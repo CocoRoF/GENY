@@ -197,6 +197,8 @@ class SessionMemoryManager:
         indexed into FAISS (awaited to prevent race conditions with
         ``auto_flush`` / ``vmm.save()``).
 
+        Skipped entirely when LTM is disabled in config.
+
         Args:
             input_text: The user's input prompt.
             result_state: The final AutonomousState dict from the graph.
@@ -204,6 +206,15 @@ class SessionMemoryManager:
             execution_number: Sequential execution counter for this session.
             success: Whether execution completed without errors.
         """
+        # Guard: skip when long-term memory is disabled in config
+        from service.config.sub_config.general.ltm_config import LTMConfig
+
+        if not LTMConfig.is_enabled():
+            logger.debug(
+                "record_execution: LTM disabled by config — skipping"
+            )
+            return
+
         try:
             entry = self._build_execution_entry(
                 input_text=input_text,
@@ -630,12 +641,21 @@ class SessionMemoryManager:
         produces a concise session summary with conversation statistics
         that is useful for future memory recall.
 
+        Skipped entirely when LTM is disabled in config.
+
         Args:
             recent_n: Number of recent messages to include excerpts from.
 
         Returns:
             The flushed text, or None if nothing to flush.
         """
+        # Guard: skip when long-term memory is disabled in config
+        from service.config.sub_config.general.ltm_config import LTMConfig
+
+        if not LTMConfig.is_enabled():
+            logger.debug("auto_flush: LTM disabled by config — skipping")
+            return None
+
         now = datetime.now(KST)
         all_entries = self._stm.load_all()
         if not all_entries:

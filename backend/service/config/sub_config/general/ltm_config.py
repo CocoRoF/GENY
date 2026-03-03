@@ -83,6 +83,23 @@ class LTMConfig(BaseConfig):
         return cls(**defaults)
 
     @classmethod
+    def is_enabled(cls) -> bool:
+        """Quick check: is long-term memory enabled in the current config?
+
+        Loads the persisted LTMConfig via the global config manager
+        and returns ``config.enabled``.  Returns ``False`` on any
+        error (config system unavailable, first run, etc.).
+        """
+        try:
+            from service.config import get_config_manager
+
+            mgr = get_config_manager()
+            config = mgr.load_config(cls)
+            return config is not None and config.enabled
+        except Exception:
+            return False
+
+    @classmethod
     def get_config_name(cls) -> str:
         return "ltm"
 

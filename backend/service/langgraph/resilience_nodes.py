@@ -186,6 +186,15 @@ def make_memory_inject_node(storage_path: str, max_inject_chars: int = 8_000):
 
     async def _node(state: Dict[str, Any]) -> Dict[str, Any]:
         """Inject memory references into state."""
+        # Guard: skip when LTM is disabled in config
+        try:
+            from service.config.sub_config.general.ltm_config import LTMConfig
+
+            if not LTMConfig.is_enabled():
+                return {}
+        except Exception:
+            pass
+
         iteration = state.get("iteration", 0)
 
         # Only inject on first turn or every 10 turns to save tokens

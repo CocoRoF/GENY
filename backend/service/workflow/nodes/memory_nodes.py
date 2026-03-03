@@ -217,6 +217,19 @@ class MemoryInjectNode(BaseNode):
             logger.debug(f"[{context.session_id}] memory_inject: no memory manager")
             return {}
 
+        # Guard: skip entirely when LTM is disabled in config
+        try:
+            from service.config.sub_config.general.ltm_config import LTMConfig
+
+            if not LTMConfig.is_enabled():
+                logger.debug(
+                    f"[{context.session_id}] memory_inject: "
+                    f"LTM disabled in config — skipping"
+                )
+                return {}
+        except Exception:
+            pass  # config system unavailable — proceed with caution
+
         try:
             # ── Extract parameters ────────────────────────────────────
             search_field = config.get("search_field", "input")
