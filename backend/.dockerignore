@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.git/
+.gitignore
+logs/
+*.log
+test_output.txt
+AGENT_IMPROVEMENT_PLAN.md
+AUTONOMOUS_AGENT_ANALYSIS.md
+AUTONOMOUS_GRAPH_DEEP_DIVE.md
+*.bak

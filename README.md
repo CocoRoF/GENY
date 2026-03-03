@@ -171,7 +171,57 @@ geny/
 
 ## Installation
 
-### Prerequisites
+### 🐳 Docker (Recommended)
+
+**Prerequisites**: Docker Desktop (or Docker Engine + Docker Compose v2)
+
+```bash
+# 1. Clone
+git clone https://github.com/<your-org>/geny.git && cd geny
+
+# 2. Configure API keys
+cp backend/.env.example backend/.env
+# Edit backend/.env — set ANTHROPIC_API_KEY at minimum
+
+# 3. Run
+docker compose up --build
+```
+
+Open **http://localhost:3000** — done!
+
+**Custom ports:**
+
+```bash
+BACKEND_PORT=8080 FRONTEND_PORT=3001 docker compose up --build
+```
+
+**Data directories** (bind-mounted to host for visibility):
+
+| Host Path | Container Path | Description |
+|-----------|---------------|-------------|
+| `./data/geny_agent_sessions/` | `/data/geny_agent_sessions` | Agent workspace directories (one per session) |
+| `./data/sessions.json` | `/app/service/claude_manager/sessions.json` | Session metadata — persists across restarts |
+| `./data/logs/` | `/app/logs` | Backend execution logs |
+
+You can browse, edit, or `tail -f` these files directly from the host.
+
+**Other commands:**
+
+```bash
+docker compose up -d            # Background
+docker compose logs -f          # Tail logs
+docker compose logs backend     # Backend logs only
+docker compose down             # Stop
+docker compose down -v          # Stop + remove volumes
+docker compose build --no-cache # Full rebuild
+```
+
+### Manual Setup (without Docker)
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
+
+#### Prerequisites
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
@@ -183,7 +233,7 @@ geny/
 | GitHub CLI | 2.0+ | PR/Issue automation (optional) |
 | Redis | 6+ | Multi-pod session sharing (optional) |
 
-### Backend Setup
+#### Backend Setup
 
 ```bash
 cd backend
@@ -207,7 +257,7 @@ cp .env.example .env
 # Edit .env — set ANTHROPIC_API_KEY at minimum
 ```
 
-### Frontend Setup
+#### Frontend Setup
 
 ```bash
 cd frontend
@@ -223,7 +273,7 @@ npm run build
 npm start
 ```
 
-### Quick Start
+#### Quick Start
 
 ```bash
 # Terminal 1 — Backend
@@ -236,6 +286,8 @@ npm run dev                     # Starts on :3000, proxies /api → :8000
 ```
 
 Open http://localhost:3000 — the Geny dashboard with 3D City Playground.
+
+</details>
 
 ---
 
