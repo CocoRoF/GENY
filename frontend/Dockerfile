@@ -10,6 +10,12 @@ RUN npm install
 # Copy source
 COPY . .
 
+# Set API_URL at build time so Next.js rewrites bake the correct target.
+# At runtime, docker-compose sets API_URL=http://backend:8000 which
+# next.config.ts reads via process.env — works for both build & runtime.
+ARG API_URL=http://backend:8000
+ENV API_URL=${API_URL}
+
 # Build Next.js
 RUN npm run build
 
@@ -38,5 +44,6 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV API_URL=http://backend:8000
 
-CMD ["npm", "run", "start", "--", "-p", "3000"]
+CMD ["npm", "run", "start"]

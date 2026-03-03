@@ -29,7 +29,8 @@ COPY . .
 # ── Storage directories ──────────────────────────────────────────────
 # Agent session workspaces — bind-mounted to host for visibility
 RUN mkdir -p /data/geny_agent_sessions && \
-    mkdir -p /app/logs
+    mkdir -p /app/logs && \
+    mkdir -p /app/service/claude_manager/session_data
 
 # ── Environment defaults ─────────────────────────────────────────────
 ENV PYTHONUNBUFFERED=1 \

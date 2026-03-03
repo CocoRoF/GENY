@@ -40,28 +40,7 @@ services:
       # Host: ./data/geny_agent_sessions  →  Container: /data/geny_agent_sessions
       - ./data/geny_agent_sessions:/data/geny_agent_sessions
 
-      # ── Session metadata (sessions.json) ───────────────────────────
-      # 세션 메타정보 파일. 컨테이너 재시작해도 세션 목록 유지.
-      # Host: ./data/sessions.json  →  Container 내부 sessions.json
-      - ./data/sessions.json:/app/service/claude_manager/sessions.json
 
-      # ── Backend logs ───────────────────────────────────────────────
-      # 세션별 실행 로그. 호스트에서 직접 tail 가능.
-      # Host: ./data/logs  →  Container: /app/logs
-      - ./data/logs:/app/logs
-
-      # ── MCP configs (live-reload) ──────────────────────────────────
-      # MCP 서버 설정 파일. 호스트에서 추가/수정하면 즉시 반영.
-      - ./backend/mcp:/app/mcp
-
-      # ── Workflow files ─────────────────────────────────────────────
-      - ./backend/workflows:/app/workflows
-
-      # ── Tool presets ───────────────────────────────────────────────
-      - ./backend/tool_presets:/app/tool_presets
-
-      # ── Prompt templates ───────────────────────────────────────────
-      - ./backend/prompts:/app/prompts
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -76,6 +55,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - API_URL=http://backend:8000
     container_name: geny-frontend
     restart: unless-stopped
     ports:

@@ -41,9 +41,14 @@ from typing import Any, Dict, List, Optional
 
 logger = getLogger(__name__)
 
-# sessions.json lives next to this file
+# sessions.json — use session_data/ subdirectory (Docker bind-mount friendly).
+# Falls back to same directory as this file if session_data/ doesn't exist.
 _STORE_DIR = Path(__file__).parent
-_STORE_PATH = _STORE_DIR / "sessions.json"
+_SESSION_DATA_DIR = _STORE_DIR / "session_data"
+if _SESSION_DATA_DIR.is_dir():
+    _STORE_PATH = _SESSION_DATA_DIR / "sessions.json"
+else:
+    _STORE_PATH = _STORE_DIR / "sessions.json"
 
 
 class SessionStore:
