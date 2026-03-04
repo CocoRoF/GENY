@@ -175,7 +175,7 @@ export const ConditionalNode = memo(({ data, selected }: NodeProps) => {
       </div>
 
       {/* Category badge + structured output indicator */}
-      <div className="px-3 pt-0 pb-1 flex items-center gap-1.5">
+      <div className="px-3 py-1.5 flex items-center gap-1.5">
         <span
           className="inline-block text-[10px] px-1.5 py-0.5 rounded-[3px] font-medium"
           style={{ background: `${borderColor}20`, color: `${borderColor}cc` }}
@@ -194,7 +194,7 @@ export const ConditionalNode = memo(({ data, selected }: NodeProps) => {
       </div>
 
       {/* Output ports */}
-      <div className="px-3 py-2 space-y-1">
+      <div className="px-3 pt-0.5 pb-2.5 space-y-1">
         {ports.map((port) => (
           <div
             key={port.id}

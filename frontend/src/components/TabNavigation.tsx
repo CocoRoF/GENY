@@ -10,10 +10,9 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 
 const GLOBAL_TAB_IDS = ['main', 'playground', 'workflows', 'tools', 'settings'] as const;
 const SESSION_TAB_DEFS = [
-  { id: 'info' },
+  { id: 'command', accent: true },
   { id: 'graph' },
   { id: 'sessionTools' },
-  { id: 'command' },
   { id: 'dashboard', managerOnly: true },
   { id: 'storage' },
   { id: 'logs' },
@@ -22,7 +21,27 @@ const SESSION_TAB_DEFS = [
 const TAB_BASE =
   'relative py-1.5 px-3.5 text-[0.8125rem] font-medium bg-transparent border-none rounded-[6px] cursor-pointer transition-all duration-150 whitespace-nowrap';
 
-function TabButton({ id, label, active, onClick }: { id: string; label: string; active: boolean; onClick: () => void }) {
+function TabButton({ id, label, active, onClick, accent }: { id: string; label: string; active: boolean; onClick: () => void; accent?: boolean }) {
+  if (accent) {
+    return (
+      <button
+        key={id}
+        className={cn(
+          TAB_BASE,
+          'mr-0.5 font-semibold',
+          active
+            ? 'text-white bg-[var(--primary-color)] shadow-[0_0_8px_rgba(59,130,246,0.3)]'
+            : 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.08)] hover:bg-[rgba(59,130,246,0.18)]',
+        )}
+        onClick={onClick}
+      >
+        {label}
+        {active && (
+          <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[var(--primary-color)]" />
+        )}
+      </button>
+    );
+  }
   return (
     <button
       key={id}
@@ -73,20 +92,26 @@ export default function TabNavigation() {
       {hasSession && (
         <>
           <div className="w-px h-5 mx-2 bg-[var(--border-color)] shrink-0" />
-          <div
-            className="flex items-center gap-1.5 py-[3px] px-2.5 mr-1 text-[0.6875rem] font-semibold text-[var(--primary-color)] bg-[rgba(59,130,246,0.08)] border border-[rgba(59,130,246,0.18)] rounded-[10px] whitespace-nowrap max-w-[140px] overflow-hidden text-ellipsis shrink-0 tracking-[0.01em]"
+          <button
+            className={cn(
+              'flex items-center gap-1.5 py-[3px] px-2.5 mr-1 text-[0.6875rem] font-semibold rounded-[10px] whitespace-nowrap max-w-[140px] overflow-hidden text-ellipsis shrink-0 tracking-[0.01em] border cursor-pointer transition-all duration-150',
+              activeTab === 'info'
+                ? 'text-white bg-[var(--primary-color)] border-[var(--primary-color)] shadow-[0_0_8px_rgba(59,130,246,0.25)]'
+                : 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.08)] border-[rgba(59,130,246,0.18)] hover:bg-[rgba(59,130,246,0.16)]',
+            )}
             title={selectedSession?.session_id}
+            onClick={() => setActiveTab('info')}
           >
             <span
               className={cn(
                 'w-1.5 h-1.5 rounded-full shrink-0',
                 selectedSession?.status === 'running'
                   ? 'bg-[var(--success-color)] shadow-[0_0_4px_var(--success-color)]'
-                  : 'bg-[var(--text-muted)]',
+                  : activeTab === 'info' ? 'bg-white/60' : 'bg-[var(--text-muted)]',
               )}
             />
             {sessionName}
-          </div>
+          </button>
           <div className="flex items-center gap-0.5">
             {SESSION_TAB_DEFS.filter(tab => !('managerOnly' in tab && tab.managerOnly) || showDashboard).map(tab => (
               <TabButton
@@ -95,6 +120,7 @@ export default function TabNavigation() {
                 label={t(`tabs.${tab.id}`)}
                 active={activeTab === tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                accent={'accent' in tab && tab.accent}
               />
             ))}
           </div>
