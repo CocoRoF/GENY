@@ -284,6 +284,12 @@ class SessionInfo(BaseModel):
         description="Human-readable name of the tool preset"
     )
 
+    # System prompt
+    system_prompt: Optional[str] = Field(
+        default=None,
+        description="System prompt applied to every execution in this session"
+    )
+
 
 class ExecuteRequest(BaseModel):
     """

@@ -35,32 +35,18 @@ class SectionLibrary:
 
     @staticmethod
     def identity(
-        agent_name: str = "Geny Agent Agent",
+        agent_name: str = "Geny Agent",
         role: str = "worker",
         agent_id: Optional[str] = None,
     ) -> PromptSection:
-        """에이전트 정체성 섹션."""
-        role_descriptions = {
-            "worker": "You are a task-execution agent that completes assigned work autonomously.",
-            "manager": "You are a management agent that plans, delegates, and monitors work across Worker agents.",
-            "developer": "You are an expert software development agent that writes and maintains production-quality code.",
-            "researcher": "You are a research agent that gathers, analyzes, and synthesizes information.",
-            "self-manager": "You are a fully autonomous self-managing agent. You plan, execute, verify, and iterate until tasks are COMPLETELY finished without any human intervention.",
-        }
-
-        role_desc = role_descriptions.get(role, role_descriptions["worker"])
-
-        content = f"""# Agent Identity
-
-You are **{agent_name}**.
-{role_desc}
-
-Agent ID: {agent_id or 'auto'}
-Role: {role}"""
+        """에이전트 정체성 섹션 (간결)."""
+        parts = [f"You are {agent_name} (role: {role})."]
+        if agent_id:
+            parts.append(f"Agent ID: {agent_id}")
 
         return PromptSection(
             name="identity",
-            content=content,
+            content=" ".join(parts),
             priority=10,
             modes={PromptMode.FULL, PromptMode.MINIMAL},
         )
@@ -73,132 +59,13 @@ Role: {role}"""
     def role_protocol(role: str = "worker") -> PromptSection:
         """역할별 상세 행동 지침 섹션."""
 
+        # Lean fallback protocols — only used when no prompts/*.md file exists
         protocols = {
-            "developer": """## Developer Protocol
-
-### Code Quality Standards
-- Write clean, readable, well-documented code
-- Follow the project's existing style and conventions
-- Add appropriate error handling and input validation
-- Write meaningful commit messages and code comments
-- Consider edge cases and failure modes
-
-### Development Workflow
-1. **Understand** — Read existing code and understand the context before making changes
-2. **Plan** — Design your approach before writing code
-3. **Implement** — Write code incrementally with clear structure
-4. **Verify** — Test your changes, check for regressions
-5. **Refactor** — Clean up code while ensuring functionality is preserved
-
-### Best Practices
-- Prefer small, focused functions over monolithic blocks
-- Use descriptive variable and function names
-- Handle errors explicitly rather than silently swallowing them
-- Document non-obvious design decisions in comments
-- Consider performance implications of your choices""",
-
-            "worker": """## Worker Protocol
-
-### Task Execution Principles
-- Focus exclusively on the assigned task until completion
-- Break complex tasks into manageable steps
-- Report progress through structured status updates
-- Attempt to resolve issues independently before escalating
-- Maintain high quality standards throughout
-
-### Status Reporting Format
-When completing a task, provide a structured status report:
-```
-[STATUS: COMPLETED/IN_PROGRESS/BLOCKED]
-[PROGRESS: X/Y steps completed]
-[RESULT: Brief summary of what was accomplished]
-[ISSUES: Any problems encountered (or "None")]
-```""",
-
-            "manager": """## Manager Protocol
-
-### ⚠️ CRITICAL RULE: DELEGATE, DO NOT EXECUTE ⚠️
-You MUST delegate work to Workers. You should NEVER perform implementation tasks yourself.
-Your role is strictly: Plan → Delegate → Monitor → Report.
-
-### Delegation Workflow
-1. **Assess** — Understand the request and break it into subtasks
-2. **Check Resources** — Use `list_workers` to see available Workers
-3. **Delegate** — Use `delegate_task` to assign work (be specific and detailed)
-4. **Monitor** — Use `get_worker_status` to track progress
-5. **Aggregate** — Collect results and synthesize a final report
-
-### Worker Management Rules
-- Assign tasks matching Worker capabilities
-- Provide clear, actionable task descriptions
-- Monitor progress without micromanaging
-- Handle Worker failures by reassigning or adjusting plans
-- Summarize results coherently for the user""",
-
-            "researcher": """## Researcher Protocol
-
-### Research Methodology
-1. **Define Scope** — Clearly identify what information is needed
-2. **Gather Sources** — Use all available tools to collect data
-3. **Analyze** — Critically evaluate information quality and reliability
-4. **Synthesize** — Combine findings into coherent conclusions
-5. **Document** — Present findings with clear structure and citations
-
-### Output Standards
-- Provide structured summaries with headers and sections
-- Include evidence and supporting data for claims
-- Note limitations, uncertainties, and gaps in findings
-- Suggest areas for further investigation
-- Distinguish between facts, inferences, and opinions""",
-
-            "self-manager": """## Self-Management Protocol
-
-### ⚠️ ABSOLUTE PROHIBITION ⚠️
-**NEVER ask the user for guidance, confirmation, or next steps.**
-You are an autonomous employee — make decisions and proceed.
-
-### CPEV Execution Cycle
-For every milestone, follow this cycle:
-
-**C — CHECK (확인)**
-- Read TASK_PLAN.md to understand requirements
-- Investigate current state: what exists, what's missing?
-- Gather context (read files, search codebase, check dependencies)
-
-**P — PLAN (계획)**
-- Break the milestone into specific actions
-- Determine execution order and identify risks
-- Update milestone status to IN_PROGRESS
-
-**E — EXECUTE (수행)**
-- Perform planned actions sequentially
-- If errors occur, debug and fix immediately
-- Never stop at the first error — resolve it yourself
-
-**V — VERIFY (검증)**
-- Confirm all deliverables exist and are correct
-- Run tests if applicable
-- Update milestone to COMPLETED only after verification passes
-
-### Milestone Tracking
-Create and maintain `TASK_PLAN.md`:
-```markdown
-# Task: {Title}
-## Success Criteria
-- [ ] Criterion 1 (specific and measurable)
-## Milestones
-### M1: {Name} — Status: NOT_STARTED/IN_PROGRESS/COMPLETED
-### M2: {Name} — Status: NOT_STARTED
-## Progress Log
-- {timestamp}: {event}
-```
-
-### Decision Making Under Uncertainty
-- **Ambiguous requirement** → Implement the most useful interpretation
-- **Multiple approaches** → Choose the simpler one
-- **Missing information** → Search for it using your tools
-- **Encountered an error** → Debug and fix yourself
-- **Blocked by dependency** → Document and work on something else""",
+            "worker": "Complete assigned tasks autonomously. Break complex work into steps, resolve issues yourself, and produce quality results.",
+            "developer": "Write clean, production-quality code. Read existing code before changing it, follow project conventions, handle edge cases, and test your changes.",
+            "manager": "Plan, delegate, and coordinate — never do implementation work yourself. Use `list_workers`, `delegate_task`, `get_worker_status`, and `broadcast_task` to manage workers.",
+            "researcher": "Gather comprehensive information, analyze critically, and present structured findings. Note limitations and suggest further investigation.",
+            "self-manager": "You are fully autonomous. Plan, execute, verify, and iterate until the task is completely finished. Never ask for guidance. End every non-final response with `[CONTINUE: {next_action}]`. When all work is verified: `[TASK_COMPLETE]`.",
         }
 
         content = protocols.get(role, protocols["worker"])
@@ -219,29 +86,32 @@ Create and maintain `TASK_PLAN.md`:
         tools: Optional[List[str]] = None,
         mcp_servers: Optional[List[str]] = None,
     ) -> PromptSection:
-        """사용 가능한 도구/MCP 서버 목록 섹션."""
-        parts = ["## Available Capabilities"]
+        """사용 가능한 도구/MCP 서버 목록 섹션.
 
-        if tools:
-            parts.append("\n### Tools")
-            for tool_name in tools:
-                parts.append(f"- `{tool_name}`")
+        Claude CLI 기본 도구는 이미 내장되어 있으므로,
+        추가 MCP 서버나 커스텀 도구만 명시합니다.
+        """
+        parts: List[str] = []
 
         if mcp_servers:
-            parts.append("\n### MCP Servers")
-            for server in mcp_servers:
-                parts.append(f"- {server}")
+            parts.append("MCP servers: " + ", ".join(mcp_servers))
 
-        if not tools and not mcp_servers:
-            parts.append("\nYou have access to Claude CLI's built-in tools (file editing, shell execution, search, etc.).")
+        if tools:
+            parts.append("Additional tools: " + ", ".join(tools))
 
-        content = "\n".join(parts)
+        if not parts:
+            # No extra capabilities beyond Claude CLI defaults — skip section
+            return PromptSection(
+                name="capabilities",
+                content="",
+                priority=20,
+                modes={PromptMode.FULL, PromptMode.MINIMAL},
+            )
 
         return PromptSection(
             name="capabilities",
-            content=content,
+            content="\n".join(parts),
             priority=20,
-            condition=lambda: bool(tools or mcp_servers) or True,  # 항상 포함
             modes={PromptMode.FULL, PromptMode.MINIMAL},
         )
 
@@ -320,17 +190,12 @@ Create and maintain `TASK_PLAN.md`:
         project_name: Optional[str] = None,
         file_tree: Optional[str] = None,
     ) -> PromptSection:
-        """작업 디렉토리 정보 섹션."""
-        parts = ["## Workspace Environment"]
-        parts.append(f"\n**Working Directory**: `{working_dir}`")
-
+        """작업 디렉토리 정보 섹션 (간결)."""
+        content = f"Working directory: {working_dir}"
         if project_name:
-            parts.append(f"**Project**: {project_name}")
-
+            content += f" (project: {project_name})"
         if file_tree:
-            parts.append(f"\n### Project Structure\n```\n{file_tree}\n```")
-
-        content = "\n".join(parts)
+            content += f"\n```\n{file_tree}\n```"
 
         return PromptSection(
             name="workspace",
@@ -346,17 +211,12 @@ Create and maintain `TASK_PLAN.md`:
 
     @staticmethod
     def datetime_info() -> PromptSection:
-        """현재 시각 정보 섹션. 빌드 시점의 시각을 캡처."""
-        now_utc = datetime.now(timezone.utc)
-        now_kst = now_utc.astimezone(KST)
-
-        content = f"""## Current Time
-- UTC: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}
-- KST: {now_kst.strftime('%Y-%m-%d %H:%M:%S %Z')}"""
+        """현재 시각 정보 (1-line). 빌드 시점의 시각을 캡처."""
+        now_kst = datetime.now(timezone.utc).astimezone(KST)
 
         return PromptSection(
             name="datetime",
-            content=content,
+            content=f"Current time: {now_kst.strftime('%Y-%m-%d %H:%M:%S KST')}",
             priority=45,
             modes={PromptMode.FULL},
         )
@@ -477,28 +337,19 @@ Always provide actionable information. If blocked, explain what's needed to unbl
         role: Optional[str] = None,
         version: str = "1.0.0",
     ) -> PromptSection:
-        """런타임 정보 한 줄 메타.
-
-        OpenClaw의 "Runtime: OpenClaw v1.2.3 | claude-opus-4-6 | agent:main | telegram | 2024-12-15T09:30:00Z"
-        패턴 참고.
-        """
-        now = datetime.now(timezone.utc)
-        parts = [f"Geny Agent v{version}"]
-
+        """런타임 메타 정보 (1-line)."""
+        parts = [f"Geny v{version}"]
         if model:
             parts.append(model)
         if session_id:
-            parts.append(f"session:{session_id[:8]}")
+            parts.append(session_id[:8])
         if role:
-            parts.append(f"role:{role}")
-        parts.append(now.strftime('%Y-%m-%dT%H:%M:%SZ'))
-
-        content = f"---\nRuntime: {' | '.join(parts)}"
+            parts.append(role)
 
         return PromptSection(
             name="runtime_line",
-            content=content,
-            priority=99,  # 항상 마지막
+            content=f"---\n{' | '.join(parts)}",
+            priority=99,
             modes={PromptMode.FULL, PromptMode.MINIMAL},
         )
 
@@ -631,7 +482,7 @@ class AutonomousPrompts:
 
 
 def build_agent_prompt(
-    agent_name: str = "Geny Agent Agent",
+    agent_name: str = "Geny Agent",
     role: str = "worker",
     agent_id: Optional[str] = None,
     working_dir: Optional[str] = None,
@@ -645,9 +496,21 @@ def build_agent_prompt(
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
-    Assembles all sections automatically and returns the final prompt string.
-    When a role-specific Markdown template exists in ``prompts/``, it is used
-    as the ``role_protocol`` section content (overriding the hardcoded default).
+    Design philosophy:
+    - Claude CLI already provides tool knowledge, safety, and error handling.
+    - LangGraph graph controls execution loop, retry, and completion.
+    - The system prompt only needs: Identity + Role Behavior + Context.
+
+    Sections removed (handled by infrastructure):
+    - tool_style: Claude CLI knows its own tools
+    - safety: Claude CLI has built-in safety
+    - context_efficiency: ContextWindowGuard handles budget
+    - execution_protocol: LangGraph graph controls the loop
+    - error_recovery: _resilient_invoke + Claude's natural debugging
+    - completion_signals: Only self-manager needs signals (in .md file)
+    - delegation: Merged into manager.md template
+    - status_reporting: Graph nodes track status
+    - safety_wrap: Claude CLI has its own guardrails
 
     Args:
         agent_name: Display name for the agent.
@@ -665,64 +528,46 @@ def build_agent_prompt(
     Returns:
         Assembled system prompt string.
     """
-    from service.prompt.protocols import (
-        ExecutionProtocol,
-        CompletionProtocol,
-        ErrorRecoveryProtocol,
-    )
     from service.prompt.template_loader import PromptTemplateLoader
 
     builder = PromptBuilder(mode=mode)
 
-    # Required sections
+    # §1 Identity (1 line)
     builder.add_section(SectionLibrary.identity(agent_name, role, agent_id))
-    builder.add_section(SectionLibrary.role_protocol(role))
-    builder.add_section(SectionLibrary.capabilities(tools, mcp_servers))
-    builder.add_section(SectionLibrary.safety())
 
-    # Override role_protocol with Markdown template if available on disk
+    # §2 Role behavior (from prompts/*.md, or lean fallback)
+    builder.add_section(SectionLibrary.role_protocol(role))
     loader = PromptTemplateLoader()
     md_template = loader.load_role_template(role)
     if md_template:
         builder.override_section("role_protocol", md_template)
 
-    # Conditional sections
-    if mode == PromptMode.FULL:
-        builder.add_section(SectionLibrary.tool_style())
-        builder.add_section(SectionLibrary.datetime_info())
-        builder.add_section(SectionLibrary.context_efficiency())
+    # §3 Capabilities — only when non-default MCP/tools are configured
+    if tools or mcp_servers:
+        builder.add_section(SectionLibrary.capabilities(tools, mcp_servers))
 
-        # Execution protocol (always included in FULL mode)
-        builder.add_section(ExecutionProtocol.autonomous_execution())
-        builder.add_section(ErrorRecoveryProtocol.self_recovery())
-
-        # Completion protocol (always in FULL mode)
-        builder.add_section(CompletionProtocol.completion_signals())
-
-        # Role-specific additional sections
-        if role == "manager":
-            builder.add_section(SectionLibrary.delegation())
-        if role in ("worker", "self-manager"):
-            builder.add_section(SectionLibrary.status_reporting())
-
-    # Workspace environment
+    # §4 Workspace
     if working_dir:
         builder.add_section(SectionLibrary.workspace(working_dir))
 
-    # Bootstrap context files
+    # §5 DateTime (FULL only)
+    if mode == PromptMode.FULL:
+        builder.add_section(SectionLibrary.datetime_info())
+
+    # §6 Bootstrap context files (e.g. AGENTS.md, CLAUDE.md)
     if context_files:
         for filename, content in context_files.items():
             builder.add_section(
                 SectionLibrary.bootstrap_context(filename, content)
             )
 
-    # Runtime metadata line
+    # §7 Runtime metadata
     builder.add_section(
         SectionLibrary.runtime_line(model, session_id, role)
     )
 
-    # Extra system prompt
+    # §8 Extra system prompt (user-provided)
     if extra_system_prompt:
         builder.add_extra_context(extra_system_prompt)
 
-    return builder.build_with_safety_wrap()
+    return builder.build()

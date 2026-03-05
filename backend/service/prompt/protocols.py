@@ -1,13 +1,13 @@
 """
-실행/완료/에러 복구 프로토콜
+실행/완료/에러 복구 프로토콜 (opt-in 섹션)
 
-OpenClaw의 시스템 프롬프트 섹션 중
-실행 관련 프로토콜을 Geny Agent의 LangGraph 패턴에 맞게 구현합니다.
+NOTE: 이 모듈의 섹션들은 기본 프롬프트 빌드에 포함되지 않습니다.
+- LangGraph 그래프가 실행 루프, 재시도, 완료 감지를 제어합니다.
+- Claude CLI가 기본 안전 가이드라인과 에러 처리를 제공합니다.
+- self-manager 역할의 실행 신호는 prompts/self-manager.md에 포함됩니다.
 
-핵심 프로토콜:
-- ExecutionProtocol: 자율 실행 프로토콜 ([CONTINUE] 시그널 등)
-- CompletionProtocol: 완료 감지 신호 규약
-- ErrorRecoveryProtocol: 에러 자기 복구 규약
+수동으로 PromptBuilder에 추가하고 싶을 때만 사용하세요:
+    builder.add_section(ExecutionProtocol.autonomous_execution())
 """
 
 from __future__ import annotations

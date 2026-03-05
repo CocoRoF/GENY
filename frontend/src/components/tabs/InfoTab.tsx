@@ -5,7 +5,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser } from 'lucide-react';
 import type { SessionInfo } from '@/types';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
@@ -22,6 +22,10 @@ export default function InfoTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [promptDraft, setPromptDraft] = useState('');
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [promptMsg, setPromptMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const fetchDetail = useCallback(async () => {
     if (!selectedSessionId) { setData(null); return; }
@@ -112,6 +116,93 @@ export default function InfoTab() {
           </div>
         ))}
       </div>
+
+      {/* System Prompt Section */}
+      {!isDeleted && (
+        <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <FileText size={14} className="text-[var(--text-muted)]" />
+              <span className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">{t('info.systemPrompt.title')}</span>
+              {data.system_prompt && !editingPrompt && (
+                <span className="text-[10px] text-[var(--text-muted)] ml-1">({t('info.systemPrompt.chars', { count: String(data.system_prompt.length) })})</span>
+              )}
+            </div>
+            {!editingPrompt ? (
+              <button
+                className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
+                onClick={() => { setPromptDraft(data.system_prompt || ''); setEditingPrompt(true); setPromptMsg(null); }}
+              >
+                <Pencil size={11} /> {t('info.systemPrompt.edit')}
+              </button>
+            ) : (
+              <div className="flex gap-1.5">
+                <button
+                  className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
+                  onClick={() => { setPromptDraft(''); }}
+                  title={t('info.systemPrompt.clear')}
+                >
+                  <Eraser size={11} /> {t('info.systemPrompt.clear')}
+                </button>
+                <button
+                  disabled={savingPrompt}
+                  className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--primary-color)] text-white hover:bg-[var(--primary-hover)] border-none transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={async () => {
+                    setSavingPrompt(true);
+                    setPromptMsg(null);
+                    try {
+                      const val = promptDraft.trim() || null;
+                      await agentApi.updateSystemPrompt(data.session_id, val);
+                      setData((prev: any) => ({ ...prev, system_prompt: val }));
+                      setEditingPrompt(false);
+                      setPromptMsg({ type: 'ok', text: t('info.systemPrompt.saveSuccess') });
+                    } catch (e: any) {
+                      setPromptMsg({ type: 'err', text: t('info.systemPrompt.saveError') });
+                    } finally {
+                      setSavingPrompt(false);
+                    }
+                  }}
+                >
+                  <Save size={11} /> {t('info.systemPrompt.save')}
+                </button>
+                <button
+                  className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
+                  onClick={() => { setEditingPrompt(false); setPromptMsg(null); }}
+                >
+                  <X size={11} /> {t('info.systemPrompt.cancel')}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {promptMsg && (
+            <div className={`text-[11px] mb-2 ${promptMsg.type === 'ok' ? 'text-[#10b981]' : 'text-[var(--danger-color)]'}`}>
+              {promptMsg.text}
+            </div>
+          )}
+
+          {editingPrompt ? (
+            <textarea
+              className="w-full min-h-[120px] p-3 text-[12px] leading-relaxed rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] resize-y focus:outline-none focus:border-[var(--primary-color)] transition-colors"
+              style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
+              value={promptDraft}
+              onChange={e => setPromptDraft(e.target.value)}
+              placeholder={t('info.systemPrompt.placeholder')}
+              autoFocus
+            />
+          ) : (
+            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] min-h-[40px]">
+              {data.system_prompt ? (
+                <pre className="text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words m-0" style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}>
+                  {data.system_prompt}
+                </pre>
+              ) : (
+                <span className="text-[12px] text-[var(--text-muted)] italic">{t('info.systemPrompt.empty')}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Actions for deleted */}
       {isDeleted && (

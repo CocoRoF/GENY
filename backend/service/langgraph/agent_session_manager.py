@@ -135,20 +135,11 @@ class AgentSessionManager(SessionManager):
             logger.warning(f"[{session_id}] Shared folder link error: {e}")
 
     def _build_shared_folder_context(self) -> str:
-        """Build a system-prompt fragment that tells Claude about the shared folder."""
+        """Build a concise system-prompt fragment about the shared folder."""
         link = self._shared_folder_link_name or "_shared"
-        real_path = self._shared_folder_manager.shared_path if self._shared_folder_manager else ""
         return (
-            "## Shared Folder\n"
-            f"A shared folder is available at `./{link}/` in your working directory.\n"
-            f"Real path: {real_path}\n\n"
-            "All sessions in this workspace share this folder. You can:\n"
-            f"- List shared files: `ls {link}/`\n"
-            f"- Read a shared file: `cat {link}/<filename>`\n"
-            f"- Copy your files to the shared folder: `cp <file> {link}/`\n"
-            f"- Copy shared files to your workspace: `cp {link}/<file> .`\n\n"
-            "Use the shared folder to exchange data, results, and intermediate "
-            "outputs with other sessions."
+            f"Shared folder: ./{link}/ (shared across all sessions). "
+            f"Use it to exchange files between sessions."
         )
 
     # ========================================================================
@@ -158,9 +149,8 @@ class AgentSessionManager(SessionManager):
     def _build_system_prompt(self, request: CreateSessionRequest) -> str:
         """Build the system prompt using the modular prompt builder.
 
-        Applies the OpenClaw-inspired buildAgentSystemPrompt() pattern:
-        assembles the prompt dynamically based on role, mode, context files,
-        and (if available) previously persisted session memory.
+        Design: The system prompt tells the agent WHO it is and WHAT to do.
+        HOW to use tools and HOW to loop is handled by Claude CLI and LangGraph.
 
         Args:
             request: Session creation request.
@@ -204,7 +194,7 @@ class AgentSessionManager(SessionManager):
 
         # Load persisted memory if storage_path exists
         memory_context = ""
-        storage_path = request.working_dir  # May be overridden by process storage_path later
+        storage_path = request.working_dir
         if storage_path:
             try:
                 from service.memory.manager import SessionMemoryManager
@@ -231,12 +221,12 @@ class AgentSessionManager(SessionManager):
 
         # Build prompt
         prompt = build_agent_prompt(
-            agent_name="Geny Agent Agent",
+            agent_name="Geny Agent",
             role=role,
             agent_id=None,
             working_dir=request.working_dir,
             model=request.model,
-            session_id=None,  # Session ID not yet created at this point
+            session_id=None,
             tools=tools,
             mcp_servers=mcp_servers,
             mode=mode,

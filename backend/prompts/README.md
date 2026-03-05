@@ -1,26 +1,38 @@
-# Prompts Directory
+# Role Prompt Templates
 
-This directory contains system prompt templates for Claude sessions.
+Role-specific behavior templates for Geny Agent sessions.
 
-## How to Use
+## Design Philosophy
 
-1. Create a new `.md` file in this directory
-2. The filename (without extension) will be used as the prompt name in the UI
-3. The entire file content will be used as the system prompt
+These templates are appended to Claude CLI's **existing** system prompt via `--append-system-prompt`.
+Claude CLI already provides tool knowledge, safety guidelines, and error handling — so templates
+should only specify **role identity** and **behavioral directives**. Keep them concise.
 
-## File Format
+LangGraph controls the execution loop, retry logic, and completion detection.
+The `AutonomousPrompts` class (in `service/prompt/sections.py`) provides per-node prompts
+for the difficulty-based graph. Only `self-manager.md` includes execution signals
+(`[CONTINUE]`, `[TASK_COMPLETE]`) because the graph's iteration gate reads them.
 
-Each file should contain the system prompt in Markdown format. The prompt will be passed directly to Claude when creating a session.
+## Files
 
-## Examples
+| File | Role | Chars | Purpose |
+|------|------|-------|---------|
+| `worker.md` | worker | ~150 | Task completion, autonomous work |
+| `developer.md` | developer | ~300 | Code quality, conventions, incremental changes |
+| `manager.md` | manager | ~500 | Delegation rules + tool reference |
+| `researcher.md` | researcher | ~250 | Research methodology |
+| `self-manager.md` | self-manager | ~800 | Full autonomy + execution signals |
 
-- `worker.md` - General worker prompt focused on task completion
-- `developer.md` - Software development focused prompt
-- `researcher.md` - Research and analysis focused prompt
+## How It Works
 
-## Tips
+1. `build_agent_prompt()` in `service/prompt/sections.py` assembles the system prompt
+2. `PromptTemplateLoader` checks this directory for a matching `{role}.md` file
+3. If found, it overrides the hardcoded fallback in `SectionLibrary.role_protocol()`
+4. The final prompt = Identity (1 line) + Role Template + Context (workspace, datetime, MCP)
 
-- Use clear and specific instructions
-- Structure prompts with headers and bullet points
-- Define the AI's role and expected behavior
-- Include any constraints or guidelines
+## Guidelines
+
+- **Be concise** — every token in the system prompt reduces the context window for actual work
+- **Don't repeat Claude CLI's defaults** — no tool usage guides, no safety rules
+- **Don't repeat LangGraph's job** — no execution loop instructions (except self-manager)
+- **Focus on behavior** — what makes this role different from default Claude?

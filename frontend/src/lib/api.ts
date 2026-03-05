@@ -93,6 +93,13 @@ export const agentApi = {
   getWorkflow: (id: string) =>
     apiCall<import('@/types/workflow').WorkflowDefinition>(`/api/agents/${id}/workflow`),
 
+  /** PUT /api/agents/{id}/system-prompt — update system prompt */
+  updateSystemPrompt: (id: string, systemPrompt: string | null) =>
+    apiCall<{ success: boolean; length: number }>(`/api/agents/${id}/system-prompt`, {
+      method: 'PUT',
+      body: JSON.stringify({ system_prompt: systemPrompt }),
+    }),
+
   /** GET /api/agents/{id}/storage — list storage files */
   listStorage: (id: string) => apiCall<StorageListResponse>(`/api/agents/${id}/storage`),
 

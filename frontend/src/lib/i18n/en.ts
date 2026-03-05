@@ -251,6 +251,18 @@ const en = {
       workflowId: 'Workflow ID',
       toolPreset: 'Tool Preset',
     },
+    systemPrompt: {
+      title: 'System Prompt',
+      empty: 'No system prompt configured',
+      edit: 'Edit',
+      save: 'Save',
+      cancel: 'Cancel',
+      placeholder: 'Enter system prompt...',
+      saveSuccess: 'System prompt updated',
+      saveError: 'Failed to update system prompt',
+      chars: '{count} characters',
+      clear: 'Clear',
+    },
   },
 
   // ─── Dashboard Tab ───

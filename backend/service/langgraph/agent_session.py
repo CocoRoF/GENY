@@ -1085,6 +1085,7 @@ class AgentSession:
             graph_name=self._graph_name,
             tool_preset_id=self._tool_preset_id,
             tool_preset_name=self._tool_preset_name,
+            system_prompt=self._system_prompt,
         )
 
     # ========================================================================

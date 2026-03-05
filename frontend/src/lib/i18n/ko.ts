@@ -251,6 +251,18 @@ const ko: Translations = {
       workflowId: '워크플로우 ID',
       toolPreset: '도구 프리셋',
     },
+    systemPrompt: {
+      title: '시스템 프롬프트',
+      empty: '설정된 시스템 프롬프트가 없습니다',
+      edit: '편집',
+      save: '저장',
+      cancel: '취소',
+      placeholder: '시스템 프롬프트를 입력하세요...',
+      saveSuccess: '시스템 프롬프트가 업데이트되었습니다',
+      saveError: '시스템 프롬프트 업데이트에 실패했습니다',
+      chars: '{count}자',
+      clear: '지우기',
+    },
   },
 
   // ─── Dashboard Tab ───

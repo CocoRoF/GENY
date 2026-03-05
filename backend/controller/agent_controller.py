@@ -242,6 +242,45 @@ async def get_agent_session(
     return agent.get_session_info()
 
 
+class UpdateSystemPromptRequest(BaseModel):
+    """Request to update an agent's system prompt."""
+    system_prompt: Optional[str] = Field(
+        default=None,
+        description="New system prompt. Set to null or empty string to clear.",
+    )
+
+
+@router.put("/{session_id}/system-prompt")
+async def update_system_prompt(
+    request: UpdateSystemPromptRequest,
+    session_id: str = Path(..., description="Session ID"),
+):
+    """
+    Update the system prompt of a running AgentSession.
+
+    The new prompt takes effect on the next execution.
+    Pass null or empty string to clear the system prompt.
+    """
+    agent = agent_manager.get_agent(session_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
+
+    new_prompt = request.system_prompt if request.system_prompt else None
+
+    # Update on AgentSession
+    agent._system_prompt = new_prompt
+
+    # Update on the underlying ClaudeProcess so --append-system-prompt uses it
+    if agent.process:
+        agent.process.system_prompt = new_prompt
+
+    logger.info(
+        f"[{session_id}] System prompt updated "
+        f"({len(new_prompt) if new_prompt else 0} chars)"
+    )
+    return {"success": True, "session_id": session_id, "system_prompt_length": len(new_prompt) if new_prompt else 0}
+
+
 @router.delete("/{session_id}")
 async def delete_agent_session(
     session_id: str = Path(..., description="Session ID"),
