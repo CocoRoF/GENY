@@ -451,8 +451,8 @@ class PromptContentResponse(BaseModel):
 
 
 def get_prompts_dir() -> Path:
-    """Get the prompts directory path."""
-    return Path(__file__).parent.parent / "prompts"
+    """Get the prompt templates directory path."""
+    return Path(__file__).parent.parent / "prompts" / "templates"
 
 
 def get_prompts_list() -> list:
@@ -460,6 +460,7 @@ def get_prompts_list() -> list:
     Get list of available prompt templates (sync version for SSR).
 
     Returns a list of dicts with name, filename, and description.
+    Reads from prompts/templates/ directory (specialization prompts).
     """
     prompts_dir = get_prompts_dir()
     prompts = []
@@ -500,7 +501,9 @@ async def list_prompts():
     """
     List all available prompt templates.
 
-    Reads .md files from the prompts directory.
+    Reads .md files from the prompts/templates directory.
+    These are specialization prompts (e.g. developer-frontend,
+    researcher-market-analysis) that augment the base role prompt.
     """
     prompts_dir = get_prompts_dir()
     prompts = []

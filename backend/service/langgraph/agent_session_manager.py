@@ -207,7 +207,7 @@ class AgentSessionManager(SessionManager):
                 pass  # Memory not available yet — fine
 
         # Determine prompt mode
-        if role in ("manager", "self-manager", "developer", "researcher"):
+        if role in ("manager", "developer", "researcher", "planner"):
             mode = PromptMode.FULL
         elif request.manager_id:
             # Worker with a manager → MINIMAL (sub-agent)

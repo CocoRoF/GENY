@@ -156,6 +156,8 @@ export default function ChatTab() {
         return 'from-blue-500 to-cyan-500';
       case 'researcher':
         return 'from-amber-500 to-orange-500';
+      case 'planner':
+        return 'from-teal-500 to-emerald-500';
       default:
         return 'from-emerald-500 to-green-500';
     }
@@ -169,6 +171,8 @@ export default function ChatTab() {
         return 'background: linear-gradient(135deg, #3b82f6, #06b6d4)';
       case 'researcher':
         return 'background: linear-gradient(135deg, #f59e0b, #ea580c)';
+      case 'planner':
+        return 'background: linear-gradient(135deg, #14b8a6, #10b981)';
       default:
         return 'background: linear-gradient(135deg, #10b981, #059669)';
     }

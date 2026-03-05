@@ -38,7 +38,7 @@ export default function CreateSessionModal({ onClose }: Props) {
 
   const [formState, setFormState] = useState<CreateAgentRequest>({
     session_name: '',
-    role: 'worker',
+    role: 'developer',
     model: '',
     max_turns: 200,
     timeout: 300,
@@ -85,7 +85,7 @@ export default function CreateSessionModal({ onClose }: Props) {
   }, []);
 
   useEffect(() => {
-    if (formState.role === 'worker') {
+    if (formState.role !== 'manager') {
       agentApi.listManagers().then(setAvailableManagers).catch(() => setAvailableManagers([]));
     }
   }, [formState.role]);
@@ -95,6 +95,9 @@ export default function CreateSessionModal({ onClose }: Props) {
     if (name) {
       const content = await loadPromptContent(name);
       if (content) setFormState(f => ({ ...f, system_prompt: content }));
+    } else {
+      // "None" selected — clear template content
+      setFormState(f => ({ ...f, system_prompt: '' }));
     }
   };
 
@@ -152,7 +155,10 @@ export default function CreateSessionModal({ onClose }: Props) {
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.role')}</label>
               <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.role} onChange={e => handleRoleChange(e.target.value)}>
+                <option value="developer">{t('createSession.roleDeveloper')}</option>
                 <option value="worker">{t('createSession.roleWorker')}</option>
+                <option value="researcher">{t('createSession.roleResearcher')}</option>
+                <option value="planner">{t('createSession.rolePlanner')}</option>
                 <option value="manager">{t('createSession.roleManager')}</option>
               </select>
             </div>
@@ -167,7 +173,7 @@ export default function CreateSessionModal({ onClose }: Props) {
           </div>
 
           {/* Manager selection */}
-          {formState.role === 'worker' && (
+          {formState.role !== 'manager' && (
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.managerSession')}</label>
               <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.manager_id || ''} onChange={e => setFormState(f => ({ ...f, manager_id: e.target.value }))}>
@@ -187,9 +193,9 @@ export default function CreateSessionModal({ onClose }: Props) {
 
           {/* Prompt Template */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.promptTemplate')}</label>
+            <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.promptTemplate')} <InfoTooltip text={t('createSession.promptTemplateHelp')} /></label>
             <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
-              <option value="">{t('createSession.customNone')}</option>
+              <option value="">{t('createSession.templateNone')}</option>
               {prompts.map(p => (
                 <option key={p.name} value={p.name}>{p.name}</option>
               ))}

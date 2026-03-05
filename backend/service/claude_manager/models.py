@@ -18,9 +18,12 @@ class SessionStatus(str, Enum):
 
 
 class SessionRole(str, Enum):
-    """Session role type for hierarchical management."""
-    MANAGER = "manager"  # Manager session - can delegate to workers
-    WORKER = "worker"    # Worker session - managed by a manager
+    """Session role type defining the agent's purpose and behavior."""
+    WORKER = "worker"          # Default developer/worker — executes tasks
+    DEVELOPER = "developer"    # Alias for worker — implementation focus
+    RESEARCHER = "researcher"  # Research & Ideation — discovers info, generates ideas
+    PLANNER = "planner"        # Plan Architect — creates detailed plans and designs
+    MANAGER = "manager"        # Manager — delegates and coordinates workers
 
 
 class ManagerEventType(str, Enum):

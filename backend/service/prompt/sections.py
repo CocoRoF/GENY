@@ -41,10 +41,9 @@ class SectionLibrary:
         session_name: Optional[str] = None,
     ) -> PromptSection:
         """Agent identity section (concise one-liner)."""
-        display_name = session_name if session_name else agent_name
-        parts = [f"You are {display_name} (role: {role})."]
+        parts = [f"You are a Great Agent (role: {role})."]
         if session_name:
-            parts.append(f"Your name is \"{session_name}\" — remember this as your identity.")
+            parts.append(f"Your name is \"{session_name}\".")
         if agent_id:
             parts.append(f"Agent ID: {agent_id}")
 
@@ -61,18 +60,22 @@ class SectionLibrary:
 
     @staticmethod
     def role_protocol(role: str = "worker") -> PromptSection:
-        """Per-role behavior protocol section."""
+        """Per-role behavior protocol section.
+
+        Worker has no role-specific prompt — it operates as a
+        general-purpose agent with only the base identity.
+        """
 
         # Lean fallback protocols — only used when no prompts/*.md file exists
         protocols = {
-            "worker": "Complete assigned tasks autonomously. Break complex work into steps, resolve issues yourself, and produce quality results.",
-            "developer": "Write clean, production-quality code. Read existing code before changing it, follow project conventions, handle edge cases, and test your changes.",
+            "worker": "",  # No role-specific behavior — general purpose agent
+            "developer": "Execute implementation tasks with precision. Read existing code before changing it, follow project conventions, handle edge cases, and test your changes.",
+            "researcher": "Discover cutting-edge information, explore emerging technologies, and generate actionable product ideas. Explore diverse sources broadly, try things hands-on, and synthesize findings into concise idea summaries.",
+            "planner": "Evaluate ideas critically and transform promising ones into comprehensive, production-ready plans. Produce detailed specifications, architecture designs, and implementation guides that developers can build from directly.",
             "manager": "Plan, delegate, and coordinate — never do implementation work yourself. Use `list_workers`, `delegate_task`, `get_worker_status`, and `broadcast_task` to manage workers.",
-            "researcher": "Gather comprehensive information, analyze critically, and present structured findings. Note limitations and suggest further investigation.",
-            "self-manager": "You are fully autonomous. Plan, execute, verify, and iterate until the task is completely finished. Never ask for guidance. End every non-final response with `[CONTINUE: {next_action}]`. When all work is verified: `[TASK_COMPLETE]`.",
         }
 
-        content = protocols.get(role, protocols["worker"])
+        content = protocols.get(role, "")
 
         return PromptSection(
             name="role_protocol",
@@ -526,9 +529,16 @@ def build_agent_prompt(
         [Base prompt]          identity + role_protocol + capabilities
                                + workspace + datetime + context_files
         ---
-        [Role prompt]          user-provided extra_system_prompt (if any)
+        [Template prompt]      additional specialization (from prompt template)
         ---
         [Shared folder info]   shared folder instructions (if enabled)
+
+    Layers:
+        1. Role prompt — auto-loaded from ``prompts/{role}.md``.
+           Worker has none.  Fallback: hardcoded one-liner.
+        2. Template prompt — optional specialization from ``extra_system_prompt``.
+           Selected independently via the Prompt Template dropdown.
+        3. Shared folder — auto-appended when enabled.
 
     Design philosophy:
     - Claude CLI already provides tool knowledge, safety, and error handling.
@@ -542,7 +552,7 @@ def build_agent_prompt(
 
     Args:
         agent_name: Display name for the agent.
-        role: Role (worker/manager/developer/researcher/self-manager).
+        role: Role (worker/developer/researcher/planner/manager).
         agent_id: Agent identifier.
         working_dir: Working directory path.
         model: Model name.
@@ -552,7 +562,7 @@ def build_agent_prompt(
         mcp_servers: List of MCP server names.
         mode: Prompt detail level.
         context_files: Bootstrap file dict ``{filename: content}``.
-        extra_system_prompt: Role-specific prompt assigned by the user.
+        extra_system_prompt: Additional specialization prompt (from template or manual input).
         shared_folder_path: Relative path to the shared folder (e.g. ``_shared``).
 
     Returns:
@@ -565,12 +575,13 @@ def build_agent_prompt(
     # §1 Identity (1 line)
     builder.add_section(SectionLibrary.identity(agent_name, role, agent_id, session_name))
 
-    # §2 Role behavior (from prompts/*.md, or lean fallback)
-    builder.add_section(SectionLibrary.role_protocol(role))
-    loader = PromptTemplateLoader()
-    md_template = loader.load_role_template(role)
-    if md_template:
-        builder.override_section("role_protocol", md_template)
+    # §2 Role behavior — always from prompts/{role}.md (worker = none)
+    if role != "worker":
+        builder.add_section(SectionLibrary.role_protocol(role))
+        loader = PromptTemplateLoader()
+        md_template = loader.load_role_template(role)
+        if md_template:
+            builder.override_section("role_protocol", md_template)
 
     # §3 Capabilities — only when non-default MCP/tools are configured
     if tools or mcp_servers:
@@ -597,7 +608,7 @@ def build_agent_prompt(
     # -- Build final prompt with clear separators --
     parts = [base_prompt]
 
-    # Role prompt section (user-specified system prompt for this session)
+    # Template prompt section (additional specialization from Prompt Template dropdown)
     if extra_system_prompt and extra_system_prompt.strip():
         parts.append("---")
         parts.append(extra_system_prompt.strip())

@@ -33,11 +33,11 @@ _DEFAULT_PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 # Role → filename mapping
 _ROLE_FILE_MAP: Dict[str, str] = {
-    "worker":       "worker.md",
-    "developer":    "developer.md",
-    "manager":      "manager.md",
-    "researcher":   "researcher.md",
-    "self-manager": "self-manager.md",
+    "worker":     "worker.md",
+    "developer":  "developer.md",
+    "researcher": "researcher.md",
+    "planner":    "planner.md",
+    "manager":    "manager.md",
 }
 
 

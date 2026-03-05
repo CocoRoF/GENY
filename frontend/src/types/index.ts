@@ -5,7 +5,7 @@ export interface SessionInfo {
   session_name: string | null;
   status: 'running' | 'stopped' | 'error' | 'idle' | string;
   model: string | null;
-  role: 'worker' | 'manager';
+  role: 'worker' | 'developer' | 'researcher' | 'planner' | 'manager';
   max_turns: number | null;
   timeout: number | null;
   max_iterations: number | null;

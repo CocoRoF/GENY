@@ -4,7 +4,7 @@
 NOTE: 이 모듈의 섹션들은 기본 프롬프트 빌드에 포함되지 않습니다.
 - LangGraph 그래프가 실행 루프, 재시도, 완료 감지를 제어합니다.
 - Claude CLI가 기본 안전 가이드라인과 에러 처리를 제공합니다.
-- self-manager 역할의 실행 신호는 prompts/self-manager.md에 포함됩니다.
+- 모든 세션이 autonomous graph를 통해 자율 실행 기능을 갖습니다.
 
 수동으로 PromptBuilder에 추가하고 싶을 때만 사용하세요:
     builder.add_section(ExecutionProtocol.autonomous_execution())
@@ -22,7 +22,7 @@ class ExecutionProtocol:
     def autonomous_execution() -> PromptSection:
         """자율 실행 프로토콜 섹션.
 
-        OpenClaw의 self-manager CPEV 사이클과
+        Autonomous graph의 실행 루프와
         Geny Agent의 [CONTINUE] 시그널을 통합.
         """
         content = """## Autonomous Execution Protocol
