@@ -91,7 +91,65 @@ class AgentSessionManager(SessionManager):
         # Persistent session metadata store (sessions.json)
         self._store = get_session_store()
 
+        # Shared folder configuration
+        self._shared_folder_enabled: bool = False
+        self._shared_folder_manager = None  # SharedFolderManager instance
+        self._shared_folder_link_name: str = "_shared"
+
         logger.info("✅ AgentSessionManager initialized")
+
+    def set_shared_folder_config(
+        self,
+        enabled: bool = True,
+        shared_folder_manager=None,
+        link_name: str = "_shared",
+    ) -> None:
+        """Configure shared folder for automatic linking on session creation.
+
+        Args:
+            enabled: Whether to create shared folder links in new sessions.
+            shared_folder_manager: SharedFolderManager instance.
+            link_name: Name of the symlink in each session's storage dir.
+        """
+        self._shared_folder_enabled = enabled
+        self._shared_folder_manager = shared_folder_manager
+        self._shared_folder_link_name = link_name
+        logger.info(
+            f"Shared folder config: enabled={enabled}, link_name={link_name}"
+        )
+
+    def _link_shared_folder(self, storage_path: str, session_id: str) -> None:
+        """Create shared folder link in a session's storage directory."""
+        if not self._shared_folder_enabled or self._shared_folder_manager is None:
+            return
+        try:
+            ok = self._shared_folder_manager.link_to_session(
+                session_storage_path=storage_path,
+                link_name=self._shared_folder_link_name,
+            )
+            if ok:
+                logger.info(f"[{session_id}] Shared folder linked: {self._shared_folder_link_name}")
+            else:
+                logger.warning(f"[{session_id}] Failed to link shared folder")
+        except Exception as e:
+            logger.warning(f"[{session_id}] Shared folder link error: {e}")
+
+    def _build_shared_folder_context(self) -> str:
+        """Build a system-prompt fragment that tells Claude about the shared folder."""
+        link = self._shared_folder_link_name or "_shared"
+        real_path = self._shared_folder_manager.shared_path if self._shared_folder_manager else ""
+        return (
+            "## Shared Folder\n"
+            f"A shared folder is available at `./{link}/` in your working directory.\n"
+            f"Real path: {real_path}\n\n"
+            "All sessions in this workspace share this folder. You can:\n"
+            f"- List shared files: `ls {link}/`\n"
+            f"- Read a shared file: `cat {link}/<filename>`\n"
+            f"- Copy your files to the shared folder: `cp <file> {link}/`\n"
+            f"- Copy shared files to your workspace: `cp {link}/<file> .`\n\n"
+            "Use the shared folder to exchange data, results, and intermediate "
+            "outputs with other sessions."
+        )
 
     # ========================================================================
     # Prompt Builder
@@ -189,6 +247,12 @@ class AgentSessionManager(SessionManager):
         # Append memory context if available
         if memory_context:
             prompt = prompt + "\n\n" + memory_context
+
+        # Append shared folder context if enabled
+        if self._shared_folder_enabled and self._shared_folder_manager:
+            shared_ctx = self._build_shared_folder_context()
+            if shared_ctx:
+                prompt = prompt + "\n\n" + shared_ctx
 
         logger.debug(f"  PromptBuilder: mode={mode.value}, role={role}, length={len(prompt)} chars")
 
@@ -343,6 +407,17 @@ class AgentSessionManager(SessionManager):
         # 기존 호환성: ClaudeProcess도 _local_processes에 등록
         if agent.process:
             self._local_processes[session_id] = agent.process
+
+        # Link shared folder into session's storage directory
+        if agent.process and agent.process.storage_path:
+            self._link_shared_folder(agent.process.storage_path, session_id)
+            # Tell the ClaudeProcess about the shared folder so storage reads
+            # through the junction/symlink are properly delegated
+            if self._shared_folder_enabled and self._shared_folder_manager:
+                agent.process.set_shared_folder(
+                    link_name=self._shared_folder_link_name,
+                    shared_path=self._shared_folder_manager.shared_path,
+                )
 
         # Pod 정보
         pod_info = get_pod_info()

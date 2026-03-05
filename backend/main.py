@@ -16,6 +16,7 @@ from controller.agent_controller import router as agent_router, agent_manager
 from controller.config_controller import router as config_router
 from controller.workflow_controller import router as workflow_router
 from controller.tool_preset_controller import router as tool_preset_router
+from controller.shared_folder_controller import router as shared_folder_router
 from service.redis.redis_client import RedisClient, get_redis_client
 from service.config import get_config_manager, ConfigManager
 from service.pod.pod_info import init_pod_info, get_pod_info
@@ -183,6 +184,27 @@ async def lifespan(app: FastAPI):
     logger.info(f"   - Workflow templates installed: {templates_installed}")
     logger.info(f"   - Total workflows: {len(workflow_store.list_all())}")
 
+    # Initialize Shared Folder
+    print_step_banner("SHARED", "SHARED FOLDER", "Initializing shared folder for cross-session collaboration...")
+    from service.shared_folder import get_shared_folder_manager
+    from service.config.sub_config.general.shared_folder_config import SharedFolderConfig
+    shared_folder_cfg = config_manager.load_config(SharedFolderConfig)
+    shared_mgr = get_shared_folder_manager()
+    # Apply custom path from config if set
+    if shared_folder_cfg.shared_folder_path:
+        shared_mgr.update_path(shared_folder_cfg.shared_folder_path)
+    app.state.shared_folder_manager = shared_mgr
+    logger.info(f"   - Shared folder: {shared_mgr.shared_path}")
+    logger.info(f"   - Enabled: {shared_folder_cfg.enabled}")
+    logger.info(f"   - Link name: {shared_folder_cfg.link_name}")
+
+    # Pass shared folder config to agent manager for session initialization
+    agent_manager.set_shared_folder_config(
+        enabled=shared_folder_cfg.enabled,
+        shared_folder_manager=shared_mgr,
+        link_name=shared_folder_cfg.link_name,
+    )
+
     print_step_banner("READY", "GENY AGENT READY", "All systems operational!")
     logger.info("Geny Agent startup complete! Ready to serve requests.")
 
@@ -298,6 +320,7 @@ app.include_router(agent_router)  # LangGraph agent sessions
 app.include_router(config_router)  # Configuration management
 app.include_router(workflow_router)  # Workflow editor
 app.include_router(tool_preset_router)  # Tool preset management
+app.include_router(shared_folder_router)  # Shared folder
 
 # Mount static files for Web UI Dashboard
 static_dir = Path(__file__).parent / "static"

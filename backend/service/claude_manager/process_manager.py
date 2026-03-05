@@ -101,6 +101,10 @@ class ClaudeProcess:
         self.error_message: Optional[str] = None
         self.created_at = now_kst()
 
+        # Shared folder configuration
+        self._shared_folder_link_name: Optional[str] = None
+        self._shared_folder_path: Optional[str] = None
+
         # Execution tracking for --resume support
         self._execution_count = 0
         self._conversation_id: Optional[str] = None
@@ -116,6 +120,19 @@ class ClaudeProcess:
     def storage_path(self) -> str:
         """Session-specific storage path."""
         return self._storage_path
+
+    def set_shared_folder(self, link_name: str, shared_path: str) -> None:
+        """Configure shared folder info so storage reads can delegate properly.
+
+        Args:
+            link_name: Name of the junction/symlink in session storage (e.g. '_shared').
+            shared_path: Absolute path to the actual shared folder.
+        """
+        self._shared_folder_link_name = link_name
+        self._shared_folder_path = shared_path
+        logger.info(f"[{self.session_id}] Shared folder set: {link_name} → {shared_path}")
+        # Update session info file with shared folder metadata
+        self._update_session_info_file()
 
     @property
     def pid(self) -> Optional[int]:
@@ -232,11 +249,23 @@ class ClaudeProcess:
             "created_at": self.created_at.isoformat()
         }
 
+        # Include shared folder info if available
+        if self._shared_folder_path:
+            session_info["shared_folder_path"] = self._shared_folder_path
+            session_info["shared_folder_link"] = self._shared_folder_link_name or "_shared"
+
         info_path = Path(self._storage_path) / ".claude_session.json"
         with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(session_info, f, indent=2)
 
         logger.info(f"[{self.session_id}] Session info file created: {info_path}")
+
+    def _update_session_info_file(self) -> None:
+        """Re-write .claude_session.json with current state (including shared folder info)."""
+        try:
+            self._create_session_info_file()
+        except Exception as e:
+            logger.warning(f"[{self.session_id}] Failed to update session info: {e}")
 
     async def _create_mcp_config(self) -> None:
         """
@@ -777,6 +806,10 @@ This file contains a log of all work performed by this session.
         """
         Read storage file content.
 
+        If the requested path starts with the shared folder link name
+        (e.g. '_shared/'), the read is delegated to the shared folder's
+        real path so that symlink/junction path validation succeeds.
+
         Args:
             file_path: File path (relative to storage root).
             encoding: File encoding.
@@ -784,6 +817,27 @@ This file contains a log of all work performed by this session.
         Returns:
             File content dictionary or None.
         """
+        # Normalize separators
+        normalized = file_path.replace("\\", "/")
+
+        # Detect shared-folder reads and delegate to the real shared path
+        if self._shared_folder_link_name and self._shared_folder_path:
+            prefix = self._shared_folder_link_name + "/"
+            if normalized.startswith(prefix) or normalized == self._shared_folder_link_name:
+                relative = normalized[len(prefix):] if normalized.startswith(prefix) else ""
+                if not relative:
+                    return None  # Can't read a directory
+                result = _read_storage_file(
+                    storage_path=self._shared_folder_path,
+                    file_path=relative,
+                    encoding=encoding,
+                    session_id=self.session_id,
+                )
+                # Restore the original path in the result so the UI shows it correctly
+                if result:
+                    result["file_path"] = file_path
+                return result
+
         return _read_storage_file(
             storage_path=self._storage_path,
             file_path=file_path,

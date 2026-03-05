@@ -35,6 +35,7 @@ const ko: Translations = {
     dashboard: '대시보드',
     storage: '스토리지',
     logs: '로그',
+    sharedFolder: '공유 폴더',
   },
 
   // ─── Sidebar ───
@@ -596,6 +597,37 @@ const ko: Translations = {
     stateCustomBadge: '커스텀',
     stateNoFields: '상태 필드를 찾을 수 없습니다.',
     stateNoNodes: '노드 상태 매핑을 찾을 수 없습니다.',
+  },
+
+  // ─── Shared Folder Tab ───
+  sharedFolderTab: {
+    title: '공유 폴더',
+    description: '모든 세션이 공유하는 파일',
+    refresh: '새로고침',
+    downloadFolder: '전체 다운로드',
+    downloadFolderError: '공유 폴더 다운로드 실패',
+    uploadFile: '파일 업로드',
+    uploadSuccess: '파일이 업로드되었습니다',
+    uploadError: '파일 업로드 실패',
+    createFile: '새 파일',
+    createFileTitle: '파일 생성',
+    createFilePlaceholder: '파일 경로 입력 (예: notes/todo.md)',
+    createFileContent: '파일 내용',
+    deleteFile: '삭제',
+    deleteConfirm: '"{name}"을(를) 삭제하시겠습니까? 되돌릴 수 없습니다.',
+    deleteSuccess: '파일이 삭제되었습니다',
+    deleteError: '파일 삭제 실패',
+    empty: '공유 폴더가 비어 있습니다',
+    noFile: '선택된 파일 없음',
+    selectFile: '미리 볼 파일을 선택하세요',
+    emptyFile: '(빈 파일)',
+    loadError: '파일 로드 오류: {message}',
+    info: '정보',
+    path: '경로',
+    totalFiles: '전체 파일 수',
+    totalSize: '전체 크기',
+    writeSuccess: '파일이 저장되었습니다',
+    writeError: '파일 저장 실패',
   },
 };
 

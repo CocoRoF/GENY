@@ -119,6 +119,105 @@ export const agentApi = {
   },
 };
 
+// ==================== Shared Folder API ====================
+
+export interface SharedFileItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified_at: string | null;
+}
+
+export interface SharedFileListResponse {
+  shared_path: string;
+  files: SharedFileItem[];
+  total: number;
+}
+
+export interface SharedFileContentResponse {
+  file_path: string;
+  content: string;
+  size: number;
+  encoding: string;
+}
+
+export interface SharedFolderInfoResponse {
+  path: string;
+  exists: boolean;
+  total_files: number;
+  total_size: number;
+}
+
+export const sharedFolderApi = {
+  /** GET /api/shared-folder/info */
+  getInfo: () => apiCall<SharedFolderInfoResponse>('/api/shared-folder/info'),
+
+  /** GET /api/shared-folder/files */
+  listFiles: (path = '') =>
+    apiCall<SharedFileListResponse>(`/api/shared-folder/files${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
+  /** GET /api/shared-folder/files/{path} */
+  getFile: (filePath: string) =>
+    apiCall<SharedFileContentResponse>(`/api/shared-folder/files/${encodeURIComponent(filePath)}`),
+
+  /** POST /api/shared-folder/files */
+  writeFile: (filePath: string, content: string, overwrite = true) =>
+    apiCall<{ success: boolean; file_path: string; size: number }>('/api/shared-folder/files', {
+      method: 'POST',
+      body: JSON.stringify({ file_path: filePath, content, overwrite }),
+    }),
+
+  /** DELETE /api/shared-folder/files/{path} */
+  deleteFile: (filePath: string) =>
+    apiCall<{ success: boolean }>(`/api/shared-folder/files/${encodeURIComponent(filePath)}`, {
+      method: 'DELETE',
+    }),
+
+  /** POST /api/shared-folder/upload */
+  uploadFile: async (file: File, path = '', overwrite = true) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params = new URLSearchParams();
+    if (path) params.set('path', path);
+    params.set('overwrite', String(overwrite));
+    const res = await fetch(`/api/shared-folder/upload?${params}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** POST /api/shared-folder/directory */
+  createDirectory: (path: string) =>
+    apiCall<{ success: boolean; path: string }>('/api/shared-folder/directory', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
+  /** GET /api/shared-folder/download */
+  download: async () => {
+    const res = await fetch('/api/shared-folder/download');
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'shared-folder.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
 // ==================== Command API ====================
 
 import type { PromptListResponse, SessionLogsResponse } from '@/types';

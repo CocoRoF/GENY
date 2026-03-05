@@ -35,6 +35,7 @@ const en = {
     dashboard: 'Dashboard',
     storage: 'Storage',
     logs: 'Logs',
+    sharedFolder: 'Shared',
   },
 
   // ─── Sidebar ───
@@ -596,6 +597,37 @@ const en = {
     stateCustomBadge: 'Custom',
     stateNoFields: 'No state fields found.',
     stateNoNodes: 'No node state mappings found.',
+  },
+
+  // ─── Shared Folder Tab ───
+  sharedFolderTab: {
+    title: 'Shared Folder',
+    description: 'Files shared across all sessions',
+    refresh: 'Refresh',
+    downloadFolder: 'Download All',
+    downloadFolderError: 'Failed to download shared folder',
+    uploadFile: 'Upload File',
+    uploadSuccess: 'File uploaded successfully',
+    uploadError: 'Failed to upload file',
+    createFile: 'New File',
+    createFileTitle: 'Create File',
+    createFilePlaceholder: 'Enter file path (e.g., notes/todo.md)',
+    createFileContent: 'File content',
+    deleteFile: 'Delete',
+    deleteConfirm: 'Delete "{name}"? This cannot be undone.',
+    deleteSuccess: 'File deleted',
+    deleteError: 'Failed to delete file',
+    empty: 'Shared folder is empty',
+    noFile: 'No file selected',
+    selectFile: 'Select a file to preview',
+    emptyFile: '(empty file)',
+    loadError: 'Error loading file: {message}',
+    info: 'Info',
+    path: 'Path',
+    totalFiles: 'Total Files',
+    totalSize: 'Total Size',
+    writeSuccess: 'File saved successfully',
+    writeError: 'Failed to save file',
   },
 };
 
