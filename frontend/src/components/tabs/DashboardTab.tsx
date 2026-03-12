@@ -95,7 +95,7 @@ export default function DashboardTab() {
       </div>
 
       {/* Content Grid */}
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: '350px 1fr', gap: '1px', background: 'var(--border-color)' }}>
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-[350px_1fr] overflow-hidden" style={{ gap: '1px', background: 'var(--border-color)' }}>
         {/* Workers Section */}
         <div className="bg-[var(--bg-secondary)] flex flex-col overflow-hidden">
           <div className="flex justify-between items-center py-3 px-4 border-b border-[var(--border-color)]">
