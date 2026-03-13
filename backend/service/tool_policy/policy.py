@@ -143,6 +143,7 @@ _TOOL_SEARCH_TOOLS: FrozenSet[str] = frozenset({
     "tool_schema",
     "tool_browse",
     "tool_workflow",
+    "tool_execute",
 })
 
 

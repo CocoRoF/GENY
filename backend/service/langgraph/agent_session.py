@@ -63,6 +63,7 @@ from service.langgraph.state import (
 )
 from service.langgraph.session_freshness import SessionFreshness
 from service.logging.session_logger import get_session_logger, SessionLogger
+from service.tool_executor.context import set_session_allowed_tools, clear_session_allowed_tools
 from service.workflow.workflow_model import WorkflowDefinition
 from service.workflow.workflow_executor import WorkflowExecutor
 from service.workflow.nodes.base import ExecutionContext
@@ -157,6 +158,10 @@ class AgentSession:
 
         # Tool Search Mode
         self._tool_search_mode = tool_search_mode
+
+        # Per-session allowed tools (set by agent_session_manager from tool preset / request)
+        # None means unrestricted; a list restricts which tools are visible/executable
+        self._session_allowed_tools: Optional[List[str]] = None
 
         # Internal components
         self._model: Optional[ClaudeCLIChatModel] = None
@@ -415,6 +420,15 @@ class AgentSession:
         if self._model and self._model.process:
             return self._model.process.storage_path
         return None
+
+    @property
+    def session_allowed_tools(self) -> Optional[List[str]]:
+        """Per-session allowed tools filter (None = unrestricted)."""
+        return self._session_allowed_tools
+
+    @session_allowed_tools.setter
+    def session_allowed_tools(self, tools: Optional[List[str]]) -> None:
+        self._session_allowed_tools = tools
 
     @property
     def memory_manager(self) -> Optional["SessionMemoryManager"]:
@@ -728,8 +742,13 @@ class AgentSession:
                 except Exception:
                     logger.debug("Failed to record user message — non-critical", exc_info=True)
 
-            # Execute the compiled graph
-            result = await self._graph.ainvoke(initial_state, config)
+            # Set per-session tool filtering context
+            _ctx_token = set_session_allowed_tools(self._session_allowed_tools)
+            try:
+                # Execute the compiled graph
+                result = await self._graph.ainvoke(initial_state, config)
+            finally:
+                clear_session_allowed_tools(_ctx_token)
             duration_ms = int((time.time() - start_time) * 1000)
             self._status = SessionStatus.RUNNING
 
@@ -864,6 +883,9 @@ class AgentSession:
             # Accumulate state updates for LTM recording
             accumulated_state: Dict[str, Any] = {}
 
+            # Set per-session tool filtering context
+            _ctx_token = set_session_allowed_tools(self._session_allowed_tools)
+
             # Stream the compiled graph
             async for event in self._graph.astream(initial_state, config):
                 event_count += 1
@@ -980,6 +1002,9 @@ class AgentSession:
                 )
 
             raise
+
+        finally:
+            clear_session_allowed_tools(_ctx_token)
 
     async def execute(
         self,

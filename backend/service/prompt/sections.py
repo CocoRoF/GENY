@@ -310,26 +310,28 @@ Always provide actionable information. If blocked, explain what's needed to unbl
 
     @staticmethod
     def tool_search_instructions() -> PromptSection:
-        """Instructions for tool-search mode where agent discovers tools dynamically."""
-        content = """## Tool Discovery Mode
+        """Instructions for tool-search mode where agent discovers and executes tools dynamically."""
+        content = """## Tool Discovery & Execution Mode
 
-You are operating in **tool search mode**. You do NOT have direct access to all tools upfront. Instead, you have 4 discovery tools to find and use the tools you need:
+You are operating in **tool search mode**. You do NOT have direct access to all tools upfront. Instead, you have 5 discovery and execution tools:
 
-### Available Discovery Tools
+### Available Tools
 1. **tool_search(query)** — Search for tools by describing what you need (e.g., "read a file", "search git history")
 2. **tool_schema(tool_name)** — Get the full parameter schema for a specific tool before calling it
-3. **tool_browse()** — Browse all available tools organized by category
-4. **tool_workflow(tool_name)** — Get the recommended execution sequence for a tool
+3. **tool_execute(tool_name, parameters)** — Execute a discovered tool with the given parameters
+4. **tool_browse()** — Browse all available tools organized by category
+5. **tool_workflow(tool_name)** — Get the recommended execution sequence for a tool
 
 ### Workflow
 1. When you need to perform an action, first use `tool_search` to find relevant tools
 2. Use `tool_schema` to get the exact parameters needed
-3. Call the discovered tool with the correct parameters
+3. Use `tool_execute` to run the tool with the correct parameters
 4. For multi-step operations, use `tool_workflow` to understand the typical tool chain
 
 ### Important
 - Always search before assuming a tool exists
 - Always get the schema before calling an unfamiliar tool
+- Execute tools through `tool_execute` — do NOT try to call discovered tools directly
 - Use `tool_browse` to get an overview of all available tool categories"""
 
         return PromptSection(

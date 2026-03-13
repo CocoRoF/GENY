@@ -407,6 +407,20 @@ class AgentSessionManager(SessionManager):
 
         session_id = agent.session_id
 
+        # Set per-session allowed_tools for tool_execute proxy filtering
+        # In tool_search_mode, explicit_tools from preset or request restricts
+        # which tools the agent can discover and execute
+        if tool_search_mode:
+            effective_allowed_tools = explicit_tools  # from preset or request
+            agent.session_allowed_tools = effective_allowed_tools
+            if effective_allowed_tools:
+                logger.info(
+                    f"[{session_id}] tool_search_mode: allowed_tools = "
+                    f"{effective_allowed_tools[:5]}{'...' if len(effective_allowed_tools) > 5 else ''}"
+                )
+            else:
+                logger.info(f"[{session_id}] tool_search_mode: all tools allowed (no filter)")
+
         # 로컬 저장소에 등록
         self._local_agents[session_id] = agent
 
