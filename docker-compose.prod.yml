@@ -93,6 +93,9 @@ services:
       dockerfile: Dockerfile
       args:
         - API_URL=http://backend:8000
+        # NEXT_PUBLIC_* vars are inlined at build time by Next.js.
+        # Empty = browser uses relative URLs, routed through nginx.
+        - NEXT_PUBLIC_API_URL=
     container_name: geny-frontend-prod
     restart: unless-stopped
     # 외부 포트 노출 없음 — nginx 를 통해서만 접근
