@@ -42,109 +42,34 @@ class ToolPresetStore:
                 is_template=True,
             ),
             ToolPreset(
-                id="preset-coding",
-                name="Coding",
-                description="Built-in tools + filesystem, git, and code-related MCP servers.",
-                allowed_servers=[
-                    "_builtin_tools",
-                    "filesystem",
-                    "git",
-                    "github",
-                    "code",
-                    "lint",
-                    "docker",
-                    "terminal",
-                ],
-                allowed_tools=["*"],
-                is_template=True,
-            ),
-            ToolPreset(
-                id="preset-research",
-                name="Research",
-                description="Built-in tools + search, web, and knowledge MCP servers.",
-                allowed_servers=[
-                    "_builtin_tools",
-                    "web",
-                    "search",
-                    "brave",
-                    "perplexity",
-                    "google",
-                    "bing",
-                    "arxiv",
-                    "wikipedia",
-                    "fetch",
-                    "browser",
-                ],
-                allowed_tools=["*"],
-                is_template=True,
-            ),
-            ToolPreset(
-                id="preset-minimal",
-                name="Minimal",
-                description="Only built-in tools — no external MCP servers.",
-                allowed_servers=["_builtin_tools"],
-                allowed_tools=["*"],
-                is_template=True,
-            ),
-            # ── Tool Search presets (tool_search_mode=True) ──
-            ToolPreset(
                 id="preset-tool-search-full",
-                name="Tool Search (Full Access)",
+                name="Full Access (Tool Search)",
                 description=(
-                    "Dynamic tool discovery mode — the agent starts with only 5 ToolSearch tools "
-                    "and discovers/executes other tools on demand. All MCP servers available."
+                    "Dynamic tool discovery mode — the agent starts with only 5 ToolSearch "
+                    "tools and discovers/executes other tools on demand. All MCP servers available."
                 ),
                 allowed_servers=["*"],
                 allowed_tools=["*"],
                 tool_search_mode=True,
                 is_template=True,
             ),
-            ToolPreset(
-                id="preset-tool-search-coding",
-                name="Tool Search (Coding)",
-                description=(
-                    "Dynamic tool discovery + coding-focused MCP servers. "
-                    "The agent discovers and uses filesystem, git, and code tools dynamically."
-                ),
-                allowed_servers=[
-                    "_builtin_tools",
-                    "filesystem",
-                    "git",
-                    "github",
-                    "code",
-                    "lint",
-                    "docker",
-                    "terminal",
-                ],
-                allowed_tools=["*"],
-                tool_search_mode=True,
-                is_template=True,
-            ),
-            ToolPreset(
-                id="preset-tool-search-research",
-                name="Tool Search (Research)",
-                description=(
-                    "Dynamic tool discovery + research-focused MCP servers. "
-                    "The agent discovers and uses search, web, and knowledge tools dynamically."
-                ),
-                allowed_servers=[
-                    "_builtin_tools",
-                    "web",
-                    "search",
-                    "brave",
-                    "perplexity",
-                    "google",
-                    "bing",
-                    "arxiv",
-                    "wikipedia",
-                    "fetch",
-                    "browser",
-                ],
-                allowed_tools=["*"],
-                tool_search_mode=True,
-                is_template=True,
-            ),
         ]
+
+        # Remove obsolete built-in presets that are no longer defined
+        active_ids = {t.id for t in templates}
+        _OBSOLETE_BUILTIN_IDS = {
+            "preset-coding",
+            "preset-research",
+            "preset-minimal",
+            "preset-tool-search-coding",
+            "preset-tool-search-research",
+        }
+        for obsolete_id in _OBSOLETE_BUILTIN_IDS:
+            if obsolete_id not in active_ids:
+                path = self._path_for(obsolete_id)
+                if path.exists():
+                    path.unlink()
+                    logger.info(f"  Removed obsolete built-in preset: {obsolete_id}")
 
         for tmpl in templates:
             if not self.exists(tmpl.id):
