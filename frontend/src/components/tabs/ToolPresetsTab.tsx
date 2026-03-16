@@ -641,6 +641,7 @@ export default function ToolPresetsTab() {
       description: '',
       allowed_servers: [],
       allowed_tools: [],
+      tool_search_mode: false,
       is_template: false,
       created_at: '',
       updated_at: '',
