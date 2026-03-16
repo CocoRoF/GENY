@@ -224,7 +224,11 @@ export default function ExecutionTimeline({
     () => showAllLevels ? entries : entries.filter((e) => PRIMARY_LEVELS.has(e.level)),
     [entries, showAllLevels],
   );
-  const hiddenCount = entries.length - visibleEntries.length;
+  // Count entries that are NOT primary (would be hidden in filtered mode)
+  const detailLevelCount = useMemo(
+    () => entries.filter((e) => !PRIMARY_LEVELS.has(e.level)).length,
+    [entries],
+  );
 
   // Map visible index → original index
   const visibleToOriginalIndex = useMemo(() => {
@@ -257,16 +261,16 @@ export default function ExecutionTimeline({
           <Terminal size={9} className="opacity-60" />
           Execution Log
           <span className="font-normal opacity-70">
-            ({visibleEntries.length}{hiddenCount > 0 ? `/${entries.length}` : ''})
+            ({visibleEntries.length}{detailLevelCount > 0 && !showAllLevels ? `/${entries.length}` : ''})
           </span>
         </span>
-        {hiddenCount > 0 && (
+        {detailLevelCount > 0 && (
           <button
-            className="text-[0.5625rem] text-[var(--text-muted)] hover:text-[var(--primary-color)] transition-colors flex items-center gap-0.5 uppercase tracking-wider font-medium cursor-pointer border-none bg-transparent"
+            className="text-[0.625rem] text-[var(--text-muted)] hover:text-[var(--primary-color)] transition-colors flex items-center gap-0.5 font-medium cursor-pointer border-none bg-transparent p-0"
             onClick={onToggleShowAll}
           >
             {showAllLevels ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-            {showAllLevels ? 'Hide' : 'Show'} detail ({hiddenCount})
+            {showAllLevels ? 'Hide' : 'Show'} detail ({detailLevelCount})
           </button>
         )}
       </div>

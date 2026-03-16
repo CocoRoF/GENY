@@ -18,6 +18,8 @@ import {
   XCircle,
   Play,
   PanelRightClose,
+  ScrollText,
+  FileOutput,
 } from 'lucide-react';
 
 export default function CommandTab() {
@@ -28,6 +30,8 @@ export default function CommandTab() {
   const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null);
   const [detailPanelWidth, setDetailPanelWidth] = useState(55); // percentage
   const [isResizing, setIsResizing] = useState(false);
+  const [activeView, setActiveView] = useState<'log' | 'result'>('log');
+  const prevFinishedRef = useRef(false);
 
   const session = sessions.find(s => s.session_id === selectedSessionId);
   const sessionData: SessionData | null = selectedSessionId ? getSessionData(selectedSessionId) : null;
@@ -42,7 +46,19 @@ export default function CommandTab() {
   // Clear selection when session changes
   useEffect(() => {
     setSelectedStepIndex(null);
+    setActiveView('log');
+    prevFinishedRef.current = false;
   }, [selectedSessionId]);
+
+  // Auto-switch to result when execution completes
+  const hasFinished = sessionData?.status === 'success' || sessionData?.status === 'error';
+  useEffect(() => {
+    if (hasFinished && !prevFinishedRef.current) {
+      setActiveView('result');
+      setSelectedStepIndex(null);
+    }
+    prevFinishedRef.current = hasFinished;
+  }, [hasFinished]);
 
   // ── Resize handler for split pane ──
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -186,7 +202,6 @@ export default function CommandTab() {
 
   const commandEntry = logEntries.find(e => e.level === 'COMMAND');
   const responseEntry = [...logEntries].reverse().find(e => e.level === 'RESPONSE');
-  const hasFinished = sessionData?.status === 'success' || sessionData?.status === 'error';
   const hasContent = commandEntry || isExecuting || logEntries.length > 0;
 
   return (
@@ -290,7 +305,7 @@ export default function CommandTab() {
           </div>
         ) : (
           <>
-            {/* ── Left pane: Timeline + Result ── */}
+            {/* ── Left pane: Accordion (Log / Result) ── */}
             <div
               className="flex flex-col min-w-0 border-r border-[var(--border-color)]"
               style={{ width: selectedEntry ? `${100 - detailPanelWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.2s ease' }}
@@ -304,62 +319,116 @@ export default function CommandTab() {
                 </div>
               )}
 
-              {/* Timeline */}
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <ExecutionTimeline
-                  entries={logEntries}
-                  selectedIndex={selectedStepIndex}
-                  onSelectEntry={setSelectedStepIndex}
-                  showAllLevels={showAllLevels}
-                  onToggleShowAll={() => setShowAllLevels(!showAllLevels)}
-                  isExecuting={isExecuting}
-                  statusText={sessionData?.statusText}
-                />
+              {/* ── Section toggle headers ── */}
+              <div className="shrink-0 flex border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                {/* Log tab */}
+                <button
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-[0.6875rem] font-semibold transition-all border-none cursor-pointer ${
+                    activeView === 'log'
+                      ? 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.06)] border-b-2 border-b-[var(--primary-color)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] bg-transparent'
+                  }`}
+                  style={{ borderBottom: activeView === 'log' ? '2px solid var(--primary-color)' : '2px solid transparent' }}
+                  onClick={() => setActiveView('log')}
+                >
+                  <ScrollText size={12} />
+                  Log
+                  <span className={`text-[0.5625rem] font-normal ${activeView === 'log' ? 'opacity-70' : 'opacity-50'}`}>
+                    ({logEntries.length})
+                  </span>
+                  {isExecuting && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary-color)] animate-pulse" />
+                  )}
+                </button>
+
+                {/* Result tab */}
+                <button
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-[0.6875rem] font-semibold transition-all border-none cursor-pointer ${
+                    activeView === 'result' && hasFinished
+                      ? (sessionData?.status === 'success'
+                          ? 'text-[var(--success-color)] bg-[rgba(16,185,129,0.06)]'
+                          : 'text-[var(--danger-color)] bg-[rgba(239,68,68,0.06)]')
+                      : hasFinished
+                        ? 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] bg-transparent'
+                        : 'text-[var(--text-muted)] opacity-40 bg-transparent cursor-default'
+                  }`}
+                  style={{
+                    borderBottom: activeView === 'result' && hasFinished
+                      ? `2px solid ${sessionData?.status === 'success' ? 'var(--success-color)' : 'var(--danger-color)'}`
+                      : '2px solid transparent',
+                  }}
+                  onClick={() => hasFinished && setActiveView('result')}
+                  disabled={!hasFinished}
+                >
+                  <FileOutput size={12} />
+                  Result
+                  {hasFinished && (
+                    sessionData?.status === 'success'
+                      ? <CheckCircle2 size={10} className="text-[var(--success-color)]" />
+                      : <XCircle size={10} className="text-[var(--danger-color)]" />
+                  )}
+                </button>
               </div>
 
-              {/* Result panel at bottom of timeline */}
-              {hasFinished && (
-                <div className="shrink-0 border-t border-[var(--border-color)]">
-                  <div className={`${
-                    sessionData?.status === 'success'
-                      ? 'bg-[rgba(16,185,129,0.04)]'
-                      : 'bg-[rgba(239,68,68,0.04)]'
-                  }`}>
-                    <div className={`flex items-center justify-between px-4 py-1.5 ${
+              {/* ── Active section content ── */}
+              {activeView === 'log' ? (
+                /* Log view: Timeline */
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <ExecutionTimeline
+                    entries={logEntries}
+                    selectedIndex={selectedStepIndex}
+                    onSelectEntry={setSelectedStepIndex}
+                    showAllLevels={showAllLevels}
+                    onToggleShowAll={() => setShowAllLevels(!showAllLevels)}
+                    isExecuting={isExecuting}
+                    statusText={sessionData?.statusText}
+                  />
+                </div>
+              ) : (
+                /* Result view */
+                <div className="flex-1 min-h-0 overflow-auto">
+                  {hasFinished && (
+                    <div className={`h-full flex flex-col ${
                       sessionData?.status === 'success'
-                        ? 'bg-[rgba(16,185,129,0.08)] border-b border-[rgba(16,185,129,0.15)]'
-                        : 'bg-[rgba(239,68,68,0.08)] border-b border-[rgba(239,68,68,0.15)]'
+                        ? 'bg-[rgba(16,185,129,0.02)]'
+                        : 'bg-[rgba(239,68,68,0.02)]'
                     }`}>
-                      <div className="flex items-center gap-2">
-                        {sessionData?.status === 'success'
-                          ? <CheckCircle2 size={12} className="text-[var(--success-color)]" />
-                          : <XCircle size={12} className="text-[var(--danger-color)]" />}
-                        <span className={`text-[0.6875rem] font-semibold uppercase tracking-wider ${
-                          sessionData?.status === 'success' ? 'text-[var(--success-color)]' : 'text-[var(--danger-color)]'
-                        }`}>
-                          {sessionData?.status === 'success' ? 'Result' : 'Error'}
-                        </span>
-                      </div>
-                      {sessionData?.statusText && (
-                        <span className="text-[0.625rem] text-[var(--text-muted)]">{sessionData.statusText}</span>
-                      )}
-                    </div>
-                    <div className="px-4 py-2 max-h-[150px] overflow-auto">
-                      {responseEntry ? (
-                        <div className="text-[0.75rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words">
-                          {responseEntry.message.replace(/^SUCCESS:\s*/, '').replace(/^ERROR:\s*/, '').slice(0, 1000)}
-                          {responseEntry.message.length > 1000 && (
-                            <span className="text-[var(--text-muted)]">... (click RESPONSE in timeline for full text)</span>
-                          )}
+                      {/* Result header */}
+                      <div className={`shrink-0 flex items-center justify-between px-4 py-2 ${
+                        sessionData?.status === 'success'
+                          ? 'bg-[rgba(16,185,129,0.08)] border-b border-[rgba(16,185,129,0.15)]'
+                          : 'bg-[rgba(239,68,68,0.08)] border-b border-[rgba(239,68,68,0.15)]'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          {sessionData?.status === 'success'
+                            ? <CheckCircle2 size={13} className="text-[var(--success-color)]" />
+                            : <XCircle size={13} className="text-[var(--danger-color)]" />}
+                          <span className={`text-[0.75rem] font-semibold ${
+                            sessionData?.status === 'success' ? 'text-[var(--success-color)]' : 'text-[var(--danger-color)]'
+                          }`}>
+                            {sessionData?.status === 'success' ? 'Result' : 'Error'}
+                          </span>
                         </div>
-                      ) : sessionData?.output ? (
-                        <pre className="text-[0.75rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words font-[inherit] m-0">
-                          {sessionData.output.slice(0, 1000)}
-                          {sessionData.output.length > 1000 && '...'}
-                        </pre>
-                      ) : null}
+                        {sessionData?.statusText && (
+                          <span className="text-[0.6875rem] text-[var(--text-muted)]">{sessionData.statusText}</span>
+                        )}
+                      </div>
+                      {/* Result body */}
+                      <div className="flex-1 overflow-auto px-5 py-4">
+                        {responseEntry ? (
+                          <div className="text-[0.8125rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words">
+                            {responseEntry.message.replace(/^SUCCESS:\s*/, '').replace(/^ERROR:\s*/, '')}
+                          </div>
+                        ) : sessionData?.output ? (
+                          <pre className="text-[0.8125rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words font-[inherit] m-0">
+                            {sessionData.output}
+                          </pre>
+                        ) : (
+                          <p className="text-[0.8125rem] text-[var(--text-muted)] italic">No output</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
