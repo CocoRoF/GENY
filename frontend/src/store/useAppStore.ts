@@ -36,6 +36,7 @@ interface AppState {
   mobileSidebarOpen: boolean;
   isExecuting: boolean;
   deletedSectionOpen: boolean;
+  devMode: boolean;
 
   // Actions
   loadSessions: () => Promise<void>;
@@ -49,6 +50,8 @@ interface AppState {
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   toggleDeletedSection: () => void;
+  toggleDevMode: () => void;
+  hydrateDevMode: () => void;
   checkHealth: () => Promise<void>;
   loadPrompts: () => Promise<void>;
   loadPromptContent: (name: string) => Promise<string | null>;
@@ -78,6 +81,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   mobileSidebarOpen: false,
   isExecuting: false,
   deletedSectionOpen: false,
+  devMode: true,
 
   loadSessions: async () => {
     try {
@@ -144,6 +148,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   toggleDeletedSection: () => set((s) => ({ deletedSectionOpen: !s.deletedSectionOpen })),
+  toggleDevMode: () => set((s) => {
+    const next = !s.devMode;
+    localStorage.setItem('geny-dev-mode', String(next));
+    // If switching to normal mode while on a dev-only tab, fall back to main
+    const devOnlyTabs = new Set(['workflows', 'tools', 'settings', 'logs', 'graph', 'sessionTools']);
+    const activeTab = !next && devOnlyTabs.has(s.activeTab) ? 'main' : s.activeTab;
+    return { devMode: next, activeTab };
+  }),
+  hydrateDevMode: () => {
+    const stored = localStorage.getItem('geny-dev-mode');
+    if (stored === 'false') {
+      set({ devMode: false });
+    }
+  },
 
   checkHealth: async () => {
     try {

@@ -17,6 +17,10 @@ const SESSION_TAB_DEFS = [
   { id: 'logs' },
 ] as const;
 
+// Tabs hidden in Normal mode
+const DEV_ONLY_GLOBAL = new Set(['workflows', 'tools', 'settings']);
+const DEV_ONLY_SESSION = new Set(['logs', 'graph', 'sessionTools']);
+
 const TAB_BASE =
   'relative py-1.5 px-3.5 text-[0.8125rem] font-medium bg-transparent border-none rounded-[6px] cursor-pointer transition-all duration-150 whitespace-nowrap';
 
@@ -61,7 +65,7 @@ function TabButton({ id, label, active, onClick, accent }: { id: string; label: 
 }
 
 export default function TabNavigation() {
-  const { activeTab, setActiveTab, selectedSessionId, sessions } = useAppStore();
+  const { activeTab, setActiveTab, selectedSessionId, sessions, devMode } = useAppStore();
   const { t } = useI18n();
 
   const selectedSession = sessions.find(s => s.session_id === selectedSessionId);
@@ -75,7 +79,9 @@ export default function TabNavigation() {
     <div className="flex items-center gap-0.5 h-11 px-2 md:px-4 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] shrink-0 overflow-x-auto scrollbar-hide">
       {/* ── Global Tabs ── */}
       <div className="flex items-center gap-0.5 shrink-0">
-        {GLOBAL_TAB_IDS.map(id => (
+        {GLOBAL_TAB_IDS
+          .filter(id => devMode || !DEV_ONLY_GLOBAL.has(id))
+          .map(id => (
           <TabButton
             key={id}
             id={id}
@@ -111,7 +117,9 @@ export default function TabNavigation() {
             {sessionName}
           </button>
           <div className="flex items-center gap-0.5">
-            {SESSION_TAB_DEFS.map(tab => (
+            {SESSION_TAB_DEFS
+              .filter(tab => devMode || !DEV_ONLY_SESSION.has(tab.id))
+              .map(tab => (
               <TabButton
                 key={tab.id}
                 id={tab.id}

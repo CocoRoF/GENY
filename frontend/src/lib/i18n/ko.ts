@@ -19,6 +19,8 @@ const ko: Translations = {
     subtitle: 'Geny Execute, Not You',
     sessions: '{count}개 세션',
     disconnected: '연결 끊김',
+    devMode: '개발',
+    normalMode: '일반',
   },
 
   // ─── Tab Navigation ───
@@ -634,6 +636,38 @@ const ko: Translations = {
     roomName: '채팅방 이름',
     enterRoomName: '채팅방 이름을 입력하세요...',
     selectSessions: '세션 선택',
+  },
+
+  // ─── Messenger Page ───
+  messenger: {
+    subtitle: '에이전트 메신저',
+    welcomeTitle: 'Geny Chat에 오신 것을 환영합니다',
+    welcomeDesc: '사이드바에서 방을 선택하거나 새로운 방을 만들어 AI 에이전트와 대화를 시작하세요.',
+    searchRooms: '채팅방 검색...',
+    newRoom: '새 채팅방',
+    noRooms: '채팅방이 없습니다',
+    noSearchResults: '검색 결과 없음',
+    members: '명',
+    online: '온라인',
+    deleteRoom: '채팅방 삭제',
+    confirmDelete: '다시 클릭하여 확인',
+    backToDashboard: '대시보드로 돌아가기',
+    emptyTitle: '대화를 시작하세요',
+    emptyDesc: '메시지를 보내면 이 방의 에이전트들이 자신의 역할과 전문성에 따라 응답합니다.',
+    inputPlaceholder: '메시지를 입력하세요...',
+    sendHint: '전송',
+    newlineHint: '줄바꿈',
+    createRoom: '채팅방 만들기',
+    roomName: '채팅방 이름',
+    enterRoomName: '새-채팅방',
+    selectSessions: '세션 선택',
+    selectAll: '전체 선택',
+    deselectAll: '전체 해제',
+    selected: '개 선택',
+    noSessions: '사용 가능한 세션이 없습니다',
+    cancel: '취소',
+    create: '만들기',
+    openMessenger: '메신저 열기',
   },
 };
 

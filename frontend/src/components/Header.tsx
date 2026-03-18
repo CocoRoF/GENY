@@ -1,15 +1,17 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon } from 'lucide-react';
+import { Menu, Sun, Moon, Code2, User } from 'lucide-react';
 
 export default function Header() {
-  const { healthStatus, sessions, setMobileSidebarOpen } = useAppStore();
+  const { healthStatus, sessions, setMobileSidebarOpen, devMode, toggleDevMode, hydrateDevMode } = useAppStore();
+
+  useEffect(() => { hydrateDevMode(); }, [hydrateDevMode]);
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
 
@@ -30,6 +32,9 @@ export default function Header() {
   const themeIcon = theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />;
   const themeTitle = theme === 'dark' ? 'Switch to Light' : 'Switch to Dark';
 
+  const devModeIcon = devMode ? <User size={14} /> : <Code2 size={14} />;
+  const devModeTitle = devMode ? t('header.normalMode') : t('header.devMode');
+
   return (
     <header className="flex justify-between items-center px-3 md:px-6 h-14 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
       <div className="flex items-center gap-2 md:gap-3">
@@ -46,13 +51,22 @@ export default function Header() {
         </span>
       </div>
       <div className="flex items-center gap-2.5">
-        {/* ── Theme Toggle (3-state: System / Light / Dark) ── */}
+        {/* ── Theme Toggle ── */}
         <button
           onClick={toggleTheme}
           className="flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
           title={themeTitle}
         >
           {themeIcon}
+        </button>
+
+        {/* ── Dev / Normal Mode Toggle ── */}
+        <button
+          onClick={toggleDevMode}
+          className="flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
+          title={devModeTitle}
+        >
+          {devModeIcon}
         </button>
 
         {/* ── Language Toggle ── */}

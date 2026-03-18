@@ -1,0 +1,59 @@
+'use client';
+
+import { useEffect } from 'react';
+import { useMessengerStore } from '@/store/useMessengerStore';
+import { useAppStore } from '@/store/useAppStore';
+import RoomSidebar from '@/components/messenger/RoomSidebar';
+import RoomHeader from '@/components/messenger/RoomHeader';
+import MessageList from '@/components/messenger/MessageList';
+import MessageInput from '@/components/messenger/MessageInput';
+import CreateRoomModal from '@/components/messenger/CreateRoomModal';
+import { MessageCircle } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
+
+export default function MessengerPage() {
+  const { fetchRooms, activeRoomId, createModalOpen } = useMessengerStore();
+  const { loadSessions, checkHealth } = useAppStore();
+  const { t } = useI18n();
+
+  useEffect(() => {
+    fetchRooms();
+    loadSessions();
+    checkHealth();
+    const interval = setInterval(fetchRooms, 10000);
+    return () => clearInterval(interval);
+  }, [fetchRooms, loadSessions, checkHealth]);
+
+  return (
+    <div className="flex h-screen h-[100dvh] overflow-hidden bg-[var(--bg-primary)]">
+      {/* Room Sidebar */}
+      <RoomSidebar />
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {activeRoomId ? (
+          <>
+            <RoomHeader />
+            <MessageList />
+            <MessageInput />
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--primary-color)] to-blue-600 flex items-center justify-center mb-6 shadow-lg">
+              <MessageCircle size={36} className="text-white" />
+            </div>
+            <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2">
+              {t('messenger.welcomeTitle')}
+            </h2>
+            <p className="text-[0.875rem] text-[var(--text-muted)] max-w-md leading-relaxed">
+              {t('messenger.welcomeDesc')}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Create Room Modal */}
+      {createModalOpen && <CreateRoomModal />}
+    </div>
+  );
+}

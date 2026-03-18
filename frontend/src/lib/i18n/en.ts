@@ -19,6 +19,8 @@ const en = {
     subtitle: 'Geny Execute, Not You',
     sessions: '{count} sessions',
     disconnected: 'Disconnected',
+    devMode: 'Dev',
+    normalMode: 'Normal',
   },
 
   // ─── Tab Navigation ───
@@ -634,6 +636,38 @@ const en = {
     roomName: 'Room Name',
     enterRoomName: 'Enter room name...',
     selectSessions: 'Select Sessions',
+  },
+
+  // ─── Messenger Page ───
+  messenger: {
+    subtitle: 'Agent Messenger',
+    welcomeTitle: 'Welcome to Geny Chat',
+    welcomeDesc: 'Select a room from the sidebar or create a new one to start chatting with your AI agents.',
+    searchRooms: 'Search rooms...',
+    newRoom: 'New Room',
+    noRooms: 'No rooms yet',
+    noSearchResults: 'No matching rooms',
+    members: 'members',
+    online: 'online',
+    deleteRoom: 'Delete room',
+    confirmDelete: 'Click again to confirm',
+    backToDashboard: 'Back to Dashboard',
+    emptyTitle: 'Start a conversation',
+    emptyDesc: 'Send a message and the agents in this room will respond based on their role and expertise.',
+    inputPlaceholder: 'Type a message...',
+    sendHint: 'to send',
+    newlineHint: 'for new line',
+    createRoom: 'Create Room',
+    roomName: 'Room Name',
+    enterRoomName: 'new-room',
+    selectSessions: 'Select Sessions',
+    selectAll: 'Select All',
+    deselectAll: 'Deselect All',
+    selected: 'selected',
+    noSessions: 'No sessions available',
+    cancel: 'Cancel',
+    create: 'Create',
+    openMessenger: 'Open Messenger',
   },
 };
 
