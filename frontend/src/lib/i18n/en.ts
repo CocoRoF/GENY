@@ -668,6 +668,16 @@ const en = {
     cancel: 'Cancel',
     create: 'Create',
     openMessenger: 'Open Messenger',
+    memberPanel: {
+      title: 'Member Info',
+      role: 'Role',
+      model: 'Model',
+      graph: 'Graph',
+      toolPreset: 'Tool Preset',
+      created: 'Created',
+      deleted: 'Unavailable',
+      deletedDesc: 'This session has been deleted and is no longer available. Previous messages from this member are still visible.',
+    },
   },
 };
 

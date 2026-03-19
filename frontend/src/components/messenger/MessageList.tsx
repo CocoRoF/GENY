@@ -84,18 +84,23 @@ function UserMessage({ msg }: { msg: ChatRoomMessage }) {
 }
 
 function AgentMessage({ msg }: { msg: ChatRoomMessage }) {
+  const { setSelectedMemberId } = useMessengerStore();
   return (
     <div className="flex gap-3 px-4 md:px-6 py-1.5 hover:bg-[var(--bg-hover)] transition-colors group">
-      <div
-        className={`w-9 h-9 rounded-full bg-gradient-to-br ${getRoleColor(msg.role || 'worker')} flex items-center justify-center shrink-0 mt-0.5 shadow-sm`}
+      <button
+        className={`w-9 h-9 rounded-full bg-gradient-to-br ${getRoleColor(msg.role || 'worker')} flex items-center justify-center shrink-0 mt-0.5 shadow-sm border-none cursor-pointer transition-transform hover:scale-110`}
+        onClick={() => msg.session_id && setSelectedMemberId(msg.session_id)}
       >
         <Bot size={15} className="text-white" />
-      </div>
+      </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-          <span className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">
+          <button
+            className="text-[0.8125rem] font-semibold text-[var(--text-primary)] hover:underline bg-transparent border-none cursor-pointer p-0"
+            onClick={() => msg.session_id && setSelectedMemberId(msg.session_id)}
+          >
             {msg.session_name || msg.session_id?.substring(0, 8)}
-          </span>
+          </button>
           {msg.role && (
             <span
               className="inline-flex items-center px-1.5 py-[1px] rounded text-[0.5625rem] font-bold text-white uppercase tracking-wider"

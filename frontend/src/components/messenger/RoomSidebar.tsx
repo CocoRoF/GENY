@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import {
   Hash, Plus, Search, X, Trash2, MessageCircle,
-  ArrowLeft, Sun, Moon, Users,
+  ArrowLeft, Sun, Moon, Users, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
@@ -25,6 +25,7 @@ export default function RoomSidebar() {
     activeRoomId, setActiveRoom, deleteRoom,
     searchQuery, setSearchQuery, getFilteredRooms,
     setCreateModalOpen, mobileSidebarOpen, setMobileSidebarOpen,
+    sidebarCollapsed, toggleSidebarCollapsed,
   } = useMessengerStore();
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
@@ -50,7 +51,7 @@ export default function RoomSidebar() {
   }, [theme, setTheme]);
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-[var(--bg-secondary)] border-r border-[var(--border-color)]">
+    <div className="flex flex-col h-full bg-[var(--bg-secondary)]">
       {/* Sidebar Header */}
       <div className="shrink-0 p-4 border-b border-[var(--border-color)]">
         <div className="flex items-center justify-between mb-3">
@@ -68,6 +69,13 @@ export default function RoomSidebar() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              onClick={toggleSidebarCollapsed}
+              className="hidden md:flex w-7 h-7 rounded-md items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all border-none bg-transparent cursor-pointer"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={13} />
+            </button>
             <button
               onClick={toggleTheme}
               className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all border-none bg-transparent cursor-pointer"
@@ -197,11 +205,77 @@ export default function RoomSidebar() {
     </div>
   );
 
+  // ── Collapsed sidebar (icons only) ──
+  const collapsedContent = (
+    <div className="flex flex-col items-center h-full bg-[var(--bg-secondary)] py-3 gap-1">
+      {/* Expand button */}
+      <button
+        onClick={toggleSidebarCollapsed}
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all border-none bg-transparent cursor-pointer mb-2"
+        title="Expand sidebar"
+      >
+        <PanelLeftOpen size={16} />
+      </button>
+
+      {/* New room */}
+      <button
+        onClick={() => setCreateModalOpen(true)}
+        className="w-9 h-9 rounded-lg bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] flex items-center justify-center text-white border-none cursor-pointer transition-all shadow-sm mb-2"
+        title={t('messenger.newRoom')}
+      >
+        <Plus size={16} />
+      </button>
+
+      {/* Room icons */}
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-1 w-full px-1.5">
+        {rooms.map(room => {
+          const isActive = room.id === activeRoomId;
+          return (
+            <button
+              key={room.id}
+              onClick={() => setActiveRoom(room.id)}
+              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border-none cursor-pointer transition-all ${
+                isActive
+                  ? 'bg-[var(--primary-color)] text-white'
+                  : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+              title={room.name}
+            >
+              <Hash size={14} />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Theme toggle */}
+      <button
+        onClick={toggleTheme}
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all border-none bg-transparent cursor-pointer mt-1"
+        title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+      >
+        {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+      </button>
+
+      {/* Back to dashboard */}
+      <Link
+        href="/"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all no-underline"
+        title={t('messenger.backToDashboard')}
+      >
+        <ArrowLeft size={14} />
+      </Link>
+    </div>
+  );
+
   return (
     <>
       {/* Desktop sidebar */}
-      <div className="hidden md:flex w-[280px] shrink-0">
-        {sidebarContent}
+      <div
+        className={`hidden md:flex shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out bg-[var(--bg-secondary)] border-r border-[var(--border-color)] ${
+          sidebarCollapsed ? 'w-[56px]' : 'w-[280px]'
+        }`}
+      >
+        {sidebarCollapsed ? collapsedContent : sidebarContent}
       </div>
 
       {/* Mobile sidebar overlay */}

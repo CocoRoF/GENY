@@ -24,6 +24,9 @@ interface MessengerState {
   // UI
   createModalOpen: boolean;
   mobileSidebarOpen: boolean;
+  sidebarCollapsed: boolean;
+  memberPanelOpen: boolean;
+  selectedMemberId: string | null;
 
   // Actions - Rooms
   fetchRooms: () => Promise<void>;
@@ -40,6 +43,9 @@ interface MessengerState {
   // Actions - UI
   setCreateModalOpen: (open: boolean) => void;
   setMobileSidebarOpen: (open: boolean) => void;
+  toggleSidebarCollapsed: () => void;
+  setMemberPanelOpen: (open: boolean) => void;
+  setSelectedMemberId: (id: string | null) => void;
 
   // Derived
   getActiveRoom: () => ChatRoom | undefined;
@@ -57,6 +63,9 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
   typingAgents: [],
   createModalOpen: false,
   mobileSidebarOpen: false,
+  sidebarCollapsed: false,
+  memberPanelOpen: false,
+  selectedMemberId: null,
 
   fetchRooms: async () => {
     set({ loadingRooms: true });
@@ -199,6 +208,9 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
 
   setCreateModalOpen: (open) => set({ createModalOpen: open }),
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
+  toggleSidebarCollapsed: () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  setMemberPanelOpen: (open) => set({ memberPanelOpen: open, ...(!open ? { selectedMemberId: null } : {}) }),
+  setSelectedMemberId: (id) => set({ selectedMemberId: id, memberPanelOpen: !!id }),
 
   getActiveRoom: () => {
     const { rooms, activeRoomId } = get();

@@ -49,12 +49,15 @@ export default function MessageInput() {
     }
   }, [input, isSending, room, sessions, sendMessage]);
 
+  const hasInput = input.trim().length > 0;
+
   return (
-    <div className="shrink-0 px-4 md:px-6 py-3 bg-[var(--bg-primary)] border-t border-[var(--border-color)]">
-      <div className="relative flex items-end gap-2 max-w-4xl mx-auto">
+    <div className="shrink-0 bg-[var(--bg-secondary)]">
+      <div className="h-px bg-[var(--border-color)]" />
+      <div className="flex items-center gap-3 px-5 md:px-6 py-3">
         <textarea
           ref={textareaRef}
-          className="flex-1 p-3 pr-12 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl text-[var(--text-primary)] text-[0.8125rem] font-[inherit] resize-none min-h-[44px] max-h-[160px] leading-relaxed transition-all placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+          className="messenger-input flex-1 bg-transparent text-[var(--text-primary)] text-[0.8125rem] font-[inherit] resize-none min-h-[24px] max-h-[160px] leading-relaxed placeholder:text-[var(--text-muted)] border-none py-0.5"
           placeholder={t('messenger.inputPlaceholder')}
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -68,8 +71,12 @@ export default function MessageInput() {
           disabled={isSending}
         />
         <button
-          className="absolute right-2 bottom-2 w-9 h-9 rounded-lg bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white flex items-center justify-center cursor-pointer transition-all duration-150 border-none disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
-          disabled={isSending || !input.trim()}
+          className={`messenger-input shrink-0 w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all duration-150 border-none disabled:cursor-not-allowed ${
+            hasInput && !isSending
+              ? 'bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white shadow-sm'
+              : 'bg-transparent text-[var(--text-muted)] opacity-30'
+          }`}
+          disabled={isSending || !hasInput}
           onClick={handleSend}
         >
           {isSending ? (
@@ -79,8 +86,8 @@ export default function MessageInput() {
           )}
         </button>
       </div>
-      <div className="flex items-center mt-1.5 max-w-4xl mx-auto">
-        <span className="text-[0.625rem] text-[var(--text-muted)]">
+      <div className="px-5 md:px-6 pb-2 -mt-1">
+        <span className="text-[0.6125rem] text-[var(--text-muted)] opacity-40">
           Enter {t('messenger.sendHint')} · Shift+Enter {t('messenger.newlineHint')}
         </span>
       </div>

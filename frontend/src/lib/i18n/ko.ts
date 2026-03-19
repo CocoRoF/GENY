@@ -668,6 +668,16 @@ const ko: Translations = {
     cancel: '취소',
     create: '만들기',
     openMessenger: '메신저 열기',
+    memberPanel: {
+      title: '멤버 정보',
+      role: '역할',
+      model: '모델',
+      graph: '그래프',
+      toolPreset: '도구 프리셋',
+      created: '생성일',
+      deleted: '사용 불가',
+      deletedDesc: '이 세션은 삭제되었으며 더 이상 사용할 수 없습니다. 이전 메시지는 계속 표시됩니다.',
+    },
   },
 };
 

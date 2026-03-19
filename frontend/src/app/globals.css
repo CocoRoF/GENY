@@ -156,6 +156,12 @@ body {
 	outline-offset: 2px;
 }
 
+.messenger-input:focus,
+.messenger-input:focus-visible {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
 /* ========================================
    Typing Indicator Animation
    ======================================== */
@@ -281,6 +287,17 @@ html.light ::-webkit-scrollbar-thumb:hover {
 		transform: translateX(-100%);
 	}
 	to {
+		transform: translateX(0);
+	}
+}
+
+@keyframes slideInRight {
+	from {
+		opacity: 0;
+		transform: translateX(20px);
+	}
+	to {
+		opacity: 1;
 		transform: translateX(0);
 	}
 }

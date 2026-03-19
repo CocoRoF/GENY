@@ -15,18 +15,19 @@ const getRoleColor = (role: string) => {
 };
 
 export default function RoomHeader() {
-  const { getActiveRoom, setMobileSidebarOpen } = useMessengerStore();
+  const { getActiveRoom, setMobileSidebarOpen, setSelectedMemberId } = useMessengerStore();
   const { sessions } = useAppStore();
   const { t } = useI18n();
 
   const room = getActiveRoom();
   if (!room) return null;
 
-  const memberSessions = room.session_ids
-    .map(sid => sessions.find(s => s.session_id === sid))
-    .filter(Boolean);
+  const memberEntries = room.session_ids.map(sid => {
+    const found = sessions.find(s => s.session_id === sid);
+    return { sid, session: found ?? null };
+  });
 
-  const aliveCount = memberSessions.filter(s => s?.status === 'running').length;
+  const aliveCount = memberEntries.filter(e => e.session?.status === 'running').length;
 
   return (
     <div className="shrink-0 h-14 px-4 flex items-center justify-between bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
@@ -57,18 +58,27 @@ export default function RoomHeader() {
       <div className="flex items-center gap-3">
         {/* Member avatar stack */}
         <div className="hidden sm:flex items-center -space-x-1.5">
-          {memberSessions.slice(0, 5).map((s, i) => (
-            <div
-              key={s?.session_id || i}
-              className={`w-7 h-7 rounded-full bg-gradient-to-br ${getRoleColor(s?.role || 'worker')} flex items-center justify-center border-2 border-[var(--bg-secondary)] shadow-sm`}
-              title={s?.session_name || s?.session_id}
-            >
-              <Bot size={11} className="text-white" />
-            </div>
-          ))}
-          {memberSessions.length > 5 && (
+          {memberEntries.slice(0, 5).map((entry) => {
+            const s = entry.session;
+            const isGone = !s;
+            return (
+              <button
+                key={entry.sid}
+                className={`w-7 h-7 rounded-full flex items-center justify-center border-2 border-[var(--bg-secondary)] shadow-sm cursor-pointer transition-transform hover:scale-110 hover:z-10 ${
+                  isGone
+                    ? 'bg-[var(--bg-tertiary)] opacity-50'
+                    : `bg-gradient-to-br ${getRoleColor(s?.role || 'worker')}`
+                }`}
+                title={s?.session_name || entry.sid.substring(0, 8)}
+                onClick={() => setSelectedMemberId(entry.sid)}
+              >
+                <Bot size={11} className={isGone ? 'text-[var(--text-muted)]' : 'text-white'} />
+              </button>
+            );
+          })}
+          {memberEntries.length > 5 && (
             <div className="w-7 h-7 rounded-full bg-[var(--bg-tertiary)] border-2 border-[var(--bg-secondary)] flex items-center justify-center text-[0.5625rem] font-semibold text-[var(--text-muted)]">
-              +{memberSessions.length - 5}
+              +{memberEntries.length - 5}
             </div>
           )}
         </div>
