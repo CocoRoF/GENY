@@ -32,6 +32,7 @@ AgentSession 전용 메서드를 추가합니다.
 from logging import getLogger
 from typing import Dict, List, Optional
 import asyncio
+import uuid
 
 from service.claude_manager.session_manager import SessionManager, merge_mcp_configs
 from service.claude_manager.models import (
@@ -158,7 +159,7 @@ class AgentSessionManager(SessionManager):
     # Prompt Builder
     # ========================================================================
 
-    def _build_system_prompt(self, request: CreateSessionRequest) -> str:
+    def _build_system_prompt(self, request: CreateSessionRequest, session_id: Optional[str] = None) -> str:
         """Build the system prompt using the modular prompt builder.
 
         Design: The system prompt tells the agent WHO it is and WHAT to do.
@@ -166,6 +167,7 @@ class AgentSessionManager(SessionManager):
 
         Args:
             request: Session creation request.
+            session_id: Pre-generated session ID (for Geny platform tools awareness).
 
         Returns:
             Assembled system prompt string.
@@ -245,7 +247,7 @@ class AgentSessionManager(SessionManager):
             agent_id=None,
             working_dir=request.working_dir,
             model=request.model,
-            session_id=None,
+            session_id=session_id,
             session_name=request.session_name,
             tools=tools,
             mcp_servers=mcp_servers,
@@ -365,8 +367,12 @@ class AgentSessionManager(SessionManager):
         if merged_mcp_config and merged_mcp_config.servers:
             logger.info(f"  mcp_servers (policy={policy.profile.value}): {list(merged_mcp_config.servers.keys())}")
 
+        # Pre-generate session_id so it can be injected into the prompt
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
         # 시스템 프롬프트 준비 — 모듈러 프롬프트 빌더 사용
-        system_prompt = self._build_system_prompt(request)
+        system_prompt = self._build_system_prompt(request, session_id=session_id)
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 
         # Resolve graph_name and workflow_id

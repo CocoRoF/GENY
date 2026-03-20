@@ -57,6 +57,7 @@ import type {
   ChatRoomListResponse,
   ChatRoomMessageListResponse,
   ChatRoomBroadcastRequest,
+  ChatRoomBroadcastResponse,
   ChatRoomMessage,
 } from '@/types';
 
@@ -421,67 +422,49 @@ export const chatApi = {
     apiCall<ChatRoomMessageListResponse>(`/api/chat/rooms/${roomId}/messages`),
 
   /**
-   * POST /api/chat/rooms/:id/broadcast — SSE streaming broadcast.
-   * Calls onEvent for each SSE event as it arrives.
-   * Returns when the stream is complete.
+   * POST /api/chat/rooms/:id/broadcast — fire-and-forget broadcast.
+   * Returns the saved user message and broadcast info immediately.
+   * Agent processing continues in the background.
    */
-  broadcastToRoom: async (
-    roomId: string,
-    data: ChatRoomBroadcastRequest,
-    onEvent: (eventType: string, eventData: ChatRoomMessage | Record<string, unknown>) => void,
-  ): Promise<void> => {
-    const res = await fetch(`/api/chat/rooms/${roomId}/broadcast`, {
+  broadcastToRoom: (roomId: string, data: ChatRoomBroadcastRequest) =>
+    apiCall<ChatRoomBroadcastResponse>(`/api/chat/rooms/${roomId}/broadcast`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-    });
+    }),
 
-    if (!res.ok) {
-      const body = await res.text();
-      let message: string;
+  /**
+   * GET /api/chat/rooms/:id/events?after=<msg_id> — reconnectable SSE stream.
+   * Streams new messages for a room. Pass `after` to resume from a known point.
+   * Returns an object with an `close()` method to stop listening.
+   */
+  subscribeToRoom: (
+    roomId: string,
+    afterId: string | null,
+    onEvent: (eventType: string, eventData: Record<string, unknown>) => void,
+  ): { close: () => void } => {
+    const backendUrl = getBackendUrl();
+    const params = afterId ? `?after=${encodeURIComponent(afterId)}` : '';
+    const evtSource = new EventSource(
+      `${backendUrl}/api/chat/rooms/${roomId}/events${params}`,
+    );
+
+    const handleEvent = (e: MessageEvent) => {
       try {
-        const json = JSON.parse(body);
-        const raw = json.detail || json.message || json.error;
-        message = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : `HTTP ${res.status}`;
-      } catch {
-        message = body || `HTTP ${res.status}`;
-      }
-      throw new Error(message);
-    }
+        onEvent(e.type, JSON.parse(e.data));
+      } catch { /* skip malformed */ }
+    };
 
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('No response body');
+    evtSource.addEventListener('message', handleEvent);
+    evtSource.addEventListener('broadcast_status', handleEvent);
+    evtSource.addEventListener('broadcast_done', handleEvent);
+    evtSource.addEventListener('heartbeat', handleEvent);
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+    evtSource.onerror = () => {
+      // EventSource auto-reconnects on error; no explicit handling needed
+    };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Parse SSE events from buffer
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        let eventType = '';
-        let eventDataStr = '';
-        for (const line of part.split('\n')) {
-          if (line.startsWith('event: ')) eventType = line.slice(7);
-          else if (line.startsWith('data: ')) eventDataStr = line.slice(6);
-        }
-        if (eventType && eventDataStr) {
-          try {
-            const parsed = JSON.parse(eventDataStr);
-            onEvent(eventType, parsed);
-          } catch {
-            // skip malformed events
-          }
-        }
-      }
-    }
+    return {
+      close: () => evtSource.close(),
+    };
   },
 };

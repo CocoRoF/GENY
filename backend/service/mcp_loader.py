@@ -342,6 +342,8 @@ Auto-generated MCP Server for tools/
 This file is auto-generated. Do not edit manually.
 """
 import sys
+import functools
+import asyncio
 from pathlib import Path
 
 # Add project root to path
@@ -364,30 +366,60 @@ mcp = FastMCP("builtin-tools")
 all_tools = []
 {chr(10).join(f"all_tools.extend({name.replace('*', '')})" for name in tool_names)}
 
-# Register each tool to MCP
-for tool_obj in all_tools:
+
+def _register_tool(tool_obj, mcp_server):
+    """Register a single tool with proper name, description, and parameter schema."""
     name = getattr(tool_obj, 'name', None)
     if not name and hasattr(tool_obj, '__name__'):
         name = tool_obj.__name__
     if not name:
-        continue
+        return
 
-    description = getattr(tool_obj, 'description', '') or getattr(tool_obj, '__doc__', '') or f"Tool: {{name}}"
+    description = (
+        getattr(tool_obj, 'description', '')
+        or getattr(tool_obj, '__doc__', '')
+        or f"Tool: {{name}}"
+    )
 
-    # Find run or arun method
-    if hasattr(tool_obj, 'arun'):
-        func = tool_obj.arun
-    elif hasattr(tool_obj, 'run'):
-        func = tool_obj.run
+    # Always prefer run() — it has proper parameter signatures with named args.
+    # BaseTool.arun() defaults to (**kwargs) which produces empty parameter schema.
+    if hasattr(tool_obj, 'run') and callable(tool_obj.run):
+        source_fn = tool_obj.run
     elif callable(tool_obj):
-        func = tool_obj
+        source_fn = tool_obj
     else:
-        continue
+        return
 
-    # Register as MCP tool
-    wrapper = mcp.tool()(func)
-    wrapper.__name__ = name
-    wrapper.__doc__ = description
+    # Create an async wrapper that preserves source_fn's signature.
+    # functools.wraps copies __wrapped__ so inspect.signature() sees
+    # the original parameter names and types (without 'self').
+    @functools.wraps(source_fn)
+    async def async_wrapper(*args, **kwargs):
+        if asyncio.iscoroutinefunction(source_fn):
+            return await source_fn(*args, **kwargs)
+        return source_fn(*args, **kwargs)
+
+    async_wrapper.__name__ = name
+
+    # Build composite docstring: tool description + Args section from run()
+    # so FastMCP can extract parameter descriptions from the Args block.
+    source_doc = source_fn.__doc__ or ""
+    args_section = ""
+    if "Args:" in source_doc:
+        args_idx = source_doc.index("Args:")
+        args_section = source_doc[args_idx:]
+    async_wrapper.__doc__ = (
+        f"{{description}}\\n\\n{{args_section}}" if args_section else description
+    )
+
+    # Explicitly pass name and description to mcp.tool() — do NOT rely
+    # on FastMCP introspecting func.__name__ (which would be "run"/"arun").
+    mcp_server.tool(name=name, description=description)(async_wrapper)
+
+
+# Register each tool to MCP
+for tool_obj in all_tools:
+    _register_tool(tool_obj, mcp)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

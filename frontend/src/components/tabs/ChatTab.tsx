@@ -8,7 +8,7 @@ import {
   Send, Loader2, MessageCircle, Users, Bot, User,
   Plus, ArrowLeft, Trash2, Hash, Clock,
 } from 'lucide-react';
-import type { ChatRoom, ChatRoomMessage } from '@/types';
+import type { ChatRoom, ChatRoomMessage, BroadcastStatus } from '@/types';
 
 // ==================== Helpers ====================
 
@@ -72,12 +72,52 @@ export default function ChatTab() {
   const [isSending, setIsSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
-  const [typingAgents, setTypingAgents] = useState<Array<{ session_id: string; session_name: string; role: string }>>([]);
+  const [broadcastStatus, setBroadcastStatus] = useState<BroadcastStatus | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const eventSubRef = useRef<{ close: () => void } | null>(null);
+  const lastMsgIdRef = useRef<string | null>(null);
 
   const aliveSessions = sessions.filter(s => s.status === 'running');
+
+  // ── Subscribe to room events ──
+  const subscribeToRoom = useCallback((roomId: string) => {
+    // Close previous subscription
+    eventSubRef.current?.close();
+    eventSubRef.current = null;
+
+    const sub = chatApi.subscribeToRoom(roomId, lastMsgIdRef.current, (eventType, eventData) => {
+      switch (eventType) {
+        case 'message': {
+          const msg = eventData as unknown as ChatRoomMessage;
+          setMessages(prev => {
+            if (prev.some(m => m.id === msg.id)) return prev;
+            lastMsgIdRef.current = msg.id;
+            return [...prev, msg];
+          });
+          break;
+        }
+        case 'broadcast_status': {
+          setBroadcastStatus(eventData as unknown as BroadcastStatus);
+          break;
+        }
+        case 'broadcast_done': {
+          setBroadcastStatus(null);
+          break;
+        }
+      }
+    });
+    eventSubRef.current = sub;
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      eventSubRef.current?.close();
+      eventSubRef.current = null;
+    };
+  }, []);
 
   // ── Load rooms ──
   const fetchRooms = useCallback(async () => {
@@ -98,9 +138,14 @@ export default function ChatTab() {
 
   // ── Enter room ──
   const enterRoom = useCallback(async (roomId: string) => {
+    // Close previous event subscription
+    eventSubRef.current?.close();
+    eventSubRef.current = null;
+
     setActiveRoomId(roomId);
     setView('conversation');
     setLoadingMessages(true);
+    setBroadcastStatus(null);
     try {
       const [roomRes, msgsRes] = await Promise.all([
         chatApi.getRoom(roomId),
@@ -108,12 +153,17 @@ export default function ChatTab() {
       ]);
       setActiveRoom(roomRes);
       setMessages(msgsRes.messages);
+      // Track last message ID for event subscription
+      const msgs = msgsRes.messages;
+      lastMsgIdRef.current = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
+      // Subscribe to live events
+      subscribeToRoom(roomId);
     } catch {
       /* ignore */
     } finally {
       setLoadingMessages(false);
     }
-  }, []);
+  }, [subscribeToRoom]);
 
   // Auto-scroll
   useEffect(() => {
@@ -155,7 +205,7 @@ export default function ChatTab() {
     }
   }, [t]);
 
-  // ── Send message (room broadcast via SSE streaming) ──
+  // ── Send message (fire-and-forget broadcast) ──
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || isSending || !activeRoomId) return;
@@ -163,90 +213,25 @@ export default function ChatTab() {
     setInput('');
     setIsSending(true);
 
-    // Optimistic user message (will be replaced by server-saved version)
-    const optimisticId = `opt-${Date.now()}`;
-    const optimistic: ChatRoomMessage = {
-      id: optimisticId,
-      type: 'user',
-      content: trimmed,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, optimistic]);
-
-    // Populate typing agents from room members
-    if (activeRoom) {
-      const agents = activeRoom.session_ids
-        .map(sid => {
-          const s = sessions.find(sess => sess.session_id === sid);
-          return s ? { session_id: sid, session_name: s.session_name || sid.substring(0, 8), role: s.role || 'worker' } : null;
-        })
-        .filter(Boolean) as Array<{ session_id: string; session_name: string; role: string }>;
-      setTypingAgents(agents);
-    }
-
     try {
-      await chatApi.broadcastToRoom(
-        activeRoomId,
-        { message: trimmed },
-        (eventType, eventData) => {
-          const msg = eventData as ChatRoomMessage;
+      const res = await chatApi.broadcastToRoom(activeRoomId, { message: trimmed });
+      // Add the user message immediately (event stream will deduplicate)
+      setMessages(prev => {
+        if (prev.some(m => m.id === res.user_message.id)) return prev;
+        lastMsgIdRef.current = res.user_message.id;
+        return [...prev, res.user_message];
+      });
 
-          switch (eventType) {
-            case 'user_saved':
-              // Replace optimistic user message with server-saved version
-              setMessages(prev =>
-                prev.map(m => m.id === optimisticId ? msg : m),
-              );
-              break;
-
-            case 'agent_response':
-              // Append agent message immediately & remove from typing
-              setMessages(prev => [...prev, msg]);
-              setTypingAgents(prev => prev.filter(a => a.session_id !== (msg as ChatRoomMessage & { session_id?: string }).session_id));
-              break;
-
-            case 'agent_skip':
-              // Agent decided not relevant — remove from typing
-              setTypingAgents(prev => prev.filter(a => a.session_id !== (eventData as Record<string, unknown>).session_id));
-              break;
-
-            case 'agent_error': {
-              const errData = eventData as Record<string, unknown>;
-              setMessages(prev => [...prev, {
-                id: `err-${Date.now()}-${errData.session_id || ''}`,
-                type: 'system' as const,
-                content: `${errData.session_name || 'Agent'}: ${errData.error || 'Error'}`,
-                timestamp: new Date().toISOString(),
-              }]);
-              setTypingAgents(prev => prev.filter(a => a.session_id !== errData.session_id));
-              break;
-            }
-
-            case 'summary':
-              // Append summary system message
-              setMessages(prev => [...prev, msg]);
-              break;
-
-            case 'done':
-              // Stream complete — clear all typing
-              setTypingAgents([]);
-              break;
-
-            case 'error': {
-              const errData2 = eventData as Record<string, unknown>;
-              setMessages(prev => [...prev, {
-                id: `sys-err-${Date.now()}`,
-                type: 'system' as const,
-                content: String(errData2.error || 'Unknown error'),
-                timestamp: new Date().toISOString(),
-              }]);
-              break;
-            }
-          }
-        },
-      );
+      if (res.target_count > 0 && res.broadcast_id) {
+        setBroadcastStatus({
+          broadcast_id: res.broadcast_id,
+          total: res.target_count,
+          completed: 0,
+          responded: 0,
+          finished: false,
+        });
+      }
     } catch (e: unknown) {
-      // Network/HTTP error
       setMessages(prev => [
         ...prev,
         {
@@ -258,10 +243,9 @@ export default function ChatTab() {
       ]);
     } finally {
       setIsSending(false);
-      setTypingAgents([]);
       inputRef.current?.focus();
     }
-  }, [input, isSending, activeRoomId, activeRoom, sessions, t]);
+  }, [input, isSending, activeRoomId, t]);
 
   // ── Toggle session selection ──
   const toggleSession = (sid: string) => {
@@ -489,7 +473,7 @@ export default function ChatTab() {
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <button
               className="w-8 h-8 rounded-lg flex items-center justify-center bg-[var(--bg-tertiary)] border border-[var(--border-color)] hover:border-[var(--primary-color)] cursor-pointer transition-all"
-              onClick={() => { setView('room-list'); setActiveRoomId(null); setMessages([]); setActiveRoom(null); }}
+              onClick={() => { eventSubRef.current?.close(); eventSubRef.current = null; setView('room-list'); setActiveRoomId(null); setMessages([]); setActiveRoom(null); setBroadcastStatus(null); }}
             >
               <ArrowLeft size={14} className="text-[var(--text-secondary)]" />
             </button>
@@ -606,34 +590,20 @@ export default function ChatTab() {
           );
         })}
 
-        {/* Typing Indicators */}
-        {typingAgents.length > 0 && typingAgents.map(agent => (
-          <div key={`typing-${agent.session_id}`} className="flex gap-2 items-end">
-            <div
-              className={`w-8 h-8 rounded-full bg-gradient-to-br ${getRoleColor(agent.role)} flex items-center justify-center shrink-0 shadow-sm`}
-            >
+        {/* Broadcast Progress */}
+        {broadcastStatus && !broadcastStatus.finished && (
+          <div className="flex gap-2 items-end">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
               <Bot size={14} className="text-white" />
             </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[0.75rem] font-semibold text-[var(--text-primary)]">
-                  {agent.session_name}
-                </span>
-                <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold text-white uppercase tracking-wider"
-                  style={{ background: getRoleBadgeStyle(agent.role).replace('background: ', '') }}
-                >
-                  {agent.role}
-                </span>
-              </div>
-              <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] inline-flex items-center gap-1">
-                <span className="typing-dot w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
-                <span className="typing-dot w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.2s' }} />
-                <span className="typing-dot w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
-              </div>
+            <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] inline-flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin text-[var(--primary-color)]" />
+              <span className="text-[0.75rem] text-[var(--text-muted)]">
+                {broadcastStatus.completed}/{broadcastStatus.total} processing
+              </span>
             </div>
           </div>
-        ))}
+        )}
 
         <div ref={messagesEndRef} />
       </div>

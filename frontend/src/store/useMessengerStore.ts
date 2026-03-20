@@ -1,12 +1,6 @@
 import { create } from 'zustand';
 import { chatApi } from '@/lib/api';
-import type { ChatRoom, ChatRoomMessage } from '@/types';
-
-interface TypingAgent {
-  session_id: string;
-  session_name: string;
-  role: string;
-}
+import type { ChatRoom, ChatRoomMessage, BroadcastStatus } from '@/types';
 
 interface MessengerState {
   // Rooms
@@ -19,7 +13,13 @@ interface MessengerState {
   messages: ChatRoomMessage[];
   loadingMessages: boolean;
   isSending: boolean;
-  typingAgents: TypingAgent[];
+
+  // Broadcast progress
+  broadcastStatus: BroadcastStatus | null;
+
+  // Event subscription (internal, not exposed directly)
+  _eventSub: { close: () => void } | null;
+  _lastMsgId: string | null;
 
   // UI
   createModalOpen: boolean;
@@ -37,10 +37,11 @@ interface MessengerState {
   setSearchQuery: (q: string) => void;
 
   // Actions - Messages
-  sendMessage: (
-    content: string,
-    sessions: Array<{ session_id: string; session_name: string; role: string }>,
-  ) => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
+
+  // Actions - Event stream
+  _subscribeToEvents: (roomId: string) => void;
+  _unsubscribeEvents: () => void;
 
   // Actions - UI
   setCreateModalOpen: (open: boolean) => void;
@@ -63,7 +64,9 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
   messages: [],
   loadingMessages: false,
   isSending: false,
-  typingAgents: [],
+  broadcastStatus: null,
+  _eventSub: null,
+  _lastMsgId: null,
   createModalOpen: false,
   inviteModalOpen: false,
   mobileSidebarOpen: false,
@@ -84,14 +87,22 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
   },
 
   setActiveRoom: async (roomId) => {
+    const { _unsubscribeEvents } = get();
+    _unsubscribeEvents();
+
     if (!roomId) {
-      set({ activeRoomId: null, messages: [], mobileSidebarOpen: false });
+      set({ activeRoomId: null, messages: [], mobileSidebarOpen: false, broadcastStatus: null, _lastMsgId: null });
       return;
     }
-    set({ activeRoomId: roomId, loadingMessages: true, mobileSidebarOpen: false });
+    set({ activeRoomId: roomId, loadingMessages: true, mobileSidebarOpen: false, broadcastStatus: null });
     try {
       const msgsRes = await chatApi.getRoomMessages(roomId);
-      set({ messages: msgsRes.messages });
+      const msgs = msgsRes.messages;
+      const lastId = msgs.length > 0 ? msgs[msgs.length - 1].id : null;
+      set({ messages: msgs, _lastMsgId: lastId });
+
+      // Subscribe to live events starting from the last known message
+      get()._subscribeToEvents(roomId);
     } catch {
       /* ignore */
     } finally {
@@ -102,10 +113,13 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
   deleteRoom: async (roomId) => {
     try {
       await chatApi.deleteRoom(roomId);
-      const { activeRoomId } = get();
+      const { activeRoomId, _unsubscribeEvents } = get();
+      if (activeRoomId === roomId) {
+        _unsubscribeEvents();
+      }
       set(s => ({
         rooms: s.rooms.filter(r => r.id !== roomId),
-        ...(activeRoomId === roomId ? { activeRoomId: null, messages: [] } : {}),
+        ...(activeRoomId === roomId ? { activeRoomId: null, messages: [], broadcastStatus: null, _lastMsgId: null } : {}),
       }));
     } catch {
       /* ignore */
@@ -128,86 +142,38 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, sessions) => {
+  sendMessage: async (content) => {
     const { activeRoomId } = get();
     if (!activeRoomId || !content.trim()) return;
 
     set({ isSending: true });
 
-    const optimisticId = `opt-${Date.now()}`;
-    const optimistic: ChatRoomMessage = {
-      id: optimisticId,
-      type: 'user',
-      content: content.trim(),
-      timestamp: new Date().toISOString(),
-    };
-
-    set(s => ({
-      messages: [...s.messages, optimistic],
-      typingAgents: sessions,
-    }));
-
     try {
-      await chatApi.broadcastToRoom(
-        activeRoomId,
-        { message: content.trim() },
-        (eventType, eventData) => {
-          const msg = eventData as ChatRoomMessage;
-          switch (eventType) {
-            case 'user_saved':
-              set(s => ({
-                messages: s.messages.map(m => m.id === optimisticId ? msg : m),
-              }));
-              break;
-            case 'agent_response':
-              set(s => ({
-                messages: [...s.messages, msg],
-                typingAgents: s.typingAgents.filter(
-                  a => a.session_id !== (msg as ChatRoomMessage & { session_id?: string }).session_id,
-                ),
-              }));
-              break;
-            case 'agent_skip':
-              set(s => ({
-                typingAgents: s.typingAgents.filter(
-                  a => a.session_id !== (eventData as Record<string, unknown>).session_id,
-                ),
-              }));
-              break;
-            case 'agent_error': {
-              const errData = eventData as Record<string, unknown>;
-              set(s => ({
-                messages: [...s.messages, {
-                  id: `err-${Date.now()}-${errData.session_id || ''}`,
-                  type: 'system' as const,
-                  content: `${errData.session_name || 'Agent'}: ${errData.error || 'Error'}`,
-                  timestamp: new Date().toISOString(),
-                }],
-                typingAgents: s.typingAgents.filter(a => a.session_id !== errData.session_id),
-              }));
-              break;
-            }
-            case 'summary':
-              set(s => ({ messages: [...s.messages, msg] }));
-              break;
-            case 'done':
-              set({ typingAgents: [] });
-              break;
-            case 'error': {
-              const errData2 = eventData as Record<string, unknown>;
-              set(s => ({
-                messages: [...s.messages, {
-                  id: `sys-err-${Date.now()}`,
-                  type: 'system' as const,
-                  content: String(errData2.error || 'Unknown error'),
-                  timestamp: new Date().toISOString(),
-                }],
-              }));
-              break;
-            }
-          }
-        },
-      );
+      const res = await chatApi.broadcastToRoom(activeRoomId, { message: content.trim() });
+      // The user_message comes back immediately from the POST response.
+      // The event stream will also deliver it via 'message' event,
+      // but we add it immediately to avoid delay.
+      set(s => {
+        const alreadyExists = s.messages.some(m => m.id === res.user_message.id);
+        if (alreadyExists) return {};
+        return {
+          messages: [...s.messages, res.user_message],
+          _lastMsgId: res.user_message.id,
+        };
+      });
+
+      if (res.target_count > 0 && res.broadcast_id) {
+        set({
+          broadcastStatus: {
+            broadcast_id: res.broadcast_id,
+            total: res.target_count,
+            completed: 0,
+            responded: 0,
+            finished: false,
+          },
+        });
+      }
+
       // Refresh room list to update message counts
       get().fetchRooms();
     } catch (e: unknown) {
@@ -220,7 +186,55 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
         }],
       }));
     } finally {
-      set({ isSending: false, typingAgents: [] });
+      set({ isSending: false });
+    }
+  },
+
+  _subscribeToEvents: (roomId: string) => {
+    const { _lastMsgId, _unsubscribeEvents } = get();
+    _unsubscribeEvents();
+
+    const sub = chatApi.subscribeToRoom(roomId, _lastMsgId, (eventType, eventData) => {
+      const state = get();
+      // Only process events for the currently active room
+      if (state.activeRoomId !== roomId) return;
+
+      switch (eventType) {
+        case 'message': {
+          const msg = eventData as unknown as ChatRoomMessage;
+          set(s => {
+            // Deduplicate — message may already exist from POST response
+            if (s.messages.some(m => m.id === msg.id)) return {};
+            return {
+              messages: [...s.messages, msg],
+              _lastMsgId: msg.id,
+            };
+          });
+          break;
+        }
+        case 'broadcast_status': {
+          const status = eventData as unknown as BroadcastStatus;
+          set({ broadcastStatus: status });
+          break;
+        }
+        case 'broadcast_done': {
+          set({ broadcastStatus: null });
+          // Refresh room list for updated counts
+          get().fetchRooms();
+          break;
+        }
+        // heartbeat — no action needed
+      }
+    });
+
+    set({ _eventSub: sub });
+  },
+
+  _unsubscribeEvents: () => {
+    const { _eventSub } = get();
+    if (_eventSub) {
+      _eventSub.close();
+      set({ _eventSub: null });
     }
   },
 

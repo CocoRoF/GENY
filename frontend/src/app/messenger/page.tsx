@@ -24,7 +24,11 @@ export default function MessengerPage() {
     checkHealth();
     loadUserName();
     const interval = setInterval(fetchRooms, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Close SSE event stream on unmount (backend continues processing)
+      useMessengerStore.getState()._unsubscribeEvents();
+    };
   }, [fetchRooms, loadSessions, checkHealth, loadUserName]);
 
   return (

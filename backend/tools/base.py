@@ -62,7 +62,7 @@ class BaseTool(ABC):
             self.parameters = self._generate_parameters_schema()
 
     def _generate_parameters_schema(self) -> Dict[str, Any]:
-        """Generate parameter schema from run method signature"""
+        """Generate parameter schema from run method signature and docstring."""
         schema = {
             "type": "object",
             "properties": {},
@@ -72,6 +72,9 @@ class BaseTool(ABC):
         try:
             sig = inspect.signature(self.run)
             hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
+
+            # Parse Args: section from run() docstring for parameter descriptions
+            param_docs = self._parse_docstring_args(self.run.__doc__)
 
             for param_name, param in sig.parameters.items():
                 if param_name == 'self':
@@ -83,7 +86,7 @@ class BaseTool(ABC):
 
                 schema["properties"][param_name] = {
                     "type": json_type,
-                    "description": f"Parameter: {param_name}"
+                    "description": param_docs.get(param_name, f"Parameter: {param_name}")
                 }
 
                 # Check required parameters
@@ -96,6 +99,34 @@ class BaseTool(ABC):
             pass
 
         return schema
+
+    @staticmethod
+    def _parse_docstring_args(docstring: Optional[str]) -> Dict[str, str]:
+        """Extract parameter descriptions from Google-style docstring Args section."""
+        if not docstring:
+            return {}
+
+        import re
+        result: Dict[str, str] = {}
+
+        # Find the Args: section
+        args_match = re.search(r'\bArgs:\s*\n', docstring)
+        if not args_match:
+            return {}
+
+        args_text = docstring[args_match.end():]
+        # Stop at the next section (Returns:, Raises:, etc.) or end of docstring
+        next_section = re.search(r'\n\S', args_text)
+        if next_section:
+            args_text = args_text[:next_section.start()]
+
+        # Parse each "    param_name: description" line
+        for match in re.finditer(r'^\s+(\w+):\s*(.+?)(?=\n\s+\w+:|$)', args_text, re.MULTILINE | re.DOTALL):
+            name = match.group(1)
+            desc = ' '.join(match.group(2).split())  # Normalize whitespace
+            result[name] = desc
+
+        return result
 
     @staticmethod
     def _python_type_to_json(python_type: type) -> str:

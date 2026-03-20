@@ -3,16 +3,21 @@ Chat Controller
 
 Provides:
   - Chat room CRUD (create, list, get, update, delete)
-  - Room-scoped broadcast via SSE — streams each agent response in real-time
+  - Fire-and-forget broadcast — agent processing runs in background, results
+    are persisted independently of client connection
+  - Reconnectable SSE event stream — clients subscribe to new messages and
+    can reconnect at any time without losing data
   - Message history persistence — all messages are stored and restorable
 """
 import asyncio
 import json
 import time
+import uuid
+from dataclasses import dataclass, field
 from logging import getLogger
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
@@ -24,6 +29,42 @@ logger = getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 agent_manager = get_agent_session_manager()
+
+
+# ============================================================================
+# Background Broadcast Tracking
+# ============================================================================
+
+@dataclass
+class BroadcastState:
+    """Tracks a single in-flight broadcast."""
+    broadcast_id: str
+    room_id: str
+    total: int
+    completed: int = 0
+    responded: int = 0
+    finished: bool = False
+    started_at: float = field(default_factory=time.time)
+
+
+# room_id → BroadcastState for the currently active broadcast
+_active_broadcasts: Dict[str, BroadcastState] = {}
+# room_id → asyncio.Event signalling "new message was saved"
+_room_new_msg_events: Dict[str, asyncio.Event] = {}
+
+
+def _notify_room(room_id: str):
+    """Signal all SSE listeners that a new message appeared for this room."""
+    ev = _room_new_msg_events.get(room_id)
+    if ev:
+        ev.set()
+
+
+def _get_room_event(room_id: str) -> asyncio.Event:
+    """Get-or-create the notification event for a room."""
+    if room_id not in _room_new_msg_events:
+        _room_new_msg_events[room_id] = asyncio.Event()
+    return _room_new_msg_events[room_id]
 
 
 # ============================================================================
@@ -81,7 +122,6 @@ class MessageListResponse(BaseModel):
 
 class RoomBroadcastRequest(BaseModel):
     message: str = Field(..., description="Chat message to send")
-    timeout: float = Field(default=120.0, description="Per-session timeout in seconds")
 
 
 # ============================================================================
@@ -172,7 +212,7 @@ async def get_room_messages(room_id: str):
 
 
 # ============================================================================
-# Room-Scoped Broadcast Endpoint (SSE Streaming)
+# Room-Scoped Broadcast Endpoint (Fire-and-Forget)
 # ============================================================================
 
 def _sse_event(event_type: str, data: Any) -> str:
@@ -184,221 +224,257 @@ def _sse_event(event_type: str, data: Any) -> str:
 @router.post("/rooms/{room_id}/broadcast")
 async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
     """
-    Send a message to sessions in a specific chat room via SSE streaming.
+    Send a message to all sessions in a chat room.
 
-    Streams events as each agent responds — no waiting for all agents.
+    Processing is fire-and-forget — agent results are persisted in the
+    background regardless of whether any client is connected.  Clients
+    subscribe to live updates via GET /rooms/{room_id}/events.
 
-    SSE event types:
-      - user_saved:      user message persisted
-      - agent_response:  an agent responded (message saved)
-      - agent_skip:      an agent skipped (not relevant)
-      - agent_error:     an agent errored
-      - summary:         summary system message
-      - done:            stream complete
-      - error:           top-level error
+    Returns the saved user message immediately.
     """
     store = get_chat_store()
     room = store.get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail=f"Room not found: {room_id}")
 
-    async def event_stream():
-        start_time = time.time()
+    # 1. Save user message
+    try:
+        user_msg = store.add_message(room_id, {
+            "type": "user",
+            "content": request.message,
+        })
+    except Exception as e:
+        logger.error("Failed to save user message: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save message: {e}")
 
-        # 1. Save & emit user message
+    _notify_room(room_id)
+
+    # 2. Resolve alive agents
+    all_agents = agent_manager.list_agents()
+    room_session_ids = set(room["session_ids"])
+    target_agents = [
+        a for a in all_agents
+        if a.session_id in room_session_ids and a.is_alive()
+    ]
+
+    if not target_agents:
+        sys_msg = store.add_message(room_id, {
+            "type": "system",
+            "content": "No active sessions in this room.",
+        })
+        _notify_room(room_id)
+        return {
+            "user_message": user_msg,
+            "broadcast_id": None,
+            "target_count": 0,
+        }
+
+    # 3. Create broadcast state and launch background processing
+    broadcast_id = str(uuid.uuid4())
+    broadcast_state = BroadcastState(
+        broadcast_id=broadcast_id,
+        room_id=room_id,
+        total=len(target_agents),
+    )
+    _active_broadcasts[room_id] = broadcast_state
+
+    logger.info(
+        "Room %s: broadcast %s → %d sessions: %s",
+        room_id, broadcast_id, len(target_agents), request.message[:80],
+    )
+
+    # Fire-and-forget background task
+    asyncio.create_task(
+        _run_broadcast(room_id, broadcast_id, broadcast_state, target_agents, request.message, store)
+    )
+
+    return {
+        "user_message": user_msg,
+        "broadcast_id": broadcast_id,
+        "target_count": len(target_agents),
+    }
+
+
+async def _run_broadcast(
+    room_id: str,
+    broadcast_id: str,
+    state: BroadcastState,
+    agents: list,
+    message: str,
+    store,
+):
+    """Background task — invokes all agents and persists results."""
+    start_time = time.time()
+
+    async def _invoke_one(agent):
+        session_start = time.time()
+        sid = agent.session_id
+        sname = agent.session_name
+        role = agent.role.value if hasattr(agent.role, 'value') else str(agent.role)
+
         try:
-            user_msg = store.add_message(room_id, {
-                "type": "user",
-                "content": request.message,
-            })
-            yield _sse_event("user_saved", user_msg)
-        except Exception as e:
-            logger.error("Failed to save user message: %s", e, exc_info=True)
-            yield _sse_event("error", {"error": f"Failed to save message: {e}"})
-            yield _sse_event("done", {})
-            return
+            session_timeout = getattr(agent, 'timeout', 1800.0)
+            result_text = await asyncio.wait_for(
+                agent.invoke(input_text=message, is_chat_message=True),
+                timeout=session_timeout,
+            )
+            duration_ms = int((time.time() - session_start) * 1000)
+            has_response = bool(result_text and result_text.strip())
 
-        # 2. Resolve alive agents in this room
-        all_agents = agent_manager.list_agents()
-        room_session_ids = set(room["session_ids"])
-        target_agents = [
-            a for a in all_agents
-            if a.session_id in room_session_ids and a.is_alive()
-        ]
-
-        if not target_agents:
-            sys_msg = store.add_message(room_id, {
-                "type": "system",
-                "content": "No active sessions in this room.",
-            })
-            yield _sse_event("summary", sys_msg)
-            yield _sse_event("done", {})
-            return
-
-        logger.info(
-            "Room %s: broadcasting to %d sessions: %s",
-            room_id, len(target_agents), request.message[:80],
-        )
-
-        # 3. Invoke sessions concurrently, stream results as they arrive
-        result_queue: asyncio.Queue = asyncio.Queue()
-
-        async def _invoke_and_enqueue(agent):
-            """Invoke a single session and push the result to the queue."""
-            session_start = time.time()
-            sid = agent.session_id
-            sname = agent.session_name
-            role = agent.role.value if hasattr(agent.role, 'value') else str(agent.role)
-
-            try:
-                result_text = await asyncio.wait_for(
-                    agent.invoke(
-                        input_text=request.message,
-                        is_chat_message=True,
-                    ),
-                    timeout=request.timeout,
-                )
-                duration_ms = int((time.time() - session_start) * 1000)
-                has_response = bool(result_text and result_text.strip())
-
-                await result_queue.put({
+            if has_response:
+                store.add_message(room_id, {
+                    "type": "agent",
+                    "content": result_text.strip(),
                     "session_id": sid,
                     "session_name": sname,
                     "role": role,
-                    "responded": has_response,
-                    "output": result_text.strip() if has_response else None,
                     "duration_ms": duration_ms,
                 })
-
-            except asyncio.TimeoutError:
-                duration_ms = int((time.time() - session_start) * 1000)
-                logger.warning("Chat broadcast timeout for session %s", sid)
-                await result_queue.put({
-                    "session_id": sid, "session_name": sname, "role": role,
-                    "responded": False, "error": "Timeout", "duration_ms": duration_ms,
-                })
-
-            except asyncio.CancelledError:
-                duration_ms = int((time.time() - session_start) * 1000)
-                logger.warning("Chat broadcast cancelled for session %s", sid)
-                await result_queue.put({
-                    "session_id": sid, "session_name": sname, "role": role,
-                    "responded": False, "error": "Cancelled", "duration_ms": duration_ms,
-                })
-
-            except Exception as e:
-                duration_ms = int((time.time() - session_start) * 1000)
-                logger.error("Chat broadcast error for session %s: %s", sid, e)
-                await result_queue.put({
-                    "session_id": sid, "session_name": sname, "role": role,
-                    "responded": False, "error": str(e)[:200], "duration_ms": duration_ms,
-                })
-
-        # Launch all tasks
-        tasks = [
-            asyncio.create_task(_invoke_and_enqueue(agent))
-            for agent in target_agents
-        ]
-
-        responded_count = 0
-        total_count = len(tasks)
-        completed_count = 0
-        heartbeat_interval = 5.0  # seconds between keep-alive pings
-
-        # Consume results as they arrive, with heartbeat to keep SSE alive.
-        # NOTE: We use asyncio.wait() instead of asyncio.wait_for() because
-        # wait_for cancels the underlying Queue.get() on timeout, which can
-        # lose an item that was mid-dequeue.  With asyncio.wait(), the
-        # get-task survives across heartbeat iterations.
-        pending_get: asyncio.Task | None = None
-
-        while completed_count < total_count:
-            if pending_get is None:
-                pending_get = asyncio.ensure_future(result_queue.get())
-
-            done, _ = await asyncio.wait(
-                {pending_get}, timeout=heartbeat_interval,
-            )
-
-            if not done:
-                # No result yet — send heartbeat to keep SSE connection alive
-                elapsed = int(time.time() - start_time)
-                yield _sse_event("heartbeat", {"elapsed_s": elapsed})
-                continue  # pending_get is still alive — reuse next iteration
-
-            # A result arrived
-            try:
-                result = pending_get.result()
-            except Exception as e:
-                logger.error("Queue get error: %s", e)
-                pending_get = None
-                completed_count += 1
-                continue
-
-            pending_get = None
-            completed_count += 1
-
-            if result.get("responded") and result.get("output"):
-                # Save agent message and stream it
-                try:
-                    saved_msg = store.add_message(room_id, {
-                        "type": "agent",
-                        "content": result["output"],
-                        "session_id": result["session_id"],
-                        "session_name": result["session_name"],
-                        "role": result["role"],
-                        "duration_ms": result["duration_ms"],
-                    })
-                    responded_count += 1
-                    yield _sse_event("agent_response", saved_msg)
-                except Exception as e:
-                    logger.error("Failed to save agent message: %s", e)
-                    yield _sse_event("agent_error", {
-                        "session_id": result["session_id"],
-                        "session_name": result["session_name"],
-                        "role": result["role"],
-                        "error": f"Save failed: {e}",
-                    })
-            elif result.get("error"):
-                yield _sse_event("agent_error", {
-                    "session_id": result["session_id"],
-                    "session_name": result["session_name"],
-                    "role": result["role"],
-                    "error": result["error"],
-                    "duration_ms": result.get("duration_ms"),
-                })
+                state.responded += 1
+                _notify_room(room_id)
             else:
-                # Skipped (not relevant) — no output, no error
-                yield _sse_event("agent_skip", {
-                    "session_id": result["session_id"],
-                    "session_name": result["session_name"],
-                    "role": result["role"],
-                    "duration_ms": result.get("duration_ms"),
-                })
+                logger.debug("Session %s skipped (no output)", sid)
 
-        # Ensure all tasks are done (prevent dangling)
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 4. Summary
-        total_duration_ms = int((time.time() - start_time) * 1000)
-        try:
-            summary_msg = store.add_message(room_id, {
+        except asyncio.TimeoutError:
+            duration_ms = int((time.time() - session_start) * 1000)
+            logger.warning("Broadcast timeout for session %s (%dms)", sid, duration_ms)
+            store.add_message(room_id, {
                 "type": "system",
-                "content": f"{responded_count}/{total_count} sessions responded ({total_duration_ms / 1000:.1f}s)",
+                "content": f"{sname}: Timeout after {duration_ms / 1000:.1f}s",
             })
-            yield _sse_event("summary", summary_msg)
+            _notify_room(room_id)
+
+        except asyncio.CancelledError:
+            logger.warning("Broadcast cancelled for session %s", sid)
+
         except Exception as e:
-            logger.error("Failed to save summary: %s", e)
+            duration_ms = int((time.time() - session_start) * 1000)
+            logger.error("Broadcast error for session %s: %s", sid, e)
+            store.add_message(room_id, {
+                "type": "system",
+                "content": f"{sname}: Error — {str(e)[:200]}",
+            })
+            _notify_room(room_id)
 
-        logger.info(
-            "Room %s: broadcast complete: %d/%d responded (%dms)",
-            room_id, responded_count, total_count, total_duration_ms,
-        )
+        finally:
+            state.completed += 1
 
-        yield _sse_event("done", {})
+    # Launch all concurrently
+    tasks = [asyncio.create_task(_invoke_one(a)) for a in agents]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Summary
+    total_duration_ms = int((time.time() - start_time) * 1000)
+    try:
+        store.add_message(room_id, {
+            "type": "system",
+            "content": f"{state.responded}/{state.total} sessions responded ({total_duration_ms / 1000:.1f}s)",
+        })
+        _notify_room(room_id)
+    except Exception as e:
+        logger.error("Failed to save broadcast summary: %s", e)
+
+    state.finished = True
+
+    logger.info(
+        "Room %s: broadcast %s complete: %d/%d responded (%dms)",
+        room_id, broadcast_id, state.responded, state.total, total_duration_ms,
+    )
+
+    # Cleanup broadcast state after a delay (allow clients to read final state)
+    await asyncio.sleep(30)
+    if _active_broadcasts.get(room_id) is state:
+        del _active_broadcasts[room_id]
+
+
+# ============================================================================
+# Reconnectable SSE Event Stream
+# ============================================================================
+
+@router.get("/rooms/{room_id}/events")
+async def room_event_stream(
+    room_id: str,
+    after: Optional[str] = Query(None, description="Last seen message ID — only newer messages will be sent"),
+):
+    """
+    SSE stream of new messages in a room.
+
+    - Reconnectable: pass `after=<last_msg_id>` to resume from where you left off.
+    - Sends `message` events for each new message (user, agent, system).
+    - Sends `broadcast_status` events with progress info.
+    - Sends `heartbeat` events every 5s to keep the connection alive.
+    - Sends `broadcast_done` when all agents have finished.
+
+    The stream stays open until the client disconnects.
+    """
+    store = get_chat_store()
+    room = store.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room not found: {room_id}")
+
+    async def event_generator():
+        last_seen_id = after
+        room_event = _get_room_event(room_id)
+        heartbeat_interval = 5.0
+
+        # On initial connect: send any messages newer than `after`
+        if last_seen_id:
+            missed = _get_messages_after(store, room_id, last_seen_id)
+            for msg in missed:
+                yield _sse_event("message", msg)
+                last_seen_id = msg["id"]
+
+        # Send current broadcast status if active
+        bstate = _active_broadcasts.get(room_id)
+        if bstate and not bstate.finished:
+            yield _sse_event("broadcast_status", {
+                "broadcast_id": bstate.broadcast_id,
+                "total": bstate.total,
+                "completed": bstate.completed,
+                "responded": bstate.responded,
+                "finished": False,
+            })
+
+        # Main loop: wait for new messages or heartbeat
+        while True:
+            room_event.clear()
+
+            # Wait for notification or timeout (heartbeat)
+            try:
+                await asyncio.wait_for(room_event.wait(), timeout=heartbeat_interval)
+            except asyncio.TimeoutError:
+                pass
+            except asyncio.CancelledError:
+                return
+
+            # Check for new messages
+            new_msgs = _get_messages_after(store, room_id, last_seen_id)
+            for msg in new_msgs:
+                yield _sse_event("message", msg)
+                last_seen_id = msg["id"]
+
+            # Broadcast status update
+            bstate = _active_broadcasts.get(room_id)
+            if bstate:
+                yield _sse_event("broadcast_status", {
+                    "broadcast_id": bstate.broadcast_id,
+                    "total": bstate.total,
+                    "completed": bstate.completed,
+                    "responded": bstate.responded,
+                    "finished": bstate.finished,
+                })
+                if bstate.finished:
+                    yield _sse_event("broadcast_done", {
+                        "broadcast_id": bstate.broadcast_id,
+                        "total": bstate.total,
+                        "responded": bstate.responded,
+                    })
+            elif not new_msgs:
+                # No active broadcast, no new messages — just heartbeat
+                yield _sse_event("heartbeat", {"ts": time.time()})
 
     return StreamingResponse(
-        event_stream(),
+        event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -406,3 +482,23 @@ async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _get_messages_after(store, room_id: str, after_id: Optional[str]) -> List[dict]:
+    """Return messages in the room that come after the given message ID."""
+    all_msgs = store.get_messages(room_id)
+    if not after_id:
+        return []  # No reference point — return nothing (history was loaded separately)
+
+    # Find the index of after_id
+    idx = -1
+    for i, m in enumerate(all_msgs):
+        if m.get("id") == after_id:
+            idx = i
+            break
+
+    if idx == -1:
+        # after_id not found — return all messages (client may have stale reference)
+        return all_msgs
+
+    return all_msgs[idx + 1:]

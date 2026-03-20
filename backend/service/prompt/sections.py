@@ -80,6 +80,37 @@ class SectionLibrary:
         )
 
     # ========================================================================
+    # §1.7 Geny Platform — Built-in platform tools awareness
+    # ========================================================================
+
+    @staticmethod
+    def geny_platform(session_id: Optional[str] = None) -> PromptSection:
+        """Geny platform tools awareness section.
+
+        Informs the agent that it has built-in tools for interacting
+        with the Geny platform (sessions, rooms, messaging).
+        """
+        parts = [
+            "## Geny Platform Tools",
+            "",
+            "You have built-in tools to interact with the Geny platform:",
+            "- **Session management**: `geny_session_list`, `geny_session_info`, `geny_session_create` — discover, inspect, and create agent sessions",
+            "- **Room management**: `geny_room_list`, `geny_room_create`, `geny_room_info`, `geny_room_add_members` — manage chat rooms for group collaboration",
+            "- **Messaging**: `geny_send_room_message`, `geny_send_direct_message` — send messages to rooms or directly to other agents",
+            "- **Reading**: `geny_read_room_messages`, `geny_read_inbox` — read room history and your direct message inbox",
+        ]
+        if session_id:
+            parts.append("")
+            parts.append(f"Your session ID: `{session_id}` — use this when reading your inbox or attributing messages.")
+
+        return PromptSection(
+            name="geny_platform",
+            content="\n".join(parts),
+            priority=13,
+            modes={PromptMode.FULL, PromptMode.MINIMAL},
+        )
+
+    # ========================================================================
     # §2 Role Protocol — Per-role behavior instructions
     # ========================================================================
 
@@ -619,6 +650,9 @@ def build_agent_prompt(
     user_section = SectionLibrary.user_context()
     if user_section:
         builder.add_section(user_section)
+
+    # §1.7 Geny platform tools awareness
+    builder.add_section(SectionLibrary.geny_platform(session_id=session_id))
 
     # §2 Role behavior — always from prompts/{role}.md (worker = none)
     if role != "worker":

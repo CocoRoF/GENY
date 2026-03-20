@@ -100,22 +100,32 @@ export interface ChatRoomMessageListResponse {
 
 export interface ChatRoomBroadcastRequest {
   message: string;
-  timeout?: number;
 }
 
-// SSE event types from broadcast stream
+export interface ChatRoomBroadcastResponse {
+  user_message: ChatRoomMessage;
+  broadcast_id: string | null;
+  target_count: number;
+}
+
+// SSE event types from room event stream
 export type ChatSSEEventType =
-  | 'user_saved'
-  | 'agent_response'
-  | 'agent_skip'
-  | 'agent_error'
-  | 'summary'
-  | 'done'
-  | 'error';
+  | 'message'
+  | 'broadcast_status'
+  | 'broadcast_done'
+  | 'heartbeat';
+
+export interface BroadcastStatus {
+  broadcast_id: string;
+  total: number;
+  completed: number;
+  responded: number;
+  finished: boolean;
+}
 
 export interface ChatSSEEvent {
   event: ChatSSEEventType;
-  data: ChatRoomMessage | { error?: string; session_id?: string; session_name?: string; role?: string; duration_ms?: number };
+  data: ChatRoomMessage | BroadcastStatus | { ts?: number };
 }
 
 

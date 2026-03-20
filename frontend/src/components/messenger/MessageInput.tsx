@@ -2,13 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useMessengerStore } from '@/store/useMessengerStore';
-import { useAppStore } from '@/store/useAppStore';
 import { useI18n } from '@/lib/i18n';
 import { Send, Loader2 } from 'lucide-react';
 
 export default function MessageInput() {
   const { isSending, sendMessage, getActiveRoom } = useMessengerStore();
-  const { sessions } = useAppStore();
   const { t } = useI18n();
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -31,23 +29,14 @@ export default function MessageInput() {
   const handleSend = useCallback(() => {
     if (!input.trim() || isSending || !room) return;
 
-    const memberAgents = room.session_ids
-      .map(sid => {
-        const s = sessions.find(sess => sess.session_id === sid);
-        return s
-          ? { session_id: sid, session_name: s.session_name || sid.substring(0, 8), role: s.role || 'worker' }
-          : null;
-      })
-      .filter(Boolean) as Array<{ session_id: string; session_name: string; role: string }>;
-
-    sendMessage(input.trim(), memberAgents);
+    sendMessage(input.trim());
     setInput('');
 
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [input, isSending, room, sessions, sendMessage]);
+  }, [input, isSending, room, sendMessage]);
 
   const hasInput = input.trim().length > 0;
 

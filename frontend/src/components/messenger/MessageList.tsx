@@ -187,15 +187,15 @@ function TypingIndicator({ name, role }: { name: string; role: string }) {
 // ── Main Component ──
 
 export default function MessageList() {
-  const { messages, loadingMessages, typingAgents } = useMessengerStore();
+  const { messages, loadingMessages, broadcastStatus } = useMessengerStore();
   const { t } = useI18n();
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages / typing
+  // Auto-scroll to bottom on new messages / broadcast progress
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingAgents]);
+  }, [messages, broadcastStatus]);
 
   if (loadingMessages) {
     return (
@@ -239,14 +239,13 @@ export default function MessageList() {
         </div>
       ))}
 
-      {/* Typing indicators */}
-      {typingAgents.map(agent => (
+      {/* Broadcast in-progress indicator */}
+      {broadcastStatus && !broadcastStatus.finished && (
         <TypingIndicator
-          key={`typing-${agent.session_id}`}
-          name={agent.session_name}
-          role={agent.role}
+          name={`${broadcastStatus.completed}/${broadcastStatus.total}`}
+          role="processing"
         />
-      ))}
+      )}
 
       <div ref={endRef} className="h-2" />
     </div>
