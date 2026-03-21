@@ -111,7 +111,7 @@ class RelevanceGateNode(BaseNode):
             )
             messages = [HumanMessage(content=prompt)]
 
-            parsed, _ = await context.resilient_structured_invoke(
+            parsed, cost_updates = await context.resilient_structured_invoke(
                 messages,
                 "relevance_gate",
                 RelevanceOutput,
@@ -133,14 +133,18 @@ class RelevanceGateNode(BaseNode):
             )
 
             if not is_relevant:
-                return {
+                result = {
                     "relevance_skipped": True,
                     "is_complete": True,
                     "final_answer": "",
                     "current_step": "relevance_skipped",
                 }
+                result.update(cost_updates)
+                return result
 
-            return {"relevance_skipped": False}
+            result = {"relevance_skipped": False}
+            result.update(cost_updates)
+            return result
 
         except Exception as e:
             logger.warning(
@@ -174,7 +178,7 @@ class RelevanceGateNode(BaseNode):
                 f"Is this message relevant to you? Reply ONLY: YES or NO"
             )
             messages = [HumanMessage(content=fallback_prompt)]
-            response, _ = await context.resilient_invoke(
+            response, cost_updates = await context.resilient_invoke(
                 messages, "relevance_gate_fallback"
             )
             response_text = response.content.strip().lower()
@@ -193,14 +197,18 @@ class RelevanceGateNode(BaseNode):
             )
 
             if not is_relevant:
-                return {
+                result = {
                     "relevance_skipped": True,
                     "is_complete": True,
                     "final_answer": "",
                     "current_step": "relevance_skipped",
                 }
+                result.update(cost_updates)
+                return result
 
-            return {"relevance_skipped": False}
+            result = {"relevance_skipped": False}
+            result.update(cost_updates)
+            return result
 
         except Exception as e2:
             logger.warning(

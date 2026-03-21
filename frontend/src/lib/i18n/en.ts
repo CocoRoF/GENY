@@ -248,6 +248,7 @@ const en = {
       deletedAt: 'Deleted At',
       graphName: 'Graph Name',
       workflowId: 'Workflow ID',
+      totalCost: 'Total Cost',
     },
     systemPrompt: {
       title: 'System Prompt',

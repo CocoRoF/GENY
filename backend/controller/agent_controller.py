@@ -406,11 +406,12 @@ async def invoke_agent(
             )
 
         # LangGraph 그래프 실행
-        output = await agent.invoke(
+        result = await agent.invoke(
             input_text=request.input_text,
             thread_id=request.thread_id,
             max_iterations=request.max_iterations,
         )
+        output = result.get("output", "") if isinstance(result, dict) else str(result)
 
         # 응답 로깅
         if session_logger:
@@ -499,9 +500,11 @@ async def execute_agent_prompt(
 
         # Execute through the compiled StateGraph (invoke)
         # Routes to the appropriate graph based on graph_name
-        result_text = await agent.invoke(
+        invoke_result = await agent.invoke(
             input_text=request.prompt,
         )
+        result_text = invoke_result.get("output", "") if isinstance(invoke_result, dict) else str(invoke_result)
+        result_cost = invoke_result.get("total_cost", 0.0) if isinstance(invoke_result, dict) else None
 
         duration_ms = int((time.time() - start_time) * 1000)
 
@@ -512,14 +515,23 @@ async def execute_agent_prompt(
                 output=result_text,
                 error=None,
                 duration_ms=duration_ms,
+                cost_usd=result_cost,
             )
+
+        # Persist cost to DB
+        if result_cost and result_cost > 0:
+            try:
+                store = get_session_store()
+                store.increment_cost(session_id, result_cost)
+            except Exception:
+                logger.debug(f"Cost persistence failed for {session_id}", exc_info=True)
 
         return ExecuteResponse(
             success=True,
             session_id=session_id,
             output=result_text,
             error=None,
-            cost_usd=None,
+            cost_usd=result_cost,
             duration_ms=duration_ms,
         )
 
@@ -612,11 +624,14 @@ async def start_agent_execution(
                     system_prompt=request.system_prompt,
                     max_turns=request.max_turns,
                 )
-            result_text = await agent.invoke(input_text=request.prompt)
+            invoke_result = await agent.invoke(input_text=request.prompt)
+            result_text = invoke_result.get("output", "") if isinstance(invoke_result, dict) else str(invoke_result)
+            result_cost = invoke_result.get("total_cost", 0.0) if isinstance(invoke_result, dict) else None
             duration_ms = int((time.time() - start_time) * 1000)
             if session_logger:
                 session_logger.log_response(
                     success=True, output=result_text, duration_ms=duration_ms,
+                    cost_usd=result_cost,
                 )
             holder["result"] = {
                 "success": True,
@@ -624,7 +639,15 @@ async def start_agent_execution(
                 "output": result_text,
                 "error": None,
                 "duration_ms": duration_ms,
+                "cost_usd": result_cost,
             }
+            # Persist cost to DB
+            if result_cost and result_cost > 0:
+                try:
+                    store = get_session_store()
+                    store.increment_cost(session_id, result_cost)
+                except Exception:
+                    logger.debug(f"Cost persistence failed for {session_id}", exc_info=True)
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             logger.error(f"❌ Agent SSE execute failed: {e}", exc_info=True)
@@ -791,13 +814,16 @@ async def execute_agent_prompt_stream(
                         system_prompt=request.system_prompt,
                         max_turns=request.max_turns,
                     )
-                result_text = await agent.invoke(input_text=request.prompt)
+                invoke_result = await agent.invoke(input_text=request.prompt)
+                result_text = invoke_result.get("output", "") if isinstance(invoke_result, dict) else str(invoke_result)
+                result_cost = invoke_result.get("total_cost", 0.0) if isinstance(invoke_result, dict) else None
                 duration_ms = int((time.time() - start_time) * 1000)
                 if session_logger:
                     session_logger.log_response(
                         success=True,
                         output=result_text,
                         duration_ms=duration_ms,
+                        cost_usd=result_cost,
                     )
                 result_holder.update({
                     "success": True,
@@ -805,7 +831,15 @@ async def execute_agent_prompt_stream(
                     "output": result_text,
                     "error": None,
                     "duration_ms": duration_ms,
+                    "cost_usd": result_cost,
                 })
+                # Persist cost to DB
+                if result_cost and result_cost > 0:
+                    try:
+                        store = get_session_store()
+                        store.increment_cost(session_id, result_cost)
+                    except Exception:
+                        logger.debug(f"Cost persistence failed for {session_id}", exc_info=True)
             except Exception as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(f"❌ Agent SSE execute failed: {e}", exc_info=True)

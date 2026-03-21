@@ -23,7 +23,7 @@ _COLUMN_FIELDS = {
     "role", "workflow_id", "graph_name",
     "max_turns", "timeout",
     "max_iterations", "pid", "error_message", "is_deleted",
-    "deleted_at", "registered_at",
+    "deleted_at", "registered_at", "total_cost",
 }
 
 
@@ -159,6 +159,28 @@ def db_update_session(db_manager, session_id: str, updates: Dict[str, Any]) -> b
         return True
     except Exception as e:
         logger.error(f"Failed to update session {session_id} in DB: {e}")
+        return False
+
+
+def db_increment_session_cost(db_manager, session_id: str, cost_usd: float) -> bool:
+    """Atomically add cost_usd to the session's total_cost."""
+    if not cost_usd or cost_usd <= 0:
+        return True
+    mgr = _get_db_manager(db_manager)
+    if not _is_db_available(db_manager):
+        return False
+    try:
+        query = (
+            f"UPDATE {TABLE} SET "
+            f"total_cost = COALESCE(total_cost, 0) + %s, "
+            f"updated_at = CURRENT_TIMESTAMP "
+            f"WHERE session_id = %s"
+        )
+        mgr.execute_update_delete(query, (cost_usd, session_id))
+        logger.debug(f"Incremented cost for {session_id}: +${cost_usd:.6f}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to increment cost for {session_id}: {e}")
         return False
 
 

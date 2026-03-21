@@ -26,6 +26,7 @@ from service.workflow.nodes.base import get_node_registry
 # ── Model nodes ──────────────────────────────────────────────
 from service.workflow.nodes.model import llm_call_node            # noqa: F401
 from service.workflow.nodes.model import classify_node             # noqa: F401
+from service.workflow.nodes.model import adaptive_classify_node    # noqa: F401
 from service.workflow.nodes.model import direct_answer_node        # noqa: F401
 from service.workflow.nodes.model import answer_node               # noqa: F401
 from service.workflow.nodes.model import review_node               # noqa: F401
@@ -46,6 +47,7 @@ from service.workflow.nodes.task import create_todos_node         # noqa: F401
 from service.workflow.nodes.task import execute_todo_node         # noqa: F401
 from service.workflow.nodes.task import final_review_node         # noqa: F401
 from service.workflow.nodes.task import final_answer_node         # noqa: F401
+from service.workflow.nodes.task import final_synthesis_node      # noqa: F401
 
 # ── Memory nodes ─────────────────────────────────────────────
 from service.workflow.nodes.memory import memory_inject_node        # noqa: F401

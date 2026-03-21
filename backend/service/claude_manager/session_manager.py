@@ -269,6 +269,7 @@ class SessionManager:
             role=role,
             workflow_id=data.get('workflow_id'),
             graph_name=data.get('graph_name'),
+            total_cost=data.get('total_cost', 0.0),
         )
 
 

@@ -248,6 +248,7 @@ const ko: Translations = {
       deletedAt: '삭제일',
       graphName: '그래프 이름',
       workflowId: '워크플로우 ID',
+      totalCost: '총 비용',
     },
     systemPrompt: {
       title: '시스템 프롬프트',

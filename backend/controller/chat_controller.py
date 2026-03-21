@@ -314,10 +314,11 @@ async def _run_broadcast(
 
         try:
             session_timeout = getattr(agent, 'timeout', 1800.0)
-            result_text = await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 agent.invoke(input_text=message, is_chat_message=True),
                 timeout=session_timeout,
             )
+            result_text = result.get("output", "") if isinstance(result, dict) else str(result)
             duration_ms = int((time.time() - session_start) * 1000)
             has_response = bool(result_text and result_text.strip())
 

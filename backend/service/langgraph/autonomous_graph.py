@@ -194,12 +194,18 @@ class AutonomousGraph:
                 response = await self._model.ainvoke(messages)
                 duration_ms = int((time.time() - start) * 1000)
 
+                # Extract cost from the response for state accumulation
+                cost_usd = 0.0
+                if hasattr(response, "additional_kwargs"):
+                    cost_usd = response.additional_kwargs.get("cost_usd", 0.0) or 0.0
+
                 if attempt > 0:
                     logger.info(
                         f"[{self._session_id}] {node_name}: "
                         f"succeeded on retry {attempt} ({duration_ms}ms)"
                     )
                     return response, {
+                        "total_cost": cost_usd,
                         "fallback": {
                             "original_model": model_name,
                             "current_model": model_name,
@@ -211,7 +217,7 @@ class AutonomousGraph:
                         }
                     }
 
-                return response, {}
+                return response, {"total_cost": cost_usd}
 
             except Exception as e:
                 last_error = e
@@ -575,7 +581,7 @@ class AutonomousGraph:
             )
             messages = [HumanMessage(content=f"{prompt}\n\n{schema_instruction}")]
 
-            response, _ = await self._resilient_invoke(
+            response, cost_updates = await self._resilient_invoke(
                 messages, "relevance_gate", state
             )
             raw_text = response.content if hasattr(response, "content") else str(response)
@@ -614,13 +620,14 @@ class AutonomousGraph:
 
             if not is_relevant:
                 return {
+                    **cost_updates,
                     "relevance_skipped": True,
                     "is_complete": True,
                     "final_answer": "",
                     "current_step": "relevance_skipped",
                 }
 
-            return {"relevance_skipped": False}
+            return {"relevance_skipped": False, **cost_updates}
 
         except Exception as e:
             logger.warning(
@@ -652,7 +659,7 @@ class AutonomousGraph:
                 f"Is this message relevant to you? Reply ONLY: YES or NO"
             )
             messages = [HumanMessage(content=fallback_prompt)]
-            response, _ = await self._resilient_invoke(
+            response, cost_updates = await self._resilient_invoke(
                 messages, "relevance_gate_fallback", state
             )
             response_text = response.content.strip().lower()
@@ -680,13 +687,14 @@ class AutonomousGraph:
 
             if not is_relevant:
                 return {
+                    **cost_updates,
                     "relevance_skipped": True,
                     "is_complete": True,
                     "final_answer": "",
                     "current_step": "relevance_skipped",
                 }
 
-            return {"relevance_skipped": False}
+            return {"relevance_skipped": False, **cost_updates}
 
         except Exception as e2:
             logger.warning(

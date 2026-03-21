@@ -268,6 +268,12 @@ class SessionInfo(BaseModel):
         description="System prompt applied to every execution in this session"
     )
 
+    # Cost tracking
+    total_cost: Optional[float] = Field(
+        default=0.0,
+        description="Cumulative API usage cost (USD) across all executions"
+    )
+
 
 class ExecuteRequest(BaseModel):
     """

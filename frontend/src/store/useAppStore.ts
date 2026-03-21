@@ -34,7 +34,6 @@ interface AppState {
   activeTab: string;
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
-  isExecuting: boolean;
   deletedSectionOpen: boolean;
   devMode: boolean;
   userName: string;
@@ -60,7 +59,6 @@ interface AppState {
   loadUserName: () => Promise<void>;
   getSessionData: (id: string) => SessionData;
   updateSessionData: (id: string, data: Partial<SessionData>) => void;
-  setIsExecuting: (v: boolean) => void;
 }
 
 const defaultSessionData: SessionData = {
@@ -82,7 +80,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeTab: 'main',
   sidebarCollapsed: false,
   mobileSidebarOpen: false,
-  isExecuting: false,
   deletedSectionOpen: false,
   devMode: true,
   userName: '',
@@ -225,6 +222,4 @@ export const useAppStore = create<AppState>((set, get) => ({
       // ignore
     }
   },
-
-  setIsExecuting: (v) => set({ isExecuting: v }),
 }));

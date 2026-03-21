@@ -29,6 +29,7 @@ class SessionModel(BaseModel):
         is_deleted: bool = False,
         deleted_at: str = "",
         registered_at: str = "",
+        total_cost: float = 0.0,
         extra_data: str = "",
         **kwargs,
     ):
@@ -49,6 +50,7 @@ class SessionModel(BaseModel):
         self.is_deleted = is_deleted
         self.deleted_at = deleted_at
         self.registered_at = registered_at
+        self.total_cost = total_cost
         self.extra_data = extra_data  # JSON blob for additional fields
 
     def get_table_name(self) -> str:
@@ -72,6 +74,7 @@ class SessionModel(BaseModel):
             "is_deleted": "BOOLEAN DEFAULT FALSE",
             "deleted_at": "VARCHAR(100) DEFAULT ''",
             "registered_at": "VARCHAR(100) DEFAULT ''",
+            "total_cost": "DOUBLE PRECISION DEFAULT 0",
             "extra_data": "TEXT DEFAULT ''",
         }
 
@@ -100,7 +103,7 @@ class SessionModel(BaseModel):
             "role", "workflow_id", "graph_name",
             "max_turns", "timeout",
             "max_iterations", "pid", "error_message", "is_deleted",
-            "deleted_at", "registered_at", "extra_data",
+            "deleted_at", "registered_at", "total_cost", "extra_data",
             "id", "created_at", "updated_at",
         }
         known_data = {k: v for k, v in data.items() if k in known_fields}

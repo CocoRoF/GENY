@@ -147,6 +147,11 @@ def _last_wins(left: Any, right: Any) -> Any:
     return right if right is not None else left
 
 
+def _add_floats(left: float, right: float) -> float:
+    """Accumulate numeric values (used for cost tracking)."""
+    return (left or 0.0) + (right or 0.0)
+
+
 # ============================================================================
 # AgentState — used by the simple (non-autonomous) graph
 # ============================================================================
@@ -187,6 +192,9 @@ class AgentState(TypedDict, total=False):
 
     # -- Memory context (formatted text for prompt injection) ---------------
     memory_context: Annotated[Optional[str], _last_wins]
+
+    # -- Cost tracking (accumulated across all nodes) -----------------------
+    total_cost: Annotated[float, _add_floats]
 
     # -- Legacy metadata (for backward compat) ------------------------------
     metadata: Dict[str, Any]
@@ -252,6 +260,9 @@ class AutonomousState(TypedDict, total=False):
     # -- Memory context (formatted text for prompt injection) ---------------
     memory_context: Annotated[Optional[str], _last_wins]
 
+    # -- Cost tracking (accumulated across all nodes) -----------------------
+    total_cost: Annotated[float, _add_floats]
+
     # -- Chat / relevance gate ------------------------------------------------
     is_chat_message: bool               # True when invoked via /chat/broadcast
     relevance_skipped: bool             # True if relevance gate decided to skip
@@ -288,6 +299,7 @@ def make_initial_agent_state(
         "fallback": None,
         "memory_refs": [],
         "memory_context": None,
+        "total_cost": 0.0,
         "metadata": extra_metadata,
     }
 
@@ -324,5 +336,6 @@ def make_initial_autonomous_state(
         "memory_context": None,
         "is_chat_message": extra_metadata.pop("is_chat_message", False),
         "relevance_skipped": False,
+        "total_cost": 0.0,
         "metadata": extra_metadata,
     }

@@ -834,9 +834,12 @@ class AgentSession:
             )
 
         # 2. Infer from graph_name
+        is_optimized = self._graph_name and 'optimized' in self._graph_name.lower()
         is_autonomous = self._graph_name and 'autonomous' in self._graph_name.lower()
 
-        if is_autonomous:
+        if is_optimized and is_autonomous:
+            template_id = "template-optimized-autonomous"
+        elif is_autonomous:
             template_id = "template-autonomous"
         else:
             template_id = "template-simple"
@@ -855,11 +858,13 @@ class AgentSession:
         )
         from service.workflow.templates import (
             create_autonomous_template,
+            create_optimized_autonomous_template,
             create_simple_template,
         )
 
         _template_factories = {
             "template-autonomous": create_autonomous_template,
+            "template-optimized-autonomous": create_optimized_autonomous_template,
             "template-simple": create_simple_template,
         }
         factory = _template_factories.get(template_id, create_simple_template)
@@ -875,8 +880,8 @@ class AgentSession:
         thread_id: Optional[str] = None,
         max_iterations: Optional[int] = None,
         **kwargs,
-    ) -> str:
-        """Execute the linked workflow graph and return the final result.
+    ) -> Dict[str, Any]:
+        """Execute the linked workflow graph and return the result.
 
         All sessions use the same path: create initial AutonomousState,
         invoke the compiled graph, extract the result.
@@ -888,7 +893,7 @@ class AgentSession:
             **kwargs: Additional metadata.
 
         Returns:
-            Agent response text.
+            Dict with keys: output (str), total_cost (float).
         """
         start_time = time.time()
 
@@ -957,6 +962,7 @@ class AgentSession:
             )
             has_error = bool(result.get("error"))
             total_iterations = result.get("iteration", 0)
+            total_cost = result.get("total_cost", 0.0) or 0.0
 
             # Log execution completion
             if session_logger:
@@ -987,9 +993,9 @@ class AgentSession:
 
             if has_error:
                 self._error_message = result["error"]
-                return f"Error: {result['error']}"
+                return {"output": f"Error: {result['error']}", "total_cost": total_cost}
 
-            return final_output
+            return {"output": final_output, "total_cost": total_cost}
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
@@ -1313,6 +1319,16 @@ class AgentSession:
         Returns:
             SessionInfo instance.
         """
+        # Read persisted total_cost from session store
+        _total_cost = 0.0
+        try:
+            from service.claude_manager.session_store import get_session_store
+            store_data = get_session_store().get(self._session_id)
+            if store_data:
+                _total_cost = store_data.get("total_cost", 0.0) or 0.0
+        except Exception:
+            pass
+
         return SessionInfo(
             session_id=self._session_id,
             session_name=self._session_name,
@@ -1332,6 +1348,7 @@ class AgentSession:
             graph_name=self._graph_name,
             tool_preset_id=self._tool_preset_id,
             system_prompt=self._system_prompt,
+            total_cost=_total_cost,
         )
 
     # ========================================================================

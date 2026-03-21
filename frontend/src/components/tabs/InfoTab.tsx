@@ -92,6 +92,7 @@ export default function InfoTab() {
     { label: t('info.fields.created'), value: data.created_at ? formatTimestamp(data.created_at) : '—' },
     { label: t('info.fields.pid'), value: data.pid || '—' },
     { label: t('info.fields.pod'), value: data.pod_name || '—' },
+    { label: t('info.fields.totalCost'), value: data.total_cost != null && data.total_cost > 0 ? `$${data.total_cost.toFixed(6)}` : '$0.000000' },
     ...(isDeleted ? [{ label: t('info.fields.deletedAt'), value: data.deleted_at ? formatTimestamp(data.deleted_at) : '—' }] : []),
   ];
 

@@ -153,12 +153,15 @@ class MemoryInjectNode(BaseNode):
         self,
         input_text: str,
         context: ExecutionContext,
-    ) -> bool:
+    ) -> tuple:
         """Ask the LLM whether *input_text* warrants memory retrieval.
 
         Uses structured output parsing with automatic fallback.
-        Returns ``True`` (retrieve memory) on any parsing failure
-        so that memory is never silently lost.
+        Returns ``(True, cost_updates)`` (retrieve memory) on any
+        parsing failure so that memory is never silently lost.
+
+        Returns:
+            (needs_memory_bool, cost_updates_dict)
         """
         from service.workflow.nodes.structured_output import MemoryGateOutput
 
@@ -166,7 +169,7 @@ class MemoryInjectNode(BaseNode):
         messages = [HumanMessage(content=prompt)]
 
         try:
-            parsed, _fallback = await context.resilient_structured_invoke(
+            parsed, cost_updates = await context.resilient_structured_invoke(
                 messages,
                 "memory_gate",
                 MemoryGateOutput,
@@ -177,7 +180,7 @@ class MemoryInjectNode(BaseNode):
                 f"needs_memory={decision} "
                 f"(reason: {parsed.reasoning or '-'})"
             )
-            return decision
+            return decision, cost_updates
 
         except Exception as exc:
             # On any failure, default to retrieving memory (safe side)
@@ -185,7 +188,7 @@ class MemoryInjectNode(BaseNode):
                 f"[{context.session_id}] memory_gate: "
                 f"LLM gate failed ({exc}), defaulting to retrieve"
             )
-            return True
+            return True, {}
 
     # ── Main execution ────────────────────────────────────────────────
 
@@ -228,8 +231,9 @@ class MemoryInjectNode(BaseNode):
                 return {}
 
             # ── LLM gate: let the model decide ───────────────────────
+            gate_cost = {}
             if enable_gate:
-                needs_memory = await self._check_memory_needed(
+                needs_memory, gate_cost = await self._check_memory_needed(
                     query, context,
                 )
                 if not needs_memory:
@@ -237,7 +241,7 @@ class MemoryInjectNode(BaseNode):
                         f"[{context.session_id}] memory_inject: "
                         f"LLM gate decided memory not needed — skipping"
                     )
-                    return {}
+                    return gate_cost
 
             # ── Build memory context with budget management ───────────
             mgr = context.memory_manager
@@ -332,6 +336,7 @@ class MemoryInjectNode(BaseNode):
 
             # ── Assemble results ──────────────────────────────────────
             result: Dict[str, Any] = {}
+            result.update(gate_cost)
 
             if parts:
                 context_text = "## Recalled Memory\n\n" + "\n\n".join(parts)

@@ -2230,3 +2230,238 @@ RELEVANCE_GATE_I18N = {
         ),
     ),
 }
+
+
+# ====================================================================
+#  Adaptive Classify Node
+# ====================================================================
+
+ADAPTIVE_CLASSIFY_I18N = {
+    "en": NodeI18n(
+        label="Adaptive Classify",
+        description="Rule-based fast classification with LLM fallback. Short/trivial inputs are classified instantly without an LLM call, saving 8-15 seconds. Uncertain inputs fall back to structured-output LLM classification. Includes inline context-guard and post-model.",
+        parameters={
+            "prompt_template": {
+                "label": "Classification Prompt",
+                "description": "Prompt for LLM classification (used only when rules are uncertain).",
+            },
+            "categories": {
+                "label": "Categories",
+                "description": "Comma-separated category names. Each becomes an output port.",
+            },
+            "default_category": {
+                "label": "Default Category",
+                "description": "Fallback when the LLM response doesn't match any category.",
+            },
+            "output_field": {
+                "label": "Output State Field",
+                "description": "State field to store the classification result.",
+            },
+            "enable_rules": {
+                "label": "Enable Rule-Based Fast Path",
+                "description": "Use rule-based pre-check before LLM. Disable to always use LLM.",
+            },
+        },
+        output_ports={
+            "easy": {"label": "Easy", "description": "Simple, direct tasks"},
+            "medium": {"label": "Medium", "description": "Moderate complexity"},
+            "hard": {"label": "Hard", "description": "Complex, multi-step tasks"},
+            "end": {"label": "End", "description": "Error / early termination"},
+        },
+        groups={"prompt": "Prompt", "routing": "Routing", "output": "Output", "behavior": "Behavior"},
+        help=_help(
+            "Adaptive Classify Node",
+            "Rule-based + LLM hybrid classifier that skips LLM calls for trivially classifiable inputs.",
+            [
+                ("Overview", (
+                    "A **conditional model node** that first tries fast rule-based "
+                    "classification. Greetings, short factual questions, and simple "
+                    "calculations are classified as 'easy' instantly. Complex multi-step "
+                    "requests are classified as 'hard' by pattern matching.\n\n"
+                    "When rules cannot determine the category, falls back to the "
+                    "standard LLM-based structured-output classification."
+                )),
+                ("Inline Hooks", (
+                    "Includes **inline context-guard** (token estimation) and "
+                    "**inline post-model** (iteration increment) to eliminate the need "
+                    "for surrounding Guard and PostModel nodes."
+                )),
+                ("Usage Tips", (
+                    "1. Place after Memory Inject / Relevance Gate in the entry chain.\n"
+                    "2. Connect output ports to difficulty-specific paths.\n"
+                    "3. Disable `enable_rules` to force LLM classification on every input.\n"
+                    "4. Customize categories for non-difficulty use cases."
+                )),
+            ],
+        ),
+    ),
+    "ko": NodeI18n(
+        label="적응형 분류",
+        description="규칙 기반 빠른 분류 + LLM 폴백. 짧고 간단한 입력은 LLM 호출 없이 즉시 분류하여 8-15초를 절약합니다. 불확실한 입력은 구조화된 출력 LLM 분류로 폴백합니다. 인라인 컨텍스트 가드 및 포스트 모델 포함.",
+        parameters={
+            "prompt_template": {
+                "label": "분류 프롬프트",
+                "description": "LLM 분류용 프롬프트 (규칙이 불확실할 때만 사용).",
+            },
+            "categories": {
+                "label": "카테고리",
+                "description": "쉼표로 구분된 카테고리 이름. 각각 출력 포트가 됩니다.",
+            },
+            "default_category": {
+                "label": "기본 카테고리",
+                "description": "LLM 응답이 어떤 카테고리에도 해당하지 않을 때의 폴백.",
+            },
+            "output_field": {
+                "label": "출력 상태 필드",
+                "description": "분류 결과를 저장할 상태 필드.",
+            },
+            "enable_rules": {
+                "label": "규칙 기반 빠른 경로 활성화",
+                "description": "LLM 전에 규칙 기반 사전 확인 사용. 비활성화하면 항상 LLM 사용.",
+            },
+        },
+        output_ports={
+            "easy": {"label": "쉬움", "description": "단순하고 직접적인 작업"},
+            "medium": {"label": "보통", "description": "중간 복잡도"},
+            "hard": {"label": "어려움", "description": "복잡한 다단계 작업"},
+            "end": {"label": "종료", "description": "오류 / 조기 종료"},
+        },
+        groups={"prompt": "프롬프트", "routing": "라우팅", "output": "출력", "behavior": "동작"},
+        help=_help(
+            "적응형 분류 노드",
+            "간단히 분류할 수 있는 입력에 대해 LLM 호출을 건너뛰는 규칙 + LLM 하이브리드 분류기.",
+            [
+                ("개요", (
+                    "빠른 규칙 기반 분류를 먼저 시도하는 **조건부 모델 노드**입니다. "
+                    "인사말, 짧은 사실 질문, 간단한 계산 등은 'easy'로 즉시 분류됩니다. "
+                    "규칙으로 판단할 수 없으면 표준 LLM 구조화 출력 분류로 폴백합니다."
+                )),
+                ("인라인 훅", (
+                    "**인라인 컨텍스트 가드**(토큰 추정)와 **인라인 포스트 모델**"
+                    "(이터레이션 증가)을 포함하여 주변 Guard/PostModel 노드가 필요 없습니다."
+                )),
+                ("사용 팁", (
+                    "1. 진입 체인에서 Memory Inject / Relevance Gate 뒤에 배치하세요.\n"
+                    "2. 출력 포트를 난이도별 경로에 연결하세요.\n"
+                    "3. `enable_rules`를 비활성화하면 모든 입력에 LLM 분류를 강제합니다.\n"
+                    "4. 난이도 외 사용 사례에 맞게 카테고리를 커스터마이즈하세요."
+                )),
+            ],
+        ),
+    ),
+}
+
+
+# ====================================================================
+#  Final Synthesis Node
+# ====================================================================
+
+FINAL_SYNTHESIS_I18N = {
+    "en": NodeI18n(
+        label="Final Synthesis",
+        description="Merged final-review + final-answer node. Reviews all completed list item results and synthesizes them into a polished final answer in a single LLM call. Budget-aware truncation prevents context overflow.",
+        parameters={
+            "prompt_template": {
+                "label": "Synthesis Prompt",
+                "description": "Prompt for reviewing and synthesising the final answer.",
+            },
+            "list_field": {
+                "label": "List State Field",
+                "description": "State field containing the list of completed items.",
+            },
+            "output_field": {
+                "label": "Output State Field",
+                "description": "State field to store the synthesised answer.",
+            },
+            "max_item_chars": {
+                "label": "Max Chars per Item",
+                "description": "Maximum characters per list item result in the prompt.",
+            },
+            "compact_item_chars": {
+                "label": "Compact Chars per Item",
+                "description": "Maximum characters per item when context budget is tight.",
+            },
+        },
+        output_ports={"default": {"label": "Next"}},
+        groups={"prompt": "Prompt", "state_fields": "State Fields", "output": "Output", "behavior": "Behavior"},
+        help=_help(
+            "Final Synthesis Node",
+            "Reviews and synthesises all TODO results into a single comprehensive answer in one LLM call.",
+            [
+                ("Overview", (
+                    "The Final Synthesis node merges the responsibilities of "
+                    "**Final Review** and **Final Answer** into a single LLM call. "
+                    "The prompt instructs the model to:\n"
+                    "1. Review the quality of completed work.\n"
+                    "2. Synthesize all results into a polished final response.\n\n"
+                    "This saves one full LLM round-trip (10-20 seconds) on the hard path."
+                )),
+                ("Budget Awareness", (
+                    "When context budget is tight (block/overflow), each item's result "
+                    "is truncated to `compact_item_chars` instead of `max_item_chars`."
+                )),
+                ("State Updates", (
+                    "After execution:\n"
+                    "- `final_answer` — the synthesized answer\n"
+                    "- `is_complete = True` — signals workflow completion\n"
+                    "- `iteration` is incremented"
+                )),
+                ("Usage Tips", (
+                    "1. Place after Check Progress in the hard path.\n"
+                    "2. Connect directly to End node — no Post Model needed.\n"
+                    "3. Replace the 6-node chain: guard_fr → fin_rev → post_fr → guard_fa → fin_ans → post_fa."
+                )),
+            ],
+        ),
+    ),
+    "ko": NodeI18n(
+        label="최종 합성",
+        description="최종 리뷰 + 최종 답변 통합 노드. 완료된 모든 항목 결과를 검토하고 단일 LLM 호출로 완성된 최종 답변으로 합성합니다. 예산 인식 절단으로 컨텍스트 오버플로우를 방지합니다.",
+        parameters={
+            "prompt_template": {
+                "label": "합성 프롬프트",
+                "description": "최종 답변 검토 및 합성을 위한 프롬프트.",
+            },
+            "list_field": {
+                "label": "목록 상태 필드",
+                "description": "완료된 항목 목록이 포함된 상태 필드.",
+            },
+            "output_field": {
+                "label": "출력 상태 필드",
+                "description": "합성된 답변을 저장할 상태 필드.",
+            },
+            "max_item_chars": {
+                "label": "항목당 최대 문자",
+                "description": "프롬프트에서 항목 결과당 최대 문자 수.",
+            },
+            "compact_item_chars": {
+                "label": "압축 항목당 문자",
+                "description": "컨텍스트 예산이 부족할 때 항목당 최대 문자 수.",
+            },
+        },
+        output_ports={"default": {"label": "다음"}},
+        groups={"prompt": "프롬프트", "state_fields": "상태 필드", "output": "출력", "behavior": "동작"},
+        help=_help(
+            "최종 합성 노드",
+            "모든 TODO 결과를 검토하고 단일 LLM 호출로 종합적인 답변으로 합성합니다.",
+            [
+                ("개요", (
+                    "최종 합성 노드는 **최종 리뷰**와 **최종 답변**의 역할을 "
+                    "단일 LLM 호출로 통합합니다. 프롬프트가 모델에게:\n"
+                    "1. 완료된 작업의 품질을 검토하고\n"
+                    "2. 모든 결과를 완성된 최종 응답으로 합성하도록 지시합니다.\n\n"
+                    "이를 통해 Hard 경로에서 LLM 왕복 1회(10-20초)를 절약합니다."
+                )),
+                ("예산 인식", (
+                    "컨텍스트 예산이 부족할 때(block/overflow), 각 항목의 결과가 "
+                    "`max_item_chars` 대신 `compact_item_chars`로 절단됩니다."
+                )),
+                ("사용 팁", (
+                    "1. Hard 경로에서 Check Progress 뒤에 배치하세요.\n"
+                    "2. End 노드에 직접 연결하세요 — Post Model이 필요 없습니다.\n"
+                    "3. 6노드 체인(guard_fr → fin_rev → post_fr → guard_fa → fin_ans → post_fa)을 대체합니다."
+                )),
+            ],
+        ),
+    ),
+}

@@ -191,6 +191,24 @@ class SessionStore:
             self._data[session_id].update(updates)
             self._save()
 
+    def increment_cost(self, session_id: str, cost_usd: float):
+        """Atomically add execution cost to a session's total_cost."""
+        if not cost_usd or cost_usd <= 0:
+            return
+        # DB primary (atomic increment)
+        if self._db_available:
+            try:
+                from service.database.session_db_helper import db_increment_session_cost
+                db_increment_session_cost(self._app_db, session_id, cost_usd)
+            except Exception as e:
+                logger.warning(f"[SessionStore] DB cost increment failed for {session_id}: {e}")
+        # JSON backup
+        with self._lock:
+            if session_id in self._data:
+                prev = self._data[session_id].get("total_cost", 0.0) or 0.0
+                self._data[session_id]["total_cost"] = prev + cost_usd
+                self._save()
+
     def soft_delete(self, session_id: str):
         """Mark a session as deleted (soft-delete).
 

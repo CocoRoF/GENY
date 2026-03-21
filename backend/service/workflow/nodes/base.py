@@ -217,12 +217,18 @@ class ExecutionContext:
                 response = await self.model.ainvoke(messages)
                 duration_ms = int((time.time() - start) * 1000)
 
+                # Extract cost from the AIMessage
+                cost_usd = 0.0
+                if hasattr(response, "additional_kwargs"):
+                    cost_usd = response.additional_kwargs.get("cost_usd", 0.0)
+
                 if attempt > 0:
                     logger.info(
                         f"[{self.session_id}] {node_name}: "
                         f"succeeded on retry {attempt} ({duration_ms}ms)"
                     )
                     return response, {
+                        "total_cost": cost_usd,
                         "fallback": {
                             "original_model": model_label,
                             "current_model": model_label,
@@ -233,7 +239,7 @@ class ExecutionContext:
                             "degraded": False,
                         }
                     }
-                return response, {}
+                return response, {"total_cost": cost_usd}
 
             except Exception as e:
                 last_error = e
@@ -380,6 +386,8 @@ class ExecutionContext:
                 f"structured output OK after correction (method={result2.method})"
             )
             merged = {**fallback, **fallback2} if fallback2 else fallback
+            # Sum costs from both attempts (don't let second overwrite first)
+            merged["total_cost"] = fallback.get("total_cost", 0.0) + fallback2.get("total_cost", 0.0)
             return result2.data, merged
 
         # ── Final failure ──

@@ -17,6 +17,7 @@ export interface SessionInfo {
   workflow_id: string | null;
   graph_name: string | null;
   tool_preset_id: string | null;
+  total_cost: number | null;
   is_deleted?: boolean;
   deleted_at?: string | null;
 }

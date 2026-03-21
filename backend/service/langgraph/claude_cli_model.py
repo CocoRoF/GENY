@@ -316,6 +316,7 @@ class ClaudeCLIChatModel(BaseChatModel):
                 "duration_ms": result.get("duration_ms", 0),
                 "session_id": self._process.session_id,
                 "conversation_id": self._process._conversation_id,
+                "cost_usd": result.get("cost_usd", 0.0),
             }
 
             message = AIMessage(

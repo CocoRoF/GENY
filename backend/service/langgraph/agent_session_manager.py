@@ -393,7 +393,9 @@ class AgentSessionManager(SessionManager):
 
         # Map built-in graph_name choices to template workflow_ids
         if not workflow_id:
-            if graph_name and 'autonomous' in graph_name.lower():
+            if graph_name and 'optimized' in graph_name.lower() and 'autonomous' in graph_name.lower():
+                workflow_id = "template-optimized-autonomous"
+            elif graph_name and 'autonomous' in graph_name.lower():
                 workflow_id = "template-autonomous"
             else:
                 workflow_id = "template-simple"

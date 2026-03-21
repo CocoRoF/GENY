@@ -190,6 +190,15 @@ async def execute_prompt(
                 for tc in tool_calls
             ]
 
+        # Persist cost to DB
+        exec_cost = result.get("cost_usd")
+        if exec_cost and exec_cost > 0:
+            try:
+                from service.claude_manager.session_store import get_session_store
+                get_session_store().increment_cost(session_id, exec_cost)
+            except Exception:
+                logger.debug(f"Cost persistence failed for {session_id}", exc_info=True)
+
         return ExecuteResponse(
             success=result.get("success", False),
             session_id=session_id,

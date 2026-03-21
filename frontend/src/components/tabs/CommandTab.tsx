@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export default function CommandTab() {
-  const { selectedSessionId, sessions, isExecuting, setIsExecuting, getSessionData, updateSessionData } = useAppStore();
+  const { selectedSessionId, sessions, getSessionData, updateSessionData } = useAppStore();
   const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAllLevels, setShowAllLevels] = useState(false);
@@ -35,6 +35,7 @@ export default function CommandTab() {
 
   const session = sessions.find(s => s.session_id === selectedSessionId);
   const sessionData: SessionData | null = selectedSessionId ? getSessionData(selectedSessionId) : null;
+  const isExecuting = sessionData?.status === 'running';
   const logEntries: LogEntry[] = useMemo(
     () => (sessionData?.logEntries || []) as LogEntry[],
     [sessionData?.logEntries],
@@ -102,7 +103,6 @@ export default function CommandTab() {
   const handleExecute = useCallback(async () => {
     if (!selectedSessionId || !sessionData?.input?.trim()) return;
     const prompt = sessionData.input.trim();
-    setIsExecuting(true);
     setSelectedStepIndex(null);
     updateSessionData(selectedSessionId, {
       status: 'running',
@@ -166,9 +166,16 @@ export default function CommandTab() {
         statusText: t('commandTab.requestFailed'),
       });
     } finally {
-      setIsExecuting(false);
+      // Safety: if SSE stream closed without result/error event, clear running state
+      const final = useAppStore.getState().sessionDataCache[selectedSessionId];
+      if (final?.status === 'running') {
+        updateSessionData(selectedSessionId, {
+          status: 'error',
+          statusText: t('commandTab.statusFailed'),
+        });
+      }
     }
-  }, [selectedSessionId, sessionData?.input, setIsExecuting, updateSessionData, t]);
+  }, [selectedSessionId, sessionData?.input, updateSessionData, t]);
 
   const handleStop = useCallback(async () => {
     if (!selectedSessionId) return;
