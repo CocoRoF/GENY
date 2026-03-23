@@ -42,6 +42,17 @@ agent_manager = get_agent_session_manager()
 # ============================================================================
 
 @dataclass
+class AgentExecutionState:
+    """Tracks an individual agent's execution state during a broadcast."""
+    session_id: str
+    session_name: str
+    role: str
+    status: str = "pending"  # pending | executing | completed | failed
+    thinking_preview: Optional[str] = None  # Latest log message (1 line)
+    started_at: Optional[float] = None
+
+
+@dataclass
 class BroadcastState:
     """Tracks a single in-flight broadcast."""
     broadcast_id: str
@@ -51,12 +62,66 @@ class BroadcastState:
     responded: int = 0
     finished: bool = False
     started_at: float = field(default_factory=time.time)
+    # NEW: per-agent execution states
+    agent_states: Dict[str, AgentExecutionState] = field(default_factory=dict)
 
 
 # room_id → BroadcastState for the currently active broadcast
 _active_broadcasts: Dict[str, BroadcastState] = {}
 # room_id → asyncio.Event signalling "new message was saved"
 _room_new_msg_events: Dict[str, asyncio.Event] = {}
+
+
+def _extract_thinking_preview(entry) -> Optional[str]:
+    """Extract a 1-line thinking preview from a log entry.
+
+    Prioritizes GRAPH events (node enter/exit) and TOOL events.
+    Returns None if the entry is not interesting for preview.
+    """
+    level = entry.level.value if hasattr(entry.level, "value") else str(entry.level)
+    meta = entry.metadata or {}
+
+    # Skip command/response entries (too verbose or final)
+    if level in ("COMMAND", "RESPONSE"):
+        return None
+
+    # GRAPH events — show node execution
+    if level == "GRAPH":
+        event_type = meta.get("event_type", "")
+        node = meta.get("node_name", "")
+        if event_type == "node_enter" and node:
+            return f"→ {node}"
+        if event_type == "node_exit" and node:
+            preview = meta.get("output_preview", "")[:60]
+            if preview:
+                return f"✓ {node}: {preview}"
+            return f"✓ {node}"
+        if event_type == "edge_decision":
+            decision = meta.get("decision", "")
+            return f"⋯ {decision}" if decision else None
+        return None
+
+    # TOOL events — show tool invocation
+    if level == "TOOL":
+        tool_name = meta.get("tool_name", "")
+        if tool_name:
+            return f"🔧 {tool_name}"
+        return None
+
+    # TOOL_RES — show brief result
+    if level == "TOOL_RES":
+        tool_name = meta.get("tool_name", "")
+        preview = meta.get("preview", "")[:50]
+        if tool_name and preview:
+            return f"🔧 {tool_name}: {preview}"
+        return None
+
+    # INFO/DEBUG — use message directly (truncated)
+    if level in ("INFO", "DEBUG"):
+        msg = entry.message[:80] if entry.message else None
+        return msg
+
+    return None
 
 
 def _notify_room(room_id: str):
@@ -289,12 +354,28 @@ async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
 
     # 3. Create broadcast state and launch background processing
     broadcast_id = str(uuid.uuid4())
+
+    # Initialize per-agent states
+    initial_agent_states: Dict[str, AgentExecutionState] = {}
+    for sid in room_session_ids:
+        info = agent_info.get(sid, {})
+        initial_agent_states[sid] = AgentExecutionState(
+            session_id=sid,
+            session_name=info.get("session_name", sid[:8]),
+            role=info.get("role", "worker"),
+            status="pending",
+        )
+
     broadcast_state = BroadcastState(
         broadcast_id=broadcast_id,
         room_id=room_id,
         total=len(room_session_ids),
+        agent_states=initial_agent_states,
     )
     _active_broadcasts[room_id] = broadcast_state
+
+    # Notify SSE clients so they immediately see initial agent states
+    _notify_room(room_id)
 
     logger.info(
         "Room %s: broadcast %s → %d sessions: %s",
@@ -337,12 +418,44 @@ async def _run_broadcast(
       - double-execution prevention
       - timeout handling
     """
+    from service.logging.session_logger import get_session_logger
+
     start_time = time.time()
 
     async def _invoke_one(session_id: str):
         info = agent_info.get(session_id, {})
         sname = info.get("session_name", session_id[:8])
         role = info.get("role", "unknown")
+
+        # Get per-agent state tracker
+        agent_state = state.agent_states.get(session_id)
+        if agent_state:
+            agent_state.status = "executing"
+            agent_state.started_at = time.time()
+            _notify_room(room_id)
+
+        # Start log-polling task to capture thinking preview
+        log_poll_task: Optional[asyncio.Task] = None
+        session_logger = get_session_logger(session_id, create_if_missing=False)
+
+        if session_logger and agent_state:
+            async def _poll_logs():
+                """Poll session logs and update thinking_preview."""
+                cache_cursor = session_logger.get_cache_length()  # Start from current position
+                try:
+                    while True:
+                        await asyncio.sleep(0.2)
+                        new_entries, cache_cursor = session_logger.get_cache_entries_since(cache_cursor)
+                        for entry in new_entries:
+                            # Extract meaningful preview from log entry
+                            preview = _extract_thinking_preview(entry)
+                            if preview:
+                                agent_state.thinking_preview = preview
+                                _notify_room(room_id)
+                except asyncio.CancelledError:
+                    pass
+
+            log_poll_task = asyncio.create_task(_poll_logs())
 
         try:
             # ── THE core call — with broadcast context ──
@@ -363,6 +476,8 @@ async def _run_broadcast(
                     "cost_usd": result.cost_usd,
                 })
                 state.responded += 1
+                if agent_state:
+                    agent_state.status = "completed"
                 _notify_room(room_id)
             elif not result.success:
                 # Execution failed (timeout, error, etc.) — show in room
@@ -370,15 +485,21 @@ async def _run_broadcast(
                     "type": "system",
                     "content": f"{sname}: {result.error or 'Unknown error'}",
                 })
+                if agent_state:
+                    agent_state.status = "failed"
                 _notify_room(room_id)
             else:
                 logger.debug("Session %s skipped (no output)", session_id)
+                if agent_state:
+                    agent_state.status = "completed"
 
         except AlreadyExecutingError:
             store.add_message(room_id, {
                 "type": "system",
                 "content": f"{sname}: Currently busy with another execution",
             })
+            if agent_state:
+                agent_state.status = "failed"
             _notify_room(room_id)
 
         except AgentNotFoundError:
@@ -386,6 +507,8 @@ async def _run_broadcast(
                 "type": "system",
                 "content": f"{sname}: Session not found",
             })
+            if agent_state:
+                agent_state.status = "failed"
             _notify_room(room_id)
 
         except AgentNotAliveError as e:
@@ -393,6 +516,8 @@ async def _run_broadcast(
                 "type": "system",
                 "content": f"{sname}: {str(e)[:200]}",
             })
+            if agent_state:
+                agent_state.status = "failed"
             _notify_room(room_id)
 
         except Exception as e:
@@ -401,10 +526,19 @@ async def _run_broadcast(
                 "type": "system",
                 "content": f"{sname}: Error — {str(e)[:200]}",
             })
+            if agent_state:
+                agent_state.status = "failed"
             _notify_room(room_id)
 
         finally:
             state.completed += 1
+            # Cancel log polling
+            if log_poll_task:
+                log_poll_task.cancel()
+                try:
+                    await log_poll_task
+                except asyncio.CancelledError:
+                    pass
 
     # Launch all concurrently — each is an independent command execution
     tasks = [asyncio.create_task(_invoke_one(sid)) for sid in session_ids]
@@ -487,6 +621,21 @@ async def room_event_stream(
                 "responded": bstate.responded,
                 "finished": False,
             })
+            # Send initial per-agent progress
+            if bstate.agent_states:
+                agent_progress_list = []
+                for sid, astate in bstate.agent_states.items():
+                    agent_progress_list.append({
+                        "session_id": astate.session_id,
+                        "session_name": astate.session_name,
+                        "role": astate.role,
+                        "status": astate.status,
+                        "thinking_preview": astate.thinking_preview,
+                    })
+                yield _sse_event("agent_progress", {
+                    "broadcast_id": bstate.broadcast_id,
+                    "agents": agent_progress_list,
+                })
 
         # Main loop: wait for new messages or heartbeat
         while True:
@@ -513,6 +662,7 @@ async def room_event_stream(
             # Broadcast status update
             bstate = _active_broadcasts.get(room_id)
             if bstate:
+                # Send overall progress
                 yield _sse_event("broadcast_status", {
                     "broadcast_id": bstate.broadcast_id,
                     "total": bstate.total,
@@ -520,6 +670,23 @@ async def room_event_stream(
                     "responded": bstate.responded,
                     "finished": bstate.finished,
                 })
+
+                # Send per-agent progress if not finished
+                if not bstate.finished and bstate.agent_states:
+                    agent_progress_list = []
+                    for sid, astate in bstate.agent_states.items():
+                        agent_progress_list.append({
+                            "session_id": astate.session_id,
+                            "session_name": astate.session_name,
+                            "role": astate.role,
+                            "status": astate.status,
+                            "thinking_preview": astate.thinking_preview,
+                        })
+                    yield _sse_event("agent_progress", {
+                        "broadcast_id": bstate.broadcast_id,
+                        "agents": agent_progress_list,
+                    })
+
                 if bstate.finished:
                     yield _sse_event("broadcast_done", {
                         "broadcast_id": bstate.broadcast_id,

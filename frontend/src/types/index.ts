@@ -112,6 +112,7 @@ export type ChatSSEEventType =
   | 'message'
   | 'broadcast_status'
   | 'broadcast_done'
+  | 'agent_progress'
   | 'heartbeat';
 
 export interface BroadcastStatus {
@@ -122,9 +123,23 @@ export interface BroadcastStatus {
   finished: boolean;
 }
 
+// Per-agent execution state during broadcast
+export interface AgentProgressState {
+  session_id: string;
+  session_name: string;
+  role: string;
+  status: 'pending' | 'executing' | 'completed' | 'failed';
+  thinking_preview: string | null;
+}
+
+export interface AgentProgressEvent {
+  broadcast_id: string;
+  agents: AgentProgressState[];
+}
+
 export interface ChatSSEEvent {
   event: ChatSSEEventType;
-  data: ChatRoomMessage | BroadcastStatus | { ts?: number };
+  data: ChatRoomMessage | BroadcastStatus | AgentProgressEvent | { ts?: number };
 }
 
 

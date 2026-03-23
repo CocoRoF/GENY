@@ -471,6 +471,7 @@ export const chatApi = {
       evtSource.addEventListener('message', handleEvent);
       evtSource.addEventListener('broadcast_status', handleEvent);
       evtSource.addEventListener('broadcast_done', handleEvent);
+      evtSource.addEventListener('agent_progress', handleEvent);
       evtSource.addEventListener('heartbeat', handleEvent);
 
       evtSource.onerror = () => {

@@ -8,7 +8,7 @@ import {
   Send, Loader2, MessageCircle, Users, Bot, User,
   Plus, ArrowLeft, Trash2, Hash, Clock,
 } from 'lucide-react';
-import type { ChatRoom, ChatRoomMessage, BroadcastStatus } from '@/types';
+import type { ChatRoom, ChatRoomMessage, BroadcastStatus, AgentProgressState } from '@/types';
 
 // ==================== Helpers ====================
 
@@ -73,6 +73,7 @@ export default function ChatTab() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [broadcastStatus, setBroadcastStatus] = useState<BroadcastStatus | null>(null);
+  const [agentProgress, setAgentProgress] = useState<AgentProgressState[] | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -102,8 +103,14 @@ export default function ChatTab() {
           setBroadcastStatus(eventData as unknown as BroadcastStatus);
           break;
         }
+        case 'agent_progress': {
+          const progress = eventData as unknown as { broadcast_id: string; agents: AgentProgressState[] };
+          setAgentProgress(progress.agents);
+          break;
+        }
         case 'broadcast_done': {
           setBroadcastStatus(null);
+          setAgentProgress(null);
           break;
         }
       }
@@ -592,16 +599,51 @@ export default function ChatTab() {
 
         {/* Broadcast Progress */}
         {broadcastStatus && !broadcastStatus.finished && (
-          <div className="flex gap-2 items-end">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
-              <Bot size={14} className="text-white" />
-            </div>
-            <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] inline-flex items-center gap-2">
-              <Loader2 size={14} className="animate-spin text-[var(--primary-color)]" />
-              <span className="text-[0.75rem] text-[var(--text-muted)]">
-                {broadcastStatus.completed}/{broadcastStatus.total} processing
-              </span>
-            </div>
+          <div className="space-y-1.5">
+            {/* Per-agent progress if available */}
+            {agentProgress && agentProgress.length > 0 ? (
+              agentProgress
+                .filter(a => a.status === 'pending' || a.status === 'executing')
+                .map(agent => (
+                  <div key={agent.session_id} className="flex gap-2 items-center">
+                    <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${getRoleColor(agent.role)} flex items-center justify-center shrink-0 shadow-sm`}>
+                      <Bot size={14} className="text-white" />
+                    </div>
+                    <span className="text-[0.75rem] font-semibold text-[var(--text-primary)] shrink-0">{agent.session_name}</span>
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold text-white uppercase tracking-wider shrink-0"
+                      style={{ background: getRoleBadgeStyle(agent.role).replace('background: ', '') }}
+                    >
+                      {agent.role}
+                    </span>
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                      {agent.thinking_preview && (
+                        <span className="text-[0.6875rem] text-[var(--text-muted)] truncate max-w-[180px]">
+                          {agent.thinking_preview}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.2s' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
+                      </div>
+                    </div>
+                  </div>
+                ))
+            ) : (
+              /* Fallback: single indicator */
+              <div className="flex gap-2 items-center">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shrink-0 shadow-sm">
+                  <Bot size={14} className="text-white" />
+                </div>
+                <div className="px-4 py-2 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] inline-flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin text-[var(--primary-color)]" />
+                  <span className="text-[0.75rem] text-[var(--text-muted)]">
+                    {broadcastStatus.completed}/{broadcastStatus.total} processing
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

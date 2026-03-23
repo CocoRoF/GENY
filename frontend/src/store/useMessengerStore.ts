@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { chatApi } from '@/lib/api';
-import type { ChatRoom, ChatRoomMessage, BroadcastStatus } from '@/types';
+import type { ChatRoom, ChatRoomMessage, BroadcastStatus, AgentProgressState } from '@/types';
 
 interface MessengerState {
   // Rooms
@@ -16,6 +16,7 @@ interface MessengerState {
 
   // Broadcast progress
   broadcastStatus: BroadcastStatus | null;
+  agentProgress: AgentProgressState[] | null;  // NEW: per-agent progress
 
   // Event subscription (internal)
   _eventSub: { close: () => void } | null;
@@ -66,6 +67,7 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
   loadingMessages: false,
   isSending: false,
   broadcastStatus: null,
+  agentProgress: null,
   _eventSub: null,
   _lastMsgId: null,
   createModalOpen: false,
@@ -219,8 +221,14 @@ export const useMessengerStore = create<MessengerState>((set, get) => ({
             set({ broadcastStatus: status });
             break;
           }
+          case 'agent_progress': {
+            // Per-agent execution progress with thinking previews
+            const progress = eventData as unknown as { broadcast_id: string; agents: AgentProgressState[] };
+            set({ agentProgress: progress.agents });
+            break;
+          }
           case 'broadcast_done': {
-            set({ broadcastStatus: null });
+            set({ broadcastStatus: null, agentProgress: null });
             get().fetchRooms();
             break;
           }

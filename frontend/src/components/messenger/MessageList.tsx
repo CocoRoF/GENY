@@ -154,32 +154,60 @@ function DateDivider({ date }: { date: string }) {
   );
 }
 
-function TypingIndicator({ name, role }: { name: string; role: string }) {
+function TypingIndicator({ name, role, thinkingPreview }: { name: string; role: string; thinkingPreview?: string | null }) {
   return (
     <div className="flex gap-3 px-4 md:px-6 py-1.5">
       <div
-        className={`w-9 h-9 rounded-full bg-gradient-to-br ${getRoleColor(role)} flex items-center justify-center shrink-0 mt-0.5 shadow-sm`}
+        className={`w-9 h-9 rounded-full bg-gradient-to-br ${getRoleColor(role)} flex items-center justify-center shrink-0 shadow-sm`}
       >
         <Bot size={15} className="text-white" />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">{name}</span>
-          {role && (
-            <span
-              className="inline-flex items-center px-1.5 py-[1px] rounded text-[0.5625rem] font-bold text-white uppercase tracking-wider"
-              style={{ background: getRoleBadgeBg(role) }}
-            >
-              {role}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        {/* Name + Role badge */}
+        <span className="text-[0.8125rem] font-semibold text-[var(--text-primary)] shrink-0">{name}</span>
+        {role && role !== 'processing' && (
+          <span
+            className="inline-flex items-center px-1.5 py-[1px] rounded text-[0.5625rem] font-bold text-white uppercase tracking-wider shrink-0"
+            style={{ background: getRoleBadgeBg(role) }}
+          >
+            {role}
+          </span>
+        )}
+        {/* Thinking preview bubble */}
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] min-w-0">
+          {thinkingPreview && (
+            <span className="text-[0.75rem] text-[var(--text-muted)] truncate max-w-[180px]">
+              {thinkingPreview}
             </span>
           )}
-        </div>
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-color)]">
-          <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
-          <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.2s' }} />
-          <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.2s' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] animate-[typingBounce_1.4s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Per-agent progress indicator during broadcast
+function AgentProgressIndicator({ agents }: { agents: import('@/types').AgentProgressState[] }) {
+  // Only show agents that are still pending or executing
+  const activeAgents = agents.filter(a => a.status === 'pending' || a.status === 'executing');
+
+  if (activeAgents.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      {activeAgents.map(agent => (
+        <TypingIndicator
+          key={agent.session_id}
+          name={agent.session_name}
+          role={agent.role}
+          thinkingPreview={agent.thinking_preview}
+        />
+      ))}
     </div>
   );
 }
@@ -187,7 +215,7 @@ function TypingIndicator({ name, role }: { name: string; role: string }) {
 // ── Main Component ──
 
 export default function MessageList() {
-  const { messages, loadingMessages, broadcastStatus } = useMessengerStore();
+  const { messages, loadingMessages, broadcastStatus, agentProgress } = useMessengerStore();
   const { t } = useI18n();
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -195,7 +223,7 @@ export default function MessageList() {
   // Auto-scroll to bottom on new messages / broadcast progress
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, broadcastStatus]);
+  }, [messages, broadcastStatus, agentProgress]);
 
   if (loadingMessages) {
     return (
@@ -241,10 +269,18 @@ export default function MessageList() {
 
       {/* Broadcast in-progress indicator */}
       {broadcastStatus && !broadcastStatus.finished && (
-        <TypingIndicator
-          name={`${broadcastStatus.completed}/${broadcastStatus.total}`}
-          role="processing"
-        />
+        <>
+          {/* Show per-agent progress if available */}
+          {agentProgress && agentProgress.length > 0 ? (
+            <AgentProgressIndicator agents={agentProgress} />
+          ) : (
+            /* Fallback: show generic counter */
+            <TypingIndicator
+              name={`${broadcastStatus.completed}/${broadcastStatus.total}`}
+              role="processing"
+            />
+          )}
+        </>
       )}
 
       <div ref={endRef} className="h-2" />
