@@ -187,6 +187,29 @@ class ToolLoader:
 
         return allowed
 
+    def get_allowed_tools_by_category(
+        self, preset: Any
+    ) -> tuple[List[str], List[str]]:
+        """Compute allowed tool names split by category.
+
+        Returns:
+            (builtin_tools, custom_tools) tuple:
+            - builtin_tools: All built-in tool names (always included)
+            - custom_tools: Custom tool names filtered by preset.custom_tools
+        """
+        builtin_names = list(self.builtin_tools.keys())
+
+        custom_selection = getattr(preset, "custom_tools", [])
+        if "*" in custom_selection:
+            custom_names = list(self.custom_tools.keys())
+        else:
+            custom_names = [
+                name for name in custom_selection
+                if name in self.custom_tools
+            ]
+
+        return builtin_names, custom_names
+
     def get_tool_info_list(self) -> List[Dict[str, Any]]:
         """Return tool metadata for all tools (for catalog API)."""
         result = []

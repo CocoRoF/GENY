@@ -248,6 +248,52 @@ async def lifespan(app: FastAPI):
     agent_manager.start_idle_monitor()
     logger.info("   - Session idle monitor: started (10min threshold)")
 
+    # ── Tool Runtime Health Check ──────────────────────────────────────
+    # Verify tools actually execute (not just registered) by invoking a
+    # read-only tool directly and checking the response.
+    print_step_banner("HEALTH", "TOOL RUNTIME CHECK", "Verifying tools execute correctly...")
+    try:
+        test_tool = tool_loader.get_tool("geny_session_list")
+        if test_tool:
+            test_result = test_tool.run()
+            if test_result and isinstance(test_result, str):
+                logger.info(f"   ✅ geny_session_list: OK (response {len(test_result)} bytes)")
+            else:
+                logger.warning(f"   ❌ geny_session_list: unexpected result type: {type(test_result)}")
+        else:
+            logger.warning("   ❌ geny_session_list: tool not found in loader")
+    except Exception as e:
+        logger.error(f"   ❌ geny_session_list: execution failed: {e}")
+
+    # Schedule HTTP endpoint health check to run after server starts
+    async def _post_startup_health_check():
+        """Wait for server to accept connections, then test /internal/tools/execute."""
+        import httpx
+        await asyncio.sleep(2)  # Wait for uvicorn to start accepting connections
+        port = int(os.environ.get("APP_PORT", "8000"))
+        url = f"http://127.0.0.1:{port}/internal/tools/execute"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json={
+                    "tool_name": "geny_session_list",
+                    "args": {},
+                    "session_id": "__health_check__"
+                })
+                if resp.status_code == 200:
+                    body = resp.json()
+                    if body.get("result") is not None and body.get("error") is None:
+                        logger.info(f"   ✅ POST /internal/tools/execute: OK (HTTP {resp.status_code}, {len(body['result'])} bytes)")
+                    elif body.get("error"):
+                        logger.warning(f"   ❌ POST /internal/tools/execute: tool error: {body['error']}")
+                    else:
+                        logger.warning(f"   ⚠️ POST /internal/tools/execute: empty result")
+                else:
+                    logger.warning(f"   ❌ POST /internal/tools/execute: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"   ❌ POST /internal/tools/execute: {e}")
+
+    asyncio.create_task(_post_startup_health_check())
+
     print_step_banner("READY", "GENY AGENT READY", "All systems operational!")
     logger.info("Geny Agent startup complete! Ready to serve requests.")
 

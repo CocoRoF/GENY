@@ -73,6 +73,7 @@ def set_global_mcp_config(config: MCPConfig) -> None:
 
 
 def build_proxy_mcp_server(
+    category: str,
     allowed_tools: List[str],
     session_id: str,
     backend_port: int = 8000,
@@ -80,10 +81,12 @@ def build_proxy_mcp_server(
     """Build a Proxy MCP server config for a session.
 
     The proxy server is a lightweight subprocess that:
+    - Auto-discovers tool files from the specified category folder
     - Registers tool schemas (from Python tool modules)
     - Forwards execution requests to the main process via HTTP
 
     Args:
+        category: 'builtin' or 'custom' — determines which folder to scan.
         allowed_tools: List of tool names to make available.
         session_id: Session ID for context.
         backend_port: Port of the FastAPI backend.
@@ -112,14 +115,15 @@ def build_proxy_mcp_server(
 
     return MCPServerStdio(
         command=sys.executable,
-        args=[proxy_script, backend_url, session_id, tools_arg],
+        args=[proxy_script, backend_url, session_id, category, tools_arg],
         env=env if env else None,
     )
 
 
 def build_session_mcp_config(
     global_config: Optional[MCPConfig],
-    allowed_tools: List[str],
+    allowed_builtin_tools: List[str],
+    allowed_custom_tools: List[str],
     session_id: str,
     backend_port: int = 8000,
     allowed_mcp_servers: Optional[List[str]] = None,
@@ -128,13 +132,15 @@ def build_session_mcp_config(
     """Build the complete MCP config for a session.
 
     Combines:
-    1. _python_tools: Proxy MCP server (for Python tools)
-    2. External MCP servers from global config (filtered by preset)
-    3. Extra per-session MCP servers
+    1. _builtin_tools: Proxy MCP server for built-in tools (always included)
+    2. _custom_tools: Proxy MCP server for custom tools (if any allowed)
+    3. External MCP servers from global config (filtered by preset)
+    4. Extra per-session MCP servers
 
     Args:
         global_config: Global MCP config (external servers from mcp/*.json).
-        allowed_tools: Python tool names to register in proxy.
+        allowed_builtin_tools: Built-in tool names (always registered).
+        allowed_custom_tools: Custom tool names (preset-filtered).
         session_id: Session ID.
         backend_port: FastAPI backend port.
         allowed_mcp_servers: List of external MCP server names to include.
@@ -146,18 +152,28 @@ def build_session_mcp_config(
     """
     servers: Dict[str, MCPServerConfig] = {}
 
-    # 1. Add proxy MCP server for Python tools
-    if allowed_tools:
-        servers["_python_tools"] = build_proxy_mcp_server(
-            allowed_tools=allowed_tools,
+    # 1. Add Proxy MCP server for built-in tools (always included if tools exist)
+    if allowed_builtin_tools:
+        servers["_builtin_tools"] = build_proxy_mcp_server(
+            category="builtin",
+            allowed_tools=allowed_builtin_tools,
             session_id=session_id,
             backend_port=backend_port,
         )
 
-    # 2. Add external MCP servers (filtered)
+    # 2. Add Proxy MCP server for custom tools (only if allowed)
+    if allowed_custom_tools:
+        servers["_custom_tools"] = build_proxy_mcp_server(
+            category="custom",
+            allowed_tools=allowed_custom_tools,
+            session_id=session_id,
+            backend_port=backend_port,
+        )
+
+    # 3. Add external MCP servers (filtered)
     if global_config and global_config.servers:
         for name, config in global_config.servers.items():
-            # Skip old _builtin_tools server (replaced by proxy)
+            # Skip internal proxy servers (starts with _)
             if name.startswith("_"):
                 continue
             # Apply filter
@@ -166,7 +182,7 @@ def build_session_mcp_config(
             elif name in allowed_mcp_servers:
                 servers[name] = config
 
-    # 3. Merge extra per-session config
+    # 4. Merge extra per-session config
     if extra_mcp and extra_mcp.servers:
         for name, config in extra_mcp.servers.items():
             servers[name] = config

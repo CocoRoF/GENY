@@ -306,7 +306,6 @@ class AgentSessionManager(SessionManager):
         # ── Resolve Tool Preset ────────────────────────────────────────
         # Determines which Python tools and MCP servers are available.
         preset = None
-        allowed_tool_names: list[str] = []
         allowed_mcp_servers: list[str] | None = None
 
         try:
@@ -327,12 +326,19 @@ class AgentSessionManager(SessionManager):
         except Exception as e:
             logger.warning(f"  Tool preset resolution failed: {e}")
 
-        # Compute allowed Python tools from preset
+        # Compute allowed Python tools from preset (split by category)
+        allowed_builtin_tools: list[str] = []
+        allowed_custom_tools: list[str] = []
+        allowed_tool_names: list[str] = []
+
         if self._tool_loader and preset:
-            allowed_tool_names = self._tool_loader.get_allowed_tools_for_preset(preset)
-            logger.info(f"  allowed_tools: {len(allowed_tool_names)} tools")
+            allowed_builtin_tools, allowed_custom_tools = self._tool_loader.get_allowed_tools_by_category(preset)
+            allowed_tool_names = allowed_builtin_tools + allowed_custom_tools
+            logger.info(f"  allowed_tools: {len(allowed_builtin_tools)} builtin + {len(allowed_custom_tools)} custom")
         elif self._tool_loader:
-            allowed_tool_names = self._tool_loader.get_all_names()
+            allowed_builtin_tools = self._tool_loader.get_builtin_names()
+            allowed_custom_tools = self._tool_loader.get_custom_names()
+            allowed_tool_names = allowed_builtin_tools + allowed_custom_tools
             logger.info(f"  allowed_tools: all ({len(allowed_tool_names)})")
 
         # Compute allowed MCP servers from preset
@@ -341,7 +347,7 @@ class AgentSessionManager(SessionManager):
         else:
             allowed_mcp_servers = ["*"]  # Default: all external MCP servers
 
-        # ── Build Session MCP Config (Proxy MCP Pattern) ─────────────────
+        # ── Build Session MCP Config (Dual Proxy MCP Pattern) ────────────
         from service.mcp_loader import build_session_mcp_config
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.api_config import APIConfig
@@ -356,7 +362,8 @@ class AgentSessionManager(SessionManager):
 
         merged_mcp_config = build_session_mcp_config(
             global_config=self._global_mcp_config,
-            allowed_tools=allowed_tool_names,
+            allowed_builtin_tools=allowed_builtin_tools,
+            allowed_custom_tools=allowed_custom_tools,
             session_id=session_id,
             backend_port=backend_port,
             allowed_mcp_servers=allowed_mcp_servers,

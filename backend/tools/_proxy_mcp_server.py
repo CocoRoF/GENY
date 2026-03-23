@@ -5,7 +5,7 @@ Proxy MCP Server — thin proxy between Claude CLI and the FastAPI main process.
 This script runs as a stdio MCP server subprocess spawned by Claude CLI.
 It does NOT execute tools itself. Instead, it:
 
-1. Imports tool modules to extract schemas (function signatures)
+1. Auto-discovers tool modules from the specified category folder
 2. Registers proxy functions with FastMCP that delegate execution
    to the main FastAPI process via HTTP POST
 
@@ -14,19 +14,21 @@ to singletons (AgentSessionManager, ChatStore) that only exist in the
 main process.
 
 Usage (spawned by Claude CLI via .mcp.json):
-    python tools/_proxy_mcp_server.py <backend_url> <session_id> [tool1,tool2,...]
+    python tools/_proxy_mcp_server.py <backend_url> <session_id> <category> [tool1,tool2,...]
 
 Arguments:
-    backend_url:  Base URL of the FastAPI server (e.g. http://localhost:8000)
-    session_id:   Session ID for context passing
+    backend_url:   Base URL of the FastAPI server (e.g. http://localhost:8000)
+    session_id:    Session ID for context passing
+    category:      Tool category: 'builtin' or 'custom'
     allowed_tools: Optional comma-separated list of tool names to register.
-                   If omitted, all tools are registered.
+                   If omitted, all tools in the category are registered.
 """
 
 import sys
 import functools
-import asyncio
+import importlib.util
 from pathlib import Path
+from typing import List, Any, Optional, Set
 
 # ── Add project root to path ──
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -45,25 +47,101 @@ except ImportError:
     sys.exit(1)
 
 
-# ── Parse CLI arguments ──
-if len(sys.argv) < 3:
+# ════════════════════════════════════════════════════════════════════════════
+# CLI Argument Parsing
+# ════════════════════════════════════════════════════════════════════════════
+
+def print_usage_and_exit():
     print(
-        "Usage: python _proxy_mcp_server.py <backend_url> <session_id> [allowed_tools]",
+        "Usage: python _proxy_mcp_server.py <backend_url> <session_id> <category> [allowed_tools]\n"
+        "  category: 'builtin' or 'custom'\n"
+        "  allowed_tools: optional comma-separated tool names",
         file=sys.stderr,
     )
     sys.exit(1)
 
+
+if len(sys.argv) < 4:
+    print_usage_and_exit()
+
 BACKEND_URL = sys.argv[1]
 SESSION_ID = sys.argv[2]
-ALLOWED_TOOLS = (
-    set(sys.argv[3].split(",")) if len(sys.argv) > 3 and sys.argv[3] else None
+CATEGORY = sys.argv[3]  # 'builtin' or 'custom'
+ALLOWED_TOOLS: Optional[Set[str]] = (
+    set(sys.argv[4].split(",")) if len(sys.argv) > 4 and sys.argv[4] else None
 )
 
-# ── Create MCP server ──
-mcp = FastMCP("python-tools")
+if CATEGORY not in ("builtin", "custom"):
+    print(f"Error: category must be 'builtin' or 'custom', got '{CATEGORY}'", file=sys.stderr)
+    print_usage_and_exit()
 
 
-def _register_proxy_tool(tool_obj, mcp_server, backend_url, session_id):
+# ════════════════════════════════════════════════════════════════════════════
+# Auto-Discovery: Load tools from folder
+# ════════════════════════════════════════════════════════════════════════════
+
+def discover_tools_from_folder(folder: Path) -> List[Any]:
+    """
+    Scan a folder for *_tools.py files and extract tool objects.
+
+    Each tool file should define a TOOLS list containing tool instances.
+    Falls back to auto-collecting BaseTool/ToolWrapper instances if no TOOLS list.
+    """
+    if not folder.exists():
+        print(f"Warning: Tool folder not found: {folder}", file=sys.stderr)
+        return []
+
+    all_tools = []
+    tool_files = sorted(folder.glob("*_tools.py"))
+
+    for tool_file in tool_files:
+        try:
+            tools = _load_tools_from_file(tool_file)
+            all_tools.extend(tools)
+            if tools:
+                names = [getattr(t, "name", "?") for t in tools]
+                print(f"  [{CATEGORY}] {tool_file.name}: {names}", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Failed to load {tool_file.name}: {e}", file=sys.stderr)
+
+    return all_tools
+
+
+def _load_tools_from_file(file_path: Path) -> List[Any]:
+    """Load tool instances from a single Python file."""
+    module_name = f"_proxy_tools_{file_path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        return []
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+    # Prefer explicit TOOLS list
+    if hasattr(module, "TOOLS"):
+        return list(module.TOOLS)
+
+    # Fallback: try to find and import tools/base.py for is_tool check
+    try:
+        from tools.base import is_tool
+        tools = []
+        for attr_name in dir(module):
+            if attr_name.startswith("_"):
+                continue
+            obj = getattr(module, attr_name)
+            if is_tool(obj):
+                tools.append(obj)
+        return tools
+    except ImportError:
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Proxy Registration
+# ════════════════════════════════════════════════════════════════════════════
+
+def _register_proxy_tool(tool_obj, mcp_server, backend_url: str, session_id: str):
     """Register a tool as a proxy that delegates execution to the main process.
 
     The tool's schema (name, description, parameters) comes from the original
@@ -128,38 +206,27 @@ def _register_proxy_tool(tool_obj, mcp_server, backend_url, session_id):
     mcp_server.tool(name=name, description=description)(proxy_fn)
 
 
-# ── Load tool modules for schema extraction ──
-# We import the tool modules only to get their TOOLS lists.
-# The actual execution happens in the main process.
+# ════════════════════════════════════════════════════════════════════════════
+# Main
+# ════════════════════════════════════════════════════════════════════════════
 
-_all_tools = []
+# Determine folder based on category
+TOOLS_DIR = PROJECT_ROOT / "tools"
+if CATEGORY == "builtin":
+    TARGET_FOLDER = TOOLS_DIR / "built_in"
+    MCP_SERVER_NAME = "builtin-tools"
+else:
+    TARGET_FOLDER = TOOLS_DIR / "custom"
+    MCP_SERVER_NAME = "custom-tools"
 
-# Built-in tools
-try:
-    from tools.built_in.geny_tools import TOOLS as builtin_geny
-    _all_tools.extend(builtin_geny)
-except ImportError as e:
-    print(f"Warning: Could not load built-in geny_tools: {e}", file=sys.stderr)
+# Create MCP server
+mcp = FastMCP(MCP_SERVER_NAME)
 
-# Custom tools
-_custom_modules = [
-    ("tools.custom.browser_tools", "TOOLS"),
-    ("tools.custom.web_search_tools", "TOOLS"),
-    ("tools.custom.web_fetch_tools", "TOOLS"),
-]
+# Discover and load tools from folder
+print(f"Proxy MCP [{CATEGORY}]: scanning {TARGET_FOLDER}", file=sys.stderr)
+_all_tools = discover_tools_from_folder(TARGET_FOLDER)
 
-for module_path, attr in _custom_modules:
-    try:
-        import importlib
-        mod = importlib.import_module(module_path)
-        tools_list = getattr(mod, attr, [])
-        _all_tools.extend(tools_list)
-    except ImportError as e:
-        print(f"Warning: Could not load {module_path}: {e}", file=sys.stderr)
-    except Exception as e:
-        print(f"Warning: Error loading {module_path}: {e}", file=sys.stderr)
-
-# ── Register proxy functions ──
+# Register proxy functions
 _registered_count = 0
 for tool_obj in _all_tools:
     tool_name = getattr(tool_obj, "name", "")
@@ -169,8 +236,7 @@ for tool_obj in _all_tools:
     _registered_count += 1
 
 print(
-    f"Proxy MCP server: {_registered_count} tools registered "
-    f"(session={SESSION_ID})",
+    f"Proxy MCP [{CATEGORY}]: {_registered_count} tools registered (session={SESSION_ID})",
     file=sys.stderr,
 )
 

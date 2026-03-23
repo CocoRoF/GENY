@@ -134,6 +134,30 @@ class GenySessionInfoTool(BaseTool):
         return json.dumps(_session_summary(agent), indent=2, ensure_ascii=False, default=str)
 
 
+def _get_config_model() -> str:
+    """Return the currently configured default model name."""
+    try:
+        from service.config.manager import get_config_manager
+        mgr = get_config_manager()
+        api_cfg = mgr.get_config("api")
+        return api_cfg.anthropic_model or "claude-sonnet-4-6"
+    except Exception:
+        return "claude-sonnet-4-6"
+
+
+def _get_model_options() -> list[dict]:
+    """Return the list of available model options from config."""
+    try:
+        from service.config.sub_config.general.api_config import MODEL_OPTIONS
+        return MODEL_OPTIONS
+    except Exception:
+        return []
+
+
+# Valid role enum values — mirrors frontend Create Session dialog
+VALID_ROLES = ["developer", "worker", "researcher", "planner"]
+
+
 class GenySessionCreateTool(BaseTool):
     """Hire / bring in a new team member (create a new agent session).
 
@@ -144,31 +168,69 @@ class GenySessionCreateTool(BaseTool):
 
     name = "geny_session_create"
     description = (
-        "Hire a new team member — create a new agent session with a name and role. "
-        "Roles: developer (coding), researcher (research/analysis), planner (planning/coordination), worker (general tasks). "
+        "Hire a new team member — create a new agent session. "
+        "Only session_name is required. Role defaults to 'developer' and model uses the system default — "
+        "do NOT specify role or model unless the user explicitly requests a different one. "
         "Use this when asked to: bring in someone new, hire an employee, add a developer to the team, "
         "get a researcher, recruit a new member, 직원 데려오기, 새 멤버 추가, etc. "
         "The new member is immediately available and can be invited to chat rooms afterwards."
     )
 
+    def __init__(self):
+        super().__init__()
+        # Build parameter schema with enum constraints dynamically
+        model_values = [opt["value"] for opt in _get_model_options()]
+        default_model = _get_config_model()
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "session_name": {
+                    "type": "string",
+                    "description": "Name of the new team member (e.g. \"김민수\", \"Alice\", \"Backend Developer Park\").",
+                },
+                "role": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Defaults to 'developer'. Only change if explicitly requested. "
+                        "developer: coding/engineering, worker: general tasks, "
+                        "researcher: research/analysis, planner: planning/coordination."
+                    ),
+                    "enum": VALID_ROLES,
+                    "default": "developer",
+                },
+                "model": {
+                    "type": "string",
+                    "description": (
+                        f"Optional. Defaults to system config ({default_model}). "
+                        "Do NOT specify unless the user explicitly asks for a different model."
+                    ),
+                    **({"enum": model_values} if model_values else {}),
+                    "default": default_model,
+                },
+            },
+            "required": ["session_name"],
+        }
+
     def run(
         self,
         session_name: str,
-        role: str = "worker",
-        model: str = "claude-sonnet-4-20250514",
+        role: str = "developer",
+        model: str | None = None,
     ) -> str:
         """Hire a new team member by creating an agent session.
 
         Args:
             session_name: Name of the new team member (e.g. "김민수", "Alice", "Backend Developer Park").
-            role: The member's role in the team — "developer" (coding/engineering), "researcher" (research/analysis), "planner" (planning/coordination), or "worker" (general tasks). Default: "worker".
-            model: AI model to use (default: claude-sonnet-4-20250514). Usually no need to change.
+            role: The member's role — "developer", "worker", "researcher", or "planner". Default: "developer".
+            model: AI model to use. Default: config default. Usually no need to change.
         """
         import asyncio
 
-        valid_roles = {"worker", "developer", "researcher", "planner"}
-        if role not in valid_roles:
-            return json.dumps({"error": f"Invalid role '{role}'. Valid: {sorted(valid_roles)}"})
+        if role not in VALID_ROLES:
+            return json.dumps({"error": f"Invalid role '{role}'. Valid: {VALID_ROLES}"})
+
+        # Resolve model: None/empty → config default
+        resolved_model = model if model else _get_config_model()
 
         try:
             from service.claude_manager.models import CreateSessionRequest, SessionRole
@@ -176,7 +238,7 @@ class GenySessionCreateTool(BaseTool):
             request = CreateSessionRequest(
                 session_name=session_name,
                 role=SessionRole(role),
-                model=model,
+                model=resolved_model,
             )
 
             manager = _get_agent_manager()
@@ -206,19 +268,21 @@ class GenySessionCreateTool(BaseTool):
     async def arun(
         self,
         session_name: str,
-        role: str = "worker",
-        model: str = "claude-sonnet-4-20250514",
+        role: str = "developer",
+        model: str | None = None,
     ) -> str:
         """Hire a new team member by creating an agent session (async).
 
         Args:
             session_name: Name of the new team member (e.g. "김민수", "Alice", "Backend Developer Park").
-            role: The member's role in the team — "developer" (coding/engineering), "researcher" (research/analysis), "planner" (planning/coordination), or "worker" (general tasks). Default: "worker".
-            model: AI model to use (default: claude-sonnet-4-20250514). Usually no need to change.
+            role: The member's role — "developer", "worker", "researcher", or "planner". Default: "developer".
+            model: AI model to use. Default: config default. Usually no need to change.
         """
-        valid_roles = {"worker", "developer", "researcher", "planner"}
-        if role not in valid_roles:
-            return json.dumps({"error": f"Invalid role '{role}'. Valid: {sorted(valid_roles)}"})
+        if role not in VALID_ROLES:
+            return json.dumps({"error": f"Invalid role '{role}'. Valid: {VALID_ROLES}"})
+
+        # Resolve model: None/empty → config default
+        resolved_model = model if model else _get_config_model()
 
         try:
             from service.claude_manager.models import CreateSessionRequest, SessionRole
@@ -226,7 +290,7 @@ class GenySessionCreateTool(BaseTool):
             request = CreateSessionRequest(
                 session_name=session_name,
                 role=SessionRole(role),
-                model=model,
+                model=resolved_model,
             )
 
             manager = _get_agent_manager()
