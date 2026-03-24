@@ -552,6 +552,14 @@ const ko: Translations = {
     softDeleteNote: '세션이 소프트 삭제됩니다. 삭제된 세션 섹션에서 복원할 수 있습니다.',
     deleting: '삭제 중...',
   },
+  confirmModal: {
+    permanentDeleteTitle: '영구 삭제',
+    permanentDeleteConfirm: '정말로 영구 삭제하시겠습니까: ',
+    permanentDeleteNote: '이 작업은 되돌릴 수 없습니다.',
+    deleteRoomTitle: '채팅방 삭제',
+    deleteRoomConfirm: '정말로 채팅방을 삭제하시겠습니까: ',
+    deleteRoomNote: '이 채팅방의 모든 메시지가 삭제됩니다.',
+  },
 
   // ─── Workflow Store (error messages) ───
   workflowStore: {

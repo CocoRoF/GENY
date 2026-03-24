@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 const formatRelative = (ts: string) => {
   const diff = Date.now() - new Date(ts).getTime();
@@ -29,20 +30,14 @@ export default function RoomSidebar() {
   } = useMessengerStore();
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteRoomId, setDeleteRoomId] = useState<string | null>(null);
 
   const rooms = getFilteredRooms();
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, roomId: string) => {
+  const handleDeleteClick = useCallback((e: React.MouseEvent, roomId: string) => {
     e.stopPropagation();
-    if (confirmDeleteId === roomId) {
-      await deleteRoom(roomId);
-      setConfirmDeleteId(null);
-    } else {
-      setConfirmDeleteId(roomId);
-      setTimeout(() => setConfirmDeleteId(null), 3000);
-    }
-  }, [confirmDeleteId, deleteRoom]);
+    setDeleteRoomId(roomId);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     document.documentElement.classList.add('theme-transition');
@@ -138,7 +133,6 @@ export default function RoomSidebar() {
 
         {rooms.map(room => {
           const isActive = room.id === activeRoomId;
-          const isDeleting = confirmDeleteId === room.id;
           return (
             <div
               key={room.id}
@@ -177,13 +171,9 @@ export default function RoomSidebar() {
                 </div>
               </div>
               <button
-                className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center border-none cursor-pointer transition-all opacity-0 group-hover:opacity-100 ${
-                  isDeleting
-                    ? 'bg-red-500 text-white opacity-100'
-                    : 'bg-transparent text-[var(--text-muted)] hover:text-red-500 hover:bg-[rgba(239,68,68,0.1)]'
-                }`}
-                onClick={e => handleDelete(e, room.id)}
-                title={isDeleting ? t('messenger.confirmDelete') : t('messenger.deleteRoom')}
+                className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center border-none cursor-pointer transition-all opacity-0 group-hover:opacity-100 bg-transparent text-[var(--text-muted)] hover:text-red-500 hover:bg-[rgba(239,68,68,0.1)]"
+                onClick={e => handleDeleteClick(e, room.id)}
+                title={t('messenger.deleteRoom')}
               >
                 <Trash2 size={12} />
               </button>
@@ -202,6 +192,19 @@ export default function RoomSidebar() {
           {t('messenger.backToDashboard')}
         </Link>
       </div>
+
+      {deleteRoomId && (() => {
+        const room = rooms.find(r => r.id === deleteRoomId);
+        return (
+          <ConfirmModal
+            title={t('confirmModal.deleteRoomTitle')}
+            message={<>{t('confirmModal.deleteRoomConfirm')}<strong className="text-[var(--text-primary)]">{room?.name || deleteRoomId.substring(0, 12)}</strong>?</>}
+            note={t('confirmModal.deleteRoomNote')}
+            onConfirm={() => deleteRoom(deleteRoomId)}
+            onClose={() => setDeleteRoomId(null)}
+          />
+        );
+      })()}
     </div>
   );
 

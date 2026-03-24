@@ -7,6 +7,7 @@ import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
 import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser } from 'lucide-react';
 import type { SessionInfo } from '@/types';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));
@@ -26,6 +27,7 @@ export default function InfoTab() {
   const [promptDraft, setPromptDraft] = useState('');
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [promptMsg, setPromptMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [showPermanentDeleteModal, setShowPermanentDeleteModal] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     if (!selectedSessionId) { setData(null); return; }
@@ -208,8 +210,17 @@ export default function InfoTab() {
       {isDeleted && (
         <div className="flex gap-2 mt-4 pt-4 border-t border-[var(--border-color)]">
           <button className={cn("py-2 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => restoreSession(data.session_id)}><RotateCcw size={12} /> {t('info.restoreSession')}</button>
-          <button className={cn("py-2 px-4 bg-[var(--danger-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => permanentDeleteSession(data.session_id)}><Trash2 size={12} /> {t('info.permanentDelete')}</button>
+          <button className={cn("py-2 px-4 bg-[var(--danger-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => setShowPermanentDeleteModal(true)}><Trash2 size={12} /> {t('info.permanentDelete')}</button>
         </div>
+      )}
+      {showPermanentDeleteModal && data && (
+        <ConfirmModal
+          title={t('confirmModal.permanentDeleteTitle')}
+          message={<>{t('confirmModal.permanentDeleteConfirm')}<strong className="text-[var(--text-primary)]">{data.session_name || data.session_id.substring(0, 12)}</strong>?</>}
+          note={t('confirmModal.permanentDeleteNote')}
+          onConfirm={() => permanentDeleteSession(data.session_id)}
+          onClose={() => setShowPermanentDeleteModal(false)}
+        />
       )}
     </div>
   );

@@ -12,6 +12,7 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 }
 import CreateSessionModal from '@/components/modals/CreateSessionModal';
 import DeleteSessionModal from '@/components/modals/DeleteSessionModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import Link from 'next/link';
 
 function SessionItem({ session, isSelected, onSelect }: {
@@ -76,6 +77,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SessionInfo | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<SessionInfo | null>(null);
 
   const running = sessions.filter(s => s.status === 'running' || s.status === 'idle').length;
   const errors = sessions.filter(s => s.status === 'error').length;
@@ -207,7 +209,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
                   </button>
                   <button
                     className="flex items-center justify-center w-7 h-7 rounded bg-transparent border-none text-[var(--text-muted)] hover:!text-[var(--danger-color)] cursor-pointer transition-colors duration-150"
-                    onClick={() => permanentDeleteSession(session.session_id)}
+                    onClick={() => setPermanentDeleteTarget(session)}
                     title={t('sidebar.permanentDelete')}
                   >
                     <Trash2 size={14} />
@@ -222,6 +224,15 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
       {showCreateModal && <CreateSessionModal onClose={() => setShowCreateModal(false)} />}
       {deleteTarget && (
         <DeleteSessionModal session={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      )}
+      {permanentDeleteTarget && (
+        <ConfirmModal
+          title={t('confirmModal.permanentDeleteTitle')}
+          message={<>{t('confirmModal.permanentDeleteConfirm')}<strong className="text-[var(--text-primary)]">{permanentDeleteTarget.session_name || permanentDeleteTarget.session_id.substring(0, 12)}</strong>?</>}
+          note={t('confirmModal.permanentDeleteNote')}
+          onConfirm={() => permanentDeleteSession(permanentDeleteTarget.session_id)}
+          onClose={() => setPermanentDeleteTarget(null)}
+        />
       )}
 
       {/* Messenger Link */}

@@ -552,6 +552,14 @@ const en = {
     softDeleteNote: 'This will soft-delete the session. You can restore it from the deleted sessions section.',
     deleting: 'Deleting...',
   },
+  confirmModal: {
+    permanentDeleteTitle: 'Permanently Delete',
+    permanentDeleteConfirm: 'Are you sure you want to permanently delete ',
+    permanentDeleteNote: 'This action cannot be undone.',
+    deleteRoomTitle: 'Delete Room',
+    deleteRoomConfirm: 'Are you sure you want to delete room ',
+    deleteRoomNote: 'All messages in this room will be deleted.',
+  },
 
   // ─── Workflow Store (error messages) ───
   workflowStore: {
