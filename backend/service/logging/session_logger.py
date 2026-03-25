@@ -125,6 +125,7 @@ class SessionLogger:
         # In-memory log cache (for quick retrieval)
         self._log_cache: List[LogEntry] = []
         self._max_cache_size = 300  # Keep last 300 entries in memory
+        self._write_count: int = 0   # Monotonically increasing write counter (cursor basis)
 
         # Activity tracking — monotonic timestamp of last cache write
         self._last_write_at: float = 0.0
@@ -158,6 +159,7 @@ class SessionLogger:
 
             # Add to cache
             self._log_cache.append(entry)
+            self._write_count += 1
             self._last_write_at = time.monotonic()
 
             # Track last entry level + tool name
@@ -968,9 +970,14 @@ class SessionLogger:
     # ── Public API for cache-based streaming (used by SSE endpoint) ──
 
     def get_cache_length(self) -> int:
-        """Return current number of entries in the in-memory log cache."""
+        """Return monotonic write count (used as cursor for SSE streaming).
+
+        This returns a cursor value that only increases, even when the
+        underlying cache is trimmed.  Use ``get_cache_entries_since()``
+        with the value returned here.
+        """
         with self._lock:
-            return len(self._log_cache)
+            return self._write_count
 
     def get_last_write_at(self) -> float:
         """Return monotonic timestamp of last cache write (0 if never written)."""
@@ -986,11 +993,17 @@ class SessionLogger:
     def extract_file_changes_from_cache(self, since_cursor: int = 0) -> list:
         """Extract file change entries from cached TOOL logs.
 
-        Returns a list of dicts with file_path, operation, lines_added,
-        lines_removed, and the full file_changes data.
+        *since_cursor* is a monotonic write-count cursor (from
+        ``get_cache_length``).  Entries written after that point are
+        scanned for file-change metadata.
         """
         with self._lock:
-            entries = self._log_cache[since_cursor:]
+            new_writes = self._write_count - since_cursor
+            if new_writes <= 0:
+                entries = []
+            else:
+                available = min(new_writes, len(self._log_cache))
+                entries = self._log_cache[-available:]
         result = []
         for entry in entries:
             if entry.level != LogLevel.TOOL_USE:
@@ -1014,15 +1027,18 @@ class SessionLogger:
         """Return new cache entries after *cursor* and the updated cursor.
 
         Args:
-            cursor: Previous cache length (as returned by this method).
+            cursor: Previous write count (as returned by ``get_cache_length``
+                    or a prior call to this method).
 
         Returns:
             (new_entries, new_cursor) – list of LogEntry objects + updated cursor.
         """
         with self._lock:
-            current_len = len(self._log_cache)
-            if current_len > cursor:
-                return list(self._log_cache[cursor:current_len]), current_len
+            new_writes = self._write_count - cursor
+            if new_writes > 0:
+                # Return at most as many entries as still exist in cache
+                available = min(new_writes, len(self._log_cache))
+                return list(self._log_cache[-available:]), self._write_count
             return [], cursor
 
     def get_logs(
