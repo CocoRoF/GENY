@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
+import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 
 const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
 
@@ -17,7 +18,11 @@ const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), {
  *  - Emotion tester buttons (per model's emotion map)
  *  - Real-time avatar state display
  *  - SSE subscription lifecycle management
+ *  - Collapsible CLI-style log panel at the bottom
  */
+
+const MIN_LOG_HEIGHT = 100;
+const DEFAULT_LOG_HEIGHT = 180;
 
 export default function VTuberTab() {
   const { t } = useI18n();
@@ -37,6 +42,13 @@ export default function VTuberTab() {
   const unsubscribeAvatar = useVTuberStore((s) => s.unsubscribeAvatar);
   const setEmotion = useVTuberStore((s) => s.setEmotion);
   const assignedModel = useVTuberStore((s) => s.getModelForSession(sessionId));
+  const logCount = useVTuberStore((s) => (s.logs[sessionId] ?? []).length);
+
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logHeight, setLogHeight] = useState(DEFAULT_LOG_HEIGHT);
+  const draggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(0);
 
   // Load models on mount
   useEffect(() => {
@@ -54,6 +66,27 @@ export default function VTuberTab() {
     subscribeAvatar(sessionId);
     return () => unsubscribeAvatar(sessionId);
   }, [sessionId, assignedModelName, subscribeAvatar, unsubscribeAvatar]);
+
+  // Drag resize handler for log panel
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    startYRef.current = e.clientY;
+    startHeightRef.current = logHeight;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const delta = startYRef.current - ev.clientY;
+      setLogHeight(Math.max(MIN_LOG_HEIGHT, startHeightRef.current + delta));
+    };
+    const handleMouseUp = () => {
+      draggingRef.current = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [logHeight]);
 
   if (!sessionId) {
     return (
@@ -146,6 +179,46 @@ export default function VTuberTab() {
           </div>
         )}
       </div>
+
+      {/* ── Log Panel Toggle Bar ── */}
+      <div
+        className="flex items-center justify-between px-3 py-1 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0 cursor-pointer select-none hover:bg-[var(--bg-tertiary)] transition-colors"
+        onClick={() => setLogsOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <svg
+            className={`w-3 h-3 text-[var(--text-muted)] transition-transform duration-200 ${logsOpen ? 'rotate-180' : ''}`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M18 15l-6-6-6 6" />
+          </svg>
+          <span className="text-[0.6875rem] text-[var(--text-muted)] font-medium tracking-wider uppercase">
+            Logs
+          </span>
+          {logCount > 0 && (
+            <span className="text-[0.5625rem] bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-1.5 py-0 rounded-full">
+              {logCount}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Log Panel (collapsible) ── */}
+      {logsOpen && (
+        <>
+          {/* Drag handle */}
+          <div
+            className="h-1 bg-[var(--border-color)] cursor-row-resize hover:bg-[var(--primary-color)] transition-colors shrink-0"
+            onMouseDown={handleDragStart}
+          />
+          <div className="shrink-0" style={{ height: logHeight }}>
+            <VTuberLogPanel sessionId={sessionId} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

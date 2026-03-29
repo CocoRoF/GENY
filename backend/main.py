@@ -263,6 +263,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"   - Live2D models: {len(live2d_model_manager.models)}")
     logger.info(f"   - Default model: {live2d_model_manager.default_model_name}")
 
+    # Give agent_executor access to app.state for avatar state emission
+    from service.execution.agent_executor import set_app_state
+    set_app_state(app.state)
+
     # ── Tool Runtime Health Check ──────────────────────────────────────
     # Verify tools actually execute (not just registered) by invoking a
     # read-only tool directly and checking the response.

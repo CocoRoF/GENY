@@ -14,6 +14,7 @@ This module owns:
     - Auto-revival               (agent.revive)
     - Double-execution prevention
     - Timeout handling
+    - Avatar state updates       (emotion extraction from output)
 
 Both ``agent_controller`` (command tab) and ``chat_controller``
 (messenger broadcast) delegate here.
@@ -60,6 +61,74 @@ class ExecutionResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# ============================================================================
+# App-state reference (set once during startup from main.py lifespan)
+# ============================================================================
+
+_app_state = None
+"""Module-level reference to FastAPI app.state (for avatar/VTuber services)."""
+
+
+def set_app_state(app_state) -> None:
+    """
+    Called once during startup to give the executor access to app.state.
+    This avoids passing app_state through every call chain.
+    """
+    global _app_state
+    _app_state = app_state
+
+
+# ============================================================================
+# Avatar state emission (called after every execution)
+# ============================================================================
+
+async def _emit_avatar_state(session_id: str, result: 'ExecutionResult') -> None:
+    """
+    Emit avatar state update based on execution result.
+    Called after _execute_core completes — ensures ALL execution paths
+    (sync, async, chat broadcast) update the Live2D avatar.
+
+    Best-effort: never raises.
+    """
+    if _app_state is None:
+        return
+    if not hasattr(_app_state, 'avatar_state_manager') or not hasattr(_app_state, 'live2d_model_manager'):
+        return
+
+    try:
+        state_manager = _app_state.avatar_state_manager
+        model_manager = _app_state.live2d_model_manager
+
+        model = model_manager.get_agent_model(session_id)
+        if not model:
+            return
+
+        from service.vtuber.emotion_extractor import EmotionExtractor
+        extractor = EmotionExtractor(model.emotionMap)
+
+        if result.success and result.output:
+            # Extract emotion from agent output text
+            emotion, index = extractor.resolve_emotion(result.output, "completed")
+            await state_manager.update_state(
+                session_id=session_id,
+                emotion=emotion,
+                expression_index=index,
+                trigger="agent_output",
+            )
+        elif not result.success:
+            # Error/timeout → set appropriate emotion
+            agent_state = "timeout" if "Timeout" in (result.error or "") else "error"
+            emotion, index = extractor.resolve_emotion(None, agent_state)
+            await state_manager.update_state(
+                session_id=session_id,
+                emotion=emotion,
+                expression_index=index,
+                trigger="state_change",
+            )
+    except Exception:
+        logger.debug("Avatar state emission failed for %s", session_id, exc_info=True)
 
 
 # ============================================================================
@@ -330,13 +399,16 @@ async def execute_command(
 
     # 4. Execute (blocking)
     try:
-        return await _execute_core(
+        result = await _execute_core(
             agent, session_id, prompt, holder,
             timeout=timeout,
             system_prompt=system_prompt,
             max_turns=max_turns,
             **invoke_kwargs,
         )
+        # 5. Emit avatar state (best-effort, never raises)
+        await _emit_avatar_state(session_id, result)
+        return result
     finally:
         # Cleanup — holder is no longer needed for SSE streaming
         cleanup_execution(session_id)
@@ -397,12 +469,14 @@ async def start_command_background(
     # 4. Fire-and-forget background task
     async def _run():
         try:
-            await _execute_core(
+            result = await _execute_core(
                 agent, session_id, prompt, holder,
                 timeout=timeout,
                 system_prompt=system_prompt,
                 max_turns=max_turns,
             )
+            # Emit avatar state (best-effort)
+            await _emit_avatar_state(session_id, result)
         finally:
             # Schedule deferred cleanup: keep the holder alive for a grace
             # period so a reconnecting frontend can pick up the final result,

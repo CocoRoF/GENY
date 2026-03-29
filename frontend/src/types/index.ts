@@ -572,3 +572,12 @@ export interface AvatarState {
   trigger: string;
   timestamp: string;
 }
+
+export interface VTuberLogEntry {
+  id: number;
+  timestamp: string;
+  level: 'info' | 'state' | 'error' | 'warn' | 'debug';
+  source: string;
+  message: string;
+  detail?: Record<string, unknown>;
+}
