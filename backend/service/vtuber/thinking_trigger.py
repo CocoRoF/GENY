@@ -12,6 +12,7 @@ checks whether any VTuber session should fire a [THINKING_TRIGGER].
 from __future__ import annotations
 
 import asyncio
+import random
 from logging import getLogger
 from typing import Dict, Optional
 
@@ -19,6 +20,33 @@ logger = getLogger(__name__)
 
 # Minimum idle seconds before a thinking trigger fires
 _DEFAULT_IDLE_THRESHOLD = 120  # 2 minutes
+
+# Varied trigger prompts for more natural behavior
+_TRIGGER_PROMPTS = [
+    (
+        "[THINKING_TRIGGER] You've been idle for a while. "
+        "Reflect on recent conversations, recall interesting "
+        "topics, or think about what the user might need next."
+    ),
+    (
+        "[THINKING_TRIGGER] 잠깐 여유가 생겼네. "
+        "최근 대화를 돌아보거나, 사용자에게 도움이 될 만한 걸 떠올려 봐."
+    ),
+    (
+        "[THINKING_TRIGGER] 조용한 시간이야. "
+        "재미있는 관찰이나 팁을 공유하고 싶다면 지금이 좋은 타이밍이야."
+    ),
+    (
+        "[THINKING_TRIGGER] 사용자가 잠깐 자리를 비운 것 같아. "
+        "다시 돌아왔을 때 반갑게 맞이할 준비를 해 두자."
+    ),
+]
+
+_CLI_AWARE_PROMPT = (
+    "[THINKING_TRIGGER] CLI 에이전트가 지금 작업 중이야. "
+    "작업이 끝나면 결과를 정리해서 사용자에게 알려줘야 해. "
+    "그동안 준비하면서 기다려 봐."
+)
 
 
 class ThinkingTriggerService:
@@ -94,20 +122,19 @@ class ThinkingTriggerService:
                 logger.debug("ThinkingTrigger loop error", exc_info=True)
 
     async def _fire_trigger(self, session_id: str) -> None:
-        """Send a [THINKING_TRIGGER] to the VTuber session."""
+        """Send a context-aware [THINKING_TRIGGER] to the VTuber session."""
         try:
             from service.execution.agent_executor import (
                 AlreadyExecutingError,
                 AgentNotAliveError,
                 AgentNotFoundError,
                 execute_command,
+                is_executing,
             )
 
-            prompt = (
-                "[THINKING_TRIGGER] You've been idle for a while. "
-                "Reflect on recent conversations, recall interesting "
-                "topics, or think about what the user might need next."
-            )
+            # Check if the linked CLI worker is busy
+            prompt = self._build_trigger_prompt(session_id, is_executing)
+
             await execute_command(session_id, prompt)
             logger.info("Thinking trigger fired for %s", session_id)
 
@@ -119,6 +146,21 @@ class ThinkingTriggerService:
         except Exception:
             logger.debug("Thinking trigger failed for %s", session_id, exc_info=True)
             self.unregister(session_id)
+
+    def _build_trigger_prompt(self, session_id: str, is_executing_fn) -> str:
+        """Select a trigger prompt based on context."""
+        # If CLI agent is currently executing, use CLI-aware prompt
+        try:
+            from service.langgraph import get_agent_session_manager
+            agent = get_agent_session_manager().get_agent(session_id)
+            if agent:
+                linked_id = getattr(agent, 'linked_session_id', None)
+                if linked_id and is_executing_fn(linked_id):
+                    return _CLI_AWARE_PROMPT
+        except Exception:
+            pass
+
+        return random.choice(_TRIGGER_PROMPTS)
 
 
 # ============================================================================

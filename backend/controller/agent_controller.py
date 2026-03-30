@@ -384,6 +384,8 @@ async def restore_session(
             graph_name=params.get("graph_name"),
             workflow_id=params.get("workflow_id"),
             tool_preset_id=params.get("tool_preset_id"),
+            linked_session_id=params.get("linked_session_id"),
+            session_type=params.get("session_type"),
         )
 
         # Reuse the SAME session_id → preserves storage_path
@@ -398,6 +400,11 @@ async def restore_session(
             if agent.process:
                 agent.process.system_prompt = stored_system_prompt
             store.update(session_id, {"system_prompt": stored_system_prompt})
+
+        # Restore chat_room_id from stored record (chat room persists across delete/restore)
+        stored_chat_room_id = params.get("chat_room_id")
+        if stored_chat_room_id:
+            agent._chat_room_id = stored_chat_room_id
 
         session_info = agent.get_session_info()
         logger.info(f"✅ Session restored: {session_id} (same ID, storage preserved)")

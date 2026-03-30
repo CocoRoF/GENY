@@ -24,6 +24,27 @@ from service.workflow.workflow_state import NodeStateUsage
 
 logger = getLogger(__name__)
 
+
+async def _emit_silent_expression(session_id: str) -> None:
+    """Emit a non-verbal 'thinking' avatar state when [SILENT] is returned."""
+    try:
+        from service.execution.agent_executor import _app_state
+        if _app_state is None:
+            return
+        if not hasattr(_app_state, 'avatar_state_manager'):
+            return
+        await _app_state.avatar_state_manager.update_state(
+            session_id=session_id,
+            emotion="neutral",
+            motion_group="Idle",
+            intensity=0.5,
+            transition_ms=600,
+            trigger="silent_think",
+        )
+    except Exception:
+        pass  # Best-effort — never break the workflow
+
+
 _THINK_PROMPT = """\
 You are a VTuber persona engaging in a moment of internal reflection.
 
@@ -96,6 +117,8 @@ class VTuberThinkNode(BaseNode):
                 logger.info(
                     f"[{context.session_id}] vtuber_think: silent — no output"
                 )
+                # Emit a non-verbal "thinking" expression so the avatar reacts
+                await _emit_silent_expression(context.session_id)
                 return {
                     "is_complete": True,
                     "current_step": "vtuber_think_silent",

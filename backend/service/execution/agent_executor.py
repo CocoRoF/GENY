@@ -174,7 +174,26 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         async def _trigger_vtuber() -> None:
             try:
                 await execute_command(linked_id, content)
-            except (AlreadyExecutingError, AgentNotFoundError, AgentNotAliveError) as exc:
+            except AlreadyExecutingError:
+                # VTuber is busy — store in inbox for later pickup
+                try:
+                    from service.chat.inbox import get_inbox_manager
+                    inbox = get_inbox_manager()
+                    inbox.deliver(
+                        target_session_id=linked_id,
+                        content=content,
+                        sender_session_id=session_id,
+                        sender_name="CLI Agent",
+                    )
+                    logger.info(
+                        "VTuber %s busy — CLI_RESULT stored in inbox", linked_id
+                    )
+                except Exception:
+                    logger.debug(
+                        "VTuber notification inbox fallback failed for %s",
+                        linked_id, exc_info=True,
+                    )
+            except (AgentNotFoundError, AgentNotAliveError) as exc:
                 logger.debug(
                     "VTuber notification to %s skipped: %s", linked_id, exc
                 )
@@ -188,6 +207,48 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         logger.debug(
             "VTuber notification failed for %s", session_id, exc_info=True
         )
+
+
+async def _notify_vtuber_cli_progress(session_id: str, status: str) -> None:
+    """
+    If this is a CLI session linked to a VTuber, update the VTuber avatar
+    to show that the CLI worker is active (e.g., "surprise" expression).
+
+    Best-effort: never raises.
+    """
+    try:
+        if _app_state is None:
+            return
+        if not hasattr(_app_state, 'avatar_state_manager') or not hasattr(_app_state, 'live2d_model_manager'):
+            return
+
+        from service.langgraph import get_agent_session_manager
+        manager = get_agent_session_manager()
+        agent = manager.get_agent(session_id)
+        if not agent:
+            return
+        if getattr(agent, '_session_type', None) != 'cli':
+            return
+        linked_id = getattr(agent, 'linked_session_id', None)
+        if not linked_id:
+            return
+
+        model_manager = _app_state.live2d_model_manager
+        model = model_manager.get_agent_model(linked_id)
+        if not model:
+            return
+
+        state_manager = _app_state.avatar_state_manager
+
+        if status == "executing":
+            await state_manager.update_state(
+                session_id=linked_id,
+                emotion="surprise",
+                expression_index=model.emotionMap.get("surprise", 0),
+                trigger="cli_progress",
+            )
+    except Exception:
+        pass  # Best-effort
 
 
 # ============================================================================
@@ -466,6 +527,9 @@ async def execute_command(
 
     # 4. Execute (blocking)
     try:
+        # Notify linked VTuber that CLI is working (best-effort)
+        await _notify_vtuber_cli_progress(session_id, "executing")
+
         result = await _execute_core(
             agent, session_id, prompt, holder,
             timeout=timeout,

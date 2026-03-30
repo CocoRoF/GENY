@@ -40,6 +40,19 @@ class AvatarState:
         return asdict(self)
 
 
+# Default emotion → motion group mapping.
+# Models can override via emotionMotionMap in model_registry.json.
+_DEFAULT_EMOTION_MOTION: Dict[str, str] = {
+    "joy": "TapBody",
+    "surprise": "TapBody",
+    "anger": "TapBody",
+    "sadness": "Idle",
+    "fear": "Idle",
+    "disgust": "Idle",
+    "neutral": "Idle",
+}
+
+
 class AvatarStateManager:
     """
     Manages avatar states for all active sessions
@@ -49,6 +62,18 @@ class AvatarStateManager:
     def __init__(self):
         self._states: Dict[str, AvatarState] = {}
         self._subscribers: Dict[str, List[Callable]] = {}
+        self._session_motion_maps: Dict[str, Dict[str, str]] = {}
+
+    def set_emotion_motion_map(self, session_id: str, mapping: Dict[str, str]) -> None:
+        """Register a per-session emotion→motion override (from model config)."""
+        self._session_motion_maps[session_id] = mapping
+
+    def resolve_motion_for_emotion(self, session_id: str, emotion: str) -> str:
+        """Resolve motion group for an emotion, checking per-session override first."""
+        custom = self._session_motion_maps.get(session_id)
+        if custom and emotion in custom:
+            return custom[emotion]
+        return _DEFAULT_EMOTION_MOTION.get(emotion, "Idle")
 
     def get_state(self, session_id: str) -> AvatarState:
         """Get current avatar state for a session. Creates default if missing."""
@@ -71,11 +96,16 @@ class AvatarStateManager:
         Update avatar state and notify all subscribers.
 
         Only changed fields are updated; others retain their previous values.
+        When emotion changes and no explicit motion_group is given,
+        auto-resolves a matching motion group from the mapping table.
         """
         state = self.get_state(session_id)
 
         if emotion is not None:
             state.emotion = emotion
+            # Auto-resolve motion when emotion changes and no explicit motion given
+            if motion_group is None:
+                state.motion_group = self.resolve_motion_for_emotion(session_id, emotion)
         if expression_index is not None:
             state.expression_index = expression_index
         if motion_group is not None:
@@ -121,6 +151,7 @@ class AvatarStateManager:
         """Remove all state and subscribers for a session."""
         self._states.pop(session_id, None)
         self._subscribers.pop(session_id, None)
+        self._session_motion_maps.pop(session_id, None)
         logger.debug(f"Avatar state cleaned up for session {session_id}")
 
     def get_all_states(self) -> Dict[str, AvatarState]:

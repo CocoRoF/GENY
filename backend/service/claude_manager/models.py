@@ -204,6 +204,16 @@ class CreateSessionRequest(BaseModel):
         description="Session type: 'vtuber' or 'cli' (None defaults to standard CLI)"
     )
 
+    # VTuber-specific: separate prompt/model for the internal CLI agent
+    cli_system_prompt: Optional[str] = Field(
+        default=None,
+        description="System prompt for the internal CLI agent (VTuber role only)"
+    )
+    cli_model: Optional[str] = Field(
+        default=None,
+        description="Model override for the internal CLI agent (VTuber role only)"
+    )
+
 
 class SessionInfo(BaseModel):
     """
@@ -293,6 +303,12 @@ class SessionInfo(BaseModel):
     session_type: Optional[str] = Field(
         default=None,
         description="Session type: 'vtuber' or 'cli' (None defaults to standard CLI)"
+    )
+
+    # VTuber chat room
+    chat_room_id: Optional[str] = Field(
+        default=None,
+        description="Chat room ID auto-created for VTuber sessions"
     )
 
 

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useAppStore } from '@/store/useAppStore';
-import { agentApi } from '@/lib/api';
+import { chatApi } from '@/lib/api';
+import type { ChatRoomMessage } from '@/types';
 
 interface ChatMessage {
   id: string;
@@ -12,17 +12,40 @@ interface ChatMessage {
 }
 
 /**
- * VTuberChatPanel — Lightweight conversational chat overlay for VTuber sessions.
+ * VTuberChatPanel — Conversational chat overlay for VTuber sessions.
  *
- * Shows recent messages as floating bubbles + a text input at the bottom.
- * Executes via the standard agent execute API.
+ * Uses the Chat Room system for DB-backed persistence:
+ *  - Loads history on mount via getRoomMessages()
+ *  - Sends messages via broadcastToRoom()
+ *  - Receives responses in real-time via SSE subscription
+ *
+ * Messages survive tab switches because they are stored in DB.
  */
-export default function VTuberChatPanel({ sessionId }: { sessionId: string }) {
+export default function VTuberChatPanel({
+  sessionId,
+  roomId,
+}: {
+  sessionId: string;
+  roomId?: string | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const lastMsgIdRef = useRef<string | null>(null);
+  const sseRef = useRef<{ close: () => void } | null>(null);
+
+  // Convert ChatRoomMessage to display format
+  const toDisplayMessage = useCallback((msg: ChatRoomMessage): ChatMessage => {
+    return {
+      id: msg.id,
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+      timestamp: new Date(msg.timestamp).getTime(),
+    };
+  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -31,33 +54,86 @@ export default function VTuberChatPanel({ sessionId }: { sessionId: string }) {
     }
   }, [messages]);
 
+  // Load history + subscribe SSE when roomId is available
+  useEffect(() => {
+    if (!roomId) return;
+
+    let cancelled = false;
+
+    const init = async () => {
+      try {
+        const historyResp = await chatApi.getRoomMessages(roomId);
+        if (cancelled) return;
+
+        const loaded = historyResp.messages.map(toDisplayMessage);
+        setMessages(loaded);
+        setHistoryLoaded(true);
+
+        if (loaded.length > 0) {
+          lastMsgIdRef.current = historyResp.messages[historyResp.messages.length - 1].id;
+        }
+
+        // Subscribe to SSE for live updates
+        const sub = chatApi.subscribeToRoom(
+          roomId,
+          lastMsgIdRef.current,
+          (eventType, eventData) => {
+            if (eventType === 'message') {
+              const msg = eventData as unknown as ChatRoomMessage;
+              if (!msg.id) return;
+              lastMsgIdRef.current = msg.id;
+              const displayMsg = toDisplayMessage(msg);
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === msg.id)) return prev;
+                return [...prev, displayMsg];
+              });
+            }
+          },
+          () => lastMsgIdRef.current,
+        );
+
+        sseRef.current = sub;
+      } catch (e) {
+        console.error('[VTuberChatPanel] Failed to init chat room:', e);
+        setHistoryLoaded(true);
+      }
+    };
+
+    init();
+
+    return () => {
+      cancelled = true;
+      sseRef.current?.close();
+      sseRef.current = null;
+    };
+  }, [roomId, toDisplayMessage]);
+
+  // Reset state when session/room changes
+  useEffect(() => {
+    setMessages([]);
+    setHistoryLoaded(false);
+    lastMsgIdRef.current = null;
+  }, [sessionId, roomId]);
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || !roomId) return;
 
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setSending(true);
 
     try {
-      // Use the standard execute API — VTuber workflow handles routing
-      const result = await agentApi.execute(sessionId, { prompt: text });
-      if (result.output) {
-        const assistantMsg: ChatMessage = {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          content: result.output,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+      const resp = await chatApi.broadcastToRoom(roomId, { message: text });
+
+      if (resp.user_message) {
+        const userMsg = toDisplayMessage(resp.user_message);
+        lastMsgIdRef.current = resp.user_message.id;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === resp.user_message.id)) return prev;
+          return [...prev, userMsg];
+        });
       }
-    } catch (e) {
+    } catch {
       const errorMsg: ChatMessage = {
         id: `e-${Date.now()}`,
         role: 'assistant',
@@ -69,7 +145,7 @@ export default function VTuberChatPanel({ sessionId }: { sessionId: string }) {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [input, sending, sessionId]);
+  }, [input, sending, roomId, toDisplayMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -87,6 +163,15 @@ export default function VTuberChatPanel({ sessionId }: { sessionId: string }) {
     return [null, content];
   };
 
+  // No chat room available yet
+  if (!roomId) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center text-[var(--text-muted)] text-sm opacity-60">
+        채팅방을 준비하고 있어요...
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages area */}
@@ -94,9 +179,14 @@ export default function VTuberChatPanel({ sessionId }: { sessionId: string }) {
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2.5 min-h-0"
       >
-        {messages.length === 0 && (
+        {historyLoaded && messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-sm opacity-60">
             대화를 시작해보세요 ✨
+          </div>
+        )}
+        {!historyLoaded && (
+          <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-sm opacity-60">
+            <span className="animate-pulse">채팅 기록을 불러오는 중...</span>
           </div>
         )}
         {messages.map((msg) => {

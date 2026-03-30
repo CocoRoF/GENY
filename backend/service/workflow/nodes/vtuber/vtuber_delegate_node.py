@@ -8,6 +8,7 @@ then returns a conversational acknowledgment to the user.
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from logging import getLogger
 from typing import Any, Dict
@@ -33,17 +34,6 @@ clear, actionable task description for the CLI agent.
 
 Keep the task description concise and technical — the CLI agent knows \
 how to execute tasks. Do NOT add pleasantries; just the task.
-
-User's original request:
-{input}"""
-
-_ACK_PROMPT = """\
-You are a VTuber persona. You just delegated a task to your CLI agent \
-partner. Write a short, friendly acknowledgment for the user.
-
-Start with an emotion tag: [neutral], [joy], [smirk], etc.
-Say something like "I've started working on it" in a natural way.
-Use the same language as the user.
 
 User's original request:
 {input}"""
@@ -81,14 +71,6 @@ class VTuberDelegateNode(BaseNode):
             type="prompt_template",
             default=_DELEGATE_PROMPT,
             description="Prompt to rephrase the user's request for the CLI agent.",
-            group="prompt",
-        ),
-        NodeParameter(
-            name="ack_prompt",
-            label="Acknowledgment Prompt",
-            type="prompt_template",
-            default=_ACK_PROMPT,
-            description="Prompt for the friendly acknowledgment to the user.",
             group="prompt",
         ),
     ]
@@ -135,16 +117,25 @@ class VTuberDelegateNode(BaseNode):
             task_text = state.get("input", "")
 
         # ------------------------------------------------------------------
+        # 2b. Gather recent conversation context for the CLI agent
+        # ------------------------------------------------------------------
+        chat_context = self._extract_recent_context(state)
+
+        # ------------------------------------------------------------------
         # 3. Deliver DM to CLI agent and trigger execution
         # ------------------------------------------------------------------
+        delegation_content = format_delegation_request(
+            sender_id=context.session_id,
+            target_id=linked_id,
+            task=task_text,
+        )
+        if chat_context:
+            delegation_content += f"\n\n[CONVERSATION_CONTEXT]\n{chat_context}"
+
         dm_ok = await self._send_dm(
             target_session_id=linked_id,
             sender_session_id=context.session_id,
-            content=format_delegation_request(
-                sender_id=context.session_id,
-                target_id=linked_id,
-                task=task_text,
-            ),
+            content=delegation_content,
         )
 
         if not dm_ok:
@@ -158,18 +149,16 @@ class VTuberDelegateNode(BaseNode):
             }
 
         # ------------------------------------------------------------------
-        # 4. Generate acknowledgment for the user
+        # 4. Acknowledgment for the user (template-based, no LLM call)
         # ------------------------------------------------------------------
-        ack_tmpl = config.get("ack_prompt", _ACK_PROMPT)
-        ack_prompt = safe_format(ack_tmpl, state)
-
-        try:
-            ack_resp, fallback = await context.resilient_invoke(
-                [HumanMessage(content=ack_prompt)], "vtuber_delegate_ack"
-            )
-            ack_text = ack_resp.content
-        except Exception:
-            ack_text = "[joy] 알겠어요! 지금 바로 처리 시작할게요~ 잠시만 기다려 주세요!"
+        _ACK_TEMPLATES = [
+            "[joy] 알겠어요! 지금 바로 처리 시작할게요~ 잠시만 기다려 주세요!",
+            "[smirk] 오 재밌겠다~ 바로 시작할게요!",
+            "[neutral] 네, 지금 작업 시작하겠습니다. 잠시만요~",
+            "[joy] 좋아요! 바로 해볼게요! 🔥",
+            "[neutral] 알겠습니다~ 작업 에이전트한테 넘겨볼게요!",
+        ]
+        ack_text = random.choice(_ACK_TEMPLATES)
 
         result: Dict[str, Any] = {
             "messages": [AIMessage(content=ack_text)],
@@ -185,6 +174,28 @@ class VTuberDelegateNode(BaseNode):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_recent_context(state: Dict[str, Any], max_messages: int = 5) -> str:
+        """Extract recent conversation messages for CLI context sharing."""
+        messages = state.get("messages", [])
+        if not messages:
+            return ""
+
+        recent = messages[-max_messages:]
+        lines = []
+        for msg in recent:
+            role = getattr(msg, 'type', 'unknown')
+            content = getattr(msg, 'content', '')
+            if not content:
+                continue
+            # Truncate long messages
+            if len(content) > 300:
+                content = content[:300] + "..."
+            label = "User" if role == "human" else "VTuber"
+            lines.append(f"- {label}: {content}")
+
+        return "\n".join(lines) if lines else ""
 
     @staticmethod
     async def _get_linked_session_id(session_id: str) -> str | None:
@@ -233,8 +244,13 @@ class VTuberDelegateNode(BaseNode):
                 )
                 try:
                     await execute_command(target_session_id, prompt)
+                except AlreadyExecutingError:
+                    # CLI is busy — message is already in inbox, will be
+                    # picked up when the current execution finishes
+                    logger.info(
+                        f"CLI {target_session_id} busy — DM stored in inbox"
+                    )
                 except (
-                    AlreadyExecutingError,
                     AgentNotFoundError,
                     AgentNotAliveError,
                 ) as e:

@@ -177,6 +177,7 @@ class AgentSession:
         # Dual-agent pairing (VTuber ↔ CLI)
         self._linked_session_id: Optional[str] = None
         self._session_type: Optional[str] = None  # "vtuber" | "cli" | None
+        self._chat_room_id: Optional[str] = None
 
         # Initial status
         self._status = SessionStatus.STARTING
@@ -875,12 +876,14 @@ class AgentSession:
             create_autonomous_template,
             create_optimized_autonomous_template,
             create_simple_template,
+            create_vtuber_template,
         )
 
         _template_factories = {
             "template-autonomous": create_autonomous_template,
             "template-optimized-autonomous": create_optimized_autonomous_template,
             "template-simple": create_simple_template,
+            "template-vtuber": create_vtuber_template,
         }
         factory = _template_factories.get(template_id, create_simple_template)
         return factory()
@@ -1379,6 +1382,7 @@ class AgentSession:
             total_cost=_total_cost,
             linked_session_id=self._linked_session_id,
             session_type=self._session_type,
+            chat_room_id=self._chat_room_id,
         )
 
     # ========================================================================

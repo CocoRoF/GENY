@@ -497,6 +497,78 @@ def create_ultra_light_template() -> WorkflowDefinition:
 
 
 # ============================================================================
+# VTuber Conversational Workflow Template
+# ============================================================================
+
+
+def create_vtuber_template() -> WorkflowDefinition:
+    """Build the VTuber conversational workflow as a WorkflowDefinition.
+
+    Topology (8 nodes)::
+
+        START → memory_inject → vtuber_classify
+          ├─ direct_response → vtuber_respond ──┐
+          ├─ delegate_to_cli → vtuber_delegate ─┤
+          └─ thinking        → vtuber_think ────┘
+                                                ▼
+                                          memory_reflect → END
+    """
+    nodes: List[WorkflowNodeInstance] = []
+    edges: List[WorkflowEdge] = []
+
+    def _add(ntype: str, nid: str, label: str, x: float, y: float, cfg=None):
+        nodes.append(WorkflowNodeInstance(
+            id=nid, node_type=ntype, label=label,
+            position={"x": x, "y": y}, config=cfg or {},
+        ))
+
+    def _edge(src: str, tgt: str, port: str = "default", lbl: str = ""):
+        edges.append(WorkflowEdge(
+            source=src, target=tgt, source_port=port, label=lbl,
+        ))
+
+    # ── START & Common Entry ──
+    _add("start",          "start",      "Start",          250,   0)
+    _add("memory_inject",  "mem_inject", "Memory Inject",  250, 100)
+    _add("vtuber_classify","classify",   "VTuber Classify", 250, 250)
+
+    _edge("start", "mem_inject")
+    _edge("mem_inject", "classify")
+
+    # ── 3 Branches ──
+    _add("vtuber_respond",  "respond",  "VTuber Respond",    0, 450)
+    _add("vtuber_delegate", "delegate", "VTuber Delegate",  250, 450)
+    _add("vtuber_think",    "think",    "VTuber Think",     500, 450)
+
+    _edge("classify", "respond",  port="direct_response", lbl="Direct")
+    _edge("classify", "delegate", port="delegate_to_cli", lbl="Delegate")
+    _edge("classify", "think",    port="thinking",        lbl="Think")
+
+    # ── Converge → Memory Reflect → END ──
+    _add("memory_reflect", "mem_reflect", "Memory Reflect", 250, 650)
+    _add("end",            "end",         "End",            250, 800)
+
+    _edge("respond",  "mem_reflect")
+    _edge("delegate", "mem_reflect")
+    _edge("think",    "mem_reflect")
+    _edge("mem_reflect", "end")
+
+    return WorkflowDefinition(
+        id="template-vtuber",
+        name="VTuber Conversational",
+        description=(
+            "VTuber persona workflow with input classification, "
+            "direct response, CLI delegation, and self-initiated thinking. "
+            "Routes user input through classify → respond/delegate/think → memory."
+        ),
+        nodes=nodes,
+        edges=edges,
+        is_template=True,
+        template_name="vtuber",
+    )
+
+
+# ============================================================================
 # Template Registry
 # ============================================================================
 
@@ -505,6 +577,7 @@ ALL_TEMPLATES = [
     create_simple_template,
     create_optimized_autonomous_template,
     create_ultra_light_template,
+    create_vtuber_template,
 ]
 
 

@@ -11,6 +11,7 @@ REST API + SSE endpoints for:
 
 import asyncio
 import json
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -20,6 +21,41 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 router = APIRouter(prefix="/api/vtuber", tags=["vtuber"])
+
+_CHARACTERS_DIR = Path(__file__).resolve().parent.parent / "prompts" / "vtuber_characters"
+
+
+def _inject_character_prompt(session_id: str, model_name: str) -> None:
+    """Load a per-model character prompt and append to the agent's system prompt."""
+    try:
+        from service.langgraph import get_agent_session_manager
+        agent = get_agent_session_manager().get_agent(session_id)
+        if not agent or getattr(agent, '_session_type', None) != 'vtuber':
+            return
+
+        # Try model-specific file, fall back to default
+        char_file = _CHARACTERS_DIR / f"{model_name}.md"
+        if not char_file.exists():
+            char_file = _CHARACTERS_DIR / "default.md"
+        if not char_file.exists():
+            return
+
+        char_prompt = char_file.read_text(encoding="utf-8").strip()
+        if not char_prompt:
+            return
+
+        marker = "\n\n## Character Personality"
+        # Avoid duplicate injection
+        if marker in (agent._system_prompt or ""):
+            return
+
+        agent._system_prompt = (agent._system_prompt or "") + "\n\n" + char_prompt
+        if agent.process:
+            agent.process.system_prompt = agent._system_prompt
+
+        logger.info(f"[{session_id}] Character prompt injected from {char_file.name}")
+    except Exception as e:
+        logger.debug(f"Character prompt injection failed: {e}", exc_info=True)
 
 
 # ── Request/Response Models ──────────────────────────────────
@@ -73,6 +109,17 @@ async def assign_model(session_id: str, req: ModelAssignRequest, request: Reques
         manager.assign_model_to_agent(session_id, req.model_name)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+    # Register per-model emotion→motion mapping if available
+    model = manager.get_model(req.model_name)
+    if model and model.emotionMotionMap and hasattr(request.app.state, "avatar_state_manager"):
+        request.app.state.avatar_state_manager.set_emotion_motion_map(
+            session_id, model.emotionMotionMap
+        )
+
+    # Inject per-model character prompt into VTuber system prompt
+    _inject_character_prompt(session_id, req.model_name)
+
     return {"status": "ok", "session_id": session_id, "model_name": req.model_name}
 
 

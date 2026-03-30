@@ -189,7 +189,7 @@ export default function VTuberTab() {
         {/* Chat Panel (VTuber role only) */}
         {isVTuberRole && (
           <div className="w-1/2 bg-[var(--bg-secondary)]">
-            <VTuberChatPanel sessionId={sessionId} />
+            <VTuberChatPanel sessionId={sessionId} roomId={currentSession?.chat_room_id} />
           </div>
         )}
       </div>

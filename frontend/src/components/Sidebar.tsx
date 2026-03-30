@@ -15,8 +15,8 @@ import DeleteSessionModal from '@/components/modals/DeleteSessionModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Link from 'next/link';
 
-function SessionItem({ session, isSelected, onSelect }: {
-  session: SessionInfo; isSelected: boolean; onSelect: () => void;
+function SessionItem({ session, isSelected, onSelect, cliSession }: {
+  session: SessionInfo; isSelected: boolean; onSelect: () => void; cliSession?: SessionInfo | null;
 }) {
   const { t } = useI18n();
   const dotClass = session.status === 'running' ? 'bg-[var(--success-color)]'
@@ -63,8 +63,19 @@ function SessionItem({ session, isSelected, onSelect }: {
         <div className="font-medium text-[0.875rem] whitespace-nowrap overflow-hidden text-ellipsis">
           {session.session_name || t('sidebar.sessionFallback', { id: session.session_id.substring(0, 8) })}
         </div>
-        <div className="text-[0.75rem] text-[var(--text-muted)] font-mono mt-0.5">
+        <div className="text-[0.75rem] text-[var(--text-muted)] font-mono mt-0.5 flex items-center gap-1.5">
           {session.session_id.substring(0, 12)}...
+          {cliSession && (
+            <span
+              className="inline-flex items-center px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wide"
+              style={{
+                background: cliSession.status === 'running' ? 'rgba(34,197,94,0.15)' : 'rgba(107,114,128,0.15)',
+                color: cliSession.status === 'running' ? 'var(--success-color)' : 'var(--text-muted)',
+              }}
+            >
+              CLI {cliSession.status === 'running' ? '●' : '○'}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -84,8 +95,18 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
   const [deleteTarget, setDeleteTarget] = useState<SessionInfo | null>(null);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<SessionInfo | null>(null);
 
-  const running = sessions.filter(s => s.status === 'running' || s.status === 'idle').length;
-  const errors = sessions.filter(s => s.status === 'error').length;
+  // Hide CLI sessions that are paired with a VTuber
+  const visibleSessions = sessions.filter(s => !(s.session_type === 'cli' && s.linked_session_id));
+  const running = visibleSessions.filter(s => s.status === 'running' || s.status === 'idle').length;
+  const errors = visibleSessions.filter(s => s.status === 'error').length;
+
+  // Build a lookup for VTuber → paired CLI session
+  const cliByVtuber = new Map<string, SessionInfo>();
+  for (const s of sessions) {
+    if (s.session_type === 'cli' && s.linked_session_id) {
+      cliByVtuber.set(s.linked_session_id, s);
+    }
+  }
 
   const handleDeleteClick = useCallback((e: React.MouseEvent, session: SessionInfo) => {
     e.stopPropagation();
@@ -132,7 +153,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
       <div className="grid grid-cols-3 gap-3 px-5 py-4 bg-[var(--bg-primary)] border-b border-[var(--border-color)]">
         <div className="text-center">
           <span className="block text-[1.5rem] font-semibold text-[var(--text-primary)] leading-tight">
-            {sessions.length}
+            {visibleSessions.length}
           </span>
           <span className="text-[0.6875rem] text-[var(--text-muted)] uppercase tracking-[0.05em] mt-0.5">
             {t('sidebar.total')}
@@ -158,17 +179,18 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
 
       {/* Session List */}
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
-        {sessions.length === 0 ? (
+        {visibleSessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4">
             <p className="text-[0.8125rem] text-[var(--text-muted)]">{t('sidebar.noSessions')}</p>
           </div>
         ) : (
-          sessions.map(session => (
+          visibleSessions.map(session => (
             <div key={session.session_id} className="relative group">
               <SessionItem
                 session={session}
                 isSelected={selectedSessionId === session.session_id}
                 onSelect={() => handleSessionSelect(session.session_id)}
+                cliSession={cliByVtuber.get(session.session_id)}
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover:opacity-100 md:group-hover:opacity-100 max-md:opacity-100 transition-opacity duration-150">
                 <button
@@ -262,6 +284,9 @@ export default function Sidebar() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
 
+  // Filter out CLI sessions paired with VTuber for collapsed counter
+  const visibleCount = sessions.filter(s => !(s.session_type === 'cli' && s.linked_session_id)).length;
+
   // Close mobile sidebar on route/tab change or escape
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -301,7 +326,7 @@ export default function Sidebar() {
               className="text-[0.6875rem] font-semibold text-[var(--text-muted)]"
               title={t('sidebar.total')}
             >
-              {sessions.length}
+              {visibleCount}
             </span>
           </div>
         )}

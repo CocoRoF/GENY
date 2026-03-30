@@ -399,6 +399,7 @@ class SessionStore:
             "tool_preset_id": rec.get("tool_preset_id"),
             "linked_session_id": rec.get("linked_session_id"),
             "session_type": rec.get("session_type"),
+            "chat_room_id": rec.get("chat_room_id"),
         }
 
     def contains(self, session_id: str) -> bool:

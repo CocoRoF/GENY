@@ -501,6 +501,22 @@ class AgentSessionManager(SessionManager):
         # Persist session metadata to sessions.json
         self._store.register(session_id, session_info.model_dump(mode="json"))
 
+        # Apply linked session attributes from request (e.g. CLI paired with VTuber)
+        if request.linked_session_id:
+            agent._linked_session_id = request.linked_session_id
+        if request.session_type:
+            agent._session_type = request.session_type
+
+        # Persist linked session attributes to the store (they were not in the
+        # initial get_session_info() snapshot because they are set after register)
+        if request.linked_session_id or request.session_type:
+            self._store.update(session_id, {
+                k: v for k, v in {
+                    "linked_session_id": request.linked_session_id,
+                    "session_type": request.session_type,
+                }.items() if v is not None
+            })
+
         logger.info(f"[{session_id}] ✅ AgentSession created successfully")
 
         # ── Auto-create paired CLI session for VTuber agents ───────────
@@ -518,11 +534,12 @@ class AgentSessionManager(SessionManager):
                 cli_request = CreateSessionRequest(
                     session_name=cli_name,
                     working_dir=shared_dir,  # Share same working dir for memory sharing
-                    model=request.model,               # Same model by default
+                    model=request.cli_model or request.model,  # CLI model override or same
                     max_turns=request.max_turns or 50,
                     timeout=request.timeout or 1800.0,
                     max_iterations=request.max_iterations or 50,
                     role=SessionRole.WORKER,
+                    system_prompt=request.cli_system_prompt,  # CLI-specific prompt
                     workflow_id="template-optimized-autonomous",
                     graph_name="Optimized Autonomous",
                     tool_preset_id=request.tool_preset_id,
@@ -556,6 +573,28 @@ class AgentSessionManager(SessionManager):
                 logger.info(
                     f"[{session_id}] 🔗 Paired CLI session created: {cli_id} ({cli_name})"
                 )
+
+                # ── Auto-create chat room for VTuber session ───────────
+                try:
+                    from service.chat.conversation_store import get_chat_store
+                    chat_store = get_chat_store()
+                    room_name = f"{request.session_name or 'VTuber'} Chat"
+                    room = chat_store.create_room(room_name, [session_id])
+                    room_id = room.get("id") or room.get("room_id")
+                    if room_id:
+                        agent._chat_room_id = room_id
+                        self._store.update(session_id, {"chat_room_id": room_id})
+                        logger.info(f"[{session_id}] 💬 Chat room created: {room_id}")
+                except Exception as e:
+                    logger.error(f"[{session_id}] Failed to create chat room: {e}", exc_info=True)
+
+                # Register VTuber session with ThinkingTriggerService immediately
+                try:
+                    from service.vtuber.thinking_trigger import get_thinking_trigger_service
+                    get_thinking_trigger_service().record_activity(session_id)
+                except Exception:
+                    pass  # best-effort
+
             except Exception as e:
                 logger.error(f"[{session_id}] Failed to create paired CLI session: {e}", exc_info=True)
 

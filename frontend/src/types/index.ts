@@ -8,6 +8,7 @@ export interface SessionInfo {
   role: 'worker' | 'developer' | 'researcher' | 'planner' | 'vtuber';
   linked_session_id?: string | null;
   session_type?: string | null;
+  chat_room_id?: string | null;
   max_turns: number | null;
   timeout: number | null;
   max_iterations: number | null;
@@ -37,6 +38,8 @@ export interface CreateAgentRequest {
   workflow_id?: string;
   graph_name?: string;
   tool_preset_id?: string;
+  cli_system_prompt?: string;
+  cli_model?: string;
 }
 
 export interface ExecuteRequest {

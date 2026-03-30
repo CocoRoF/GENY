@@ -48,6 +48,7 @@ export default function CreateSessionModal({ onClose }: Props) {
     system_prompt: '',
   });
   const [selectedPrompt, setSelectedPrompt] = useState('geny-default');
+  const [selectedCliPrompt, setSelectedCliPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [availableWorkflows, setAvailableWorkflows] = useState<WorkflowDefinition[]>([]);
@@ -102,17 +103,34 @@ export default function CreateSessionModal({ onClose }: Props) {
     }
   };
 
+  const handleCliPromptChange = async (name: string) => {
+    setSelectedCliPrompt(name);
+    if (name) {
+      const content = await loadPromptContent(name);
+      if (content) setFormState(f => ({ ...f, cli_system_prompt: content }));
+    } else {
+      setFormState(f => ({ ...f, cli_system_prompt: '' }));
+    }
+  };
+
   const handleRoleChange = (role: string) => {
     setFormState(f => ({ ...f, role }));
     // Auto-select VTuber defaults
     if (role === 'vtuber') {
       setSelectedWorkflow('template-vtuber');
-      handlePromptChange('vtuber');
+      handlePromptChange('vtuber-default');
+      handleCliPromptChange('cli-default');
       if (!avatarsLoaded) fetchAvatarModels();
     } else {
       setSelectedAvatar('');
+      setSelectedCliPrompt('');
     }
   };
+
+  // Filtered prompt lists
+  const vtuberPrompts = prompts.filter(p => p.name.startsWith('vtuber-'));
+  const cliPrompts = prompts.filter(p => p.name.startsWith('cli-'));
+  const generalPrompts = prompts.filter(p => !p.name.startsWith('vtuber-') && !p.name.startsWith('cli-'));
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -203,16 +221,18 @@ export default function CreateSessionModal({ onClose }: Props) {
             </div>
           )}
 
-          {/* Prompt Template */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.promptTemplate')} <InfoTooltip text={t('createSession.promptTemplateHelp')} /></label>
-            <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
-              <option value="">{t('createSession.templateNone')}</option>
-              {prompts.map(p => (
-                <option key={p.name} value={p.name}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Prompt Template — hidden for VTuber (moved into VTuber sections) */}
+          {formState.role !== 'vtuber' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.promptTemplate')} <InfoTooltip text={t('createSession.promptTemplateHelp')} /></label>
+              <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
+                <option value="">{t('createSession.templateNone')}</option>
+                {generalPrompts.map(p => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Max Turns + Timeout */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -299,12 +319,51 @@ export default function CreateSessionModal({ onClose }: Props) {
             </small>
           </div>
 
-          {/* System Prompt */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.systemPrompt')} <InfoTooltip text={t('createSession.systemPromptHelp')} /></label>
-            <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={4} placeholder={t('createSession.systemPromptPlaceholder')}
-              value={formState.system_prompt || ''} onChange={e => setFormState(f => ({ ...f, system_prompt: e.target.value }))} />
-          </div>
+          {/* System Prompt — VTuber mode shows dual prompts with template selectors */}
+          {formState.role === 'vtuber' ? (
+            <>
+              {/* VTuber Persona Prompt */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.vtuberPromptLabel')} <InfoTooltip text={t('createSession.vtuberPromptHelp')} /></label>
+                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
+                  <option value="">{t('createSession.templateNone')}</option>
+                  {vtuberPrompts.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+                <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={4} placeholder={t('createSession.systemPromptPlaceholder')}
+                  value={formState.system_prompt || ''} onChange={e => setFormState(f => ({ ...f, system_prompt: e.target.value }))} />
+              </div>
+              {/* CLI Agent Prompt */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.cliPromptLabel')} <InfoTooltip text={t('createSession.cliPromptHelp')} /></label>
+                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedCliPrompt} onChange={e => handleCliPromptChange(e.target.value)}>
+                  <option value="">{t('createSession.templateNone')}</option>
+                  {cliPrompts.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+                <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={3} placeholder={t('createSession.cliPromptPlaceholder')}
+                  value={formState.cli_system_prompt || ''} onChange={e => setFormState(f => ({ ...f, cli_system_prompt: e.target.value }))} />
+              </div>
+              {/* CLI Agent Model */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.cliModel')} <InfoTooltip text={t('createSession.cliModelHelp')} /></label>
+                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.cli_model || ''} onChange={e => setFormState(f => ({ ...f, cli_model: e.target.value }))}>
+                  <option value="">{t('createSession.cliModelSame')}</option>
+                  {MODEL_OPTIONS_BASE.filter(o => o.value).map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.systemPrompt')} <InfoTooltip text={t('createSession.systemPromptHelp')} /></label>
+              <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={4} placeholder={t('createSession.systemPromptPlaceholder')}
+                value={formState.system_prompt || ''} onChange={e => setFormState(f => ({ ...f, system_prompt: e.target.value }))} />
+            </div>
+          )}
         </div>
 
         {/* Footer */}

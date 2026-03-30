@@ -28,6 +28,7 @@ class Live2dModelInfo:
     idleMotionGroupName: str
     emotionMap: Dict[str, int]
     tapMotions: Dict[str, Dict[str, int]]
+    emotionMotionMap: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -42,6 +43,7 @@ class Live2dModelInfo:
             "idleMotionGroupName": self.idleMotionGroupName,
             "emotionMap": self.emotionMap,
             "tapMotions": self.tapMotions,
+            "emotionMotionMap": self.emotionMotionMap,
         }
 
 
@@ -85,6 +87,7 @@ class Live2dModelManager:
                     idleMotionGroupName=model_data.get("idleMotionGroupName", "Idle"),
                     emotionMap=model_data.get("emotionMap", {"neutral": 0}),
                     tapMotions=model_data.get("tapMotions", {}),
+                    emotionMotionMap=model_data.get("emotionMotionMap", {}),
                 )
                 self._models[info.name] = info
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
 import { useI18n } from '@/lib/i18n';
@@ -37,14 +38,44 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   vtuber: VTuberTab,
 };
 
+// Tabs that should stay mounted once activated (KeepAlive)
+const KEEP_ALIVE_TABS = new Set(['vtuber']);
+
 export default function TabContent() {
   const activeTab = useAppStore(s => s.activeTab);
   const { t } = useI18n();
-  const Component = TAB_MAP[activeTab];
+
+  // Track which keep-alive tabs have been mounted at least once
+  const [mountedKeepAlive, setMountedKeepAlive] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (KEEP_ALIVE_TABS.has(activeTab) && !mountedKeepAlive.has(activeTab)) {
+      setMountedKeepAlive((prev) => new Set(prev).add(activeTab));
+    }
+  }, [activeTab, mountedKeepAlive]);
+
+  // Non-keep-alive active tab
+  const ActiveComponent = !KEEP_ALIVE_TABS.has(activeTab) ? TAB_MAP[activeTab] : null;
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-      {Component ? <Component /> : <div className="p-8 text-[var(--text-muted)]">{t('common.unknownTab')}</div>}
+      {/* Keep-alive tabs: render once mounted, hide when inactive */}
+      {Array.from(mountedKeepAlive).map((tabKey) => {
+        const Comp = TAB_MAP[tabKey];
+        if (!Comp) return null;
+        const isActive = activeTab === tabKey;
+        return (
+          <div
+            key={tabKey}
+            className={isActive ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}
+          >
+            <Comp />
+          </div>
+        );
+      })}
+
+      {/* Normal tabs: mount/unmount on switch */}
+      {ActiveComponent ? <ActiveComponent /> : (!KEEP_ALIVE_TABS.has(activeTab) && !TAB_MAP[activeTab] && <div className="p-8 text-[var(--text-muted)]">{t('common.unknownTab')}</div>)}
     </div>
   );
 }
