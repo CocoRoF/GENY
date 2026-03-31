@@ -213,6 +213,20 @@ class CreateSessionRequest(BaseModel):
         default=None,
         description="Model override for the internal CLI agent (VTuber role only)"
     )
+    cli_workflow_id: Optional[str] = Field(
+        default=None,
+        description="Workflow (graph) ID for the internal CLI agent (VTuber role only). "
+                    "Defaults to 'template-optimized-autonomous' if not specified."
+    )
+    cli_graph_name: Optional[str] = Field(
+        default=None,
+        description="Human-readable graph name for the internal CLI agent (VTuber role only)"
+    )
+    cli_tool_preset_id: Optional[str] = Field(
+        default=None,
+        description="Tool preset ID for the internal CLI agent (VTuber role only). "
+                    "If None, inherits from the VTuber session's tool_preset_id."
+    )
 
 
 class SessionInfo(BaseModel):

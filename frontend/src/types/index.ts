@@ -40,6 +40,9 @@ export interface CreateAgentRequest {
   tool_preset_id?: string;
   cli_system_prompt?: string;
   cli_model?: string;
+  cli_workflow_id?: string;
+  cli_graph_name?: string;
+  cli_tool_preset_id?: string;
 }
 
 export interface ExecuteRequest {

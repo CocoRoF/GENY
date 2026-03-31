@@ -540,9 +540,9 @@ class AgentSessionManager(SessionManager):
                     max_iterations=request.max_iterations or 50,
                     role=SessionRole.WORKER,
                     system_prompt=request.cli_system_prompt,  # CLI-specific prompt
-                    workflow_id="template-optimized-autonomous",
-                    graph_name="Optimized Autonomous",
-                    tool_preset_id=request.tool_preset_id,
+                    workflow_id=request.cli_workflow_id or "template-optimized-autonomous",
+                    graph_name=request.cli_graph_name or "Optimized Autonomous",
+                    tool_preset_id=request.cli_tool_preset_id or request.tool_preset_id,
                     linked_session_id=session_id,  # Link back to VTuber
                     session_type="cli",
                     env_vars=request.env_vars,
