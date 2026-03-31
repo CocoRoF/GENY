@@ -580,7 +580,7 @@ const en = {
     cliToolPresetHelp: 'Tool preset for the internal CLI agent. Controls which tools are available to the CLI worker.',
     cliToolPresetSame: 'Same as VTuber',
     cliToolPresetDefault: 'Inherits the VTuber session tool preset by default.',
-    creating: 'Creating...',,
+    creating: 'Creating...',
     createSession: 'Create Session',
     failedToCreate: 'Failed to create session',
   },

@@ -580,7 +580,7 @@ const ko: Translations = {
     cliToolPresetHelp: '내부 CLI 에이전트의 도구 프리셋. CLI 워커가 사용할 수 있는 도구를 제어합니다.',
     cliToolPresetSame: 'VTuber와 동일',
     cliToolPresetDefault: '기본적으로 VTuber 세션의 도구 프리셋을 상속합니다.',
-    creating: '생성 중...',,
+    creating: '생성 중...',
     createSession: '세션 생성',
     failedToCreate: '세션 생성에 실패했습니다',
   },

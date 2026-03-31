@@ -34,11 +34,12 @@ function getBackendUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   // Explicitly set (including empty string '' for reverse-proxy setups)
   if (envUrl !== undefined) return envUrl;
-  // Fallback: same hostname as the browser page, port 8000 (local dev)
+  // Fallback: same hostname as the browser page, backend port from env (local dev)
+  const port = process.env.NEXT_PUBLIC_BACKEND_PORT || '8000';
   if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    return `${window.location.protocol}//${window.location.hostname}:${port}`;
   }
-  return 'http://localhost:8000';
+  return `http://localhost:${port}`;
 }
 
 // ==================== Agent API ====================
