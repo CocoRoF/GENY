@@ -936,3 +936,55 @@ export const vtuberApi = {
     };
   },
 };
+
+// ==================== TTS API ====================
+
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  language: string;
+  gender: string;
+  engine: string;
+  preview_text?: string;
+}
+
+export const ttsApi = {
+  /** POST /api/tts/agents/{sessionId}/speak — TTS 오디오 스트리밍 요청 */
+  speak: async (
+    sessionId: string,
+    text: string,
+    emotion: string = 'neutral',
+    language?: string,
+    engine?: string,
+  ): Promise<Response> => {
+    const backendUrl = getBackendUrl();
+    return fetch(`${backendUrl}/api/tts/agents/${sessionId}/speak`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, emotion, language, engine }),
+    });
+  },
+
+  /** GET /api/tts/voices — 보이스 목록 */
+  voices: (language?: string) =>
+    apiCall<Record<string, VoiceInfo[]>>(
+      `/api/tts/voices${language ? `?language=${language}` : ''}`,
+    ),
+
+  /** GET /api/tts/voices/{engine}/{voiceId}/preview — 보이스 미리듣기 */
+  preview: async (engine: string, voiceId: string, text?: string): Promise<Response> => {
+    const backendUrl = getBackendUrl();
+    const params = text ? `?text=${encodeURIComponent(text)}` : '';
+    return fetch(
+      `${backendUrl}/api/tts/voices/${encodeURIComponent(engine)}/${encodeURIComponent(voiceId)}/preview${params}`,
+    );
+  },
+
+  /** GET /api/tts/status — TTS 서비스 상태 */
+  status: () =>
+    apiCall<Record<string, { available: boolean; engine: string }>>('/api/tts/status'),
+
+  /** GET /api/tts/engines — 엔진 목록 */
+  engines: () =>
+    apiCall<{ engines: string[]; default: string }>('/api/tts/engines'),
+};

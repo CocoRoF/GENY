@@ -804,6 +804,15 @@ const ko: Translations = {
     inputPlaceholder: '메시지를 입력하세요...',
     errorMessage: '죄송해요, 잠시 문제가 생겼어요.',
   },
+
+  // ─── TTS ───
+  tts: {
+    clickToEnable: 'TTS 활성화',
+    clickToDisable: 'TTS 비활성화',
+    volume: '볼륨',
+    stop: '재생 중지',
+    speakMessage: '음성으로 읽기',
+  },
 };
 
 export default ko;

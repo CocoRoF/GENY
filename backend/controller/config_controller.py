@@ -89,6 +89,7 @@ async def list_configs():
     category_info = {
         "general": {"name": "general", "label": "General", "icon": "settings"},
         "channels": {"name": "channels", "label": "Channels", "icon": "chat"},
+        "tts": {"name": "tts", "label": "TTS", "icon": "volume"},
         "security": {"name": "security", "label": "Security", "icon": "shield"},
         "advanced": {"name": "advanced", "label": "Advanced", "icon": "code"},
     }

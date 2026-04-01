@@ -1,24 +1,20 @@
 # ══════════════════════════════════════════════════════════════════════
-#  Geny — Docker Compose (Development / Full)
+#  Geny — Docker Compose (Development / Core — 경량 버전)
 #
+#  TTS 로컬 엔진 없이 핵심 서비스만 실행합니다.
 #  소스 코드가 바인드 마운트되어 로컬 편집이 컨테이너에 즉시 반영됩니다.
-#  TTS 로컬 엔진은 --profile tts-local 로 활성화할 수 있습니다.
 #
 #  - Backend : uvicorn --reload (watchfiles 기반 hot reload)
 #  - Frontend: next dev (HMR / Fast Refresh)
 #
 #  Usage:
-#    docker compose -f docker-compose.dev.yml up --build
-#    docker compose -f docker-compose.dev.yml --profile tts-local up --build
-#    docker compose -f docker-compose.dev.yml down
-#    docker compose -f docker-compose.dev.yml logs -f
-#
-#  경량 버전 (TTS 없음):
 #    docker compose -f docker-compose.dev-core.yml up --build
+#    docker compose -f docker-compose.dev-core.yml up -d
+#    docker compose -f docker-compose.dev-core.yml down
+#    docker compose -f docker-compose.dev-core.yml logs -f
 #
-#  TTS 설정:
-#    GPT-SoVITS API URL → 설정 UI에서 http://gpt-sovits:9871 입력
-#    Fish Speech API URL → 설정 UI에서 http://fish-speech:8080 입력
+#  전체 버전 (TTS 포함):
+#    docker compose -f docker-compose.dev.yml up --build
 # ══════════════════════════════════════════════════════════════════════
 
 services:
@@ -115,57 +111,10 @@ services:
     networks:
       - geny-net-dev
 
-  # ── GPT-SoVITS (Optional — TTS 로컬 엔진, GPU 필요) ──────────────
-  gpt-sovits:
-    image: breakstring/gpt-sovits:latest
-    container_name: geny-gpt-sovits-dev
-    profiles: ["tts-local"]
-    restart: unless-stopped
-    ports:
-      - "${GPT_SOVITS_PORT:-9871}:9871"
-    volumes:
-      - ./backend/static/voices:/app/references:ro
-      - gpt-sovits-models-dev:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    environment:
-      - is_half=True
-    networks:
-      - geny-net-dev
-
-  # ── Fish Speech (Optional — TTS 로컬 엔진, GPU 필요) ──────────────
-  fish-speech:
-    image: fishaudio/fish-speech:latest
-    container_name: geny-fish-speech-dev
-    profiles: ["tts-local"]
-    restart: unless-stopped
-    ports:
-      - "${FISH_SPEECH_PORT:-8080}:8080"
-    volumes:
-      - fish-speech-models-dev:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks:
-      - geny-net-dev
-
 networks:
   geny-net-dev:
     driver: bridge
 
 volumes:
   geny-pgdata-dev:
-    driver: local
-  gpt-sovits-models-dev:
-    driver: local
-  fish-speech-models-dev:
     driver: local

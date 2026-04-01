@@ -7,6 +7,7 @@ import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
 import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
+import AudioControls from '@/components/live2d/AudioControls';
 
 const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
 
@@ -164,6 +165,13 @@ export default function VTuberTab() {
             <span className="opacity-60">
               {currentState.motion_group}[{currentState.motion_index}]
             </span>
+          </div>
+        )}
+
+        {/* TTS Audio Controls */}
+        {isVTuberRole && (
+          <div className={currentState ? '' : 'ml-auto'}>
+            <AudioControls sessionId={sessionId} />
           </div>
         )}
       </div>

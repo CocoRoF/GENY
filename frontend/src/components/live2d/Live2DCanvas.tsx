@@ -2,6 +2,8 @@
 
 import { useRef, useEffect, useCallback } from 'react';
 import { useVTuberStore } from '@/store/useVTuberStore';
+import { LipSyncController } from '@/lib/lipSync';
+import { getAudioManager } from '@/lib/audioManager';
 
 /**
  * Live2DCanvas — renders a Live2D Cubism 4 model using pixi.js + pixi-live2d-display.
@@ -34,6 +36,8 @@ export default function Live2DCanvas({
   const modelRef = useRef<any>(null);
   /** Generation counter — each effect run gets a unique gen; stale inits bail out. */
   const genRef = useRef(0);
+  /** LipSync controller for TTS audio → mouth movement mapping */
+  const lipSyncRef = useRef<LipSyncController>(new LipSyncController());
 
   const model = useVTuberStore((s) => s.getModelForSession(sessionId));
   const avatarState = useVTuberStore((s) => s.avatarStates[sessionId]);
@@ -154,6 +158,10 @@ export default function Live2DCanvas({
 
       app.stage.addChild(live2dModel);
 
+      // Connect LipSync controller to model + AudioManager
+      lipSyncRef.current.setModel(live2dModel);
+      getAudioManager().setAmplitudeCallback(lipSyncRef.current.onAmplitude);
+
       // Start an idle motion
       try {
         await live2dModel.motion(model.idleMotionGroupName || 'Idle');
@@ -167,6 +175,9 @@ export default function Live2DCanvas({
     return () => {
       // Bump generation — invalidates any in-flight async init
       genRef.current++;
+      // Disconnect LipSync
+      lipSyncRef.current.reset();
+      lipSyncRef.current.setModel(null);
       // Remove model from stage FIRST, then destroy model, then app.
       // This avoids app.destroy trying to destroy an already-destroyed model
       // which causes _clippingManager._currentFrameNo errors.

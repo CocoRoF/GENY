@@ -21,3 +21,5 @@ ddgs==9.11.4
 playwright>=1.49.0
 # MCP (Model Context Protocol) — needed for proxy MCP server
 mcp>=1.0.0
+# TTS (Text-to-Speech) — Edge TTS engine
+edge-tts>=6.1

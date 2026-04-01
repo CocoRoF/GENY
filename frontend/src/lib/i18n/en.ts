@@ -804,6 +804,15 @@ const en = {
     inputPlaceholder: 'Type a message...',
     errorMessage: 'Sorry, something went wrong.',
   },
+
+  // ─── TTS ───
+  tts: {
+    clickToEnable: 'Click to enable TTS',
+    clickToDisable: 'Click to disable TTS',
+    volume: 'Volume',
+    stop: 'Stop speaking',
+    speakMessage: 'Read aloud',
+  },
 };
 
 export default en;

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from '@/lib/api';
+import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
 import type { ChatRoomMessage } from '@/types';
 
@@ -38,6 +39,21 @@ export default function VTuberChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastMsgIdRef = useRef<string | null>(null);
   const sseRef = useRef<{ close: () => void } | null>(null);
+
+  // TTS store
+  const ttsEnabled = useVTuberStore((s) => s.ttsEnabled);
+  const ttsSpeaking = useVTuberStore((s) => s.ttsSpeaking[sessionId] ?? false);
+  const speakResponse = useVTuberStore((s) => s.speakResponse);
+  const stopSpeaking = useVTuberStore((s) => s.stopSpeaking);
+
+  // Parse emotion tag: "[joy] Hello" → ["joy", "Hello"]
+  const parseEmotion = useCallback((content: string): [string, string] => {
+    const match = content.match(/^\[(neutral|joy|anger|disgust|fear|smirk|sadness|surprise)\]\s*/);
+    if (match) {
+      return [match[1], content.slice(match[0].length)];
+    }
+    return ['neutral', content];
+  }, []);
 
   // Convert ChatRoomMessage to display format
   const toDisplayMessage = useCallback((msg: ChatRoomMessage): ChatMessage => {
@@ -90,6 +106,17 @@ export default function VTuberChatPanel({
                 if (prev.some((m) => m.id === msg.id)) return prev;
                 return [...prev, displayMsg];
               });
+
+              // Auto TTS for assistant messages
+              if (displayMsg.role === 'assistant') {
+                const [emotion, cleanText] = parseEmotion(displayMsg.content);
+                if (cleanText.trim()) {
+                  const store = useVTuberStore.getState();
+                  if (store.ttsEnabled) {
+                    store.speakResponse(sessionId, cleanText, emotion);
+                  }
+                }
+              }
             }
           },
           () => lastMsgIdRef.current,
@@ -211,7 +238,7 @@ export default function VTuberChatPanel({
           return (
             <div
               key={msg.id}
-              className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${isUser ? 'justify-end' : 'justify-start'} group`}
             >
               <div
                 className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-[0.875rem] leading-relaxed whitespace-pre-wrap break-words ${
@@ -227,6 +254,25 @@ export default function VTuberChatPanel({
                 )}
                 {text}
               </div>
+              {/* TTS Speak button for assistant messages */}
+              {!isUser && ttsEnabled && (
+                <button
+                  onClick={() => {
+                    const [emo, clean] = parseEmotion(msg.content);
+                    if (clean.trim()) {
+                      if (ttsSpeaking) stopSpeaking(sessionId);
+                      speakResponse(sessionId, clean, emo);
+                    }
+                  }}
+                  className="self-center ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity cursor-pointer"
+                  title={t('tts.speakMessage') ?? 'Read aloud'}
+                >
+                  <svg className="w-3.5 h-3.5 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                    <path d="M15.54 8.46a5 5 0 010 7.07" />
+                  </svg>
+                </button>
+              )}
             </div>
           );
         })}

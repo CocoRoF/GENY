@@ -23,6 +23,7 @@ from controller.docs_controller import router as docs_router
 from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
 from controller.vtuber_controller import router as vtuber_router
+from controller.tts_controller import router as tts_router
 from service.config import get_config_manager
 from service.mcp_loader import MCPLoader, get_global_mcp_config
 import uvicorn
@@ -435,6 +436,7 @@ app.include_router(docs_router)  # Documentation API
 app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
 app.include_router(vtuber_router)  # VTuber Live2D API
+app.include_router(tts_router)  # TTS (Text-to-Speech) API
 
 # Mount static files for Web UI Dashboard
 static_dir = Path(__file__).parent / "static"

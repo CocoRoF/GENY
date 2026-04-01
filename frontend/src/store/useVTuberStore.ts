@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { vtuberApi } from '@/lib/api';
+import { vtuberApi, ttsApi } from '@/lib/api';
+import { getAudioManager } from '@/lib/audioManager';
 import type { Live2dModelInfo, AvatarState, VTuberLogEntry } from '@/types';
 
 const MAX_LOGS = 500;
@@ -22,6 +23,11 @@ interface VTuberState {
   // SSE subscriptions (keyed by session_id)
   _subs: Record<string, { close: () => void }>;
 
+  // TTS state
+  ttsEnabled: boolean;
+  ttsSpeaking: Record<string, boolean>;
+  ttsVolume: number;
+
   // Actions
   fetchModels: () => Promise<void>;
   assignModel: (sessionId: string, modelName: string) => Promise<void>;
@@ -34,6 +40,12 @@ interface VTuberState {
   getModelForSession: (sessionId: string) => Live2dModelInfo | null;
   addLog: (sessionId: string, level: VTuberLogEntry['level'], source: string, message: string, detail?: Record<string, unknown>) => void;
   clearLogs: (sessionId: string) => void;
+
+  // TTS actions
+  toggleTTS: () => void;
+  setTTSVolume: (vol: number) => void;
+  speakResponse: (sessionId: string, text: string, emotion: string) => Promise<void>;
+  stopSpeaking: (sessionId: string) => void;
 }
 
 export const useVTuberStore = create<VTuberState>((set, get) => ({
@@ -43,6 +55,9 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   avatarStates: {},
   logs: {},
   _subs: {},
+  ttsEnabled: true,
+  ttsSpeaking: {},
+  ttsVolume: 0.7,
 
   fetchModels: async () => {
     try {
@@ -172,5 +187,60 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     set((s) => ({
       logs: { ...s.logs, [sessionId]: [] },
     }));
+  },
+
+  // ─── TTS Actions ───
+
+  toggleTTS: () => {
+    set((s) => ({ ttsEnabled: !s.ttsEnabled }));
+  },
+
+  setTTSVolume: (vol) => {
+    const clamped = Math.max(0, Math.min(1, vol));
+    set({ ttsVolume: clamped });
+    getAudioManager().setVolume(clamped);
+  },
+
+  speakResponse: async (sessionId, text, emotion) => {
+    const { ttsEnabled } = get();
+    if (!ttsEnabled) return;
+
+    try {
+      set((s) => ({
+        ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: true },
+      }));
+      get().addLog(sessionId, 'info', 'TTS', `Speaking: "${text.slice(0, 50)}..." (${emotion})`);
+
+      const response = await ttsApi.speak(sessionId, text, emotion);
+      const audioManager = getAudioManager();
+      audioManager.setVolume(get().ttsVolume);
+
+      await audioManager.playTTSResponse(
+        response,
+        () => {
+          get().addLog(sessionId, 'debug', 'TTS', 'Audio playback started');
+        },
+        () => {
+          set((s) => ({
+            ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: false },
+          }));
+          get().addLog(sessionId, 'debug', 'TTS', 'Audio playback ended');
+        },
+      );
+    } catch (err) {
+      console.error('[VTuber] TTS speak error:', err);
+      set((s) => ({
+        ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: false },
+      }));
+      get().addLog(sessionId, 'error', 'TTS', `Speak failed: ${err}`);
+    }
+  },
+
+  stopSpeaking: (sessionId) => {
+    getAudioManager().stop();
+    set((s) => ({
+      ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: false },
+    }));
+    get().addLog(sessionId, 'info', 'TTS', 'Playback stopped');
   },
 }));
