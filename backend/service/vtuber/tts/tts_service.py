@@ -89,15 +89,23 @@ class TTSService:
         engine = self.get_engine(engine_name)
         if not engine:
             logger.error("No TTS engine available")
-            return
+            raise RuntimeError("No TTS engine available")
 
         # Health check with fallback
+        actual_engine_name = engine.engine_name
         if not await engine.health_check():
             logger.warning(f"{engine.engine_name} health check failed, trying fallback")
             engine = self._engines.get("edge_tts")
             if not engine or not await engine.health_check():
-                logger.error("All TTS engines unavailable")
-                return
+                logger.error(
+                    f"All TTS engines unavailable "
+                    f"(primary={actual_engine_name}, fallback=edge_tts)"
+                )
+                raise RuntimeError(
+                    f"All TTS engines unavailable. "
+                    f"Primary engine '{actual_engine_name}' health check failed. "
+                    f"Check engine config (enabled, api_url, etc.)"
+                )
 
         # Build request from Config
         audio_format = AudioFormat.MP3

@@ -21,7 +21,7 @@ from logging import getLogger
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -69,14 +69,43 @@ async def speak(session_id: str, body: SpeakRequest):
         current_provider = "edge_tts"
 
     async def audio_generator():
-        async for chunk in tts.speak(
-            text=body.text,
-            emotion=body.emotion,
-            language=body.language or default_language,
-            engine_name=body.engine,
-        ):
-            if chunk.audio_data:
-                yield chunk.audio_data
+        has_data = False
+        try:
+            async for chunk in tts.speak(
+                text=body.text,
+                emotion=body.emotion,
+                language=body.language or default_language,
+                engine_name=body.engine,
+            ):
+                if chunk.audio_data:
+                    has_data = True
+                    yield chunk.audio_data
+        except RuntimeError as e:
+            logger.error(f"TTS speak error: {e}")
+            # 제너레이터 안에서 HTTP 응답을 바꿀 수 없으므로 에러 로그만 남김
+            # 아래에서 has_data 체크로 처리
+
+        if not has_data:
+            logger.warning(
+                f"TTS produced no audio for text='{body.text[:50]}...' "
+                f"engine={current_provider}"
+            )
+
+    # Pre-flight: TTS 서비스 상태 확인 후 에러 시 즉시 4xx 응답
+    try:
+        engine = tts.get_engine(body.engine)
+        if engine and not await engine.health_check():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "TTS engine unavailable",
+                    "engine": current_provider,
+                    "message": f"TTS engine '{current_provider}' health check failed. "
+                               f"Check if the engine is enabled and the server is running.",
+                },
+            )
+    except Exception as e:
+        logger.warning(f"TTS pre-flight check error: {e}")
 
     return StreamingResponse(
         audio_generator(),

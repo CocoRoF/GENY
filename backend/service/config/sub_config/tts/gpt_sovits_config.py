@@ -18,8 +18,9 @@ class GPTSoVITSConfig(BaseConfig):
     """GPT-SoVITS TTS settings — open-source voice cloning"""
 
     enabled: bool = False
-    api_url: str = "http://localhost:9871"
-    ref_audio_dir: str = ""
+    api_url: str = "http://gpt-sovits:9871"
+    ref_audio_dir: str = "/app/static/voices/mao_pro"
+    container_ref_dir: str = "/app/references/mao_pro"
     prompt_text: str = ""
     prompt_lang: str = "ko"
     top_k: int = 5
@@ -61,17 +62,25 @@ class GPTSoVITSConfig(BaseConfig):
                 name="api_url",
                 field_type=FieldType.URL,
                 label="API URL",
-                description="GPT-SoVITS API v2 server address",
+                description="GPT-SoVITS API v2 server address (Docker: http://gpt-sovits:9871)",
                 group="server",
-                placeholder="http://localhost:9871",
+                placeholder="http://gpt-sovits:9871",
             ),
             ConfigField(
                 name="ref_audio_dir",
                 field_type=FieldType.STRING,
-                label="Reference Audio Path",
-                description="Directory containing per-emotion reference files (ref_joy.wav, ref_anger.wav, ...)",
+                label="Reference Audio Path (Backend)",
+                description="Backend container path to per-emotion reference files",
                 group="voice",
-                placeholder="/app/references/mao_pro/",
+                placeholder="/app/static/voices/mao_pro",
+            ),
+            ConfigField(
+                name="container_ref_dir",
+                field_type=FieldType.STRING,
+                label="Reference Audio Path (GPT-SoVITS Container)",
+                description="GPT-SoVITS container path — must match Docker volume mount",
+                group="voice",
+                placeholder="/app/references/mao_pro",
             ),
             ConfigField(
                 name="prompt_text",
@@ -147,8 +156,12 @@ class GPTSoVITSConfig(BaseConfig):
                         "description": "GPT-SoVITS API v2 서버 주소",
                     },
                     "ref_audio_dir": {
-                        "label": "레퍼런스 오디오 경로",
-                        "description": "감정별 레퍼런스 파일이 있는 디렉토리 (ref_joy.wav, ref_anger.wav, ...)",
+                        "label": "레퍼런스 오디오 경로 (Backend)",
+                        "description": "Backend 컨테이너 기준 감정별 레퍼런스 파일 디렉토리",
+                    },
+                    "container_ref_dir": {
+                        "label": "레퍼런스 오디오 경로 (GPT-SoVITS 컨테이너)",
+                        "description": "GPT-SoVITS 컨테이너 내부 경로 — Docker 볼륨 마운트와 일치해야 합니다",
                     },
                     "prompt_text": {
                         "label": "프롬프트 텍스트",

@@ -27,9 +27,10 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: geny-postgres-dev
+    init: true
     restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-geny}
       POSTGRES_USER: ${POSTGRES_USER:-geny}
@@ -40,9 +41,9 @@ services:
       - geny-pgdata-dev:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-geny} -d ${POSTGRES_DB:-geny}"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
-      retries: 5
+      retries: 3
       start_period: 10s
     networks:
       - geny-net-dev
@@ -53,9 +54,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: geny-backend-dev
+    init: true
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     env_file:
       - path: ./backend/.env
         required: false
@@ -79,10 +81,10 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
       start_period: 30s
     networks:
       - geny-net-dev
@@ -93,16 +95,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     container_name: geny-frontend-dev
+    init: true
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     environment:
       - API_URL=http://backend:8000
       - NEXT_PUBLIC_BACKEND_PORT=${BACKEND_PORT:-8000}
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - WATCHPACK_POLLING=true
-      - CHOKIDAR_USEPOLLING=true
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./frontend/src:/app/src
@@ -121,9 +122,10 @@ services:
     image: breakstring/gpt-sovits:latest
     container_name: geny-gpt-sovits-dev
     profiles: ["tts-local"]
+    init: true
     restart: unless-stopped
     ports:
-      - "${GPT_SOVITS_PORT:-9871}:9871"
+      - "127.0.0.1:${GPT_SOVITS_PORT:-9871}:9871"
     volumes:
       - ./backend/static/voices:/app/references:ro
       - gpt-sovits-models-dev:/app/models
@@ -144,10 +146,11 @@ services:
   #   image: fishaudio/fish-speech:latest
   #   container_name: geny-fish-speech-dev
   #   profiles: ["tts-local"]
+  #   init: true
   #   restart: unless-stopped
   #   entrypoint: ["/bin/bash", "/app/scripts/fish-speech-entrypoint.sh"]
   #   ports:
-  #     - "${FISH_SPEECH_PORT:-8080}:8080"
+  #     - "127.0.0.1:${FISH_SPEECH_PORT:-8080}:8080"
   #   volumes:
   #     - ./fish-speech-checkpoints:/app/checkpoints
   #     - ./scripts/fish-speech-entrypoint.sh:/app/scripts/fish-speech-entrypoint.sh:ro
