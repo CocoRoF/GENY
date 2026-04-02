@@ -32,6 +32,8 @@ class APIConfig(BaseConfig):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
+    vtuber_default_model: str = "claude-haiku-4-5-20251001"
+    memory_model: str = "claude-haiku-4-5-20251001"
     max_thinking_tokens: int = 31999
     skip_permissions: bool = True
     app_port: int = 8000
@@ -39,6 +41,8 @@ class APIConfig(BaseConfig):
     _ENV_MAP = {
         "anthropic_api_key": "ANTHROPIC_API_KEY",
         "anthropic_model": "ANTHROPIC_MODEL",
+        "vtuber_default_model": "VTUBER_DEFAULT_MODEL",
+        "memory_model": "MEMORY_MODEL",
         "max_thinking_tokens": "MAX_THINKING_TOKENS",
         "skip_permissions": "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS",
         "app_port": "APP_PORT",
@@ -86,7 +90,15 @@ class APIConfig(BaseConfig):
                     },
                     "anthropic_model": {
                         "label": "Default Model",
-                        "description": "Default Claude model for new sessions",
+                        "description": "Default Claude model for CLI sessions",
+                    },
+                    "vtuber_default_model": {
+                        "label": "VTuber Default Model",
+                        "description": "Default Claude model for VTuber sessions",
+                    },
+                    "memory_model": {
+                        "label": "Memory Model",
+                        "description": "메모리 게이트/인사이트 추출 전용 경량 모델 (비워두면 메인 모델 사용)",
                     },
                     "max_thinking_tokens": {
                         "label": "Max Thinking Tokens",
@@ -122,11 +134,31 @@ class APIConfig(BaseConfig):
                 name="anthropic_model",
                 field_type=FieldType.SELECT,
                 label="Default Model",
-                description="Default Claude model for new sessions",
+                description="Default Claude model for CLI sessions",
                 default="claude-sonnet-4-6",
                 options=MODEL_OPTIONS,
                 group="api",
                 apply_change=env_sync("ANTHROPIC_MODEL"),
+            ),
+            ConfigField(
+                name="vtuber_default_model",
+                field_type=FieldType.SELECT,
+                label="VTuber Default Model",
+                description="Default Claude model for VTuber sessions (lightweight recommended)",
+                default="claude-haiku-4-5-20251001",
+                options=MODEL_OPTIONS,
+                group="api",
+                apply_change=env_sync("VTUBER_DEFAULT_MODEL"),
+            ),
+            ConfigField(
+                name="memory_model",
+                field_type=FieldType.SELECT,
+                label="Memory Model",
+                description="Lightweight model for memory gate & reflect (empty = use main model)",
+                default="claude-haiku-4-5-20251001",
+                options=[{"value": "", "label": "Same as main model"}] + MODEL_OPTIONS,
+                group="api",
+                apply_change=env_sync("MEMORY_MODEL"),
             ),
             ConfigField(
                 name="max_thinking_tokens",

@@ -849,6 +849,39 @@ class AgentSession:
         if not self._graph_name:
             self._graph_name = self._workflow.name
 
+        # Create lightweight memory model (ChatAnthropic) if configured
+        memory_chat_model = None
+        memory_model_name = None
+        try:
+            from service.config.manager import get_config_manager
+            from service.config.sub_config.general.api_config import APIConfig
+
+            api_cfg = get_config_manager().load_config(APIConfig)
+            mem_model = api_cfg.memory_model
+            api_key = (
+                api_cfg.anthropic_api_key
+                or os.environ.get("ANTHROPIC_API_KEY", "")
+            )
+
+            if mem_model and api_key:
+                from langchain_anthropic import ChatAnthropic
+
+                memory_chat_model = ChatAnthropic(
+                    model=mem_model,
+                    api_key=api_key,
+                    max_tokens=2048,
+                    timeout=30,
+                )
+                memory_model_name = mem_model
+                logger.info(
+                    f"[{self._session_id}] Memory model created: {mem_model}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[{self._session_id}] Failed to create memory model, "
+                f"will use main model: {e}"
+            )
+
         # Create ExecutionContext for the WorkflowExecutor
         context = ExecutionContext(
             model=self._model,
@@ -858,6 +891,8 @@ class AgentSession:
             context_guard=None,  # Context guard nodes are part of the workflow
             max_retries=2,
             model_name=self._model_name,
+            memory_model=memory_chat_model,
+            memory_model_name=memory_model_name,
         )
 
         # Compile via WorkflowExecutor
@@ -1402,7 +1437,11 @@ class AgentSession:
                 from service.config.manager import get_config_manager
                 from service.config.sub_config.general.api_config import APIConfig
                 api_cfg = get_config_manager().load_config(APIConfig)
-                effective_model = api_cfg.anthropic_model or None
+                # Use VTuber-specific default for VTuber sessions
+                if self._role == SessionRole.VTUBER and api_cfg.vtuber_default_model:
+                    effective_model = api_cfg.vtuber_default_model
+                else:
+                    effective_model = api_cfg.anthropic_model or None
             except Exception:
                 pass
 

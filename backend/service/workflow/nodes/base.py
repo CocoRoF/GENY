@@ -192,6 +192,10 @@ class ExecutionContext:
     max_retries: int = 2
     model_name: Optional[str] = None
 
+    # Lightweight model for memory operations (ChatAnthropic)
+    memory_model: Any = None
+    memory_model_name: Optional[str] = None
+
     async def resilient_invoke(
         self,
         messages: list,
@@ -401,6 +405,215 @@ class ExecutionContext:
             f"attempt2_raw[:{min(200, len(raw_text2))}]={raw_text2[:200]!r}"
         )
         raise ValueError(error_msg)
+
+    # ── Memory-specific lightweight model methods ─────────────────────
+
+    async def _memory_model_invoke(
+        self,
+        messages: list,
+        node_name: str,
+    ) -> tuple:
+        """Invoke memory_model (ChatAnthropic) with retry.
+
+        Falls back to main model if memory_model is None.
+        Returns (response, cost_updates_dict).
+        """
+        if self.memory_model is None:
+            return await self.resilient_invoke(messages, node_name)
+
+        from service.langgraph.model_fallback import (
+            classify_error,
+            is_recoverable,
+            FailureReason,
+        )
+
+        last_error: Optional[Exception] = None
+        model_label = self.memory_model_name or "memory-model"
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                start = time.time()
+                response = await self.memory_model.ainvoke(messages)
+                duration_ms = int((time.time() - start) * 1000)
+
+                # Extract cost from ChatAnthropic response metadata
+                cost_usd = 0.0
+                usage = getattr(response, "usage_metadata", None)
+                if usage:
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    # Also check response_metadata for model-reported cost
+                    resp_meta = getattr(response, "response_metadata", {}) or {}
+                    if "cost_usd" in resp_meta:
+                        cost_usd = resp_meta["cost_usd"]
+                    else:
+                        # Estimate from token counts (Haiku 4.5 pricing)
+                        cost_usd = (input_tokens * 0.80 + output_tokens * 4.00) / 1_000_000
+
+                if attempt > 0:
+                    logger.info(
+                        f"[{self.session_id}] {node_name}: "
+                        f"memory_model succeeded on retry {attempt} "
+                        f"({duration_ms}ms, model={model_label})"
+                    )
+                else:
+                    logger.debug(
+                        f"[{self.session_id}] {node_name}: "
+                        f"memory_model OK ({duration_ms}ms, model={model_label})"
+                    )
+                return response, {"total_cost": cost_usd}
+
+            except Exception as e:
+                last_error = e
+                reason = classify_error(e)
+                logger.warning(
+                    f"[{self.session_id}] {node_name}: "
+                    f"memory_model attempt {attempt + 1}/{self.max_retries + 1} "
+                    f"failed ({reason.value}): {str(e)[:100]}"
+                )
+                if not is_recoverable(reason) or attempt >= self.max_retries:
+                    # Final fallback: try main model
+                    logger.warning(
+                        f"[{self.session_id}] {node_name}: "
+                        f"memory_model exhausted retries, falling back to main model"
+                    )
+                    return await self.resilient_invoke(messages, node_name)
+
+                delay_map = {
+                    FailureReason.RATE_LIMITED: 5.0,
+                    FailureReason.OVERLOADED: 3.0,
+                    FailureReason.TIMEOUT: 2.0,
+                    FailureReason.NETWORK_ERROR: 2.0,
+                }
+                wait = delay_map.get(reason, 2.0) * (attempt + 1)
+                await asyncio.sleep(wait)
+
+        # Should not reach here, but fallback just in case
+        return await self.resilient_invoke(messages, node_name)
+
+    async def memory_structured_invoke(
+        self,
+        messages: list,
+        node_name: str,
+        schema_cls: Any,
+        *,
+        allowed_values: Optional[Dict[str, List[str]]] = None,
+        coerce_field: Optional[str] = None,
+        coerce_values: Optional[List[str]] = None,
+        coerce_default: Optional[str] = None,
+        extra_instruction: str = "",
+    ) -> tuple:
+        """Invoke memory_model with structured output parsing.
+
+        Falls back to resilient_structured_invoke if memory_model is None.
+        """
+        if self.memory_model is None:
+            return await self.resilient_structured_invoke(
+                messages, node_name, schema_cls,
+                allowed_values=allowed_values,
+                coerce_field=coerce_field,
+                coerce_values=coerce_values,
+                coerce_default=coerce_default,
+                extra_instruction=extra_instruction,
+            )
+
+        from service.workflow.nodes.structured_output import (
+            build_schema_instruction,
+            build_correction_prompt,
+            parse_structured_output,
+        )
+
+        schema_instruction = build_schema_instruction(
+            schema_cls,
+            allowed_values=allowed_values,
+            extra_instruction=extra_instruction,
+        )
+
+        # Inject schema instruction into the last human message
+        augmented = list(messages)
+        if augmented and hasattr(augmented[-1], "content"):
+            from langchain_core.messages import HumanMessage
+            last_msg = augmented[-1]
+            augmented[-1] = HumanMessage(
+                content=f"{last_msg.content}\n\n{schema_instruction}"
+            )
+        else:
+            from langchain_core.messages import HumanMessage
+            augmented.append(HumanMessage(content=schema_instruction))
+
+        # ── First attempt ──
+        response, fallback = await self._memory_model_invoke(augmented, node_name)
+        raw_text = (
+            response.content if hasattr(response, "content") else str(response)
+        )
+
+        result = parse_structured_output(
+            raw_text, schema_cls,
+            allowed_values=allowed_values,
+            coerce_field=coerce_field,
+            coerce_values=coerce_values,
+            coerce_default=coerce_default,
+        )
+
+        if result.success and result.data is not None:
+            logger.info(
+                f"[{self.session_id}] {node_name}: "
+                f"memory_model structured OK (method={result.method})"
+            )
+            return result.data, fallback
+
+        # ── Correction retry ──
+        logger.warning(
+            f"[{self.session_id}] {node_name}: "
+            f"memory_model structured parse failed ({result.error}), "
+            f"sending correction…"
+        )
+        from langchain_core.messages import HumanMessage
+
+        correction = build_correction_prompt(
+            raw_text, schema_cls, result.error or "unknown error",
+        )
+        correction_messages = list(messages) + [
+            HumanMessage(content=correction),
+        ]
+
+        response2, fallback2 = await self._memory_model_invoke(
+            correction_messages, f"{node_name}_correction",
+        )
+        raw_text2 = (
+            response2.content if hasattr(response2, "content") else str(response2)
+        )
+
+        result2 = parse_structured_output(
+            raw_text2, schema_cls,
+            allowed_values=allowed_values,
+            coerce_field=coerce_field,
+            coerce_values=coerce_values,
+            coerce_default=coerce_default,
+        )
+
+        if result2.success and result2.data is not None:
+            logger.info(
+                f"[{self.session_id}] {node_name}: "
+                f"memory_model structured OK after correction"
+            )
+            merged = {**fallback, **fallback2} if fallback2 else fallback
+            merged["total_cost"] = fallback.get("total_cost", 0.0) + fallback2.get("total_cost", 0.0)
+            return result2.data, merged
+
+        # ── Final failure — fallback to main model ──
+        logger.warning(
+            f"[{self.session_id}] {node_name}: "
+            f"memory_model structured output failed, falling back to main model"
+        )
+        return await self.resilient_structured_invoke(
+            messages, node_name, schema_cls,
+            allowed_values=allowed_values,
+            coerce_field=coerce_field,
+            coerce_values=coerce_values,
+            coerce_default=coerce_default,
+            extra_instruction=extra_instruction,
+        )
 
 
 # ============================================================================

@@ -6,7 +6,7 @@ import { memoryApi, globalMemoryApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import {
   Search, Plus, RefreshCw, X, ChevronDown, ChevronRight,
-  Trash2, Edit3, Save, FolderOpen, FileText, Upload,
+  Trash2, Edit3, Save, FolderOpen, FileText, Upload, ExternalLink,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -109,19 +109,14 @@ function MemoryFileTree({
   files,
   selectedFile,
   onSelect,
-  categoryFilter,
-  onCategoryFilter,
 }: {
   files: Record<string, MemoryFileInfo>;
   selectedFile: string | null;
   onSelect: (filename: string) => void;
-  categoryFilter: string | null;
-  onCategoryFilter: (cat: string | null) => void;
 }) {
   const grouped = useMemo(() => {
     const groups: Record<string, MemoryFileInfo[]> = {};
     for (const info of Object.values(files)) {
-      if (categoryFilter && info.category !== categoryFilter) continue;
       const cat = info.category || 'root';
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(info);
@@ -130,43 +125,10 @@ function MemoryFileTree({
       arr.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
     }
     return groups;
-  }, [files, categoryFilter]);
+  }, [files]);
 
   return (
     <div className="flex flex-col h-full">
-      {/* Category filter pills */}
-      <div className="flex items-center gap-1 px-2 py-2 border-b border-[var(--border-color)] flex-wrap">
-        <button
-          onClick={() => onCategoryFilter(null)}
-          className={cn(
-            'text-[11px] px-2 py-0.5 rounded-full transition-colors font-medium',
-            !categoryFilter
-              ? 'bg-[var(--primary-color)] text-white'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
-          )}
-        >
-          All
-        </button>
-        {CATEGORIES.map(cat => {
-          const count = grouped[cat]?.length || 0;
-          if (!count && categoryFilter && categoryFilter !== cat) return null;
-          return (
-            <button
-              key={cat}
-              onClick={() => onCategoryFilter(categoryFilter === cat ? null : cat)}
-              className={cn(
-                'text-[11px] px-2 py-0.5 rounded-full transition-colors',
-                categoryFilter === cat
-                  ? 'bg-[var(--primary-color)] text-white'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
-              )}
-            >
-              {cat}
-            </button>
-          );
-        })}
-      </div>
-
       {/* File list */}
       <div className="flex-1 overflow-y-auto p-1">
         {CATEGORIES.map(cat => {
@@ -617,7 +579,6 @@ export default function MemoryTab() {
   const [tags, setTags] = useState<Record<string, number>>({});
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileDetail, setFileDetail] = useState<MemoryFileDetail | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<MemorySearchResult[] | null>(null);
@@ -696,7 +657,6 @@ export default function MemoryTab() {
         setSearchResults(res.results);
       } else {
         const res = await memoryApi.search(sessionId!, query, {
-          category: categoryFilter || undefined,
           tag: selectedTag || undefined,
         });
         setSearchResults(res.results);
@@ -708,7 +668,7 @@ export default function MemoryTab() {
     } finally {
       setSearching(false);
     }
-  }, [sessionId, isGlobal, categoryFilter, selectedTag]);
+  }, [sessionId, isGlobal, selectedTag]);
 
   // Create note
   const handleCreate = useCallback(async (data: {
@@ -860,6 +820,17 @@ export default function MemoryTab() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => {
+              const url = sessionId
+                ? `/geny-obsidian?sessionId=${encodeURIComponent(sessionId)}`
+                : '/geny-obsidian';
+              window.open(url, '_blank');
+            }}
+            className="py-1.5 px-3 bg-transparent hover:bg-[rgba(139,92,246,0.1)] text-[#8b5cf6] text-[0.75rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all border border-[rgba(139,92,246,0.3)] inline-flex items-center gap-1.5"
+          >
+            <ExternalLink size={12} /> Obsidian
+          </button>
+          <button
             onClick={() => setShowCreateModal(true)}
             className={cn(
               'py-1.5 px-3 text-[0.75rem] font-medium inline-flex items-center gap-1.5 rounded-[var(--border-radius)] transition-all cursor-pointer',
@@ -934,8 +905,6 @@ export default function MemoryTab() {
               files={displayFiles}
               selectedFile={selectedFile}
               onSelect={loadFile}
-              categoryFilter={categoryFilter}
-              onCategoryFilter={setCategoryFilter}
             />
           )}
         </div>

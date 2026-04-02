@@ -29,6 +29,25 @@
   --obs-font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 }
 
+/* ── Light theme overrides ──────────────────────────────────── */
+html.light .obsidian-root {
+  --obs-purple: #7c3aed;
+  --obs-purple-dim: rgba(124, 58, 237, 0.08);
+  --obs-purple-glow: rgba(124, 58, 237, 0.15);
+  --obs-purple-bright: #8b5cf6;
+  --obs-violet: #6d28d9;
+  --obs-bg-deep: #f8fafc;
+  --obs-bg-panel: #ffffff;
+  --obs-bg-surface: #f1f5f9;
+  --obs-bg-hover: #e2e8f0;
+  --obs-bg-active: #dbeafe;
+  --obs-border: #e2e8f0;
+  --obs-border-subtle: #f1f5f9;
+  --obs-text: #0f172a;
+  --obs-text-dim: #475569;
+  --obs-text-muted: #94a3b8;
+}
+
 /* ── Root reset ─────────────────────────────────────────────── */
 .obsidian-root {
   display: flex;
@@ -134,7 +153,7 @@
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.03em;
-  background: linear-gradient(135deg, #e4e4e7 30%, var(--obs-purple-bright));
+  background: linear-gradient(135deg, var(--obs-text) 30%, var(--obs-purple-bright));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }

@@ -377,6 +377,11 @@ class AgentSessionManager(SessionManager):
         api_cfg = get_config_manager().load_config(APIConfig)
         backend_port = api_cfg.app_port
 
+        # Resolve model: use VTuber-specific default if role is VTuber and no model specified
+        resolved_model = request.model
+        if not resolved_model and request.role == SessionRole.VTUBER:
+            resolved_model = api_cfg.vtuber_default_model or None
+
         # Pre-generate session_id so it can be injected into the prompt
         if not session_id:
             session_id = str(uuid.uuid4())
@@ -440,7 +445,7 @@ class AgentSessionManager(SessionManager):
         # Create AgentSession
         agent = await AgentSession.create(
             working_dir=request.working_dir,
-            model_name=request.model,
+            model_name=resolved_model,
             session_name=request.session_name,
             session_id=session_id,
             system_prompt=system_prompt,
@@ -534,7 +539,7 @@ class AgentSessionManager(SessionManager):
                 cli_request = CreateSessionRequest(
                     session_name=cli_name,
                     working_dir=shared_dir,  # Share same working dir for memory sharing
-                    model=request.cli_model or request.model,  # CLI model override or same
+                    model=request.cli_model if request.cli_model else None,  # CLI model override or own default
                     max_turns=request.max_turns or 50,
                     timeout=request.timeout or 1800.0,
                     max_iterations=request.max_iterations or 50,

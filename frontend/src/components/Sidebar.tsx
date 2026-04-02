@@ -208,7 +208,11 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
       </div>
 
       {/* Deleted Sessions */}
-      {deletedSessions.length > 0 && (
+      {deletedSessions.length > 0 && (() => {
+        // Hide CLI sessions paired with VTuber (same filter as active sessions)
+        const visibleDeleted = deletedSessions.filter(s => !(s.session_type === 'cli' && s.linked_session_id));
+        if (visibleDeleted.length === 0) return null;
+        return (
         <div className="border-t border-[var(--border-color)]">
           <div
             className="flex items-center gap-2 cursor-pointer select-none hover:text-[var(--text-secondary)] transition-colors duration-150"
@@ -218,12 +222,12 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
             {deletedSectionOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <span>{t('sidebar.deletedSessions')}</span>
             <span className="ml-auto text-center" style={{ fontSize: '10px', fontWeight: 600, background: 'rgba(107, 114, 128, 0.2)', color: 'var(--text-muted)', padding: '1px 7px', borderRadius: '10px', minWidth: '18px' }}>
-              {deletedSessions.length}
+              {visibleDeleted.length}
             </span>
           </div>
           {deletedSectionOpen && (
             <div className="max-h-[240px] overflow-y-auto">
-              {deletedSessions.map(session => (
+              {visibleDeleted.map(session => (
                 <div key={session.session_id} className="flex items-center gap-2 px-4 py-1.5 text-[0.8125rem] opacity-70 hover:opacity-100 transition-opacity">
                   <span className="truncate flex-1">
                     {session.session_name || session.session_id.substring(0, 12)}
@@ -247,7 +251,8 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {showCreateModal && <CreateSessionModal onClose={() => setShowCreateModal(false)} />}
       {deleteTarget && (

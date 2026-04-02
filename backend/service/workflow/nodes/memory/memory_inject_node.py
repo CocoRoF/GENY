@@ -179,7 +179,7 @@ class MemoryInjectNode(BaseNode):
         messages = [HumanMessage(content=prompt)]
 
         try:
-            parsed, cost_updates = await context.resilient_structured_invoke(
+            parsed, cost_updates = await context.memory_structured_invoke(
                 messages,
                 "memory_gate",
                 MemoryGateOutput,

@@ -175,7 +175,7 @@ class MemoryReflectNode(BaseNode):
             )
             messages = [HumanMessage(content=prompt)]
 
-            parsed, cost_updates = await context.resilient_structured_invoke(
+            parsed, cost_updates = await context.memory_structured_invoke(
                 messages,
                 "memory_reflect",
                 MemoryReflectOutput,

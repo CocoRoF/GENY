@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import dynamic from 'next/dynamic';
 
 const ObsidianView = dynamic(() => import('@/components/obsidian/ObsidianView'), {
@@ -23,5 +24,9 @@ const ObsidianView = dynamic(() => import('@/components/obsidian/ObsidianView'),
 });
 
 export default function GenyObsidianPage() {
-  return <ObsidianView />;
+  return (
+    <Suspense>
+      <ObsidianView />
+    </Suspense>
+  );
 }

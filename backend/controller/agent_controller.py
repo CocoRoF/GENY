@@ -346,15 +346,17 @@ async def permanent_delete_session(
     Permanently delete a session from the persistent store.
     The session record is irrecoverably removed from sessions.json
     and its storage directory is deleted from disk.
+    Cascades to linked sessions (VTuber ↔ CLI pairs).
     """
     import shutil
     from pathlib import Path as FilePath
 
     store = get_session_store()
 
-    # Get storage_path before deleting anything
+    # Get record and find linked session before deleting
     record = store.get(session_id)
     storage_path = record.get("storage_path") if record else None
+    linked_id = record.get("linked_session_id") if record else None
 
     # Also delete from live agents if still active
     if agent_manager.has_agent(session_id):
@@ -373,6 +375,25 @@ async def permanent_delete_session(
     if not removed:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found in store")
     logger.info(f"✅ Session permanently deleted: {session_id}")
+
+    # Cascade to linked session (VTuber ↔ CLI pair)
+    if linked_id:
+        linked_rec = store.get(linked_id)
+        if linked_rec:
+            linked_storage = linked_rec.get("storage_path")
+            if agent_manager.has_agent(linked_id):
+                await agent_manager.delete_session(linked_id, cleanup_storage=True)
+            elif linked_storage:
+                sp = FilePath(linked_storage)
+                if sp.is_dir():
+                    try:
+                        shutil.rmtree(sp)
+                        logger.info(f"Linked session storage cleaned up: {linked_storage}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup linked storage {linked_storage}: {e}")
+            store.permanent_delete(linked_id)
+            logger.info(f"✅ Linked session permanently deleted: {linked_id}")
+
     return {"success": True, "session_id": session_id}
 
 
@@ -385,7 +406,7 @@ async def restore_session(
 
     Re-creates the AgentSession using the original creation parameters
     stored in sessions.json, with the same session_name and settings.
-    Returns the new SessionInfo (note: session_id will be NEW).
+    Cascades to linked sessions (VTuber ↔ CLI pairs).
     """
     store = get_session_store()
     record = store.get(session_id)
@@ -397,6 +418,9 @@ async def restore_session(
     # Check not already live
     if agent_manager.has_agent(session_id):
         raise HTTPException(status_code=400, detail="Session is already running")
+
+    # Find linked session for cascade restore
+    linked_id = record.get("linked_session_id")
 
     # Build creation params from stored record
     params = store.get_creation_params(session_id)
@@ -442,6 +466,42 @@ async def restore_session(
 
         session_info = agent.get_session_info()
         logger.info(f"✅ Session restored: {session_id} (same ID, storage preserved)")
+
+        # Cascade restore to linked session (VTuber ↔ CLI pair)
+        if linked_id:
+            linked_rec = store.get(linked_id)
+            if linked_rec and linked_rec.get("is_deleted") and not agent_manager.has_agent(linked_id):
+                try:
+                    linked_params = store.get_creation_params(linked_id)
+                    if linked_params:
+                        linked_system_prompt = linked_rec.get("system_prompt")
+                        linked_request = CreateSessionRequest(
+                            session_name=linked_params.get("session_name"),
+                            working_dir=linked_params.get("working_dir"),
+                            model=linked_params.get("model"),
+                            max_turns=linked_params.get("max_turns", 100),
+                            timeout=linked_params.get("timeout", 21600),
+                            max_iterations=linked_params.get("max_iterations", linked_params.get("autonomous_max_iterations", 100)),
+                            role=SessionRole(linked_params["role"]) if linked_params.get("role") else SessionRole.WORKER,
+                            graph_name=linked_params.get("graph_name"),
+                            workflow_id=linked_params.get("workflow_id"),
+                            tool_preset_id=linked_params.get("tool_preset_id"),
+                            linked_session_id=linked_params.get("linked_session_id"),
+                            session_type=linked_params.get("session_type"),
+                        )
+                        linked_agent = await agent_manager.create_agent_session(
+                            request=linked_request,
+                            session_id=linked_id,
+                        )
+                        if linked_system_prompt:
+                            linked_agent._system_prompt = linked_system_prompt
+                            if linked_agent.process:
+                                linked_agent.process.system_prompt = linked_system_prompt
+                            store.update(linked_id, {"system_prompt": linked_system_prompt})
+                        logger.info(f"✅ Linked session restored: {linked_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to cascade restore to linked session {linked_id}: {e}")
+
         return session_info
     except Exception as e:
         logger.error(f"❌ Failed to restore session {session_id}: {e}", exc_info=True)
