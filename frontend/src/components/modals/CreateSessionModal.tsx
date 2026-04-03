@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { agentApi } from '@/lib/api';
+import { agentApi, ttsApi, type VoiceProfile } from '@/lib/api';
 import { workflowApi } from '@/lib/workflowApi';
 import { toolPresetApi } from '@/lib/toolApi';
 import NumberStepper from '@/components/ui/NumberStepper';
@@ -11,7 +11,7 @@ import InfoTooltip from '@/components/ui/InfoTooltip';
 import { X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useVTuberStore } from '@/store/useVTuberStore';
-import type { CreateAgentRequest, SessionInfo, ToolPresetDefinition } from '@/types';
+import type { CreateAgentRequest, SessionInfo, ToolPresetDefinition, VoiceProfile } from '@/types';
 import type { WorkflowDefinition } from '@/types/workflow';
 
 const selectArrow: React.CSSProperties = {
@@ -59,16 +59,31 @@ export default function CreateSessionModal({ onClose }: Props) {
   const [selectedCliWorkflow, setSelectedCliWorkflow] = useState('template-optimized-autonomous');
   const [selectedCliPreset, setSelectedCliPreset] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('');
+  const [selectedTtsProfile, setSelectedTtsProfile] = useState('');
+  const [ttsProfiles, setTtsProfiles] = useState<VoiceProfile[]>([]);
+  const [ttsProfilesLoaded, setTtsProfilesLoaded] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const { models: avatarModels, modelsLoaded: avatarsLoaded, fetchModels: fetchAvatarModels, assignModel: assignAvatar } = useVTuberStore();
 
   useEffect(() => { loadPrompts(); }, [loadPrompts]);
 
-  // Load avatar models when VTuber role is selected
+  // Load avatar models + TTS profiles when VTuber role is selected
   useEffect(() => {
     if (formState.role === 'vtuber' && !avatarsLoaded) {
       fetchAvatarModels();
     }
-  }, [formState.role, avatarsLoaded, fetchAvatarModels]);
+    if (formState.role === 'vtuber' && !ttsProfilesLoaded) {
+      Promise.all([
+        ttsApi.engines().catch(() => ({ engines: [], default: '' })),
+        ttsApi.listProfiles().catch(() => ({ profiles: [] })),
+      ]).then(([enginesRes, profilesRes]) => {
+        const hasGptSovits = enginesRes.engines.includes('gpt_sovits');
+        setTtsEnabled(hasGptSovits);
+        setTtsProfiles(profilesRes.profiles || []);
+        setTtsProfilesLoaded(true);
+      });
+    }
+  }, [formState.role, avatarsLoaded, fetchAvatarModels, ttsProfilesLoaded]);
 
   // Load default prompt template content on mount
   useEffect(() => {
@@ -126,6 +141,7 @@ export default function CreateSessionModal({ onClose }: Props) {
       if (!avatarsLoaded) fetchAvatarModels();
     } else {
       setSelectedAvatar('');
+      setSelectedTtsProfile('');
       setSelectedCliPrompt('');
       setSelectedCliWorkflow('template-optimized-autonomous');
       setSelectedCliPreset('');
@@ -170,6 +186,14 @@ export default function CreateSessionModal({ onClose }: Props) {
         } catch {
           // Non-blocking: session created successfully, avatar assignment can be done later
           console.warn('Avatar assignment failed, can be assigned manually later');
+        }
+      }
+      // Auto-assign TTS voice profile if selected for VTuber sessions
+      if (selectedTtsProfile && session?.session_id && formState.role === 'vtuber') {
+        try {
+          await ttsApi.assignSessionProfile(session.session_id, selectedTtsProfile);
+        } catch {
+          console.warn('TTS profile assignment failed, can be assigned manually later');
         }
       }
       onClose();
@@ -234,6 +258,25 @@ export default function CreateSessionModal({ onClose }: Props) {
                   <option key={m.name} value={m.name}>{m.display_name || m.name}</option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* TTS Voice Profile (VTuber only) */}
+          {formState.role === 'vtuber' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.ttsProfile')} <InfoTooltip text={t('createSession.ttsProfileHelp')} /></label>
+              {ttsProfilesLoaded && !ttsEnabled ? (
+                <div className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.8125rem] text-[var(--text-muted)] opacity-60">
+                  {t('createSession.ttsDisabled')}
+                </div>
+              ) : (
+                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedTtsProfile} onChange={e => setSelectedTtsProfile(e.target.value)}>
+                  <option value="">{ttsProfilesLoaded ? t('createSession.ttsProfileNone') : t('createSession.ttsProfileLoading')}</option>
+                  {ttsProfiles.map(p => (
+                    <option key={p.name} value={p.name}>{p.display_name || p.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 

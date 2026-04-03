@@ -3,6 +3,9 @@ TTS Controller
 
 REST API endpoints for Text-to-Speech:
 - POST /api/tts/agents/{session_id}/speak — Stream audio synthesis
+- GET  /api/tts/agents/{session_id}/profile — Get session voice profile
+- PUT  /api/tts/agents/{session_id}/profile — Assign voice profile to session
+- DELETE /api/tts/agents/{session_id}/profile — Remove session voice profile
 - GET  /api/tts/voices                     — List available voices
 - GET  /api/tts/voices/{engine}/{voice_id}/preview — Preview a voice
 - GET  /api/tts/status                     — Engine health status
@@ -45,10 +48,21 @@ async def speak(session_id: str, body: SpeakRequest):
 
     The active TTS engine is determined by Config (tts_general.provider),
     unless overridden by the `engine` field in the request body.
+    Uses per-session voice profile if assigned, else global config.
     """
     from service.vtuber.tts.tts_service import get_tts_service
 
     tts = get_tts_service()
+
+    # Look up per-session voice profile
+    session_voice_profile = None
+    try:
+        from service.claude_manager.session_store import get_session_store
+        session = get_session_store().get(session_id)
+        if session:
+            session_voice_profile = session.get("tts_voice_profile")
+    except Exception as e:
+        logger.debug(f"Failed to look up session voice profile: {e}")
 
     # Determine content type from Config
     content_type = "audio/mpeg"
@@ -80,6 +94,7 @@ async def speak(session_id: str, body: SpeakRequest):
                 emotion=body.emotion,
                 language=body.language or default_language,
                 engine_name=body.engine,
+                voice_profile=session_voice_profile,
             ):
                 if chunk.audio_data:
                     has_data = True
@@ -106,6 +121,68 @@ async def speak(session_id: str, body: SpeakRequest):
             "X-TTS-Engine": current_provider,
         },
     )
+
+
+# ==================== Per-Session Voice Profile ====================
+
+class AssignProfileRequest(BaseModel):
+    """Request body to assign a voice profile to a session"""
+    profile_name: str
+
+
+@router.get("/agents/{session_id}/profile")
+async def get_session_profile(session_id: str):
+    """Get the voice profile assigned to a session."""
+    from service.claude_manager.session_store import get_session_store
+
+    session = get_session_store().get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {
+        "session_id": session_id,
+        "tts_voice_profile": session.get("tts_voice_profile"),
+    }
+
+
+@router.put("/agents/{session_id}/profile")
+async def assign_session_profile(session_id: str, body: AssignProfileRequest):
+    """Assign a voice profile to a VTuber session.
+
+    Stores the profile name in the session's extra_data JSON blob.
+    """
+    from service.claude_manager.session_store import get_session_store
+
+    store = get_session_store()
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Validate profile exists
+    profile_dir = VOICES_DIR / body.profile_name
+    if not profile_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Voice profile '{body.profile_name}' not found")
+
+    store.update(session_id, {"tts_voice_profile": body.profile_name})
+    logger.info(f"Assigned voice profile '{body.profile_name}' to session {session_id}")
+
+    return {"success": True, "session_id": session_id, "tts_voice_profile": body.profile_name}
+
+
+@router.delete("/agents/{session_id}/profile")
+async def unassign_session_profile(session_id: str):
+    """Remove the voice profile assignment from a session."""
+    from service.claude_manager.session_store import get_session_store
+
+    store = get_session_store()
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.update(session_id, {"tts_voice_profile": ""})
+    logger.info(f"Unassigned voice profile from session {session_id}")
+
+    return {"success": True, "session_id": session_id}
 
 
 @router.get("/voices")

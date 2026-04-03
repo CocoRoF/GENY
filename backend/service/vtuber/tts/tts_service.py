@@ -65,6 +65,7 @@ class TTSService:
         emotion: str = "neutral",
         language: str = "ko",
         engine_name: Optional[str] = None,
+        voice_profile: Optional[str] = None,
     ) -> AsyncIterator[TTSChunk]:
         """
         Main TTS entry point — synthesize text to streaming audio.
@@ -125,6 +126,7 @@ class TTSService:
             language=language or "ko",
             audio_format=audio_format,
             sample_rate=sample_rate,
+            voice_profile=voice_profile,
         )
 
         # Apply emotion parameters

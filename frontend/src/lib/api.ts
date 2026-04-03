@@ -1064,4 +1064,23 @@ export const ttsApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  // ── Per-Session Voice Profile ──
+
+  /** GET /api/tts/agents/{sessionId}/profile — 세션 보이스 프로필 조회 */
+  getSessionProfile: (sessionId: string) =>
+    apiCall<{ session_id: string; tts_voice_profile: string | null }>(`/api/tts/agents/${sessionId}/profile`),
+
+  /** PUT /api/tts/agents/{sessionId}/profile — 세션에 보이스 프로필 할당 */
+  assignSessionProfile: (sessionId: string, profileName: string) =>
+    apiCall<{ success: boolean; session_id: string; tts_voice_profile: string }>(`/api/tts/agents/${sessionId}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ profile_name: profileName }),
+    }),
+
+  /** DELETE /api/tts/agents/{sessionId}/profile — 세션 보이스 프로필 해제 */
+  unassignSessionProfile: (sessionId: string) =>
+    apiCall<{ success: boolean; session_id: string }>(`/api/tts/agents/${sessionId}/profile`, {
+      method: 'DELETE',
+    }),
 };

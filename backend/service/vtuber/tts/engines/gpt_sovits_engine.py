@@ -50,8 +50,13 @@ class GPTSoVITSEngine(TTSEngine):
         if not config.enabled:
             raise ValueError("GPT-SoVITS is not enabled")
 
-        # Resolve paths from voice_profile (or legacy direct paths)
-        ref_audio_dir, container_ref_dir = self._resolve_profile_paths(config)
+        # Per-session voice_profile override (from TTSRequest)
+        if request.voice_profile:
+            ref_audio_dir = f"/app/static/voices/{request.voice_profile}"
+            container_ref_dir = f"/workspace/GPT-SoVITS/references/{request.voice_profile}"
+        else:
+            # Resolve paths from voice_profile (or legacy direct paths)
+            ref_audio_dir, container_ref_dir = self._resolve_profile_paths(config)
 
         # Select emotion-specific reference audio + per-emotion prompt
         ref_audio_path, per_prompt_text, per_prompt_lang = self._get_emotion_ref(
