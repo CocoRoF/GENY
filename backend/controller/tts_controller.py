@@ -292,6 +292,27 @@ async def clear_cache():
 VOICES_DIR = Path(__file__).parent.parent / "static" / "voices"
 
 
+def _is_template_profile(name: str) -> bool:
+    """Check if a voice profile is marked as a template (read-only)."""
+    profile_json = VOICES_DIR / name / "profile.json"
+    if profile_json.exists():
+        try:
+            data = json.loads(profile_json.read_text(encoding="utf-8"))
+            return bool(data.get("is_template", False))
+        except Exception:
+            pass
+    return False
+
+
+def _guard_template(name: str) -> None:
+    """Raise 403 if the profile is a template."""
+    if _is_template_profile(name):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Profile '{name}' is a built-in template and cannot be modified.",
+        )
+
+
 def _migrate_emotion_refs(data: dict) -> None:
     """Ensure each emotion_ref entry has prompt_text/prompt_lang fields.
 
@@ -436,6 +457,7 @@ async def create_profile(body: CreateProfileRequest):
 @router.put("/profiles/{name}")
 async def update_profile(name: str, body: UpdateProfileRequest):
     """Update an existing voice profile"""
+    _guard_template(name)
     profile_dir = VOICES_DIR / name
     profile_json = profile_dir / "profile.json"
     if not profile_json.exists():
@@ -470,6 +492,7 @@ async def upload_reference_audio(
     file: UploadFile = File(...),
 ):
     """Upload a reference audio file for a specific emotion"""
+    _guard_template(name)
     profile_dir = VOICES_DIR / name
     if not profile_dir.exists():
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
@@ -516,6 +539,7 @@ async def upload_reference_audio(
 @router.delete("/profiles/{name}/ref/{emotion}")
 async def delete_reference_audio(name: str, emotion: str):
     """Delete a reference audio file for a specific emotion"""
+    _guard_template(name)
     # Validate name to prevent path traversal
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid profile name")
@@ -564,6 +588,7 @@ async def get_reference_audio(name: str, emotion: str):
 @router.put("/profiles/{name}/ref/{emotion}")
 async def update_emotion_ref(name: str, emotion: str, body: UpdateEmotionRefRequest):
     """Update prompt_text / prompt_lang for a single emotion reference"""
+    _guard_template(name)
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid profile name")
 

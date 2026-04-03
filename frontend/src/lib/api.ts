@@ -952,6 +952,7 @@ export interface VoiceProfile {
   name: string;
   display_name: string;
   language?: string;
+  is_template?: boolean;
   prompt_text?: string;
   prompt_lang?: string;
   emotion_refs?: Record<string, { file: string; prompt_text?: string; prompt_lang?: string }>;
