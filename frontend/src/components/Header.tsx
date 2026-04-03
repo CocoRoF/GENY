@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, Code2, User, BookOpen, Mic } from 'lucide-react';
+import { Menu, Sun, Moon, Code2, User, BookOpen, Mic, AudioLines } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Header() {
@@ -97,6 +97,15 @@ export default function Header() {
         >
           <Mic size={14} />
         </a>
+
+        {/* ── TTS Voice Button — hidden on mobile ── */}
+        <Link
+          href="/tts-voice"
+          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          title={t('header.ttsVoice')}
+        >
+          <AudioLines size={14} />
+        </Link>
 
         {/* ── Language Toggle ── */}
         <div className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)]">

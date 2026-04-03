@@ -23,6 +23,7 @@ const en = {
     normalMode: 'Normal',
     wiki: 'Wiki',
     ttsStudio: 'TTS Studio',
+    ttsVoice: 'TTS Voice',
   },
 
   // ─── Wiki ───
@@ -813,6 +814,40 @@ const en = {
     volume: 'Volume',
     stop: 'Stop speaking',
     speakMessage: 'Read aloud',
+  },
+
+  // ─── TTS Voice ───
+  ttsVoice: {
+    title: 'TTS Voice Profiles',
+    backToApp: 'Back',
+    loading: 'Loading...',
+    noProfiles: 'No voice profiles found.',
+    selectProfile: 'Select a voice profile from the sidebar.',
+    newProfile: 'New Profile',
+    profileName: 'Profile Name (ID)',
+    profileNameHint: 'Lowercase letters, numbers, underscore only.',
+    displayName: 'Display Name',
+    displayNamePlaceholder: 'My Voice',
+    language: 'Language',
+    create: 'Create',
+    cancel: 'Cancel',
+    created: 'Profile created.',
+    saved: 'Saved.',
+    activated: 'Voice profile activated.',
+    activate: 'Set as Active Voice',
+    currentActive: 'Currently Active',
+    promptSettings: 'Prompt Settings',
+    promptText: 'Prompt Text',
+    promptTextPlaceholder: 'Transcription of your reference audio...',
+    promptTextHint: 'The exact text spoken in your reference audio file.',
+    promptLanguage: 'Prompt Language',
+    save: 'Save',
+    emotionRefs: 'Emotion Reference Audio',
+    noRef: 'No file uploaded',
+    upload: 'Upload .wav',
+    uploaded: 'uploaded.',
+    delete: 'Delete',
+    deleted: 'deleted.',
   },
 };
 

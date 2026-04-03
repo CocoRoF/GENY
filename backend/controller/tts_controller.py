@@ -242,16 +242,40 @@ async def list_profiles():
             if not profile_dir.is_dir():
                 continue
             profile_json = profile_dir / "profile.json"
+            refs = {f.stem.replace("ref_", ""): True for f in profile_dir.glob("ref_*.wav")}
             if profile_json.exists():
                 try:
                     data = json.loads(profile_json.read_text(encoding="utf-8"))
-                    data["has_refs"] = {
-                        f.stem.replace("ref_", ""): True
-                        for f in profile_dir.glob("ref_*.wav")
-                    }
+                    data["has_refs"] = refs
                     profiles.append(data)
                 except Exception as e:
                     logger.warning(f"Failed to read profile {profile_dir.name}: {e}")
+            else:
+                # Legacy directory without profile.json — auto-generate metadata
+                profiles.append({
+                    "name": profile_dir.name,
+                    "display_name": profile_dir.name,
+                    "language": "ko",
+                    "prompt_text": "",
+                    "prompt_lang": "ko",
+                    "emotion_refs": {},
+                    "has_refs": refs,
+                })
+
+    # Mark which profile is currently active in GPT-SoVITS config
+    active_dir = ""
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+
+        cfg = get_config_manager().load_config(GPTSoVITSConfig)
+        active_dir = os.path.basename(cfg.ref_audio_dir.rstrip("/"))
+    except Exception:
+        pass
+
+    for p in profiles:
+        p["active"] = p.get("name") == active_dir
+
     return {"profiles": profiles}
 
 
@@ -377,3 +401,79 @@ async def upload_reference_audio(
         "file": f"ref_{emotion}.wav",
         "size": len(content),
     }
+
+
+@router.delete("/profiles/{name}/ref/{emotion}")
+async def delete_reference_audio(name: str, emotion: str):
+    """Delete a reference audio file for a specific emotion"""
+    # Validate name to prevent path traversal
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    profile_dir = VOICES_DIR / name
+    if not profile_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    ref_path = profile_dir / f"ref_{emotion}.wav"
+    if not ref_path.exists():
+        raise HTTPException(status_code=404, detail=f"Reference audio for '{emotion}' not found")
+
+    ref_path.unlink()
+
+    # Update profile.json
+    profile_json = profile_dir / "profile.json"
+    if profile_json.exists():
+        data = json.loads(profile_json.read_text(encoding="utf-8"))
+        if "emotion_refs" in data and emotion in data["emotion_refs"]:
+            del data["emotion_refs"][emotion]
+            profile_json.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    return {"success": True, "profile": name, "emotion": emotion}
+
+
+@router.post("/profiles/{name}/activate")
+async def activate_profile(name: str):
+    """Set a voice profile as the active GPT-SoVITS voice"""
+    # Validate name to prevent path traversal
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    profile_dir = VOICES_DIR / name
+    if not profile_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+
+        mgr = get_config_manager()
+        cfg = mgr.load_config(GPTSoVITSConfig)
+
+        # Update paths
+        cfg.ref_audio_dir = f"/app/static/voices/{name}"
+        cfg.container_ref_dir = f"/workspace/GPT-SoVITS/references/{name}"
+
+        # Update prompt from profile.json if available
+        profile_json = profile_dir / "profile.json"
+        if profile_json.exists():
+            data = json.loads(profile_json.read_text(encoding="utf-8"))
+            if data.get("prompt_text"):
+                cfg.prompt_text = data["prompt_text"]
+            if data.get("prompt_lang"):
+                cfg.prompt_lang = data["prompt_lang"]
+
+        mgr.save_config(cfg)
+        logger.info(f"Activated voice profile: {name}")
+
+        return {
+            "success": True,
+            "profile": name,
+            "ref_audio_dir": cfg.ref_audio_dir,
+            "container_ref_dir": cfg.container_ref_dir,
+        }
+    except Exception as e:
+        logger.error(f"Failed to activate profile '{name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -23,6 +23,7 @@ const ko: Translations = {
     normalMode: '일반',
     wiki: '위키',
     ttsStudio: 'TTS Studio',
+    ttsVoice: 'TTS Voice',
   },
 
   // ─── Wiki ───
@@ -813,6 +814,40 @@ const ko: Translations = {
     volume: '볼륨',
     stop: '재생 중지',
     speakMessage: '음성으로 읽기',
+  },
+
+  // ─── TTS Voice ───
+  ttsVoice: {
+    title: 'TTS 보이스 프로필',
+    backToApp: '돌아가기',
+    loading: '로딩 중...',
+    noProfiles: '보이스 프로필이 없습니다.',
+    selectProfile: '사이드바에서 보이스 프로필을 선택하세요.',
+    newProfile: '새 프로필',
+    profileName: '프로필 이름 (ID)',
+    profileNameHint: '영문 소문자, 숫자, 언더스코어만 사용 가능',
+    displayName: '표시 이름',
+    displayNamePlaceholder: '내 보이스',
+    language: '언어',
+    create: '생성',
+    cancel: '취소',
+    created: '프로필이 생성되었습니다.',
+    saved: '저장되었습니다.',
+    activated: '보이스 프로필이 활성화되었습니다.',
+    activate: '활성 보이스로 설정',
+    currentActive: '현재 활성',
+    promptSettings: '프롬프트 설정',
+    promptText: '프롬프트 텍스트',
+    promptTextPlaceholder: '레퍼런스 오디오의 전사 텍스트...',
+    promptTextHint: '레퍼런스 오디오에서 실제로 발화된 텍스트입니다.',
+    promptLanguage: '프롬프트 언어',
+    save: '저장',
+    emotionRefs: '감정별 레퍼런스 오디오',
+    noRef: '파일 없음',
+    upload: '.wav 업로드',
+    uploaded: '업로드 완료',
+    delete: '삭제',
+    deleted: '삭제 완료',
   },
 };
 

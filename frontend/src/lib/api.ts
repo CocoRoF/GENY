@@ -948,6 +948,18 @@ export interface VoiceInfo {
   preview_text?: string;
 }
 
+export interface VoiceProfile {
+  name: string;
+  display_name: string;
+  language?: string;
+  prompt_text?: string;
+  prompt_lang?: string;
+  emotion_refs?: Record<string, { file: string; text?: string }>;
+  has_refs?: Record<string, boolean>;
+  active?: boolean;
+  gpt_sovits_settings?: Record<string, unknown>;
+}
+
 export const ttsApi = {
   /** POST /api/tts/agents/{sessionId}/speak — TTS 오디오 스트리밍 요청 */
   speak: async (
@@ -987,4 +999,57 @@ export const ttsApi = {
   /** GET /api/tts/engines — 엔진 목록 */
   engines: () =>
     apiCall<{ engines: string[]; default: string }>('/api/tts/engines'),
+
+  // ── Voice Profile Management ──
+
+  /** GET /api/tts/profiles — 보이스 프로필 목록 */
+  listProfiles: () =>
+    apiCall<{ profiles: VoiceProfile[] }>('/api/tts/profiles'),
+
+  /** GET /api/tts/profiles/{name} — 프로필 상세 */
+  getProfile: (name: string) =>
+    apiCall<VoiceProfile>(`/api/tts/profiles/${encodeURIComponent(name)}`),
+
+  /** POST /api/tts/profiles — 새 프로필 생성 */
+  createProfile: (body: { name: string; display_name: string; language?: string; prompt_text?: string; prompt_lang?: string }) =>
+    apiCall<VoiceProfile>('/api/tts/profiles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** PUT /api/tts/profiles/{name} — 프로필 수정 */
+  updateProfile: (name: string, body: { display_name?: string; language?: string; prompt_text?: string; prompt_lang?: string }) =>
+    apiCall<VoiceProfile>(`/api/tts/profiles/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  /** POST /api/tts/profiles/{name}/ref — 레퍼런스 오디오 업로드 */
+  uploadRef: async (name: string, emotion: string, file: File, text?: string): Promise<{ success: boolean }> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('emotion', emotion);
+    if (text) form.append('text', text);
+    const res = await fetch(`/api/tts/profiles/${encodeURIComponent(name)}/ref`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** DELETE /api/tts/profiles/{name}/ref/{emotion} — 레퍼런스 오디오 삭제 */
+  deleteRef: (name: string, emotion: string) =>
+    apiCall<{ success: boolean }>(`/api/tts/profiles/${encodeURIComponent(name)}/ref/${encodeURIComponent(emotion)}`, {
+      method: 'DELETE',
+    }),
+
+  /** POST /api/tts/profiles/{name}/activate — 프로필 활성화 */
+  activateProfile: (name: string) =>
+    apiCall<{ success: boolean }>(`/api/tts/profiles/${encodeURIComponent(name)}/activate`, {
+      method: 'POST',
+    }),
 };
