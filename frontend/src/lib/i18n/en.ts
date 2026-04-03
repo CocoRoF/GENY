@@ -22,6 +22,7 @@ const en = {
     devMode: 'Dev',
     normalMode: 'Normal',
     wiki: 'Wiki',
+    ttsStudio: 'TTS Studio',
   },
 
   // ─── Wiki ───

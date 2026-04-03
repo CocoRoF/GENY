@@ -22,6 +22,7 @@ const ko: Translations = {
     devMode: '개발',
     normalMode: '일반',
     wiki: '위키',
+    ttsStudio: 'TTS Studio',
   },
 
   // ─── Wiki ───

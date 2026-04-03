@@ -101,6 +101,7 @@ services:
     environment:
       - API_URL=http://backend:8000
       - NEXT_PUBLIC_BACKEND_PORT=${BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_GPT_SOVITS_WEBUI_PORT=${GPT_SOVITS_WEBUI_PORT:-9874}
       - PORT=3000
       - HOSTNAME=0.0.0.0
     volumes:
@@ -118,7 +119,7 @@ services:
 
   # ── GPT-SoVITS (Optional — TTS 로컬 엔진, GPU 필요) ──────────────
   # xxxxrt666/gpt-sovits:latest (공식 이미지, v2 API, 한국어 지원)
-  # 기본 CMD 는 symlink + bash. api_v2.py 를 수동 실행해야 포트 9880 서빙.
+  # api_v2.py → 포트 9880 서빙, webui.py → 포트 9874 (TTS Studio)
   gpt-sovits:
     image: xxxxrt666/gpt-sovits:latest-cu126
     container_name: geny-gpt-sovits-dev
@@ -136,9 +137,11 @@ services:
         ln -sf /workspace/models/G2PWModel       GPT_SoVITS/text/G2PWModel;
         ln -sf /workspace/models/asr_models       tools/asr/models;
         ln -sf /workspace/models/uvr5_weights     tools/uvr5/uvr5_weights;
+        python webui.py &
         exec python api_v2.py -a 0.0.0.0 -p 9880
     ports:
       - "127.0.0.1:${GPT_SOVITS_PORT:-9880}:9880"
+      - "127.0.0.1:${GPT_SOVITS_WEBUI_PORT:-9874}:9874"
     volumes:
       - ./backend/static/voices:/workspace/GPT-SoVITS/references:ro
     tty: true
