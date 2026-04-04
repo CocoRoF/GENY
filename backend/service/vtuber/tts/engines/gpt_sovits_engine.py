@@ -252,6 +252,16 @@ class GPTSoVITSEngine(TTSEngine):
             logger.info(f"Emotion '{emotion}' not found, falling back to neutral")
             return result
 
+        # Fallback to any registered emotion
+        for fallback_emo in emotion_refs:
+            result = _resolve(fallback_emo)
+            if result:
+                logger.info(
+                    f"Emotion '{emotion}' and 'neutral' not found, "
+                    f"falling back to '{fallback_emo}'"
+                )
+                return result
+
         # No local files found — send container path as-is
         container_path = os.path.join(container_dir, f"ref_{emotion}.wav")
         logger.warning(
