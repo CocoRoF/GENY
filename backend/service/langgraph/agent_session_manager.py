@@ -530,7 +530,7 @@ class AgentSessionManager(SessionManager):
                     system_prompt=request.cli_system_prompt,  # CLI-specific prompt
                     workflow_id=request.cli_workflow_id or "template-optimized-autonomous",
                     graph_name=request.cli_graph_name or "Optimized Autonomous",
-                    tool_preset_id=request.cli_tool_preset_id or request.tool_preset_id,
+                    tool_preset_id=request.cli_tool_preset_id,  # None → CLI uses its own role default
                     linked_session_id=session_id,  # Link back to VTuber
                     session_type="cli",
                     env_vars=request.env_vars,
