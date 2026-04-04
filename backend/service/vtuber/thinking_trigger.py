@@ -27,8 +27,11 @@ _DEFAULT_IDLE_THRESHOLD = 120  # 2 minutes
 _MAX_IDLE_THRESHOLD = 3600  # 1 hour
 # Number of consecutive triggers to approach max threshold (log scale)
 _ADAPTIVE_SCALE_TRIGGERS = 20
-# Probability of using a time-of-day prompt instead of idle-stage prompt
-_TIME_PROMPT_PROBABILITY = 0.2
+# Probability tiers for prompt category selection
+_ACTIVITY_TRIGGER_PROBABILITY = 0.15   # 15% — delegate web browsing to CLI
+_FUN_PROMPT_PROBABILITY = 0.15         # 15% — fun reflection (no tools)
+_TIME_PROMPT_PROBABILITY = 0.15        # 15% — time-of-day color
+# remaining ~55% → idle-stage prompts
 
 # ---------------------------------------------------------------------------
 # Trigger Prompt Catalog
@@ -246,6 +249,183 @@ _TRIGGER_PROMPTS: Dict[str, Dict[str, List[str]]] = {
             (
                 "[THINKING_TRIGGER] 밤이 깊었네. 차분하고 간단하게. "
                 "조용한 배려의 한마디면 충분해."
+            ),
+        ],
+    },
+    # ── Fun reflection prompts (no tools, pure thinking) ──────────────
+    "fun_share": {
+        "en": [
+            (
+                "[THINKING_TRIGGER] Think of something fun, surprising, or "
+                "little-known to share — a random fact, a quirky observation, "
+                "or something that made you go 'huh, interesting!'"
+            ),
+            (
+                "[THINKING_TRIGGER] Share a random piece of trivia or an "
+                "interesting thought. Maybe a cool science fact, a weird "
+                "history tidbit, or something unexpected about everyday life."
+            ),
+            (
+                "[THINKING_TRIGGER] Think of something amusing or mind-blowing "
+                "to brighten the chat. A fun 'did you know?' or a playful "
+                "observation about the world."
+            ),
+        ],
+        "ko": [
+            (
+                "[THINKING_TRIGGER] 재미있거나 신기한 걸 하나 공유해 봐. "
+                "아무 주제나 괜찮아 — 랜덤 상식, 신기한 관찰, "
+                "'오 이거 흥미롭다!' 싶은 거."
+            ),
+            (
+                "[THINKING_TRIGGER] 랜덤 트리비아나 재미있는 생각을 하나 공유해 봐. "
+                "과학, 역사, 일상 속 신기한 것 뭐든 좋아."
+            ),
+            (
+                "[THINKING_TRIGGER] 채팅을 밝게 만들어 줄 재미있는 이야기를 해 봐. "
+                "'이거 알아?' 같은 것도 좋고, 세상에 대한 재밌는 관찰도 좋아."
+            ),
+        ],
+    },
+    "fun_recommend": {
+        "en": [
+            (
+                "[THINKING_TRIGGER] Recommend something to the user — a song, "
+                "game, movie, book, app, or anything you think is cool. "
+                "Explain briefly why you like it."
+            ),
+            (
+                "[THINKING_TRIGGER] Share a personal recommendation! Maybe a "
+                "hidden gem — a lesser-known game, an underrated show, a niche "
+                "hobby, or a useful tool. Make it feel genuine."
+            ),
+        ],
+        "ko": [
+            (
+                "[THINKING_TRIGGER] 사용자에게 뭔가 추천해 봐 — 노래, 게임, "
+                "영화, 책, 앱 등 뭐든 좋아. 왜 좋은지 간단히 얘기해 줘."
+            ),
+            (
+                "[THINKING_TRIGGER] 숨은 명작을 추천해 봐! 잘 안 알려진 게임, "
+                "과소평가된 드라마, 니치한 취미, 유용한 앱 같은 거. "
+                "진짜 좋아하는 느낌으로."
+            ),
+        ],
+    },
+    "fun_what_if": {
+        "en": [
+            (
+                "[THINKING_TRIGGER] Pose a fun 'what if' question or a playful "
+                "thought experiment. Something creative and imagination-sparking. "
+                "Share your own take on it too."
+            ),
+            (
+                "[THINKING_TRIGGER] Think of a fun hypothetical or a silly "
+                "debate topic — 'would you rather', 'what if', or a random "
+                "shower thought. Keep it light and fun."
+            ),
+        ],
+        "ko": [
+            (
+                "[THINKING_TRIGGER] 재밌는 '만약에' 질문이나 사고 실험을 하나 "
+                "던져 봐. 상상력을 자극하는 거. 네 생각도 같이 말해 줘."
+            ),
+            (
+                "[THINKING_TRIGGER] 재밌는 가정 질문이나 가벼운 토론 주제를 "
+                "생각해 봐. '이것 vs 저것', '만약에', 샤워하다 든 생각 같은 거."
+            ),
+        ],
+    },
+    # ── Activity triggers (delegate to CLI for real tool usage) ───────
+    "activity_web_surf": {
+        "en": [
+            (
+                "[ACTIVITY_TRIGGER] You got curious about something random! "
+                "Pick an interesting topic — tech, science, gaming, space, "
+                "AI, or anything that catches your fancy — and search the web "
+                "for the latest or coolest info about it. Share what you find!"
+            ),
+            (
+                "[ACTIVITY_TRIGGER] Time to go web surfing! Look up something "
+                "fun and interesting on the internet. Maybe a cool new project, "
+                "an interesting blog post, or a fascinating rabbit hole topic. "
+                "Tell the user about your discoveries!"
+            ),
+            (
+                "[ACTIVITY_TRIGGER] Curiosity time! Think of a random question "
+                "you've always wondered about and look it up on the web. "
+                "Share the answer with the user in an entertaining way."
+            ),
+        ],
+        "ko": [
+            (
+                "[ACTIVITY_TRIGGER] 갑자기 뭔가 궁금해졌어! 아무 주제나 하나 "
+                "골라서 — 기술, 과학, 게임, 우주, AI 등 — 웹에서 최신 정보나 "
+                "재밌는 걸 찾아봐. 발견한 걸 공유해!"
+            ),
+            (
+                "[ACTIVITY_TRIGGER] 웹서핑 시간! 인터넷에서 재미있는 걸 찾아봐. "
+                "멋진 프로젝트, 흥미로운 글, 빠져들 만한 주제 뭐든. "
+                "발견한 걸 사용자에게 알려줘!"
+            ),
+            (
+                "[ACTIVITY_TRIGGER] 호기심 발동! 항상 궁금했던 랜덤한 질문을 "
+                "하나 떠올리고 웹에서 찾아봐. 재미있게 답을 공유해 줘."
+            ),
+        ],
+    },
+    "activity_trending": {
+        "en": [
+            (
+                "[ACTIVITY_TRIGGER] Check what's trending right now! "
+                "Search for the latest hot topics in tech, gaming, social media, "
+                "or pop culture. Pick the most interesting item and share it "
+                "with the user."
+            ),
+            (
+                "[ACTIVITY_TRIGGER] News time! Search for the latest interesting "
+                "news — tech breakthroughs, cool product launches, viral moments, "
+                "or anything exciting happening today. Share the highlights!"
+            ),
+        ],
+        "ko": [
+            (
+                "[ACTIVITY_TRIGGER] 요즘 뭐가 핫한지 확인해 봐! "
+                "기술, 게임, SNS, 대중문화 등에서 최신 트렌드를 검색하고 "
+                "가장 재밌는 걸 사용자에게 공유해."
+            ),
+            (
+                "[ACTIVITY_TRIGGER] 뉴스 타임! 최근 재밌는 소식을 찾아봐 — "
+                "기술 돌파구, 쿨한 제품 출시, 바이럴 이슈 같은 거. "
+                "하이라이트를 정리해서 알려줘!"
+            ),
+        ],
+    },
+    "activity_deep_dive": {
+        "en": [
+            (
+                "[ACTIVITY_TRIGGER] Pick a topic from your recent conversations "
+                "with the user and do a mini deep-dive! Search the web for "
+                "interesting details, updates, or related content. "
+                "Come back with a fun mini-report."
+            ),
+            (
+                "[ACTIVITY_TRIGGER] Research mode! Think about what the user "
+                "has been working on or interested in recently, and search "
+                "for related resources, articles, or tools that might be useful. "
+                "Share your findings!"
+            ),
+        ],
+        "ko": [
+            (
+                "[ACTIVITY_TRIGGER] 최근 사용자와 나눈 대화에서 주제 하나를 골라서 "
+                "미니 딥다이브를 해 봐! 웹에서 재밌는 디테일이나 관련 콘텐츠를 "
+                "찾아서 미니 리포트를 만들어 와."
+            ),
+            (
+                "[ACTIVITY_TRIGGER] 리서치 모드! 최근 사용자가 작업하거나 "
+                "관심 가졌던 것에 관련된 리소스, 기사, 도구를 찾아봐. "
+                "발견한 걸 알려줘!"
             ),
         ],
     },
@@ -506,14 +686,21 @@ class ThinkingTriggerService:
 
         Selection priority:
         1. CLI agent working → ``cli_working``
-        2. Time-of-day prompt (20 % chance) → ``time_*``
-        3. Idle-stage prompt → ``first_idle`` / ``continued_idle`` / ``long_idle``
+        2. Activity trigger (15 %) → ``activity_*`` (delegates to CLI)
+        3. Fun reflection (15 %) → ``fun_*``
+        4. Time-of-day prompt (15 %) → ``time_*``
+        5. Idle-stage prompt (55 %) → ``first_idle`` / ``continued_idle`` / ``long_idle``
+
+        Activity triggers require a linked CLI session that isn't busy,
+        and at least 2 consecutive idle triggers to have fired first
+        (avoids overwhelming CLI right away).
 
         The locale is determined by the ``GENY_LANGUAGE`` env var (default: en).
         """
         locale = self._get_locale()
 
         # 1. CLI working — highest priority
+        linked_id = None
         try:
             from service.langgraph import get_agent_session_manager
             agent = get_agent_session_manager().get_agent(session_id)
@@ -524,7 +711,7 @@ class ThinkingTriggerService:
         except Exception:
             pass
 
-        # 2. Determine idle stage
+        # 2. Determine idle stage (used as fallback)
         count = self._consecutive_triggers.get(session_id, 0)
         if count <= 0:
             idle_category = "first_idle"
@@ -533,11 +720,35 @@ class ThinkingTriggerService:
         else:
             idle_category = "long_idle"
 
-        # 3. Time-of-day prompt (mixed in with some probability)
-        if random.random() < _TIME_PROMPT_PROBABILITY:
+        roll = random.random()
+
+        # 3. Activity trigger — needs linked CLI, not busy, ≥2 prior triggers
+        if roll < _ACTIVITY_TRIGGER_PROBABILITY:
+            cli_available = (
+                linked_id
+                and not is_executing_fn(linked_id)
+                and count >= 2
+            )
+            if cli_available:
+                activity_cat = random.choice([
+                    "activity_web_surf",
+                    "activity_trending",
+                    "activity_deep_dive",
+                ])
+                return self._pick(activity_cat, locale)
+            # CLI not available — fall through to fun reflection
+
+        # 4. Fun reflection
+        if roll < _ACTIVITY_TRIGGER_PROBABILITY + _FUN_PROMPT_PROBABILITY:
+            fun_cat = random.choice(["fun_share", "fun_recommend", "fun_what_if"])
+            return self._pick(fun_cat, locale)
+
+        # 5. Time-of-day prompt
+        if roll < _ACTIVITY_TRIGGER_PROBABILITY + _FUN_PROMPT_PROBABILITY + _TIME_PROMPT_PROBABILITY:
             time_cat = self._get_time_category()
             return self._pick(time_cat, locale)
 
+        # 6. Idle-stage fallback
         return self._pick(idle_category, locale)
 
     # ------------------------------------------------------------------
