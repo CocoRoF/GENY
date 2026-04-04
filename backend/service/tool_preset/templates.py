@@ -24,8 +24,31 @@ def create_all_tools_preset() -> ToolPresetDefinition:
     )
 
 
+def create_vtuber_tools_preset() -> ToolPresetDefinition:
+    """VTuber persona — lightweight tools for conversation + info lookup."""
+    return ToolPresetDefinition(
+        id="template-vtuber-tools",
+        name="VTuber Tools",
+        description=(
+            "Lightweight tool set for VTuber personas. "
+            "Includes web search and page fetch for conversational info lookup. "
+            "Excludes browser automation and bulk fetch."
+        ),
+        icon="🎤",
+        custom_tools=[
+            "web_search",
+            "news_search",
+            "web_fetch",
+        ],
+        mcp_servers=[],
+        is_template=True,
+        template_name="vtuber-tools",
+    )
+
+
 _TEMPLATE_FACTORIES = [
     create_all_tools_preset,
+    create_vtuber_tools_preset,
 ]
 
 
@@ -47,5 +70,5 @@ ROLE_DEFAULT_PRESET: dict[str, str] = {
     "developer": "template-all-tools",
     "researcher": "template-all-tools",
     "planner": "template-all-tools",
-    "vtuber": "template-all-tools",
+    "vtuber": "template-vtuber-tools",
 }
