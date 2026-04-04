@@ -80,7 +80,7 @@ export default function TtsVoicePage() {
     if (!createForm.name || !createForm.display_name) return;
     try {
       await ttsApi.createProfile({
-        name: createForm.name.replace(/[^a-zA-Z0-9_-]/g, '_'),
+        name: createForm.name.replace(/[^\p{L}\p{N}_-]/gu, '_'),
         display_name: createForm.display_name,
         language: createForm.language,
       });
