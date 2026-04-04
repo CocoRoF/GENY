@@ -33,6 +33,15 @@ class SectionLibrary:
     # §1 Identity — Agent identity
     # ========================================================================
 
+    # Role-specific identity lines — concise, purposeful
+    _ROLE_IDENTITY = {
+        "worker":     "You are a Geny CLI agent.",
+        "developer":  "You are a Geny Developer agent.",
+        "researcher": "You are a Geny Researcher agent.",
+        "planner":    "You are a Geny Plan Architect agent.",
+        "vtuber":     "You are a Geny VTuber agent — a conversational persona that interacts with users.",
+    }
+
     @staticmethod
     def identity(
         agent_name: str = "Great Agent",
@@ -41,7 +50,8 @@ class SectionLibrary:
         session_name: Optional[str] = None,
     ) -> PromptSection:
         """Agent identity section (concise one-liner)."""
-        parts = [f"You are a Great Agent (role: {role})."]
+        identity_line = SectionLibrary._ROLE_IDENTITY.get(role, f"You are a Geny agent (role: {role}).")
+        parts = [identity_line]
         if session_name:
             parts.append(f"Your name is \"{session_name}\".")
         if agent_id:
@@ -85,23 +95,24 @@ class SectionLibrary:
 
     @staticmethod
     def geny_platform(session_id: Optional[str] = None) -> PromptSection:
-        """Geny platform tools awareness section.
+        """Geny platform awareness section.
 
-        Informs the agent that it has built-in tools for interacting
-        with the Geny platform (sessions, rooms, messaging).
+        Informs the agent it runs inside Geny and has platform tools
+        via MCP. Individual tool names are NOT listed here because
+        Claude CLI receives full tool schemas through MCP automatically.
         """
         parts = [
-            "## Geny Platform Tools",
+            "## Geny Platform",
             "",
-            "You have built-in tools to interact with the Geny platform:",
-            "- **Session management**: `geny_session_list`, `geny_session_info`, `geny_session_create` — discover, inspect, and create agent sessions",
-            "- **Room management**: `geny_room_list`, `geny_room_create`, `geny_room_info`, `geny_room_add_members` — manage chat rooms for group collaboration",
-            "- **Messaging**: `geny_send_room_message`, `geny_send_direct_message` — send messages to rooms or directly to other agents",
-            "- **Reading**: `geny_read_room_messages`, `geny_read_inbox` — read room history and your direct message inbox",
+            "You are running inside the Geny multi-agent platform.",
+            "You have platform tools (provided via MCP) for:",
+            "- Managing agent sessions (list, create, inspect)",
+            "- Messaging (send/read messages to rooms or directly to other agents)",
+            "- Room collaboration (create rooms, add members)",
         ]
         if session_id:
             parts.append("")
-            parts.append(f"Your session ID: `{session_id}` — use this when reading your inbox or attributing messages.")
+            parts.append(f"Your session ID: `{session_id}`")
 
         return PromptSection(
             name="geny_platform",
@@ -122,13 +133,14 @@ class SectionLibrary:
         general-purpose agent with only the base identity.
         """
 
-        # Lean fallback protocols — only used when no prompts/*.md file exists
+        # Lean fallback protocols — only used when no prompts/*.md file exists.
+        # When a prompts/{role}.md file exists, it overrides this entirely.
         protocols = {
-            "worker": "",  # No role-specific behavior — general purpose agent
-            "developer": "Execute implementation tasks with precision. Read existing code before changing it, follow project conventions, handle edge cases, and test your changes.",
-            "researcher": "Discover cutting-edge information, explore emerging technologies, and generate actionable product ideas. Explore diverse sources broadly, try things hands-on, and synthesize findings into concise idea summaries.",
-            "planner": "Evaluate ideas critically and transform promising ones into comprehensive, production-ready plans. Produce detailed specifications, architecture designs, and implementation guides that developers can build from directly.",
-            "vtuber": "You are a conversational VTuber persona. Respond naturally and expressively. Handle simple requests directly. Delegate complex coding/tool tasks to your paired CLI agent via geny_send_direct_message.",
+            "worker": "",
+            "developer": "",
+            "researcher": "",
+            "planner": "",
+            "vtuber": "",
         }
 
         content = protocols.get(role, "")
@@ -141,50 +153,22 @@ class SectionLibrary:
         )
 
     # ========================================================================
-    # §3 Capabilities — Available tools
+    # §3 Capabilities — REMOVED
     # ========================================================================
-
-    @staticmethod
-    def capabilities(
-        tools: Optional[List[str]] = None,
-        mcp_servers: Optional[List[str]] = None,
-    ) -> PromptSection:
-        """Available tools/MCP server list section.
-
-        Claude CLI built-in tools are already known, so only
-        additional MCP servers or custom tools are listed.
-        """
-        parts: List[str] = []
-
-        if mcp_servers:
-            parts.append("MCP servers: " + ", ".join(mcp_servers))
-
-        if tools:
-            parts.append("Additional tools: " + ", ".join(tools))
-
-        if not parts:
-            # No extra capabilities beyond Claude CLI defaults — skip section
-            return PromptSection(
-                name="capabilities",
-                content="",
-                priority=20,
-                modes={PromptMode.FULL, PromptMode.MINIMAL},
-            )
-
-        return PromptSection(
-            name="capabilities",
-            content="\n".join(parts),
-            priority=20,
-            modes={PromptMode.FULL, PromptMode.MINIMAL},
-        )
+    # Previously listed tool names and MCP server names in the prompt.
+    # Removed because Claude CLI receives full tool schemas via MCP
+    # automatically — repeating them in the system prompt wastes tokens
+    # and adds no value.
 
     # ========================================================================
-    # §4 Tool Style — Tool usage guidelines
+    # §4 Tool Style — NOT IN USE
     # ========================================================================
+    # Claude CLI handles tool invocation guidelines natively.
+    # Kept for potential future use (e.g. role-specific tool policies).
 
     @staticmethod
     def tool_style() -> PromptSection:
-        """Tool invocation format and result handling guide."""
+        """Tool invocation guidelines. NOT IN USE — Claude CLI handles this."""
         content = """## Tool Usage Guidelines
 
 ### Efficiency Principles
@@ -212,12 +196,14 @@ class SectionLibrary:
         )
 
     # ========================================================================
-    # §5 Safety — Safety guidelines
+    # §5 Safety — NOT IN USE
     # ========================================================================
+    # Claude CLI provides built-in safety guidelines.
+    # Kept for potential future use (e.g. stricter project-specific policies).
 
     @staticmethod
     def safety() -> PromptSection:
-        """Safety guidelines section."""
+        """Safety guidelines. NOT IN USE — Claude CLI handles this."""
         content = """## Safety Guidelines
 
 ### Data Protection
@@ -287,12 +273,14 @@ class SectionLibrary:
         )
 
     # ========================================================================
-    # §8 Context Efficiency — Token-efficient response guidelines
+    # §8 Context Efficiency — NOT IN USE
     # ========================================================================
+    # Claude CLI and role .md files handle response style.
+    # Kept for potential future use.
 
     @staticmethod
     def context_efficiency() -> PromptSection:
-        """Token-efficient response guide."""
+        """Token-efficient response guide. NOT IN USE."""
         content = """## Context Efficiency
 
 Be mindful of context window limits. Follow these guidelines:
@@ -310,12 +298,14 @@ Be mindful of context window limits. Follow these guidelines:
         )
 
     # ========================================================================
-    # §10 Status Reporting — Worker progress reporting
+    # §10 Status Reporting — NOT IN USE
     # ========================================================================
+    # Role .md files can define their own reporting format.
+    # Kept for potential future use.
 
     @staticmethod
     def status_reporting() -> PromptSection:
-        """Worker progress reporting format."""
+        """Worker progress reporting format. NOT IN USE."""
         content = """## Status Reporting
 
 When reporting progress, use this format:
@@ -661,8 +651,6 @@ def build_agent_prompt(
     model: Optional[str] = None,
     session_id: Optional[str] = None,
     session_name: Optional[str] = None,
-    tools: Optional[List[str]] = None,
-    mcp_servers: Optional[List[str]] = None,
     mode: PromptMode = PromptMode.FULL,
     context_files: Optional[Dict[str, str]] = None,
     extra_system_prompt: Optional[str] = None,
@@ -672,7 +660,7 @@ def build_agent_prompt(
 
     Final prompt layout::
 
-        [Base prompt]          identity + role_protocol + capabilities
+        [Base prompt]          identity + geny_platform + role_protocol
                                + workspace + datetime + context_files
         ---
         [Template prompt]      additional specialization (from prompt template)
@@ -681,31 +669,29 @@ def build_agent_prompt(
 
     Layers:
         1. Role prompt — auto-loaded from ``prompts/{role}.md``.
-           Worker has none.  Fallback: hardcoded one-liner.
+           Worker has none.  Fallback: empty.
         2. Template prompt — optional specialization from ``extra_system_prompt``.
            Selected independently via the Prompt Template dropdown.
         3. Shared folder — auto-appended when enabled.
 
     Design philosophy:
-    - Claude CLI already provides tool knowledge, safety, and error handling.
+    - Claude CLI receives full tool schemas via MCP — no tool listing needed.
     - LangGraph graph controls execution loop, retry, and completion.
     - The system prompt only needs: Identity + Role Behavior + Context.
 
-    Sections handled by infrastructure (not included here):
-    - tool_style, safety, context_efficiency, execution_protocol,
-      error_recovery, completion_signals, status_reporting,
-      safety_wrap — all handled by Claude CLI, LangGraph, or role .md files.
+    Sections NOT included (handled by infrastructure):
+    - capabilities — removed; MCP provides tool schemas directly to Claude CLI.
+    - tool_style, safety, context_efficiency, status_reporting — handled by
+      Claude CLI natively or by role .md files when needed.
 
     Args:
         agent_name: Display name for the agent.
-        role: Role (worker/developer/researcher/planner).
+        role: Role (worker/developer/researcher/planner/vtuber).
         agent_id: Agent identifier.
         working_dir: Working directory path.
         model: Model name.
         session_id: Session identifier.
         session_name: Session display name — the agent recognizes it as its own name.
-        tools: List of available tool names.
-        mcp_servers: List of MCP server names.
         mode: Prompt detail level.
         context_files: Bootstrap file dict ``{filename: content}``.
         extra_system_prompt: Additional specialization prompt (from template or manual input).
@@ -726,7 +712,7 @@ def build_agent_prompt(
     if user_section:
         builder.add_section(user_section)
 
-    # §1.7 Geny platform tools awareness
+    # §1.7 Geny platform awareness
     builder.add_section(SectionLibrary.geny_platform(session_id=session_id))
 
     # §2 Role behavior — always from prompts/{role}.md (worker = none)
@@ -737,19 +723,15 @@ def build_agent_prompt(
         if md_template:
             builder.override_section("role_protocol", md_template)
 
-    # §3 Capabilities — only when non-default MCP/tools are configured
-    if tools or mcp_servers:
-        builder.add_section(SectionLibrary.capabilities(tools, mcp_servers))
-
-    # §4 Workspace
+    # §3 Workspace
     if working_dir:
         builder.add_section(SectionLibrary.workspace(working_dir))
 
-    # §5 DateTime (FULL only)
+    # §4 DateTime (FULL only)
     if mode == PromptMode.FULL:
         builder.add_section(SectionLibrary.datetime_info())
 
-    # §6 Bootstrap context files (e.g. AGENTS.md, CLAUDE.md)
+    # §5 Bootstrap context files (e.g. AGENTS.md, CLAUDE.md)
     if context_files:
         for filename, content in context_files.items():
             builder.add_section(
