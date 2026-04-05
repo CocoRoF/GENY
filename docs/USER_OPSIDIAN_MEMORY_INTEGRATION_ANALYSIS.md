@@ -1,7 +1,7 @@
 # User Opsidian × Curated Knowledge × Agent Memory 통합 설계서
 
-> **작성일**: 2026-04-05  
-> **버전**: 2.0 (최종)  
+> **작성일**: 2026-04-05
+> **버전**: 2.0 (최종)
 > **핵심 원칙**: Curated Knowledge는 기존 Opsidian 시스템과 **100% 호환** — 동일한 엔진, 동일한 노트 포맷, 동일한 UI 컴포넌트 재사용
 
 ---
@@ -246,28 +246,28 @@ curation_quality: 0.85                   # ← LLM 평가 점수
 ```python
 class CurationTriage:
     """규칙 기반 큐레이션 후보 필터링.
-    
+
     빠르게 "큐레이션 대상인가?"를 판단하여 LLM 호출 비용을 절약한다.
     """
-    
+
     # ── 자동 큐레이션 규칙 ──
     IMPORTANCE_THRESHOLD = "high"          # high, critical → 자동 큐레이션
     AUTO_CURATE_TAGS = {
-        "important", "reference", "knowledge", "curate-me", 
+        "important", "reference", "knowledge", "curate-me",
         "핵심", "중요", "레퍼런스"
     }
     AUTO_CURATE_CATEGORIES = {"reference", "insights", "projects"}
     AUTO_CURATE_PREFIXES = ["[REF]", "[핵심]", "[중요]", "[CORE]", "[KEY]"]
     MIN_BODY_LENGTH = 200                  # 최소 본문 길이 (노이즈 필터)
-    
+
     # ── 자동 제외 규칙 ──
     EXCLUDE_TAGS = {"draft", "temp", "todo", "wip", "초안", "임시"}
     EXCLUDE_PREFIXES = ["[DRAFT]", "[TMP]", "[임시]", "[초안]"]
-    
+
     @classmethod
     def triage(cls, note_metadata: dict, body: str) -> dict:
         """분류 결과 반환.
-        
+
         Returns:
             {
                 "action": "auto_curate" | "candidate" | "exclude",
@@ -279,7 +279,7 @@ class CurationTriage:
         tags = set(note_metadata.get("tags", []))
         category = note_metadata.get("category", "")
         title = note_metadata.get("title", "")
-        
+
         # 자동 제외
         if tags & cls.EXCLUDE_TAGS:
             return {"action": "exclude", "reason": "draft/temp tag", "confidence": 0.95}
@@ -287,7 +287,7 @@ class CurationTriage:
             return {"action": "exclude", "reason": "draft prefix", "confidence": 0.95}
         if len(body.strip()) < cls.MIN_BODY_LENGTH:
             return {"action": "exclude", "reason": "too short", "confidence": 0.80}
-        
+
         # 자동 큐레이션
         if importance in ("high", "critical"):
             return {"action": "auto_curate", "reason": f"importance={importance}", "confidence": 0.90}
@@ -298,7 +298,7 @@ class CurationTriage:
             return {"action": "auto_curate", "reason": f"category={category}", "confidence": 0.80}
         if any(title.startswith(p) for p in cls.AUTO_CURATE_PREFIXES):
             return {"action": "auto_curate", "reason": "title prefix", "confidence": 0.85}
-        
+
         # 후보 (LLM 분석 필요)
         return {"action": "candidate", "reason": "needs_llm_analysis", "confidence": 0.50}
 ```
@@ -483,10 +483,10 @@ Return JSON:
 ```python
 class CuratedKnowledgeManager:
     """Per-user curated knowledge vault — 100% Opsidian 호환.
-    
+
     User Opsidian과 동일한 엔진(StructuredMemoryWriter + MemoryIndexManager)을
     사용하되, VectorMemoryManager를 추가하고, 큐레이션 메타데이터를 확장한다.
-    
+
     Storage layout:
         {STORAGE_ROOT}/_curated_knowledge/{username}/
             daily/
@@ -501,17 +501,17 @@ class CuratedKnowledgeManager:
             _index.json
             _curation_log.jsonl
     """
-    
+
     def __init__(self, username: str, base_path: Optional[str] = None):
         self.username = username
         self.memory_dir = f"{base_path}/_curated_knowledge/{username}/"
-        
+
         # ── 기존 엔진 100% 재사용 ──
         self._writer: StructuredMemoryWriter     # 노트 CRUD
         self._index: MemoryIndexManager           # 인덱스 + 그래프
         self._vmm: VectorMemoryManager            # FAISS 벡터 검색 ★추가
         self._curation_log: CurationLog           # 감사 기록
-    
+
     # ── Curate (핵심 파이프라인) ───────────────────────────────────
 
     async def curate_from_opsidian(
@@ -524,11 +524,11 @@ class CuratedKnowledgeManager:
         llm_model = None,             # 큐레이션용 LLM (memory_model 활용)
     ) -> CurationResult:
         """5-Stage 큐레이션 파이프라인 실행.
-        
+
         Returns:
             CurationResult(
-                success=True, 
-                curated_filename="...", 
+                success=True,
+                curated_filename="...",
                 method_used="summary",
                 quality_score=0.82,
                 analysis=...,
@@ -537,10 +537,10 @@ class CuratedKnowledgeManager:
         # Stage 1: Triage
         note = user_opsidian.read_note(filename)
         triage = CurationTriage.triage(note["metadata"], note["body"])
-        
+
         if triage["action"] == "exclude":
             return CurationResult(success=False, reason=triage["reason"])
-        
+
         # Stage 2: LLM Analysis (auto일 때만)
         if method == "auto":
             analysis = await self._llm_analyze(note, llm_model)
@@ -549,17 +549,17 @@ class CuratedKnowledgeManager:
             method = analysis["curation_strategy"]
         else:
             analysis = None
-        
+
         # Stage 3: Transform
         transformed = await self._transform(note, method, analysis, llm_model)
-        
+
         # Stage 4: Enrich
         enriched = await self._enrich(transformed, analysis, llm_model)
-        
+
         # Stage 5: Store & Audit
         curated_fn = self._store(enriched, note, method, analysis)
         self._log_curation(filename, curated_fn, method, analysis)
-        
+
         return CurationResult(
             success=True,
             curated_filename=curated_fn,
@@ -587,72 +587,72 @@ class CuratedKnowledgeManager:
         importance: str = "medium",
     ) -> Optional[str]:
         """Agent reflect 등에서 직접 텍스트로 큐레이팅 노트 생성."""
-    
+
     # ── Read Operations (Opsidian과 100% 동일한 인터페이스) ─────
-    
+
     def list_notes(self, *, category=None, tag=None) -> List[Dict]:
         """UserOpsidianManager.list_notes()와 동일한 형식."""
-    
+
     def read_note(self, filename: str) -> Optional[Dict]:
         """UserOpsidianManager.read_note()와 동일한 형식."""
-    
+
     def search(self, query: str, max_results: int = 10) -> List[Dict]:
         """키워드 검색 (UserOpsidianManager.search()와 동일)."""
-    
+
     async def vector_search(self, query: str, top_k: int = 5):
         """FAISS 의미 검색 ★추가."""
-    
+
     async def hybrid_search(self, query: str, max_results: int = 10) -> List[Dict]:
         """키워드 + 벡터 하이브리드 검색 ★추가.
-        
+
         두 결과를 RRF(Reciprocal Rank Fusion)로 통합하여
         가장 관련성 높은 노트를 반환한다.
         """
-    
+
     def get_index(self) -> Optional[Dict]:
         """UserOpsidianManager.get_index()와 동일."""
-    
+
     def get_stats(self) -> Dict:
         """UserOpsidianManager.get_stats()와 동일."""
-    
+
     def get_graph(self) -> Dict:
         """UserOpsidianManager.get_graph()와 동일."""
-    
+
     # ── Curation-specific Operations ──────────────────────────────
-    
+
     def get_origin_info(self, filename: str) -> Optional[Dict]:
         """큐레이팅 노트의 원본 정보 조회.
         Returns:
-            {"origin_file": "...", "origin_scope": "...", 
-             "curated_at": "...", "curation_method": "...", 
+            {"origin_file": "...", "origin_scope": "...",
+             "curated_at": "...", "curation_method": "...",
              "quality_score": 0.82, "is_stale": False}
         """
-    
+
     def check_freshness(self, user_opsidian: UserOpsidianManager) -> List[Dict]:
         """원본이 수정된 큐레이팅 노트 감지 (origin_hash 비교)."""
-    
+
     async def refresh_stale(
         self, user_opsidian: UserOpsidianManager, *, llm_model=None
     ) -> int:
         """stale 노트를 원본에서 재큐레이팅."""
-    
+
     def get_curation_log(self, limit: int = 50) -> List[Dict]:
         """큐레이션 이력 조회."""
-    
+
     # ── Write (User UI에서 직접 편집도 가능) ──────────────────────
-    
+
     def write_note(self, **kwargs) -> Optional[str]:
         """UserOpsidianManager.write_note()와 동일 — 사용자가 큐레이터 뷰에서 직접 편집."""
-    
+
     def update_note(self, filename, **kwargs) -> bool:
         """UserOpsidianManager.update_note()와 동일."""
-    
+
     def delete_note(self, filename) -> bool:
         """UserOpsidianManager.delete_note()와 동일."""
-    
+
     def create_link(self, source, target) -> bool:
         """UserOpsidianManager.create_link()와 동일."""
-    
+
     def reindex(self) -> int:
         """UserOpsidianManager.reindex()와 동일."""
 ```
@@ -679,7 +679,7 @@ class CurationResult:
     quality_score: Optional[float] = None  # 0.0~1.0
     analysis: Optional[Dict] = None        # Stage 2 LLM analysis 전문
     reason: Optional[str] = None           # 실패 시 사유
-    
+
 @dataclass
 class CurationLogEntry:
     timestamp: str
@@ -824,7 +824,7 @@ interface CuratedKnowledgeState {
   sidebarPanel: 'files' | 'tags' | 'links';
   sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
-  
+
   // ── 큐레이션 전용 필드 (추가) ──
   curationCandidates: CurationCandidate[];    // User Opsidian 큐레이션 후보
   curationHistory: CurationLogEntry[];        // 큐레이션 이력
@@ -899,7 +899,7 @@ class KnowledgeSearchTool(BaseTool):
         "This is your PRIMARY source for user-specific knowledge. "
         "Use this before falling back to user_doc_browse."
     )
-    
+
     parameters_schema = {
         "query": {"type": "string", "description": "Search query", "required": True},
         "max_results": {"type": "integer", "default": 10, "description": "Max results"},
@@ -909,18 +909,18 @@ class KnowledgeSearchTool(BaseTool):
             "description": "Search strategy"
         },
     }
-    
+
     async def _execute(self, session_id: str, query: str, **kwargs) -> str:
         mgr = self._get_curated_manager()
         search_type = kwargs.get("search_type", "hybrid")
-        
+
         if search_type == "hybrid":
             results = await mgr.hybrid_search(query, max_results)
         elif search_type == "vector":
             results = await mgr.vector_search(query, top_k=max_results)
         else:
             results = mgr.search(query, max_results)
-        
+
         return self._format_results(results)
 ```
 
@@ -930,7 +930,7 @@ class KnowledgeSearchTool(BaseTool):
 class KnowledgeReadTool(BaseTool):
     name = "knowledge_read"
     description = "Read a specific curated knowledge note by filename."
-    
+
     parameters_schema = {
         "filename": {"type": "string", "required": True},
     }
@@ -942,7 +942,7 @@ class KnowledgeReadTool(BaseTool):
 class KnowledgeListTool(BaseTool):
     name = "knowledge_list"
     description = "List curated knowledge notes, optionally filtered by category or tag."
-    
+
     parameters_schema = {
         "category": {"type": "string", "default": ""},
         "tag": {"type": "string", "default": ""},
@@ -961,23 +961,23 @@ class UserDocBrowseTool(BaseTool):
         "get its full content. Use this ONLY when curated knowledge "
         "doesn't have what you need."
     )
-    
+
     parameters_schema = {
         "query": {"type": "string", "default": "", "description": "Search in index"},
         "read_filename": {"type": "string", "default": "", "description": "Read specific note raw content"},
         "category": {"type": "string", "default": ""},
         "tag": {"type": "string", "default": ""},
     }
-    
+
     async def _execute(self, session_id: str, **kwargs) -> str:
         mgr = self._get_user_opsidian_manager()
         read_fn = kwargs.get("read_filename", "")
-        
+
         if read_fn:
             # Opt-in raw read — 특정 노트 본문 반환
             note = mgr.read_note(read_fn)
             return self._format_note(note)
-        
+
         # 기본: 인덱스만 반환 (본문 없음)
         query = kwargs.get("query", "")
         if query:
@@ -986,7 +986,7 @@ class UserDocBrowseTool(BaseTool):
             for r in results:
                 r.pop("snippet", None)
             return self._format_index_results(results)
-        
+
         notes = mgr.list_notes(
             category=kwargs.get("category") or None,
             tag=kwargs.get("tag") or None,
@@ -1053,7 +1053,7 @@ if remaining > 200 and refs:
         if linked_text:
             parts.append(linked_text)
             total_chars += len(linked_text)
-        
+
         if curated_mgr and (budget - total_chars) > 200:
             curated_linked = self._add_linked_context(
                 refs, curated_mgr, budget - total_chars   # curated scope
@@ -1367,7 +1367,7 @@ Phase 2 (핵심 Manager)
             │
 Phase 3 (큐레이션 엔진)          Phase 4 (Agent 도구)
   ├─ CurationTriage              ├─ knowledge_search/read/list
-  ├─ LLM Analysis                ├─ user_doc_browse  
+  ├─ LLM Analysis                ├─ user_doc_browse
   ├─ 5 Transform 전략             ├─ MemoryInjectNode +2단계
   ├─ Enrich                      └─ MemoryReflectNode promote
   └─ Merge / Freshness
