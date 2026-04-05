@@ -149,10 +149,17 @@ export default function UserOpsidianView() {
     }
   }, [hub, loadData]);
 
+  // ─── Draft note for inline creation ──
+  const [draftNote, setDraftNote] = useState<{
+    title: string; content: string; category: string;
+    importance: string; tags: string;
+  } | null>(null);
+
   // ─── File selection handler ──
   const handleSelectFile = useCallback(
     async (filename: string) => {
       openFile(filename);
+      setDraftNote(null);
       try {
         const detail = await userOpsidianApi.readFile(filename);
         setFileDetail(detail);
@@ -162,6 +169,34 @@ export default function UserOpsidianView() {
     },
     [openFile, setFileDetail],
   );
+
+  const handleNewNote = useCallback(() => {
+    setDraftNote({ title: '', content: '', category: 'topics', importance: 'medium', tags: '' });
+    useUserOpsidianStore.getState().setSelectedFile(null);
+    useUserOpsidianStore.getState().setFileDetail(null);
+    setViewMode('editor');
+  }, [setViewMode]);
+
+  const handleSaveDraft = useCallback(async (draft: {
+    title: string; content: string; category: string;
+    importance: string; tags: string;
+  }) => {
+    const tags = draft.tags.split(',').map((s) => s.trim()).filter(Boolean);
+    try {
+      const res = await userOpsidianApi.createFile({
+        title: draft.title || t('opsidian.untitled'),
+        content: draft.content || '',
+        category: draft.category,
+        tags,
+        importance: draft.importance,
+      });
+      setDraftNote(null);
+      await loadData();
+      await handleSelectFile(res.filename);
+    } catch (e) {
+      console.error('Create failed:', e);
+    }
+  }, [loadData, handleSelectFile, t]);
 
   // ─── Auth guard ──
   if (!isAuthenticated) {
@@ -201,6 +236,7 @@ export default function UserOpsidianView() {
         onSetSidebarPanel={setSidebarPanel}
         onSetViewMode={setViewMode}
         onRefresh={loadData}
+        onNewNote={handleNewNote}
       />
 
       {/* Main content */}
@@ -223,12 +259,19 @@ export default function UserOpsidianView() {
         {/* Content */}
         <div className="obsidian-content">
           {viewMode === 'editor' && (
-            <NoteEditor
-              fileDetail={fileDetail}
-              selectedFile={selectedFile}
-              onSelectFile={handleSelectFile}
-              onRefresh={loadData}
-            />
+            draftNote
+              ? <DraftEditor
+                  draft={draftNote}
+                  onUpdate={setDraftNote}
+                  onSave={handleSaveDraft}
+                  onDiscard={() => setDraftNote(null)}
+                />
+              : <NoteEditor
+                  fileDetail={fileDetail}
+                  selectedFile={selectedFile}
+                  onSelectFile={handleSelectFile}
+                  onRefresh={loadData}
+                />
           )}
           {viewMode === 'graph' && (
             <GraphViewer nodes={graphNodes} edges={graphEdges} onSelectFile={handleSelectFile} />
@@ -249,11 +292,6 @@ export default function UserOpsidianView() {
 
       {/* Right panel */}
       {rightPanelOpen && <RightPanel />}
-
-
-
-      {/* Create note FAB */}
-      <CreateNoteModal onCreated={loadData} />
     </div>
   );
 }
@@ -265,7 +303,7 @@ export default function UserOpsidianView() {
 // ─── Sidebar ──────────────────────────────────────────────────
 function Sidebar({
   files, selectedFile, sidebarCollapsed, sidebarPanel, viewMode, memoryIndex,
-  onSelectFile, onSetSidebarCollapsed, onSetSidebarPanel, onSetViewMode, onRefresh,
+  onSelectFile, onSetSidebarCollapsed, onSetSidebarPanel, onSetViewMode, onRefresh, onNewNote,
 }: {
   files: Record<string, import('@/types').MemoryFileInfo>;
   selectedFile: string | null;
@@ -278,6 +316,7 @@ function Sidebar({
   onSetSidebarPanel: (p: 'files' | 'tags' | 'backlinks') => void;
   onSetViewMode: (v: 'editor' | 'graph' | 'search') => void;
   onRefresh: () => void;
+  onNewNote: () => void;
 }) {
   const { t } = useI18n();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
@@ -352,6 +391,9 @@ function Sidebar({
         </Link>
         <span className="obs-sb-brand">{t('opsidian.title')}</span>
         <div className="obs-sb-header-actions">
+          <button className="obs-sb-toggle" onClick={onNewNote} title={t('opsidian.createNote')}>
+            <Plus size={13} />
+          </button>
           <button className="obs-sb-toggle" onClick={onRefresh} title={t('opsidian.refresh')}>
             <RefreshCw size={13} />
           </button>
@@ -935,196 +977,129 @@ function SearchView({
   );
 }
 
-// ─── Create Note Modal ────────────────────────────────────────
-function CreateNoteModal({ onCreated }: { onCreated: () => void }) {
+// ─── Draft Editor (IDE-style inline creation) ────────────────
+function DraftEditor({
+  draft, onUpdate, onSave, onDiscard,
+}: {
+  draft: { title: string; content: string; category: string; importance: string; tags: string };
+  onUpdate: (d: typeof draft) => void;
+  onSave: (d: typeof draft) => void;
+  onDiscard: () => void;
+}) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [category, setCategory] = useState('topics');
-  const [tagsInput, setTagsInput] = useState('');
-  const [importance, setImportance] = useState('medium');
-  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleCreate = async () => {
-    if (!title.trim()) return;
-    setCreating(true);
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      const tags = tagsInput.split(',').map((s) => s.trim()).filter(Boolean);
-      await userOpsidianApi.createFile({
-        title: title.trim(),
-        content: content || `# ${title.trim()}\n\n`,
-        category,
-        tags,
-        importance,
-      });
-      setTitle(''); setContent(''); setTagsInput(''); setCategory('topics'); setImportance('medium');
-      setOpen(false);
-      onCreated();
-    } catch (e) {
-      console.error('Create failed:', e);
+      await onSave(draft);
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
   return (
-    <>
-      {/* FAB */}
-      <button
-        onClick={() => setOpen(true)}
-        style={{
-          position: 'fixed', bottom: 40, right: 24, width: 48, height: 48,
-          borderRadius: '50%', background: 'linear-gradient(135deg, var(--obs-violet), var(--obs-purple))',
-          color: '#fff', border: 'none', cursor: 'pointer', display: 'flex',
-          alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 4px 20px var(--obs-purple-glow)', zIndex: 40,
-          transition: 'transform 150ms ease',
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.1)'; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
-        title={t('opsidian.createNote')}
-      >
-        <Plus size={22} />
-      </button>
-
-      {/* Modal */}
-      {open && (
-        <div
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
+        borderBottom: '1px solid var(--obs-border-subtle)',
+        background: 'var(--obs-bg-panel)',
+      }}>
+        <select
+          value={draft.category}
+          onChange={(e) => onUpdate({ ...draft, category: e.target.value })}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 50,
+            padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+            border: '1px solid var(--obs-border)', borderRadius: 4,
+            color: 'var(--obs-text)', outline: 'none',
           }}
-          onClick={() => setOpen(false)}
         >
-          <div
+          <option value="topics">Topics</option>
+          <option value="daily">Daily</option>
+          <option value="entities">Entities</option>
+          <option value="projects">Projects</option>
+          <option value="insights">Insights</option>
+        </select>
+        <select
+          value={draft.importance}
+          onChange={(e) => onUpdate({ ...draft, importance: e.target.value })}
+          style={{
+            padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+            border: '1px solid var(--obs-border)', borderRadius: 4,
+            color: 'var(--obs-text)', outline: 'none',
+          }}
+        >
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <input
+          value={draft.tags}
+          onChange={(e) => onUpdate({ ...draft, tags: e.target.value })}
+          placeholder={t('opsidian.tagsPlaceholder')}
+          style={{
+            flex: 1, padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+            border: '1px solid var(--obs-border)', borderRadius: 4,
+            color: 'var(--obs-text)', outline: 'none', minWidth: 100,
+          }}
+        />
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <button
+            onClick={onDiscard}
             style={{
-              width: 480, maxHeight: '80vh', overflowY: 'auto',
-              background: 'var(--obs-bg-panel)', borderRadius: 12,
-              border: '1px solid var(--obs-border)', padding: 24,
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+              display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px',
+              fontSize: 12, background: 'var(--obs-bg-hover)', color: 'var(--obs-text-dim)',
+              border: '1px solid var(--obs-border)', borderRadius: 5, cursor: 'pointer',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700, color: 'var(--obs-text)' }}>
-              {t('opsidian.createNote')}
-            </h3>
-
-            {/* Title */}
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 12, color: 'var(--obs-text-dim)', display: 'block', marginBottom: 4 }}>{t('opsidian.noteTitle')}</span>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={t('opsidian.noteTitlePlaceholder')}
-                style={{
-                  width: '100%', padding: '8px 12px', background: 'var(--obs-bg-surface)',
-                  border: '1px solid var(--obs-border)', borderRadius: 6, color: 'var(--obs-text)',
-                  fontSize: 13, outline: 'none',
-                }}
-              />
-            </label>
-
-            {/* Category */}
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 12, color: 'var(--obs-text-dim)', display: 'block', marginBottom: 4 }}>{t('opsidian.category')}</span>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                style={{
-                  width: '100%', padding: '8px 12px', background: 'var(--obs-bg-surface)',
-                  border: '1px solid var(--obs-border)', borderRadius: 6, color: 'var(--obs-text)',
-                  fontSize: 13, outline: 'none',
-                }}
-              >
-                <option value="topics">Topics</option>
-                <option value="daily">Daily</option>
-                <option value="entities">Entities</option>
-                <option value="projects">Projects</option>
-                <option value="insights">Insights</option>
-              </select>
-            </label>
-
-            {/* Importance */}
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 12, color: 'var(--obs-text-dim)', display: 'block', marginBottom: 4 }}>{t('opsidian.importance')}</span>
-              <select
-                value={importance}
-                onChange={(e) => setImportance(e.target.value)}
-                style={{
-                  width: '100%', padding: '8px 12px', background: 'var(--obs-bg-surface)',
-                  border: '1px solid var(--obs-border)', borderRadius: 6, color: 'var(--obs-text)',
-                  fontSize: 13, outline: 'none',
-                }}
-              >
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </label>
-
-            {/* Tags */}
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 12, color: 'var(--obs-text-dim)', display: 'block', marginBottom: 4 }}>{t('opsidian.tagsLabel')}</span>
-              <input
-                value={tagsInput}
-                onChange={(e) => setTagsInput(e.target.value)}
-                placeholder={t('opsidian.tagsPlaceholder')}
-                style={{
-                  width: '100%', padding: '8px 12px', background: 'var(--obs-bg-surface)',
-                  border: '1px solid var(--obs-border)', borderRadius: 6, color: 'var(--obs-text)',
-                  fontSize: 13, outline: 'none',
-                }}
-              />
-            </label>
-
-            {/* Content */}
-            <label style={{ display: 'block', marginBottom: 20 }}>
-              <span style={{ fontSize: 12, color: 'var(--obs-text-dim)', display: 'block', marginBottom: 4 }}>{t('opsidian.content')}</span>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder={t('opsidian.contentPlaceholder')}
-                rows={8}
-                style={{
-                  width: '100%', padding: '10px 12px', background: 'var(--obs-bg-surface)',
-                  border: '1px solid var(--obs-border)', borderRadius: 6, color: 'var(--obs-text)',
-                  fontFamily: 'var(--obs-font-mono)', fontSize: 13, lineHeight: 1.6,
-                  resize: 'vertical', outline: 'none',
-                }}
-              />
-            </label>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setOpen(false)}
-                style={{
-                  padding: '8px 16px', fontSize: 13, background: 'var(--obs-bg-hover)',
-                  color: 'var(--obs-text-dim)', border: '1px solid var(--obs-border)',
-                  borderRadius: 6, cursor: 'pointer',
-                }}
-              >
-                {t('opsidian.cancel')}
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={creating || !title.trim()}
-                style={{
-                  padding: '8px 20px', fontSize: 13, fontWeight: 600,
-                  background: 'var(--obs-purple)', color: '#fff', border: 'none',
-                  borderRadius: 6, cursor: title.trim() ? 'pointer' : 'not-allowed',
-                  opacity: title.trim() ? 1 : 0.5,
-                }}
-              >
-                {creating ? <Loader2 size={14} className="spin" /> : t('opsidian.create')}
-              </button>
-            </div>
-          </div>
+            <X size={12} /> {t('opsidian.cancel')}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '5px 14px',
+              fontSize: 12, fontWeight: 600, background: 'var(--obs-purple)',
+              color: '#fff', border: 'none', borderRadius: 5, cursor: 'pointer',
+            }}
+          >
+            {saving ? <Loader2 size={12} className="spin" /> : <Save size={12} />}
+            {t('opsidian.save')}
+          </button>
         </div>
-      )}
-    </>
+      </div>
+
+      {/* Title */}
+      <div style={{ padding: '16px 32px 0', maxWidth: 900, margin: '0 auto', width: '100%' }}>
+        <input
+          value={draft.title}
+          onChange={(e) => onUpdate({ ...draft, title: e.target.value })}
+          placeholder={t('opsidian.noteTitlePlaceholder')}
+          autoFocus
+          style={{
+            width: '100%', padding: '8px 0', fontSize: 24, fontWeight: 700,
+            background: 'transparent', border: 'none', borderBottom: '1px solid var(--obs-border-subtle)',
+            color: 'var(--obs-text)', outline: 'none', marginBottom: 16,
+          }}
+        />
+      </div>
+
+      {/* Content textarea */}
+      <div style={{ flex: 1, padding: '0 32px 16px', maxWidth: 900, margin: '0 auto', width: '100%' }}>
+        <textarea
+          value={draft.content}
+          onChange={(e) => onUpdate({ ...draft, content: e.target.value })}
+          placeholder={t('opsidian.contentPlaceholder')}
+          style={{
+            width: '100%', height: '100%', minHeight: 300, padding: 0,
+            background: 'transparent', color: 'var(--obs-text)',
+            border: 'none', fontFamily: 'var(--obs-font-mono)', fontSize: 14,
+            lineHeight: 1.8, resize: 'none', outline: 'none',
+          }}
+        />
+      </div>
+    </div>
   );
 }

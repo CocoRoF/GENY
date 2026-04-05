@@ -919,6 +919,7 @@ const ko: Translations = {
     backlinksLabel: '역링크',
     outlinksLabel: '외부 링크',
     selectOrCreate: '노트를 선택하거나 새로 만들어보세요.',
+    untitled: '제목 없음',
     edit: '편집',
     save: '저장',
     cancel: '취소',

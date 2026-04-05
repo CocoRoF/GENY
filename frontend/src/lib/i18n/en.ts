@@ -918,6 +918,7 @@ const en = {
     backlinksLabel: 'Backlinks',
     outlinksLabel: 'Outgoing Links',
     selectOrCreate: 'Select a note or create a new one.',
+    untitled: 'Untitled',
     edit: 'Edit',
     save: 'Save',
     cancel: 'Cancel',

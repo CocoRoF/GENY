@@ -324,7 +324,7 @@ class CuratedKnowledgeManager:
             tags=all_tags,
             importance=importance,
             source=source,
-            links_to=links_to,
+            links=links_to,
         )
 
         if filename:

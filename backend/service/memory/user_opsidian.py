@@ -219,7 +219,7 @@ class UserOpsidianManager:
             tags=tags,
             importance=importance,
             source=source,
-            links_to=links_to,
+            links=links_to,
         )
 
     def update_note(
