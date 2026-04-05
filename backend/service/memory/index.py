@@ -379,17 +379,26 @@ class MemoryIndexManager:
         """Resolve a wikilink target to an indexed filename."""
         slug = link_target.lower().strip()
 
-        # 1. Direct filename match
+        # 1. Exact path match (e.g. "topics/python-async")
+        for filename in idx.files:
+            if filename.rsplit(".", 1)[0].lower() == slug:
+                return filename
+
+        # 2. Exact stem match
         for filename in idx.files:
             stem = Path(filename).stem.lower()
             if stem == slug:
                 return filename
 
-        # 2. Partial match
-        for filename in idx.files:
-            stem = Path(filename).stem.lower()
-            if slug in stem:
-                return filename
+        # 3. Strict partial match: slug ≥ 3 chars, covers ≥ 50% of stem, unique
+        if len(slug) >= 3:
+            candidates = []
+            for filename in idx.files:
+                stem = Path(filename).stem.lower()
+                if slug in stem and len(slug) / len(stem) >= 0.5:
+                    candidates.append(filename)
+            if len(candidates) == 1:
+                return candidates[0]
 
         return None
 

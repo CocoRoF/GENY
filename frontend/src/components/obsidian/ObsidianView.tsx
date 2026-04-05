@@ -10,7 +10,7 @@ import SessionSelector from './SessionSelector';
 import ObsidianSidebar from './ObsidianSidebar';
 import ObsidianTabs from './ObsidianTabs';
 import NoteViewer from './NoteViewer';
-import GraphView from './GraphView';
+import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import SearchPanel from './SearchPanel';
 import RightPanel from './RightPanel';
 
@@ -21,6 +21,8 @@ export default function ObsidianView() {
     viewMode,
     sidebarCollapsed,
     rightPanelOpen,
+    graphNodes,
+    graphEdges,
     setLoading,
     setMemoryIndex,
     setMemoryStats,
@@ -29,6 +31,9 @@ export default function ObsidianView() {
     setSessions,
     setLoadingSessions,
     setSelectedSessionId,
+    openFile,
+    setFileDetail,
+    setViewMode,
   } = useObsidianStore();
   const hub = useHubMode();
 
@@ -89,6 +94,23 @@ export default function ObsidianView() {
     }
   }, [hub, selectedSessionId, loadSessionMemory]);
 
+  // Handle graph node click → open file (same behaviour as old GraphView)
+  const handleSelectFile = useCallback(
+    async (filename: string) => {
+      openFile(filename);
+      setViewMode('editor');
+      if (selectedSessionId) {
+        try {
+          const detail = await memoryApi.readFile(selectedSessionId, filename);
+          setFileDetail(detail);
+        } catch (e) {
+          console.error('Failed to read:', e);
+        }
+      }
+    },
+    [selectedSessionId, openFile, setFileDetail, setViewMode],
+  );
+
   if (!selectedSessionId) {
     return <SessionSelector />;
   }
@@ -109,7 +131,13 @@ export default function ObsidianView() {
         <ObsidianTabs />
         <div className="obsidian-content">
           {viewMode === 'editor' && <NoteViewer />}
-          {viewMode === 'graph' && <GraphView />}
+          {viewMode === 'graph' && (
+            <UnifiedGraphView
+              nodes={graphNodes}
+              edges={graphEdges}
+              onSelectFile={handleSelectFile}
+            />
+          )}
           {viewMode === 'search' && <SearchPanel />}
         </div>
       </div>

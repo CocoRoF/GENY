@@ -178,23 +178,66 @@ class UserOpsidianManager:
         }
 
     def get_graph(self) -> Dict[str, Any]:
-        """Get graph data for visualization."""
+        """Get graph data for visualization (enhanced with tag edges + metadata)."""
         idx = self.get_index()
         if idx is None:
             return {"nodes": [], "edges": []}
         nodes = []
         edges = []
+        edge_set: set = set()
+        tag_to_files: Dict[str, List[str]] = {}
         files_map = idx.get("files", {})
+
         for fn, info in files_map.items():
+            links_to = info.get("links_to", [])
+            linked_from = info.get("linked_from", [])
+            tags = info.get("tags", [])
+
             nodes.append({
                 "id": fn,
                 "label": info.get("title", fn),
                 "category": info.get("category", "root"),
                 "importance": info.get("importance", "medium"),
+                "tags": tags,
+                "connectionCount": len(links_to) + len(linked_from),
+                "summary": info.get("summary", ""),
+                "charCount": info.get("char_count", 0),
             })
-            for target in info.get("links_to", []):
+
+            # Wikilink edges
+            for target in links_to:
                 if target in files_map:
-                    edges.append({"source": fn, "target": target})
+                    key = (fn, target)
+                    if key not in edge_set:
+                        edge_set.add(key)
+                        edges.append({
+                            "source": fn,
+                            "target": target,
+                            "type": "wikilink",
+                            "weight": 1.0,
+                        })
+
+            # Build tag map
+            for tag in tags:
+                tag_to_files.setdefault(tag, []).append(fn)
+
+        # Tag-based edges
+        for tag, fns in tag_to_files.items():
+            if len(fns) < 2:
+                continue
+            for i in range(len(fns)):
+                for j in range(i + 1, len(fns)):
+                    a, b = fns[i], fns[j]
+                    if (a, b) not in edge_set and (b, a) not in edge_set:
+                        edge_set.add((a, b))
+                        edges.append({
+                            "source": a,
+                            "target": b,
+                            "type": "tag",
+                            "weight": 0.5,
+                            "label": tag,
+                        })
+
         return {"nodes": nodes, "edges": edges}
 
     # ── Write Operations ──────────────────────────────────────────────

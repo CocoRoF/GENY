@@ -548,11 +548,18 @@ export interface MemoryGraphNode {
   label: string;
   category: string;
   importance: string;
+  tags?: string[];
+  connectionCount?: number;
+  summary?: string;
+  charCount?: number;
 }
 
 export interface MemoryGraphEdge {
   source: string;
   target: string;
+  type?: 'wikilink' | 'tag' | 'backlink';
+  weight?: number;
+  label?: string;
 }
 
 export interface MemoryGraphResponse {

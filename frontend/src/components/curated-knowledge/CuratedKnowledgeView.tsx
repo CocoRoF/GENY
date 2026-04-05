@@ -37,6 +37,7 @@ import {
   Edit3,
   Loader2,
 } from 'lucide-react';
+import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import '../obsidian/obsidian.css';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -274,7 +275,7 @@ export default function CuratedKnowledgeView() {
                 />
           )}
           {viewMode === 'graph' && (
-            <CuratedGraphViewer nodes={graphNodes} edges={graphEdges} onSelectFile={handleSelectFile} />
+            <UnifiedGraphView nodes={graphNodes} edges={graphEdges} onSelectFile={handleSelectFile} />
           )}
           {viewMode === 'search' && (
             <CuratedSearchView
@@ -900,87 +901,6 @@ function CuratedNoteEditor({
           </ReactMarkdown>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Graph Viewer ─────────────────────────────────────────────
-function CuratedGraphViewer({
-  nodes, edges, onSelectFile,
-}: {
-  nodes: import('@/types').MemoryGraphNode[];
-  edges: import('@/types').MemoryGraphEdge[];
-  onSelectFile: (fn: string) => void;
-}) {
-  const { t } = useI18n();
-
-  const width = 800;
-  const height = 600;
-  const nodePositions = useMemo(() => {
-    const positions: Record<string, { x: number; y: number }> = {};
-    const catGroups: Record<string, string[]> = {};
-    nodes.forEach((n) => {
-      if (!catGroups[n.category]) catGroups[n.category] = [];
-      catGroups[n.category].push(n.id);
-    });
-    const cats = Object.keys(catGroups);
-    cats.forEach((cat, ci) => {
-      const angle = (ci / cats.length) * 2 * Math.PI;
-      const cx = width / 2 + Math.cos(angle) * 200;
-      const cy = height / 2 + Math.sin(angle) * 180;
-      catGroups[cat].forEach((id, ni) => {
-        const subAngle = (ni / catGroups[cat].length) * 2 * Math.PI;
-        positions[id] = {
-          x: cx + Math.cos(subAngle) * (40 + catGroups[cat].length * 8),
-          y: cy + Math.sin(subAngle) * (40 + catGroups[cat].length * 8),
-        };
-      });
-    });
-    return positions;
-  }, [nodes]);
-
-  if (nodes.length === 0) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100%', color: 'var(--obs-text-muted)', fontSize: 14,
-        flexDirection: 'column', gap: 12,
-      }}>
-        <GitGraph size={40} strokeWidth={1.2} style={{ opacity: 0.5 }} />
-        <span>{t('opsidian.emptyGraph')}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', overflow: 'auto' }}>
-      <svg width={width} height={height} style={{ background: 'var(--obs-bg-deep)' }}>
-        {/* Edges */}
-        {edges.map((e, i) => {
-          const from = nodePositions[e.source];
-          const to = nodePositions[e.target];
-          if (!from || !to) return null;
-          return (
-            <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-              stroke="var(--obs-purple)" strokeWidth={1} opacity={0.3} />
-          );
-        })}
-        {/* Nodes */}
-        {nodes.map((n) => {
-          const pos = nodePositions[n.id];
-          if (!pos) return null;
-          const color = CATEGORY_COLORS[n.category] || '#64748b';
-          return (
-            <g key={n.id} style={{ cursor: 'pointer' }} onClick={() => onSelectFile(n.id)}>
-              <circle cx={pos.x} cy={pos.y} r={8} fill={color} opacity={0.8} />
-              <circle cx={pos.x} cy={pos.y} r={8} fill="none" stroke={color} strokeWidth={1} opacity={0.4} />
-              <text x={pos.x} y={pos.y + 20} textAnchor="middle" fill="var(--obs-text-dim)" fontSize={10}>
-                {n.label.length > 20 ? n.label.slice(0, 20) + '…' : n.label}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
     </div>
   );
 }

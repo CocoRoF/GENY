@@ -350,21 +350,62 @@ class SessionMemoryManager:
         return tag_counts
 
     def get_memory_graph(self) -> Dict[str, Any]:
-        """Get link graph data for visualization."""
+        """Get link graph data for visualization (enhanced with tag edges + metadata)."""
         if self._index_manager is None:
             return {"nodes": [], "edges": []}
         idx = self._index_manager.index
         nodes = []
         edges = []
+        edge_set: set = set()
+        tag_to_files: Dict[str, list] = {}
+        files_set = set(idx.files.keys())
+
         for fn, info in idx.files.items():
             nodes.append({
                 "id": fn,
                 "label": info.title or fn.replace(".md", ""),
                 "category": info.category,
                 "importance": info.importance,
+                "tags": info.tags,
+                "connectionCount": len(info.links_to) + len(info.linked_from),
+                "summary": info.summary or "",
+                "charCount": info.char_count,
             })
+
+            # Wikilink edges (with target existence filter)
             for target in info.links_to:
-                edges.append({"source": fn, "target": target})
+                if target in files_set:
+                    key = (fn, target)
+                    if key not in edge_set:
+                        edge_set.add(key)
+                        edges.append({
+                            "source": fn,
+                            "target": target,
+                            "type": "wikilink",
+                            "weight": 1.0,
+                        })
+
+            # Build tag map
+            for tag in info.tags:
+                tag_to_files.setdefault(tag, []).append(fn)
+
+        # Tag-based edges
+        for tag, fns in tag_to_files.items():
+            if len(fns) < 2:
+                continue
+            for i in range(len(fns)):
+                for j in range(i + 1, len(fns)):
+                    a, b = fns[i], fns[j]
+                    if (a, b) not in edge_set and (b, a) not in edge_set:
+                        edge_set.add((a, b))
+                        edges.append({
+                            "source": a,
+                            "target": b,
+                            "type": "tag",
+                            "weight": 0.5,
+                            "label": tag,
+                        })
+
         return {"nodes": nodes, "edges": edges}
 
     def reindex_memory(self) -> int:
