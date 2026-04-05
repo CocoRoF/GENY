@@ -1491,13 +1491,14 @@ html.light .obsidian-root {
 .opsidian-hub .session-selector {
   height: 100% !important;
 }
-/* StatusBar inside Hub: un-fix it so it stays above the bottom nav */
-.opsidian-hub .obs-statusbar {
+/* StatusBar inside Hub: relative position so it sits at the bottom of flex column */
+.opsidian-hub > .obs-statusbar {
   position: relative;
   bottom: auto;
   left: auto;
   right: auto;
   z-index: 10;
+  flex-shrink: 0;
 }
 
 /* ── Hub Navigation inside StatusBar ────────────────────────── */

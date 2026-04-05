@@ -9,7 +9,6 @@ import { userOpsidianApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Brain,
   FolderOpen,
@@ -78,8 +77,8 @@ const IMPORTANCE_STYLES: Record<string, { bg: string; color: string; label: stri
 export default function UserOpsidianView() {
   const { isAuthenticated } = useAuthStore();
   const { t } = useI18n();
+  const hub = useHubMode();
   const {
-    loading,
     files,
     selectedFile,
     fileDetail,
@@ -88,13 +87,12 @@ export default function UserOpsidianView() {
     sidebarCollapsed,
     rightPanelOpen,
     memoryIndex,
-    stats,
+    sidebarPanel,
     graphNodes,
     graphEdges,
     searchQuery,
     searchResults,
     searching,
-    sidebarPanel,
     setLoading,
     setMemoryIndex,
     setStats,
@@ -102,7 +100,6 @@ export default function UserOpsidianView() {
     setGraphData,
     setViewMode,
     setSidebarCollapsed,
-    setRightPanelOpen,
     setFileDetail,
     openFile,
     closeFile,
@@ -143,6 +140,13 @@ export default function UserOpsidianView() {
       loadData();
     }
   }, [isAuthenticated, loadData]);
+
+  // Register refresh callback for hub StatusBar
+  useEffect(() => {
+    if (hub) {
+      hub.refreshRef.current = loadData;
+    }
+  }, [hub, loadData]);
 
   // ─── File selection handler ──
   const handleSelectFile = useCallback(
@@ -247,15 +251,7 @@ export default function UserOpsidianView() {
         <RightInfoPanel fileDetail={fileDetail} files={files} onSelectFile={handleSelectFile} />
       )}
 
-      {/* Status bar */}
-      <StatusBar
-        stats={stats}
-        loading={loading}
-        sidebarCollapsed={sidebarCollapsed}
-        rightPanelOpen={rightPanelOpen}
-        onToggleRight={() => setRightPanelOpen(!rightPanelOpen)}
-        onRefresh={loadData}
-      />
+
 
       {/* Create note FAB */}
       <CreateNoteModal onCreated={loadData} />
@@ -1058,76 +1054,7 @@ function RightInfoPanel({
   );
 }
 
-// ─── Status Bar ───────────────────────────────────────────────
-function StatusBar({
-  stats, loading, sidebarCollapsed, rightPanelOpen, onToggleRight, onRefresh,
-}: {
-  stats: { total_files: number; total_chars: number; categories: Record<string, number>; total_tags: number } | null;
-  loading: boolean;
-  sidebarCollapsed: boolean;
-  rightPanelOpen: boolean;
-  onToggleRight: () => void;
-  onRefresh: () => void;
-}) {
-  const { t } = useI18n();
-  const hub = useHubMode();
-  const router = useRouter();
 
-  return (
-    <div style={{
-      position: 'fixed', bottom: 0, left: sidebarCollapsed ? 40 : 260, right: 0,
-      height: 24, display: 'flex', alignItems: 'center', gap: 16, padding: '0 12px',
-      background: 'var(--obs-bg-panel)', borderTop: '1px solid var(--obs-border-subtle)',
-      fontSize: 11, color: 'var(--obs-text-muted)', zIndex: 30,
-      transition: 'left 200ms ease',
-    }}>
-      {/* Hub navigation */}
-      {hub && (
-        <div className="obs-hub-nav">
-          <button className="obs-hub-nav-btn" onClick={() => router.push('/')} title={t('opsidian.home')}>
-            {t('opsidian.home')}
-          </button>
-          <button
-            className={`obs-hub-nav-btn ${hub.mode === 'user' ? 'obs-hub-nav-active' : ''}`}
-            onClick={() => hub.setMode('user')}
-          >
-            {t('opsidian.userVault')}
-          </button>
-          <button
-            className={`obs-hub-nav-btn ${hub.mode === 'sessions' ? 'obs-hub-nav-active' : ''}`}
-            onClick={() => hub.setMode('sessions')}
-          >
-            {t('opsidian.sessionsVault')}
-          </button>
-          <span className="obs-hub-nav-sep" />
-        </div>
-      )}
-      {loading && <Loader2 size={11} className="spin" style={{ color: 'var(--obs-purple)' }} />}
-      <span>{stats?.total_files ?? 0} {t('opsidian.notes')}</span>
-      <span>{stats?.total_tags ?? 0} {t('opsidian.tagsCount')}</span>
-      <span style={{ flex: 1 }} />
-      <button
-        onClick={onRefresh}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 4, background: 'none',
-          border: 'none', color: 'var(--obs-text-muted)', cursor: 'pointer', fontSize: 11,
-        }}
-      >
-        <RefreshCw size={10} /> {t('opsidian.refresh')}
-      </button>
-      <button
-        onClick={onToggleRight}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 4, background: 'none',
-          border: 'none', color: rightPanelOpen ? 'var(--obs-purple-bright)' : 'var(--obs-text-muted)',
-          cursor: 'pointer', fontSize: 11,
-        }}
-      >
-        {rightPanelOpen ? t('opsidian.hidePanel') : t('opsidian.showPanel')}
-      </button>
-    </div>
-  );
-}
 
 // ─── Create Note Modal ────────────────────────────────────────
 function CreateNoteModal({ onCreated }: { onCreated: () => void }) {

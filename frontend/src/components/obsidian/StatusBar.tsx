@@ -1,9 +1,9 @@
 'use client';
 
 import { useObsidianStore } from '@/store/useObsidianStore';
+import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import { useI18n } from '@/lib/i18n';
-import { useRouter } from 'next/navigation';
 import {
   RefreshCw,
   FileText,
@@ -17,23 +17,37 @@ import {
 } from 'lucide-react';
 
 export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
-  const {
-    selectedSessionId,
-    memoryStats,
-    memoryIndex,
-    loading,
-    selectedFile,
-    viewMode,
-    rightPanelOpen,
-    setRightPanelOpen,
-  } = useObsidianStore();
   const hub = useHubMode();
   const { t } = useI18n();
-  const router = useRouter();
 
-  if (!selectedSessionId && !hub) return null;
+  // Always read both stores — pick data based on hub mode
+  const obsidian = useObsidianStore();
+  const userStore = useUserOpsidianStore();
 
-  const stats = memoryStats;
+  const isUserMode = hub?.mode === 'user';
+
+  // Derived data — switch source based on mode
+  const totalFiles = isUserMode
+    ? (userStore.stats?.total_files ?? 0)
+    : (obsidian.memoryStats?.total_files ?? 0);
+  const totalChars = isUserMode
+    ? (userStore.stats?.total_chars ?? 0)
+    : (obsidian.memoryIndex?.total_chars ?? 0);
+  const totalTags = isUserMode
+    ? (userStore.stats?.total_tags ?? 0)
+    : (obsidian.memoryStats?.total_tags ?? 0);
+  const totalLinks = isUserMode ? 0 : (obsidian.memoryStats?.total_links ?? 0);
+  const loading = isUserMode ? userStore.loading : obsidian.loading;
+  const selectedFile = isUserMode ? userStore.selectedFile : obsidian.selectedFile;
+  const viewMode = isUserMode ? userStore.viewMode : obsidian.viewMode;
+  const rightPanelOpen = isUserMode ? userStore.rightPanelOpen : obsidian.rightPanelOpen;
+  const togglePanel = isUserMode
+    ? () => userStore.setRightPanelOpen(!userStore.rightPanelOpen)
+    : () => obsidian.setRightPanelOpen(!obsidian.rightPanelOpen);
+  const showViewMode = isUserMode || !!obsidian.selectedSessionId;
+
+  // Without hub context (standalone session page), hide when no session
+  if (!hub && !obsidian.selectedSessionId) return null;
 
   return (
     <div className="obs-statusbar">
@@ -41,9 +55,6 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
         {/* Hub navigation buttons */}
         {hub && (
           <div className="obs-hub-nav">
-            <button className="obs-hub-nav-btn" onClick={() => router.push('/')} title={t('opsidian.home')}>
-              {t('opsidian.home')}
-            </button>
             <button
               className={`obs-hub-nav-btn ${hub.mode === 'user' ? 'obs-hub-nav-active' : ''}`}
               onClick={() => hub.setMode('user')}
@@ -63,26 +74,22 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
           <Brain size={12} />
           GenY Obsidian
         </span>
-        {selectedSessionId && (
-          <>
-            <span className="obs-sb-item">
-              <FileText size={11} />
-              {stats?.total_files ?? 0} files
-            </span>
-            <span className="obs-sb-item">
-              <Database size={11} />
-              {((memoryIndex?.total_chars ?? 0) / 1000).toFixed(1)}K chars
-            </span>
-            <span className="obs-sb-item">
-              <Tag size={11} />
-              {stats?.total_tags ?? 0} tags
-            </span>
-            <span className="obs-sb-item">
-              <Link2 size={11} />
-              {stats?.total_links ?? 0} links
-            </span>
-          </>
-        )}
+        <span className="obs-sb-item">
+          <FileText size={11} />
+          {totalFiles} files
+        </span>
+        <span className="obs-sb-item">
+          <Database size={11} />
+          {(totalChars / 1000).toFixed(1)}K chars
+        </span>
+        <span className="obs-sb-item">
+          <Tag size={11} />
+          {totalTags} tags
+        </span>
+        <span className="obs-sb-item">
+          <Link2 size={11} />
+          {totalLinks} links
+        </span>
       </div>
       <div className="obs-sb-right">
         {loading && (
@@ -96,13 +103,13 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
             {selectedFile}
           </span>
         )}
-        {selectedSessionId && <span className="obs-sb-item obs-sb-mode">{viewMode}</span>}
+        {showViewMode && <span className="obs-sb-item obs-sb-mode">{viewMode}</span>}
         <button className="obs-sb-btn" onClick={onRefresh} title="Refresh memory">
           <RefreshCw size={11} />
         </button>
         <button
           className="obs-sb-btn"
-          onClick={() => setRightPanelOpen(!rightPanelOpen)}
+          onClick={togglePanel}
           title={rightPanelOpen ? 'Hide right panel' : 'Show right panel'}
         >
           {rightPanelOpen ? <PanelRightClose size={11} /> : <PanelRight size={11} />}

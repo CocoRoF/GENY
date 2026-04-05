@@ -1,12 +1,14 @@
 'use client';
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type MutableRefObject } from 'react';
 
 export type HubMode = 'user' | 'sessions';
 
 interface HubContextValue {
   mode: HubMode;
   setMode: (m: HubMode) => void;
+  /** Each child view writes its refresh function here. */
+  refreshRef: MutableRefObject<() => void>;
 }
 
 export const HubContext = createContext<HubContextValue | null>(null);

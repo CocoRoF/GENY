@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useObsidianStore } from '@/store/useObsidianStore';
+import { useHubMode } from '@/components/OpsidianHubContext';
 import { agentApi, memoryApi } from '@/lib/api';
 import './obsidian.css';
 import SessionSelector from './SessionSelector';
@@ -11,7 +12,6 @@ import ObsidianTabs from './ObsidianTabs';
 import NoteViewer from './NoteViewer';
 import GraphView from './GraphView';
 import SearchPanel from './SearchPanel';
-import StatusBar from './StatusBar';
 import RightPanel from './RightPanel';
 
 export default function ObsidianView() {
@@ -30,6 +30,7 @@ export default function ObsidianView() {
     setLoadingSessions,
     setSelectedSessionId,
   } = useObsidianStore();
+  const hub = useHubMode();
 
   // Load sessions on mount
   useEffect(() => {
@@ -79,13 +80,17 @@ export default function ObsidianView() {
     }
   }, [selectedSessionId, loadSessionMemory]);
 
+  // Register refresh callback for hub StatusBar
+  useEffect(() => {
+    if (hub) {
+      hub.refreshRef.current = () => {
+        if (selectedSessionId) loadSessionMemory(selectedSessionId);
+      };
+    }
+  }, [hub, selectedSessionId, loadSessionMemory]);
+
   if (!selectedSessionId) {
-    return (
-      <>
-        <SessionSelector />
-        <StatusBar onRefresh={() => {}} />
-      </>
-    );
+    return <SessionSelector />;
   }
 
   return (
@@ -112,8 +117,7 @@ export default function ObsidianView() {
       {/* Right panel: metadata / backlinks / outline */}
       {rightPanelOpen && <RightPanel />}
 
-      {/* Bottom status bar */}
-      <StatusBar onRefresh={() => selectedSessionId && loadSessionMemory(selectedSessionId)} />
+
     </div>
   );
 }
