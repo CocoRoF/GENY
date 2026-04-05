@@ -4,6 +4,7 @@ import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import { splitEmotionSegments, EMOTION_COLORS } from './chat-utils';
 
 /**
  * Lightweight Markdown renderer for chat messages.
@@ -136,17 +137,69 @@ const mdComponents: Components = {
   },
 };
 
+// ── Inline emotion badge ──
+function InlineEmotionBadge({ emotion }: { emotion: string }) {
+  const color = EMOTION_COLORS[emotion] ?? '#8b949e';
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        fontSize: '0.6875rem',
+        color,
+        opacity: 0.75,
+        marginRight: 4,
+        verticalAlign: 'baseline',
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: '50%',
+          background: color,
+          flexShrink: 0,
+        }}
+      />
+      {emotion}
+    </span>
+  );
+}
+
 export interface ChatMarkdownProps {
   content: string;
   className?: string;
 }
 
 function ChatMarkdownInner({ content, className }: ChatMarkdownProps) {
+  const segments = splitEmotionSegments(content);
+  const hasInlineEmotions = segments.length > 1 || (segments.length === 1 && segments[0].emotion !== null);
+
+  // Fast path: no inline emotion tags
+  if (!hasInlineEmotions) {
+    return (
+      <div className={`chat-markdown text-[0.8125rem] text-[var(--text-primary)] leading-relaxed break-keep ${className || ''}`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+
+  // Segmented render: each emotion tag becomes an inline badge
   return (
     <div className={`chat-markdown text-[0.8125rem] text-[var(--text-primary)] leading-relaxed break-keep ${className || ''}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-        {content}
-      </ReactMarkdown>
+      {segments.map((seg, i) => (
+        <div key={i}>
+          {seg.emotion && <InlineEmotionBadge emotion={seg.emotion} />}
+          {seg.content.trim() && (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {seg.content.trim()}
+            </ReactMarkdown>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

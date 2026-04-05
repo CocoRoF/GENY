@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from '@/lib/api';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
-import { parseEmotion, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble } from '@/components/chat';
+import { parseEmotion, EMOTION_COLORS, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble } from '@/components/chat';
 import { ChevronDown, ChevronRight, XCircle } from 'lucide-react';
 import type { ChatRoomMessage, FileChanges, AgentProgressState, AgentLogEntry } from '@/types';
 
@@ -343,8 +343,19 @@ export default function VTuberChatPanel({
                   </div>
                 )}
                 {emotion && (
-                  <span className="text-[0.6875rem] opacity-60 mr-1.5">
-                    [{emotion}]
+                  <span
+                    className="text-[0.6875rem] mr-1.5 inline-flex items-center gap-1"
+                    style={{ color: EMOTION_COLORS[emotion] ?? '#8b949e', opacity: 0.75 }}
+                  >
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: EMOTION_COLORS[emotion] ?? '#8b949e',
+                      }}
+                    />
+                    {emotion}
                   </span>
                 )}
                 {isUser ? (
