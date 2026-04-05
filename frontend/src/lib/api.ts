@@ -852,6 +852,7 @@ export const userOpsidianApi = {
     content?: string;
     tags?: string[];
     importance?: string;
+    category?: string;
   }) =>
     apiCall<{ filename: string; message: string }>(
       `/api/opsidian/files/${filename}`,
@@ -942,6 +943,7 @@ export const curatedKnowledgeApi = {
     content?: string;
     tags?: string[];
     importance?: string;
+    category?: string;
   }) =>
     apiCall<{ filename: string; message: string }>(
       `/api/curated/files/${filename}`,

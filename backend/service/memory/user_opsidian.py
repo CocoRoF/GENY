@@ -229,11 +229,12 @@ class UserOpsidianManager:
         body: Optional[str] = None,
         tags: Optional[List[str]] = None,
         importance: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> bool:
         if self._writer is None:
             return False
         return self._writer.update_note(
-            filename, content=body, tags=tags, importance=importance,
+            filename, content=body, tags=tags, importance=importance, category=category,
         )
 
     def delete_note(self, filename: str) -> bool:

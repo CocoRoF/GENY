@@ -603,11 +603,18 @@ function CuratedNoteEditor({
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editImportance, setEditImportance] = useState('');
+  const [editTags, setEditTags] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (fileDetail?.body) {
-      setEditContent(fileDetail.body);
+    if (fileDetail) {
+      setEditContent(fileDetail.body ?? '');
+      const m = fileDetail.metadata || {};
+      setEditCategory(String(m.category || 'topics'));
+      setEditImportance(String(m.importance || 'medium'));
+      setEditTags(Array.isArray(m.tags) ? m.tags.join(', ') : '');
     }
     setEditing(false);
   }, [fileDetail]);
@@ -616,7 +623,13 @@ function CuratedNoteEditor({
     if (!selectedFile || !editContent) return;
     setSaving(true);
     try {
-      await curatedKnowledgeApi.updateFile(selectedFile, { content: editContent });
+      const tags = editTags.split(',').map((s) => s.trim()).filter(Boolean);
+      await curatedKnowledgeApi.updateFile(selectedFile, {
+        content: editContent,
+        category: editCategory,
+        importance: editImportance,
+        tags,
+      });
       setEditing(false);
       await onRefresh();
       await onSelectFile(selectedFile);
@@ -662,45 +675,67 @@ function CuratedNoteEditor({
     },
   );
 
+  const handleStartEdit = () => {
+    const m = fileDetail?.metadata || {};
+    setEditContent(fileDetail?.body ?? '');
+    setEditCategory(String(m.category || 'topics'));
+    setEditImportance(String(m.importance || 'medium'));
+    setEditTags(Array.isArray(m.tags) ? m.tags.join(', ') : '');
+    setEditing(true);
+  };
+
   if (editing) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Toolbar — matches DraftEditor */}
+        {/* Toolbar — matches CuratedDraftEditor */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
           borderBottom: '1px solid var(--obs-border-subtle)',
           background: 'var(--obs-bg-panel)',
         }}>
-          {!!meta.category && (
-            <span style={{
-              padding: '4px 10px', fontSize: 11, borderRadius: 4,
-              background: `${CATEGORY_COLORS[String(meta.category)] || '#64748b'}20`,
-              color: CATEGORY_COLORS[String(meta.category)] || '#64748b',
-            }}>{String(meta.category)}</span>
-          )}
-          {!!meta.importance && (
-            <span style={{
-              padding: '4px 10px', fontSize: 11, borderRadius: 4,
-              background: IMPORTANCE_STYLES[String(meta.importance)]?.bg || 'transparent',
-              color: IMPORTANCE_STYLES[String(meta.importance)]?.color || 'var(--obs-text-dim)',
-            }}>{String(meta.importance)}</span>
-          )}
-          {Array.isArray(meta.tags) && meta.tags.length > 0 && (
-            <span style={{
-              flex: 1, padding: '4px 8px', fontSize: 11,
-              color: 'var(--obs-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>{meta.tags.map(String).join(', ')}</span>
-          )}
-          {!!meta.source && (
-            <span style={{
-              padding: '4px 8px', fontSize: 11, borderRadius: 4,
-              background: 'rgba(6,182,212,0.1)', color: '#06b6d4',
-            }}>source: {String(meta.source)}</span>
-          )}
+          <select
+            value={editCategory}
+            onChange={(e) => setEditCategory(e.target.value)}
+            style={{
+              padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+              border: '1px solid var(--obs-border)', borderRadius: 4,
+              color: 'var(--obs-text)', outline: 'none',
+            }}
+          >
+            <option value="topics">Topics</option>
+            <option value="daily">Daily</option>
+            <option value="entities">Entities</option>
+            <option value="projects">Projects</option>
+            <option value="insights">Insights</option>
+            <option value="reference">Reference</option>
+          </select>
+          <select
+            value={editImportance}
+            onChange={(e) => setEditImportance(e.target.value)}
+            style={{
+              padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+              border: '1px solid var(--obs-border)', borderRadius: 4,
+              color: 'var(--obs-text)', outline: 'none',
+            }}
+          >
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <input
+            value={editTags}
+            onChange={(e) => setEditTags(e.target.value)}
+            placeholder={t('opsidian.tagsPlaceholder')}
+            style={{
+              flex: 1, padding: '4px 8px', fontSize: 11, background: 'var(--obs-bg-surface)',
+              border: '1px solid var(--obs-border)', borderRadius: 4,
+              color: 'var(--obs-text)', outline: 'none', minWidth: 100,
+            }}
+          />
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             <button
-              onClick={() => { setEditing(false); setEditContent(body); }}
+              onClick={() => { setEditing(false); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px',
                 fontSize: 12, background: 'var(--obs-bg-hover)', color: 'var(--obs-text-dim)',
@@ -811,7 +846,7 @@ function CuratedNoteEditor({
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button
-            onClick={() => setEditing(true)}
+            onClick={handleStartEdit}
             style={{
               display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px',
               fontSize: 12, fontWeight: 500, background: 'var(--obs-purple-dim)',

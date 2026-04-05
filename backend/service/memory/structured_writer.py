@@ -176,6 +176,7 @@ class StructuredMemoryWriter:
         content: Optional[str] = None,
         tags: Optional[List[str]] = None,
         importance: Optional[str] = None,
+        category: Optional[str] = None,
         append: bool = False,
     ) -> bool:
         """Update an existing note's content and/or metadata.
@@ -219,6 +220,9 @@ class StructuredMemoryWriter:
 
             if importance:
                 metadata["importance"] = importance
+
+            if category:
+                metadata["category"] = category
 
             # Update content
             if content is not None:

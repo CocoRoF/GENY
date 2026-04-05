@@ -38,6 +38,7 @@ class UpdateNoteRequest(BaseModel):
     content: Optional[str] = None
     tags: Optional[List[str]] = None
     importance: Optional[str] = None
+    category: Optional[str] = None
 
 
 class LinkNotesRequest(BaseModel):
@@ -161,7 +162,7 @@ async def update_opsidian_file(
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
     ok = mgr.update_note(
-        filename, body=req.content, tags=req.tags, importance=req.importance,
+        filename, body=req.content, tags=req.tags, importance=req.importance, category=req.category,
     )
     if not ok:
         raise HTTPException(status_code=404, detail=f"Update failed: {filename}")
