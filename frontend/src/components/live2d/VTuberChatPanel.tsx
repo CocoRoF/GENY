@@ -137,9 +137,9 @@ export default function VTuberChatPanel({
       role,
       content: msg.content,
       timestamp: new Date(msg.timestamp).getTime(),
-      agentRole: msg.role,
-      sessionName: msg.session_name,
-      durationMs: msg.duration_ms,
+      agentRole: msg.role ?? undefined,
+      sessionName: msg.session_name ?? undefined,
+      durationMs: msg.duration_ms ?? undefined,
       fileChanges: msg.file_changes,
     };
   }, []);
