@@ -453,7 +453,7 @@ class LTMConfig(BaseConfig):
             ),
             ConfigField(
                 name="auto_curation_last_run",
-                field_type=FieldType.TEXT,
+                field_type=FieldType.STRING,
                 label="Last Run",
                 description="Timestamp of the last automatic curation run (read-only)",
                 default="",
