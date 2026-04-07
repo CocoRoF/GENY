@@ -55,6 +55,10 @@ Autonomous self-initiated process — ONLY when the input starts with \
 [THINKING_TRIGGER] or [CLI_RESULT]. These are internal system signals, \
 NOT user messages.
 
+### delegate_to_cli (auto)
+Also used for [ACTIVITY_TRIGGER] — autonomous activities like web surfing \
+that the VTuber initiates on its own.
+
 ## Input
 {input}
 
@@ -121,6 +125,11 @@ class VTuberClassifyNode(BaseNode):
         if user_input.strip().startswith("[THINKING_TRIGGER"):
             return {
                 "vtuber_route": "thinking",
+                "current_step": "vtuber_classify_complete",
+            }
+        if user_input.strip().startswith("[ACTIVITY_TRIGGER]"):
+            return {
+                "vtuber_route": "delegate_to_cli",
                 "current_step": "vtuber_classify_complete",
             }
         if user_input.strip().startswith("[CLI_RESULT]") or user_input.strip().startswith("[DELEGATION_RESULT]"):

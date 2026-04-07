@@ -38,6 +38,17 @@ how to execute tasks. Do NOT add pleasantries; just the task.
 User's original request:
 {input}"""
 
+_ACTIVITY_DELEGATE_PROMPT = """\
+You are a VTuber persona who just decided to do something fun on your own. \
+Rephrase the activity into a clear, actionable task for your CLI agent partner.
+
+The CLI agent has web_search, news_search, and web_fetch tools. \
+Tell it exactly what to search for or look up. Be specific about the topic \
+you're curious about — pick a concrete subject rather than being vague.
+
+Activity request:
+{input}"""
+
 
 @register_node
 class VTuberDelegateNode(BaseNode):
@@ -102,7 +113,13 @@ class VTuberDelegateNode(BaseNode):
         # ------------------------------------------------------------------
         # 2. Use LLM to rephrase into a clear task description
         # ------------------------------------------------------------------
-        task_tmpl = config.get("task_prompt", _DELEGATE_PROMPT)
+        user_input = state.get("input", "")
+        is_activity = user_input.strip().startswith("[ACTIVITY_TRIGGER]")
+
+        if is_activity:
+            task_tmpl = _ACTIVITY_DELEGATE_PROMPT
+        else:
+            task_tmpl = config.get("task_prompt", _DELEGATE_PROMPT)
         task_prompt = safe_format(task_tmpl, state)
 
         try:
@@ -151,13 +168,23 @@ class VTuberDelegateNode(BaseNode):
         # ------------------------------------------------------------------
         # 4. Acknowledgment for the user (template-based, no LLM call)
         # ------------------------------------------------------------------
-        _ACK_TEMPLATES = [
-            "[joy] 알겠어요! 지금 바로 처리 시작할게요~ 잠시만 기다려 주세요!",
-            "[smirk] 오 재밌겠다~ 바로 시작할게요!",
-            "[neutral] 네, 지금 작업 시작하겠습니다. 잠시만요~",
-            "[joy] 좋아요! 바로 해볼게요! 🔥",
-            "[neutral] 알겠습니다~ 작업 에이전트한테 넘겨볼게요!",
-        ]
+        if is_activity:
+            _ACK_TEMPLATES = [
+                "[joy] 앗 갑자기 궁금한 게 생겼어! 잠깐 찾아볼게~ 🔍",
+                "[smirk] 심심한데 재미있는 거 좀 찾아볼까~ 잠깐만!",
+                "[joy] 오 이거 한번 찾아보고 싶다! 잠시만~",
+                "[surprise] 갑자기 호기심이 폭발했어! 웹서핑 좀 하고 올게!",
+                "[neutral] 음~ 뭔가 재밌는 걸 찾고 싶어졌어. 잠깐 둘러볼게!",
+                "[joy] 혼자 놀기 타임! 뭔가 재밌는 거 발견하면 알려줄게~",
+            ]
+        else:
+            _ACK_TEMPLATES = [
+                "[joy] 알겠어요! 지금 바로 처리 시작할게요~ 잠시만 기다려 주세요!",
+                "[smirk] 오 재밌겠다~ 바로 시작할게요!",
+                "[neutral] 네, 지금 작업 시작하겠습니다. 잠시만요~",
+                "[joy] 좋아요! 바로 해볼게요! 🔥",
+                "[neutral] 알겠습니다~ 작업 에이전트한테 넘겨볼게요!",
+            ]
         ack_text = random.choice(_ACK_TEMPLATES)
 
         result: Dict[str, Any] = {
@@ -244,9 +271,16 @@ class VTuberDelegateNode(BaseNode):
                 )
                 try:
                     await execute_command(target_session_id, prompt)
+                    # Mark inbox message read — execution already processed
+                    # the content.  Prevents _drain_inbox from re-executing
+                    # the same delegation task.
+                    try:
+                        inbox.mark_read(target_session_id, [message_id])
+                    except Exception:
+                        pass
                 except AlreadyExecutingError:
-                    # CLI is busy — message is already in inbox, will be
-                    # picked up when the current execution finishes
+                    # CLI is busy — message stays unread in inbox and will
+                    # be picked up by _drain_inbox when current work ends.
                     logger.info(
                         f"CLI {target_session_id} busy — DM stored in inbox"
                     )

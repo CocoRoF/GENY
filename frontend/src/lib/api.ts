@@ -3,11 +3,18 @@
  * Mirrors all legacy frontend-legacy/static/components/api.js endpoints
  */
 
+import { getToken } from '@/lib/authApi';
+import { sseSubscribe } from '@/lib/sse';
+
 // ==================== Base Fetch Wrapper ====================
 
 async function apiCall<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const authHeaders: Record<string, string> = {};
+  if (token) authHeaders['Authorization'] = `Bearer ${token}`;
+
   const res = await fetch(endpoint, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders, ...options.headers },
     ...options,
   });
   if (!res.ok) {
@@ -134,75 +141,29 @@ export const agentApi = {
       throw new Error(message);
     }
 
-    // Step 2: connect EventSource DIRECTLY to backend (bypass Next.js proxy buffering)
-    // Supports auto-reconnection: if the SSE connection drops while execution is
-    // still running, reconnect to /execute/events (the holder persists on backend).
+    // Step 2: connect EventSource via unified SSE manager
+    const backendUrl = getBackendUrl();
     return new Promise<void>((resolve) => {
-      const backendUrl = getBackendUrl();
-      let evtSource: EventSource | null = null;
-      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-      let done = false;
-      const MAX_RECONNECT_ATTEMPTS = 20;
-      const RECONNECT_DELAY = 3_000;
-      let reconnectAttempts = 0;
-
-      const cleanup = () => {
-        done = true;
-        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        evtSource?.close();
-        evtSource = null;
-      };
-
-      const connect = () => {
-        if (done) return;
-        evtSource = new EventSource(`${backendUrl}/api/agents/${id}/execute/events`);
-
-        evtSource.addEventListener('log', (e) => {
-          reconnectAttempts = 0;
-          try { onEvent('log', JSON.parse(e.data)); } catch { /* skip */ }
-        });
-        evtSource.addEventListener('status', (e) => {
-          reconnectAttempts = 0;
-          try { onEvent('status', JSON.parse(e.data)); } catch { /* skip */ }
-        });
-        evtSource.addEventListener('result', (e) => {
-          reconnectAttempts = 0;
-          try { onEvent('result', JSON.parse(e.data)); } catch { /* skip */ }
-        });
-        evtSource.addEventListener('heartbeat', (e) => {
-          reconnectAttempts = 0; // connection alive
-          try { onEvent('heartbeat', JSON.parse((e as MessageEvent).data)); } catch { /* skip */ }
-        });
-        evtSource.addEventListener('error', (e) => {
-          // SSE error event — could be connection error or custom error event
-          if (e instanceof MessageEvent && e.data) {
-            try { onEvent('error', JSON.parse(e.data)); } catch { /* skip */ }
-          }
-        });
-        evtSource.addEventListener('done', () => {
+      const dispatch = (name: string) => (d: unknown) => onEvent(name, d as Record<string, unknown>);
+      const sub = sseSubscribe({
+        url: `${backendUrl}/api/agents/${id}/execute/events`,
+        events: {
+          log: dispatch('log'),
+          status: dispatch('status'),
+          result: dispatch('result'),
+          heartbeat: dispatch('heartbeat'),
+          error: dispatch('error'),
+        },
+        reconnect: { maxAttempts: 20, delay: 3_000 },
+        doneEvents: ['done'],
+        onDone: () => {
           onEvent('done', {});
-          cleanup();
           resolve();
-        });
+        },
+      });
 
-        // Handle connection errors — reconnect instead of giving up
-        evtSource.onerror = () => {
-          if (done) return;
-          evtSource?.close();
-          evtSource = null;
-
-          if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            // Exhausted retries — give up
-            cleanup();
-            resolve();
-            return;
-          }
-          reconnectAttempts++;
-          reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
-        };
-      };
-
-      connect();
+      // If SSE never connects and exhausts retries, resolve anyway
+      void sub;
     });
   },
 
@@ -229,68 +190,22 @@ export const agentApi = {
     id: string,
     onEvent: (eventType: string, eventData: Record<string, unknown>) => void,
   ): { close: () => void } => {
-    let evtSource: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-    const RECONNECT_DELAY = 3_000;
-    const MAX_RETRIES = 10;
-    let retries = 0;
-
-    const connect = () => {
-      if (closed) return;
-      const backendUrl = getBackendUrl();
-      evtSource = new EventSource(`${backendUrl}/api/agents/${id}/execute/events`);
-
-      evtSource.addEventListener('log', (e) => {
-        retries = 0;
-        try { onEvent('log', JSON.parse(e.data)); } catch { /* skip */ }
-      });
-      evtSource.addEventListener('status', (e) => {
-        retries = 0;
-        try { onEvent('status', JSON.parse(e.data)); } catch { /* skip */ }
-      });
-      evtSource.addEventListener('result', (e) => {
-        retries = 0;
-        try { onEvent('result', JSON.parse(e.data)); } catch { /* skip */ }
-      });
-      evtSource.addEventListener('heartbeat', (e) => {
-        retries = 0;
-        try { onEvent('heartbeat', JSON.parse((e as MessageEvent).data)); } catch { /* skip */ }
-      });
-      evtSource.addEventListener('error', (e) => {
-        if (e instanceof MessageEvent && e.data) {
-          try { onEvent('error', JSON.parse(e.data)); } catch { /* skip */ }
-        }
-      });
-      evtSource.addEventListener('done', () => {
-        onEvent('done', {});
-        closed = true;
-        evtSource?.close();
-        evtSource = null;
-      });
-
-      evtSource.onerror = () => {
-        if (closed) return;
-        evtSource?.close();
-        evtSource = null;
-        if (retries >= MAX_RETRIES) {
-          closed = true;
-          return;
-        }
-        retries++;
-        reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
-      };
-    };
-
-    connect();
-    return {
-      close: () => {
-        closed = true;
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        evtSource?.close();
-        evtSource = null;
+    const backendUrl = getBackendUrl();
+    const dispatch = (name: string) => (d: unknown) => onEvent(name, d as Record<string, unknown>);
+    const sub = sseSubscribe({
+      url: `${backendUrl}/api/agents/${id}/execute/events`,
+      events: {
+        log: dispatch('log'),
+        status: dispatch('status'),
+        result: dispatch('result'),
+        heartbeat: dispatch('heartbeat'),
+        error: dispatch('error'),
       },
-    };
+      reconnect: { maxAttempts: 10, delay: 3_000 },
+      doneEvents: ['done'],
+      onDone: () => onEvent('done', {}),
+    });
+    return { close: () => sub.close() };
   },
 
   /** GET /api/agents/{id}/graph — graph structure */
@@ -414,8 +329,12 @@ export const sharedFolderApi = {
     const params = new URLSearchParams();
     if (path) params.set('path', path);
     params.set('overwrite', String(overwrite));
+    const uploadToken = getToken();
+    const uploadHeaders: Record<string, string> = {};
+    if (uploadToken) uploadHeaders['Authorization'] = `Bearer ${uploadToken}`;
     const res = await fetch(`/api/shared-folder/upload?${params}`, {
       method: 'POST',
+      headers: uploadHeaders,
       body: formData,
     });
     if (!res.ok) {
@@ -553,9 +472,16 @@ export const chatApi = {
       method: 'DELETE',
     }),
 
-  /** GET /api/chat/rooms/:id/messages — get room message history */
-  getRoomMessages: (roomId: string) =>
-    apiCall<ChatRoomMessageListResponse>(`/api/chat/rooms/${roomId}/messages`),
+  /** GET /api/chat/rooms/:id/messages — get room message history (supports pagination) */
+  getRoomMessages: (roomId: string, opts?: { limit?: number; before?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.before) params.set('before', opts.before);
+    const qs = params.toString();
+    return apiCall<ChatRoomMessageListResponse>(
+      `/api/chat/rooms/${roomId}/messages${qs ? `?${qs}` : ''}`,
+    );
+  },
 
   /**
    * POST /api/chat/rooms/:id/broadcast — fire-and-forget broadcast.
@@ -567,6 +493,13 @@ export const chatApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  /** POST /api/chat/rooms/:id/broadcast/cancel — cancel active broadcast */
+  cancelBroadcast: (roomId: string) =>
+    apiCall<{ status: string; broadcast_id: string; cancelled_agents: number }>(
+      `/api/chat/rooms/${roomId}/broadcast/cancel`,
+      { method: 'POST' },
+    ),
 
   /**
    * Subscribe to SSE events for a chat room.
@@ -580,62 +513,23 @@ export const chatApi = {
     onEvent: (eventType: string, eventData: Record<string, unknown>) => void,
     getLatestMsgId?: () => string | null,
   ): { close: () => void } => {
-    let evtSource: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const RECONNECT_DELAY = 3_000;
-
-    const getUrl = () => {
-      const currentAfter = getLatestMsgId?.() ?? afterId;
-      const qs = currentAfter ? `?after=${encodeURIComponent(currentAfter)}` : '';
-      return `${getBackendUrl()}/api/chat/rooms/${roomId}/events${qs}`;
-    };
-
-    const connect = () => {
-      if (closed) return;
-
-      const url = getUrl();
-      evtSource = new EventSource(url);
-
-      const handleEvent = (e: MessageEvent) => {
-        try {
-          onEvent(e.type, JSON.parse(e.data));
-        } catch { /* skip malformed */ }
-      };
-
-      evtSource.addEventListener('message', handleEvent);
-      evtSource.addEventListener('broadcast_status', handleEvent);
-      evtSource.addEventListener('broadcast_done', handleEvent);
-      evtSource.addEventListener('agent_progress', handleEvent);
-      evtSource.addEventListener('heartbeat', handleEvent);
-
-      evtSource.onerror = () => {
-        if (closed) return;
-        evtSource?.close();
-        evtSource = null;
-        scheduleReconnect();
-      };
-    };
-
-    const scheduleReconnect = () => {
-      if (closed || reconnectTimer) return;
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        connect();
-      }, RECONNECT_DELAY);
-    };
-
-    connect();
-
-    return {
-      close: () => {
-        closed = true;
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        evtSource?.close();
-        evtSource = null;
+    const dispatch = (name: string) => (d: unknown) => onEvent(name, d as Record<string, unknown>);
+    const sub = sseSubscribe({
+      url: () => {
+        const currentAfter = getLatestMsgId?.() ?? afterId;
+        const qs = currentAfter ? `?after=${encodeURIComponent(currentAfter)}` : '';
+        return `${getBackendUrl()}/api/chat/rooms/${roomId}/events${qs}`;
       },
-    };
+      events: {
+        message: dispatch('message'),
+        broadcast_status: dispatch('broadcast_status'),
+        broadcast_done: dispatch('broadcast_done'),
+        agent_progress: dispatch('agent_progress'),
+        heartbeat: dispatch('heartbeat'),
+      },
+      reconnect: { delay: 3_000 },
+    });
+    return { close: () => sub.close() };
   },
 };
 
@@ -891,50 +785,251 @@ export const vtuberApi = {
     sessionId: string,
     onState: (state: AvatarState) => void,
   ): { close: () => void } => {
-    let evtSource: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-    const RECONNECT_DELAY = 3_000;
-    const MAX_RETRIES = 10;
-    let retries = 0;
-
-    const connect = () => {
-      if (closed) return;
-      const backendUrl = getBackendUrl();
-      evtSource = new EventSource(`${backendUrl}/api/vtuber/agents/${sessionId}/events`);
-
-      evtSource.addEventListener('avatar_state', (e) => {
-        retries = 0;
-        try { onState(JSON.parse(e.data) as AvatarState); } catch { /* skip */ }
-      });
-
-      evtSource.addEventListener('heartbeat', () => {
-        retries = 0;
-      });
-
-      evtSource.onerror = () => {
-        if (closed) return;
-        evtSource?.close();
-        evtSource = null;
-        if (retries >= MAX_RETRIES) {
-          closed = true;
-          return;
-        }
-        retries++;
-        reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
-      };
-    };
-
-    connect();
-    return {
-      close: () => {
-        closed = true;
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        evtSource?.close();
-        evtSource = null;
+    const backendUrl = getBackendUrl();
+    const sub = sseSubscribe({
+      url: `${backendUrl}/api/vtuber/agents/${sessionId}/events`,
+      events: {
+        avatar_state: (d) => onState(d as AvatarState),
+        heartbeat: () => {},
       },
-    };
+      reconnect: { maxAttempts: 10, delay: 3_000 },
+    });
+    return { close: () => sub.close() };
   },
+};
+
+// ==================== User Opsidian API ====================
+
+export const userOpsidianApi = {
+  /** GET /api/opsidian — index + stats */
+  getIndex: () =>
+    apiCall<import('@/types').MemoryIndexResponse & { username: string }>('/api/opsidian'),
+
+  /** GET /api/opsidian/stats */
+  getStats: () =>
+    apiCall<{ total_files: number; total_chars: number; categories: Record<string, number>; total_tags: number }>('/api/opsidian/stats'),
+
+  /** GET /api/opsidian/graph */
+  getGraph: () =>
+    apiCall<import('@/types').MemoryGraphResponse>('/api/opsidian/graph'),
+
+  /** GET /api/opsidian/tags */
+  getTags: () =>
+    apiCall<{ tags: Record<string, string[]> }>('/api/opsidian/tags'),
+
+  /** GET /api/opsidian/files */
+  listFiles: (params?: { category?: string; tag?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.category) qs.set('category', params.category);
+    if (params?.tag) qs.set('tag', params.tag);
+    const q = qs.toString();
+    return apiCall<{ files: Array<Record<string, unknown>>; total: number }>(
+      `/api/opsidian/files${q ? `?${q}` : ''}`
+    );
+  },
+
+  /** GET /api/opsidian/files/{filename} */
+  readFile: (filename: string) =>
+    apiCall<import('@/types').MemoryFileDetail>(`/api/opsidian/files/${filename}`),
+
+  /** POST /api/opsidian/files */
+  createFile: (data: {
+    title: string;
+    content: string;
+    category?: string;
+    tags?: string[];
+    importance?: string;
+    source?: string;
+    links_to?: string[];
+  }) =>
+    apiCall<{ filename: string; message: string }>('/api/opsidian/files', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** PUT /api/opsidian/files/{filename} */
+  updateFile: (filename: string, data: {
+    content?: string;
+    tags?: string[];
+    importance?: string;
+    category?: string;
+  }) =>
+    apiCall<{ filename: string; message: string }>(
+      `/api/opsidian/files/${filename}`,
+      { method: 'PUT', body: JSON.stringify(data) },
+    ),
+
+  /** DELETE /api/opsidian/files/{filename} */
+  deleteFile: (filename: string) =>
+    apiCall<{ message: string }>(
+      `/api/opsidian/files/${filename}`,
+      { method: 'DELETE' },
+    ),
+
+  /** GET /api/opsidian/search?q=... */
+  search: (query: string, maxResults?: number) => {
+    const qs = new URLSearchParams({ q: query });
+    if (maxResults) qs.set('max_results', String(maxResults));
+    return apiCall<{ query: string; results: Array<Record<string, unknown>>; total: number }>(
+      `/api/opsidian/search?${qs.toString()}`
+    );
+  },
+
+  /** POST /api/opsidian/links */
+  createLink: (sourceFilename: string, targetFilename: string) =>
+    apiCall<{ message: string }>('/api/opsidian/links', {
+      method: 'POST',
+      body: JSON.stringify({ source_filename: sourceFilename, target_filename: targetFilename }),
+    }),
+
+  /** POST /api/opsidian/reindex */
+  reindex: () =>
+    apiCall<{ message: string; total_files: number }>('/api/opsidian/reindex', {
+      method: 'POST',
+    }),
+};
+
+// ==================== Curated Knowledge API ====================
+
+export const curatedKnowledgeApi = {
+  /** GET /api/curated — index + stats */
+  getIndex: () =>
+    apiCall<import('@/types').MemoryIndexResponse & { username: string }>('/api/curated'),
+
+  /** GET /api/curated/stats */
+  getStats: () =>
+    apiCall<{ total_files: number; total_chars: number; categories: Record<string, number>; total_tags: number; vector_enabled: boolean }>('/api/curated/stats'),
+
+  /** GET /api/curated/graph */
+  getGraph: () =>
+    apiCall<import('@/types').MemoryGraphResponse>('/api/curated/graph'),
+
+  /** GET /api/curated/tags */
+  getTags: () =>
+    apiCall<{ tags: Record<string, string[]> }>('/api/curated/tags'),
+
+  /** GET /api/curated/files */
+  listFiles: (params?: { category?: string; tag?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.category) qs.set('category', params.category);
+    if (params?.tag) qs.set('tag', params.tag);
+    const q = qs.toString();
+    return apiCall<{ files: Array<Record<string, unknown>>; total: number }>(
+      `/api/curated/files${q ? `?${q}` : ''}`
+    );
+  },
+
+  /** GET /api/curated/files/{filename} */
+  readFile: (filename: string) =>
+    apiCall<import('@/types').MemoryFileDetail>(`/api/curated/files/${filename}`),
+
+  /** POST /api/curated/files */
+  createFile: (data: {
+    title: string;
+    content: string;
+    category?: string;
+    tags?: string[];
+    importance?: string;
+    source?: string;
+    links_to?: string[];
+  }) =>
+    apiCall<{ filename: string; message: string }>('/api/curated/files', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** PUT /api/curated/files/{filename} */
+  updateFile: (filename: string, data: {
+    content?: string;
+    tags?: string[];
+    importance?: string;
+    category?: string;
+  }) =>
+    apiCall<{ filename: string; message: string }>(
+      `/api/curated/files/${filename}`,
+      { method: 'PUT', body: JSON.stringify(data) },
+    ),
+
+  /** DELETE /api/curated/files/{filename} */
+  deleteFile: (filename: string) =>
+    apiCall<{ message: string }>(
+      `/api/curated/files/${filename}`,
+      { method: 'DELETE' },
+    ),
+
+  /** GET /api/curated/search?q=... */
+  search: (query: string, maxResults?: number) => {
+    const qs = new URLSearchParams({ q: query });
+    if (maxResults) qs.set('max_results', String(maxResults));
+    return apiCall<{ query: string; results: Array<Record<string, unknown>>; total: number }>(
+      `/api/curated/search?${qs.toString()}`
+    );
+  },
+
+  /** POST /api/curated/links */
+  createLink: (sourceFilename: string, targetFilename: string) =>
+    apiCall<{ message: string }>('/api/curated/links', {
+      method: 'POST',
+      body: JSON.stringify({ source_filename: sourceFilename, target_filename: targetFilename }),
+    }),
+
+  /** POST /api/curated/reindex */
+  reindex: () =>
+    apiCall<{ message: string; total_files: number }>('/api/curated/reindex', {
+      method: 'POST',
+    }),
+
+  /** POST /api/curated/curate — run 5-stage curation pipeline */
+  curateNote: (data: {
+    source_filename: string;
+    method?: string;
+    extra_tags?: string[];
+    use_llm?: boolean;
+  }) =>
+    apiCall<{
+      success: boolean;
+      curated_filename?: string;
+      method_used?: string;
+      quality_score?: number;
+      reason?: string;
+    }>('/api/curated/curate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** POST /api/curated/curate/batch — batch curation */
+  curateBatch: (data: { filenames: string[]; use_llm?: boolean }) =>
+    apiCall<{
+      total: number;
+      success_count: number;
+      results: Array<{
+        success: boolean;
+        curated_filename?: string;
+        method_used?: string;
+        quality_score?: number;
+        reason?: string;
+      }>;
+    }>('/api/curated/curate/batch', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** POST /api/curated/curate/all — curate all uncurated user notes */
+  curateAll: (use_llm?: boolean) =>
+    apiCall<{
+      total: number;
+      success_count: number;
+      results: Array<{
+        success: boolean;
+        curated_filename?: string;
+        quality_score?: number;
+        reason?: string;
+      }>;
+      message?: string;
+    }>('/api/curated/curate/all', {
+      method: 'POST',
+      body: JSON.stringify({ use_llm: use_llm ?? true }),
+    }),
 };
 
 // ==================== TTS API ====================
@@ -946,6 +1041,19 @@ export interface VoiceInfo {
   gender: string;
   engine: string;
   preview_text?: string;
+}
+
+export interface VoiceProfile {
+  name: string;
+  display_name: string;
+  language?: string;
+  is_template?: boolean;
+  prompt_text?: string;
+  prompt_lang?: string;
+  emotion_refs?: Record<string, { file: string; prompt_text?: string; prompt_lang?: string }>;
+  has_refs?: Record<string, boolean>;
+  active?: boolean;
+  gpt_sovits_settings?: Record<string, unknown>;
 }
 
 export const ttsApi = {
@@ -987,4 +1095,92 @@ export const ttsApi = {
   /** GET /api/tts/engines — 엔진 목록 */
   engines: () =>
     apiCall<{ engines: string[]; default: string }>('/api/tts/engines'),
+
+  // ── Voice Profile Management ──
+
+  /** GET /api/tts/profiles — 보이스 프로필 목록 */
+  listProfiles: () =>
+    apiCall<{ profiles: VoiceProfile[] }>('/api/tts/profiles'),
+
+  /** GET /api/tts/profiles/{name} — 프로필 상세 */
+  getProfile: (name: string) =>
+    apiCall<VoiceProfile>(`/api/tts/profiles/${encodeURIComponent(name)}`),
+
+  /** POST /api/tts/profiles — 새 프로필 생성 */
+  createProfile: (body: { name: string; display_name: string; language?: string; prompt_text?: string; prompt_lang?: string }) =>
+    apiCall<VoiceProfile>('/api/tts/profiles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** PUT /api/tts/profiles/{name} — 프로필 수정 */
+  updateProfile: (name: string, body: { display_name?: string; language?: string; prompt_text?: string; prompt_lang?: string }) =>
+    apiCall<VoiceProfile>(`/api/tts/profiles/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  /** POST /api/tts/profiles/{name}/ref — 레퍼런스 오디오 업로드 */
+  uploadRef: async (name: string, emotion: string, file: File, text?: string, lang?: string): Promise<{ success: boolean }> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('emotion', emotion);
+    if (text) form.append('text', text);
+    if (lang) form.append('lang', lang);
+    const refToken = getToken();
+    const refHeaders: Record<string, string> = {};
+    if (refToken) refHeaders['Authorization'] = `Bearer ${refToken}`;
+    const res = await fetch(`/api/tts/profiles/${encodeURIComponent(name)}/ref`, {
+      method: 'POST',
+      headers: refHeaders,
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /** DELETE /api/tts/profiles/{name}/ref/{emotion} — 레퍼런스 오디오 삭제 */
+  deleteRef: (name: string, emotion: string) =>
+    apiCall<{ success: boolean }>(`/api/tts/profiles/${encodeURIComponent(name)}/ref/${encodeURIComponent(emotion)}`, {
+      method: 'DELETE',
+    }),
+
+  /** POST /api/tts/profiles/{name}/activate — 프로필 활성화 */
+  activateProfile: (name: string) =>
+    apiCall<{ success: boolean }>(`/api/tts/profiles/${encodeURIComponent(name)}/activate`, {
+      method: 'POST',
+    }),
+
+  /** GET /api/tts/profiles/{name}/ref/{emotion}/audio — 레퍼런스 오디오 URL */
+  getRefAudioUrl: (name: string, emotion: string): string =>
+    `/api/tts/profiles/${encodeURIComponent(name)}/ref/${encodeURIComponent(emotion)}/audio`,
+
+  /** PUT /api/tts/profiles/{name}/ref/{emotion} — 개별 emotion prompt 수정 */
+  updateEmotionRef: (name: string, emotion: string, body: { prompt_text?: string; prompt_lang?: string }) =>
+    apiCall<{ success: boolean }>(`/api/tts/profiles/${encodeURIComponent(name)}/ref/${encodeURIComponent(emotion)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  // ── Per-Session Voice Profile ──
+
+  /** GET /api/tts/agents/{sessionId}/profile — 세션 보이스 프로필 조회 */
+  getSessionProfile: (sessionId: string) =>
+    apiCall<{ session_id: string; tts_voice_profile: string | null }>(`/api/tts/agents/${sessionId}/profile`),
+
+  /** PUT /api/tts/agents/{sessionId}/profile — 세션에 보이스 프로필 할당 */
+  assignSessionProfile: (sessionId: string, profileName: string) =>
+    apiCall<{ success: boolean; session_id: string; tts_voice_profile: string }>(`/api/tts/agents/${sessionId}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ profile_name: profileName }),
+    }),
+
+  /** DELETE /api/tts/agents/{sessionId}/profile — 세션 보이스 프로필 해제 */
+  unassignSessionProfile: (sessionId: string) =>
+    apiCall<{ success: boolean; session_id: string }>(`/api/tts/agents/${sessionId}/profile`, {
+      method: 'DELETE',
+    }),
 };

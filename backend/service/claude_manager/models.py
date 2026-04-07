@@ -225,7 +225,7 @@ class CreateSessionRequest(BaseModel):
     cli_tool_preset_id: Optional[str] = Field(
         default=None,
         description="Tool preset ID for the internal CLI agent (VTuber role only). "
-                    "If None, inherits from the VTuber session's tool_preset_id."
+                    "If None, uses the CLI worker role default (template-all-tools)."
     )
 
 

@@ -3,6 +3,9 @@ TTS Controller
 
 REST API endpoints for Text-to-Speech:
 - POST /api/tts/agents/{session_id}/speak — Stream audio synthesis
+- GET  /api/tts/agents/{session_id}/profile — Get session voice profile
+- PUT  /api/tts/agents/{session_id}/profile — Assign voice profile to session
+- DELETE /api/tts/agents/{session_id}/profile — Remove session voice profile
 - GET  /api/tts/voices                     — List available voices
 - GET  /api/tts/voices/{engine}/{voice_id}/preview — Preview a voice
 - GET  /api/tts/status                     — Engine health status
@@ -20,10 +23,12 @@ import os
 from logging import getLogger
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+
+from service.auth.auth_middleware import require_auth
 
 logger = getLogger(__name__)
 
@@ -45,10 +50,21 @@ async def speak(session_id: str, body: SpeakRequest):
 
     The active TTS engine is determined by Config (tts_general.provider),
     unless overridden by the `engine` field in the request body.
+    Uses per-session voice profile if assigned, else global config.
     """
     from service.vtuber.tts.tts_service import get_tts_service
 
     tts = get_tts_service()
+
+    # Look up per-session voice profile
+    session_voice_profile = None
+    try:
+        from service.claude_manager.session_store import get_session_store
+        session = get_session_store().get(session_id)
+        if session:
+            session_voice_profile = session.get("tts_voice_profile")
+    except Exception as e:
+        logger.debug(f"Failed to look up session voice profile: {e}")
 
     # Determine content type from Config
     content_type = "audio/mpeg"
@@ -80,6 +96,7 @@ async def speak(session_id: str, body: SpeakRequest):
                 emotion=body.emotion,
                 language=body.language or default_language,
                 engine_name=body.engine,
+                voice_profile=session_voice_profile,
             ):
                 if chunk.audio_data:
                     has_data = True
@@ -106,6 +123,67 @@ async def speak(session_id: str, body: SpeakRequest):
             "X-TTS-Engine": current_provider,
         },
     )
+
+
+# ==================== Per-Session Voice Profile ====================
+
+class AssignProfileRequest(BaseModel):
+    """Request body to assign a voice profile to a session"""
+    profile_name: str
+
+
+@router.get("/agents/{session_id}/profile")
+async def get_session_profile(session_id: str):
+    """Get the voice profile assigned to a session."""
+    from service.claude_manager.session_store import get_session_store
+
+    session = get_session_store().get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {
+        "session_id": session_id,
+        "tts_voice_profile": session.get("tts_voice_profile"),
+    }
+
+
+@router.put("/agents/{session_id}/profile")
+async def assign_session_profile(session_id: str, body: AssignProfileRequest, auth: dict = Depends(require_auth)):
+    """Assign a voice profile to a VTuber session.
+
+    Stores the profile name in the session's extra_data JSON blob.
+    """
+    from service.claude_manager.session_store import get_session_store
+
+    store = get_session_store()
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Validate profile exists
+    profile_dir = VOICES_DIR / body.profile_name
+    if not profile_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Voice profile '{body.profile_name}' not found")
+
+    store.update(session_id, {"tts_voice_profile": body.profile_name})
+    logger.info(f"Assigned voice profile '{body.profile_name}' to session {session_id}")
+
+    return {"success": True, "session_id": session_id, "tts_voice_profile": body.profile_name}
+
+
+@router.delete("/agents/{session_id}/profile")
+async def unassign_session_profile(session_id: str, auth: dict = Depends(require_auth)):
+    from service.claude_manager.session_store import get_session_store
+
+    store = get_session_store()
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.update(session_id, {"tts_voice_profile": ""})
+    logger.info(f"Unassigned voice profile from session {session_id}")
+
+    return {"success": True, "session_id": session_id}
 
 
 @router.get("/voices")
@@ -202,7 +280,7 @@ async def get_cache_stats():
 
 
 @router.delete("/cache")
-async def clear_cache():
+async def clear_cache(auth: dict = Depends(require_auth)):
     """Clear the TTS audio cache"""
     from service.vtuber.tts.cache import get_tts_cache
 
@@ -214,6 +292,89 @@ async def clear_cache():
 
 VOICES_DIR = Path(__file__).parent.parent / "static" / "voices"
 
+# Built-in template profiles — auto-created if directory exists but profile.json is missing.
+_BUILTIN_PROFILES = {
+    "paimon_ko": {
+        "name": "paimon_ko",
+        "display_name": "파이몬 (한국어)",
+        "language": "ko",
+        "is_template": True,
+        "prompt_text": "으음~ 나쁘지 않은데? 너도 먹어봐~ 우리 같이 먹자!",
+        "prompt_lang": "ko",
+        "emotion_refs": {
+            "neutral": {
+                "file": "ref_neutral.wav",
+                "prompt_text": "으음~ 나쁘지 않은데? 너도 먹어봐~ 우리 같이 먹자!",
+                "prompt_lang": "ko",
+            },
+            "joy": {
+                "file": "ref_joy.wav",
+                "prompt_text": "우와아——! 이건 세상에서 제일 맛있는 요리야! 이히힛, 역시 네가 최고야!",
+                "prompt_lang": "ko",
+            },
+        },
+    },
+}
+
+
+def _ensure_builtin_profiles() -> None:
+    """Auto-create profile.json for built-in template profiles if missing."""
+    for name, data in _BUILTIN_PROFILES.items():
+        profile_dir = VOICES_DIR / name
+        if profile_dir.is_dir():
+            profile_json = profile_dir / "profile.json"
+            if not profile_json.exists():
+                try:
+                    profile_json.write_text(
+                        json.dumps(data, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info(f"Auto-created profile.json for built-in profile: {name}")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-create profile.json for {name}: {e}")
+
+
+def _is_template_profile(name: str) -> bool:
+    """Check if a voice profile is marked as a template (read-only)."""
+    profile_json = VOICES_DIR / name / "profile.json"
+    if profile_json.exists():
+        try:
+            data = json.loads(profile_json.read_text(encoding="utf-8"))
+            return bool(data.get("is_template", False))
+        except Exception:
+            pass
+    return False
+
+
+def _guard_template(name: str) -> None:
+    """Raise 403 if the profile is a template."""
+    if _is_template_profile(name):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Profile '{name}' is a built-in template and cannot be modified.",
+        )
+
+
+def _migrate_emotion_refs(data: dict) -> None:
+    """Ensure each emotion_ref entry has prompt_text/prompt_lang fields.
+
+    Legacy entries only had {"file": "...", "text": "..."}, so we back-fill
+    from the profile-level prompt_text/prompt_lang as fallback.
+    """
+    emotion_refs = data.get("emotion_refs")
+    if not isinstance(emotion_refs, dict):
+        return
+    fallback_text = data.get("prompt_text", "")
+    fallback_lang = data.get("prompt_lang", "ko")
+    for _emotion, ref in emotion_refs.items():
+        if not isinstance(ref, dict):
+            continue
+        if "prompt_text" not in ref:
+            # Migrate legacy "text" field → "prompt_text"
+            ref["prompt_text"] = ref.pop("text", "") or fallback_text
+        if "prompt_lang" not in ref:
+            ref["prompt_lang"] = fallback_lang
+
 
 class CreateProfileRequest(BaseModel):
     """Request body to create a voice profile"""
@@ -222,6 +383,12 @@ class CreateProfileRequest(BaseModel):
     language: str = "ko"
     prompt_text: str = ""
     prompt_lang: str = "ko"
+
+
+class UpdateEmotionRefRequest(BaseModel):
+    """Request body to update a single emotion ref's prompt"""
+    prompt_text: Optional[str] = None
+    prompt_lang: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -236,22 +403,49 @@ class UpdateProfileRequest(BaseModel):
 @router.get("/profiles")
 async def list_profiles():
     """List all voice profiles"""
+    _ensure_builtin_profiles()
     profiles = []
     if VOICES_DIR.exists():
         for profile_dir in sorted(VOICES_DIR.iterdir()):
             if not profile_dir.is_dir():
                 continue
             profile_json = profile_dir / "profile.json"
+            refs = {f.stem.replace("ref_", ""): True for f in profile_dir.glob("ref_*.wav")}
             if profile_json.exists():
                 try:
                     data = json.loads(profile_json.read_text(encoding="utf-8"))
-                    data["has_refs"] = {
-                        f.stem.replace("ref_", ""): True
-                        for f in profile_dir.glob("ref_*.wav")
-                    }
+                    data["has_refs"] = refs
+                    # Ensure emotion_refs have per-emotion prompt fields
+                    _migrate_emotion_refs(data)
                     profiles.append(data)
                 except Exception as e:
                     logger.warning(f"Failed to read profile {profile_dir.name}: {e}")
+            else:
+                # Legacy directory without profile.json — auto-generate metadata
+                profiles.append({
+                    "name": profile_dir.name,
+                    "display_name": profile_dir.name,
+                    "language": "ko",
+                    "prompt_text": "",
+                    "prompt_lang": "ko",
+                    "emotion_refs": {},
+                    "has_refs": refs,
+                })
+
+    # Mark which profile is currently active in GPT-SoVITS config
+    active_dir = ""
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+
+        cfg = get_config_manager().load_config(GPTSoVITSConfig)
+        active_dir = os.path.basename(cfg.ref_audio_dir.rstrip("/"))
+    except Exception:
+        pass
+
+    for p in profiles:
+        p["active"] = p.get("name") == active_dir
+
     return {"profiles": profiles}
 
 
@@ -262,17 +456,30 @@ async def get_profile(name: str):
     if not profile_dir.exists() or not profile_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
 
-    profile_json = profile_dir / "profile.json"
-    if not profile_json.exists():
-        raise HTTPException(status_code=404, detail=f"Profile '{name}' has no profile.json")
+    _ensure_builtin_profiles()
 
-    data = json.loads(profile_json.read_text(encoding="utf-8"))
+    profile_json = profile_dir / "profile.json"
+    if profile_json.exists():
+        data = json.loads(profile_json.read_text(encoding="utf-8"))
+    else:
+        # Graceful fallback for directories without profile.json
+        data = {
+            "name": name,
+            "display_name": name,
+            "language": "ko",
+            "prompt_text": "",
+            "prompt_lang": "ko",
+            "emotion_refs": {},
+        }
+
     data["available_refs"] = [f.name for f in profile_dir.glob("ref_*.wav")]
+    data["has_refs"] = {f.stem.replace("ref_", ""): True for f in profile_dir.glob("ref_*.wav")}
+    _migrate_emotion_refs(data)
     return data
 
 
 @router.post("/profiles")
-async def create_profile(body: CreateProfileRequest):
+async def create_profile(body: CreateProfileRequest, auth: dict = Depends(require_auth)):
     """Create a new voice profile directory with profile.json"""
     profile_dir = VOICES_DIR / body.name
     if profile_dir.exists():
@@ -302,8 +509,9 @@ async def create_profile(body: CreateProfileRequest):
 
 
 @router.put("/profiles/{name}")
-async def update_profile(name: str, body: UpdateProfileRequest):
+async def update_profile(name: str, body: UpdateProfileRequest, auth: dict = Depends(require_auth)):
     """Update an existing voice profile"""
+    _guard_template(name)
     profile_dir = VOICES_DIR / name
     profile_json = profile_dir / "profile.json"
     if not profile_json.exists():
@@ -334,9 +542,12 @@ async def upload_reference_audio(
     name: str,
     emotion: str = Form(...),
     text: str = Form(""),
+    lang: str = Form(""),
     file: UploadFile = File(...),
+    auth: dict = Depends(require_auth),
 ):
     """Upload a reference audio file for a specific emotion"""
+    _guard_template(name)
     profile_dir = VOICES_DIR / name
     if not profile_dir.exists():
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
@@ -355,7 +566,7 @@ async def upload_reference_audio(
     content = await file.read()
     ref_path.write_bytes(content)
 
-    # Update profile.json emotion_refs
+    # Update profile.json emotion_refs with per-emotion prompt
     profile_json = profile_dir / "profile.json"
     if profile_json.exists():
         data = json.loads(profile_json.read_text(encoding="utf-8"))
@@ -363,7 +574,8 @@ async def upload_reference_audio(
             data["emotion_refs"] = {}
         data["emotion_refs"][emotion] = {
             "file": f"ref_{emotion}.wav",
-            "text": text,
+            "prompt_text": text or data["emotion_refs"].get(emotion, {}).get("prompt_text", ""),
+            "prompt_lang": lang or data["emotion_refs"].get(emotion, {}).get("prompt_lang", data.get("prompt_lang", "ko")),
         }
         profile_json.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
@@ -377,3 +589,128 @@ async def upload_reference_audio(
         "file": f"ref_{emotion}.wav",
         "size": len(content),
     }
+
+
+@router.delete("/profiles/{name}/ref/{emotion}")
+async def delete_reference_audio(name: str, emotion: str, auth: dict = Depends(require_auth)):
+    """Delete a reference audio file for a specific emotion"""
+    _guard_template(name)
+    # Validate name to prevent path traversal
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    profile_dir = VOICES_DIR / name
+    if not profile_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    ref_path = profile_dir / f"ref_{emotion}.wav"
+    if not ref_path.exists():
+        raise HTTPException(status_code=404, detail=f"Reference audio for '{emotion}' not found")
+
+    ref_path.unlink()
+
+    # Update profile.json
+    profile_json = profile_dir / "profile.json"
+    if profile_json.exists():
+        data = json.loads(profile_json.read_text(encoding="utf-8"))
+        if "emotion_refs" in data and emotion in data["emotion_refs"]:
+            del data["emotion_refs"][emotion]
+            profile_json.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    return {"success": True, "profile": name, "emotion": emotion}
+
+
+@router.get("/profiles/{name}/ref/{emotion}/audio")
+async def get_reference_audio(name: str, emotion: str):
+    """Stream a reference audio file for playback"""
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    ref_path = VOICES_DIR / name / f"ref_{emotion}.wav"
+    if not ref_path.exists():
+        raise HTTPException(status_code=404, detail=f"Reference audio for '{emotion}' not found")
+
+    return StreamingResponse(
+        open(ref_path, "rb"),
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="ref_{emotion}.wav"'},
+    )
+
+
+@router.put("/profiles/{name}/ref/{emotion}")
+async def update_emotion_ref(name: str, emotion: str, body: UpdateEmotionRefRequest, auth: dict = Depends(require_auth)):
+    """Update prompt_text / prompt_lang for a single emotion reference"""
+    _guard_template(name)
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    profile_dir = VOICES_DIR / name
+    profile_json = profile_dir / "profile.json"
+    if not profile_json.exists():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    data = json.loads(profile_json.read_text(encoding="utf-8"))
+    if "emotion_refs" not in data:
+        data["emotion_refs"] = {}
+    if emotion not in data["emotion_refs"]:
+        data["emotion_refs"][emotion] = {"file": f"ref_{emotion}.wav"}
+
+    if body.prompt_text is not None:
+        data["emotion_refs"][emotion]["prompt_text"] = body.prompt_text
+    if body.prompt_lang is not None:
+        data["emotion_refs"][emotion]["prompt_lang"] = body.prompt_lang
+
+    profile_json.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {"success": True, "profile": name, "emotion": emotion, "ref": data["emotion_refs"][emotion]}
+
+
+@router.post("/profiles/{name}/activate")
+async def activate_profile(name: str, auth: dict = Depends(require_auth)):
+    """Set a voice profile as the active GPT-SoVITS voice"""
+    # Validate name to prevent path traversal
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    profile_dir = VOICES_DIR / name
+    if not profile_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+
+        mgr = get_config_manager()
+        cfg = mgr.load_config(GPTSoVITSConfig)
+
+        # Update voice_profile (new) + legacy path fields for compatibility
+        cfg.voice_profile = name
+        cfg.ref_audio_dir = f"/app/static/voices/{name}"
+        cfg.container_ref_dir = f"/workspace/GPT-SoVITS/references/{name}"
+
+        # Update prompt from profile.json if available
+        profile_json = profile_dir / "profile.json"
+        if profile_json.exists():
+            data = json.loads(profile_json.read_text(encoding="utf-8"))
+            if data.get("prompt_text"):
+                cfg.prompt_text = data["prompt_text"]
+            if data.get("prompt_lang"):
+                cfg.prompt_lang = data["prompt_lang"]
+
+        mgr.save_config(cfg)
+        logger.info(f"Activated voice profile: {name}")
+
+        return {
+            "success": True,
+            "profile": name,
+            "ref_audio_dir": cfg.ref_audio_dir,
+            "container_ref_dir": cfg.container_ref_dir,
+        }
+    except Exception as e:
+        logger.error(f"Failed to activate profile '{name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))

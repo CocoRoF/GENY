@@ -98,12 +98,14 @@ export interface ChatRoomMessage {
   role?: string | null;
   duration_ms?: number | null;
   file_changes?: FileChanges[];
+  meta?: Record<string, unknown>;
 }
 
 export interface ChatRoomMessageListResponse {
   room_id: string;
   messages: ChatRoomMessage[];
   total: number;
+  has_more?: boolean;
 }
 
 export interface ChatRoomBroadcastRequest {
@@ -137,11 +139,21 @@ export interface AgentProgressState {
   session_id: string;
   session_name: string;
   role: string;
-  status: 'pending' | 'executing' | 'completed' | 'failed';
+  status: 'pending' | 'executing' | 'completed' | 'failed' | 'queued';
   thinking_preview: string | null;
   elapsed_ms?: number;
   last_activity_ms?: number;
   last_tool_name?: string;
+  recent_logs?: AgentLogEntry[];
+  log_cursor?: number;
+}
+
+export interface AgentLogEntry {
+  level: string;
+  message: string;
+  ts?: string | null;
+  tool_name?: string;
+  node_name?: string;
 }
 
 export interface AgentProgressEvent {
@@ -536,11 +548,18 @@ export interface MemoryGraphNode {
   label: string;
   category: string;
   importance: string;
+  tags?: string[];
+  connectionCount?: number;
+  summary?: string;
+  charCount?: number;
 }
 
 export interface MemoryGraphEdge {
   source: string;
   target: string;
+  type?: 'wikilink' | 'tag' | 'backlink';
+  weight?: number;
+  label?: string;
 }
 
 export interface MemoryGraphResponse {

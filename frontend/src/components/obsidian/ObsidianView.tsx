@@ -3,15 +3,15 @@
 import { useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useObsidianStore } from '@/store/useObsidianStore';
+import { useHubMode } from '@/components/OpsidianHubContext';
 import { agentApi, memoryApi } from '@/lib/api';
 import './obsidian.css';
 import SessionSelector from './SessionSelector';
 import ObsidianSidebar from './ObsidianSidebar';
 import ObsidianTabs from './ObsidianTabs';
 import NoteViewer from './NoteViewer';
-import GraphView from './GraphView';
+import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import SearchPanel from './SearchPanel';
-import StatusBar from './StatusBar';
 import RightPanel from './RightPanel';
 
 export default function ObsidianView() {
@@ -21,6 +21,8 @@ export default function ObsidianView() {
     viewMode,
     sidebarCollapsed,
     rightPanelOpen,
+    graphNodes,
+    graphEdges,
     setLoading,
     setMemoryIndex,
     setMemoryStats,
@@ -29,7 +31,11 @@ export default function ObsidianView() {
     setSessions,
     setLoadingSessions,
     setSelectedSessionId,
+    openFile,
+    setFileDetail,
+    setViewMode,
   } = useObsidianStore();
+  const hub = useHubMode();
 
   // Load sessions on mount
   useEffect(() => {
@@ -79,6 +85,32 @@ export default function ObsidianView() {
     }
   }, [selectedSessionId, loadSessionMemory]);
 
+  // Register refresh callback for hub StatusBar
+  useEffect(() => {
+    if (hub) {
+      hub.refreshRef.current = () => {
+        if (selectedSessionId) loadSessionMemory(selectedSessionId);
+      };
+    }
+  }, [hub, selectedSessionId, loadSessionMemory]);
+
+  // Handle graph node click → open file (same behaviour as old GraphView)
+  const handleSelectFile = useCallback(
+    async (filename: string) => {
+      openFile(filename);
+      setViewMode('editor');
+      if (selectedSessionId) {
+        try {
+          const detail = await memoryApi.readFile(selectedSessionId, filename);
+          setFileDetail(detail);
+        } catch (e) {
+          console.error('Failed to read:', e);
+        }
+      }
+    },
+    [selectedSessionId, openFile, setFileDetail, setViewMode],
+  );
+
   if (!selectedSessionId) {
     return <SessionSelector />;
   }
@@ -99,7 +131,13 @@ export default function ObsidianView() {
         <ObsidianTabs />
         <div className="obsidian-content">
           {viewMode === 'editor' && <NoteViewer />}
-          {viewMode === 'graph' && <GraphView />}
+          {viewMode === 'graph' && (
+            <UnifiedGraphView
+              nodes={graphNodes}
+              edges={graphEdges}
+              onSelectFile={handleSelectFile}
+            />
+          )}
           {viewMode === 'search' && <SearchPanel />}
         </div>
       </div>
@@ -107,8 +145,7 @@ export default function ObsidianView() {
       {/* Right panel: metadata / backlinks / outline */}
       {rightPanelOpen && <RightPanel />}
 
-      {/* Bottom status bar */}
-      <StatusBar onRefresh={() => selectedSessionId && loadSessionMemory(selectedSessionId)} />
+
     </div>
   );
 }

@@ -74,6 +74,9 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
+    volumes:
+      - geny-tts-cache-prod:/app/cache/tts
+      - geny-voices-prod:/app/static/voices
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,4 +135,8 @@ networks:
 
 volumes:
   geny-pgdata-prod:
+    driver: local
+  geny-tts-cache-prod:
+    driver: local
+  geny-voices-prod:
     driver: local

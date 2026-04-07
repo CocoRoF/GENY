@@ -68,6 +68,27 @@ class LTMConfig(BaseConfig):
     score_threshold: float = 0.35
     max_inject_chars: int = 10000
 
+    # ── Curated Knowledge ──
+    curated_knowledge_enabled: bool = False
+    curated_vector_enabled: bool = False
+    curated_inject_budget: int = 5000
+    curated_max_results: int = 5
+
+    # ── Auto-Curation Pipeline ──
+    auto_curation_enabled: bool = False
+    auto_curation_use_llm: bool = True
+    auto_curation_quality_threshold: float = 0.6
+
+    # ── Auto-Curation Scheduling ──
+    auto_curation_schedule_enabled: bool = False
+    auto_curation_interval_hours: int = 24
+    auto_curation_max_notes_per_run: int = 20
+    auto_curation_last_run: str = ""
+
+    # ── User Opsidian Read Access ──
+    user_opsidian_index_enabled: bool = False
+    user_opsidian_raw_read_enabled: bool = False
+
     # ── Env mapping (for optional .env fallback) ──
     _ENV_MAP = {
         "embedding_api_key": "LTM_EMBEDDING_API_KEY",
@@ -137,6 +158,10 @@ class LTMConfig(BaseConfig):
                     "embedding": "Embedding Settings",
                     "chunking": "Chunking Settings",
                     "retrieval": "Retrieval Settings",
+                    "curated": "Curated Knowledge",
+                    "auto_curation": "Auto-Curation Pipeline",
+                    "auto_curation_schedule": "Curation Schedule",
+                    "user_opsidian": "User Opsidian Access",
                 },
                 "fields": {
                     "enabled": {
@@ -175,6 +200,58 @@ class LTMConfig(BaseConfig):
                     "max_inject_chars": {
                         "label": "Max Inject Characters",
                         "description": "Maximum number of characters from vector search results to inject into context",
+                    },
+                    "curated_knowledge_enabled": {
+                        "label": "Enable Curated Knowledge",
+                        "description": "Enable the curated knowledge layer between User Opsidian and agent memory",
+                    },
+                    "curated_vector_enabled": {
+                        "label": "Curated Vector Search",
+                        "description": "Enable FAISS vector search within curated knowledge",
+                    },
+                    "curated_inject_budget": {
+                        "label": "Curated Inject Budget",
+                        "description": "Character budget for curated knowledge injected into context",
+                    },
+                    "curated_max_results": {
+                        "label": "Curated Max Results",
+                        "description": "Maximum number of curated knowledge notes to inject",
+                    },
+                    "auto_curation_enabled": {
+                        "label": "Enable Auto-Curation",
+                        "description": "Automatically curate high-quality notes from User Opsidian",
+                    },
+                    "auto_curation_use_llm": {
+                        "label": "LLM-Assisted Curation",
+                        "description": "Use LLM to evaluate and transform notes during curation",
+                    },
+                    "auto_curation_quality_threshold": {
+                        "label": "Quality Threshold",
+                        "description": "Minimum quality score (0-1) for auto-curation acceptance",
+                    },
+                    "auto_curation_schedule_enabled": {
+                        "label": "Enable Scheduled Curation",
+                        "description": "Run curation automatically on a periodic schedule",
+                    },
+                    "auto_curation_interval_hours": {
+                        "label": "Curation Interval (hours)",
+                        "description": "How often to run automatic curation (in hours)",
+                    },
+                    "auto_curation_max_notes_per_run": {
+                        "label": "Max Notes Per Run",
+                        "description": "Maximum number of notes to curate per scheduled run",
+                    },
+                    "auto_curation_last_run": {
+                        "label": "Last Run",
+                        "description": "Timestamp of the last automatic curation run",
+                    },
+                    "user_opsidian_index_enabled": {
+                        "label": "Opsidian Index Access",
+                        "description": "Allow agent to browse User Opsidian note index",
+                    },
+                    "user_opsidian_raw_read_enabled": {
+                        "label": "Opsidian Raw Read",
+                        "description": "Allow agent to read individual User Opsidian notes",
                     },
                 },
             }
@@ -277,5 +354,127 @@ class LTMConfig(BaseConfig):
                 min_value=500,
                 max_value=30000,
                 group="retrieval",
+            ),
+
+            # ── Curated Knowledge ──
+            ConfigField(
+                name="curated_knowledge_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Enable Curated Knowledge",
+                description="Enable the curated knowledge layer between User Opsidian and agent memory",
+                default=False,
+                group="curated",
+            ),
+            ConfigField(
+                name="curated_vector_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Curated Vector Search",
+                description="Enable FAISS vector search within curated knowledge",
+                default=False,
+                group="curated",
+            ),
+            ConfigField(
+                name="curated_inject_budget",
+                field_type=FieldType.NUMBER,
+                label="Curated Inject Budget (chars)",
+                description="Character budget for curated knowledge in context",
+                default=5000,
+                min_value=500,
+                max_value=20000,
+                group="curated",
+            ),
+            ConfigField(
+                name="curated_max_results",
+                field_type=FieldType.NUMBER,
+                label="Curated Max Results",
+                description="Maximum curated notes to inject per turn",
+                default=5,
+                min_value=1,
+                max_value=20,
+                group="curated",
+            ),
+
+            # ── Auto-Curation Pipeline ──
+            ConfigField(
+                name="auto_curation_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Enable Auto-Curation",
+                description="Automatically curate from User Opsidian",
+                default=False,
+                group="auto_curation",
+            ),
+            ConfigField(
+                name="auto_curation_use_llm",
+                field_type=FieldType.BOOLEAN,
+                label="LLM-Assisted Curation",
+                description="Use LLM for quality evaluation during curation",
+                default=True,
+                group="auto_curation",
+            ),
+            ConfigField(
+                name="auto_curation_quality_threshold",
+                field_type=FieldType.NUMBER,
+                label="Quality Threshold",
+                description="Minimum quality score (0.0-1.0) for acceptance",
+                default=0.6,
+                min_value=0.0,
+                max_value=1.0,
+                group="auto_curation",
+            ),
+
+            # ── Auto-Curation Scheduling ──
+            ConfigField(
+                name="auto_curation_schedule_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Enable Scheduled Curation",
+                description="Run curation automatically on a periodic schedule",
+                default=False,
+                group="auto_curation_schedule",
+            ),
+            ConfigField(
+                name="auto_curation_interval_hours",
+                field_type=FieldType.NUMBER,
+                label="Interval (hours)",
+                description="How often to run auto-curation",
+                default=24,
+                min_value=1,
+                max_value=168,
+                group="auto_curation_schedule",
+            ),
+            ConfigField(
+                name="auto_curation_max_notes_per_run",
+                field_type=FieldType.NUMBER,
+                label="Max Notes Per Run",
+                description="Cap on notes curated per scheduled run",
+                default=20,
+                min_value=1,
+                max_value=100,
+                group="auto_curation_schedule",
+            ),
+            ConfigField(
+                name="auto_curation_last_run",
+                field_type=FieldType.STRING,
+                label="Last Run",
+                description="Timestamp of the last automatic curation run (read-only)",
+                default="",
+                group="auto_curation_schedule",
+            ),
+
+            # ── User Opsidian Access ──
+            ConfigField(
+                name="user_opsidian_index_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Opsidian Index Access",
+                description="Let agents browse User Opsidian note index",
+                default=False,
+                group="user_opsidian",
+            ),
+            ConfigField(
+                name="user_opsidian_raw_read_enabled",
+                field_type=FieldType.BOOLEAN,
+                label="Opsidian Raw Read",
+                description="Let agents read individual User Opsidian notes",
+                default=False,
+                group="user_opsidian",
             ),
         ]

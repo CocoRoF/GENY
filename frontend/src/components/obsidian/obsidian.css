@@ -196,7 +196,7 @@ html.light .obsidian-root {
 .ss-card:hover {
   background: var(--obs-bg-surface);
   border-color: var(--obs-purple);
-  box-shadow: 0 0 0 1px var(--obs-purple-dim), 0 4px 20px rgba(0,0,0,0.3);
+  box-shadow: 0 0 0 1px var(--obs-purple-dim), 0 4px 20px rgba(0,0,0,0.12);
   transform: translateY(-1px);
 }
 .ss-card-top {
@@ -235,6 +235,25 @@ html.light .obsidian-root {
 .ss-role-planner {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
+}
+/* Light-mode: darken role badge text for readability */
+html.light .ss-role-cli,
+html.light .ss-role-worker,
+html.light .ss-role-developer {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+html.light .ss-role-vtuber {
+  background: rgba(236, 72, 153, 0.12);
+  color: #db2777;
+}
+html.light .ss-role-researcher {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+html.light .ss-role-planner {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
 }
 .ss-card-meta {
   display: flex;
@@ -1347,6 +1366,27 @@ html.light .obsidian-root {
   color: var(--obs-purple-bright);
   font-weight: 600;
 }
+.obs-sb-session-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--obs-border-subtle);
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.08);
+  color: var(--obs-purple-bright);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-sb-session-btn:hover {
+  background: rgba(139, 92, 246, 0.18);
+}
 .obs-sb-file {
   font-family: var(--obs-font-mono);
   font-size: 10px;
@@ -1468,4 +1508,114 @@ html.light .obsidian-root {
 .obs-graph-tooltip-meta {
   font-size: 11px;
   color: var(--obs-text-muted);
+}
+
+/* ────────────────────────────────────────────────────────────
+   OPSIDIAN HUB — Unified wrapper with bottom navigation
+   ──────────────────────────────────────────────────────────── */
+.opsidian-hub {
+  /* Duplicate obs variables so StatusBar + SessionSelector (outside .obsidian-root) inherit them */
+  --obs-purple: #8b5cf6;
+  --obs-purple-dim: rgba(139, 92, 246, 0.12);
+  --obs-purple-glow: rgba(139, 92, 246, 0.25);
+  --obs-purple-bright: #a78bfa;
+  --obs-violet: #7c3aed;
+  --obs-bg-deep: #0c0c0f;
+  --obs-bg-panel: #111114;
+  --obs-bg-surface: #18181c;
+  --obs-bg-hover: #1f1f24;
+  --obs-bg-active: #252530;
+  --obs-border: #2a2a32;
+  --obs-border-subtle: #222228;
+  --obs-text: #e4e4e7;
+  --obs-text-dim: #a1a1aa;
+  --obs-text-muted: #6b6b76;
+  --obs-radius-sm: 4px;
+  --obs-radius-md: 8px;
+  --obs-radius-lg: 12px;
+  --obs-transition: 150ms ease;
+  --obs-font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--obs-bg-deep);
+  color: var(--obs-text);
+  overflow: hidden;
+}
+/* Light theme overrides for the hub wrapper */
+html.light .opsidian-hub {
+  --obs-purple: #7c3aed;
+  --obs-purple-dim: rgba(124, 58, 237, 0.08);
+  --obs-purple-glow: rgba(124, 58, 237, 0.15);
+  --obs-purple-bright: #8b5cf6;
+  --obs-violet: #6d28d9;
+  --obs-bg-deep: #f8fafc;
+  --obs-bg-panel: #ffffff;
+  --obs-bg-surface: #f1f5f9;
+  --obs-bg-hover: #e2e8f0;
+  --obs-bg-active: #dbeafe;
+  --obs-border: #e2e8f0;
+  --obs-border-subtle: #f1f5f9;
+  --obs-text: #0f172a;
+  --obs-text-dim: #475569;
+  --obs-text-muted: #94a3b8;
+}
+.opsidian-hub-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+/* Override full-viewport heights when inside the hub */
+.opsidian-hub .obsidian-root,
+.opsidian-hub .session-selector {
+  height: 100% !important;
+}
+/* StatusBar inside Hub: relative position so it sits at the bottom of flex column */
+.opsidian-hub > .obs-statusbar {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+/* ── Hub Navigation inside StatusBar ────────────────────────── */
+.obs-hub-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+}
+.obs-hub-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--obs-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+  white-space: nowrap;
+}
+.obs-hub-nav-btn:hover {
+  background: var(--obs-bg-hover);
+  color: var(--obs-text-dim);
+}
+.obs-hub-nav-btn.obs-hub-nav-active {
+  background: var(--obs-purple-dim);
+  color: var(--obs-purple-bright);
+}
+.obs-hub-nav-sep {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: var(--obs-border);
+  margin: 0 6px;
 }

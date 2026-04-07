@@ -24,6 +24,9 @@ from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
 from controller.vtuber_controller import router as vtuber_router
 from controller.tts_controller import router as tts_router
+from controller.auth_controller import router as auth_router
+from controller.user_opsidian_controller import router as user_opsidian_router
+from controller.curated_knowledge_controller import router as curated_knowledge_router
 from service.config import get_config_manager
 from service.mcp_loader import MCPLoader, get_global_mcp_config
 import uvicorn
@@ -131,6 +134,18 @@ async def lifespan(app: FastAPI):
 
     # ── Step 2: Initialize Config Manager (with DB backend) ────────────
     print_step_banner("CONFIG", "CONFIG MANAGER", "Loading configurations...")
+
+    # Initialize Auth Service (requires DB)
+    if app_db is not None:
+        from service.auth import init_auth_service
+        auth_svc = init_auth_service(app_db)
+        app.state.auth_service = auth_svc
+        has_admin = auth_svc.has_users()
+        logger.info(f"   - Auth service: initialized (admin exists: {has_admin})")
+    else:
+        app.state.auth_service = None
+        logger.info("   - Auth service: disabled (no database)")
+
     config_manager = get_config_manager()
 
     # Connect database to config manager if available
@@ -274,6 +289,12 @@ async def lifespan(app: FastAPI):
     thinking_trigger.start()
     app.state.thinking_trigger = thinking_trigger
 
+    # ── Curation Scheduler Service ────────────────────────────────────
+    from service.memory.curation_scheduler import get_curation_scheduler
+    curation_scheduler = get_curation_scheduler()
+    curation_scheduler.start()
+    app.state.curation_scheduler = curation_scheduler
+
     # ── Tool Runtime Health Check ──────────────────────────────────────
     # Verify tools actually execute (not just registered) by invoking a
     # read-only tool directly and checking the response.
@@ -331,6 +352,10 @@ async def lifespan(app: FastAPI):
     # Stop thinking trigger service
     if hasattr(app.state, 'thinking_trigger'):
         app.state.thinking_trigger.stop()
+
+    # Stop curation scheduler
+    if hasattr(app.state, 'curation_scheduler'):
+        app.state.curation_scheduler.stop()
 
     # Stop idle monitor
     await agent_manager.stop_idle_monitor()
@@ -422,6 +447,7 @@ async def health_check():
 
 
 # Register routers
+app.include_router(auth_router)  # Auth (must be first — no auth guard on itself)
 app.include_router(claude_router)
 app.include_router(command_router)
 app.include_router(agent_router)  # LangGraph agent sessions
@@ -437,6 +463,8 @@ app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
 app.include_router(vtuber_router)  # VTuber Live2D API
 app.include_router(tts_router)  # TTS (Text-to-Speech) API
+app.include_router(user_opsidian_router)  # User Opsidian (personal knowledge vault)
+app.include_router(curated_knowledge_router)  # Curated Knowledge (refined knowledge layer)
 
 # Mount static files for Web UI Dashboard
 static_dir = Path(__file__).parent / "static"

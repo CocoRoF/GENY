@@ -174,32 +174,22 @@ class AgentSessionManager(SessionManager):
         self,
         request: CreateSessionRequest,
         session_id: Optional[str] = None,
-        resolved_tool_names: Optional[list[str]] = None,
-        resolved_mcp_servers: Optional[list[str]] = None,
     ) -> str:
         """Build the system prompt using the modular prompt builder.
 
         Design: The system prompt tells the agent WHO it is and WHAT to do.
         HOW to use tools and HOW to loop is handled by Claude CLI and LangGraph.
+        Tool schemas are provided to Claude CLI via MCP — not repeated in prompts.
 
         Args:
             request: Session creation request.
-            session_id: Pre-generated session ID (for Geny platform tools awareness).
-            resolved_tool_names: Pre-computed list of allowed tool names (from preset).
-            resolved_mcp_servers: Pre-computed list of MCP server names (from session config).
+            session_id: Pre-generated session ID (for Geny platform awareness).
 
         Returns:
             Assembled system prompt string.
         """
         # Determine role
         role = request.role.value if request.role else "worker"
-
-        # MCP server names for the prompt
-        mcp_servers: list[str] = resolved_mcp_servers or []
-        if not mcp_servers:
-            merged_mcp = merge_mcp_configs(self._global_mcp_config, request.mcp_config)
-            if merged_mcp and merged_mcp.servers:
-                mcp_servers = [n for n in merged_mcp.servers.keys() if not n.startswith("_")]
 
         # Load bootstrap context files from working directory
         context_files: dict[str, str] = {}
@@ -233,16 +223,7 @@ class AgentSessionManager(SessionManager):
                 pass  # Memory not available yet — fine
 
         # Determine prompt mode
-        if role in ("developer", "researcher", "planner"):
-            mode = PromptMode.FULL
-        elif role == "vtuber":
-            mode = PromptMode.FULL
-        else:
-            # Standalone worker → FULL
-            mode = PromptMode.FULL
-
-        # Allowed tools list (preset-resolved or from request)
-        tools = resolved_tool_names or request.allowed_tools or []
+        mode = PromptMode.FULL
 
         # Resolve shared folder path for prompt inclusion
         shared_folder_path: str | None = None
@@ -258,8 +239,6 @@ class AgentSessionManager(SessionManager):
             model=request.model,
             session_id=session_id,
             session_name=request.session_name,
-            tools=tools,
-            mcp_servers=mcp_servers,
             mode=mode,
             context_files=context_files if context_files else None,
             extra_system_prompt=request.system_prompt,
@@ -273,12 +252,22 @@ class AgentSessionManager(SessionManager):
         # Append VTuber-specific context (linked CLI session info)
         if role == "vtuber" and request.linked_session_id:
             vtuber_ctx = (
-                f"\n\n## Linked CLI Agent\n"
-                f"Your paired CLI worker session ID: `{request.linked_session_id}`\n"
-                f"Delegate complex tasks to this agent via `geny_send_direct_message`.\n"
-                f"You will receive results back when the CLI agent completes work."
+                f"\n\n## Paired CLI Agent\n"
+                f"Session ID: `{request.linked_session_id}`\n"
+                f"Delegate complex tasks via `geny_send_direct_message`.\n"
+                f"Results will arrive in your inbox when the CLI agent finishes."
             )
             prompt = prompt + vtuber_ctx
+
+        # Append CLI-specific context (paired VTuber session info)
+        if request.session_type == "cli" and request.linked_session_id:
+            cli_ctx = (
+                f"\n\n## Paired VTuber Agent\n"
+                f"Session ID: `{request.linked_session_id}`\n"
+                f"You are the internal task executor for this VTuber persona.\n"
+                f"Report results via `geny_send_direct_message` to this session when done."
+            )
+            prompt = prompt + cli_ctx
 
         logger.debug(f"  PromptBuilder: mode={mode.value}, role={role}, length={len(prompt)} chars")
 
@@ -293,6 +282,7 @@ class AgentSessionManager(SessionManager):
         request: CreateSessionRequest,
         enable_checkpointing: bool = False,
         session_id: Optional[str] = None,
+        owner_username: Optional[str] = None,
     ) -> AgentSession:
         """
         Create a new AgentSession.
@@ -397,15 +387,9 @@ class AgentSessionManager(SessionManager):
         )
 
         # Prepare system prompt — using modular prompt builder
-        # Extract non-internal MCP server names for the prompt
-        resolved_mcp_names = []
-        if merged_mcp_config and merged_mcp_config.servers:
-            resolved_mcp_names = [n for n in merged_mcp_config.servers.keys() if not n.startswith("_")]
         system_prompt = self._build_system_prompt(
             request,
             session_id=session_id,
-            resolved_tool_names=allowed_tool_names,
-            resolved_mcp_servers=resolved_mcp_names,
         )
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 
@@ -459,6 +443,7 @@ class AgentSessionManager(SessionManager):
             workflow_id=workflow_id,
             graph_name=graph_name,
             tool_preset_id=preset_id,
+            owner_username=owner_username,
         )
 
         session_id = agent.session_id
@@ -547,7 +532,7 @@ class AgentSessionManager(SessionManager):
                     system_prompt=request.cli_system_prompt,  # CLI-specific prompt
                     workflow_id=request.cli_workflow_id or "template-optimized-autonomous",
                     graph_name=request.cli_graph_name or "Optimized Autonomous",
-                    tool_preset_id=request.cli_tool_preset_id or request.tool_preset_id,
+                    tool_preset_id=request.cli_tool_preset_id,  # None → CLI uses its own role default
                     linked_session_id=session_id,  # Link back to VTuber
                     session_type="cli",
                     env_vars=request.env_vars,
@@ -566,10 +551,10 @@ class AgentSessionManager(SessionManager):
 
                 # Rebuild system prompt with CLI session ID injected
                 vtuber_ctx = (
-                    f"\n\n## Linked CLI Agent\n"
-                    f"Your paired CLI worker session ID: `{cli_id}`\n"
-                    f"Delegate complex tasks to this agent via `geny_send_direct_message`.\n"
-                    f"You will receive results back when the CLI agent completes work."
+                    f"\n\n## Paired CLI Agent\n"
+                    f"Session ID: `{cli_id}`\n"
+                    f"Delegate complex tasks via `geny_send_direct_message`.\n"
+                    f"Results will arrive in your inbox when the CLI agent finishes."
                 )
                 agent._system_prompt = agent._system_prompt + vtuber_ctx
                 if agent.process:

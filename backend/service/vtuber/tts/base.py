@@ -32,6 +32,7 @@ class TTSRequest:
     pitch_shift: str = "+0Hz"
     audio_format: AudioFormat = AudioFormat.MP3
     sample_rate: int = 24000
+    voice_profile: Optional[str] = None  # per-session override
 
 
 @dataclass
