@@ -81,6 +81,45 @@
         "HitAreaBody": { "Tap@Body": 0 },
         "HitAreaHead": { "Tap": 0 }
       }
+    },
+    {
+      "name": "huohuo",
+      "display_name": "HuoHuo",
+      "description": "붕괴: 스타레일 — 혹화 (HuoHuo) 캐릭터",
+      "url": "/static/live2d-models/huohuo/runtime/huohuo.model3.json",
+      "thumbnail": null,
+      "kScale": 0.7,
+      "initialXshift": 0,
+      "initialYshift": 0,
+      "idleMotionGroupName": "Idle",
+      "emotionMap": {
+        "neutral": 0,
+        "anger": 0,
+        "fear": 5,
+        "joy": 3,
+        "sadness": 2,
+        "surprise": 1,
+        "disgust": 0
+      },
+      "tapMotions": {
+        "HitAreaHead": { "Tap": 0 },
+        "HitAreaBody": { "Tap": 1 }
+      }
+    },
+    {
+      "name": "ruan_mei",
+      "display_name": "Ruan Mei",
+      "description": "붕괴: 스타레일 — 완매 (Ruan Mei) 캐릭터",
+      "url": "/static/live2d-models/ruan_mei/runtime/ruan_mei.model3.json",
+      "thumbnail": null,
+      "kScale": 1.3,
+      "initialXshift": 0,
+      "initialYshift": 200,
+      "idleMotionGroupName": "Idle",
+      "emotionMap": {
+        "neutral": 0
+      },
+      "tapMotions": {}
     }
   ],
   "default_model": "mao_pro",

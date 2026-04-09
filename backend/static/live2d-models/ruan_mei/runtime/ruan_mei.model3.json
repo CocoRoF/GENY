@@ -1,0 +1,26 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "ruan_mei.moc3",
+		"Textures": [
+			"ruan_mei.8192/texture_00.png",
+			"ruan_mei.8192/texture_01.png",
+			"ruan_mei.8192/texture_02.png",
+			"ruan_mei.8192/texture_03.png"
+		],
+		"Physics": "ruan_mei.physics3.json",
+		"DisplayInfo": "ruan_mei.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": ["ParamMouthOpenY"]
+		}
+	]
+}
