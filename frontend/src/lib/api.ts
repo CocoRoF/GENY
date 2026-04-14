@@ -676,22 +676,35 @@ export const chatApi = {
     let closed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
-    const maxAttempts = 20;
-    const reconnectDelay = 3000;
-    let fallbackSub: { close: () => void } | null = null;
+    const maxAttempts = 30;
 
     console.debug(`${_tag} subscribeToRoom called, wsUrl=${wsUrl}, afterId=${afterId}`);
 
     const connect = () => {
       if (closed) return;
 
+      // Exponential backoff: 500ms, 1s, 2s, 4s... max 10s
+      const delay = attempts === 0 ? 0 : Math.min(500 * Math.pow(2, attempts - 1), 10000);
+      if (delay > 0) {
+        console.debug(`${_tag} reconnecting in ${delay}ms (attempt=${attempts}/${maxAttempts})`);
+        reconnectTimer = setTimeout(_doConnect, delay);
+      } else {
+        _doConnect();
+      }
+    };
+
+    const _doConnect = () => {
+      if (closed) return;
+      reconnectTimer = null;
+
       console.debug(`${_tag} connecting (attempt=${attempts})...`);
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        console.debug(`${_tag} connected`);
         attempts = 0;
         const currentAfter = getLatestMsgId?.() ?? afterId;
-        console.debug(`${_tag} connected, sending subscribe after=${currentAfter}`);
+        console.debug(`${_tag} sending subscribe after=${currentAfter}`);
         ws!.send(JSON.stringify({
           type: 'subscribe',
           after: currentAfter,
@@ -710,46 +723,19 @@ export const chatApi = {
         }
       };
 
-      ws.onerror = (err) => {
-        console.warn(`${_tag} WebSocket error (attempt=${attempts}):`, err);
+      ws.onerror = () => {
+        // onerror is always followed by onclose — let onclose handle reconnection
         ws = null;
-        if (!closed && attempts === 0) {
-          // First connection failed — fall back to SSE
-          console.warn(`${_tag} first connection failed, falling back to SSE`);
-          closed = true;
-          const dispatch = (name: string) => (d: unknown) => {
-            if (name !== 'heartbeat') {
-              console.debug(`${_tag} SSE event: ${name}`, d);
-            }
-            onEvent(name, d as Record<string, unknown>);
-          };
-          fallbackSub = sseSubscribe({
-            url: () => {
-              const currentAfter = getLatestMsgId?.() ?? afterId;
-              const qs = currentAfter ? `?after=${encodeURIComponent(currentAfter)}` : '';
-              return `${getBackendUrl()}/api/chat/rooms/${roomId}/events${qs}`;
-            },
-            events: {
-              message: dispatch('message'),
-              broadcast_status: dispatch('broadcast_status'),
-              broadcast_done: dispatch('broadcast_done'),
-              agent_progress: dispatch('agent_progress'),
-              heartbeat: dispatch('heartbeat'),
-            },
-            reconnect: { delay: 3_000 },
-          });
-        }
       };
 
       ws.onclose = (ev) => {
-        console.debug(`${_tag} WebSocket closed (code=${ev.code}, reason=${ev.reason}, clean=${ev.wasClean})`);
+        console.debug(`${_tag} closed (code=${ev.code}, clean=${ev.wasClean})`);
         ws = null;
         if (!closed && attempts < maxAttempts) {
           attempts++;
-          console.debug(`${_tag} scheduling reconnect in ${reconnectDelay}ms (attempt=${attempts}/${maxAttempts})`);
-          reconnectTimer = setTimeout(connect, reconnectDelay);
+          connect();
         } else if (!closed) {
-          console.error(`${_tag} max reconnect attempts (${maxAttempts}) reached, giving up`);
+          console.error(`${_tag} max reconnect attempts reached, giving up`);
         }
       };
     };
@@ -767,10 +753,6 @@ export const chatApi = {
         if (ws) {
           ws.close();
           ws = null;
-        }
-        if (fallbackSub) {
-          fallbackSub.close();
-          fallbackSub = null;
         }
       },
     };
