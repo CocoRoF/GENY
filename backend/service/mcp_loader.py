@@ -111,124 +111,50 @@ def reload_builtin_mcp() -> None:
     _mcp_loader_instance.reload_builtins()
 
 
-def build_proxy_mcp_server(
-    category: str,
-    allowed_tools: List[str],
-    session_id: str,
-    backend_port: int = 8000,
-) -> MCPServerStdio:
-    """Build a Proxy MCP server config for a session.
-
-    The proxy server is a lightweight subprocess that:
-    - Auto-discovers tool files from the specified category folder
-    - Registers tool schemas (from Python tool modules)
-    - Forwards execution requests to the main process via HTTP
-
-    Args:
-        category: 'builtin' or 'custom' — determines which folder to scan.
-        allowed_tools: List of tool names to make available.
-        session_id: Session ID for context.
-        backend_port: Port of the FastAPI backend.
-
-    Returns:
-        MCPServerStdio config for the proxy server.
-    """
-    proxy_script = str(PROJECT_ROOT / "tools" / "_proxy_mcp_server.py")
-    backend_url = f"http://localhost:{backend_port}"
-    tools_arg = ",".join(allowed_tools) if allowed_tools else ""
-
-    # Pass critical env vars for the proxy subprocess.
-    # Claude Code merges these with the parent environment, so we only
-    # need to ensure the subprocess can locate user-installed packages
-    # (e.g. pip install --user in Docker dev mode) and the project root.
-    env: Dict[str, str] = {}
-    home = os.environ.get("HOME") or os.environ.get("USERPROFILE")
-    if home:
-        env["HOME"] = home
-    pythonpath = os.environ.get("PYTHONPATH", "")
-    # Always include project root so the proxy can find tools/ and service/
-    project_root_str = str(PROJECT_ROOT)
-    if project_root_str not in pythonpath:
-        pythonpath = f"{project_root_str}{os.pathsep}{pythonpath}" if pythonpath else project_root_str
-    env["PYTHONPATH"] = pythonpath
-
-    return MCPServerStdio(
-        command=sys.executable,
-        args=[proxy_script, backend_url, session_id, category, tools_arg],
-        env=env if env else None,
-    )
-
-
 def build_session_mcp_config(
     global_config: Optional[MCPConfig],
-    allowed_builtin_tools: List[str],
-    allowed_custom_tools: List[str],
-    session_id: str,
-    backend_port: int = 8000,
     allowed_mcp_servers: Optional[List[str]] = None,
     extra_mcp: Optional[MCPConfig] = None,
+    **_kwargs,
 ) -> MCPConfig:
-    """Build the complete MCP config for a session.
+    """Build the MCP config for a session (external MCP servers only).
+
+    Python tools are registered directly in the geny-executor Pipeline
+    ToolRegistry — no proxy MCP servers needed.
 
     Combines:
-    1. _builtin_tools: Proxy MCP server for built-in Python tools (always included)
-    2. _custom_tools: Proxy MCP server for custom Python tools (if any allowed)
-    3. Built-in MCP servers from mcp/built_in/ (always included, no filtering)
-    4. Custom MCP servers from mcp/custom/ (filtered by preset)
-    5. Extra per-session MCP servers
+    1. Built-in MCP servers from mcp/built_in/ (always included)
+    2. Custom MCP servers from mcp/custom/ (filtered by preset)
+    3. Extra per-session MCP servers
 
     Args:
-        global_config: Global MCP config (custom MCP servers from mcp/custom/).
-        allowed_builtin_tools: Built-in tool names (always registered).
-        allowed_custom_tools: Custom tool names (preset-filtered).
-        session_id: Session ID.
-        backend_port: FastAPI backend port.
-        allowed_mcp_servers: List of custom MCP server names to include.
+        global_config: Global MCP config (custom MCP servers).
+        allowed_mcp_servers: Custom MCP server names to include.
                              None or ["*"] includes all.
         extra_mcp: Additional per-session MCP config.
 
     Returns:
-        Complete MCPConfig for the session's .mcp.json.
+        MCPConfig with external MCP servers.
     """
     servers: Dict[str, MCPServerConfig] = {}
 
-    # 1. Add Proxy MCP server for built-in tools (always included if tools exist)
-    if allowed_builtin_tools:
-        servers["_builtin_tools"] = build_proxy_mcp_server(
-            category="builtin",
-            allowed_tools=allowed_builtin_tools,
-            session_id=session_id,
-            backend_port=backend_port,
-        )
-
-    # 2. Add Proxy MCP server for custom tools (only if allowed)
-    if allowed_custom_tools:
-        servers["_custom_tools"] = build_proxy_mcp_server(
-            category="custom",
-            allowed_tools=allowed_custom_tools,
-            session_id=session_id,
-            backend_port=backend_port,
-        )
-
-    # 3. Add built-in MCP servers (always included, bypass preset filter)
+    # 1. Built-in MCP servers (always included)
     builtin_config = get_builtin_mcp_config()
     if builtin_config and builtin_config.servers:
         for name, config in builtin_config.servers.items():
             servers[name] = config
 
-    # 4. Add custom MCP servers (filtered by preset)
+    # 2. Custom MCP servers (filtered by preset)
     if global_config and global_config.servers:
         for name, config in global_config.servers.items():
-            # Skip internal proxy servers (starts with _)
             if name.startswith("_"):
                 continue
-            # Apply filter
             if allowed_mcp_servers is None or "*" in allowed_mcp_servers:
                 servers[name] = config
             elif name in allowed_mcp_servers:
                 servers[name] = config
 
-    # 5. Merge extra per-session config
+    # 3. Extra per-session config
     if extra_mcp and extra_mcp.servers:
         for name, config in extra_mcp.servers.items():
             servers[name] = config
