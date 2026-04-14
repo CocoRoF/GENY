@@ -43,7 +43,6 @@ from service.claude_manager.models import (
     SessionRole,
     SessionStatus,
 )
-from service.claude_manager.process_manager import ClaudeProcess
 
 from service.logging.session_logger import get_session_logger, remove_session_logger
 from service.langgraph.agent_session import AgentSession
@@ -370,10 +369,6 @@ class AgentSessionManager(SessionManager):
 
         merged_mcp_config = build_session_mcp_config(
             global_config=self._global_mcp_config,
-            allowed_builtin_tools=allowed_builtin_tools,
-            allowed_custom_tools=allowed_custom_tools,
-            session_id=session_id,
-            backend_port=backend_port,
             allowed_mcp_servers=allowed_mcp_servers,
             extra_mcp=request.mcp_config,
         )
@@ -540,8 +535,6 @@ class AgentSessionManager(SessionManager):
                     f"Results will arrive in your inbox when the CLI agent finishes."
                 )
                 agent._system_prompt = agent._system_prompt + vtuber_ctx
-                if agent.process:
-                    agent.process.system_prompt = agent._system_prompt
 
                 logger.info(
                     f"[{session_id}] 🔗 Paired CLI session created: {cli_id} ({cli_name})"
@@ -724,9 +717,6 @@ class AgentSessionManager(SessionManager):
                 success = await agent.revive()
                 if success:
                     logger.info(f"[{session_id}] ✅ AgentSession revived successfully")
-                    # Update process reference in _local_processes
-                    if agent.process:
-                        self._local_processes[session_id] = agent.process
                     continue
             except Exception as e:
                 logger.warning(f"[{session_id}] Revival failed: {e}")
@@ -827,48 +817,6 @@ class AgentSessionManager(SessionManager):
 
         if transitioned > 0:
             logger.info(f"Idle monitor: {transitioned} session(s) transitioned to IDLE")
-
-    # ========================================================================
-    # Compatibility: Upgrade/Convert
-    # ========================================================================
-
-    def upgrade_to_agent(
-        self,
-        session_id: str,
-        enable_checkpointing: bool = False,
-    ) -> Optional[AgentSession]:
-        """
-        Upgrade an existing ClaudeProcess session to an AgentSession.
-
-        Retains the existing session's ClaudeProcess while
-        wrapping it as an AgentSession.
-
-        Args:
-            session_id: Session ID
-            enable_checkpointing: Enable checkpointing
-
-        Returns:
-            AgentSession instance or None
-        """
-        # Already an AgentSession
-        if session_id in self._local_agents:
-            logger.info(f"[{session_id}] Already an AgentSession")
-            return self._local_agents[session_id]
-
-        # Retrieve ClaudeProcess
-        process = self._local_processes.get(session_id)
-        if not process:
-            logger.warning(f"[{session_id}] Session not found")
-            return None
-
-        # Convert to AgentSession
-        agent = AgentSession.from_process(process, enable_checkpointing=enable_checkpointing)
-
-        # Register in store
-        self._local_agents[session_id] = agent
-
-        logger.info(f"[{session_id}] ✅ Upgraded to AgentSession")
-        return agent
 
 # ============================================================================
 # Singleton

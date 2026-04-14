@@ -116,9 +116,9 @@ class AgentSession:
         # Role
         self._role = role
 
-        # Workflow / Graph
-        self._workflow_id = workflow_id
-        self._graph_name = graph_name
+        # Preset (determined during _build_pipeline)
+        self._workflow_id = workflow_id  # kept for SessionInfo backward compat
+        self._preset_name: str = "default"
         self._tool_preset_id = tool_preset_id
         self._owner_username = owner_username
 
@@ -258,9 +258,8 @@ class AgentSession:
 
     @property
     def autonomous(self) -> bool:
-        """Whether this session uses an autonomous-type preset."""
-        wid = self._workflow_id or ""
-        return "autonomous" in wid.lower() or (not "simple" in wid.lower() and not "vtuber" in wid.lower())
+        """Whether this session uses the default (adaptive) preset."""
+        return self._preset_name == "default"
 
     @property
     def max_iterations(self) -> int:
@@ -631,21 +630,22 @@ class AgentSession:
     # ========================================================================
 
     def _build_pipeline(self):
-        """Build a geny-executor Pipeline with built-in tools and MCP.
+        """Build a geny-executor Pipeline.
 
-        Maps the workflow_id string to a GenyPresets
-        method, wiring in memory_manager, tools (built-in + Geny custom +
-        MCP), and LLM callbacks.
+        Two presets only:
+          - vtuber: conversational agent with persona + memory
+          - default (worker_adaptive): full autonomous agent with binary classify
 
         No fallback — if this fails, the session is in error state.
         """
         from geny_executor.memory import GenyPresets
         from geny_executor.tools.registry import ToolRegistry
+        from geny_executor.tools.base import ToolContext
         from geny_executor.tools.built_in import (
             ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool,
         )
 
-        # Get API key (required — no fallback to CLI)
+        # ── API key (required) ──
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         try:
             from service.config.manager import get_config_manager
@@ -657,17 +657,22 @@ class AgentSession:
 
         if not api_key:
             raise RuntimeError(
-                f"[{self._session_id}] ANTHROPIC_API_KEY is required for "
-                f"geny-executor Pipeline. Set it in environment or config."
+                f"[{self._session_id}] ANTHROPIC_API_KEY is required. "
+                f"Set it in environment or config."
             )
 
         model = self._model_name or "claude-sonnet-4-20250514"
         system_prompt = self._system_prompt or ""
         working_dir = self._working_dir or self.storage_path or ""
 
-        # ── Build unified tool registry ──
-        # 1. Core built-in tools (file I/O, shell, search)
+        # ── Determine preset: vtuber or default ──
+        is_vtuber = self._role == SessionRole.VTUBER
+        self._preset_name = "vtuber" if is_vtuber else "default"
+
+        # ── Build tool registry ──
         tools = ToolRegistry()
+
+        # 1. Core built-in tools (file I/O, shell, search)
         tools.register(ReadTool())
         tools.register(WriteTool())
         tools.register(EditTool())
@@ -675,55 +680,23 @@ class AgentSession:
         tools.register(GlobTool())
         tools.register(GrepTool())
 
-        # 2. Geny custom tools (via tool_bridge adapter)
+        # 2. Geny application tools (via tool_bridge adapter)
         if self._geny_tool_registry:
             for t in self._geny_tool_registry.list_all():
                 tools.register(t)
-
-        # 3. External MCP server tools (GitHub, Notion, etc.)
-        if self._mcp_config:
-            try:
-                from geny_executor.tools.mcp.manager import MCPManager, MCPServerConfig
-                mcp_servers = {}
-                if isinstance(self._mcp_config, dict):
-                    raw_servers = self._mcp_config.get("mcpServers", {})
-                elif hasattr(self._mcp_config, "mcpServers"):
-                    raw_servers = self._mcp_config.mcpServers or {}
-                else:
-                    raw_servers = {}
-                for name, cfg in raw_servers.items():
-                    if isinstance(cfg, dict):
-                        mcp_servers[name] = MCPServerConfig(
-                            name=name,
-                            command=cfg.get("command", ""),
-                            args=cfg.get("args", []),
-                            env=cfg.get("env", {}),
-                            transport=cfg.get("transport", "stdio"),
-                            url=cfg.get("url", ""),
-                        )
-                if mcp_servers:
-                    import asyncio
-                    mcp_manager = MCPManager()
-                    asyncio.get_event_loop().run_until_complete(
-                        mcp_manager.connect_all(mcp_servers)
-                    )
-                    mcp_tools = asyncio.get_event_loop().run_until_complete(
-                        mcp_manager.discover_tools()
-                    )
-                    for t in mcp_tools:
-                        tools.register(t)
-                    logger.info(
-                        f"[{self._session_id}] MCP tools registered: "
-                        f"{[t.name for t in mcp_tools]} from {list(mcp_servers.keys())}"
-                    )
-            except Exception as e:
-                logger.warning(f"[{self._session_id}] MCP tool registration failed: {e}")
 
         logger.info(
             f"[{self._session_id}] Tool registry: {len(tools)} tools"
         )
 
-        # Curated knowledge manager
+        # ── ToolContext for working_dir propagation ──
+        tool_context = ToolContext(
+            session_id=self._session_id,
+            working_dir=working_dir,
+            storage_path=self.storage_path,
+        )
+
+        # ── Curated knowledge ──
         curated_km = None
         if self._owner_username:
             try:
@@ -732,14 +705,10 @@ class AgentSession:
             except Exception:
                 pass
 
-        # LLM reflect callback (uses Anthropic SDK directly)
+        # ── LLM reflection callback ──
         llm_reflect = self._make_llm_reflect_callback(api_key)
 
-        # Determine preset from template
-        template_id = self._workflow_id or ""
-        is_vtuber = "vtuber" in template_id.lower()
-        is_simple = "simple" in template_id.lower()
-
+        # ── Build pipeline ──
         if is_vtuber:
             self._pipeline = GenyPresets.vtuber(
                 api_key=api_key,
@@ -750,17 +719,8 @@ class AgentSession:
                 llm_reflect=llm_reflect,
                 tools=tools,
             )
-        elif is_simple:
-            self._pipeline = GenyPresets.worker_easy(
-                api_key=api_key,
-                memory_manager=self._memory_manager,
-                model=model,
-                system_prompt=system_prompt,
-            )
         else:
-            # autonomous, optimized-autonomous, ultra-light → worker_adaptive
             max_turns = self._max_iterations or 30
-
             self._pipeline = GenyPresets.worker_adaptive(
                 api_key=api_key,
                 memory_manager=self._memory_manager,
@@ -773,13 +733,13 @@ class AgentSession:
                 llm_reflect=llm_reflect,
             )
 
+        # Store context for ToolStage
+        self._tool_context = tool_context
         self._execution_backend = "pipeline"
-        self._pipeline_working_dir = working_dir
 
-        preset_name = 'vtuber' if is_vtuber else 'worker_easy' if is_simple else 'worker_adaptive'
         logger.info(
-            f"[{self._session_id}] Pipeline built: template='{template_id}', "
-            f"preset={preset_name}, model={model}, tools={len(tools)}"
+            f"[{self._session_id}] Pipeline built: preset={self._preset_name}, "
+            f"model={model}, tools={len(tools)}, working_dir={working_dir[:50]}"
         )
 
     @staticmethod
@@ -869,7 +829,11 @@ class AgentSession:
         success = True
         error_msg = None
 
-        async for event in self._pipeline.run_stream(input_text):
+        # Create PipelineState with session context
+        from geny_executor.core.state import PipelineState as _PipelineState
+        _state = _PipelineState(session_id=self._session_id)
+
+        async for event in self._pipeline.run_stream(input_text, _state):
             event_type = event.type if hasattr(event, "type") else ""
             event_data = event.data if hasattr(event, "data") else {}
 
@@ -987,7 +951,11 @@ class AgentSession:
         iterations = 0
         success = True
 
-        async for event in self._pipeline.run_stream(input_text):
+        # Create PipelineState with session context
+        from geny_executor.core.state import PipelineState as _PipelineState
+        _state = _PipelineState(session_id=self._session_id)
+
+        async for event in self._pipeline.run_stream(input_text, _state):
             event_type = event.type if hasattr(event, "type") else ""
             event_data = event.data if hasattr(event, "data") else {}
 
@@ -1220,8 +1188,6 @@ class AgentSession:
         self._current_iteration = 0
         self._execution_start_time = datetime.now()  # fixed: was float, must be datetime
         effective_max_iterations = max_iterations or self._max_iterations
-        event_count = 0
-        last_event = None
 
         # Log execution start
         if session_logger:
@@ -1244,9 +1210,6 @@ class AgentSession:
             ):
                 yield event
         except Exception as e:
-            self._is_executing = False
-            self._execution_start_time = datetime.now()
-            self._status = SessionStatus.RUNNING
             self._error_message = str(e)
             logger.exception(f"[{self._session_id}] Error during astream: {e}")
 
@@ -1267,6 +1230,10 @@ class AgentSession:
                 )
 
             raise
+        finally:
+            self._is_executing = False
+            self._execution_start_time = datetime.now()
+            self._freshness.reset_revive_counter()
 
     # ========================================================================
     # Lifecycle Methods
@@ -1363,7 +1330,7 @@ class AgentSession:
             pod_ip=pod_ip,
             role=self._role,
             workflow_id=self._workflow_id,
-            graph_name=self._graph_name,
+            graph_name=self._preset_name,
             tool_preset_id=self._tool_preset_id,
             system_prompt=self._system_prompt,
             total_cost=_total_cost,

@@ -148,7 +148,8 @@ class SessionMemoryManager:
         memory_dir = self._ltm.memory_dir
         self._index_manager = MemoryIndexManager(str(memory_dir))
         self._structured_writer = StructuredMemoryWriter(
-            str(memory_dir), self._index_manager
+            str(memory_dir), self._index_manager,
+            session_id=self._session_id or "",
         )
         # Propagate DB if already set
         if self._db_manager is not None and self._session_id is not None:
