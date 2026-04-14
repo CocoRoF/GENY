@@ -25,7 +25,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
-from service.workflow.nodes.base import get_node_registry
+try:
+    from service.workflow.nodes.base import get_node_registry
+except ImportError:
+    get_node_registry = None
 from service.workflow.workflow_model import (
     WorkflowDefinition,
     WorkflowEdge,
