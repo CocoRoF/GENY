@@ -71,16 +71,28 @@ export function useChatWebSocket() {
       let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
       let closed = false;
       let attempts = 0;
-      const maxAttempts = 20;
-      const reconnectDelay = 3000;
+      const maxAttempts = 30;
 
       console.debug(`${_tag} subscribe called, afterId=${afterId}`);
 
       const connect = () => {
         if (closed) return;
 
+        const delay = attempts === 0 ? 0 : Math.min(500 * Math.pow(2, attempts - 1), 10000);
+        if (delay > 0) {
+          console.debug(`${_tag} reconnecting in ${delay}ms (attempt=${attempts}/${maxAttempts})`);
+          reconnectTimer = setTimeout(_doConnect, delay);
+        } else {
+          _doConnect();
+        }
+      };
+
+      const _doConnect = () => {
+        if (closed) return;
+        reconnectTimer = null;
+
         const wsUrl = getChatWsUrl(roomId);
-        console.debug(`${_tag} connecting (attempt=${attempts}), url=${wsUrl}`);
+        console.debug(`${_tag} connecting (attempt=${attempts})`);
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -108,20 +120,18 @@ export function useChatWebSocket() {
           }
         };
 
-        ws.onerror = (err) => {
-          console.warn(`${_tag} WebSocket error:`, err);
+        ws.onerror = () => {
           wsRef.current = null;
         };
 
         ws.onclose = (ev) => {
-          console.debug(`${_tag} WebSocket closed (code=${ev.code}, reason=${ev.reason}, clean=${ev.wasClean})`);
+          console.debug(`${_tag} closed (code=${ev.code}, clean=${ev.wasClean})`);
           wsRef.current = null;
           if (!closed && attempts < maxAttempts) {
             attempts++;
-            console.debug(`${_tag} scheduling reconnect in ${reconnectDelay}ms (attempt=${attempts}/${maxAttempts})`);
-            reconnectTimer = setTimeout(connect, reconnectDelay);
+            connect();
           } else if (!closed) {
-            console.error(`${_tag} max reconnect attempts (${maxAttempts}) reached, giving up`);
+            console.error(`${_tag} max reconnect attempts reached`);
           }
         };
       };
