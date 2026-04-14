@@ -118,6 +118,7 @@ export default function VTuberChatPanel({
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [agentProgress, setAgentProgress] = useState<AgentProgressState[] | null>(null);
   const [broadcastActive, setBroadcastActive] = useState(false);
+  const [streamingTexts, setStreamingTexts] = useState<Record<string, { content: string; session_name: string; role: string }>>({});
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -181,6 +182,17 @@ export default function VTuberChatPanel({
               if (!msg.id) return;
               lastMsgIdRef.current = msg.id;
               const displayMsg = toDisplayMessage(msg);
+
+              // Remove streaming bubble for this agent (final message replaces it)
+              if (msg.session_id) {
+                setStreamingTexts((prev) => {
+                  if (!(msg.session_id! in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[msg.session_id!];
+                  return next;
+                });
+              }
+
               setMessages((prev) => {
                 if (prev.some((m) => m.id === msg.id)) return prev;
                 return [...prev, displayMsg];
@@ -199,6 +211,20 @@ export default function VTuberChatPanel({
             } else if (eventType === 'agent_progress') {
               const progress = eventData as unknown as { agents: AgentProgressState[] };
               setAgentProgress(progress.agents);
+
+              // Update streaming text from agent progress
+              for (const agent of progress.agents) {
+                if (agent.streaming_text && agent.status === 'executing') {
+                  setStreamingTexts((prev) => ({
+                    ...prev,
+                    [agent.session_id]: {
+                      content: agent.streaming_text!,
+                      session_name: agent.session_name,
+                      role: agent.role,
+                    },
+                  }));
+                }
+              }
             } else if (eventType === 'broadcast_status') {
               const status = eventData as unknown as { finished: boolean };
               setBroadcastActive(!status.finished);
@@ -224,7 +250,8 @@ export default function VTuberChatPanel({
       sseRef.current?.close();
       sseRef.current = null;
     };
-  }, [roomId, toDisplayMessage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
   // Reset state when session/room changes
   useEffect(() => {
@@ -392,6 +419,16 @@ export default function VTuberChatPanel({
             </div>
           );
         })}
+        {/* Streaming text bubbles (token-level real-time) */}
+        {Object.entries(streamingTexts).map(([sid, st]) => (
+          <div key={`stream-${sid}`} className="flex justify-start">
+            <div className="max-w-[85%] px-3.5 py-2 rounded-2xl rounded-bl-md bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[0.875rem]">
+              <div className="text-[0.625rem] text-[var(--text-muted)] mb-1 font-medium">{st.session_name}</div>
+              <ChatMarkdown content={st.content} className="text-[0.875rem]" />
+              <span className="animate-pulse text-[var(--text-muted)]">▍</span>
+            </div>
+          </div>
+        ))}
         {/* Agent progress during broadcast */}
         {agentProgress && agentProgress.length > 0 && (
           <VTuberProgressPanel agents={agentProgress} />

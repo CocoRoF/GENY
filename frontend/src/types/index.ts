@@ -141,6 +141,7 @@ export interface AgentProgressState {
   role: string;
   status: 'pending' | 'executing' | 'completed' | 'failed' | 'queued';
   thinking_preview: string | null;
+  streaming_text: string | null;
   elapsed_ms?: number;
   last_activity_ms?: number;
   last_tool_name?: string;
