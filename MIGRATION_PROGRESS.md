@@ -16,20 +16,20 @@
 | 1-1: Pipeline-Only 전환 | **DONE** | _build_graph → _build_pipeline only, LangGraph path 제거 (-332 lines) |
 | 1-2: CLI spawn 제거 | **DONE** | initialize()에서 ClaudeCLIChatModel 제거 |
 | 1-3: revive() 수정 | **DONE** | ClaudeProcess 재생성 → Pipeline rebuild만 |
-| 1-4: session_manager 정리 | PENDING | `agent_session_manager.py` |
+| 1-4: session_manager 정리 | **DONE** | ClaudeProcess 참조 제거, storage_path 직접 사용 |
 | 1-5: _build_pipeline() 수정 | **DONE** | 빌트인 도구 6종 자동 등록, API key 필수 |
 
 ## Phase 2: CLI 의존성 제거
 
 | Task | 상태 | 파일 |
 |------|------|------|
-| 2-1: 레거시 파일 삭제 | PENDING | 다수 |
-| 2-2: Dockerfile 정리 | PENDING | `Dockerfile` |
-| 2-3: docker-compose 정리 | PENDING | `docker-compose.*.yml` |
+| 2-1: 레거시 파일 삭제 | DEFERRED | Phase 2 완전 삭제는 별도 PR (참조 정리 필요) |
+| 2-2: Dockerfile 정리 | **DONE** | claude-code npm 제거, config/variables 디렉토리 추가 |
+| 2-3: docker-compose 정리 | DEFERRED | GENY_FORCE_LANGGRAPH 참조 확인 후 |
 
 ## Phase 3: 스트리밍 통합
 
 | Task | 상태 | 파일 |
 |------|------|------|
-| 3-1: Pipeline 이벤트 → session_logger | PENDING | `agent_session.py` |
-| 3-2: broadcast thinking_preview | PENDING | `chat_controller.py` |
+| 3-1: Pipeline 이벤트 → session_logger | **DONE** | tool/stage 이벤트 → TOOL/GRAPH 레벨 로깅 |
+| 3-2: broadcast thinking_preview | **DONE** | 기존 _extract_thinking_preview()가 그대로 동작 (GRAPH/TOOL 이벤트 호환) |
