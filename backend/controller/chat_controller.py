@@ -51,6 +51,7 @@ class AgentExecutionState:
     role: str
     status: str = "pending"  # pending | executing | completed | failed | queued
     thinking_preview: Optional[str] = None  # Latest log message (1 line)
+    streaming_text: Optional[str] = None  # Accumulated streaming text (token-level)
     started_at: Optional[float] = None
     last_activity_at: Optional[float] = None  # monotonic timestamp of last log entry
     last_tool_name: Optional[str] = None  # tool name if last log was TOOL level
@@ -151,6 +152,7 @@ def _build_agent_progress_data(astate: AgentExecutionState) -> dict:
         "role": astate.role,
         "status": astate.status,
         "thinking_preview": astate.thinking_preview,
+        "streaming_text": astate.streaming_text,
     }
     if astate.started_at:
         data["elapsed_ms"] = int((now - astate.started_at) * 1000)
@@ -565,28 +567,45 @@ async def _run_broadcast(
             _MAX_RECENT_LOGS = 20
 
             async def _poll_logs():
-                """Poll session logs and update thinking_preview + recent_logs."""
-                cache_cursor = session_logger.get_cache_length()  # Start from current position
+                """Poll session logs and update thinking_preview, streaming_text, recent_logs."""
+                cache_cursor = session_logger.get_cache_length()
+                had_new = False
                 try:
                     while True:
-                        await asyncio.sleep(0.2)
+                        await asyncio.sleep(0.05)  # 50ms polling for token-level streaming
                         new_entries, cache_cursor = session_logger.get_cache_entries_since(cache_cursor)
+                        if not new_entries:
+                            continue
+
+                        had_new = False
                         for entry in new_entries:
+                            level = entry.level.value if hasattr(entry.level, "value") else str(entry.level)
+                            meta = entry.metadata or {}
+
+                            # Token-level streaming: accumulate STREAM entries
+                            if level == "STREAM":
+                                agent_state.streaming_text = (
+                                    (agent_state.streaming_text or "") + (entry.message or "")
+                                )
+                                agent_state.last_activity_at = time.monotonic()
+                                had_new = True
+                                continue
+
                             # Extract meaningful preview from log entry
                             preview = _extract_thinking_preview(entry)
                             if preview:
                                 agent_state.thinking_preview = preview
                                 agent_state.last_activity_at = time.monotonic()
-                                _notify_room(room_id)
-                            # Track last tool name for tool execution detection
-                            level = entry.level.value if hasattr(entry.level, "value") else str(entry.level)
-                            meta = entry.metadata or {}
+                                had_new = True
+
+                            # Track last tool name
                             if level in ("TOOL", "TOOL_RES"):
                                 agent_state.last_tool_name = meta.get("tool_name")
-                            elif level not in ("DEBUG", "INFO"):
+                            elif level not in ("DEBUG", "INFO", "STREAM"):
                                 agent_state.last_tool_name = None
-                            # Accumulate recent logs for client-side display
-                            if level not in ("DEBUG", "COMMAND", "RESPONSE"):
+
+                            # Accumulate recent logs (exclude noisy levels)
+                            if level not in ("DEBUG", "COMMAND", "RESPONSE", "STREAM"):
                                 log_entry = {
                                     "level": level,
                                     "message": (entry.message or "")[:120],
@@ -597,10 +616,13 @@ async def _run_broadcast(
                                 if meta.get("node_name"):
                                     log_entry["node_name"] = meta["node_name"]
                                 agent_state.recent_logs.append(log_entry)
-                                # Keep only last N entries
                                 if len(agent_state.recent_logs) > _MAX_RECENT_LOGS:
                                     agent_state.recent_logs = agent_state.recent_logs[-_MAX_RECENT_LOGS:]
                                 agent_state.log_cursor += 1
+
+                        if had_new:
+                            _notify_room(room_id)
+
                 except asyncio.CancelledError:
                     pass
 

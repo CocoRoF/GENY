@@ -861,11 +861,17 @@ class AgentSession:
                         node_name=stage_name,
                     )
 
-            # Accumulate output
+            # Accumulate output + log to session_logger for streaming
             if event_type == "text.delta":
                 text = event_data.get("text", "")
                 if text:
                     accumulated_output += text
+                    if session_logger:
+                        session_logger.log(
+                            level="STREAM",
+                            message=text,
+                            metadata={"type": "text_delta"},
+                        )
 
             elif event_type == "pipeline.complete":
                 accumulated_output = event_data.get("result", accumulated_output)
@@ -988,6 +994,12 @@ class AgentSession:
                 text = event_data.get("text", "")
                 if text:
                     accumulated_output += text
+                    if session_logger:
+                        session_logger.log(
+                            level="STREAM",
+                            message=text,
+                            metadata={"type": "text_delta"},
+                        )
                     yield {"text_delta": {"text": text}}
 
             elif event_type == "stage.enter":
