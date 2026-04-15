@@ -64,11 +64,15 @@ class LogEntry:
         self.timestamp = timestamp or now_kst()
         self.metadata = metadata or {}
 
+    def _level_str(self) -> str:
+        """Get level as string, handling both enum and plain string."""
+        return self.level.value if hasattr(self.level, 'value') else str(self.level)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert log entry to dictionary."""
         return {
             "timestamp": self.timestamp.isoformat(),
-            "level": self.level.value,
+            "level": self._level_str(),
             "message": self.message,
             "metadata": self.metadata
         }
@@ -79,7 +83,7 @@ class LogEntry:
         meta_str = ""
         if self.metadata:
             meta_str = f" | {json.dumps(self.metadata, ensure_ascii=False)}"
-        return f"[{ts}] [{self.level.value:8}] {self.message}{meta_str}\n"
+        return f"[{ts}] [{self._level_str():8}] {self.message}{meta_str}\n"
 
 
 class SessionLogger:

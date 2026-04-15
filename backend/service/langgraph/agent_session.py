@@ -842,7 +842,7 @@ class AgentSession:
                     errors = event_data.get("errors", 0)
                     count = event_data.get("count", 0)
                     session_logger.log(
-                        level="TOOL_RES",
+                        level=LogLevel.TOOL_RESULT,
                         message=f"Tool execution complete: {count} calls, {errors} errors",
                         metadata={"tool_count": count, "error_count": errors},
                     )
@@ -970,7 +970,7 @@ class AgentSession:
                     errors = event_data.get("errors", 0)
                     count = event_data.get("count", 0)
                     session_logger.log(
-                        level="TOOL_RES",
+                        level=LogLevel.TOOL_RESULT,
                         message=f"Tool execution complete: {count} calls, {errors} errors",
                         metadata={"tool_count": count, "error_count": errors},
                     )
