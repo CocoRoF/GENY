@@ -201,6 +201,7 @@ async def _stream_room_events(
     _chat_cfg = ChatConfig.get_default_instance()
     heartbeat_interval = float(_chat_cfg.sse_heartbeat_interval_s)
     room_event = get_room_event(room_id)
+    sent_done_ids: set = set()  # broadcast_done 중복 전송 방지
 
     logger.info(
         "[ChatWS:%s] _stream_room_events started, last_seen_id=%s, heartbeat=%ss",
@@ -338,7 +339,8 @@ async def _stream_room_events(
                     }, room_id):
                         return
 
-                if bstate.finished:
+                if bstate.finished and bstate.broadcast_id not in sent_done_ids:
+                    sent_done_ids.add(bstate.broadcast_id)
                     logger.info(
                         "[ChatWS:%s] broadcast %s finished",
                         room_id[:8], bstate.broadcast_id[:8],

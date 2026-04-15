@@ -2,7 +2,7 @@
  * AudioManager — Web Audio API 기반 TTS 오디오 재생 관리자
  *
  * 책임:
- *  - AudioContext 초기화 (사용자 인터랙션 후)
+ *  - AudioContext 초기화 + resume (브라우저 자동재생 정책 대응)
  *  - StreamingResponse → Blob → Audio 재생
  *  - Web Audio API: MediaElementSource → AnalyserNode → GainNode → destination
  *  - 진폭 콜백: requestAnimationFrame 루프에서 RMS 계산 (립싱크용)
@@ -26,6 +26,13 @@ export class AudioManager {
   async init(): Promise<void> {
     if (this.audioContext) return;
     this.audioContext = new AudioContext();
+
+    // Chrome/Safari: AudioContext는 suspended 상태로 시작될 수 있음.
+    // 명시적으로 resume해야 오디오 파이프라인이 동작함.
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
     this.gainNode = this.audioContext.createGain();
     this.gainNode.gain.value = this._volume;
     this.gainNode.connect(this.audioContext.destination);
@@ -51,6 +58,11 @@ export class AudioManager {
       throw new Error(`TTS response error: ${response.status}`);
     }
 
+    // AudioContext가 suspended면 재생 전에 반드시 resume
+    if (this.audioContext?.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
     // 스트리밍 바디 → Blob
     const reader = response.body.getReader();
     const chunks: BlobPart[] = [];
@@ -59,9 +71,17 @@ export class AudioManager {
       if (done) break;
       chunks.push(value);
     }
-    const blob = new Blob(chunks, {
-      type: response.headers.get('content-type') || 'audio/mpeg',
-    });
+    const contentType = response.headers.get('content-type') || 'audio/mpeg';
+    const blob = new Blob(chunks, { type: contentType });
+
+    // 빈 오디오 검증
+    if (blob.size === 0) {
+      console.error('[AudioManager] TTS returned empty audio (0 bytes)');
+      throw new Error('TTS returned empty audio');
+    }
+
+    console.info(`[AudioManager] audio ready: ${blob.size} bytes, type=${contentType}`);
+
     const url = URL.createObjectURL(blob);
 
     // Audio 엘리먼트 생성 및 Web Audio API 연결
@@ -75,13 +95,19 @@ export class AudioManager {
       this.startAmplitudeTracking();
     }
 
-    audio.onplay = () => onStart?.();
+    audio.onplay = () => {
+      console.info('[AudioManager] playback started');
+      onStart?.();
+    };
     audio.onended = () => {
+      console.info('[AudioManager] playback ended');
       this.stopAmplitudeTracking();
       onEnd?.();
       URL.revokeObjectURL(url);
     };
     audio.onerror = () => {
+      const err = audio.error;
+      console.error('[AudioManager] audio error:', err?.code, err?.message);
       this.stopAmplitudeTracking();
       onEnd?.();
       URL.revokeObjectURL(url);
