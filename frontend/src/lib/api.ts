@@ -185,16 +185,17 @@ export const agentApi = {
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (err) => {
+        console.error(`${_tag} WebSocket error, url=${wsUrl}`, err);
         if (!resolved) {
           resolved = true;
-          onEvent('error', { error: 'WebSocket connection failed' });
-          reject(new Error('WebSocket connection failed'));
+          onEvent('error', { error: `WebSocket connection failed: ${wsUrl}` });
+          reject(new Error(`WebSocket connection failed: ${wsUrl}`));
         }
       };
 
       ws.onclose = (ev) => {
-        console.debug(`${_tag} WebSocket closed (code=${ev.code}, reason=${ev.reason})`);
+        console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
         finish();
       };
     });
@@ -244,13 +245,14 @@ export const agentApi = {
       }
     };
 
-    ws.onerror = () => {
-      onEvent('error', { error: 'WebSocket reconnection failed' });
+    ws.onerror = (err) => {
+      console.error(`${_tag} WebSocket error, url=${wsUrl}`, err);
+      onEvent('error', { error: `WebSocket reconnection failed: ${wsUrl}` });
       ws = null;
     };
 
     ws.onclose = (ev) => {
-      console.debug(`${_tag} WebSocket closed (code=${ev.code}, reason=${ev.reason})`);
+      console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
       ws = null;
     };
 
@@ -577,13 +579,14 @@ export const chatApi = {
     let attempts = 0;
     const maxAttempts = 30;
 
-    console.debug(`${_tag} subscribeToRoom wsUrl=${wsUrl}`);
+    console.info(`${_tag} subscribeToRoom wsUrl=${wsUrl}`);
 
     const connect = () => {
       if (closed) return;
 
       const delay = attempts === 0 ? 0 : Math.min(500 * Math.pow(2, attempts - 1), 10000);
       if (delay > 0) {
+        console.info(`${_tag} reconnecting in ${delay}ms (attempt=${attempts}/${maxAttempts})`);
         reconnectTimer = setTimeout(_doConnect, delay);
       } else {
         _doConnect();
@@ -594,18 +597,18 @@ export const chatApi = {
       if (closed) return;
       reconnectTimer = null;
 
-      console.debug(`${_tag} connecting (attempt=${attempts})...`);
+      console.info(`${_tag} connecting to ${wsUrl} (attempt=${attempts})...`);
 
       try {
         ws = new WebSocket(wsUrl);
-      } catch {
-        console.error(`${_tag} WebSocket constructor failed`);
+      } catch (err) {
+        console.error(`${_tag} WebSocket constructor failed for ${wsUrl}:`, err);
         return;
       }
 
       const connectTimeout = setTimeout(() => {
         if (ws && ws.readyState === WebSocket.CONNECTING) {
-          console.warn(`${_tag} connection timeout, closing`);
+          console.warn(`${_tag} connection timeout (5s), url=${wsUrl}`);
           ws.close();
         }
       }, 5000);
@@ -614,7 +617,7 @@ export const chatApi = {
         clearTimeout(connectTimeout);
         attempts = 0;
         const currentAfter = getLatestMsgId?.() ?? afterId;
-        console.debug(`${_tag} connected, subscribe after=${currentAfter}`);
+        console.info(`${_tag} connected, subscribe after=${currentAfter}`);
         ws!.send(JSON.stringify({ type: 'subscribe', after: currentAfter }));
       };
 
@@ -630,13 +633,17 @@ export const chatApi = {
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (err) => {
         clearTimeout(connectTimeout);
+        console.error(`${_tag} WebSocket error, url=${wsUrl}`, err);
         ws = null;
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         clearTimeout(connectTimeout);
+        if (!closed) {
+          console.warn(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'}, url=${wsUrl})`);
+        }
         ws = null;
         if (closed) return;
 
@@ -644,7 +651,7 @@ export const chatApi = {
           attempts++;
           connect();
         } else {
-          console.error(`${_tag} max reconnect attempts (${maxAttempts}) reached`);
+          console.error(`${_tag} max reconnect attempts (${maxAttempts}) reached, url=${wsUrl}`);
         }
       };
     };
@@ -958,9 +965,15 @@ export const vtuberApi = {
         }
       };
 
-      ws.onerror = () => { ws = null; };
+      ws.onerror = (err) => {
+        console.error(`${_tag} WebSocket error, url=${wsUrl}`, err);
+        ws = null;
+      };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        if (!closed) {
+          console.warn(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
+        }
         ws = null;
         if (!closed && attempts < maxAttempts) {
           attempts++;
