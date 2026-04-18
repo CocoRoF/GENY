@@ -153,7 +153,9 @@
         "fear": 0,
         "sadness": 0,
         "joy": 1,
-        "disgust": 0
+        "disgust": 0,
+        "test3": 3,
+        "test4": 4
       },
       "tapMotions": {},
       "hiddenParts": ["Part17"]
