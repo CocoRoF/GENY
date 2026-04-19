@@ -492,6 +492,7 @@ const ko: Translations = {
     newEnvironment: '새 환경',
     createFirst: '첫 환경 만들기',
     compare: '비교',
+    sessionCountTooltip: '이 환경에 바인딩된 활성 세션 {n} 개',
   },
 
   // ─── Environment Diff Modal ───
