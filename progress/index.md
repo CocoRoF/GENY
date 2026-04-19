@@ -6,8 +6,11 @@ geny-executor v0.20.0 통합 작업의 PR 단위 기록. 기록 규약은
 의 18-PR 그리드였으나, 구현 과정에서 UI/안전장치 PR 이 추가되어
 총 34 개로 분할 완료.
 
-요약 문서: [`35_rollout_verification_summary.md`](35_rollout_verification_summary.md) —
-plan 06 체크리스트 vs 실제 출고물의 매핑.
+요약 문서:
+- **[`FINAL_INTEGRATION_REPORT.md`](FINAL_INTEGRATION_REPORT.md) —
+  최종 완수 보고서 (plan 01-06 전체 재검증 + prod QA 인계 목록).**
+- [`35_rollout_verification_summary.md`](35_rollout_verification_summary.md) —
+  plan 06 체크리스트 vs 실제 출고물의 매핑 (세부).
 
 ## Phase 1 — Dependency bump
 
