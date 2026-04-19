@@ -39,6 +39,7 @@ from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
 from controller.session_memory_controller import router as session_memory_router
 from controller.environment_controller import router as environment_router
+from controller.catalog_controller import router as catalog_router
 from controller.vtuber_controller import router as vtuber_router
 from controller.tts_controller import router as tts_router
 from controller.auth_controller import router as auth_router
@@ -301,6 +302,13 @@ async def lifespan(app: FastAPI):
     app.state.environment_service = environment_service
     logger.info(f"   - EnvironmentService: storage={environment_service.storage_path}")
 
+    # ── ArtifactService (Phase 3) ───────────────────────────────────────
+    # Session-less catalog of executor stage/artifact introspection.
+    # Caches are lazy + process-wide; first call warms them.
+    from service.artifact import ArtifactService
+    app.state.artifact_service = ArtifactService()
+    logger.info("   - ArtifactService: ready (lazy catalog)")
+
     # ── VTuber Service: Live2D model management + avatar state ─────────
     print_step_banner("VTUBER", "VTUBER SERVICE", "Initializing Live2D model management...")
     from service.vtuber import Live2dModelManager, AvatarStateManager
@@ -466,6 +474,7 @@ app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
 app.include_router(session_memory_router)  # Per-session MemoryProvider API (Phase 2)
 app.include_router(environment_router)  # Environment CRUD API (Phase 3)
+app.include_router(catalog_router)  # Stage/Artifact catalog API (Phase 3)
 app.include_router(vtuber_router)  # VTuber Live2D API
 app.include_router(tts_router)  # TTS (Text-to-Speech) API
 app.include_router(user_opsidian_router)  # User Opsidian (personal knowledge vault)
