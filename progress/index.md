@@ -78,3 +78,5 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
   초기 `docs/MEMORY_UPGRADE_PLAN.md` 에 superseded 배너 부착.
 - [37_phase6d9-1_changed_expand.md](37_phase6d9-1_changed_expand.md) —
   Import diff "changed" 항목을 before/after 로 펼치기.
+- [38_phase7-6_env_session_count_badge.md](38_phase7-6_env_session_count_badge.md) —
+  Environment 카드에 "N sessions bound" badge.

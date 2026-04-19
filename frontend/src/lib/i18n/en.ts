@@ -492,6 +492,7 @@ const en = {
     newEnvironment: 'New Environment',
     createFirst: 'Create your first environment',
     compare: 'Compare',
+    sessionCountTooltip: '{n} active session(s) bound to this environment',
   },
 
   // ─── Environment Diff Modal ───

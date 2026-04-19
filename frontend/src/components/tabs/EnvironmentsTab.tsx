@@ -8,8 +8,9 @@
  * land in follow-up PRs so this file stays small and easy to diff.
  */
 
-import { useEffect, useState } from 'react';
-import { ArrowLeftRight, Boxes, Plus, RefreshCw, Tag } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeftRight, Boxes, Plus, RefreshCw, Tag, Users } from 'lucide-react';
+import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
 import type { EnvironmentSummary } from '@/types/environment';
@@ -25,7 +26,15 @@ function formatDate(iso: string): string {
   }
 }
 
-function EnvironmentCard({ env, onClick }: { env: EnvironmentSummary; onClick: () => void }) {
+function EnvironmentCard({
+  env,
+  sessionCount,
+  onClick,
+}: {
+  env: EnvironmentSummary;
+  sessionCount: number;
+  onClick: () => void;
+}) {
   const { t } = useI18n();
   return (
     <div
@@ -41,6 +50,15 @@ function EnvironmentCard({ env, onClick }: { env: EnvironmentSummary; onClick: (
             {env.name}
           </h4>
         </div>
+        {sessionCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1 py-0.5 px-1.5 rounded-md bg-[rgba(34,197,94,0.1)] text-[10px] font-semibold text-[var(--success-color)] border border-[rgba(34,197,94,0.25)] shrink-0"
+            title={t('environmentsTab.sessionCountTooltip', { n: String(sessionCount) })}
+          >
+            <Users size={9} />
+            {sessionCount}
+          </span>
+        )}
       </div>
 
       <p className="text-[0.75rem] text-[var(--text-muted)] line-clamp-2 leading-[1.5]">
@@ -75,6 +93,7 @@ function EnvironmentCard({ env, onClick }: { env: EnvironmentSummary; onClick: (
 
 export default function EnvironmentsTab() {
   const { environments, isLoading, error, loadEnvironments } = useEnvironmentStore();
+  const sessions = useAppStore(s => s.sessions);
   const { t } = useI18n();
   const [showCreate, setShowCreate] = useState(false);
   const [showDiff, setShowDiff] = useState<{ left?: string; right?: string } | null>(null);
@@ -83,6 +102,15 @@ export default function EnvironmentsTab() {
   useEffect(() => {
     loadEnvironments();
   }, [loadEnvironments]);
+
+  const sessionsPerEnv = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of sessions) {
+      const envId = (s as { env_id?: string | null }).env_id;
+      if (envId) counts[envId] = (counts[envId] ?? 0) + 1;
+    }
+    return counts;
+  }, [sessions]);
 
   return (
     <div className="flex-1 min-h-0 overflow-auto bg-[var(--bg-primary)]">
@@ -159,6 +187,7 @@ export default function EnvironmentsTab() {
               <EnvironmentCard
                 key={env.id}
                 env={env}
+                sessionCount={sessionsPerEnv[env.id] ?? 0}
                 onClick={() => setOpenEnvId(env.id)}
               />
             ))}
