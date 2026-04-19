@@ -540,6 +540,12 @@ const en = {
     deleteNote: 'Sessions currently referencing this environment will fall back to the default pipeline on their next turn.',
     linkedSessions: 'Linked sessions ({n})',
     linkedSessionsEmpty: 'No active sessions are bound to this environment.',
+    statusRunning: 'running',
+    statusError: 'error',
+    statusOther: 'other',
+    breakdownRunning: '{n} running session(s)',
+    breakdownError: '{n} errored session(s)',
+    breakdownOther: '{n} idle/stopped session(s)',
   },
 
   // ─── Import Manifest Modal ───

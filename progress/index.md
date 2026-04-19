@@ -88,3 +88,5 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
   ImportEnvironmentModal 신설 — 백업 JSON 으로 새 환경 생성.
 - [42_phase7-10_empty_state_import.md](42_phase7-10_empty_state_import.md) —
   Environments empty state 에 Import 버튼 병치.
+- [43_phase7-11_linked_sessions_breakdown.md](43_phase7-11_linked_sessions_breakdown.md) —
+  드로어 Linked sessions 헤더에 running/error/other 브레이크다운.
