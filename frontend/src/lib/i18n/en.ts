@@ -658,6 +658,11 @@ const en = {
     bundleOpenEnv: 'Open the new environment',
     atomicLabel: 'Atomic batch — roll back on any failure',
     atomicHint: 'If any entry fails the server deletes envs created earlier in this batch. Safer but a single malformed entry aborts the whole import.',
+    conflictBadge: 'Name already exists',
+    conflictBannerSingle: 'An environment named "{name}" already exists. Importing will create a duplicate name — set a Name override above.',
+    conflictBannerBundle: '{count} entry(ies) clash with existing environment names. Rename them above or continue to create duplicates.',
+    retryWithoutAtomic: 'Retry without atomic',
+    retryingWithoutAtomic: 'Retrying without atomic…',
   },
 
   // ─── Environment Builder Tab ───
