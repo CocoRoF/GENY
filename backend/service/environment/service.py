@@ -499,13 +499,36 @@ class EnvironmentService:
     def diff(self, env_id_a: str, env_id_b: str) -> List[Dict[str, Any]]:
         a = self._read_raw(env_id_a)
         b = self._read_raw(env_id_b)
-        if a is None or b is None:
+        return self.diff_from_raw(a, b)
+
+    def diff_from_raw(
+        self,
+        raw_a: Optional[Dict[str, Any]],
+        raw_b: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Compute a diff between two already-loaded env records.
+
+        Exposed so callers doing many pairwise diffs (e.g. the
+        `/diff-bulk` matrix endpoint) can load each unique env once and
+        then iterate over pairs without repeating the filesystem read.
+        Mirrors `diff`'s empty-on-missing contract.
+        """
+        if raw_a is None or raw_b is None:
             return []
-        left = a.get("manifest") or a.get("snapshot") or {}
-        right = b.get("manifest") or b.get("snapshot") or {}
+        left = raw_a.get("manifest") or raw_a.get("snapshot") or {}
+        right = raw_b.get("manifest") or raw_b.get("snapshot") or {}
         changes: List[Dict[str, Any]] = []
         self._diff_recursive(left, right, "", changes)
         return changes
+
+    def read_raw(self, env_id: str) -> Optional[Dict[str, Any]]:
+        """Public wrapper around `_read_raw` for callers that need the
+        raw record without going through `load()`'s manifest coercion.
+
+        Used by the `/diff-bulk` endpoint to cache one read per unique
+        env id across all pairs in the batch.
+        """
+        return self._read_raw(env_id)
 
     def _diff_recursive(
         self,

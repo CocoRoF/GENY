@@ -150,3 +150,6 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
 - [65_phase7-33_matrix_export.md](65_phase7-33_matrix_export.md) —
   Diff 매트릭스 결과를 JSON / Markdown 으로 다운로드 (index table +
   symmetric matrix + drill-down 섹션).
+- [66_phase7-34_diff_bulk_cache.md](66_phase7-34_diff_bulk_cache.md) —
+  `/diff-bulk` 에 per-env read cache (N·(N-1) → N fs reads) +
+  service 에 `diff_from_raw` / `read_raw` 공개.
