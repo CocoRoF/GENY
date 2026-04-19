@@ -164,7 +164,12 @@ function applyNameOverrideToBundleEntry(
 }
 
 export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
-  const { importEnvironment, loadEnvironments, refreshSessionCounts } = useEnvironmentStore();
+  const {
+    importEnvironment,
+    loadEnvironments,
+    refreshSessionCounts,
+    environments,
+  } = useEnvironmentStore();
   const { t } = useI18n();
 
   const [rawText, setRawText] = useState('');
@@ -191,6 +196,48 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
 
   const parseError = parsed && !parsed.ok ? parsed.error : null;
   const ready = parsed && parsed.ok;
+
+  const existingNames = useMemo(
+    () => new Set(environments.map(e => e.name.toLowerCase())),
+    [environments],
+  );
+
+  const bundleConflicts = useMemo(() => {
+    if (!parsed || !parsed.ok || parsed.kind !== 'bundle') return null;
+    const conflicts: Record<number, boolean> = {};
+    let count = 0;
+    parsed.entries.forEach((e, i) => {
+      const name = (bundleNameOverrides[i]?.trim() || e.meta.name || '').toLowerCase();
+      if (name && existingNames.has(name)) {
+        conflicts[i] = true;
+        count += 1;
+      }
+    });
+    return { conflicts, count };
+  }, [parsed, bundleNameOverrides, existingNames]);
+
+  const singleConflict = useMemo(() => {
+    if (!parsed || !parsed.ok || parsed.kind !== 'single') return false;
+    const name = (nameOverride.trim() || parsed.meta.name || '').toLowerCase();
+    return !!name && existingNames.has(name);
+  }, [parsed, nameOverride, existingNames]);
+
+  const singleConflictName = useMemo(() => {
+    if (!parsed || !parsed.ok || parsed.kind !== 'single') return '';
+    return nameOverride.trim() || parsed.meta.name || '';
+  }, [parsed, nameOverride]);
+
+  // A bundleResult is an atomic rollback when every entry failed with a
+  // "rolled back" or "not processed" marker. In that case the user can
+  // retry without atomic in one click.
+  const atomicRollback = useMemo(() => {
+    if (!bundleResult) return false;
+    if (bundleResult.successes.length > 0) return false;
+    if (bundleResult.failures.length === 0) return false;
+    return bundleResult.failures.every(
+      f => f.error.startsWith('rolled back') || f.error.startsWith('not processed'),
+    );
+  }, [bundleResult]);
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
@@ -224,8 +271,9 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
     }
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (atomicOverride?: boolean) => {
     if (!parsed || !parsed.ok || submitting) return;
+    const useAtomic = atomicOverride ?? atomic;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -254,7 +302,7 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
           version: parsed.bundleVersion,
           entries: cleanedEntries,
         },
-        { atomic },
+        { atomic: useAtomic },
       );
       const successes: BundleResult['successes'] = [];
       const failures: BundleResult['failures'] = [];
@@ -286,6 +334,14 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleRetryWithoutAtomic = () => {
+    setAtomic(false);
+    setBundleResult(null);
+    setSubmitError('');
+    // Pass the override explicitly — state updates haven't committed yet.
+    void handleConfirm(false);
   };
 
   if (typeof document === 'undefined') return null;
@@ -412,6 +468,7 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
               <ul className="flex flex-col gap-1 text-[0.6875rem] text-[var(--text-secondary)] max-h-[220px] overflow-y-auto">
                 {parsed.entries.map((e, i) => {
                   const originalName = e.meta.name || e.env_id || '—';
+                  const inConflict = !!bundleConflicts?.conflicts[i];
                   return (
                     <li key={e.env_id ?? i} className="flex items-center gap-2">
                       <span className="shrink-0 text-[var(--text-muted)] font-mono w-6 text-right">
@@ -427,8 +484,20 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
                         aria-label={t('importEnvironment.bundleEntryNameLabel', {
                           n: String(i + 1),
                         })}
-                        className="flex-1 min-w-0 py-1 px-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[0.6875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--primary-color)]"
+                        className={`flex-1 min-w-0 py-1 px-2 bg-[var(--bg-primary)] border rounded text-[0.6875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--primary-color)] ${
+                          inConflict
+                            ? 'border-[rgba(234,179,8,0.55)]'
+                            : 'border-[var(--border-color)]'
+                        }`}
                       />
+                      {inConflict && (
+                        <span
+                          title={t('importEnvironment.conflictBadge')}
+                          className="shrink-0 text-[#eab308] flex items-center"
+                        >
+                          <AlertTriangle size={12} />
+                        </span>
+                      )}
                       <span className="shrink-0 text-[0.625rem] text-[var(--text-muted)] whitespace-nowrap">
                         {e.meta.mode}
                         {typeof e.meta.stageCount === 'number' && ` · ${e.meta.stageCount} stage(s)`}
@@ -440,6 +509,16 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
               <p className="text-[0.625rem] text-[var(--text-muted)]">
                 {t('importEnvironment.bundleNamesHint')}
               </p>
+              {bundleConflicts && bundleConflicts.count > 0 && (
+                <div className="flex items-start gap-2 px-2 py-1.5 rounded bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)]">
+                  <AlertTriangle size={12} className="text-[#eab308] mt-0.5 shrink-0" />
+                  <div className="text-[0.6875rem] text-[#eab308]">
+                    {t('importEnvironment.conflictBannerBundle', {
+                      count: String(bundleConflicts.count),
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -510,6 +589,16 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
               <p className="text-[0.6875rem] text-[var(--text-muted)]">
                 {t('importEnvironment.nameOverrideHint')}
               </p>
+              {singleConflict && (
+                <div className="flex items-start gap-2 px-2 py-1.5 mt-1 rounded bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)]">
+                  <AlertTriangle size={12} className="text-[#eab308] mt-0.5 shrink-0" />
+                  <div className="text-[0.6875rem] text-[#eab308]">
+                    {t('importEnvironment.conflictBannerSingle', {
+                      name: singleConflictName,
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -569,15 +658,28 @@ export default function ImportEnvironmentModal({ onClose, onImported }: Props) {
             {t('common.cancel')}
           </button>
           {bundleResult ? (
-            <button
-              onClick={onClose}
-              className="py-1.5 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-semibold cursor-pointer border-none transition-colors"
-            >
-              {t('common.done')}
-            </button>
+            <>
+              {atomicRollback && (
+                <button
+                  onClick={handleRetryWithoutAtomic}
+                  disabled={submitting}
+                  className="py-1.5 px-3 rounded-md bg-transparent border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting
+                    ? t('importEnvironment.retryingWithoutAtomic')
+                    : t('importEnvironment.retryWithoutAtomic')}
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="py-1.5 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-semibold cursor-pointer border-none transition-colors"
+              >
+                {t('common.done')}
+              </button>
+            </>
           ) : (
             <button
-              onClick={handleConfirm}
+              onClick={() => handleConfirm()}
               disabled={!ready || submitting}
               className="py-1.5 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-semibold cursor-pointer border-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >

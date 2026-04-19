@@ -135,3 +135,6 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
   시 drawer cache 즉시 invalidate.
 - [60_phase7-28_diff_export_atomic_bulk.md](60_phase7-28_diff_export_atomic_bulk.md) —
   DiffModal JSON export + `/import-bulk` 에 `?atomic=true` 롤백 옵션.
+- [61_phase7-29_import_conflict_retry.md](61_phase7-29_import_conflict_retry.md) —
+  ImportEnvironmentModal 에 이름 충돌 경고 + atomic 롤백 후 "Retry
+  without atomic" 원클릭 재시도.

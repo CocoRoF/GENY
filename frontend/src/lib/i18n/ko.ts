@@ -658,6 +658,11 @@ const ko: Translations = {
     bundleOpenEnv: '새 환경 열기',
     atomicLabel: 'Atomic 모드 — 하나라도 실패하면 전체 롤백',
     atomicHint: '실패한 entry 가 있으면 배치 중 이미 생성된 env 를 서버가 삭제합니다. 안전하지만 하나의 malformed entry 가 전체 import 를 중단시킵니다.',
+    conflictBadge: '같은 이름이 이미 있음',
+    conflictBannerSingle: '"{name}" 이름의 환경이 이미 존재합니다. 이대로 가져오면 이름이 중복됩니다 — 위의 이름 덮어쓰기를 설정하세요.',
+    conflictBannerBundle: '기존 환경 이름과 겹치는 entry 가 {count} 개 있습니다. 위에서 이름을 바꾸거나, 그대로 진행하면 중복된 이름으로 생성됩니다.',
+    retryWithoutAtomic: 'Atomic 없이 다시 시도',
+    retryingWithoutAtomic: 'Atomic 없이 다시 시도 중…',
   },
 
   // ─── Environment Builder Tab ───
