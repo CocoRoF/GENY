@@ -118,3 +118,6 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
 - [54_phase7-22_bulk_import_bundle.md](54_phase7-22_bulk_import_bundle.md) —
   ImportEnvironmentModal 이 번들 포맷 자동 감지 + 순차 import +
   per-entry 결과 리포트.
+- [55_phase7-23_bulk_compare_deleted_filter.md](55_phase7-23_bulk_compare_deleted_filter.md) —
+  Bulk-select 에 "Compare 2" 액션 추가 + 필터 바에 "Has deleted"
+  옵션.
