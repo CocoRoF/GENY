@@ -423,11 +423,27 @@ async def diff_environments_bulk(
     auth: dict = Depends(require_auth),
 ):
     svc = _env_svc(request)
+
+    # Cache one fs read per unique env id. A matrix of N envs has
+    # N·(N-1)/2 pairs referencing each id (N-1) times — without the
+    # cache that's 2·M reads, with it N. For 10 envs / 45 pairs:
+    # 90 reads → 10.
+    unique_ids: set[str] = set()
+    for pair in body.pairs:
+        unique_ids.add(pair.env_id_a)
+        unique_ids.add(pair.env_id_b)
+    raw_cache: dict[str, dict | None] = {
+        env_id: svc.read_raw(env_id) for env_id in unique_ids
+    }
+
     results: list[DiffBulkResultEntry] = []
     ok_count = 0
     for pair in body.pairs:
         try:
-            changes = svc.diff(pair.env_id_a, pair.env_id_b)
+            changes = svc.diff_from_raw(
+                raw_cache.get(pair.env_id_a),
+                raw_cache.get(pair.env_id_b),
+            )
         except Exception as exc:
             logger.warning(
                 "diff-bulk pair failed: %s vs %s: %s",
