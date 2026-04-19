@@ -540,6 +540,12 @@ const ko: Translations = {
     deleteNote: '이 환경을 참조 중인 세션은 다음 턴에 기본 파이프라인으로 fallback 합니다.',
     linkedSessions: '연결된 세션 ({n})',
     linkedSessionsEmpty: '이 환경을 사용 중인 활성 세션이 없습니다.',
+    statusRunning: '실행중',
+    statusError: '에러',
+    statusOther: '대기',
+    breakdownRunning: '실행중 세션 {n} 개',
+    breakdownError: '에러 세션 {n} 개',
+    breakdownOther: '대기/중지 세션 {n} 개',
   },
 
   // ─── Import Manifest Modal ───

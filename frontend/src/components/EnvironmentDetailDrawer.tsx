@@ -68,6 +68,16 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
     [sessions, envId],
   );
 
+  const linkedBreakdown = useMemo(() => {
+    const counts = { running: 0, error: 0, other: 0 };
+    for (const s of linkedSessions) {
+      if (s.status === 'running') counts.running += 1;
+      else if (s.status === 'error') counts.error += 1;
+      else counts.other += 1;
+    }
+    return counts;
+  }, [linkedSessions]);
+
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -235,10 +245,40 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
 
               {/* Linked sessions */}
               <section className="flex flex-col gap-1.5">
-                <h4 className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide flex items-center gap-1.5">
-                  <Link2 size={11} />
-                  {t('environmentDetail.linkedSessions', { n: linkedSessions.length })}
-                </h4>
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide flex items-center gap-1.5">
+                    <Link2 size={11} />
+                    {t('environmentDetail.linkedSessions', { n: linkedSessions.length })}
+                  </h4>
+                  {linkedSessions.length > 0 && (
+                    <div className="flex items-center gap-1 text-[0.625rem]">
+                      {linkedBreakdown.running > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 py-0.5 px-1.5 rounded-md bg-[rgba(34,197,94,0.12)] text-[#4ade80] border border-[rgba(34,197,94,0.25)]"
+                          title={t('environmentDetail.breakdownRunning', { n: linkedBreakdown.running })}
+                        >
+                          {linkedBreakdown.running} {t('environmentDetail.statusRunning')}
+                        </span>
+                      )}
+                      {linkedBreakdown.error > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 py-0.5 px-1.5 rounded-md bg-[rgba(239,68,68,0.12)] text-[var(--danger-color)] border border-[rgba(239,68,68,0.25)]"
+                          title={t('environmentDetail.breakdownError', { n: linkedBreakdown.error })}
+                        >
+                          {linkedBreakdown.error} {t('environmentDetail.statusError')}
+                        </span>
+                      )}
+                      {linkedBreakdown.other > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 py-0.5 px-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-muted)] border border-[var(--border-color)]"
+                          title={t('environmentDetail.breakdownOther', { n: linkedBreakdown.other })}
+                        >
+                          {linkedBreakdown.other} {t('environmentDetail.statusOther')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {linkedSessions.length === 0 ? (
                   <p className="text-[0.75rem] text-[var(--text-muted)] italic">
                     {t('environmentDetail.linkedSessionsEmpty')}
