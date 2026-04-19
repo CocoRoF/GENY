@@ -487,6 +487,27 @@ const ko: Translations = {
     createFirst: '첫 환경 만들기',
   },
 
+  // ─── Environment Detail Drawer ───
+  environmentDetail: {
+    title: '환경',
+    loading: '불러오는 중…',
+    loadFailed: '환경 불러오기 실패',
+    description: '설명',
+    tags: '태그',
+    created: '생성',
+    updated: '수정',
+    manifest: 'Manifest',
+    manifestEmpty: 'manifest 가 아직 없습니다.',
+    duplicatePrompt: '복제할 환경의 이름',
+    duplicating: '복제 중…',
+    duplicateFailed: '환경 복제 실패',
+    exporting: '내보내는 중…',
+    exportFailed: '환경 내보내기 실패',
+    deleteTitle: '환경 삭제',
+    deleteConfirm: '"{name}" 을(를) 삭제하시겠습니까? 되돌릴 수 없습니다.',
+    deleteNote: '이 환경을 참조 중인 세션은 다음 턴에 기본 파이프라인으로 fallback 합니다.',
+  },
+
   // ─── Create Environment Modal ───
   createEnvironment: {
     title: '새 환경',

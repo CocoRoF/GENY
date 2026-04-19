@@ -14,6 +14,7 @@ import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
 import type { EnvironmentSummary } from '@/types/environment';
 import CreateEnvironmentModal from '@/components/modals/CreateEnvironmentModal';
+import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
 
 function formatDate(iso: string): string {
   try {
@@ -23,10 +24,13 @@ function formatDate(iso: string): string {
   }
 }
 
-function EnvironmentCard({ env }: { env: EnvironmentSummary }) {
+function EnvironmentCard({ env, onClick }: { env: EnvironmentSummary; onClick: () => void }) {
   const { t } = useI18n();
   return (
-    <div className="group relative flex flex-col gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] transition-all duration-150">
+    <div
+      onClick={onClick}
+      className="group relative flex flex-col gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] transition-all duration-150 cursor-pointer"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] flex items-center justify-center shrink-0">
@@ -72,6 +76,7 @@ export default function EnvironmentsTab() {
   const { environments, isLoading, error, loadEnvironments } = useEnvironmentStore();
   const { t } = useI18n();
   const [showCreate, setShowCreate] = useState(false);
+  const [openEnvId, setOpenEnvId] = useState<string | null>(null);
 
   useEffect(() => {
     loadEnvironments();
@@ -141,14 +146,28 @@ export default function EnvironmentsTab() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
             {environments.map(env => (
-              <EnvironmentCard key={env.id} env={env} />
+              <EnvironmentCard
+                key={env.id}
+                env={env}
+                onClick={() => setOpenEnvId(env.id)}
+              />
             ))}
           </div>
         )}
       </div>
 
       {showCreate && (
-        <CreateEnvironmentModal onClose={() => setShowCreate(false)} />
+        <CreateEnvironmentModal
+          onClose={() => setShowCreate(false)}
+          onCreated={id => setOpenEnvId(id)}
+        />
+      )}
+
+      {openEnvId && (
+        <EnvironmentDetailDrawer
+          envId={openEnvId}
+          onClose={() => setOpenEnvId(null)}
+        />
       )}
     </div>
   );

@@ -487,6 +487,27 @@ const en = {
     createFirst: 'Create your first environment',
   },
 
+  // ─── Environment Detail Drawer ───
+  environmentDetail: {
+    title: 'Environment',
+    loading: 'Loading…',
+    loadFailed: 'Failed to load environment',
+    description: 'Description',
+    tags: 'Tags',
+    created: 'Created',
+    updated: 'Updated',
+    manifest: 'Manifest',
+    manifestEmpty: 'No manifest attached yet.',
+    duplicatePrompt: 'Name for the duplicated environment',
+    duplicating: 'Duplicating…',
+    duplicateFailed: 'Failed to duplicate environment',
+    exporting: 'Exporting…',
+    exportFailed: 'Failed to export environment',
+    deleteTitle: 'Delete environment',
+    deleteConfirm: 'Delete "{name}"? This cannot be undone.',
+    deleteNote: 'Sessions currently referencing this environment will fall back to the default pipeline on their next turn.',
+  },
+
   // ─── Create Environment Modal ───
   createEnvironment: {
     title: 'New Environment',
