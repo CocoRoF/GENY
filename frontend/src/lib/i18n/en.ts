@@ -509,6 +509,7 @@ const en = {
       all: 'All',
       has_errors: 'Has errors',
       has_sessions: 'In use',
+      has_deleted: 'Has deleted',
       idle: 'Idle',
     },
     sort: {
@@ -524,6 +525,7 @@ const en = {
     bulkSelected: '{n} selected',
     bulkSelectAll: 'Select all ({n})',
     bulkClear: 'Clear',
+    bulkCompare: 'Compare 2',
     bulkDelete: 'Delete {n}',
     bulkExport: 'Export {n}',
     bulkDeleteTitle: 'Delete selected environments?',

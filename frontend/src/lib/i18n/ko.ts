@@ -508,6 +508,7 @@ const ko: Translations = {
       all: '전체',
       has_errors: '에러 있음',
       has_sessions: '사용 중',
+      has_deleted: '삭제 포함',
       idle: '미사용',
     },
     sort: {
@@ -524,6 +525,7 @@ const ko: Translations = {
     bulkSelected: '{n} 개 선택됨',
     bulkSelectAll: '전체 선택 ({n})',
     bulkClear: '해제',
+    bulkCompare: '2 개 비교',
     bulkDelete: '{n} 개 삭제',
     bulkExport: '{n} 개 내보내기',
     bulkDeleteTitle: '선택한 환경을 삭제할까요?',

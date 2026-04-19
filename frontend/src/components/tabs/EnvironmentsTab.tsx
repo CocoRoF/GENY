@@ -140,7 +140,7 @@ function EnvironmentCard({
 
 type CountBucket = { active: number; deleted: number; error: number };
 
-type StatusFilter = 'all' | 'has_errors' | 'has_sessions' | 'idle';
+type StatusFilter = 'all' | 'has_errors' | 'has_sessions' | 'has_deleted' | 'idle';
 type SortKey =
   | 'updated_desc'
   | 'updated_asc'
@@ -267,6 +267,7 @@ export default function EnvironmentsTab() {
         const b = countsPerEnv[env.id] ?? { active: 0, deleted: 0, error: 0 };
         if (statusFilter === 'has_errors' && b.error === 0) return false;
         if (statusFilter === 'has_sessions' && b.active === 0) return false;
+        if (statusFilter === 'has_deleted' && b.deleted === 0) return false;
         if (statusFilter === 'idle' && b.active > 0) return false;
       }
       return true;
@@ -509,6 +510,19 @@ export default function EnvironmentsTab() {
               </button>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {selectedIds.size === 2 && (
+                <button
+                  onClick={() => {
+                    const [left, right] = Array.from(selectedIds);
+                    setShowDiff({ left, right });
+                  }}
+                  disabled={bulkBusy}
+                  className="flex items-center gap-1.5 py-1 px-3 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ArrowLeftRight size={12} />
+                  {t('environmentsTab.bulkCompare')}
+                </button>
+              )}
               <button
                 onClick={runBulkExport}
                 disabled={selectedIds.size === 0 || bulkBusy}
@@ -561,7 +575,7 @@ export default function EnvironmentsTab() {
             </div>
 
             <div className="flex items-center gap-1 text-[0.75rem]">
-              {(['all', 'has_errors', 'has_sessions', 'idle'] as StatusFilter[]).map(v => (
+              {(['all', 'has_errors', 'has_sessions', 'has_deleted', 'idle'] as StatusFilter[]).map(v => (
                 <button
                   key={v}
                   onClick={() => setStatusFilter(v)}
