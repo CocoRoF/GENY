@@ -109,3 +109,6 @@ plan 06 체크리스트 vs 실제 출고물의 매핑.
   create/delete/duplicate/import 시 자동 재조회.
 - [51_phase7-19_env_counts_focus_refresh.md](51_phase7-19_env_counts_focus_refresh.md) —
   visibility/focus 전환 시 10 초 TTL 게이트로 카운트 자동 재조회.
+- [52_phase7-20_drawer_sessions_store_cache.md](52_phase7-20_drawer_sessions_store_cache.md) —
+  드로어 linked-sessions 를 store cache 로 올리고 focus/visibility
+  TTL refresh + 수동 Refresh 버튼.

@@ -576,6 +576,7 @@ const ko: Translations = {
     showDeleted: '삭제된 세션 포함',
     sessionDeletedHint: '삭제된 세션입니다. 열 수 없습니다.',
     linkedSessionsFallback: '서버 조회 실패 — 메모리의 세션만 표시합니다.',
+    refreshSessions: '연결된 세션 새로고침',
   },
 
   // ─── Import Manifest Modal ───

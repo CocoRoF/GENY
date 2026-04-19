@@ -17,7 +17,6 @@ import { ArrowLeftRight, Check, Copy, Download, Link2, RefreshCw, Settings2, Tag
 import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
-import { environmentApi } from '@/lib/environmentApi';
 import type { EnvironmentSessionSummary } from '@/types/environment';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import ImportManifestModal from '@/components/modals/ImportManifestModal';
@@ -58,7 +57,11 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
     duplicateEnvironment,
     exportEnvironment,
     openInBuilder,
+    loadDrawerSessions,
+    refreshDrawerSessions,
+    refreshDrawerSessionsIfStale,
   } = useEnvironmentStore();
+  const drawerSessionsCache = useEnvironmentStore(s => s.drawerSessions);
   const setActiveTab = useAppStore(s => s.setActiveTab);
   const sessions = useAppStore(s => s.sessions);
   const selectSession = useAppStore(s => s.selectSession);
@@ -91,20 +94,19 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
   const [exporting, setExporting] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
-  const [serverSessions, setServerSessions] = useState<EnvironmentSessionSummary[] | null>(null);
   const [sessionsFetching, setSessionsFetching] = useState(false);
   const [sessionsError, setSessionsError] = useState('');
 
+  const drawerKey = `${envId}:${showDeleted ? 'all' : 'active'}`;
+  const cachedEntry = drawerSessionsCache[drawerKey];
+  const serverSessions = cachedEntry ? cachedEntry.sessions : null;
+
   useEffect(() => {
     let cancelled = false;
-    setSessionsFetching(true);
+    const hasCached = cachedEntry !== undefined;
+    if (!hasCached) setSessionsFetching(true);
     setSessionsError('');
-    environmentApi
-      .linkedSessions(envId, showDeleted)
-      .then(res => {
-        if (cancelled) return;
-        setServerSessions(res.sessions);
-      })
+    loadDrawerSessions(envId, showDeleted)
       .catch((e: unknown) => {
         if (cancelled) return;
         setSessionsError(e instanceof Error ? e.message : 'fetch failed');
@@ -115,7 +117,32 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envId, showDeleted]);
+
+  useEffect(() => {
+    const handleRefresh = () => {
+      void refreshDrawerSessionsIfStale(envId, showDeleted, 10_000);
+    };
+    document.addEventListener('visibilitychange', handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    return () => {
+      document.removeEventListener('visibilitychange', handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+    };
+  }, [envId, showDeleted, refreshDrawerSessionsIfStale]);
+
+  const handleManualRefreshSessions = async () => {
+    setSessionsFetching(true);
+    setSessionsError('');
+    try {
+      await refreshDrawerSessions(envId, showDeleted);
+    } catch (e: unknown) {
+      setSessionsError(e instanceof Error ? e.message : 'fetch failed');
+    } finally {
+      setSessionsFetching(false);
+    }
+  };
 
   const linkedSessions = useMemo<EnvironmentSessionSummary[]>(() => {
     if (serverSessions !== null) return serverSessions;
@@ -315,9 +342,14 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
                   <h4 className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide flex items-center gap-1.5">
                     <Link2 size={11} />
                     {t('environmentDetail.linkedSessions', { n: linkedSessions.length })}
-                    {sessionsFetching && (
-                      <RefreshCw size={10} className="animate-spin opacity-60" />
-                    )}
+                    <button
+                      onClick={handleManualRefreshSessions}
+                      disabled={sessionsFetching}
+                      title={t('environmentDetail.refreshSessions')}
+                      className="inline-flex items-center justify-center w-5 h-5 rounded bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <RefreshCw size={10} className={sessionsFetching ? 'animate-spin' : 'opacity-60'} />
+                    </button>
                   </h4>
                   {linkedSessions.length > 0 && (
                     <div className="flex items-center gap-1 text-[0.625rem]">
