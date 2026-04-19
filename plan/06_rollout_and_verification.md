@@ -1,5 +1,8 @@
 # 06. 롤아웃 & 검증 체크리스트
 
+구현 링크: [`progress/35_rollout_verification_summary.md`](../progress/35_rollout_verification_summary.md)
+— plan 18-PR 그리드 ↔ 실제 출고된 34 PR 매핑, 수용 상태, 남은 follow-up.
+
 ## PR 단위 로드맵
 
 | # | 제목 | 단계 | 예상 크기 |
