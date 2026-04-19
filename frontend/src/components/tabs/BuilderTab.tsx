@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, ChevronRight, Eye, EyeOff, RotateCcw, Save, X } from 'lucide-react';
+import { Boxes, ChevronRight, Eye, EyeOff, RotateCcw, Save, Wrench, X } from 'lucide-react';
 
 import { catalogApi } from '@/lib/environmentApi';
 import { useAppStore } from '@/store/useAppStore';
@@ -24,10 +24,18 @@ import {
   ChainsEditor,
   StrategiesEditor,
 } from '@/components/environment/StrategyEditors';
+import ToolsEditor, {
+  emptyTools,
+  toolsDraftFromSnapshot,
+  toolsSnapshotsEqual,
+  validateToolsDraft,
+  type ToolsDraft,
+} from '@/components/environment/ToolsEditor';
 import type {
   ArtifactInfo,
   StageIntrospection,
   StageManifestEntry,
+  ToolsSnapshot,
 } from '@/types/environment';
 
 interface StageDraft {
@@ -79,6 +87,7 @@ export default function BuilderTab() {
     selectedEnvironment,
     loadEnvironment,
     updateStage,
+    replaceManifest,
     closeBuilder,
     clearSelection,
   } = useEnvironmentStore();
@@ -100,6 +109,11 @@ export default function BuilderTab() {
   >({});
   const [showPreview, setShowPreview] = useState(true);
   const [configMode, setConfigMode] = useState<'form' | 'json'>('form');
+  const [builderView, setBuilderView] = useState<'stages' | 'tools'>('stages');
+  const [toolsDraft, setToolsDraft] = useState<ToolsDraft | null>(null);
+  const [toolsSaving, setToolsSaving] = useState(false);
+  const [toolsError, setToolsError] = useState('');
+  const [toolsSavedFlash, setToolsSavedFlash] = useState(false);
 
   // Load env whenever builderEnvId changes
   useEffect(() => {
@@ -223,6 +237,57 @@ export default function BuilderTab() {
     setSavedFlash(false);
   };
 
+  const manifestTools: ToolsSnapshot = useMemo(
+    () => env?.manifest?.tools ?? emptyTools(),
+    [env],
+  );
+
+  // Sync tools draft when the underlying manifest changes
+  useEffect(() => {
+    if (env?.manifest) {
+      setToolsDraft(toolsDraftFromSnapshot(env.manifest.tools));
+      setToolsError('');
+      setToolsSavedFlash(false);
+    } else {
+      setToolsDraft(null);
+    }
+  }, [env]);
+
+  const toolsValidation = useMemo(
+    () => (toolsDraft ? validateToolsDraft(toolsDraft) : null),
+    [toolsDraft],
+  );
+  const toolsDirty = useMemo(() => {
+    if (!toolsDraft || !toolsValidation || !toolsValidation.snapshot) return false;
+    return !toolsSnapshotsEqual(toolsValidation.snapshot, manifestTools);
+  }, [toolsDraft, toolsValidation, manifestTools]);
+
+  const handleToolsRevert = () => {
+    if (env?.manifest) {
+      setToolsDraft(toolsDraftFromSnapshot(env.manifest.tools));
+    }
+    setToolsError('');
+    setToolsSavedFlash(false);
+  };
+
+  const handleToolsSave = async () => {
+    if (!builderEnvId || !env?.manifest || !toolsValidation || !toolsValidation.snapshot) return;
+    setToolsSaving(true);
+    setToolsError('');
+    setToolsSavedFlash(false);
+    try {
+      await replaceManifest(builderEnvId, {
+        ...env.manifest,
+        tools: toolsValidation.snapshot,
+      });
+      setToolsSavedFlash(true);
+    } catch (e: unknown) {
+      setToolsError(e instanceof Error ? e.message : t('builderTab.toolsSaveFailed'));
+    } finally {
+      setToolsSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!builderEnvId || !selectedStage || !draft) return;
     if (configInvalid) {
@@ -296,6 +361,30 @@ export default function BuilderTab() {
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <div className="inline-flex rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
+            <button
+              onClick={() => setBuilderView('stages')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[0.75rem] font-medium cursor-pointer transition-colors ${
+                builderView === 'stages'
+                  ? 'bg-[var(--primary-color)] text-white'
+                  : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <Boxes size={12} />
+              {t('builderTab.viewStages')}
+            </button>
+            <button
+              onClick={() => setBuilderView('tools')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[0.75rem] font-medium cursor-pointer transition-colors ${
+                builderView === 'tools'
+                  ? 'bg-[var(--primary-color)] text-white'
+                  : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <Wrench size={12} />
+              {t('builderTab.viewTools')}
+            </button>
+          </div>
           <button
             onClick={() => setShowPreview(p => !p)}
             className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors"
@@ -318,6 +407,100 @@ export default function BuilderTab() {
 
       {/* Body */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
+        {builderView === 'tools' ? (
+          <main className="flex-1 min-w-0 flex overflow-hidden">
+            <section className="flex-1 min-w-0 overflow-y-auto p-5 flex flex-col gap-5">
+              <div className="flex flex-col gap-1">
+                <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">
+                  {t('builderTab.toolsTitle')}
+                </h3>
+                <p className="text-[0.75rem] text-[var(--text-muted)] max-w-[680px]">
+                  {t('builderTab.toolsSubtitle')}
+                </p>
+              </div>
+
+              {loading && !env ? (
+                <div className="text-[0.8125rem] text-[var(--text-muted)]">
+                  {t('builderTab.loading')}
+                </div>
+              ) : loadError ? (
+                <div className="px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
+                  {loadError}
+                </div>
+              ) : !toolsDraft ? (
+                <div className="text-[0.8125rem] text-[var(--text-muted)]">
+                  {t('builderTab.loading')}
+                </div>
+              ) : (
+                <>
+                  <ToolsEditor
+                    draft={toolsDraft}
+                    onChange={setToolsDraft}
+                    labels={{
+                      allowlist: t('builderTab.allowlist'),
+                      allowlistHint: t('builderTab.allowlistHint'),
+                      blocklist: t('builderTab.blocklist'),
+                      blocklistHint: t('builderTab.blocklistHint'),
+                      adhocTools: t('builderTab.adhocTools'),
+                      adhocToolsHint: t('builderTab.adhocToolsHint'),
+                      mcpServers: t('builderTab.mcpServers'),
+                      mcpServersHint: t('builderTab.mcpServersHint'),
+                      patternsPlaceholder: t('builderTab.patternsPlaceholder'),
+                      jsonArrayPlaceholder: t('builderTab.jsonArrayPlaceholder'),
+                      entriesCount: t('builderTab.entriesCount'),
+                    }}
+                  />
+
+                  {toolsError && (
+                    <div className="px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
+                      {toolsError}
+                    </div>
+                  )}
+                  {toolsSavedFlash && !toolsError && (
+                    <div className="px-3 py-2 rounded-md bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)] text-[0.75rem] text-[var(--success-color)]">
+                      {t('builderTab.toolsSaved')}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      onClick={handleToolsRevert}
+                      disabled={!toolsDirty || toolsSaving}
+                      className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-transparent border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <RotateCcw size={12} />
+                      {t('builderTab.revert')}
+                    </button>
+                    <button
+                      onClick={handleToolsSave}
+                      disabled={
+                        !toolsDirty ||
+                        toolsSaving ||
+                        (toolsValidation ? toolsValidation.hasErrors : true)
+                      }
+                      className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-semibold cursor-pointer border-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Save size={12} />
+                      {toolsSaving ? t('builderTab.saving') : t('builderTab.toolsSave')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+
+            {showPreview && (
+              <aside className="hidden md:flex w-[360px] shrink-0 border-l border-[var(--border-color)] bg-[var(--bg-secondary)] flex-col">
+                <div className="px-4 py-2.5 border-b border-[var(--border-color)] text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
+                  {t('builderTab.manifestPreview')}
+                </div>
+                <pre className="flex-1 min-h-0 overflow-auto p-3 text-[0.6875rem] leading-[1.5] font-mono text-[var(--text-secondary)] whitespace-pre">
+                  {env?.manifest ? JSON.stringify(env.manifest, null, 2) : ''}
+                </pre>
+              </aside>
+            )}
+          </main>
+        ) : (
+          <>
         {/* Stage list */}
         <aside className="w-[260px] shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col">
           <div className="px-4 py-2.5 border-b border-[var(--border-color)] text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
@@ -633,6 +816,8 @@ export default function BuilderTab() {
             </aside>
           )}
         </main>
+          </>
+        )}
       </div>
     </div>
   );
