@@ -576,6 +576,7 @@ const en = {
     showDeleted: 'Include soft-deleted sessions',
     sessionDeletedHint: 'This session was soft-deleted; it cannot be opened.',
     linkedSessionsFallback: 'Live lookup failed — showing in-memory sessions only.',
+    refreshSessions: 'Refresh linked sessions',
   },
 
   // ─── Import Manifest Modal ───

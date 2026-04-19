@@ -17,6 +17,7 @@ import type {
   CreateEnvironmentPayload,
   EnvironmentDetail,
   EnvironmentManifest,
+  EnvironmentSessionSummary,
   EnvironmentSummary,
   UpdateEnvironmentPayload,
   UpdateStageTemplatePayload,
@@ -28,6 +29,15 @@ export type EnvSessionCountBucket = {
   error: number;
 };
 
+export type DrawerSessionsEntry = {
+  sessions: EnvironmentSessionSummary[];
+  fetchedAt: number;
+};
+
+function drawerKey(envId: string, includeDeleted: boolean): string {
+  return `${envId}:${includeDeleted ? 'all' : 'active'}`;
+}
+
 interface EnvironmentState {
   // Data
   environments: EnvironmentSummary[];
@@ -35,6 +45,7 @@ interface EnvironmentState {
   catalog: CatalogResponse | null;
   sessionCounts: Record<string, EnvSessionCountBucket> | null;
   sessionCountsFetchedAt: number | null;
+  drawerSessions: Record<string, DrawerSessionsEntry>;
   isLoading: boolean;
   isLoadingCatalog: boolean;
   error: string | null;
@@ -45,6 +56,12 @@ interface EnvironmentState {
   clearSelection: () => void;
   refreshSessionCounts: () => Promise<void>;
   refreshSessionCountsIfStale: (ttlMs: number) => Promise<void>;
+
+  // Drawer linked-sessions cache
+  loadDrawerSessions: (envId: string, includeDeleted: boolean) => Promise<EnvironmentSessionSummary[]>;
+  refreshDrawerSessions: (envId: string, includeDeleted: boolean) => Promise<EnvironmentSessionSummary[]>;
+  refreshDrawerSessionsIfStale: (envId: string, includeDeleted: boolean, ttlMs: number) => Promise<void>;
+  invalidateDrawerSessionsForEnv: (envId: string) => void;
 
   // Mutations
   createEnvironment: (payload: CreateEnvironmentPayload) => Promise<{ id: string }>;
@@ -81,6 +98,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
   catalog: null,
   sessionCounts: null,
   sessionCountsFetchedAt: null,
+  drawerSessions: {},
   isLoading: false,
   isLoadingCatalog: false,
   error: null,
@@ -123,6 +141,50 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
     }
     await get().refreshSessionCounts();
   },
+
+  loadDrawerSessions: async (envId, includeDeleted) => {
+    const key = drawerKey(envId, includeDeleted);
+    const cached = get().drawerSessions[key];
+    if (cached) return cached.sessions;
+    return get().refreshDrawerSessions(envId, includeDeleted);
+  },
+
+  refreshDrawerSessions: async (envId, includeDeleted) => {
+    const key = drawerKey(envId, includeDeleted);
+    const res = await environmentApi.linkedSessions(envId, includeDeleted);
+    set((s) => ({
+      drawerSessions: {
+        ...s.drawerSessions,
+        [key]: { sessions: res.sessions, fetchedAt: Date.now() },
+      },
+    }));
+    return res.sessions;
+  },
+
+  refreshDrawerSessionsIfStale: async (envId, includeDeleted, ttlMs) => {
+    const key = drawerKey(envId, includeDeleted);
+    const cached = get().drawerSessions[key];
+    if (cached && Date.now() - cached.fetchedAt < ttlMs) return;
+    try {
+      await get().refreshDrawerSessions(envId, includeDeleted);
+    } catch {
+      // Preserve the prior cache; the drawer surfaces its own error
+      // message via the imperative fetch path.
+    }
+  },
+
+  invalidateDrawerSessionsForEnv: (envId) =>
+    set((s) => {
+      const activeKey = drawerKey(envId, false);
+      const allKey = drawerKey(envId, true);
+      if (!(activeKey in s.drawerSessions) && !(allKey in s.drawerSessions)) {
+        return s;
+      }
+      const next = { ...s.drawerSessions };
+      delete next[activeKey];
+      delete next[allKey];
+      return { drawerSessions: next };
+    }),
 
   loadEnvironment: async (envId) => {
     set({ isLoading: true, error: null });
@@ -173,6 +235,14 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
         const { [envId]: _dropped, ...rest } = s.sessionCounts;
         void _dropped;
         next.sessionCounts = rest;
+      }
+      const activeKey = drawerKey(envId, false);
+      const allKey = drawerKey(envId, true);
+      if (activeKey in s.drawerSessions || allKey in s.drawerSessions) {
+        const cache = { ...s.drawerSessions };
+        delete cache[activeKey];
+        delete cache[allKey];
+        next.drawerSessions = cache;
       }
       return next as EnvironmentState;
     });
