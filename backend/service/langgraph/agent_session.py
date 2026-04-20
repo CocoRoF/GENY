@@ -53,6 +53,27 @@ from service.logging.session_logger import get_session_logger, SessionLogger, Lo
 logger = getLogger(__name__)
 
 
+def _classify_input_role(input_text: str) -> str:
+    """Map invoke input to the STM role it should be recorded under.
+
+    Internal auto-triggers and inter-agent DMs must not be recorded as
+    ``"user"`` — downstream reasoning (session_summary, keyword/vector
+    retrieval) would otherwise conflate system self-prompts and
+    counterpart messages with real user input. See
+    ``dev_docs/20260420_8/plan/03_turn_memory_continuity.md`` § 4-2.
+    """
+    head = input_text.lstrip()[:64]
+    if head.startswith("[THINKING_TRIGGER") or head.startswith("[ACTIVITY_TRIGGER"):
+        return "internal_trigger"
+    if (
+        head.startswith("[SUB_WORKER_RESULT]")
+        or head.startswith("[SUB_WORKER_PROGRESS]")
+        or head.startswith("[FROM_COUNTERPART]")
+    ):
+        return "assistant_dm"
+    return "user"
+
+
 # ============================================================================
 # AgentSession Class
 # ============================================================================
@@ -882,12 +903,16 @@ class AgentSession:
 
         Maintains the same return contract: {"output": str, "total_cost": float}
         """
-        # Record user input to short-term memory
+        # Record input to short-term memory with proper role classification.
+        # Internal triggers and inter-agent DMs are not "user" — see
+        # _classify_input_role for the full rationale.
         if self._memory_manager:
             try:
-                self._memory_manager.record_message("user", input_text)
+                self._memory_manager.record_message(
+                    _classify_input_role(input_text), input_text,
+                )
             except Exception:
-                logger.debug("Failed to record user message — non-critical", exc_info=True)
+                logger.debug("Failed to record input message — non-critical", exc_info=True)
 
         # Stream pipeline and log events in real time
         accumulated_output = ""
@@ -1011,6 +1036,23 @@ class AgentSession:
                 stop_reason="pipeline_complete" if success else (error_msg or "error"),
             )
 
+        # Record the assistant's reply into STM before the LTM write.
+        # Without this the transcript only contains user-side messages,
+        # so retrieval layers (session_summary, keyword, vector) cannot
+        # see what the assistant just said — which is exactly what broke
+        # trigger-driven continuity in cycle 20260420_8 Bug 2b.
+        if self._memory_manager and success and accumulated_output.strip():
+            try:
+                self._memory_manager.record_message(
+                    "assistant",
+                    accumulated_output[:10000],
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to record assistant message — non-critical",
+                    exc_info=True,
+                )
+
         # Record to long-term memory
         self._execution_count += 1
         if self._memory_manager:
@@ -1051,12 +1093,16 @@ class AgentSession:
         agent_executor.py and the frontend expect, while also logging
         events to session_logger for WebSocket/SSE streaming.
         """
-        # Record user input to short-term memory
+        # Record input to short-term memory with proper role classification.
+        # See _classify_input_role for why triggers / inter-agent DMs are
+        # not "user".
         if self._memory_manager:
             try:
-                self._memory_manager.record_message("user", input_text)
+                self._memory_manager.record_message(
+                    _classify_input_role(input_text), input_text,
+                )
             except Exception:
-                logger.debug("Failed to record user message — non-critical", exc_info=True)
+                logger.debug("Failed to record input message — non-critical", exc_info=True)
 
         accumulated_output = ""
         total_cost = 0.0
@@ -1173,6 +1219,20 @@ class AgentSession:
                 total_duration_ms=duration_ms,
                 stop_reason="pipeline_stream_complete",
             )
+
+        # Record the assistant's streamed reply into STM before the LTM
+        # write — see _invoke_pipeline for the full rationale.
+        if self._memory_manager and success and accumulated_output.strip():
+            try:
+                self._memory_manager.record_message(
+                    "assistant",
+                    accumulated_output[:10000],
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to record assistant message — non-critical",
+                    exc_info=True,
+                )
 
         self._execution_count += 1
         if self._memory_manager:
