@@ -1,8 +1,7 @@
 # Progress Index — Tool/MCP Integration Hardening
 
-본 사이클의 구현 PR 단위 기록. 현재 단계는 **분석 + 계획** 이며, 아직 구현에
-착수하지 않았다. 구현이 시작되면 각 PR 별로 이 폴더에 `NN_<slug>.md` 를
-추가한다.
+본 사이클의 구현 PR 단위 기록. 구현 진행 중 — 각 PR 별로 이 폴더에
+`NN_<slug>.md` 를 추가한다.
 
 ## 기록 규약
 
@@ -13,11 +12,14 @@
 
 ## 현재 상태
 
-- [ ] Phase A — Host 계약 강화 (plan/02)
-- [ ] Phase B — MCP 수명주기 (plan/03)
-- [ ] Phase C — 단일 tool surface (plan/01)
-- [ ] Phase D — 관측성 / logging swallower 제거 (plan/04)
-- [ ] Phase E — 롤아웃 / 회귀 방지 (plan/05)
+- [x] Phase A — Host 계약 강화 (plan/02) — PR1 `#22`, PR2 `#23`.
+- [x] Phase B — MCP 수명주기 (plan/03) — PR3 `#24`.
+- [ ] Phase C — 단일 tool surface (plan/01) — host PR4 `#25` 완료,
+  릴리즈 PR5 `#26` + tag `v0.22.0` 완료, Geny safe-refactor PR6
+  `#135` 완료. 남은 작업: Geny switch-over (PR8).
+- [ ] Phase D — 관측성 / logging swallower 제거 (plan/04) — PR7 대기.
+- [ ] Phase E — 롤아웃 / 회귀 방지 (plan/05) — Phase C 종료 후 수동
+  QA 진행.
 
 ## 인덱스
 
@@ -29,3 +31,7 @@
   — geny-executor `feat/mcp-lifecycle`.
 - [04 — AdhocToolProvider + external 필드 (PR4, Phase C host)](04_adhoc_tool_provider.md)
   — geny-executor `feat/adhoc-tool-provider`.
+- [05 — geny-executor v0.22.0 릴리즈 (PR5)](05_release_v0_22_0.md)
+  — geny-executor `release/v0.22.0` + tag `v0.22.0`.
+- [06 — Geny safe-refactor dead code (PR6, Phase C 준비)](06_safe_refactor_dead_code.md)
+  — Geny `feat/geny-tool-provider-dead-code`.
