@@ -807,53 +807,70 @@ async def execute_command(
 
 async def _drain_inbox(session_id: str) -> None:
     """
-    After an execution completes, check for unread inbox messages
-    (e.g. SUB_WORKER_RESULT that arrived while VTuber was busy, or queued
-    user messages) and process them.
+    After an execution completes, consume unread inbox messages one at a
+    time and feed them back through ``execute_command``. Messages are
+    marked read at pull time (consumed-on-pull), so a deterministic
+    processing failure cannot loop — the message is lost but the drain
+    does not spin.
 
-    Uses ``_draining_sessions`` to prevent infinite recursion:
-    drain → execute_command → drain → ...
-
-    NOT marked as ``is_trigger`` so it cannot be preempted mid-flight
-    (inbox messages must not be lost).
+    Ordering: each pull + synthesised turn runs serially under the
+    ``_draining_sessions`` guard. The existing ``AlreadyExecutingError``
+    is the backstop against concurrent execution (the winning caller's
+    own finally block will re-invoke this drain).
     """
+    if session_id in _draining_sessions:
+        return
+
     try:
         from service.chat.inbox import get_inbox_manager
-        inbox = get_inbox_manager()
+    except Exception:
+        logger.debug("Inbox import failed for %s drain", session_id, exc_info=True)
+        return
 
-        unread = inbox.read(session_id, unread_only=True)
-        if not unread:
-            return
+    inbox = get_inbox_manager()
+    _draining_sessions.add(session_id)
+    try:
+        while True:
+            try:
+                pulled = inbox.pull_unread(session_id, limit=1)
+            except Exception:
+                logger.debug(
+                    "Inbox pull failed for %s", session_id, exc_info=True,
+                )
+                return
+            if not pulled:
+                return
+            msg = pulled[0]
 
-        # Build combined prompt from all unread messages
-        msg_ids = [m["id"] for m in unread]
-        parts = []
-        for m in unread:
-            sender = m.get("sender_name") or "Unknown"
-            parts.append(f"[INBOX from {sender}]\n{m['content']}")
-        combined = "\n\n---\n\n".join(parts)
+            sender = msg.get("sender_name") or "Unknown"
+            prompt = f"[INBOX from {sender}]\n{msg['content']}"
+            logger.info(
+                "Draining inbox msg %s for %s (sender=%s)",
+                msg.get("id"), session_id, sender,
+            )
 
-        logger.info(
-            "Draining inbox for %s: %d unread messages",
-            session_id, len(unread),
-        )
+            try:
+                result = await execute_command(session_id, prompt)
+            except AlreadyExecutingError:
+                # A concurrent execution took the slot. Its finally
+                # block will re-trigger drain; bail to avoid racing.
+                logger.debug(
+                    "Drain for %s yielded to concurrent execution",
+                    session_id,
+                )
+                return
+            except Exception:
+                logger.debug(
+                    "Drained execute_command failed for %s",
+                    session_id, exc_info=True,
+                )
+                # Message already consumed — skip to next one.
+                continue
 
-        # Guard against recursion
-        _draining_sessions.add(session_id)
-        try:
-            result = await execute_command(session_id, combined)
-            # Mark read AFTER successful processing to prevent data loss
-            inbox.mark_read(session_id, msg_ids)
-            # Save result to chat room so user can see it
             if result.success and result.output and result.output.strip():
                 _save_drain_to_chat_room(session_id, result)
-        finally:
-            _draining_sessions.discard(session_id)
-
-    except AlreadyExecutingError:
-        pass  # Another execution started — inbox will drain after it completes
-    except Exception:
-        logger.debug("Inbox drain failed for %s", session_id, exc_info=True)
+    finally:
+        _draining_sessions.discard(session_id)
 
 
 def _save_drain_to_chat_room(session_id: str, result: 'ExecutionResult') -> None:
