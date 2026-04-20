@@ -787,6 +787,7 @@ class AgentSession:
                 max_inject_chars=max_inject_chars,
                 enable_vector_search=True,
                 curated_knowledge_manager=curated_km,
+                recent_turns=6,
             )
             attach_kwargs["memory_strategy"] = GenyMemoryStrategy(
                 self._memory_manager,
