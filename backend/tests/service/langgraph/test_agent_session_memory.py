@@ -38,18 +38,39 @@ from service.langgraph.agent_session import (
 @pytest.mark.parametrize(
     "text,expected",
     [
+        # Plain user input
         ("hello world", "user"),
         ("  hi there", "user"),
+        # Internal triggers — emitted by service/vtuber/thinking_trigger.py
+        ("[THINKING_TRIGGER] user has been quiet", "internal_trigger"),
         ("[THINKING_TRIGGER:first_idle] check in", "internal_trigger"),
         ("[THINKING_TRIGGER:continued_idle]", "internal_trigger"),
+        ("[ACTIVITY_TRIGGER] curiosity time", "internal_trigger"),
         ("[ACTIVITY_TRIGGER:user_return] hi", "internal_trigger"),
+        # Sub-worker auto-reports — emitted by service/execution/agent_executor.py
         ("[SUB_WORKER_RESULT] Task done: file.txt created", "assistant_dm"),
+        ("[SUB_WORKER_RESULT] Task failed: boom", "assistant_dm"),
+        # Legacy alias still accepted by DelegationMessage.is_result_message
+        ("[CLI_RESULT] legacy payload", "assistant_dm"),
+        # Delegation protocol tags — service/vtuber/delegation.py
+        ("[DELEGATION_REQUEST] please handle this task", "assistant_dm"),
+        ("[DELEGATION_RESULT] task completed", "assistant_dm"),
+        # DM prompt wrapper — tools/built_in/geny_tools.py _trigger_dm_response
+        (
+            "[SYSTEM] You received a direct message from alice (session: s-1). "
+            "Read the message below...",
+            "assistant_dm",
+        ),
+        # Forward-compat placeholders from plan/03 § 4-2
         ("[SUB_WORKER_PROGRESS] 50% done", "assistant_dm"),
         ("[FROM_COUNTERPART:sub-1] hey worker", "assistant_dm"),
+        # Leading whitespace must not defeat the match
         ("   [SUB_WORKER_RESULT] leading ws stripped", "assistant_dm"),
-        # Ambiguous / malicious — must not match
+        # Ambiguous / embedded — must stay "user"
         ("fake [THINKING_TRIGGER] inside prose", "user"),
         ("[OTHER_TAG] not ours", "user"),
+        # Unrelated [SYSTEM] prompts must not be swept up
+        ("[SYSTEM] Something else entirely", "user"),
     ],
 )
 def test_classify_input_role(text: str, expected: str) -> None:

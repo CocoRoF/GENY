@@ -61,14 +61,35 @@ def _classify_input_role(input_text: str) -> str:
     retrieval) would otherwise conflate system self-prompts and
     counterpart messages with real user input. See
     ``dev_docs/20260420_8/plan/03_turn_memory_continuity.md`` § 4-2.
+
+    Tag coverage mirrors what the rest of the codebase actually emits:
+
+    * ``[THINKING_TRIGGER]`` and ``[ACTIVITY_TRIGGER]`` from
+      ``service/vtuber/thinking_trigger.py`` → ``internal_trigger``.
+    * ``[SUB_WORKER_RESULT]`` (+ legacy ``[CLI_RESULT]``),
+      ``[DELEGATION_REQUEST]``, ``[DELEGATION_RESULT]`` from
+      ``service/vtuber/delegation.py`` → ``assistant_dm``.
+    * DM prompts emitted by ``_trigger_dm_response`` in
+      ``tools/built_in/geny_tools.py`` start with
+      ``[SYSTEM] You received a direct message`` — also ``assistant_dm``.
+    * ``[SUB_WORKER_PROGRESS]`` / ``[FROM_COUNTERPART]`` are reserved
+      forward-compat slots from plan/03 § 4-2; kept here so callers
+      that later emit them get routed without another code change.
+
+    Prefix matches use the open form (``[TAG`` rather than ``[TAG]``)
+    so variants like ``[THINKING_TRIGGER:first_idle]`` match.
     """
-    head = input_text.lstrip()[:64]
+    head = input_text.lstrip()[:128]
     if head.startswith("[THINKING_TRIGGER") or head.startswith("[ACTIVITY_TRIGGER"):
         return "internal_trigger"
     if (
-        head.startswith("[SUB_WORKER_RESULT]")
-        or head.startswith("[SUB_WORKER_PROGRESS]")
-        or head.startswith("[FROM_COUNTERPART]")
+        head.startswith("[SUB_WORKER_RESULT")
+        or head.startswith("[SUB_WORKER_PROGRESS")
+        or head.startswith("[CLI_RESULT")
+        or head.startswith("[DELEGATION_REQUEST")
+        or head.startswith("[DELEGATION_RESULT")
+        or head.startswith("[FROM_COUNTERPART")
+        or head.startswith("[SYSTEM] You received a direct message")
     ):
         return "assistant_dm"
     return "user"
