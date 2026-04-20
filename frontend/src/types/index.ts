@@ -263,6 +263,11 @@ export interface LogEntryMetadata {
   state_snapshot?: Record<string, unknown>;
   data?: Record<string, unknown>;
 
+  // Per-turn context — which environment + role produced this entry.
+  // Threaded through log_command / log_response in agent_executor.
+  env_id?: string;
+  role?: string;
+
   // Rich structured data for IDE display (injected by enhanced logger)
   file_changes?: FileChanges;
   command_data?: CommandData;
