@@ -607,6 +607,7 @@ class AgentSessionManager(SessionManager):
             and request.session_type != "sub"
             and not request.linked_session_id
         ):
+            worker_session_id: Optional[str] = None
             try:
                 worker_name = f"{request.session_name or 'vtuber'}_worker"
                 # Share the VTuber's actual storage path so memory is shared
@@ -690,7 +691,30 @@ class AgentSessionManager(SessionManager):
                     pass  # best-effort
 
             except Exception as e:
-                logger.error(f"[{session_id}] Failed to create Sub-Worker: {e}", exc_info=True)
+                logger.error(
+                    f"[{session_id}] Failed to create Sub-Worker: {e} — "
+                    f"rolling back VTuber to avoid an orphaned half-pair",
+                    exc_info=True,
+                )
+                # Roll back any Sub-Worker that did register before the
+                # failure, then the VTuber itself. Each cleanup is
+                # independently guarded so a secondary failure can't
+                # swallow the primary one — we still re-raise.
+                if worker_session_id is not None:
+                    try:
+                        await self.delete_session(worker_session_id)
+                    except Exception:
+                        logger.exception(
+                            f"[{session_id}] Rollback of partial Sub-Worker "
+                            f"{worker_session_id} also failed"
+                        )
+                try:
+                    await self.delete_session(session_id)
+                except Exception:
+                    logger.exception(
+                        f"[{session_id}] Rollback of partial VTuber also failed"
+                    )
+                raise
 
         return agent
 
