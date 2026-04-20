@@ -1,38 +1,26 @@
 """Preset → :class:`EnvironmentManifest` factory.
 
-Non-``env_id`` sessions have historically been wired through
-:class:`~geny_executor.memory.GenyPresets`'s imperative preset builders
-(``worker_adaptive`` / ``vtuber`` / ``worker_easy``). The Phase C
-switch-over collapses every session path onto the single
-``Pipeline.from_manifest_async(manifest, adhoc_providers=[...])`` entry
-point; this factory is the piece that turns a preset *name* into the
-manifest that entry-point expects.
+Turns a preset *name* (``"worker_adaptive"`` / ``"vtuber"`` /
+``"worker_easy"``) into the :class:`EnvironmentManifest` that
+:meth:`Pipeline.from_manifest_async` expects. Called from the
+manifest-first session build path once that lands in a later PR —
+until then this module produces manifests that tests can exercise
+for parity against :class:`~geny_executor.memory.GenyPresets`.
 
-**Still inactive after the Phase C cutover PR.** That PR activates
-:class:`GenyToolProvider` in the env_id flow (where a manifest is
-loaded from disk), but the non-env_id path in
-``AgentSession._build_pipeline`` continues to call
-:class:`~geny_executor.memory.GenyPresets` directly. Replacing that
-path requires populating ``stages=[...]`` here with the worker /
-vtuber stage chains *and* writing a post-construction attach helper
-that injects ``memory_manager`` / ``llm_reflect`` /
-``curated_knowledge_manager`` into the relevant stages — both
-deliberately out of scope for the current cutover. Once that
-follow-on PR lands, this factory becomes the single entry point for
-non-env_id sessions.
-
-Returned manifests deliberately carry **only what the manifest can
-authoritatively express**: stage layout, built-in tool whitelist, and
-(once the switch-over lands) the ``external`` names for Geny-provider
-tools. Runtime-scoped objects — memory manager, curated-knowledge
-callback, LLM reflect callback — remain the caller's responsibility
-and are attached to the pipeline after construction; they are not
-encoded in the manifest.
+The returned manifest carries **only declarative shape**: the stage
+list, per-stage artifact names, slot strategy choices, and static
+configs (e.g. ``loop.max_turns``). Runtime-scoped objects — the
+per-session :class:`GenyMemoryRetriever` / :class:`GenyMemoryStrategy`
+/ :class:`GenyPersistence` instances, the composable prompt builder
+blocks, the ``llm_reflect`` / ``llm_gate`` callbacks, the curated
+knowledge manager — stay out of the manifest and are wired in by
+``Pipeline.attach_runtime(...)`` at session start. This is the
+split the plan calls "declarative params only".
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # Core built-in tool set shared across presets. Mirrors the six tools
@@ -59,6 +47,222 @@ _DEFAULT_ALIAS = "default"  # maps to worker_adaptive at session level
 _KNOWN_PRESETS = frozenset(
     {_VTUBER, _WORKER_ADAPTIVE, _WORKER_EASY, _DEFAULT_ALIAS}
 )
+
+
+# Defaults that ``GenyPresets`` passes into the adaptive evaluator.
+# Matches ``geny_executor.memory.presets.GenyPresets.worker_adaptive``.
+_WORKER_ADAPTIVE_EASY_MAX_TURNS = 1
+_WORKER_ADAPTIVE_NOT_EASY_MAX_TURNS = 30
+
+# Loop max_turns defaults per preset. Mirror GenyPresets.* directly.
+_WORKER_ADAPTIVE_MAX_TURNS = 30
+_VTUBER_MAX_TURNS = 10
+
+
+def _build_stage_entries(preset: str) -> List["object"]:
+    """Emit the :class:`StageManifestEntry` list for *preset*.
+
+    Stage identities, artifact names, and slot choices mirror the
+    pipelines that :class:`~geny_executor.memory.GenyPresets` builds
+    today (see ``geny_executor/memory/presets.py``). Three runtime-
+    swapped slots carry *default* strategies here — they are
+    overwritten by :meth:`Pipeline.attach_runtime` at session start:
+
+    - ``context.retriever`` → swapped to :class:`GenyMemoryRetriever`
+    - ``memory.strategy`` → swapped to :class:`GenyMemoryStrategy`
+    - ``memory.persistence`` → swapped to :class:`GenyPersistence`
+
+    Stage 3 ``system.builder`` is declared as ``"composable"`` to
+    match the preset; the block list (persona + datetime + memory
+    context) is attached at runtime in a later PR. Stage 10
+    (``tool``) is left off the declarative stage list — presets
+    register it conditionally on ``tools`` being passed, and the
+    session-level code decides that at pipeline-build time.
+    """
+    from geny_executor.core.environment import StageManifestEntry
+
+    if preset == _VTUBER:
+        return _vtuber_stage_entries(StageManifestEntry)
+    # worker_adaptive and worker_easy both inherit the adaptive layout
+    # for now. worker_easy's single-turn behaviour is expressed by the
+    # session layer setting ``max_turns=1`` on the loop at attach time,
+    # not by a separate manifest variant.
+    return _worker_adaptive_stage_entries(StageManifestEntry)
+
+
+def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
+    """Mirror :meth:`GenyPresets.worker_adaptive` stage chain."""
+    return [
+        StageManifestEntry(
+            order=1,
+            name="input",
+            strategies={"validator": "default", "normalizer": "default"},
+        ),
+        StageManifestEntry(
+            order=2,
+            name="context",
+            strategies={
+                "strategy": "simple_load",
+                "compactor": "truncate",
+                "retriever": "null",  # swapped by attach_runtime
+            },
+        ),
+        StageManifestEntry(
+            order=3,
+            name="system",
+            strategies={"builder": "composable"},
+        ),
+        StageManifestEntry(
+            order=4,
+            name="guard",
+        ),
+        StageManifestEntry(
+            order=5,
+            name="cache",
+            strategies={"strategy": "aggressive_cache"},
+        ),
+        StageManifestEntry(
+            order=6,
+            name="api",
+            strategies={
+                "provider": "anthropic",
+                "retry": "exponential_backoff",
+            },
+        ),
+        StageManifestEntry(
+            order=7,
+            name="token",
+            strategies={
+                "tracker": "default",
+                "calculator": "anthropic_pricing",
+            },
+        ),
+        StageManifestEntry(
+            order=8,
+            name="think",
+            strategies={"processor": "extract_and_store"},
+        ),
+        StageManifestEntry(
+            order=9,
+            name="parse",
+            strategies={"parser": "default", "signal_detector": "regex"},
+        ),
+        StageManifestEntry(
+            order=12,
+            name="evaluate",
+            strategies={"strategy": "binary_classify", "scorer": "no_scorer"},
+            strategy_configs={
+                "strategy": {
+                    "easy_max_turns": _WORKER_ADAPTIVE_EASY_MAX_TURNS,
+                    "not_easy_max_turns": _WORKER_ADAPTIVE_NOT_EASY_MAX_TURNS,
+                },
+            },
+        ),
+        StageManifestEntry(
+            order=13,
+            name="loop",
+            strategies={"controller": "standard"},
+            config={"max_turns": _WORKER_ADAPTIVE_MAX_TURNS},
+        ),
+        StageManifestEntry(
+            order=15,
+            name="memory",
+            strategies={
+                "strategy": "append_only",  # swapped by attach_runtime
+                "persistence": "null",  # swapped by attach_runtime
+            },
+        ),
+        StageManifestEntry(
+            order=16,
+            name="yield",
+            strategies={"formatter": "default"},
+        ),
+    ]
+
+
+def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
+    """Mirror :meth:`GenyPresets.vtuber` stage chain.
+
+    Diff vs worker_adaptive: no Stage 8 (think), cache is
+    ``system_cache`` (not ``aggressive_cache``), evaluator is
+    ``signal_based`` (not ``binary_classify``), and loop
+    ``max_turns`` is 10 (not 30).
+    """
+    return [
+        StageManifestEntry(
+            order=1,
+            name="input",
+            strategies={"validator": "default", "normalizer": "default"},
+        ),
+        StageManifestEntry(
+            order=2,
+            name="context",
+            strategies={
+                "strategy": "simple_load",
+                "compactor": "truncate",
+                "retriever": "null",  # swapped by attach_runtime
+            },
+        ),
+        StageManifestEntry(
+            order=3,
+            name="system",
+            strategies={"builder": "composable"},
+        ),
+        StageManifestEntry(
+            order=4,
+            name="guard",
+        ),
+        StageManifestEntry(
+            order=5,
+            name="cache",
+            strategies={"strategy": "system_cache"},
+        ),
+        StageManifestEntry(
+            order=6,
+            name="api",
+            strategies={
+                "provider": "anthropic",
+                "retry": "exponential_backoff",
+            },
+        ),
+        StageManifestEntry(
+            order=7,
+            name="token",
+            strategies={
+                "tracker": "default",
+                "calculator": "anthropic_pricing",
+            },
+        ),
+        StageManifestEntry(
+            order=9,
+            name="parse",
+            strategies={"parser": "default", "signal_detector": "regex"},
+        ),
+        StageManifestEntry(
+            order=12,
+            name="evaluate",
+            strategies={"strategy": "signal_based", "scorer": "no_scorer"},
+        ),
+        StageManifestEntry(
+            order=13,
+            name="loop",
+            strategies={"controller": "standard"},
+            config={"max_turns": _VTUBER_MAX_TURNS},
+        ),
+        StageManifestEntry(
+            order=15,
+            name="memory",
+            strategies={
+                "strategy": "append_only",  # swapped by attach_runtime
+                "persistence": "null",  # swapped by attach_runtime
+            },
+        ),
+        StageManifestEntry(
+            order=16,
+            name="yield",
+            strategies={"formatter": "default"},
+        ),
+    ]
 
 
 def build_default_manifest(
@@ -88,18 +292,19 @@ def build_default_manifest(
 
     Returns:
         An :class:`EnvironmentManifest` ready to feed
-        :meth:`Pipeline.from_manifest_async`. The manifest carries
-        ``tools.built_in`` populated from the shared default set and
-        ``tools.external`` populated from *external_tool_names*. No
-        ``mcp_servers`` are declared; callers that need MCP tools add
-        them to the manifest explicitly.
+        :meth:`Pipeline.from_manifest_async`. The manifest carries a
+        populated stage list (mirroring the preset's stage chain),
+        ``tools.built_in`` populated from the shared default set,
+        and ``tools.external`` populated from *external_tool_names*.
+        No ``mcp_servers`` are declared; callers that need MCP tools
+        add them to the manifest explicitly.
 
     Raises:
         ValueError: If *preset* is not a known preset name.
         ImportError: If ``geny-executor`` is not installed in the
             current environment. This module imports the executor
             lazily so merely importing ``default_manifest`` is safe
-            even on deployments that predate the v0.22.0 dependency
+            even on deployments that predate the v0.25.0 dependency
             bump.
     """
     if preset not in _KNOWN_PRESETS:
@@ -113,9 +318,6 @@ def build_default_manifest(
     # name.
     effective = _WORKER_ADAPTIVE if preset == _DEFAULT_ALIAS else preset
 
-    # Lazy import — keeps merely loading this module safe against
-    # older executor versions during the pre-v0.22.0 dead-code
-    # window.
     from geny_executor.core.environment import (
         EnvironmentManifest,
         EnvironmentMetadata,
@@ -134,18 +336,15 @@ def build_default_manifest(
         external=list(external_tool_names or []),
     )
 
-    model_block: Dict[str, object] = {"model": model} if model else {}
+    model_block: Dict[str, Any] = {"model": model} if model else {}
 
-    # The stage list is intentionally empty in the dead-code version.
-    # The switch-over PR fills it in by walking the preset's stage
-    # configuration — that requires the runtime plumbing to
-    # reattach memory_manager / callbacks and belongs in the same
-    # commit that deletes the legacy preset branches.
+    entries = _build_stage_entries(effective)
+
     return EnvironmentManifest(
         metadata=metadata,
         model=model_block,
         pipeline={},
-        stages=[],
+        stages=[e.to_dict() for e in entries],
         tools=tools,
     )
 
