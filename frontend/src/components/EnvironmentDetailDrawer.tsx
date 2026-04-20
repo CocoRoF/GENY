@@ -1,14 +1,15 @@
 'use client';
 
 /**
- * EnvironmentDetailDrawer — slide-over panel for inspecting a single
+ * EnvironmentDetailDrawer — centered modal for inspecting a single
  * EnvironmentManifest. Shows metadata, a read-only manifest JSON
  * preview, and the destructive/utility actions (duplicate, export,
  * delete) that the v2 environment REST surface exposes.
  *
- * Editing the manifest lands in Phase 6d (Builder tab) — this drawer
- * is intentionally read-only for the body so the delete/duplicate
- * flows can ship without waiting on the stage editor UX.
+ * Filename retained for git history; layout was a right-side drawer
+ * before 2026-04-20 when it moved to a centered modal so the footer
+ * action row stops wrapping into a broken layout in the narrow
+ * 520px slide-over.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -226,21 +227,28 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (typeof document === 'undefined') return null;
 
   return createPortal(
     <>
-      {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         onClick={onClose}
-      />
-
-      {/* Drawer */}
-      <aside
-        className="fixed top-0 right-0 bottom-0 z-50 w-full sm:w-[520px] bg-[var(--bg-secondary)] border-l border-[var(--border-color)] shadow-[var(--shadow-lg)] flex flex-col"
-        onClick={e => e.stopPropagation()}
       >
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[720px] max-h-[85vh] flex flex-col shadow-[var(--shadow-lg)]"
+          onClick={e => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="flex items-start justify-between gap-3 py-3 px-5 border-b border-[var(--border-color)] shrink-0">
           <div className="flex flex-col gap-0.5 min-w-0">
@@ -474,17 +482,58 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
           )}
         </div>
 
-        {/* Footer actions */}
-        <div className="flex items-center justify-between gap-2 py-3 px-5 border-t border-[var(--border-color)] shrink-0">
+        {/* Footer actions — primary on the right, secondaries collapse to
+            icon-only buttons with tooltips so the row no longer bursts. */}
+        <div className="flex items-center justify-between gap-3 py-3 px-5 border-t border-[var(--border-color)] shrink-0">
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-transparent border border-[rgba(239,68,68,0.3)] text-[0.75rem] font-medium text-[var(--danger-color)] hover:bg-[rgba(239,68,68,0.08)] cursor-pointer transition-colors"
             disabled={!env}
+            title={t('environmentDetail.deleteTitle')}
+            aria-label={t('environmentDetail.deleteTitle')}
+            className="flex items-center justify-center w-9 h-9 rounded-md bg-transparent border border-[rgba(239,68,68,0.3)] text-[var(--danger-color)] hover:bg-[rgba(239,68,68,0.08)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Trash2 size={12} />
-            {t('common.delete')}
+            <Trash2 size={14} />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {onCompare && (
+              <button
+                onClick={onCompare}
+                disabled={!env}
+                title={t('environmentDetail.compareWith')}
+                aria-label={t('environmentDetail.compareWith')}
+                className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowLeftRight size={14} />
+              </button>
+            )}
+            <button
+              onClick={handleDuplicate}
+              disabled={!env || duplicating}
+              title={duplicating ? t('environmentDetail.duplicating') : t('common.clone')}
+              aria-label={duplicating ? t('environmentDetail.duplicating') : t('common.clone')}
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Copy size={14} className={duplicating ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={handleExport}
+              disabled={!env || exporting}
+              title={exporting ? t('environmentDetail.exporting') : t('common.export')}
+              aria-label={exporting ? t('environmentDetail.exporting') : t('common.export')}
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download size={14} className={exporting ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={() => setShowImportManifest(true)}
+              disabled={!env}
+              title={t('environmentDetail.importManifest')}
+              aria-label={t('environmentDetail.importManifest')}
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Upload size={14} />
+            </button>
+            <div className="w-px h-6 bg-[var(--border-color)] mx-1" aria-hidden />
             <button
               onClick={() => {
                 openInBuilder(envId);
@@ -492,48 +541,15 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
                 onClose();
               }}
               disabled={!env}
-              className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-semibold cursor-pointer border-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 h-9 px-4 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.8125rem] font-semibold cursor-pointer border-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Settings2 size={12} />
+              <Settings2 size={14} />
               {t('environmentDetail.openInBuilder')}
-            </button>
-            {onCompare && (
-              <button
-                onClick={onCompare}
-                disabled={!env}
-                className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ArrowLeftRight size={12} />
-                {t('environmentDetail.compareWith')}
-              </button>
-            )}
-            <button
-              onClick={handleDuplicate}
-              disabled={!env || duplicating}
-              className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Copy size={12} />
-              {duplicating ? t('environmentDetail.duplicating') : t('common.clone')}
-            </button>
-            <button
-              onClick={handleExport}
-              disabled={!env || exporting}
-              className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download size={12} />
-              {exporting ? t('environmentDetail.exporting') : t('common.export')}
-            </button>
-            <button
-              onClick={() => setShowImportManifest(true)}
-              disabled={!env}
-              className="flex items-center gap-1.5 py-1.5 px-3 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload size={12} />
-              {t('environmentDetail.importManifest')}
             </button>
           </div>
         </div>
-      </aside>
+        </div>
+      </div>
 
       {showDeleteConfirm && (
         <ConfirmModal
