@@ -23,3 +23,5 @@
 
 - [01 — Host 구조화 에러 + 입력 검증 (PR1, Phase A)](01_host_structured_errors.md)
   — geny-executor `feat/tool-structured-errors`.
+- [02 — MCP 도구 네임스페이스 prefix (PR2, Phase A)](02_mcp_namespace_prefix.md)
+  — geny-executor `feat/mcp-namespace-prefix`.
