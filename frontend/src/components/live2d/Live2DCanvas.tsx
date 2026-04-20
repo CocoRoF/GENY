@@ -237,9 +237,9 @@ export default function Live2DCanvas({
       // Live2D Parts carry opacity per frame; motions may re-enable them, so we zero
       // opacity each tick (see onTick below).
       hiddenPartIndicesRef.current = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const coreModel = internalModel.coreModel as any;
       if (model.hiddenParts && model.hiddenParts.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const coreModel = internalModel.coreModel as any;
         for (const partId of model.hiddenParts) {
           try {
             const idx = coreModel.getPartIndex?.(partId);
@@ -252,6 +252,56 @@ export default function Live2DCanvas({
             console.warn(`[Live2DCanvas] Failed to resolve part "${partId}":`, err);
           }
         }
+      }
+
+      // ── DEV: expose part debug utility on window for watermark/credit identification ──
+      // Usage (browser console):
+      //   __live2dDebug.listParts()      — show all parts with opacity
+      //   __live2dDebug.hidePart("Part17") — hide a part by ID or index
+      //   __live2dDebug.showAll()         — reset all hidden parts
+      //   __live2dDebug.getHidden()       — list currently hidden Part IDs
+      if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+        // Cubism SDK v5: _partIds is the reliable array; getPartId() doesn't exist.
+        const allPartIds: string[] = coreModel._partIds
+          ? Array.from(coreModel._partIds as string[])
+          : [];
+        const partTotal = allPartIds.length;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__live2dDebug = {
+          listParts: () => {
+            const result: { index: number; id: string; opacity: number }[] = [];
+            for (let i = 0; i < partTotal; i++) {
+              result.push({
+                index: i,
+                id: allPartIds[i],
+                opacity: coreModel.getPartOpacityByIndex?.(i) ?? -1,
+              });
+            }
+            console.table(result);
+            return result;
+          },
+          hidePart: (idOrIndex: string | number) => {
+            const idx = typeof idOrIndex === 'number' ? idOrIndex : coreModel.getPartIndex?.(idOrIndex);
+            if (typeof idx === 'number' && idx >= 0) {
+              if (!hiddenPartIndicesRef.current.includes(idx)) {
+                hiddenPartIndicesRef.current.push(idx);
+              }
+              console.log(`Hidden part index ${idx} (${allPartIds[idx]})`);
+            } else {
+              console.warn(`Part "${idOrIndex}" not found`);
+            }
+          },
+          showPart: (idOrIndex: string | number) => {
+            const idx = typeof idOrIndex === 'number' ? idOrIndex : coreModel.getPartIndex?.(idOrIndex);
+            hiddenPartIndicesRef.current = hiddenPartIndicesRef.current.filter((i) => i !== idx);
+            console.log(`Shown part index ${idx} (${allPartIds[idx]})`);
+          },
+          showAll: () => {
+            hiddenPartIndicesRef.current = [];
+            console.log('All parts shown');
+          },
+          getHidden: () => hiddenPartIndicesRef.current.map((i) => allPartIds[i]),
+        };
       }
 
       // ── 1. Enhanced Lip Sync ──
