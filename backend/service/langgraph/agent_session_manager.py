@@ -567,6 +567,10 @@ class AgentSessionManager(SessionManager):
                 "working_dir": request.working_dir,
                 "max_turns": request.max_turns,
                 "type": "agent_session",
+                "env_id": env_id,
+                "role": request.role.value if request.role else "worker",
+                "session_type": request.session_type,
+                "linked_session_id": request.linked_session_id,
             })
             logger.info(f"[{session_id}] 📝 Session logger created")
 
