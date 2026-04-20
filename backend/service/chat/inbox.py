@@ -151,6 +151,30 @@ class InboxManager:
         # Return the *last* `limit` messages (most recent)
         return messages[-limit:] if len(messages) > limit else messages
 
+    def pull_unread(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Atomically read and mark all (or up to *limit*) unread messages.
+
+        The lock is held across the read+mark+save cycle so the same
+        message cannot be pulled twice by concurrent callers. Callers
+        take ownership of the returned messages — if they fail to
+        process them, the messages are lost (consumed-on-pull).
+        """
+        with self._lock:
+            messages = self._load_inbox(session_id)
+            pulled: List[Dict[str, Any]] = []
+            mutated = False
+            for m in messages:
+                if m.get("read", False):
+                    continue
+                if limit is not None and len(pulled) >= limit:
+                    break
+                m["read"] = True
+                pulled.append(m)
+                mutated = True
+            if mutated:
+                self._save_inbox(session_id, messages)
+        return pulled
+
     def mark_read(self, session_id: str, message_ids: List[str]) -> int:
         """Mark specific messages as read.
 
