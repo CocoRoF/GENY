@@ -33,7 +33,7 @@ dependencies = [
     # WebSocket protocol
     "websockets>=13.0",
     # geny-executor: Pipeline-based execution engine
-    "geny-executor>=0.24.0,<0.25.0",
+    "geny-executor>=0.25.0,<0.26.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
