@@ -99,7 +99,7 @@ def install_environment_templates(
     *,
     external_tool_names: Optional[List[str]] = None,
 ) -> int:
-    """Save default environment manifests to disk if not already present.
+    """Save default environment manifests to disk, overwriting existing.
 
     Mirrors :func:`service.tool_preset.templates.install_templates`.
     Called once at app boot after the tool preset templates are
@@ -107,18 +107,22 @@ def install_environment_templates(
     — so *external_tool_names* can be the full custom-tool registry
     for the worker env.
 
-    Returns the number of new environment files written. Existing
-    environments are never overwritten — user edits to a seed persist
-    and we re-save only the envs that weren't there before.
+    The two template seed envs (``template-worker-env`` /
+    ``template-vtuber-env``) are rewritten every boot from the
+    canonical :func:`build_default_manifest` output. Custom envs —
+    any id other than the two template seeds — are never touched.
+    This keeps the seeds in lockstep with manifest-builder changes
+    (e.g. a new stage added to the default chain) without needing a
+    migration framework.
+
+    Returns the number of environment files written (always equal to
+    the seed count after the write loop completes).
     """
     seeds: List[EnvironmentManifest] = [
         create_worker_env(external_tool_names=external_tool_names),
         create_vtuber_env(),
     ]
-    installed = 0
     for manifest in seeds:
         env_id = manifest.metadata.id
-        if service.load(env_id) is None:
-            service._write_manifest(env_id, manifest)
-            installed += 1
-    return installed
+        service._write_manifest(env_id, manifest)
+    return len(seeds)

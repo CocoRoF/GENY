@@ -311,11 +311,13 @@ async def lifespan(app: FastAPI):
     agent_manager.set_environment_service(environment_service)
     logger.info(f"   - EnvironmentService: storage={environment_service.storage_path}")
 
-    # Seed default environment manifests (WORKER + VTUBER). Mirrors the
-    # tool_preset install_templates step above; runs only on first boot
-    # thanks to the per-env "exists?" check inside the installer. The
-    # worker env binds to every custom tool the loader knows about, so
-    # its "All Tools" sensibility tracks what the user actually has.
+    # Seed default environment manifests (WORKER + VTUBER). The two
+    # template seed ids are rewritten every boot from the canonical
+    # build_default_manifest output — custom envs (any other id) are
+    # untouched. Keeps seeds in lockstep with manifest-builder changes
+    # without a migration framework. The worker env binds to every
+    # custom tool the loader knows about, so its "All Tools" sensibility
+    # tracks what the user actually has.
     from service.environment.templates import install_environment_templates
     env_templates_installed = install_environment_templates(
         environment_service,
