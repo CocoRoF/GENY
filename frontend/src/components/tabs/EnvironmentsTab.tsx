@@ -188,13 +188,6 @@ export default function EnvironmentsTab() {
     builderEnvId,
   } = useEnvironmentStore();
 
-  // When an env is "opened in builder", swap the entire tab body for the
-  // builder view. Filters / drawer state are preserved in the parent so
-  // returning to the list keeps the user's context.
-  if (builderEnvId) {
-    return <BuilderTab />;
-  }
-
   const sessions = useAppStore(s => s.sessions);
   const { t } = useI18n();
   const [showCreate, setShowCreate] = useState(false);
@@ -457,6 +450,15 @@ export default function EnvironmentsTab() {
       );
     }
   };
+
+  // When an env is "opened in builder", swap the entire tab body for the
+  // builder view. Filters / drawer state are preserved in the parent so
+  // returning to the list keeps the user's context. NB: this branch runs
+  // *after* every hook above so the hook order stays stable across the
+  // list ↔ builder transition (otherwise React #300 fires).
+  if (builderEnvId) {
+    return <BuilderTab />;
+  }
 
   return (
     <div className="flex-1 min-h-0 overflow-auto bg-[var(--bg-primary)]">
