@@ -237,7 +237,9 @@ class SessionLogger:
         prompt: str,
         timeout: Optional[float] = None,
         system_prompt: Optional[str] = None,
-        max_turns: Optional[int] = None
+        max_turns: Optional[int] = None,
+        env_id: Optional[str] = None,
+        role: Optional[str] = None,
     ):
         """
         Log a command sent to Claude.
@@ -247,6 +249,13 @@ class SessionLogger:
             timeout: Command timeout
             system_prompt: Custom system prompt
             max_turns: Maximum turns for execution
+            env_id: Environment id the session runs on (e.g.
+                ``template-worker-env``). Lets log readers tell
+                which environment produced the turn without a
+                cross-reference to the session store.
+            role: Session role string (``worker`` / ``vtuber`` /
+                ``sub`` / etc.). Pairs with ``env_id`` for quick
+                disambiguation on the LogsTab feed.
         """
         # Store full message for log file, but add preview info for frontend
         is_truncated = len(prompt) > 200
@@ -260,7 +269,9 @@ class SessionLogger:
             "max_turns": max_turns,
             "prompt_length": len(prompt),
             "is_truncated": is_truncated,
-            "preview": preview
+            "preview": preview,
+            "env_id": env_id,
+            "role": role,
         }
         # Remove None values
         metadata = {k: v for k, v in metadata.items() if v is not None}
@@ -276,7 +287,9 @@ class SessionLogger:
         duration_ms: Optional[int] = None,
         cost_usd: Optional[float] = None,
         tool_calls: Optional[List[Dict[str, Any]]] = None,
-        num_turns: Optional[int] = None
+        num_turns: Optional[int] = None,
+        env_id: Optional[str] = None,
+        role: Optional[str] = None,
     ):
         """
         Log a response from Claude.
@@ -289,6 +302,10 @@ class SessionLogger:
             cost_usd: API cost in USD
             tool_calls: List of tool calls made during execution
             num_turns: Number of conversation turns
+            env_id: Environment id the session runs on — mirrors
+                ``log_command`` so every per-turn entry carries the
+                same context.
+            role: Session role string.
         """
         # Store full message for log file
         output_length = len(output) if output else 0
@@ -304,7 +321,9 @@ class SessionLogger:
             "is_truncated": is_truncated,
             "preview": preview if success else None,
             "tool_call_count": len(tool_calls) if tool_calls else 0,
-            "num_turns": num_turns
+            "num_turns": num_turns,
+            "env_id": env_id,
+            "role": role,
         }
         # Remove None values
         metadata = {k: v for k, v in metadata.items() if v is not None}

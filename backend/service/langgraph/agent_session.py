@@ -318,6 +318,13 @@ class AgentSession:
         return self._role
 
     @property
+    def env_id(self) -> Optional[str]:
+        """Environment id the session was built from (e.g.
+        ``template-worker-env``). ``None`` only on sessions that
+        predate manifest-backed construction."""
+        return self._env_id
+
+    @property
     def is_initialized(self) -> bool:
         return self._initialized
 

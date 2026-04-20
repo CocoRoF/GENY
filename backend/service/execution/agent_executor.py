@@ -471,6 +471,14 @@ async def _execute_core(
     session_logger = _get_session_logger(session_id, create_if_missing=True)
     start_time = holder["start_time"]
 
+    # env_id / role metadata threaded into every per-turn log entry.
+    # Resolved once up front so every log_command / log_response call
+    # below can pass identical values, keeping the log coherent across
+    # the command/response/error branches.
+    log_env_id = getattr(agent, "env_id", None)
+    _role = getattr(agent, "role", None)
+    log_role = _role.value if _role is not None and hasattr(_role, "value") else _role
+
     try:
         # 1. Log command
         logger.info(
@@ -483,6 +491,8 @@ async def _execute_core(
                 timeout=timeout,
                 system_prompt=system_prompt,
                 max_turns=max_turns,
+                env_id=log_env_id,
+                role=log_role,
             )
 
         # 2. Invoke
@@ -520,6 +530,8 @@ async def _execute_core(
                 output=result_text,
                 duration_ms=duration_ms,
                 cost_usd=result_cost,
+                env_id=log_env_id,
+                role=log_role,
             )
 
         # 4. Persist cost
@@ -546,6 +558,7 @@ async def _execute_core(
         if session_logger:
             session_logger.log_response(
                 success=False, error=error_msg, duration_ms=duration_ms,
+                env_id=log_env_id, role=log_role,
             )
         result = ExecutionResult(
             success=False,
@@ -576,6 +589,7 @@ async def _execute_core(
         if session_logger:
             session_logger.log_response(
                 success=False, error=str(e), duration_ms=duration_ms,
+                env_id=log_env_id, role=log_role,
             )
         result = ExecutionResult(
             success=False,
