@@ -122,8 +122,8 @@ class CurationScheduler:
             llm_model = None
             if cfg.auto_curation_use_llm:
                 try:
-                    from service.memory.reflect_utils import get_memory_model as _get_memory_model
-                    llm_model = _get_memory_model()
+                    from service.memory.memory_llm import build_memory_llm
+                    llm_model = build_memory_llm()
                 except Exception:
                     pass
 

@@ -272,6 +272,14 @@ class CurationEngine:
         llm_model=None,
         quality_threshold: float = 0.6,
     ):
+        """Initialise the curation engine.
+
+        ``llm_model`` is a duck-typed ``MemoryLLM`` (from
+        ``service.memory.memory_llm``) exposing
+        ``async complete(prompt, *, purpose) -> str``. ``None`` is
+        legitimate and causes every LLM-backed stage to fall back to
+        rule-based behaviour.
+        """
         self._curated = curated_manager
         self._opsidian = user_opsidian_manager
         self._llm = llm_model
@@ -456,11 +464,7 @@ class CurationEngine:
         )
 
         try:
-            from langchain_core.messages import HumanMessage
-            response = await self._llm.ainvoke([HumanMessage(content=prompt)])
-            text = response.content if hasattr(response, "content") else str(response)
-
-            # Parse JSON from response
+            text = await self._llm.complete(prompt, purpose="memory.curation.analyze")
             text = text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -515,9 +519,9 @@ class CurationEngine:
             return body.strip()
 
         try:
-            from langchain_core.messages import HumanMessage
-            response = await self._llm.ainvoke([HumanMessage(content=prompt)])
-            text = response.content if hasattr(response, "content") else str(response)
+            text = await self._llm.complete(
+                prompt, purpose=f"memory.curation.transform.{method}"
+            )
             return text.strip()
         except Exception as e:
             logger.warning("Curation transform (%s) failed: %s", method, e)
@@ -584,9 +588,7 @@ class CurationEngine:
         )
 
         try:
-            from langchain_core.messages import HumanMessage
-            response = await self._llm.ainvoke([HumanMessage(content=prompt)])
-            text = response.content if hasattr(response, "content") else str(response)
+            text = await self._llm.complete(prompt, purpose="memory.curation.enrich")
             text = text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()

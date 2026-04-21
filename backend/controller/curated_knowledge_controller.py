@@ -278,8 +278,8 @@ async def curate_from_opsidian(
             from service.config import get_config_manager
             ltm_cfg = get_config_manager().load_config(LTMConfig)
             if ltm_cfg and ltm_cfg.auto_curation_use_llm:
-                from service.memory.reflect_utils import get_memory_model as _get_memory_model
-                llm_model = _get_memory_model()
+                from service.memory.memory_llm import build_memory_llm
+                llm_model = build_memory_llm()
         except Exception:
             pass  # Proceed without LLM
 
@@ -330,8 +330,8 @@ async def curate_batch_from_opsidian(
             from service.config import get_config_manager
             ltm_cfg = get_config_manager().load_config(LTMConfig)
             if ltm_cfg and ltm_cfg.auto_curation_use_llm:
-                from service.memory.reflect_utils import get_memory_model as _get_memory_model
-                llm_model = _get_memory_model()
+                from service.memory.memory_llm import build_memory_llm
+                llm_model = build_memory_llm()
         except Exception:
             pass
 
@@ -394,8 +394,8 @@ async def curate_all_from_opsidian(
 
             ltm_cfg = get_config_manager().load_config(LTMConfig)
             if ltm_cfg and ltm_cfg.auto_curation_use_llm:
-                from service.memory.reflect_utils import get_memory_model as _get_memory_model
-                llm_model = _get_memory_model()
+                from service.memory.memory_llm import build_memory_llm
+                llm_model = build_memory_llm()
         except Exception:
             pass
 
