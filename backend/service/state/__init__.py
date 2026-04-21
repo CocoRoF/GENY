@@ -17,6 +17,14 @@ full contract; this package is layered as:
 
 from __future__ import annotations
 
+from .provider import (
+    CreatureStateProvider,
+    InMemoryCreatureStateProvider,
+    RECENT_EVENTS_MAX,
+    SqliteCreatureStateProvider,
+    StateConflictError,
+    apply_mutations,
+)
 from .schema import (
     SCHEMA_VERSION,
     Bond,
@@ -33,10 +41,16 @@ __all__ = [
     "SCHEMA_VERSION",
     "Bond",
     "CreatureState",
+    "CreatureStateProvider",
+    "InMemoryCreatureStateProvider",
     "MoodVector",
     "Mutation",
     "MutationBuffer",
     "MutationOp",
     "Progression",
+    "RECENT_EVENTS_MAX",
+    "SqliteCreatureStateProvider",
+    "StateConflictError",
     "Vitals",
+    "apply_mutations",
 ]
