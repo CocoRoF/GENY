@@ -260,16 +260,20 @@ function IterationDetail({ entry }: { entry: LogEntry }) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Graph Event Detail
+// Stage Event Detail (also handles legacy GRAPH rows)
 // ════════════════════════════════════════════════════════════════
-function GraphEventDetail({ entry }: { entry: LogEntry }) {
+function StageEventDetail({ entry }: { entry: LogEntry }) {
   const meta = entry.metadata as LogEntryMetadata;
+  const stageName = meta?.stage_name || meta?.node_name;
   return (
     <div className="space-y-4">
-      <Section title="Graph Event" icon={<Zap size={12} className="text-[#8b5cf6]" />}>
+      <Section title="Stage Event" icon={<Zap size={12} className="text-[#8b5cf6]" />}>
         <div className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3">
           {meta?.event_type && <MetaRow label="Event" value={meta.event_type} />}
-          {meta?.node_name && <MetaRow label="Node" value={meta.node_name} mono />}
+          {meta?.stage_display_name && <MetaRow label="Stage" value={meta.stage_display_name} mono />}
+          {!meta?.stage_display_name && stageName && <MetaRow label="Stage" value={stageName} mono />}
+          {meta?.stage_order != null && <MetaRow label="Order" value={`#${meta.stage_order}`} mono />}
+          {meta?.iteration != null && <MetaRow label="Iteration" value={`#${meta.iteration}`} mono />}
           {meta?.event_id && <MetaRow label="Event ID" value={meta.event_id} mono />}
           <MetaRow label="Time" value={formatTime(entry.timestamp)} mono />
         </div>
@@ -338,7 +342,8 @@ const LEVEL_LABELS: Record<string, { label: string; color: string }> = {
   ERROR: { label: 'Error', color: '#ef4444' },
   WARNING: { label: 'Warning', color: '#f59e0b' },
   ITER: { label: 'Iteration', color: '#fb923c' },
-  GRAPH: { label: 'Graph Event', color: '#8b5cf6' },
+  STAGE: { label: 'Stage', color: '#8b5cf6' },
+  GRAPH: { label: 'Stage', color: '#8b5cf6' },
   INFO: { label: 'Info', color: '#3b82f6' },
   DEBUG: { label: 'Debug', color: '#71717a' },
   STREAM: { label: 'Stream', color: '#94a3b8' },
@@ -374,8 +379,8 @@ export default function StepDetailPanel({ entry, allEntries, onClose }: StepDeta
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {entry.level === 'TOOL' && <ToolUseDetail entry={entry} allEntries={allEntries} />}
         {entry.level === 'ITER' && <IterationDetail entry={entry} />}
-        {entry.level === 'GRAPH' && <GraphEventDetail entry={entry} />}
-        {!['TOOL', 'ITER', 'GRAPH'].includes(entry.level) && <GenericDetail entry={entry} />}
+        {(entry.level === 'STAGE' || entry.level === 'GRAPH') && <StageEventDetail entry={entry} />}
+        {!['TOOL', 'ITER', 'STAGE', 'GRAPH'].includes(entry.level) && <GenericDetail entry={entry} />}
       </div>
     </div>
   );

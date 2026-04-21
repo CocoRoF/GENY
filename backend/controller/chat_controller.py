@@ -84,8 +84,10 @@ _room_new_msg_events: Dict[str, asyncio.Event] = {}
 def _extract_thinking_preview(entry) -> Optional[str]:
     """Extract a 1-line thinking preview from a log entry.
 
-    Prioritizes GRAPH events (node enter/exit) and TOOL events.
-    Returns None if the entry is not interesting for preview.
+    Prioritizes STAGE events (stage enter/exit/bypass/error) and TOOL
+    events. Legacy ``GRAPH`` rows with old ``node_enter``/``node_exit``
+    event_types render the same way so older sessions still surface a
+    coherent preview.
     """
     level = entry.level.value if hasattr(entry.level, "value") else str(entry.level)
     meta = entry.metadata or {}
@@ -94,17 +96,23 @@ def _extract_thinking_preview(entry) -> Optional[str]:
     if level in ("COMMAND", "RESPONSE"):
         return None
 
-    # GRAPH events -- show node execution
-    if level == "GRAPH":
+    # STAGE events (new) + GRAPH events (legacy) — same visual treatment.
+    if level in ("STAGE", "GRAPH"):
         event_type = meta.get("event_type", "")
-        node = meta.get("node_name", "")
-        if event_type == "node_enter" and node:
-            return f"\u2192 {node}"
-        if event_type == "node_exit" and node:
-            preview = meta.get("output_preview", "")[:60]
+        display = meta.get("stage_display_name") or meta.get("node_name", "")
+        iteration = meta.get("iteration")
+        iter_suffix = f" (iter {iteration})" if iteration else ""
+        if event_type in ("stage_enter", "node_enter") and display:
+            return f"\u2192 {display}{iter_suffix}"
+        if event_type in ("stage_exit", "node_exit") and display:
+            preview = (meta.get("output_preview") or "")[:60]
             if preview:
-                return f"\u2713 {node}: {preview}"
-            return f"\u2713 {node}"
+                return f"\u2713 {display}: {preview}"
+            return f"\u2713 {display}{iter_suffix}"
+        if event_type == "stage_bypass" and display:
+            return f"\u2298 {display} (skipped)"
+        if event_type == "stage_error" and display:
+            return f"\u2717 {display}: error"
         if event_type == "edge_decision":
             decision = meta.get("decision", "")
             return f"\u22ef {decision}" if decision else None

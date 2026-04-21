@@ -57,7 +57,7 @@ const LOG_GROUPS: LogGroup[] = [
     id: 'detail',
     labelKey: 'groupDetail',
     descKey: 'groupDetailDesc',
-    levels: ['INFO', 'COMMAND', 'RESPONSE', 'ERROR', 'WARNING', 'TOOL', 'TOOL_RES', 'ITER', 'GRAPH', 'STREAM'],
+    levels: ['INFO', 'COMMAND', 'RESPONSE', 'ERROR', 'WARNING', 'TOOL', 'TOOL_RES', 'ITER', 'STAGE', 'GRAPH', 'STREAM'],
     Icon: Search,
   },
   {
@@ -69,7 +69,7 @@ const LOG_GROUPS: LogGroup[] = [
   },
 ];
 
-const ALL_LEVELS = ['INFO', 'ERROR', 'WARNING', 'DEBUG', 'COMMAND', 'RESPONSE', 'GRAPH', 'ITER', 'TOOL', 'TOOL_RES', 'STREAM'] as const;
+const ALL_LEVELS = ['INFO', 'ERROR', 'WARNING', 'DEBUG', 'COMMAND', 'RESPONSE', 'STAGE', 'GRAPH', 'ITER', 'TOOL', 'TOOL_RES', 'STREAM'] as const;
 
 const PAGE_SIZE = 50;
 

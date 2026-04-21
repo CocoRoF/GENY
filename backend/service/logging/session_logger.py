@@ -43,11 +43,39 @@ class LogLevel(str, Enum):
     ERROR = "ERROR"
     COMMAND = "COMMAND"
     RESPONSE = "RESPONSE"
-    GRAPH = "GRAPH"             # LangGraph state transitions and node executions
+    # Preferred level for geny-executor stage transitions. Mirrors the
+    # executor's Environment/Stage model; new writes use STAGE.
+    STAGE = "STAGE"
+    # Legacy alias kept so DB rows persisted under the old LangGraph-era
+    # name still deserialize. Reads only — new writes should use STAGE.
+    GRAPH = "GRAPH"
     TOOL_USE = "TOOL"           # Tool invocation events
     TOOL_RESULT = "TOOL_RES"    # Tool execution results
     STREAM_EVENT = "STREAM"     # Stream-json events
     ITERATION = "ITER"          # Autonomous execution iteration complete
+
+
+# ── Stage order lookup ───────────────────────────────────────────
+# Mirror of ``geny_executor.core.pipeline._DEFAULT_STAGE_NAMES``.
+# The executor treats that table as private; duplicating it here is a
+# deliberate trade-off (zero coordination with the executor package)
+# guarded by ``test_stage_order_table_matches_executor_names`` so a
+# rename upstream surfaces as a loud failing test rather than silent
+# drift. Update in lockstep when the floor version changes.
+STAGE_ORDER: Dict[str, int] = {
+    "input": 1, "context": 2, "system": 3, "guard": 4,
+    "cache": 5, "api": 6, "token": 7, "think": 8,
+    "parse": 9, "tool": 10, "agent": 11, "evaluate": 12,
+    "loop": 13, "emit": 14, "memory": 15, "yield": 16,
+}
+
+
+def stage_display_name(stage_name: Optional[str], stage_order: Optional[int]) -> Optional[str]:
+    """Return ``s{NN}_{name}`` for a known stage, else the raw name."""
+    if not stage_name:
+        return None
+    order = stage_order if stage_order is not None else STAGE_ORDER.get(stage_name)
+    return f"s{order:02d}_{stage_name}" if order else stage_name
 
 
 class LogEntry:
@@ -701,28 +729,30 @@ class SessionLogger:
         message = f"DELEGATION {direction} {tag} {other_short or ''}".strip()
         self.log(LogLevel.INFO, message, metadata)
 
-    # ========== LangGraph Event Logging ==========
+    # ========== Stage Event Logging (geny-executor Environment model) ==========
 
-    def log_graph_event(
+    def log_stage_event(
         self,
         event_type: str,
         message: str,
-        node_name: Optional[str] = None,
+        stage_name: Optional[str] = None,
+        stage_order: Optional[int] = None,
+        stage_display_name: Optional[str] = None,
+        iteration: Optional[int] = None,
         state_snapshot: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None
+        data: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """
-        Log a LangGraph execution event.
+        """Log a geny-executor stage lifecycle event.
 
-        Args:
-            event_type: Type of graph event (e.g., execution_start, node_enter, state_update)
-            message: Human-readable event description
-            node_name: Current node name (if applicable)
-            state_snapshot: Snapshot of current AgentState (if applicable)
-            data: Additional event data
+        ``stage_name`` is the canonical short name (``"yield"``,
+        ``"tool"``, …). ``stage_order`` is the 1-16 position from
+        :data:`STAGE_ORDER`; callers pass it explicitly so a new
+        unrecognised stage still logs (with ``stage_order=None``).
+        ``node_name`` is mirrored into metadata for back-compat with
+        frontend code that still reads legacy GRAPH rows.
 
         Returns:
-            Event ID for tracking
+            Event ID for tracking.
         """
         import uuid
         event_id = str(uuid.uuid4())[:8]
@@ -730,27 +760,126 @@ class SessionLogger:
         metadata = {
             "event_id": event_id,
             "event_type": event_type,
-            "node_name": node_name,
+            "stage_name": stage_name,
+            "stage_order": stage_order,
+            "stage_display_name": stage_display_name,
+            "iteration": iteration,
+            # Legacy mirror — old DB rows and older frontend code read node_name.
+            "node_name": stage_name,
             "state_snapshot": state_snapshot,
-            "data": data
+            "data": data,
         }
-        # Remove None values
         metadata = {k: v for k, v in metadata.items() if v is not None}
 
-        self.log(LogLevel.GRAPH, message, metadata)
+        self.log(LogLevel.STAGE, message, metadata)
         return event_id
 
-    def log_graph_execution_start(
+    def log_stage_enter(
+        self,
+        stage_name: str,
+        *,
+        stage_order: Optional[int] = None,
+        iteration: int = 0,
+        state_summary: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        display = stage_display_name(stage_name, stage_order)
+        iter_suffix = f" (iter {iteration})" if iteration else ""
+        message = f"→ {display}{iter_suffix}"
+        return self.log_stage_event(
+            event_type="stage_enter",
+            message=message,
+            stage_name=stage_name,
+            stage_order=stage_order,
+            stage_display_name=display,
+            iteration=iteration,
+            state_snapshot=state_summary,
+        )
+
+    def log_stage_exit(
+        self,
+        stage_name: str,
+        *,
+        stage_order: Optional[int] = None,
+        iteration: int = 0,
+        output_preview: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+        state_changes: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        display = stage_display_name(stage_name, stage_order)
+        iter_suffix = f" (iter {iteration})" if iteration else ""
+        message = f"✓ {display}{iter_suffix}"
+        if duration_ms:
+            message += f" [{duration_ms}ms]"
+        return self.log_stage_event(
+            event_type="stage_exit",
+            message=message,
+            stage_name=stage_name,
+            stage_order=stage_order,
+            stage_display_name=display,
+            iteration=iteration,
+            data={
+                "iteration": iteration,
+                "output_preview": output_preview[:200] if output_preview and len(output_preview) > 200 else output_preview,
+                "output_length": len(output_preview) if output_preview else 0,
+                "duration_ms": duration_ms,
+                "state_changes": state_changes,
+            },
+        )
+
+    def log_stage_bypass(
+        self,
+        stage_name: str,
+        *,
+        stage_order: Optional[int] = None,
+        iteration: int = 0,
+        reason: Optional[str] = None,
+    ) -> str:
+        """Log a stage that was registered but skipped (empty slot or conditional bypass)."""
+        display = stage_display_name(stage_name, stage_order)
+        message = f"⊘ {display} (skipped)"
+        return self.log_stage_event(
+            event_type="stage_bypass",
+            message=message,
+            stage_name=stage_name,
+            stage_order=stage_order,
+            stage_display_name=display,
+            iteration=iteration,
+            data={"reason": reason} if reason else None,
+        )
+
+    def log_stage_error(
+        self,
+        stage_name: str,
+        error: str,
+        *,
+        stage_order: Optional[int] = None,
+        iteration: int = 0,
+    ) -> str:
+        """Log a stage that raised. Recovery may still follow."""
+        display = stage_display_name(stage_name, stage_order)
+        short = (error or "")[:200]
+        message = f"✗ {display}: {short}"
+        return self.log_stage_event(
+            event_type="stage_error",
+            message=message,
+            stage_name=stage_name,
+            stage_order=stage_order,
+            stage_display_name=display,
+            iteration=iteration,
+            data={"error": error},
+        )
+
+    def log_stage_execution_start(
         self,
         input_text: str,
         thread_id: Optional[str] = None,
         max_iterations: Optional[int] = None,
-        execution_mode: str = "invoke"
+        execution_mode: str = "invoke",
     ) -> str:
-        """Log when graph execution starts."""
+        """Log when a pipeline starts. Mirrors old ``log_graph_execution_start``."""
         input_preview = input_text[:100] + "..." if len(input_text) > 100 else input_text
-        message = f"GRAPH START [{execution_mode.upper()}]: {input_preview}"
-        return self.log_graph_event(
+        message = f"PIPELINE START [{execution_mode.upper()}]: {input_preview}"
+        return self.log_stage_event(
             event_type="execution_start",
             message=message,
             data={
@@ -758,103 +887,21 @@ class SessionLogger:
                 "input_length": len(input_text),
                 "thread_id": thread_id,
                 "max_iterations": max_iterations,
-                "execution_mode": execution_mode
-            }
+                "execution_mode": execution_mode,
+            },
         )
 
-    def log_graph_node_enter(
-        self,
-        node_name: str,
-        iteration: int = 0,
-        state_summary: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """Log when entering a graph node."""
-        message = f"NODE ENTER: {node_name} (iteration {iteration})"
-        return self.log_graph_event(
-            event_type="node_enter",
-            message=message,
-            node_name=node_name,
-            state_snapshot=state_summary,
-            data={"iteration": iteration}
-        )
-
-    def log_graph_node_exit(
-        self,
-        node_name: str,
-        iteration: int = 0,
-        output_preview: Optional[str] = None,
-        duration_ms: Optional[int] = None,
-        state_changes: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """Log when exiting a graph node."""
-        message = f"NODE EXIT: {node_name} (iteration {iteration})"
-        if duration_ms:
-            message += f" [{duration_ms}ms]"
-        return self.log_graph_event(
-            event_type="node_exit",
-            message=message,
-            node_name=node_name,
-            data={
-                "iteration": iteration,
-                "output_preview": output_preview[:200] if output_preview and len(output_preview) > 200 else output_preview,
-                "output_length": len(output_preview) if output_preview else 0,
-                "duration_ms": duration_ms,
-                "state_changes": state_changes
-            }
-        )
-
-    def log_graph_state_update(
-        self,
-        update_type: str,
-        changes: Dict[str, Any],
-        iteration: int = 0
-    ) -> str:
-        """Log when graph state is updated."""
-        message = f"STATE UPDATE: {update_type} (iteration {iteration})"
-        return self.log_graph_event(
-            event_type="state_update",
-            message=message,
-            data={
-                "update_type": update_type,
-                "iteration": iteration,
-                "changes": changes
-            }
-        )
-
-    def log_graph_edge_decision(
-        self,
-        from_node: str,
-        decision: str,
-        reason: Optional[str] = None,
-        iteration: int = 0
-    ) -> str:
-        """Log conditional edge decision."""
-        message = f"EDGE DECISION: {from_node} -> {decision}"
-        if reason:
-            message += f" ({reason})"
-        return self.log_graph_event(
-            event_type="edge_decision",
-            message=message,
-            node_name=from_node,
-            data={
-                "from_node": from_node,
-                "decision": decision,
-                "reason": reason,
-                "iteration": iteration
-            }
-        )
-
-    def log_graph_execution_complete(
+    def log_stage_execution_complete(
         self,
         success: bool,
         total_iterations: int,
         final_output: Optional[str] = None,
         total_duration_ms: Optional[int] = None,
-        stop_reason: Optional[str] = None
+        stop_reason: Optional[str] = None,
     ) -> str:
-        """Log when graph execution completes."""
+        """Log when a pipeline finishes."""
         status = "SUCCESS" if success else "FAILED"
-        message = f"GRAPH COMPLETE [{status}]: {total_iterations} iterations"
+        message = f"PIPELINE COMPLETE [{status}]: {total_iterations} iterations"
         if stop_reason:
             message += f" ({stop_reason})"
 
@@ -862,7 +909,7 @@ class SessionLogger:
         if final_output:
             output_preview = final_output[:200] + "..." if len(final_output) > 200 else final_output
 
-        return self.log_graph_event(
+        return self.log_stage_event(
             event_type="execution_complete",
             message=message,
             data={
@@ -871,43 +918,136 @@ class SessionLogger:
                 "final_output_preview": output_preview,
                 "final_output_length": len(final_output) if final_output else 0,
                 "total_duration_ms": total_duration_ms,
-                "stop_reason": stop_reason
-            }
+                "stop_reason": stop_reason,
+            },
         )
+
+    # ── Legacy ``log_graph_*`` wrappers ──────────────────────────────
+    # Kept so any external caller / call site not yet migrated keeps
+    # working. They route to the new STAGE-level emit; the frontend
+    # renders legacy GRAPH rows with the same Stage visual.
+
+    def log_graph_event(
+        self,
+        event_type: str,
+        message: str,
+        node_name: Optional[str] = None,
+        state_snapshot: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """DEPRECATED — use :meth:`log_stage_event`.
+
+        ``node_name`` is treated as ``stage_name``. Emits at LogLevel.STAGE.
+        """
+        return self.log_stage_event(
+            event_type=event_type,
+            message=message,
+            stage_name=node_name,
+            stage_order=STAGE_ORDER.get(node_name) if node_name else None,
+            stage_display_name=stage_display_name(node_name, STAGE_ORDER.get(node_name) if node_name else None),
+            state_snapshot=state_snapshot,
+            data=data,
+        )
+
+    def log_graph_execution_start(self, *args, **kwargs) -> str:
+        """DEPRECATED — use :meth:`log_stage_execution_start`."""
+        return self.log_stage_execution_start(*args, **kwargs)
+
+    def log_graph_node_enter(
+        self,
+        node_name: str,
+        iteration: int = 0,
+        state_summary: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """DEPRECATED — use :meth:`log_stage_enter`."""
+        return self.log_stage_enter(
+            stage_name=node_name,
+            stage_order=STAGE_ORDER.get(node_name),
+            iteration=iteration,
+            state_summary=state_summary,
+        )
+
+    def log_graph_node_exit(
+        self,
+        node_name: str,
+        iteration: int = 0,
+        output_preview: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+        state_changes: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """DEPRECATED — use :meth:`log_stage_exit`."""
+        return self.log_stage_exit(
+            stage_name=node_name,
+            stage_order=STAGE_ORDER.get(node_name),
+            iteration=iteration,
+            output_preview=output_preview,
+            duration_ms=duration_ms,
+            state_changes=state_changes,
+        )
+
+    def log_graph_state_update(
+        self,
+        update_type: str,
+        changes: Dict[str, Any],
+        iteration: int = 0,
+    ) -> str:
+        """DEPRECATED — use :meth:`log_stage_event`."""
+        message = f"STATE UPDATE: {update_type} (iteration {iteration})"
+        return self.log_stage_event(
+            event_type="state_update",
+            message=message,
+            iteration=iteration,
+            data={"update_type": update_type, "iteration": iteration, "changes": changes},
+        )
+
+    def log_graph_edge_decision(
+        self,
+        from_node: str,
+        decision: str,
+        reason: Optional[str] = None,
+        iteration: int = 0,
+    ) -> str:
+        """DEPRECATED — use :meth:`log_stage_event`."""
+        message = f"EDGE DECISION: {from_node} -> {decision}"
+        if reason:
+            message += f" ({reason})"
+        return self.log_stage_event(
+            event_type="edge_decision",
+            message=message,
+            stage_name=from_node,
+            stage_order=STAGE_ORDER.get(from_node),
+            iteration=iteration,
+            data={"from_node": from_node, "decision": decision, "reason": reason, "iteration": iteration},
+        )
+
+    def log_graph_execution_complete(self, *args, **kwargs) -> str:
+        """DEPRECATED — use :meth:`log_stage_execution_complete`."""
+        return self.log_stage_execution_complete(*args, **kwargs)
 
     def log_graph_error(
         self,
         error_message: str,
         node_name: Optional[str] = None,
         iteration: int = 0,
-        error_type: Optional[str] = None
+        error_type: Optional[str] = None,
     ) -> str:
-        """Log graph execution error."""
-        message = f"GRAPH ERROR"
-        if node_name:
-            message += f" in {node_name}"
-        message += f": {error_message}"
-
-        return self.log_graph_event(
-            event_type="error",
-            message=message,
-            node_name=node_name,
-            data={
-                "error_message": error_message,
-                "error_type": error_type,
-                "iteration": iteration
-            }
+        """DEPRECATED — use :meth:`log_stage_error`."""
+        return self.log_stage_error(
+            stage_name=node_name or "unknown",
+            error=error_message,
+            stage_order=STAGE_ORDER.get(node_name) if node_name else None,
+            iteration=iteration,
         )
 
+    def get_stage_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get stage lifecycle log entries (new STAGE level)."""
+        return self.get_logs(limit=limit, level=LogLevel.STAGE)
+
     def get_graph_events(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """
-        Get LangGraph event log entries.
+        """DEPRECATED — use :meth:`get_stage_events`.
 
-        Args:
-            limit: Maximum number of entries to return
-
-        Returns:
-            List of graph event entries
+        Still returns only legacy GRAPH-level rows for callers that
+        explicitly want to inspect pre-migration logs.
         """
         return self.get_logs(limit=limit, level=LogLevel.GRAPH)
 
