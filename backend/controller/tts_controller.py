@@ -20,7 +20,6 @@ REST API endpoints for Text-to-Speech:
 
 import json
 import os
-import re
 import shutil
 from logging import getLogger
 from pathlib import Path
@@ -31,51 +30,22 @@ from pydantic import BaseModel
 from typing import Optional
 
 from service.auth.auth_middleware import require_auth
+from service.utils.text_sanitizer import sanitize_for_display
 
 logger = getLogger(__name__)
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
-# ── TTS Text Sanitization ────────────────────────────────────────────
-# TTS 엔진에 전달하기 전에 시스템 마커, 감정 태그, think 블록을 제거
-
-_SYSTEM_TAG_PATTERN = re.compile(
-    r"\["
-    r"(?:THINKING_TRIGGER(?::\w+)?|"
-    r"autonomous_signal:[^]]*|"
-    r"DELEGATION_REQUEST|"
-    r"DELEGATION_RESULT|"
-    r"SUB_WORKER_RESULT|"
-    r"CLI_RESULT|"  # legacy alias for SUB_WORKER_RESULT — keep for in-flight/historical messages
-    r"ACTIVITY_TRIGGER|"
-    r"SILENT)"
-    r"\]\s*",
-    re.IGNORECASE,
-)
-
-_EMOTION_TAGS = [
-    "neutral", "joy", "anger", "disgust", "fear", "smirk",
-    "sadness", "surprise", "warmth", "curious", "calm",
-    "excited", "shy", "proud", "grateful", "playful",
-    "confident", "thoughtful", "concerned", "amused", "tender",
-]
-_EMOTION_TAG_PATTERN = re.compile(
-    r"\[(" + "|".join(_EMOTION_TAGS) + r")\]\s*",
-    re.IGNORECASE,
-)
-
-_THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
-_THINK_OPEN_PATTERN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
-
 
 def sanitize_tts_text(text: str) -> str:
-    """TTS에 전달할 텍스트에서 시스템 마커, 감정 태그, think 블록을 제거."""
-    text = _THINK_BLOCK_PATTERN.sub("", text)
-    text = _THINK_OPEN_PATTERN.sub("", text)
-    text = _SYSTEM_TAG_PATTERN.sub("", text)
-    text = _EMOTION_TAG_PATTERN.sub("", text)
-    text = re.sub(r"\s{2,}", " ", text).strip()
-    return text
+    """Back-compat shim — delegates to the shared display sanitizer.
+
+    Kept under this name so any external caller / stable import path
+    continues to work. The underlying behaviour (strip routing tags +
+    emotion tags + ``<think>`` blocks, collapse whitespace) is
+    identical to ``sanitize_for_display``.
+    """
+    return sanitize_for_display(text)
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
