@@ -17,6 +17,7 @@ full contract; this package is layered as:
 
 from __future__ import annotations
 
+from .hydrator import hydrate_state, persist_state
 from .provider import (
     CreatureStateProvider,
     InMemoryCreatureStateProvider,
@@ -24,6 +25,12 @@ from .provider import (
     SqliteCreatureStateProvider,
     StateConflictError,
     apply_mutations,
+)
+from .registry import (
+    CREATURE_STATE_KEY,
+    MUTATION_BUFFER_KEY,
+    SESSION_META_KEY,
+    SessionRuntimeRegistry,
 )
 from .schema import (
     SCHEMA_VERSION,
@@ -38,7 +45,10 @@ from .schema import (
 )
 
 __all__ = [
+    "CREATURE_STATE_KEY",
+    "MUTATION_BUFFER_KEY",
     "SCHEMA_VERSION",
+    "SESSION_META_KEY",
     "Bond",
     "CreatureState",
     "CreatureStateProvider",
@@ -49,8 +59,11 @@ __all__ = [
     "MutationOp",
     "Progression",
     "RECENT_EVENTS_MAX",
+    "SessionRuntimeRegistry",
     "SqliteCreatureStateProvider",
     "StateConflictError",
     "Vitals",
     "apply_mutations",
+    "hydrate_state",
+    "persist_state",
 ]
