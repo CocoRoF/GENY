@@ -26,7 +26,9 @@ const LEVEL_CONFIG: Record<string, { icon: typeof Terminal; color: string; bgCol
   TOOL:     { icon: Wrench,        color: '#22d3ee', bgColor: 'rgba(34,211,238,0.08)', label: 'Tool' },
   TOOL_RES: { icon: CheckCircle2,  color: '#06b6d4', bgColor: 'rgba(6,182,212,0.06)',  label: 'Result' },
   ITER:     { icon: Hash,          color: '#fb923c', bgColor: 'rgba(251,146,60,0.08)', label: 'Iteration' },
-  GRAPH:    { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)', label: 'Graph' },
+  STAGE:    { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)', label: 'Stage' },
+  // Legacy rows — same visual so mixed-era timelines stay coherent.
+  GRAPH:    { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)', label: 'Stage' },
   ERROR:    { icon: XCircle,       color: '#ef4444', bgColor: 'rgba(239,68,68,0.10)',  label: 'Error' },
   WARNING:  { icon: AlertTriangle, color: '#f59e0b', bgColor: 'rgba(245,158,11,0.08)', label: 'Warning' },
   INFO:     { icon: Eye,           color: '#3b82f6', bgColor: 'rgba(59,130,246,0.08)', label: 'Info' },
@@ -36,7 +38,7 @@ const LEVEL_CONFIG: Record<string, { icon: typeof Terminal; color: string; bgCol
 
 // Primary levels shown by default
 const PRIMARY_LEVELS = new Set([
-  'COMMAND', 'RESPONSE', 'ERROR', 'WARNING', 'GRAPH', 'TOOL', 'ITER',
+  'COMMAND', 'RESPONSE', 'ERROR', 'WARNING', 'STAGE', 'GRAPH', 'TOOL', 'ITER',
 ]);
 
 function formatShortTime(ts: string): string {

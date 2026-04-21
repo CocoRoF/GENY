@@ -27,7 +27,10 @@ const LEVEL_CONFIG: Record<string, { icon: typeof Terminal; color: string; bgCol
   TOOL:      { icon: Wrench,        color: '#22d3ee', bgColor: 'rgba(34,211,238,0.08)',   label: 'Tool' },
   TOOL_RES:  { icon: CheckCircle2,  color: '#06b6d4', bgColor: 'rgba(6,182,212,0.06)',    label: 'Result' },
   ITER:      { icon: Hash,          color: '#fb923c', bgColor: 'rgba(251,146,60,0.08)',   label: 'Iteration' },
-  GRAPH:     { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)',   label: 'Graph' },
+  STAGE:     { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)',   label: 'Stage' },
+  // Legacy — old DB rows persisted under the LangGraph-era name.
+  // Rendered with the same visual as STAGE so timelines stay coherent.
+  GRAPH:     { icon: Zap,           color: '#8b5cf6', bgColor: 'rgba(139,92,246,0.08)',   label: 'Stage' },
   ERROR:     { icon: XCircle,       color: '#ef4444', bgColor: 'rgba(239,68,68,0.10)',    label: 'Error' },
   WARNING:   { icon: AlertTriangle, color: '#f59e0b', bgColor: 'rgba(245,158,11,0.08)',   label: 'Warning' },
   INFO:      { icon: Eye,           color: '#3b82f6', bgColor: 'rgba(59,130,246,0.08)',   label: 'Info' },
@@ -83,8 +86,21 @@ function getEntryDescription(entry: LogEntry): string {
     return `Iteration #${meta.iteration} ${status}${dur}${cost}`;
   }
 
-  if (entry.level === 'GRAPH' && meta?.event_type) {
-    return meta.event_type + (meta.node_name ? `: ${meta.node_name}` : '');
+  if ((entry.level === 'STAGE' || entry.level === 'GRAPH') && meta?.event_type) {
+    const display = meta.stage_display_name || meta.node_name || '';
+    const iter = meta.iteration ? ` (iter ${meta.iteration})` : '';
+    // New event_types (stage_*) + legacy (node_*) render the same way
+    if (meta.event_type === 'stage_enter' || meta.event_type === 'node_enter')
+      return `→ ${display}${iter}`;
+    if (meta.event_type === 'stage_exit' || meta.event_type === 'node_exit')
+      return `✓ ${display}${iter}`;
+    if (meta.event_type === 'stage_bypass')
+      return `⊘ ${display} (skipped)`;
+    if (meta.event_type === 'stage_error')
+      return `✗ ${display}: error`;
+    if (meta.event_type === 'edge_decision')
+      return `⋯ ${display}`;
+    return meta.event_type + (display ? `: ${display}` : '');
   }
 
   // Delegation events — render as "<tag> <arrow> <peer>" regardless of level.
@@ -154,7 +170,7 @@ export default function LogEntryCard({ entry, isSelected, onClick }: LogEntryCar
   const Icon = config.icon;
   const meta = entry.metadata as LogEntryMetadata | undefined;
   const description = useMemo(() => getEntryDescription(entry), [entry]);
-  const hasDetail = ['TOOL', 'ITER', 'GRAPH', 'COMMAND', 'RESPONSE', 'ERROR', 'TOOL_RES'].includes(entry.level);
+  const hasDetail = ['TOOL', 'ITER', 'STAGE', 'GRAPH', 'COMMAND', 'RESPONSE', 'ERROR', 'TOOL_RES'].includes(entry.level);
 
   return (
     <div

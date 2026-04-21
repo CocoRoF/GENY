@@ -256,10 +256,13 @@ export interface LogEntryMetadata {
   is_complete?: boolean;
   stop_reason?: string;
 
-  // Graph event metadata
+  // Stage event metadata (mirrors geny-executor Environment pipeline stages)
   event_id?: string;
   event_type?: string;
-  node_name?: string;
+  node_name?: string;           // legacy mirror of stage_name for older readers
+  stage_name?: string;
+  stage_order?: number;
+  stage_display_name?: string;  // e.g. "s16_yield"
   state_snapshot?: Record<string, unknown>;
   data?: Record<string, unknown>;
 

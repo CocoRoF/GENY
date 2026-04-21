@@ -48,7 +48,7 @@ from service.claude_manager.models import (
     SessionStatus,
 )
 from service.langgraph.session_freshness import SessionFreshness, FreshnessStatus
-from service.logging.session_logger import get_session_logger, SessionLogger, LogLevel
+from service.logging.session_logger import get_session_logger, SessionLogger, LogLevel, STAGE_ORDER
 
 logger = getLogger(__name__)
 
@@ -1000,24 +1000,30 @@ class AgentSession:
                     )
                 elif event_type == "stage.enter":
                     stage_name = event.stage if hasattr(event, "stage") else event_data.get("stage", "unknown")
-                    session_logger.log_graph_event(
-                        event_type="node_enter",
-                        message=f"→ {stage_name}",
-                        node_name=stage_name,
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_enter(
+                        stage_name=stage_name,
+                        stage_order=STAGE_ORDER.get(stage_name),
+                        iteration=iteration or 0,
                     )
                 elif event_type == "stage.exit":
                     stage_name = event.stage if hasattr(event, "stage") else event_data.get("stage", "unknown")
-                    session_logger.log_graph_event(
-                        event_type="node_exit",
-                        message=f"✓ {stage_name}",
-                        node_name=stage_name,
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_exit(
+                        stage_name=stage_name,
+                        stage_order=STAGE_ORDER.get(stage_name),
+                        iteration=iteration or 0,
                     )
                 elif event_type in ("loop.escalate", "loop.error"):
                     signal = event_data.get("signal") or "unknown"
-                    session_logger.log_graph_event(
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_event(
                         event_type="loop_signal",
                         message=f"{event_type}: {signal}",
-                        node_name="s13_loop",
+                        stage_name="loop",
+                        stage_order=STAGE_ORDER.get("loop"),
+                        iteration=iteration or 0,
+                        data={"signal": signal},
                     )
 
             # Accumulate output + log to session_logger for streaming
@@ -1166,24 +1172,30 @@ class AgentSession:
                     )
                 elif event_type == "stage.enter":
                     stage_name = event.stage if hasattr(event, "stage") else event_data.get("stage", "unknown")
-                    session_logger.log_graph_event(
-                        event_type="node_enter",
-                        message=f"→ {stage_name}",
-                        node_name=stage_name,
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_enter(
+                        stage_name=stage_name,
+                        stage_order=STAGE_ORDER.get(stage_name),
+                        iteration=iteration or 0,
                     )
                 elif event_type == "stage.exit":
                     stage_name = event.stage if hasattr(event, "stage") else event_data.get("stage", "unknown")
-                    session_logger.log_graph_event(
-                        event_type="node_exit",
-                        message=f"✓ {stage_name}",
-                        node_name=stage_name,
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_exit(
+                        stage_name=stage_name,
+                        stage_order=STAGE_ORDER.get(stage_name),
+                        iteration=iteration or 0,
                     )
                 elif event_type in ("loop.escalate", "loop.error"):
                     signal = event_data.get("signal") or "unknown"
-                    session_logger.log_graph_event(
+                    iteration = event.iteration if hasattr(event, "iteration") else event_data.get("iteration", 0)
+                    session_logger.log_stage_event(
                         event_type="loop_signal",
                         message=f"{event_type}: {signal}",
-                        node_name="s13_loop",
+                        stage_name="loop",
+                        stage_order=STAGE_ORDER.get("loop"),
+                        iteration=iteration or 0,
+                        data={"signal": signal},
                     )
 
             # ── Yield events to caller ──
