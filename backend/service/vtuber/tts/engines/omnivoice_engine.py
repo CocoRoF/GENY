@@ -170,15 +170,31 @@ class OmniVoiceEngine(TTSEngine):
             payload["instruct"] = config.instruct.strip()
 
         api_url = config.api_url.rstrip("/")
-        timeout = float(config.timeout_seconds or 60.0)
+        # First-time CUDA inference on Pascal GPUs (e.g. GTX 1070) can
+        # easily exceed the legacy 60s default. Honour Config but raise the
+        # implicit floor so the very first request after model load does
+        # not get cut off mid-generation.
+        timeout = max(float(config.timeout_seconds or 0.0), 180.0)
+
+        # Use explicit per-stage timeouts so a slow GPU doesn't trip the
+        # default 5s read timeout that ``httpx.Timeout(timeout)`` applies
+        # uniformly. Connect should be fast (in-cluster), but read can be
+        # very slow.
+        http_timeout = httpx.Timeout(
+            connect=10.0,
+            read=timeout,
+            write=30.0,
+            pool=10.0,
+        )
 
         async with _synthesis_lock:
             logger.info(
-                "OmniVoice request: url=%s/tts mode=%s profile=%s lang=%s",
+                "OmniVoice request: url=%s/tts mode=%s profile=%s lang=%s timeout=%.1fs text_len=%d",
                 api_url, payload["mode"], profile, payload.get("language"),
+                timeout, len(request.text or ""),
             )
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                async with httpx.AsyncClient(timeout=http_timeout) as client:
                     resp = await client.post(f"{api_url}/tts", json=payload)
                     resp.raise_for_status()
                     audio_data = resp.content
@@ -188,8 +204,25 @@ class OmniVoiceEngine(TTSEngine):
                 raise ValueError(
                     f"OmniVoice API error {e.response.status_code}: {body}"
                 ) from e
+            except httpx.TimeoutException as e:
+                # ReadTimeout/ConnectTimeout/WriteTimeout: str(e) is often
+                # empty; surface the type explicitly so ops can see it.
+                logger.exception(
+                    "OmniVoice timeout after %.1fs (type=%s repr=%r) url=%s payload_keys=%s",
+                    timeout, type(e).__name__, e, api_url, list(payload.keys()),
+                )
+                raise RuntimeError(
+                    f"OmniVoice request timed out after {timeout:.0f}s "
+                    f"(type={type(e).__name__}). Increase Config.timeout_seconds "
+                    f"or check GPU load on the omnivoice service."
+                ) from e
             except Exception as e:
-                logger.error("OmniVoice synthesis error: %s", e)
+                # Always log the type/repr + full traceback. ``str(e)`` is
+                # frequently empty for httpx / asyncio cancellation errors.
+                logger.exception(
+                    "OmniVoice synthesis error (type=%s repr=%r) url=%s",
+                    type(e).__name__, e, api_url,
+                )
                 raise
 
         if audio_data:

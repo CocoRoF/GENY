@@ -151,7 +151,10 @@ class TTSService:
                     collected_chunks.append(chunk.audio_data)
                 yield chunk
         except Exception as e:
-            logger.error(f"TTS synthesis failed ({engine.engine_name}): {e}")
+            logger.exception(
+                "TTS synthesis failed (engine=%s type=%s repr=%r)",
+                engine.engine_name, type(e).__name__, e,
+            )
             collected_chunks.clear()
             if engine.engine_name != "edge_tts":
                 fallback = self._engines.get("edge_tts")
