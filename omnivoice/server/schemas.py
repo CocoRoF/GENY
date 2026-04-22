@@ -77,6 +77,40 @@ class TTSRequest(BaseModel):
     sample_rate: int = Field(default=24000)
 
 
+class TTSStreamRequest(TTSRequest):
+    """Streaming TTS request — same fields as :class:`TTSRequest` plus
+    sentence-splitting controls.
+
+    The server splits ``text`` into sentences (multi-language aware),
+    synthesises each sentence as a separate generation, and streams the
+    resulting WAV chunks back as NDJSON frames in order. Suitable for
+    chat-style payloads where the LLM emits multiple sentences and the
+    listener should hear sentence #1 while the model is still producing
+    sentence #2.
+    """
+
+    max_sentence_chars: int = Field(
+        default=240,
+        ge=20,
+        le=2000,
+        description=(
+            "Soft upper bound on sentence length before secondary splitting. "
+            "240 chars ≈ ~12s of audio at default speed; raise for languages "
+            "with very long compound sentences, lower for tighter latency."
+        ),
+    )
+    seed_jitter: bool = Field(
+        default=True,
+        description=(
+            "When true and ``seed`` is set, each sentence is seeded with "
+            "``seed + sentence_index`` so the regression gate stays "
+            "deterministic without forcing every sentence to share the "
+            "same RNG draw (which can collapse short utterances into "
+            "identical voices)."
+        ),
+    )
+
+
 EnginePhase = Literal["loading", "warming", "compiling", "ok", "error"]
 
 

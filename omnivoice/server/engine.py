@@ -229,6 +229,61 @@ def _make_streams(device: str) -> dict[str, Optional[Any]]:
     }
 
 
+# ── torch.compile capability gate (Phase 3) ──────────────────────────
+
+
+def _should_compile(settings: Settings) -> bool:
+    """Decide whether to wrap the model in :func:`torch.compile`.
+
+    Tier-C optimisation: torch.compile materially speeds up Ampere+
+    (sm_80) but on Pascal (sm_61) it either no-ops or regresses because
+    Inductor's preferred backends require Triton, which targets
+    sm_70 minimum. We therefore auto-OFF below sm_70 unless the
+    operator explicitly forces ``always``.
+
+    Modes (``settings.use_compile``):
+      * ``"never"``  — never compile (default-safe).
+      * ``"auto"``   — compile only on cap >= (7,0).
+      * ``"always"`` — compile regardless (operator opt-in for testing).
+    """
+    mode = settings.use_compile
+    if mode == "never":
+        return False
+    if mode == "always":
+        return True
+    cap = _device_capability(settings.device)
+    if cap is None:
+        return False
+    return cap >= (7, 0)
+
+
+def maybe_compile(model: OmniVoice, settings: Settings) -> OmniVoice:
+    """Return ``model`` possibly wrapped by :func:`torch.compile`.
+
+    Logs the decision either way so operators can confirm the gate fired
+    as expected. Failures fall back to the eager model — we never let
+    an Inductor compile error keep the service from coming up.
+    """
+    if not _should_compile(settings):
+        cap = _device_capability(settings.device)
+        logger.info(
+            "torch.compile gate: OFF (mode=%s, capability=%s)",
+            settings.use_compile, cap,
+        )
+        return model
+    try:
+        compiled = torch.compile(model, mode="reduce-overhead", fullgraph=False)
+        logger.info(
+            "torch.compile gate: ON (mode=%s, capability=%s) — "
+            "first request will pay one-time compile cost",
+            settings.use_compile, _device_capability(settings.device),
+        )
+        return compiled  # type: ignore[return-value]
+    except Exception:
+        logger.exception("torch.compile failed; falling back to eager model")
+        return model
+
+
 # ── Load / unload ────────────────────────────────────────────────────
 
 
@@ -250,6 +305,7 @@ def load(settings: Settings) -> EngineState:
         asr_model_name=settings.asr_model,
     )
     logger.info("OmniVoice loaded; sampling_rate=%s", model.sampling_rate)
+    model = maybe_compile(model, settings)
 
     streams = _make_streams(settings.device)
 
