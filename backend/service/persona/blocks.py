@@ -25,7 +25,7 @@ from typing import Any, Iterable
 from geny_executor.core.state import PipelineState
 from geny_executor.stages.s03_system.interface import PromptBlock
 
-from backend.service.state import CREATURE_STATE_KEY
+from service.state import CREATURE_STATE_KEY
 
 _MOOD_DOMINANT_THRESHOLD: float = 0.15
 _MOOD_SECONDARY_THRESHOLD: float = 0.25

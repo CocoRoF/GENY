@@ -12,19 +12,19 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from backend.service.state.hydrator import hydrate_state, persist_state
-from backend.service.state.provider.in_memory import (
+from service.state.hydrator import hydrate_state, persist_state
+from service.state.provider.in_memory import (
     InMemoryCreatureStateProvider,
 )
-from backend.service.state.provider.interface import StateConflictError
-from backend.service.state.registry import (
+from service.state.provider.interface import StateConflictError
+from service.state.registry import (
     CREATURE_STATE_KEY,
     MUTATION_BUFFER_KEY,
     SESSION_META_KEY,
     SessionRuntimeRegistry,
 )
-from backend.service.state.schema.creature_state import CreatureState
-from backend.service.state.schema.mutation import Mutation, MutationBuffer
+from service.state.schema.creature_state import CreatureState
+from service.state.schema.mutation import Mutation, MutationBuffer
 
 
 class _StubState:
@@ -294,7 +294,7 @@ async def _prime_snapshot(
 ) -> None:
     """Load the base snapshot and apply enough mutations to satisfy the
     infant→child predicate (age≥3 and familiarity≥20)."""
-    from backend.service.state.schema.mutation import MutationBuffer as _MB
+    from service.state.schema.mutation import MutationBuffer as _MB
 
     base = await prov.load(character_id, owner_user_id=owner_user_id)
     buf = _MB()

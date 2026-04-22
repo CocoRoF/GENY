@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from backend.service.lifecycle import (
+from service.lifecycle import (
     LifecycleEvent,
     LifecyclePayload,
     SessionLifecycleBus,

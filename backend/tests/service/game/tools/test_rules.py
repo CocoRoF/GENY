@@ -8,7 +8,7 @@ ordering — tuning still moves freely within those bounds.
 
 from __future__ import annotations
 
-from backend.service.game.tools.rules import (
+from service.game.tools.rules import (
     FEED_RULES,
     GIFT_RULES,
     PLAY_RULES,

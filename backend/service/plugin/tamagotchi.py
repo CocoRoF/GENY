@@ -49,12 +49,12 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from backend.service.game.events import (
+from service.game.events import (
     DEFAULT_SEEDS,
     EventSeed,
     EventSeedPool,
 )
-from backend.service.persona.blocks import (
+from service.persona.blocks import (
     MoodBlock,
     ProgressionBlock,
     RelationshipBlock,

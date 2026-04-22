@@ -15,16 +15,16 @@ from typing import Any
 
 import pytest
 
-from backend.service.state.decay import (
+from service.state.decay import (
     DEFAULT_DECAY,
     DecayPolicy,
     DecayRule,
 )
-from backend.service.state.provider.in_memory import (
+from service.state.provider.in_memory import (
     InMemoryCreatureStateProvider,
 )
-from backend.service.state.provider.interface import StateConflictError
-from backend.service.state.provider.sqlite_creature import (
+from service.state.provider.interface import StateConflictError
+from service.state.provider.sqlite_creature import (
     SqliteCreatureStateProvider,
 )
 

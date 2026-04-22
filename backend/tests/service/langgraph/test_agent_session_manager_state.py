@@ -12,8 +12,8 @@ here we only exercise:
 
 from __future__ import annotations
 
-from backend.service.langgraph.agent_session_manager import AgentSessionManager
-from backend.service.state import InMemoryCreatureStateProvider
+from service.langgraph.agent_session_manager import AgentSessionManager
+from service.state import InMemoryCreatureStateProvider
 
 
 def _manager_skeleton() -> AgentSessionManager:

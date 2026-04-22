@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.service.game.tools import TalkTool
-from backend.service.game.tools.talk import FAMILIARITY_DELTA
+from service.game.tools import TalkTool
+from service.game.tools.talk import FAMILIARITY_DELTA
 
 from ._helpers import bound_buffer, by_path
 

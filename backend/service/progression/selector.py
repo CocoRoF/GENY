@@ -35,7 +35,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 
-from backend.service.state.schema.creature_state import CreatureState
+from service.state.schema.creature_state import CreatureState
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ from typing import List
 
 import pytest
 
-from backend.service.lifecycle import (
+from service.lifecycle import (
     LifecycleEvent,
     LifecyclePayload,
     SessionLifecycleBus,
@@ -94,7 +94,7 @@ async def test_scan_skips_sessions_within_threshold(monkeypatch) -> None:
     events = _make_recorder(bus)
 
     # Simulate disconnect at t=1000, scan at t=1030 — only 30s gap.
-    import backend.service.lifecycle.ws_abandoned_detector as mod
+    import service.lifecycle.ws_abandoned_detector as mod
 
     t = [1000.0]
     monkeypatch.setattr(mod.time, "time", lambda: t[0])
@@ -113,7 +113,7 @@ async def test_scan_emits_after_threshold(monkeypatch) -> None:
     det = WSAbandonedDetector(bus, threshold_seconds=60)
     events = _make_recorder(bus)
 
-    import backend.service.lifecycle.ws_abandoned_detector as mod
+    import service.lifecycle.ws_abandoned_detector as mod
 
     t = [1000.0]
     monkeypatch.setattr(mod.time, "time", lambda: t[0])
@@ -141,7 +141,7 @@ async def test_reconnect_after_emit_starts_fresh_episode(monkeypatch) -> None:
     det = WSAbandonedDetector(bus, threshold_seconds=60)
     events = _make_recorder(bus)
 
-    import backend.service.lifecycle.ws_abandoned_detector as mod
+    import service.lifecycle.ws_abandoned_detector as mod
 
     t = [1000.0]
     monkeypatch.setattr(mod.time, "time", lambda: t[0])
@@ -167,7 +167,7 @@ async def test_scan_multiple_sessions(monkeypatch) -> None:
     det = WSAbandonedDetector(bus, threshold_seconds=60)
     events = _make_recorder(bus)
 
-    import backend.service.lifecycle.ws_abandoned_detector as mod
+    import service.lifecycle.ws_abandoned_detector as mod
 
     t = [1000.0]
     monkeypatch.setattr(mod.time, "time", lambda: t[0])

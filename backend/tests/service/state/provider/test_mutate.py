@@ -10,10 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.service.state.provider.mutate import apply_mutations
-from backend.service.state.provider.interface import RECENT_EVENTS_MAX
-from backend.service.state.schema.creature_state import CreatureState
-from backend.service.state.schema.mutation import Mutation
+from service.state.provider.mutate import apply_mutations
+from service.state.provider.interface import RECENT_EVENTS_MAX
+from service.state.schema.creature_state import CreatureState
+from service.state.schema.mutation import Mutation
 
 
 def _mk_state(**overrides) -> CreatureState:

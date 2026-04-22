@@ -63,7 +63,7 @@ from typing import (
 from geny_executor.stages.s03_system.interface import PromptBlock
 from geny_executor.stages.s14_emit.interface import Emitter
 
-from backend.service.tick.engine import TickSpec
+from service.tick.engine import TickSpec
 
 __all__ = [
     "GenyPlugin",

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.service.game.tools import FeedTool
-from backend.service.game.tools.rules import FEED_RULES
+from service.game.tools import FeedTool
+from service.game.tools.rules import FEED_RULES
 
 from ._helpers import bound_buffer, by_path
 

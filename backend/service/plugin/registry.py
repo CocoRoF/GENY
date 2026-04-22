@@ -45,9 +45,9 @@ from typing import Any, Dict, List, Mapping, Sequence
 from geny_executor.stages.s03_system.interface import PromptBlock
 from geny_executor.stages.s14_emit.interface import Emitter
 
-from backend.service.lifecycle.bus import SessionLifecycleBus
-from backend.service.lifecycle.events import LifecycleEvent
-from backend.service.tick.engine import TickEngine, TickSpec
+from service.lifecycle.bus import SessionLifecycleBus
+from service.lifecycle.events import LifecycleEvent
+from service.tick.engine import TickEngine, TickSpec
 
 from .protocol import GenyPlugin, SessionContext, SessionListener
 

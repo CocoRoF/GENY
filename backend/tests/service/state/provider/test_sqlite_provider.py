@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from backend.service.state.provider.interface import (
+from service.state.provider.interface import (
     RECENT_EVENTS_MAX,
     StateConflictError,
 )
-from backend.service.state.provider.sqlite_creature import (
+from service.state.provider.sqlite_creature import (
     SqliteCreatureStateProvider,
 )
-from backend.service.state.schema.mutation import Mutation
+from service.state.schema.mutation import Mutation
 
 
 @pytest.mark.asyncio

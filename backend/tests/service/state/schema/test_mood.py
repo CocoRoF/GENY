@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.service.state.schema.mood import MoodVector
+from service.state.schema.mood import MoodVector
 
 
 def test_default_mood_is_neutral() -> None:

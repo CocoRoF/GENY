@@ -10,7 +10,7 @@ from geny_executor.stages.s03_system.artifact.default.builders import (
     PersonaBlock,
 )
 
-from backend.service.persona import (
+from service.persona import (
     DynamicPersonaSystemBuilder,
     PersonaResolution,
 )

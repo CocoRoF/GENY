@@ -22,20 +22,20 @@ from geny_executor.stages.s03_system.artifact.default.builders import (
     PersonaBlock,
 )
 
-from backend.service.persona import (
+from service.persona import (
     MoodBlock,
     ProgressionBlock,
     RelationshipBlock,
     VitalsBlock,
 )
-from backend.service.state import CREATURE_STATE_KEY
-from backend.service.state.schema.creature_state import (
+from service.state import CREATURE_STATE_KEY
+from service.state.schema.creature_state import (
     Bond,
     CreatureState,
     Progression,
     Vitals,
 )
-from backend.service.state.schema.mood import MoodVector
+from service.state.schema.mood import MoodVector
 
 
 def _state_with_creature(creature: CreatureState) -> PipelineState:

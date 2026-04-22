@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from backend.service.state.provider.in_memory import InMemoryCreatureStateProvider
-from backend.service.state.schema.mutation import Mutation
+from service.state.provider.in_memory import InMemoryCreatureStateProvider
+from service.state.schema.mutation import Mutation
 
 
 @pytest.mark.asyncio
