@@ -311,3 +311,143 @@ async def test_no_mutation_buffer_does_not_stash_summary() -> None:
     result = await AffectTagEmitter().emit(state)
     assert result.metadata.get("reason") == "no_mutation_buffer"
     assert AFFECT_TURN_SUMMARY_KEY not in state.shared
+
+
+# ── X7 (cycle 20260422_5): expanded taxonomy + catch-all strip ──────
+
+
+@pytest.mark.asyncio
+async def test_wonder_tag_distributes_across_three_axes() -> None:
+    """`[wonder]` maps to excitement + calm + joy per the X7 taxonomy.
+
+    Verifies the expansion from single-axis-per-tag (pre-X7) to a
+    distributed-coefficient regime.
+    """
+    state, buf = _state_with_buffer("whoa [wonder] look at that")
+    await AffectTagEmitter().emit(state)
+
+    by_path = {m.path: m.value for m in buf.items}
+    assert by_path["mood.excitement"] == pytest.approx(0.4 * MOOD_ALPHA)
+    assert by_path["mood.calm"] == pytest.approx(0.3 * MOOD_ALPHA)
+    assert by_path["mood.joy"] == pytest.approx(0.2 * MOOD_ALPHA)
+    assert "[wonder]" not in state.final_text
+    assert "whoa" in state.final_text
+
+
+@pytest.mark.asyncio
+async def test_amazement_maps_to_excitement_and_joy() -> None:
+    state, buf = _state_with_buffer("[amazement] incredible!")
+    await AffectTagEmitter().emit(state)
+
+    by_path = {m.path: m.value for m in buf.items}
+    assert by_path["mood.excitement"] == pytest.approx(0.7 * MOOD_ALPHA)
+    assert by_path["mood.joy"] == pytest.approx(0.3 * MOOD_ALPHA)
+    assert "[amazement]" not in state.final_text
+
+
+@pytest.mark.asyncio
+async def test_satisfaction_contributes_bond_affection() -> None:
+    """`[satisfaction]` is a bond-builder — taxonomy declares
+    bond.affection 0.3, applying _BOND_AFFECTION_SCALE (0.5) = 0.15."""
+    state, buf = _state_with_buffer("[satisfaction] good work")
+    await AffectTagEmitter().emit(state)
+
+    by_path_values: dict[str, list[float]] = {}
+    for m in buf.items:
+        by_path_values.setdefault(m.path, []).append(m.value)
+
+    assert by_path_values["mood.joy"] == pytest.approx([0.5 * MOOD_ALPHA])
+    assert by_path_values["mood.calm"] == pytest.approx([0.4 * MOOD_ALPHA])
+    # bond.affection coefficient 0.3 × scale 0.5 = 0.15
+    assert by_path_values["bond.affection"] == pytest.approx([0.15])
+
+
+@pytest.mark.asyncio
+async def test_curiosity_alias_equivalent_to_curious() -> None:
+    """`[curiosity]` and `[curious]` share identical coefficient maps."""
+    s1, b1 = _state_with_buffer("[curiosity]")
+    s2, b2 = _state_with_buffer("[curious]")
+    await AffectTagEmitter().emit(s1)
+    await AffectTagEmitter().emit(s2)
+
+    def _paths(buf):
+        return {m.path: m.value for m in buf.items}
+
+    assert _paths(b1) == _paths(b2)
+
+
+@pytest.mark.asyncio
+async def test_unknown_lowercase_tag_is_stripped_without_mutation() -> None:
+    """Safety net: unknown lowercase tags like `[bewildered]` produce
+    *no* mutation but are still cleaned from display text."""
+    state, buf = _state_with_buffer("hmm [bewildered] interesting")
+    result = await AffectTagEmitter().emit(state)
+
+    assert len(buf.items) == 0
+    assert "[bewildered]" not in state.final_text
+    assert "hmm" in state.final_text
+    assert result.metadata.get("unknown_stripped") == 1
+    # No recognized tags → emitted=False, reason identifies the branch.
+    assert result.emitted is False
+    assert result.metadata.get("reason") == "no_recognized_tags"
+
+
+@pytest.mark.asyncio
+async def test_uppercase_routing_tag_is_not_stripped_by_catch_all() -> None:
+    """`[THINKING_TRIGGER]` / `[SUB_WORKER_RESULT]` must survive — they
+    are system routing tokens consumed downstream by the router."""
+    state, buf = _state_with_buffer("[THINKING_TRIGGER] noted")
+    await AffectTagEmitter().emit(state)
+
+    assert "[THINKING_TRIGGER]" in state.final_text
+    assert len(buf.items) == 0
+
+
+@pytest.mark.asyncio
+async def test_short_bracketed_words_are_not_stripped() -> None:
+    """`[a]`, `[1]`, `[to]` must NOT be stripped — below 3-char minimum
+    or numeric, they're legitimate text (footnote refs, lists, etc.)."""
+    state, buf = _state_with_buffer("see [a] and [1] or [to]")
+    result = await AffectTagEmitter().emit(state)
+
+    assert "[a]" in state.final_text
+    assert "[1]" in state.final_text
+    assert "[to]" in state.final_text
+    assert result.metadata.get("unknown_stripped", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_mixed_recognized_and_unknown_tags() -> None:
+    """Recognized tag applies mutation; unknown lowercase tag is silently
+    stripped. Both gone from display."""
+    state, buf = _state_with_buffer("[joy] meets [bewildered]")
+    result = await AffectTagEmitter().emit(state)
+
+    paths = [m.path for m in buf.items]
+    assert "mood.joy" in paths
+    assert "bond.affection" in paths
+    assert "[joy]" not in state.final_text
+    assert "[bewildered]" not in state.final_text
+    assert "meets" in state.final_text
+    assert result.metadata.get("matches") == 1
+    assert result.metadata.get("unknown_stripped") == 1
+
+
+@pytest.mark.asyncio
+async def test_original_six_tags_preserve_exact_pre_x7_magnitudes() -> None:
+    """Regression pin: primary 6 tags apply the exact same values as
+    before the X7 taxonomy expansion."""
+    state, buf = _state_with_buffer("[joy] [fear:2] [calm]")
+    await AffectTagEmitter().emit(state)
+
+    by_path_values: dict[str, list[float]] = {}
+    for m in buf.items:
+        by_path_values.setdefault(m.path, []).append(m.value)
+
+    assert by_path_values["mood.joy"] == pytest.approx([MOOD_ALPHA])
+    # fear@2: mood.fear=0.30, bond.trust=-0.6 (strength 2)
+    assert by_path_values["mood.fear"] == pytest.approx([2 * MOOD_ALPHA])
+    assert by_path_values["bond.trust"] == pytest.approx([-0.6])
+    assert by_path_values["mood.calm"] == pytest.approx([MOOD_ALPHA])
+    # bond.affection accumulates joy(0.5) + calm(0.5) — two entries
+    assert by_path_values["bond.affection"] == pytest.approx([0.5, 0.5])

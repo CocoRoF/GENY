@@ -9,6 +9,7 @@ import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, 
 import type { SessionInfo } from '@/types';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
+import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));
@@ -248,6 +249,11 @@ export default function InfoTab() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Tamagotchi Creature State (X7) ─── */}
+      {!isDeleted && data.creature_state && (
+        <CreatureStatePanel snapshot={data.creature_state} t={t} />
       )}
 
       {/* Fields Grid */}
