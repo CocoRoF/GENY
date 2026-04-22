@@ -20,6 +20,7 @@ from .registry import (
     PluginRegistry,
     UnknownLifecycleEventError,
 )
+from .tamagotchi import TamagotchiPlugin
 
 __all__ = [
     "AttachRuntimeKeyConflict",
@@ -30,5 +31,6 @@ __all__ = [
     "PluginRegistry",
     "SessionContext",
     "SessionListener",
+    "TamagotchiPlugin",
     "UnknownLifecycleEventError",
 ]

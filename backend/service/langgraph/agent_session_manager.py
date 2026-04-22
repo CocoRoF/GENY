@@ -61,6 +61,7 @@ from service.langgraph.agent_session import (
 )
 from backend.service.persona import CharacterPersonaProvider
 from backend.service.lifecycle import LifecycleEvent, SessionLifecycleBus
+from backend.service.plugin import PluginRegistry, TamagotchiPlugin
 
 
 logger = getLogger(__name__)
@@ -118,37 +119,26 @@ class AgentSessionManager(SessionManager):
         self._idle_monitor_jitter: float = 3.0     # spec jitter (s)
         self._idle_monitor_running: bool = False
 
+        # Plugin registry — cycle 20260422 PR-X5-2/3. Manager-scoped
+        # singleton. TamagotchiPlugin owns the four live blocks and the
+        # EventSeedPool; future plugins register here the same way.
+        # Live blocks drop to empty output when ``creature_state`` isn't
+        # hydrated, so classic-mode (no-state) sessions remain
+        # byte-identical to pre-X4 prompt output.
+        self._plugin_registry = PluginRegistry()
+        self._tamagotchi_plugin = TamagotchiPlugin()
+        self._plugin_registry.register(self._tamagotchi_plugin)
+
         # Persona provider — single manager-scoped instance, keys state on
         # session_id. Created eagerly so controllers can inject per-session
         # persona edits without reaching into AgentSession internals.
-        #
-        # Live CreatureState blocks (Mood / Vitals / Bond / Progression)
-        # and the EventSeedPool are wired unconditionally: they drop to
-        # empty output when ``creature_state`` isn't hydrated, so
-        # classic-mode sessions remain byte-identical to pre-X4 prompt
-        # output. The seed pool is the default baseline catalogue from
-        # PR-X4-4 (``DEFAULT_SEEDS``). Game-specific overrides will ride
-        # the X5 plugin registry.
-        from backend.service.persona.blocks import (
-            MoodBlock,
-            ProgressionBlock,
-            RelationshipBlock,
-            VitalsBlock,
-        )
-        from backend.service.game.events import DEFAULT_SEEDS, EventSeedPool
-
         self._persona_provider = CharacterPersonaProvider(
             characters_dir=_VTUBER_CHARACTERS_DIR,
             default_vtuber_prompt=_DEFAULT_VTUBER_PROMPT,
             default_worker_prompt=_DEFAULT_WORKER_PROMPT,
             adaptive_prompt=_ADAPTIVE_PROMPT,
-            live_blocks=(
-                MoodBlock(),
-                VitalsBlock(),
-                RelationshipBlock(),
-                ProgressionBlock(),
-            ),
-            event_seed_pool=EventSeedPool(DEFAULT_SEEDS),
+            live_blocks=self._plugin_registry.collect_prompt_blocks({}),
+            event_seed_pool=self._tamagotchi_plugin.event_seed_pool,
         )
 
         # Session lifecycle bus — manager-scoped pub/sub rail (cycle
