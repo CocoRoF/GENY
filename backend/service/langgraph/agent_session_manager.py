@@ -59,9 +59,9 @@ from service.langgraph.agent_session import (
     _DEFAULT_VTUBER_PROMPT,
     _DEFAULT_WORKER_PROMPT,
 )
-from backend.service.persona import CharacterPersonaProvider
-from backend.service.lifecycle import LifecycleEvent, SessionLifecycleBus
-from backend.service.plugin import PluginRegistry, TamagotchiPlugin
+from service.persona import CharacterPersonaProvider
+from service.lifecycle import LifecycleEvent, SessionLifecycleBus
+from service.plugin import PluginRegistry, TamagotchiPlugin
 
 
 logger = getLogger(__name__)
@@ -224,8 +224,8 @@ class AgentSessionManager(SessionManager):
         negligible. Trees / naming defaults come from
         :mod:`backend.service.progression.trees.default`.
         """
-        from backend.service.progression.selector import ManifestSelector
-        from backend.service.progression.trees.default import (
+        from service.progression.selector import ManifestSelector
+        from service.progression.trees.default import (
             DEFAULT_TREE,
             DEFAULT_TREE_ID,
         )

@@ -33,7 +33,7 @@ from service.langgraph import (
     get_agent_session_manager,
     AgentSession,
 )
-from backend.service.lifecycle import LifecycleEvent
+from service.lifecycle import LifecycleEvent
 from service.logging.session_logger import get_session_logger
 from service.claude_manager.session_store import get_session_store
 from service.execution.agent_executor import (

@@ -24,7 +24,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
-from backend.service.state.schema.creature_state import CreatureState
+from service.state.schema.creature_state import CreatureState
 
 logger = logging.getLogger(__name__)
 

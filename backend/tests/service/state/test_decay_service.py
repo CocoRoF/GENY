@@ -8,16 +8,16 @@ from typing import Any, List
 
 import pytest
 
-from backend.service.state.decay import DecayPolicy, DecayRule
-from backend.service.state.decay_service import (
+from service.state.decay import DecayPolicy, DecayRule
+from service.state.decay_service import (
     DEFAULT_DECAY_INTERVAL_SECONDS,
     CreatureStateDecayService,
 )
-from backend.service.state.provider.in_memory import (
+from service.state.provider.in_memory import (
     InMemoryCreatureStateProvider,
 )
-from backend.service.state.provider.interface import StateConflictError
-from backend.service.tick import TickEngine
+from service.state.provider.interface import StateConflictError
+from service.tick import TickEngine
 
 
 @pytest.mark.asyncio

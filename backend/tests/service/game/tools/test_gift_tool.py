@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.service.game.tools import GiftTool
-from backend.service.game.tools.rules import GIFT_RULES
+from service.game.tools import GiftTool
+from service.game.tools.rules import GIFT_RULES
 
 from ._helpers import bound_buffer, by_path
 

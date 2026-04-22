@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 
-from backend.service.state import (
+from service.state import (
     MutationBuffer,
     bind_mutation_buffer,
     current_mutation_buffer,

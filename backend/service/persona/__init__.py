@@ -10,15 +10,15 @@ Public API:
       no-op stubs for X1. X3/X4 replace ``render`` with real CreatureState reads.
 """
 
-from backend.service.persona.blocks import (
+from service.persona.blocks import (
     MoodBlock,
     ProgressionBlock,
     RelationshipBlock,
     VitalsBlock,
 )
-from backend.service.persona.character_provider import CharacterPersonaProvider
-from backend.service.persona.dynamic_builder import DynamicPersonaSystemBuilder
-from backend.service.persona.provider import PersonaProvider, PersonaResolution
+from service.persona.character_provider import CharacterPersonaProvider
+from service.persona.dynamic_builder import DynamicPersonaSystemBuilder
+from service.persona.provider import PersonaProvider, PersonaResolution
 
 __all__ = [
     "PersonaProvider",

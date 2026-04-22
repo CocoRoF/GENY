@@ -735,7 +735,7 @@ class AgentSession:
         if self._lifecycle_bus is None:
             return
         try:
-            from backend.service.lifecycle import LifecycleEvent
+            from service.lifecycle import LifecycleEvent
             await self._lifecycle_bus.emit(
                 LifecycleEvent.SESSION_REVIVED,
                 self._session_id,
@@ -1056,7 +1056,7 @@ class AgentSession:
         # construction in tests), the fixed ComposablePromptBuilder path
         # is preserved.
         if self._persona_provider is not None:
-            from backend.service.persona import DynamicPersonaSystemBuilder
+            from service.persona import DynamicPersonaSystemBuilder
             system_builder: Any = DynamicPersonaSystemBuilder(
                 self._persona_provider,
                 session_meta={
@@ -1203,7 +1203,7 @@ class AgentSession:
         """
         if self._state_provider is None:
             return None
-        from backend.service.state import (
+        from service.state import (
             DEFAULT_DECAY,
             SessionRuntimeRegistry,
         )
@@ -1287,7 +1287,7 @@ class AgentSession:
         ``exception`` so ops still sees them, but the turn result
         (already yielded to the user) is not rewritten into an error.
         """
-        from backend.service.state.provider.interface import (
+        from service.state.provider.interface import (
             StateConflictError,
         )
         try:

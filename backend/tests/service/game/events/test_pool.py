@@ -25,7 +25,7 @@ import pytest
 
 
 def _blank_creature():
-    from backend.service.state.schema.creature_state import CreatureState
+    from service.state.schema.creature_state import CreatureState
 
     return CreatureState(character_id="c1", owner_user_id="u1")
 
@@ -34,7 +34,7 @@ def _blank_creature():
 
 
 def test_empty_pool_returns_none() -> None:
-    from backend.service.game.events import EventSeedPool
+    from service.game.events import EventSeedPool
 
     pool = EventSeedPool([])
     assert pool.pick(_blank_creature(), {}) is None
@@ -42,7 +42,7 @@ def test_empty_pool_returns_none() -> None:
 
 
 def test_pool_with_no_active_seeds_returns_none() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     pool = EventSeedPool(
         [
@@ -55,7 +55,7 @@ def test_pool_with_no_active_seeds_returns_none() -> None:
 
 
 def test_single_active_seed_is_always_picked() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     only = EventSeed("only", lambda cs, m: True, "hint only")
     pool = EventSeedPool([only])
@@ -66,7 +66,7 @@ def test_single_active_seed_is_always_picked() -> None:
 
 
 def test_list_active_returns_only_firing_seeds() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     a = EventSeed("a", lambda cs, m: True, "hint a")
     b = EventSeed("b", lambda cs, m: False, "hint b")
@@ -82,7 +82,7 @@ def test_list_active_returns_only_firing_seeds() -> None:
 
 
 def test_weighted_pick_is_reproducible_under_same_seed() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     seeds = [
         EventSeed("low", lambda cs, m: True, "low", weight=1.0),
@@ -102,7 +102,7 @@ def test_weighted_pick_is_reproducible_under_same_seed() -> None:
 def test_heavier_weight_wins_the_long_run() -> None:
     """80:20 weight split should bias distribution clearly over 500 trials
     (≥ 60% heavier). Uses a seeded RNG so the test is deterministic."""
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     light = EventSeed("light", lambda cs, m: True, "light", weight=1.0)
     heavy = EventSeed("heavy", lambda cs, m: True, "heavy", weight=4.0)
@@ -120,7 +120,7 @@ def test_heavier_weight_wins_the_long_run() -> None:
 def test_seeds_snapshot_immutable_after_construction() -> None:
     """Caller's list mutation after construction must not change the
     pool's behaviour — matches ManifestSelector's snapshot stance."""
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     a = EventSeed("a", lambda cs, m: True, "hint a")
     b = EventSeed("b", lambda cs, m: True, "hint b")
@@ -136,7 +136,7 @@ def test_seeds_snapshot_immutable_after_construction() -> None:
 
 
 def test_seeds_property_returns_tuple() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     pool = EventSeedPool([EventSeed("x", lambda cs, m: False, "x")])
     assert isinstance(pool.seeds, tuple)
@@ -146,7 +146,7 @@ def test_seeds_property_returns_tuple() -> None:
 
 
 def test_trigger_exception_is_swallowed_and_pool_continues() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     def boom(cs, m):
         raise RuntimeError("trigger blew up")
@@ -165,7 +165,7 @@ def test_trigger_exception_is_swallowed_and_pool_continues() -> None:
 
 
 def test_all_triggers_raising_returns_none() -> None:
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     def boom(cs, m):
         raise ValueError()
@@ -180,7 +180,7 @@ def test_all_triggers_raising_returns_none() -> None:
 def test_negative_weight_clamps_to_zero_and_doesnt_invert_odds() -> None:
     """A -5.0 weight must not mean "pick 5× more often inverted" — it
     should clamp to 0.0 so the other candidate always wins."""
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     good = EventSeed("good", lambda cs, m: True, "good", weight=1.0)
     broken = EventSeed("broken", lambda cs, m: True, "broken", weight=-5.0)
@@ -196,7 +196,7 @@ def test_all_zero_weight_active_seeds_falls_back_to_uniform_pick() -> None:
     pick SOMETHING rather than silently return None — absent a pick,
     the turn gets no hint at all and that's worse UX than a random
     hint."""
-    from backend.service.game.events import EventSeed, EventSeedPool
+    from service.game.events import EventSeed, EventSeedPool
 
     a = EventSeed("a", lambda cs, m: True, "a", weight=0.0)
     b = EventSeed("b", lambda cs, m: True, "b", weight=0.0)
@@ -214,7 +214,7 @@ def test_event_seed_is_frozen() -> None:
     """EventSeed must be frozen — triggers / weights are declarative, a
     tree author mutating an instance would introduce spooky action at
     a distance."""
-    from backend.service.game.events import EventSeed
+    from service.game.events import EventSeed
 
     seed = EventSeed("a", lambda cs, m: True, "a")
     with pytest.raises(Exception):
@@ -225,8 +225,8 @@ def test_pick_rng_default_uses_module_random(monkeypatch: pytest.MonkeyPatch) ->
     """With ``rng=None`` the pool falls back to the module ``random``
     module — verified by patching its ``random`` call and catching
     it."""
-    from backend.service.game.events import EventSeed, EventSeedPool
-    from backend.service.game.events import pool as pool_module
+    from service.game.events import EventSeed, EventSeedPool
+    from service.game.events import pool as pool_module
 
     calls: list[None] = []
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.service.state.schema.mutation import (
+from service.state.schema.mutation import (
     Mutation,
     MutationBuffer,
     MutationOp,

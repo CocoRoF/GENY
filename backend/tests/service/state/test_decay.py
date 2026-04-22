@@ -6,14 +6,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.service.state.decay import (
+from service.state.decay import (
     CATCHUP_THRESHOLD,
     DEFAULT_DECAY,
     DecayPolicy,
     DecayRule,
     apply_decay,
 )
-from backend.service.state.schema.creature_state import CreatureState
+from service.state.schema.creature_state import CreatureState
 
 
 def _fresh_state(now: datetime) -> CreatureState:

@@ -7,7 +7,7 @@ from typing import Any
 from geny_executor.core.state import PipelineState
 from geny_executor.stages.s03_system.artifact.default.builders import PersonaBlock
 
-from backend.service.persona import PersonaProvider, PersonaResolution
+from service.persona import PersonaProvider, PersonaResolution
 
 
 class _FakeProvider:

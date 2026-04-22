@@ -24,14 +24,14 @@ from typing import List
 
 import pytest
 
-from backend.service.progression import (
+from service.progression import (
     DEFAULT_TREE,
     DEFAULT_TREE_ID,
     ManifestSelector,
     Transition,
     default_manifest_naming,
 )
-from backend.service.state.schema.creature_state import (
+from service.state.schema.creature_state import (
     Bond,
     CreatureState,
     Progression,

@@ -27,7 +27,7 @@ from geny_executor.stages.s03_system.artifact.default.builders import (
 )
 from geny_executor.stages.s03_system.interface import PromptBlock, PromptBuilder
 
-from backend.service.persona.provider import PersonaProvider, PersonaResolution
+from service.persona.provider import PersonaProvider, PersonaResolution
 
 
 class DynamicPersonaSystemBuilder(PromptBuilder):

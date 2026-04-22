@@ -23,7 +23,7 @@ from geny_executor.stages.s03_system.artifact.default.builders import (
     MemoryContextBlock,
 )
 
-from backend.service.persona import (
+from service.persona import (
     CharacterPersonaProvider,
     DynamicPersonaSystemBuilder,
 )

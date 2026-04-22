@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from backend.service.tick import TickEngine, TickSpec
+from service.tick import TickEngine, TickSpec
 
 
 async def _noop() -> None:

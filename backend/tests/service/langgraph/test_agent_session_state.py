@@ -22,7 +22,7 @@ import pytest
 
 from service.langgraph.agent_session import AgentSession
 
-from backend.service.state import (
+from service.state import (
     CREATURE_STATE_KEY,
     MUTATION_BUFFER_KEY,
     SESSION_META_KEY,
@@ -30,7 +30,7 @@ from backend.service.state import (
     InMemoryCreatureStateProvider,
     SessionRuntimeRegistry,
 )
-from backend.service.state.provider.interface import StateConflictError
+from service.state.provider.interface import StateConflictError
 
 
 # --- Shared scaffolding ----------------------------------------------------

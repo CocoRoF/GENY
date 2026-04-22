@@ -12,22 +12,22 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pytest
 
-from backend.service.state.decay import (
+from service.state.decay import (
     CATCHUP_THRESHOLD,
     DEFAULT_DECAY,
     DecayPolicy,
     DecayRule,
     apply_decay,
 )
-from backend.service.state.provider.in_memory import (
+from service.state.provider.in_memory import (
     InMemoryCreatureStateProvider,
 )
-from backend.service.state.provider.interface import StateConflictError
-from backend.service.state.registry import (
+from service.state.provider.interface import StateConflictError
+from service.state.registry import (
     CREATURE_STATE_KEY,
     SessionRuntimeRegistry,
 )
-from backend.service.state.schema.creature_state import CreatureState
+from service.state.schema.creature_state import CreatureState
 
 
 class _StubState:

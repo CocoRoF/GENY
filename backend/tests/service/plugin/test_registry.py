@@ -23,9 +23,9 @@ from geny_executor.stages.s03_system.interface import PromptBlock
 from geny_executor.stages.s14_emit.interface import Emitter
 from geny_executor.stages.s14_emit.types import EmitResult
 
-from backend.service.lifecycle.bus import SessionLifecycleBus
-from backend.service.lifecycle.events import LifecycleEvent, LifecyclePayload
-from backend.service.tick.engine import TickEngine, TickSpec
+from service.lifecycle.bus import SessionLifecycleBus
+from service.lifecycle.events import LifecycleEvent, LifecyclePayload
+from service.tick.engine import TickEngine, TickSpec
 
 from service.plugin import (
     AttachRuntimeKeyConflict,

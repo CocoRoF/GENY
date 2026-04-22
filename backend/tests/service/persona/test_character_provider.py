@@ -11,10 +11,10 @@ from geny_executor.core.state import PipelineState
 from geny_executor.stages.s03_system.artifact.default.builders import PersonaBlock
 from geny_executor.stages.s03_system.interface import PromptBlock
 
-from backend.service.game.events import EventSeed, EventSeedBlock, EventSeedPool
-from backend.service.persona import CharacterPersonaProvider, PersonaProvider
-from backend.service.state import CREATURE_STATE_KEY, SESSION_META_KEY
-from backend.service.state.schema.creature_state import CreatureState
+from service.game.events import EventSeed, EventSeedBlock, EventSeedPool
+from service.persona import CharacterPersonaProvider, PersonaProvider
+from service.state import CREATURE_STATE_KEY, SESSION_META_KEY
+from service.state.schema.creature_state import CreatureState
 
 
 _VTUBER_DEFAULT = "VDEFAULT"

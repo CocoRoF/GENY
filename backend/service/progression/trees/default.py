@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from backend.service.state.schema.creature_state import CreatureState
+from service.state.schema.creature_state import CreatureState
 
 from ..selector import Transition
 

@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import pytest
 
-from backend.service.lifecycle import (
+from service.lifecycle import (
     LifecycleEvent,
     LifecyclePayload,
     SessionLifecycleBus,
 )
-from backend.service.langgraph.agent_session_manager import AgentSessionManager
-from backend.service.tick import TickEngine
+from service.langgraph.agent_session_manager import AgentSessionManager
+from service.tick import TickEngine
 
 
 def _make_manager_skeleton() -> AgentSessionManager:
@@ -86,7 +86,7 @@ class _FakeStatus:
 
     def __eq__(self, other: object) -> bool:
         # Tests only compare `agent.status == SessionStatus.RUNNING`.
-        from backend.service.langgraph.agent_session_manager import (
+        from service.langgraph.agent_session_manager import (
             SessionStatus,
         )
         return isinstance(other, SessionStatus) and bool(self._running) == (

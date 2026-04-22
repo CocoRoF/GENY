@@ -9,14 +9,14 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 from datetime import datetime, timezone
 
-from backend.service.state.schema.creature_state import (
+from service.state.schema.creature_state import (
     SCHEMA_VERSION,
     Bond,
     CreatureState,
     Progression,
     Vitals,
 )
-from backend.service.state.schema.mood import MoodVector
+from service.state.schema.mood import MoodVector
 
 
 def test_schema_version_is_one() -> None:

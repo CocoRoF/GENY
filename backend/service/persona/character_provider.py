@@ -50,7 +50,7 @@ from typing import Any, Dict, Optional, Sequence
 from geny_executor.stages.s03_system.artifact.default.builders import PersonaBlock
 from geny_executor.stages.s03_system.interface import PromptBlock
 
-from backend.service.persona.provider import PersonaResolution
+from service.persona.provider import PersonaResolution
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class CharacterPersonaProvider:
         if self._event_seed_pool is not None:
             picked = self._pick_event_seed(state)
             if picked is not None:
-                from backend.service.game.events import EventSeedBlock
+                from service.game.events import EventSeedBlock
 
                 blocks.append(EventSeedBlock(picked))
                 picked_seed_id = getattr(picked, "id", None)
@@ -205,7 +205,7 @@ class CharacterPersonaProvider:
         already wraps trigger exceptions (plan/04 §6.2); this layer only
         handles the surrounding read.
         """
-        from backend.service.state import (
+        from service.state import (
             CREATURE_STATE_KEY,
             SESSION_META_KEY,
         )
