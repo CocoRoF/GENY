@@ -49,8 +49,9 @@ RUN pip install --no-cache-dir . \
 # PYTORCH_CUDA_ALLOC_CONF: ``expandable_segments`` keeps a single growing
 # arena instead of fragmenting into many fixed-size blocks — essential
 # for the persistent-residency policy (see dev_docs/20260422_OmniVoice_Perf/).
-# ``max_split_size_mb=128`` discourages the allocator from carving large
-# arenas into small slivers that fragment over many requests.
+# Note: ``expandable_segments:True`` is mutually exclusive with
+# ``max_split_size_mb`` — combining them raises
+# ``RuntimeError: Unrecognized CachingAllocator option`` at first CUDA init.
 # OMNIVOICE_GPU_MEM_FRACTION: cap this process at 70% of total VRAM by
 # default (~5.5 GB on a GTX 1070 8 GB). Operators on dedicated hosts
 # can raise to 0.9 via the compose file.
@@ -60,7 +61,7 @@ ENV OMNIVOICE_HOST=0.0.0.0 \
     OMNIVOICE_HF_CACHE=/models/hf-cache \
     HF_HOME=/models/hf-cache \
     TRANSFORMERS_CACHE=/models/hf-cache \
-    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb=128 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     OMNIVOICE_GPU_MEMORY_FRACTION=0.7
 
 RUN mkdir -p /voices /models/hf-cache

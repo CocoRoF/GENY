@@ -161,15 +161,32 @@ def configure_runtime(settings: Settings) -> None:
     os.environ.setdefault("HF_HOME", settings.hf_cache)
     os.environ.setdefault("TRANSFORMERS_CACHE", settings.hf_cache)
 
+    # NOTE: ``expandable_segments:True`` is mutually exclusive with
+    # ``max_split_size_mb`` in PyTorch's caching allocator — setting
+    # both raises ``RuntimeError: Unrecognized CachingAllocator option``
+    # at the first CUDA init. expandable_segments alone gives us the
+    # vLLM-style growing arena we want for persistent residency.
     if "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = (
-            "expandable_segments:True,max_split_size_mb=128"
-        )
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         logger.info("set PYTORCH_CUDA_ALLOC_CONF=%s",
                     os.environ["PYTORCH_CUDA_ALLOC_CONF"])
     else:
-        logger.info("respecting operator-set PYTORCH_CUDA_ALLOC_CONF=%s",
-                    os.environ["PYTORCH_CUDA_ALLOC_CONF"])
+        # Operator-supplied values may still contain the bad combo (e.g.
+        # carried over from an older Dockerfile). Strip max_split_size_mb
+        # if expandable_segments is also enabled so we degrade gracefully
+        # instead of crash-looping.
+        cur = os.environ["PYTORCH_CUDA_ALLOC_CONF"]
+        if "expandable_segments:True" in cur and "max_split_size_mb" in cur:
+            sanitized = ",".join(
+                p for p in cur.split(",") if not p.strip().startswith("max_split_size_mb")
+            )
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = sanitized
+            logger.warning(
+                "PYTORCH_CUDA_ALLOC_CONF had incompatible max_split_size_mb "
+                "with expandable_segments:True; sanitized to %r", sanitized,
+            )
+        else:
+            logger.info("respecting operator-set PYTORCH_CUDA_ALLOC_CONF=%s", cur)
 
     if not _is_cuda_device(settings.device):
         logger.info("CUDA not available or device=%s; skipping CUDA runtime tweaks.",
