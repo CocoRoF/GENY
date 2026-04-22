@@ -227,6 +227,9 @@ services:
     volumes:
       - geny-voices-prod:/voices:ro
       - geny-omnivoice-models-prod:/models
+      # Output-equivalence baselines persist across container restarts so
+      # every Tier-A PR can be diffed against the same reference PCM.
+      - ./omnivoice/baselines:/baselines
     shm_size: 8G
     deploy:
       resources:

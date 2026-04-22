@@ -40,6 +40,7 @@ import torch
 from omnivoice_core import OmniVoice, OmniVoiceGenerationConfig
 
 from server.host_pool import PinnedPCMPool
+from server.ref_cache import RefCache
 from server.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,7 @@ class EngineState:
     semaphore: asyncio.Semaphore
     streams: dict[str, Optional[Any]] = field(default_factory=dict)
     pinned_pool: Optional[PinnedPCMPool] = None
+    ref_cache: Optional[RefCache] = None
 
     @property
     def sampling_rate(self) -> int:
@@ -280,7 +282,15 @@ def load(settings: Settings) -> EngineState:
         semaphore=asyncio.Semaphore(settings.max_concurrency),
         streams=streams,
         pinned_pool=pinned_pool,
+        ref_cache=RefCache(max_size=settings.ref_cache_size),
     )
+    if settings.ref_cache_size > 0:
+        logger.info(
+            "RefCache enabled: max_size=%d (Tier-A, output-equivalent)",
+            settings.ref_cache_size,
+        )
+    else:
+        logger.info("RefCache disabled (ref_cache_size=0); pass-through mode")
     return _state
 
 
@@ -336,6 +346,7 @@ def _generate_sync(
     preprocess_prompt: bool,
     postprocess_output: bool,
     seed: Optional[int] = None,
+    voice_clone_prompt: Optional[Any] = None,
 ) -> np.ndarray:
     """Blocking synthesis. Runs inside an executor thread."""
     if seed is not None:
@@ -368,12 +379,16 @@ def _generate_sync(
         kwargs["speed"] = float(speed)
 
     if mode == "clone":
-        if not ref_audio_path:
+        if not ref_audio_path and voice_clone_prompt is None:
             raise ValueError("clone mode requires ref_audio_path")
-        kwargs["voice_clone_prompt"] = state.model.create_voice_clone_prompt(
-            ref_audio=ref_audio_path,
-            ref_text=ref_text,
-        )
+        if voice_clone_prompt is not None:
+            kwargs["voice_clone_prompt"] = voice_clone_prompt
+        else:
+            kwargs["voice_clone_prompt"] = state.model.create_voice_clone_prompt(
+                ref_audio=ref_audio_path,
+                ref_text=ref_text,
+                preprocess_prompt=preprocess_prompt,
+            )
 
     if mode == "design":
         if not instruct:
@@ -417,6 +432,32 @@ async def synthesize(
 ) -> tuple[np.ndarray, int]:
     """Public async entry point. Returns (audio_ndarray, sampling_rate)."""
     state = get_state()
+
+    # Phase 2b ref-cache: resolve voice clone prompt OUTSIDE the heavy
+    # generation executor so concurrent miss-coalescing can happen on
+    # the event loop. Cache hit -> ~0ms; miss -> one upstream build
+    # dispatched to the executor.
+    voice_clone_prompt: Optional[Any] = None
+    if mode == "clone" and ref_audio_path and state.ref_cache is not None:
+        loop = asyncio.get_running_loop()
+
+        async def _build() -> Any:
+            return await loop.run_in_executor(
+                None,
+                lambda: state.model.create_voice_clone_prompt(
+                    ref_audio=ref_audio_path,
+                    ref_text=ref_text,
+                    preprocess_prompt=preprocess_prompt,
+                ),
+            )
+
+        voice_clone_prompt = await state.ref_cache.get_or_build(
+            ref_audio_path=ref_audio_path,
+            ref_text=ref_text,
+            preprocess_prompt=preprocess_prompt,
+            builder=_build,
+        )
+
     async with state.semaphore:
         loop = asyncio.get_running_loop()
         audio = await loop.run_in_executor(
@@ -437,6 +478,7 @@ async def synthesize(
                 preprocess_prompt=preprocess_prompt,
                 postprocess_output=postprocess_output,
                 seed=seed,
+                voice_clone_prompt=voice_clone_prompt,
             ),
         )
     return audio, state.sampling_rate

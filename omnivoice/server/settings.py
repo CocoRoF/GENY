@@ -157,12 +157,15 @@ class Settings(BaseSettings):
         ),
     )
     ref_cache_size: int = Field(
-        default=0,
+        default=4,
         ge=0,
         le=64,
         description=(
-            "Voice-reference embedding LRU cache size. Reserved for Phase 2b; "
-            "0 disables (current behaviour)."
+            "Voice-reference embedding LRU cache size (Phase 2b, Tier-A). "
+            "Each entry holds a VoiceClonePrompt — small dataclass + one "
+            "(C, T) GPU tensor (a few MB per voice). 4 covers a typical "
+            "small-roster Geny deployment; 0 disables the cache (legacy "
+            "behaviour: rebuild prompt every request)."
         ),
     )
 

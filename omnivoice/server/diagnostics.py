@@ -96,3 +96,19 @@ def memory() -> dict:
 @router.get("/phase")
 def phase() -> dict:
     return {"phase": engine.get_phase()}
+
+
+@router.get("/cache")
+def cache() -> dict:
+    """Voice-clone-prompt LRU cache stats (Phase 2b).
+
+    Returns ``{"enabled": false}`` when the cache is disabled (size=0)
+    or the engine has not finished loading. Used by the perf gate to
+    confirm hit_ratio rises after warmup + a few real requests.
+    """
+    if not engine.is_loaded():
+        return {"enabled": False, "reason": "engine_not_ready"}
+    state = engine.get_state()
+    if state.ref_cache is None or state.ref_cache.max_size == 0:
+        return {"enabled": False}
+    return {"enabled": True, **state.ref_cache.stats()}
