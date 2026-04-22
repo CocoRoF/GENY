@@ -2069,6 +2069,88 @@ class AgentSession:
             memory_config=self._memory_config,
         )
 
+    async def load_creature_state_snapshot(self) -> Optional[Dict[str, Any]]:
+        """Return a JSON-friendly snapshot of the session's CreatureState.
+
+        Reads directly from the attached ``state_provider`` (SQLite /
+        in-memory), so the value reflects the most recently *persisted*
+        turn. Snapshots are cheap (single-row load on a keyed index)
+        and the provider handles concurrent reads safely, so it's fine
+        to call this on every UI refresh.
+
+        Returns ``None`` when:
+        - The session has no ``state_provider`` (classic / non-Tamagotchi
+          session — no creature state exists).
+        - The provider's ``load`` raises (swallowed with a debug log).
+
+        Callers must treat ``None`` as "no creature state" rather than
+        "error" — the UI path decides whether to hide the panel
+        entirely or show a placeholder.
+
+        Cycle 20260422_5 (X7) — see dev_docs/20260422_5/progress/*.
+        """
+        if self._state_provider is None:
+            return None
+        try:
+            snapshot = await self._state_provider.load(
+                self._character_id or self._session_id,
+                owner_user_id=self._owner_username or "",
+            )
+        except Exception:
+            logger.debug(
+                "[%s] load_creature_state_snapshot: provider load failed; "
+                "returning None",
+                self._session_id,
+                exc_info=True,
+            )
+            return None
+
+        bond = snapshot.bond
+        vitals = snapshot.vitals
+        progression = snapshot.progression
+        mood_dict = snapshot.mood.as_dict()
+
+        last_interaction_iso: Optional[str] = None
+        if snapshot.last_interaction_at is not None:
+            try:
+                last_interaction_iso = snapshot.last_interaction_at.isoformat()
+            except Exception:
+                last_interaction_iso = None
+
+        try:
+            last_tick_iso = snapshot.last_tick_at.isoformat()
+        except Exception:
+            last_tick_iso = None
+
+        return {
+            "character_id": snapshot.character_id,
+            "owner_user_id": snapshot.owner_user_id,
+            "mood": mood_dict,
+            "mood_dominant": snapshot.mood.dominant(threshold=0.15),
+            "bond": {
+                "affection": float(bond.affection),
+                "trust": float(bond.trust),
+                "familiarity": float(bond.familiarity),
+                "dependency": float(bond.dependency),
+            },
+            "vitals": {
+                "hunger": float(vitals.hunger),
+                "energy": float(vitals.energy),
+                "stress": float(vitals.stress),
+                "cleanliness": float(vitals.cleanliness),
+            },
+            "progression": {
+                "age_days": int(progression.age_days),
+                "life_stage": progression.life_stage,
+                "xp": int(progression.xp),
+                "milestones": list(progression.milestones),
+                "manifest_id": progression.manifest_id,
+            },
+            "last_interaction_at": last_interaction_iso,
+            "last_tick_at": last_tick_iso,
+            "recent_events": list(snapshot.recent_events[-10:]),
+        }
+
     # ========================================================================
     # Utility Methods
     # ========================================================================

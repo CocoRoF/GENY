@@ -353,6 +353,21 @@ class SessionInfo(BaseModel):
         description="Per-session MemoryProvider override config, or None when the process default is used"
     )
 
+    # Tamagotchi creature state — surfaced only for sessions that have
+    # a state_provider wired (classic / non-Tamagotchi sessions keep
+    # this ``None``). Populated by the agent controller after calling
+    # ``AgentSession.load_creature_state_snapshot()``; the base
+    # ``get_session_info`` stays sync to keep its many existing
+    # callers unaffected. See cycle 20260422_5 (X7).
+    creature_state: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Snapshot of the session's CreatureState (mood / bond / vitals / "
+            "progression) when a state_provider is attached; None for sessions "
+            "without Tamagotchi integration."
+        ),
+    )
+
 
 class ExecuteRequest(BaseModel):
     """

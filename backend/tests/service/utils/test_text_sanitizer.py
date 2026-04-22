@@ -70,12 +70,16 @@ from service.utils.text_sanitizer import sanitize_for_display
         # ── Unclosed <think> block — everything after is dropped ──
         ("<think>never closed", ""),
         ("visible <think>rest is dropped", "visible"),
-        # ── Unknown bracketed tokens are preserved ──
-        ("[random_thing] stays", "[random_thing] stays"),
+        # ── X7: unknown lowercase single-word brackets are now STRIPPED ──
+        # This is the catch-all safety net for emotion-like tags the
+        # LLM invents outside the taxonomy. See taxonomy.py docstring.
+        ("[random_thing] stays", "stays"),
+        # Tags with colons + spaces / punctuation are NOT single-word
+        # identifiers, so they remain — the narrow catch-all preserves
+        # these legitimate bracketed payloads.
         ("[note: todo] also stays", "[note: todo] also stays"),
-        # Input-only routing tags (not in output vocabulary) preserved —
-        # the classifier handles them at input; output sanitizer stays
-        # conservative.
+        # Input-only routing tags with spaces / capitals / punctuation
+        # stay preserved — the catch-all is intentionally narrow.
         (
             "[INBOX from Alice] should stay",
             "[INBOX from Alice] should stay",
@@ -134,3 +138,51 @@ def test_tts_shim_matches_sanitize_for_display() -> None:
     sample = "[SUB_WORKER_RESULT] hi [joy] there"
     assert sanitize_tts_text(sample) == sanitize_for_display(sample)
     assert sanitize_tts_text(sample) == "hi there"
+
+
+# ─────────────────────────────────────────────────────────────────
+# X7 (cycle 20260422_5): expanded taxonomy + unknown-tag catch-all
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_new_taxonomy_tags_are_stripped() -> None:
+    """Tags that were added in X7 (wonder, amazement, satisfaction,
+    curiosity) must now be recognized by the sanitizer whitelist."""
+    for tag in ("wonder", "amazement", "satisfaction", "curiosity"):
+        assert sanitize_for_display(f"[{tag}] hi") == "hi", (
+            f"tag {tag!r} should be stripped after X7"
+        )
+
+
+def test_unknown_lowercase_tag_stripped_by_catch_all() -> None:
+    """User-reported leak: `[bewildered]` / `[melancholy]` were not in
+    the old whitelist; the X7 catch-all strips any unseen lowercase
+    bracket identifier (3-20 chars)."""
+    assert sanitize_for_display("[bewildered] thinking") == "thinking"
+    assert sanitize_for_display("mid [melancholy] sentence") == "mid sentence"
+
+
+def test_catch_all_preserves_routing_tags() -> None:
+    """The narrow catch-all must not eat uppercase routing tags — those
+    are handled by SYSTEM_TAG_PATTERN separately with precise matches."""
+    # SUB_WORKER_RESULT is uppercase_underscore → routing path strips it;
+    # the catch-all would ignore it regardless. The assertion here is
+    # about ordering + pattern narrowness.
+    assert sanitize_for_display("[SUB_WORKER_RESULT] done") == "done"
+    assert sanitize_for_display("[THINKING_TRIGGER] ok") == "ok"
+
+
+def test_catch_all_preserves_short_or_numeric_brackets() -> None:
+    """`[a]`, `[1]`, `[to]`, `[x1]` stay — legitimate user text
+    (footnote refs, numbers, list markers)."""
+    assert sanitize_for_display("footnote [a] and [1]") == "footnote [a] and [1]"
+    assert sanitize_for_display("word [to] word") == "word [to] word"
+    # Even 2-char lowercase stays (below min length 3)
+    assert sanitize_for_display("tag [hi]") == "tag [hi]"
+
+
+def test_recognized_tags_imported_from_taxonomy() -> None:
+    """Canonical list must be the taxonomy, not an in-file duplicate."""
+    from service.affect.taxonomy import RECOGNIZED_TAGS as canonical
+    from service.utils.text_sanitizer import EMOTION_TAGS
+    assert EMOTION_TAGS is canonical

@@ -264,7 +264,12 @@ async def get_agent_session(
             )
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
 
-    return agent.get_session_info()
+    info = agent.get_session_info()
+    # X7 (cycle 20260422_5): enrich with the Tamagotchi snapshot for
+    # sessions that have a state_provider. Returns None for classic
+    # sessions — the frontend UI hides the panel in that case.
+    info.creature_state = await agent.load_creature_state_snapshot()
+    return info
 
 
 class UpdateSystemPromptRequest(BaseModel):

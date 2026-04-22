@@ -25,6 +25,46 @@ export interface SessionInfo {
   memory_config?: Record<string, unknown> | null;
   is_deleted?: boolean;
   deleted_at?: string | null;
+  // Tamagotchi creature state snapshot. Present only when the session
+  // has a state_provider attached (cycle 20260422_5 / X7). Classic
+  // sessions omit this field entirely or receive null.
+  creature_state?: CreatureStateSnapshot | null;
+}
+
+export interface CreatureStateSnapshot {
+  character_id: string;
+  owner_user_id: string;
+  mood: {
+    joy: number;
+    sadness: number;
+    anger: number;
+    fear: number;
+    calm: number;
+    excitement: number;
+  };
+  mood_dominant: string;
+  bond: {
+    affection: number;
+    trust: number;
+    familiarity: number;
+    dependency: number;
+  };
+  vitals: {
+    hunger: number;      // 0=sated, 100=starving
+    energy: number;      // 0=exhausted, 100=peak
+    stress: number;      // 0=calm, 100=extreme
+    cleanliness: number; // 0=filthy, 100=spotless
+  };
+  progression: {
+    age_days: number;
+    life_stage: string;
+    xp: number;
+    milestones: string[];
+    manifest_id: string;
+  };
+  last_interaction_at: string | null;
+  last_tick_at: string | null;
+  recent_events: string[];
 }
 
 export interface CreateAgentRequest {

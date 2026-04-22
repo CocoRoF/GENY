@@ -17,11 +17,22 @@ display sink, including streaming accumulation where the input may
 be a partial, still-growing string (a regex ``sub`` over the whole
 accumulated buffer correctly strips complete tags and leaves an
 incomplete trailing tag in place until the next token completes it).
+
+Governance: the emotion-tag vocabulary lives in
+:mod:`service.affect.taxonomy` (cycle 20260422_5 X7). Both this
+module and :class:`service.emit.affect_tag_emitter.AffectTagEmitter`
+import ``RECOGNIZED_TAGS`` from there, and a second narrow
+catch-all strips any lowercase-bracketed identifier that slips past
+the whitelist — so a newly-invented tag name the LLM tries never
+reaches the user-visible surface, even if the taxonomy hasn't been
+updated yet.
 """
 
 from __future__ import annotations
 
 import re
+
+from service.affect.taxonomy import RECOGNIZED_TAGS
 
 # Exported so consumers (TTS sanitizer, future plugins) can extend
 # the routing-prefix set without duplicating the master list.
@@ -39,18 +50,23 @@ SYSTEM_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Canonical emotion labels. Mirrors ``tts_controller._EMOTION_TAGS``
-# and the Live2D model emotionMap. Update in lockstep if new labels
-# are added to the VTuber prompt vocabulary.
-EMOTION_TAGS = (
-    "neutral", "joy", "anger", "disgust", "fear", "smirk",
-    "sadness", "surprise", "warmth", "curious", "calm",
-    "excited", "shy", "proud", "grateful", "playful",
-    "confident", "thoughtful", "concerned", "amused", "tender",
-)
+# Canonical emotion labels. Imported from the single source of truth
+# in ``service.affect.taxonomy`` so the sanitizer, the emitter, and
+# the prompt instruction can't drift apart. See the taxonomy module
+# docstring for the governance rule.
+EMOTION_TAGS = RECOGNIZED_TAGS
 EMOTION_TAG_PATTERN = re.compile(
     r"\[(?:" + "|".join(EMOTION_TAGS) + r")\]\s*",
     re.IGNORECASE,
+)
+
+# Narrow catch-all mirroring ``AffectTagEmitter.UNKNOWN_EMOTION_TAG_RE``
+# — any *remaining* lowercase single-word bracket tag that isn't on the
+# canonical list is also stripped from display. Matches the emitter's
+# safety-net so user-facing text never carries raw ``[something]``.
+# Uppercase routing tags (already handled above) don't match.
+UNKNOWN_EMOTION_TAG_PATTERN = re.compile(
+    r"\[[a-z][a-z_]{2,19}\]\s*",
 )
 
 THINK_BLOCK_PATTERN = re.compile(
@@ -80,4 +96,5 @@ def sanitize_for_display(text: str | None) -> str:
     text = THINK_OPEN_PATTERN.sub("", text)
     text = SYSTEM_TAG_PATTERN.sub("", text)
     text = EMOTION_TAG_PATTERN.sub("", text)
+    text = UNKNOWN_EMOTION_TAG_PATTERN.sub("", text)
     return _WHITESPACE_COLLAPSE.sub(" ", text).strip()
