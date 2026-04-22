@@ -9,7 +9,9 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
+
+from service.affect import encode_emotion_vec
 
 if TYPE_CHECKING:
     from service.database.app_database_manager import AppDatabaseManager
@@ -262,6 +264,23 @@ def db_ltm_search(
 #  Short-Term Memory — Write
 # ======================================================================
 
+def _coerce_emotion_vec(
+    vec: Optional[Union[Sequence[float], str]],
+) -> Optional[str]:
+    """Normalize an ``emotion_vec`` argument for INSERT.
+
+    Accepts either a raw float sequence (encoded via
+    :func:`service.affect.encode_emotion_vec`) or a pre-encoded JSON
+    string (passed through after a truthiness check). Returns ``None``
+    when the caller provided nothing — the column defaults to NULL.
+    """
+    if vec is None:
+        return None
+    if isinstance(vec, str):
+        return vec or None
+    return encode_emotion_vec(vec)
+
+
 def db_stm_add_message(
     db_manager,
     session_id: str,
@@ -269,6 +288,8 @@ def db_stm_add_message(
     content: str,
     *,
     metadata: Optional[Dict[str, Any]] = None,
+    emotion_vec: Optional[Union[Sequence[float], str]] = None,
+    emotion_intensity: Optional[float] = None,
 ) -> bool:
     """Add a short-term memory message (conversation transcript).
 
@@ -278,6 +299,13 @@ def db_stm_add_message(
         role: "user", "assistant", or "system".
         content: Message text.
         metadata: Optional extra fields.
+        emotion_vec: Optional per-turn emotion vector — a float
+            sequence (e.g. the output of
+            :func:`service.affect.summary.summarize_affect_mutations`)
+            or a pre-encoded JSON string. ``None`` writes NULL,
+            preserving the "no emotion captured" sentinel from X6-1.
+        emotion_intensity: Optional scalar in ``[0.0, 1.0]``. ``None``
+            writes NULL.
 
     Returns:
         True if successful.
@@ -290,13 +318,21 @@ def db_stm_add_message(
         entry_id = str(uuid.uuid4())
         now = datetime.now(_get_tz()).isoformat()
         meta_str = json.dumps(metadata, ensure_ascii=False, default=str) if metadata else "{}"
+        emotion_vec_raw = _coerce_emotion_vec(emotion_vec)
         query = (
             f"INSERT INTO {TABLE} "
-            f"(entry_id, session_id, source, entry_type, content, role, metadata_json, entry_timestamp) "
-            f"VALUES (%s, %s, 'short_term', 'message', %s, %s, %s, %s) "
+            f"(entry_id, session_id, source, entry_type, content, role, metadata_json, "
+            f"entry_timestamp, emotion_vec, emotion_intensity) "
+            f"VALUES (%s, %s, 'short_term', 'message', %s, %s, %s, %s, %s, %s) "
             f"RETURNING id"
         )
-        mgr.execute_insert(query, (entry_id, session_id, content, role, meta_str, now))
+        mgr.execute_insert(
+            query,
+            (
+                entry_id, session_id, content, role, meta_str, now,
+                emotion_vec_raw, emotion_intensity,
+            ),
+        )
         return True
     except Exception as e:
         logger.debug(f"Failed to insert STM message for {session_id}: {e}")
@@ -308,8 +344,15 @@ def db_stm_add_event(
     session_id: str,
     event_name: str,
     data: Optional[Dict[str, Any]] = None,
+    *,
+    emotion_vec: Optional[Union[Sequence[float], str]] = None,
+    emotion_intensity: Optional[float] = None,
 ) -> bool:
     """Add a short-term memory event (tool call, state change, etc.).
+
+    Events can carry affect metadata too — e.g. a game-tool invocation
+    might record the emotional context it happened in. Kept optional
+    and NULL-by-default per the X6-1 storage contract.
 
     Returns:
         True if successful.
@@ -322,13 +365,21 @@ def db_stm_add_event(
         entry_id = str(uuid.uuid4())
         now = datetime.now(_get_tz()).isoformat()
         data_str = json.dumps(data, ensure_ascii=False, default=str) if data else "{}"
+        emotion_vec_raw = _coerce_emotion_vec(emotion_vec)
         query = (
             f"INSERT INTO {TABLE} "
-            f"(entry_id, session_id, source, entry_type, content, event_name, metadata_json, entry_timestamp) "
-            f"VALUES (%s, %s, 'short_term', 'event', '', %s, %s, %s) "
+            f"(entry_id, session_id, source, entry_type, content, event_name, metadata_json, "
+            f"entry_timestamp, emotion_vec, emotion_intensity) "
+            f"VALUES (%s, %s, 'short_term', 'event', '', %s, %s, %s, %s, %s) "
             f"RETURNING id"
         )
-        mgr.execute_insert(query, (entry_id, session_id, event_name, data_str, now))
+        mgr.execute_insert(
+            query,
+            (
+                entry_id, session_id, event_name, data_str, now,
+                emotion_vec_raw, emotion_intensity,
+            ),
+        )
         return True
     except Exception as e:
         logger.debug(f"Failed to insert STM event for {session_id}: {e}")
