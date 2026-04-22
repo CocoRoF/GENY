@@ -437,6 +437,11 @@ async def warmup() -> None:
     medium / long cases without paying the first-request penalty in
     production.
 
+    The warmup text is scaled to the bucket duration (~3 chars/sec) so
+    OmniVoice has real content to synthesise; otherwise the post-process
+    stage can hit a zero-size waveform reduction on long-duration
+    requests built from a one-line probe.
+
     Failures are logged and swallowed: a warmup miss must not bring
     down the whole service. The phase machine is restored to ``ok`` on
     return regardless of per-bucket failures.
@@ -444,13 +449,24 @@ async def warmup() -> None:
     state = get_state()
     settings = state.settings
     set_phase("warming")
+    base_sentence = (
+        "This is a warmup probe utterance for the omnivoice service. "
+    )
     try:
         for bucket in settings.warmup_buckets_seconds:
             bucket_s = float(bucket)
+            # Roughly 3 chars per second of speech; round up so we never
+            # under-feed the model for the requested duration.
+            target_chars = max(32, int(bucket_s * 18))
+            repeats = max(1, target_chars // len(base_sentence) + 1)
+            warmup_text = (base_sentence * repeats)[:target_chars].strip()
             try:
-                logger.info("warmup: synthesising %.1fs probe", bucket_s)
+                logger.info(
+                    "warmup: synthesising %.1fs probe (%d chars)",
+                    bucket_s, len(warmup_text),
+                )
                 await synthesize(
-                    text="warmup probe utterance.",
+                    text=warmup_text,
                     mode="auto",
                     ref_audio_path=None,
                     ref_text=None,
