@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { agentApi } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
@@ -42,6 +43,17 @@ export default function InfoTab() {
   const [thinkingTriggerMsg, setThinkingTriggerMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [envDrawerId, setEnvDrawerId] = useState<string | null>(null);
 
+  // Sub-tab navigation: VTuber / Status / Worker
+  type SubTab = 'vtuber' | 'status' | 'worker';
+  const [subTab, setSubTab] = useState<SubTab>('vtuber');
+
+  // Reset sub-tab when switching session
+  useEffect(() => { setSubTab('vtuber'); }, [selectedSessionId]);
+
+  // Mirror creature_state into the shared store so the VTuberTab
+  // status badge stays in sync with whatever InfoTab last fetched.
+  const setCreatureSnapshot = useCreatureStateStore((s) => s.setSnapshot);
+
   const fetchDetail = useCallback(async () => {
     if (!selectedSessionId) { setData(null); return; }
     setLoading(true);
@@ -56,13 +68,16 @@ export default function InfoTab() {
         result._source = 'store';
       }
       setData(result);
+      if (result?.session_id) {
+        setCreatureSnapshot(result.session_id, result.creature_state ?? null);
+      }
     } catch (e: any) {
       setError(e.message);
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [selectedSessionId]);
+  }, [selectedSessionId, setCreatureSnapshot]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
@@ -198,8 +213,34 @@ export default function InfoTab() {
         </span>
       </div>
 
+      {/* Sub-tab navigation: VTuber / Status / Worker */}
+      <div className="flex items-center gap-1 mb-4 border-b border-[var(--border-color)]">
+        {([
+          { id: 'vtuber' as const, label: t('info.subTabs.vtuber') },
+          { id: 'status' as const, label: t('info.subTabs.status') },
+          { id: 'worker' as const, label: t('info.subTabs.worker') },
+        ]).map((tab) => {
+          const active = subTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSubTab(tab.id)}
+              className={cn(
+                'px-3 py-1.5 text-[12px] font-semibold rounded-t-md border-b-2 transition-colors duration-150 cursor-pointer',
+                active
+                  ? 'text-[var(--primary-color)] border-[var(--primary-color)] bg-[var(--bg-secondary)]'
+                  : 'text-[var(--text-muted)] border-transparent hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]',
+              )}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Thinking Trigger Toggle (VTuber sessions only) ── */}
-      {!isDeleted && data.session_type === 'vtuber' && thinkingTriggerEnabled !== null && (
+      {subTab === 'vtuber' && !isDeleted && data.session_type === 'vtuber' && thinkingTriggerEnabled !== null && (
         <div className="mb-4 pb-4 border-b border-[var(--border-color)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -252,11 +293,17 @@ export default function InfoTab() {
       )}
 
       {/* ── Tamagotchi Creature State (X7) ─── */}
-      {!isDeleted && data.creature_state && (
+      {subTab === 'status' && !isDeleted && data.creature_state && (
         <CreatureStatePanel snapshot={data.creature_state} t={t} />
+      )}
+      {subTab === 'status' && !isDeleted && !data.creature_state && (
+        <div className="text-[12px] text-[var(--text-muted)] italic py-3">
+          {t('common.noData') ?? '—'}
+        </div>
       )}
 
       {/* Fields Grid */}
+      {subTab === 'vtuber' && (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
         {fields.map(f => (
           <div key={f.label} className="flex flex-col gap-0.5 py-2 px-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
@@ -277,9 +324,10 @@ export default function InfoTab() {
           </div>
         ))}
       </div>
+      )}
 
       {/* System Prompt Section */}
-      {!isDeleted && (
+      {subTab === 'vtuber' && !isDeleted && (
         <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5">
@@ -366,7 +414,7 @@ export default function InfoTab() {
       )}
 
       {/* ── Linked Sub-Worker Section (VTuber sessions only) ── */}
-      {!isDeleted && data.session_type === 'vtuber' && data.linked_session_id && (
+      {subTab === 'worker' && !isDeleted && data.session_type === 'vtuber' && data.linked_session_id && (
         <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
           <div className="flex items-center gap-1.5 mb-3">
             <Link2 size={14} className="text-[var(--text-muted)]" />
@@ -497,9 +545,14 @@ export default function InfoTab() {
           )}
         </div>
       )}
+      {subTab === 'worker' && !isDeleted && !(data.session_type === 'vtuber' && data.linked_session_id) && (
+        <div className="text-[12px] text-[var(--text-muted)] italic py-3">
+          {t('info.subWorker.notFound')}
+        </div>
+      )}
 
       {/* Actions for deleted */}
-      {isDeleted && (
+      {subTab === 'vtuber' && isDeleted && (
         <div className="flex gap-2 mt-4 pt-4 border-t border-[var(--border-color)]">
           <button className={cn("py-2 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => restoreSession(data.session_id)}><RotateCcw size={12} /> {t('info.restoreSession')}</button>
           <button className={cn("py-2 px-4 bg-[var(--danger-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => setShowPermanentDeleteModal(true)}><Trash2 size={12} /> {t('info.permanentDelete')}</button>

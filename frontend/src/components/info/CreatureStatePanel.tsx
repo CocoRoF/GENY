@@ -28,6 +28,13 @@ import { Heart, Battery, Brain, Sparkles } from 'lucide-react';
 export interface CreatureStatePanelProps {
   snapshot: CreatureStateSnapshot;
   t: (key: string, params?: Record<string, string>) => string;
+  /**
+   * Compact "game UI" rendering for the VTuberTab status badge
+   * hover overlay. Uses a darker translucent backdrop, neon
+   * accents and tighter spacing while preserving the same
+   * three-section layout (vitals / bond / mood).
+   */
+  compact?: boolean;
 }
 
 function clamp01(v: number): number {
@@ -99,6 +106,7 @@ function StatBar({
 export default function CreatureStatePanel({
   snapshot,
   t,
+  compact = false,
 }: CreatureStatePanelProps) {
   const { mood, bond, vitals, progression, mood_dominant, last_interaction_at } =
     snapshot;
@@ -128,6 +136,119 @@ export default function CreatureStatePanel({
     ['stress', t('info.creatureState.vitalsAxes.stress'), 'warn'],
     ['cleanliness', t('info.creatureState.vitalsAxes.cleanliness'), 'good'],
   ];
+
+  // ─── Compact "game UI" rendering for the VTuberTab hover overlay ─
+  if (compact) {
+    return (
+      <div
+        className="rounded-xl border border-[rgba(99,102,241,0.45)] shadow-[0_0_30px_rgba(99,102,241,0.25),inset_0_0_20px_rgba(0,0,0,0.6)] backdrop-blur-md p-3.5 w-[360px] text-[var(--text-primary)]"
+        style={{
+          background:
+            'linear-gradient(160deg, rgba(15,18,38,0.92) 0%, rgba(28,16,46,0.92) 100%)',
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-[rgba(99,102,241,0.25)]">
+          <div className="flex items-center gap-1.5">
+            <Sparkles size={13} className="text-[#a5b4fc]" />
+            <span className="text-[11px] font-bold uppercase tracking-[1px] text-[#c7d2fe]">
+              {t('info.creatureState.title')}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <span className="px-1.5 py-0.5 rounded bg-[rgba(99,102,241,0.2)] text-[#e0e7ff] uppercase tracking-[0.8px] border border-[rgba(99,102,241,0.4)]">
+              {progression.life_stage || '—'}
+            </span>
+            <span className="text-[#a5b4fc]">
+              {t('info.creatureState.ageDays', { days: String(progression.age_days) })}
+            </span>
+          </div>
+        </div>
+
+        {/* Dominant mood pill */}
+        <div className="mb-3 flex items-center justify-between text-[10px]">
+          <span className="uppercase tracking-[0.8px] text-[#a5b4fc]">
+            {t('info.creatureState.dominantMood')}
+          </span>
+          <span className="font-mono text-[#fde68a] uppercase">{mood_dominant}</span>
+        </div>
+
+        {/* Vitals */}
+        <div className="mb-2.5">
+          <div className="flex items-center gap-1 mb-1">
+            <Battery size={11} className="text-[#a5b4fc]" />
+            <span className="text-[10px] font-bold uppercase tracking-[1px] text-[#c7d2fe]">
+              {t('info.creatureState.vitals')}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {vitalAxes.map(([key, label, tone]) => (
+              <StatBar
+                key={key}
+                label={label}
+                value={clamp100(vitals[key])}
+                max={100}
+                tone={tone}
+                valueLabel={vitals[key].toFixed(0)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Bond */}
+        <div className="mb-2.5">
+          <div className="flex items-center gap-1 mb-1">
+            <Heart size={11} className="text-[#a5b4fc]" />
+            <span className="text-[10px] font-bold uppercase tracking-[1px] text-[#c7d2fe]">
+              {t('info.creatureState.bond')}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {bondAxes.map(([key, label]) => (
+              <StatBar
+                key={key}
+                label={label}
+                value={Math.max(-100, Math.min(100, bond[key]))}
+                max={100}
+                tone="info"
+                valueLabel={bond[key].toFixed(1)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Mood */}
+        <div>
+          <div className="flex items-center gap-1 mb-1">
+            <Brain size={11} className="text-[#a5b4fc]" />
+            <span className="text-[10px] font-bold uppercase tracking-[1px] text-[#c7d2fe]">
+              {t('info.creatureState.mood')}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {moodAxes.map(([key, label]) => (
+              <StatBar
+                key={key}
+                label={label}
+                value={clamp01(mood[key]) * 100}
+                max={100}
+                tone="neutral"
+                valueLabel={`${(clamp01(mood[key]) * 100).toFixed(0)}%`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Footer: last interaction */}
+        <div className="mt-2.5 pt-2 border-t border-[rgba(99,102,241,0.25)] flex items-center justify-between text-[9px] text-[#a5b4fc]">
+          <span className="uppercase tracking-[0.8px]">
+            {t('info.creatureState.lastInteraction')}
+          </span>
+          <span className="font-mono">{formatTimestamp(last_interaction_at)}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4 pb-4 border-b border-[var(--border-color)]">

@@ -5,6 +5,7 @@ import { chatApi } from '@/lib/api';
 import { getChatWSManager } from '@/lib/chatWsManager';
 import { getAudioManager } from '@/lib/audioManager';
 import { useVTuberStore } from '@/store/useVTuberStore';
+import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
 import { parseEmotion, EMOTION_COLORS, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble } from '@/components/chat';
 import { ChevronDown, ChevronRight, XCircle } from 'lucide-react';
@@ -224,6 +225,13 @@ export default function VTuberChatPanel({
                 if (prev.some((m) => m.id === msg.id)) return prev;
                 return [...prev, displayMsg];
               });
+
+              // Refresh the per-session creature state snapshot once per turn
+              // so the VTuberTab status badge / InfoTab Status sub-tab stay
+              // current with backend mood/vitals updates.
+              if (displayMsg.role === 'assistant') {
+                useCreatureStateStore.getState().fetch(sessionId);
+              }
 
               // Auto TTS for assistant messages
               if (displayMsg.role === 'assistant') {

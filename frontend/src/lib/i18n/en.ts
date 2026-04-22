@@ -280,6 +280,11 @@ const en = {
     selectSessionDesc: 'Choose a session to view its details',
     loading: 'Loading...',
     sessionDetails: 'Session Details',
+    subTabs: {
+      vtuber: 'VTuber',
+      status: 'Status',
+      worker: 'Worker',
+    },
     unnamed: '(unnamed)',
     deleted: 'Deleted',
     unknown: 'unknown',
@@ -314,7 +319,9 @@ const en = {
     memoryProviderDefault: 'Default (server)',
     memoryProviderDisabled: 'Disabled (this session)',
     creatureState: {
-      title: 'Tamagotchi Status',
+      title: 'VTuber Status',
+      badge: 'Status',
+      hoverHint: 'Hover for status',
       dominantMood: 'Dominant mood',
       lastInteraction: 'Last interaction',
       ageDays: 'Day {days}',

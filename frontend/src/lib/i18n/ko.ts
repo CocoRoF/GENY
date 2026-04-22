@@ -280,6 +280,11 @@ const ko: Translations = {
     selectSessionDesc: '상세 정보를 볼 세션을 선택하세요',
     loading: '로딩 중...',
     sessionDetails: '세션 상세 정보',
+    subTabs: {
+      vtuber: 'VTuber',
+      status: 'Status',
+      worker: 'Worker',
+    },
     unnamed: '(이름 없음)',
     deleted: '삭제됨',
     unknown: '알 수 없음',
@@ -314,7 +319,9 @@ const ko: Translations = {
     memoryProviderDefault: '기본값 (서버)',
     memoryProviderDisabled: '비활성화 (이 세션)',
     creatureState: {
-      title: '다마고치 상태',
+      title: 'VTuber 상태',
+      badge: '상태',
+      hoverHint: '상태 확인',
       dominantMood: '주요 감정',
       lastInteraction: '최근 상호작용',
       ageDays: '{days}일차',

@@ -4,10 +4,13 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
+import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
+import { Sparkles } from 'lucide-react';
 import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
+import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 
 const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
 
@@ -54,6 +57,16 @@ export default function VTuberTab() {
   const draggingRef = useRef(false);
   const startYRef = useRef(0);
   const startHeightRef = useRef(0);
+
+  // ── Creature state (Tamagotchi snapshot) for the Status badge ──
+  const creatureSnapshot = useCreatureStateStore((s) => s.states[sessionId]);
+  const fetchCreatureState = useCreatureStateStore((s) => s.fetch);
+  const [statusHover, setStatusHover] = useState(false);
+
+  // Fetch on session change so the badge has data even before any chat turn
+  useEffect(() => {
+    if (sessionId) fetchCreatureState(sessionId);
+  }, [sessionId, fetchCreatureState]);
 
   // Load models on mount
   useEffect(() => {
@@ -168,9 +181,40 @@ export default function VTuberTab() {
           </div>
         )}
 
+        {/* ── VTuber Status badge with game-UI hover overlay ── */}
+        <div
+          className={`relative ${currentState ? '' : 'ml-auto'}`}
+          onMouseEnter={() => setStatusHover(true)}
+          onMouseLeave={() => setStatusHover(false)}
+        >
+          <button
+            type="button"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold uppercase tracking-[0.5px] border transition-colors duration-150 cursor-default ${
+              creatureSnapshot
+                ? 'bg-[rgba(99,102,241,0.12)] text-[#a5b4fc] border-[rgba(99,102,241,0.45)] hover:bg-[rgba(99,102,241,0.22)]'
+                : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] border-[var(--border-color)] opacity-60'
+            }`}
+            aria-label={t('info.creatureState.hoverHint') ?? 'Status'}
+            onClick={() => sessionId && fetchCreatureState(sessionId)}
+          >
+            <Sparkles size={11} />
+            <span>{t('info.creatureState.badge') ?? 'Status'}</span>
+            {creatureSnapshot && (
+              <span className="font-mono opacity-80">
+                {creatureSnapshot.mood_dominant}
+              </span>
+            )}
+          </button>
+          {statusHover && creatureSnapshot && (
+            <div className="absolute right-0 top-full mt-2 z-50">
+              <CreatureStatePanel snapshot={creatureSnapshot} t={t} compact />
+            </div>
+          )}
+        </div>
+
         {/* TTS Audio Controls */}
         {isVTuberRole && (
-          <div className={currentState ? '' : 'ml-auto'}>
+          <div>
             <AudioControls sessionId={sessionId} />
           </div>
         )}
