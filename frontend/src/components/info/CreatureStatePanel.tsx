@@ -260,64 +260,110 @@ export default function CreatureStatePanel({
   }
 
   return (
-    <div className="mb-4 pb-4 border-b border-[var(--border-color)]">
-      {/* Header: title + life-stage / dominant mood summary */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5">
-          <Sparkles size={14} className="text-[var(--text-muted)]" />
-          <span className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.title')}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-          <span className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-primary)] uppercase tracking-[0.5px]">
-            {progression.life_stage || '—'}
-          </span>
-          <span>
-            {t('info.creatureState.ageDays', {
-              days: String(progression.age_days),
-            })}
-          </span>
-        </div>
-      </div>
+    <div
+      className="relative mb-4 rounded-xl border border-[var(--border-color)] overflow-hidden"
+      style={{
+        background:
+          'linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%)',
+      }}
+    >
+      {/* Decorative top accent bar (HUD frame) */}
+      <div
+        className="h-[2px] w-full"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent 0%, var(--primary-color, #6366f1) 20%, #a855f7 50%, var(--primary-color, #6366f1) 80%, transparent 100%)',
+        }}
+      />
 
-      {/* Top line: dominant mood + last interaction */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-3">
-        <div className="flex flex-col gap-0.5 py-2 px-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.dominantMood')}
-          </span>
-          <span
-            className="text-[13px] text-[var(--text-primary)]"
-            style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
-          >
-            {dominantLabel}
-          </span>
+      <div className="p-3.5">
+        {/* ── Header: title + life-stage badge ─────────────────────── */}
+        <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-[var(--border-color)]">
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center justify-center w-6 h-6 rounded-md"
+              style={{
+                background:
+                  'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(168,85,247,0.18))',
+                border: '1px solid rgba(99,102,241,0.35)',
+              }}
+            >
+              <Sparkles size={12} className="text-[var(--primary-color,#6366f1)]" />
+            </div>
+            <span className="text-[12px] font-bold uppercase tracking-[1px] text-[var(--text-primary)]">
+              {t('info.creatureState.title')}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px]">
+            <span
+              className="px-2 py-0.5 rounded-md font-bold uppercase tracking-[1px] text-[10px]"
+              style={{
+                background:
+                  'linear-gradient(135deg, rgba(168,85,247,0.18), rgba(99,102,241,0.18))',
+                color: 'var(--primary-color, #6366f1)',
+                border: '1px solid rgba(99,102,241,0.4)',
+                boxShadow: '0 0 12px rgba(99,102,241,0.15)',
+              }}
+            >
+              {progression.life_stage || '—'}
+            </span>
+            <span
+              className="font-mono text-[var(--text-muted)] text-[11px]"
+              style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
+            >
+              {t('info.creatureState.ageDays', {
+                days: String(progression.age_days),
+              })}
+            </span>
+          </div>
         </div>
-        <div className="flex flex-col gap-0.5 py-2 px-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.lastInteraction')}
-          </span>
-          <span
-            className="text-[12px] text-[var(--text-primary)] break-all"
-            style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
-          >
-            {formatTimestamp(last_interaction_at)}
-          </span>
-        </div>
-      </div>
 
-      {/* Vitals group */}
-      <div className="mb-3">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Battery size={12} className="text-[var(--text-muted)]" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.vitals')}
-          </span>
+        {/* ── Featured: dominant mood + last interaction ───────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+          <div
+            className="relative flex flex-col gap-0.5 py-2 px-3 rounded-lg overflow-hidden"
+            style={{
+              background:
+                'linear-gradient(135deg, rgba(99,102,241,0.10), rgba(168,85,247,0.06))',
+              border: '1px solid rgba(99,102,241,0.30)',
+            }}
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)]">
+              ◆ {t('info.creatureState.dominantMood')}
+            </span>
+            <span
+              className="text-[15px] font-bold text-[var(--text-primary)]"
+              style={{
+                textShadow: '0 0 10px rgba(99,102,241,0.35)',
+              }}
+            >
+              {dominantLabel}
+            </span>
+          </div>
+          <div
+            className="flex flex-col gap-0.5 py-2 px-3 rounded-lg"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)]">
+              ◇ {t('info.creatureState.lastInteraction')}
+            </span>
+            <span
+              className="text-[12px] text-[var(--text-primary)] break-all"
+              style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
+            >
+              {formatTimestamp(last_interaction_at)}
+            </span>
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+
+        {/* ── Vitals group ────────────────────────────────────────── */}
+        <SectionHeader icon={<Battery size={12} />} label={t('info.creatureState.vitals')} accent="#10b981" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 mb-3">
           {vitalAxes.map(([key, label, tone]) => (
-            <StatBar
+            <SegmentedStatBar
               key={key}
               label={label}
               value={clamp100(vitals[key])}
@@ -327,24 +373,14 @@ export default function CreatureStatePanel({
             />
           ))}
         </div>
-      </div>
 
-      {/* Bond group */}
-      <div className="mb-3">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Heart size={12} className="text-[var(--text-muted)]" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.bond')}
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* ── Bond group ──────────────────────────────────────────── */}
+        <SectionHeader icon={<Heart size={12} />} label={t('info.creatureState.bond')} accent="#ec4899" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 mb-3">
           {bondAxes.map(([key, label]) => (
-            <StatBar
+            <SegmentedStatBar
               key={key}
               label={label}
-              // Bond axes are unbounded in the backend; clamp to 100
-              // for visual stability while still showing the raw
-              // value in the label.
               value={Math.max(-100, Math.min(100, bond[key]))}
               max={100}
               tone="info"
@@ -352,19 +388,12 @@ export default function CreatureStatePanel({
             />
           ))}
         </div>
-      </div>
 
-      {/* Mood group */}
-      <div>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Brain size={12} className="text-[var(--text-muted)]" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
-            {t('info.creatureState.mood')}
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* ── Mood group ──────────────────────────────────────────── */}
+        <SectionHeader icon={<Brain size={12} />} label={t('info.creatureState.mood')} accent="#a855f7" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
           {moodAxes.map(([key, label]) => (
-            <StatBar
+            <SegmentedStatBar
               key={key}
               label={label}
               value={clamp01(mood[key]) * 100}
@@ -374,6 +403,98 @@ export default function CreatureStatePanel({
             />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Section divider header used between Vitals / Bond / Mood blocks. */
+function SectionHeader({
+  icon,
+  label,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  accent: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <span style={{ color: accent }}>{icon}</span>
+      <span className="text-[11px] font-bold uppercase tracking-[1.5px] text-[var(--text-primary)]">
+        {label}
+      </span>
+      <div
+        className="flex-1 h-px"
+        style={{
+          background: `linear-gradient(90deg, ${accent}55 0%, transparent 100%)`,
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Segmented stat bar — RPG/HUD style. Splits the bar into 10 ticks
+ * and lights them up proportionally with a soft glow on the active
+ * segments. Falls back gracefully if `value` exceeds `max`.
+ */
+function SegmentedStatBar({
+  label,
+  value,
+  max,
+  tone,
+  valueLabel,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: 'good' | 'warn' | 'neutral' | 'info';
+  valueLabel?: string;
+}) {
+  const SEGMENTS = 12;
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+  const filled = Math.round(pct * SEGMENTS);
+  const toneColor =
+    tone === 'good'
+      ? '#10b981'
+      : tone === 'warn'
+        ? '#ef4444'
+        : tone === 'info'
+          ? '#6366f1'
+          : '#a855f7';
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
+          {label}
+        </span>
+        <span
+          className="text-[11px] font-bold"
+          style={{
+            color: toneColor,
+            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            textShadow: `0 0 6px ${toneColor}40`,
+          }}
+        >
+          {valueLabel ?? `${(pct * 100).toFixed(0)}%`}
+        </span>
+      </div>
+      <div className="flex gap-[2px]">
+        {Array.from({ length: SEGMENTS }).map((_, i) => {
+          const active = i < filled;
+          return (
+            <div
+              key={i}
+              className="flex-1 h-[6px] rounded-[1px] transition-colors duration-200"
+              style={{
+                background: active ? toneColor : 'var(--bg-tertiary, rgba(0,0,0,0.10))',
+                boxShadow: active ? `0 0 4px ${toneColor}66` : 'none',
+                opacity: active ? 1 : 0.45,
+              }}
+            />
+          );
+        })}
       </div>
     </div>
   );
