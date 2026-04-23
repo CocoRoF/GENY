@@ -228,10 +228,10 @@ services:
       # Diffusion outer-loop step 수. 32 가 원본 기본값이지만 GPU 시간이
       # 여기에 정비례. 16 으로 절반 단축해도 voice clone 품질 차이 거의 없음.
       # 음질 우선이면 24, 속도 우선이면 8 까지 내릴 수 있음.
-      - OMNIVOICE_DEFAULT_NUM_STEP=${OMNIVOICE_DEFAULT_NUM_STEP:-16}
+      - OMNIVOICE_DEFAULT_NUM_STEP=${OMNIVOICE_DEFAULT_NUM_STEP:-12}
       # CUDA 컨텍스트 메모리 단편화 방지. 0.7 = 8GB GPU 에서 5.6GB 예약.
       # 0 으로 두면 비활성화 (기존 동작).
-      - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.7}
+      - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.5}
       - OMNIVOICE_AUTO_ASR=${OMNIVOICE_AUTO_ASR:-false}
       - OMNIVOICE_LOG_LEVEL=${OMNIVOICE_LOG_LEVEL:-info}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}

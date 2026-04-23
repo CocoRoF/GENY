@@ -72,6 +72,19 @@ export class AudioManager {
   private _retiredTurns: string[] = [];
   private static _MAX_RETIRED = 32;
 
+  /** 턴 도착 순서 ordinal — registerTurnStart 가 부여. 큐 정렬 시
+   *  "더 오래된 턴 의 클립이 더 새로운 턴 의 클립보다 먼저 재생되어야"
+   *  하는 inter-turn FIFO 보장에 사용. 같은 세션의 새 턴이 시작돼도
+   *  이전 턴의 늦은 클립이 새 턴 앞으로 끼어들어가야 자연스럽다. */
+  private _turnOrdinal: Map<string, number> = new Map();
+  private _nextTurnOrdinal = 0;
+  /** 턴별 in-flight HTTP 요청 카운터. dispatch 시 +1, 응답이 큐에 들어가
+   *  거나 에러 처리되면 -1. 이전 턴의 합성이 아직 진행 중인지 판단해
+   *  새 턴 클립의 재생을 막는데 사용한다. */
+  private _turnPending: Map<string, number> = new Map();
+  /** 턴 finalize (= 더 이상 dispatch 가 추가되지 않음) 가 호출된 turn 들. */
+  private _turnFinalized: Set<string> = new Set();
+
   // ── iOS WebKit user gesture 오디오 언락 ──
   private _gestureListenerAttached = false;
 
@@ -159,9 +172,56 @@ export class AudioManager {
    */
   registerTurnStart(turnId: string, startSeq = 0): void {
     this._nextSeqByTurn.set(turnId, startSeq);
+    // 턴 도착 ordinal 부여 (한 turnId 당 한 번만)
+    if (!this._turnOrdinal.has(turnId)) {
+      this._turnOrdinal.set(turnId, this._nextTurnOrdinal++);
+    }
     // retired 목록에 들어있다면 제거 (재사용 가능)
     const idx = this._retiredTurns.indexOf(turnId);
     if (idx !== -1) this._retiredTurns.splice(idx, 1);
+  }
+
+  /**
+   * 턴별 in-flight 합성 요청 +1. 새 문장에 대한 HTTP 요청을 시작하기
+   * 직전에 호출. 이전 턴이 아직 합성 중인 동안 새 턴 클립이 큐에 먼저
+   * 도착해서 잘못 재생되는 것을 막는 inter-turn FIFO 의 핵심 신호.
+   */
+  noteTurnDispatch(turnId: string): void {
+    if (!this._turnOrdinal.has(turnId)) {
+      this._turnOrdinal.set(turnId, this._nextTurnOrdinal++);
+    }
+    this._turnPending.set(turnId, (this._turnPending.get(turnId) ?? 0) + 1);
+  }
+
+  /**
+   * 턴별 in-flight 합성 요청 -1. HTTP 응답이 도착해서 enqueue 되었거나
+   * (성공/실패 무관) fetch 자체가 끝난 시점에 호출.
+   */
+  noteTurnReceive(turnId: string): void {
+    const cur = this._turnPending.get(turnId) ?? 0;
+    if (cur <= 1) {
+      this._turnPending.delete(turnId);
+    } else {
+      this._turnPending.set(turnId, cur - 1);
+    }
+  }
+
+  /**
+   * 턴 finalize — 이 턴에 더 이상 새 dispatch 가 없을 것임을 신호.
+   * pending=0 이고 큐에 잔여 아이템이 없으면 _processQueue 의 폴링이
+   * 즉시 drain 을 감지해 다음 턴으로 진행.
+   */
+  markTurnFinalized(turnId: string): void {
+    this._turnFinalized.add(turnId);
+  }
+
+  /** 턴이 drained 인지: finalized AND pending=0 AND 큐 잔여 없음 AND 재생 중 아님. */
+  private _isTurnDrained(turnId: string): boolean {
+    if (!this._turnFinalized.has(turnId)) return false;
+    if ((this._turnPending.get(turnId) ?? 0) > 0) return false;
+    if (this._queue.some((q) => q.turnId === turnId)) return false;
+    if (this._currentTurnId === turnId) return false;
+    return true;
   }
 
   /**
@@ -200,12 +260,26 @@ export class AudioManager {
       seq,
     };
 
-    // 같은 턴에서 seq 가 지정된 경우 순서 유지를 위해 정렬 삽입
+    // 같은 턴에서 seq 가 지정된 경우 순서 유지를 위해 정렬 삽입.
+    // **inter-turn FIFO**: 더 오래된 turn (작은 ordinal) 의 클립은
+    // 새로운 turn 의 클립보다 항상 앞에 와야 한다. 그렇지 않으면
+    // chat0 의 늦게 도착한 seq=2 가 이미 큐에 있는 chat1:seq=0 뒤로
+    // 붙어서 [chat0:0, chat0:1, chat1:0, chat0:2] 같은 뒤섞임 발생.
     if (turnId && typeof seq === 'number') {
+      // ordinal 미등록 (registerTurnStart 미호출) 인 경우 즉시 부여
+      if (!this._turnOrdinal.has(turnId)) {
+        this._turnOrdinal.set(turnId, this._nextTurnOrdinal++);
+      }
+      const myOrd = this._turnOrdinal.get(turnId)!;
+
       let inserted = false;
       for (let i = 0; i < this._queue.length; i += 1) {
         const q = this._queue[i];
-        if (q.turnId === turnId && typeof q.seq === 'number' && q.seq > seq) {
+        const qOrd = q.turnId ? this._turnOrdinal.get(q.turnId) ?? Infinity : Infinity;
+        const isLaterTurn = qOrd > myOrd;
+        const isSameTurnLaterSeq =
+          q.turnId === turnId && typeof q.seq === 'number' && q.seq > seq;
+        if (isLaterTurn || isSameTurnLaterSeq) {
           this._queue.splice(i, 0, item);
           // 정렬 삽입 시 이후 아이템의 pre-fetch 예약을 무효화
           q._prefetchPromise = undefined;
@@ -272,6 +346,48 @@ export class AudioManager {
         // Strict seq ordering: 맨 앞 아이템이 턴의 nextSeq 와 맞지 않으면
         // 아직 비는 seq 가 도착할 때까지 잠시 대기 (최대 2초).
         const head = this._queue[0];
+
+        // ── Inter-turn FIFO ───────────────────────────────────────
+        // head 가 어느 턴이든, 이 턴보다 ordinal 이 작은 (= 더 오래된)
+        // 활성 턴이 있으면 그 턴이 drain 될 때까지 기다린다. 이렇게 해야
+        // chat0 가 아직 합성 중일 때 chat1:seq=0 이 먼저 도착해서 큐
+        // 맨 앞에 있더라도 chat0 의 모든 클립이 끝난 뒤에 chat1 을 재생.
+        if (head.turnId) {
+          const headOrd = this._turnOrdinal.get(head.turnId);
+          if (typeof headOrd === 'number') {
+            let blockingTurn: string | null = null;
+            for (const [tid, ord] of this._turnOrdinal) {
+              if (ord >= headOrd) continue;
+              if (this._isTurnDrained(tid)) continue;
+              blockingTurn = tid;
+              break;
+            }
+            if (blockingTurn) {
+              // 폴링: 50ms 간격으로 (a) blockingTurn 의 새 클립이 큐
+              // 맨앞에 끼어들어왔는지, (b) blockingTurn 이 drain 됐는지,
+              // (c) head 자체가 바뀌었는지 — 셋 중 하나라도 맞으면 즉시 빠져나감.
+              // 60초 timeout 안에 아무 일도 없으면 강제로 blocker 를 drain
+              // 처리해서 진행한다 (백엔드 실종 등 이상 상황 방어).
+              const deadline = Date.now() + 60000;
+              let progressed = false;
+              while (Date.now() < deadline) {
+                const newHead = this._queue[0];
+                if (newHead !== head) { progressed = true; break; }
+                if (this._isTurnDrained(blockingTurn)) { progressed = true; break; }
+                await new Promise((r) => setTimeout(r, 50));
+              }
+              if (!progressed) {
+                console.warn(
+                  `[AudioManager] inter-turn drain timeout: blocking=${blockingTurn}, advancing to head=${head.turnId}:${head.seq}`,
+                );
+                this._turnPending.delete(blockingTurn);
+                this._turnFinalized.add(blockingTurn);
+              }
+              continue; // queue head 재평가
+            }
+          }
+        }
+
         if (head.turnId && typeof head.seq === 'number') {
           const expected = this._nextSeqByTurn.get(head.turnId);
           if (expected !== undefined && head.seq > expected) {
@@ -301,6 +417,10 @@ export class AudioManager {
         }
 
         await this._playOne(item);
+
+        if (item.turnId) {
+          this._currentTurnId = null;
+        }
       }
     } finally {
       this._isProcessingQueue = false;

@@ -17,10 +17,17 @@ const _ttsAbortControllers: Map<string, AbortController> = new Map();
 // 사용자가 첫 음성을 듣는 시점을 agent_message turn-end 이전으로 앞당긴다.
 //
 // 턴 ID 규칙:  `${sessionId}:${turnIndex}`
-//   - 사용자가 새 메시지를 보낼 때 turnIndex++ 하고 이전 턴의 잔여 클립을
-//     AudioManager.clearTurn 으로 버림으로써 overlap 을 원천 차단.
+//   - 사용자가 새 메시지를 보낼 때 turnIndex++ 하여 새 스코프를 연다.
+//   - **이전 턴의 잔여 클립은 폐기하지 않고** 자연스럽게 완주시킨다.
+//     (사용자가 STOP 버튼을 누른 경우만 명시적 폐기 — stopSpeaking)
+//   - AudioManager 의 큐는 turn 단위 FIFO 로 누적 — 챗0 클립 전부가
+//     끝난 다음에야 챗1 클립이 재생되므로 자연스러운 대화 순서 유지.
+//
+// AbortController 키는 **턴별** (sessionId:turnIndex). 세션별 단일 컨트
+// 롤러로 묶으면 새 턴에서 만든 컨트롤러가 이전 턴의 in-flight HTTP 까지
+// 끊어 챗0 의 합성된 오디오가 영영 안 도착함 → 같은 챗 안에서 잠식.
 const _liveTurnIndex: Map<string, number> = new Map();
-const _liveAbortControllers: Map<string, AbortController> = new Map();
+const _liveAbortControllersByTurn: Map<string, AbortController> = new Map();
 const _liveEmittedByTurn: Map<string, number> = new Map(); // turnId → next seq
 // 짧은 문장은 묶어서 내보낸다. TTS 요청 1건당 fixed 오버헤드 (커넥션 풀
 // + GPU 워밍업 + RTF 비효율) 가 크기 때문에, "안녕!" (3자) 같은 미니
@@ -445,11 +452,21 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   },
 
   stopSpeaking: (sessionId) => {
-    // 진행 중인 TTS fetch 취소
+    // 진행 중인 단발 TTS fetch 취소
     const controller = _ttsAbortControllers.get(sessionId);
     if (controller) {
       controller.abort();
       _ttsAbortControllers.delete(sessionId);
+    }
+    // **명시적 STOP 경로** — 이 세션의 모든 live turn HTTP 도 함께 abort.
+    // 평상시(beginTTSTurn) 에서는 절대 abort 하면 안 됨 — 이전 턴 클립이
+    // 잠식되어 사라짐. 사용자가 STOP 버튼을 누른 경우만 여기로 들어옴.
+    const sessionPrefix = `${sessionId}:`;
+    for (const [turnId, ac] of _liveAbortControllersByTurn) {
+      if (turnId.startsWith(sessionPrefix)) {
+        ac.abort();
+        _liveAbortControllersByTurn.delete(turnId);
+      }
     }
     // clearQueue: 큐의 모든 대기 아이템 비우기 + 현재 재생 중지
     // 각 아이템의 onEnd 콜백이 호출되어 ttsSpeaking 상태가 정리됨
@@ -462,16 +479,21 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
 
   // ── Live chat-stream pre-emit TTS ─────────────────────────────────
   //
-  // 새 유저 메시지 시작 시 호출. 이전 턴의 잔여 클립을 AudioManager 에서
-  // 제거하고 turnIndex++ 하여 새 스코프를 연다. extractor 버퍼도 리셋.
+  // 새 유저 메시지 시작 시 호출. **이전 턴은 손대지 않는다** — AudioManager
+  // 큐가 turn 단위로 FIFO 누적되어 챗0 클립이 모두 재생된 다음 챗1 클립이
+  // 자연스럽게 이어지도록 한다. (이전엔 clearTurn + abort 로 챗0 클립을
+  // 파괴해서 "앞선 챗 잠식" 버그 발생.)
+  //
+  // 명시적 폐기는 사용자가 STOP 버튼을 눌렀을 때 (stopSpeaking) 만.
   beginTTSTurn: (sessionId) => {
+    // 이전 턴이 finalize 되지 않은 상태에서 새 턴이 시작되면 (예: assistant
+    // _message 가 아직 안 왔거나, 빈 응답으로 early return 됐거나), AudioManager
+    // 가 영영 이전 턴 drain 을 기다리며 새 턴 클립 재생을 막을 수 있다.
+    // → 새 턴 시작 자체가 "이전 턴엔 더 이상 dispatch 가 없다" 는 강한 신호.
     const prevTurn = _currentTurnId(sessionId);
-    // 이전 턴 고유 폐기
-    getAudioManager().clearTurn(prevTurn, /* stopCurrent */ false);
-    _liveAbortControllers.get(sessionId)?.abort();
-    _liveAbortControllers.delete(sessionId);
-    _liveEmittedByTurn.delete(prevTurn);
-    _liveExtractor.reset(prevTurn);
+    if (_liveTurnIndex.has(sessionId)) {
+      getAudioManager().markTurnFinalized(prevTurn);
+    }
 
     const nextIdx = (_liveTurnIndex.get(sessionId) ?? 0) + 1;
     _liveTurnIndex.set(sessionId, nextIdx);
@@ -506,14 +528,21 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
       const nextSeq = _liveEmittedByTurn.get(turnId) ?? 0;
       _liveEmittedByTurn.set(turnId, nextSeq + 1);
 
-      // 세션당 단일 AbortController 로 턴 취소를 전파
-      let controller = _liveAbortControllers.get(sessionId);
+      // **턴별** AbortController. 세션별 단일 컨트롤러로 묶으면 새 턴이
+      // 시작될 때 이전 턴의 in-flight HTTP 까지 끊겨서 합성된 오디오가
+      // 영영 도착 안 함 (= 앞선 챗 잠식 버그).
+      let controller = _liveAbortControllersByTurn.get(turnId);
       if (!controller) {
         controller = new AbortController();
-        _liveAbortControllers.set(sessionId, controller);
+        _liveAbortControllersByTurn.set(turnId, controller);
       }
 
       set((s) => ({ ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: true } }));
+
+      // Inter-turn FIFO 신호: dispatch 주 바로 앞에서 +1, 응답이 끝나면 -1.
+      // 이 카운터가 0 이고 markTurnFinalized 가 숨으면 턴이 drained 되어
+      // AudioManager 가 다음 턴 클립 재생을 개시한다.
+      getAudioManager().noteTurnDispatch(turnId);
 
       // 문장당 1 HTTP 요청 — TCP 레이어에서 자연스러운 파이프라이닝을 얻고
       // 한 요청의 지연이 다른 문장의 재생에 영향을 주지 않는다. 응답 seq
@@ -538,10 +567,15 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
           },
         },
         controller.signal,
-      ).catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        console.warn('[VTuber] live chunk dispatch failed:', err);
-      });
+      )
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          console.warn('[VTuber] live chunk dispatch failed:', err);
+        })
+        .finally(() => {
+          // 성공/실패/취소 무관 pending counter 원상복구
+          getAudioManager().noteTurnReceive(turnId);
+        });
     }
   },
 
@@ -575,12 +609,14 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     for (const sentence of toSend) {
       const nextSeq = _liveEmittedByTurn.get(turnId) ?? 0;
       _liveEmittedByTurn.set(turnId, nextSeq + 1);
-      let controller = _liveAbortControllers.get(sessionId);
+      // 턴별 AbortController 재사용 (pushStreamingText 가 만든 것과 동일).
+      let controller = _liveAbortControllersByTurn.get(turnId);
       if (!controller) {
         controller = new AbortController();
-        _liveAbortControllers.set(sessionId, controller);
+        _liveAbortControllersByTurn.set(turnId, controller);
       }
       set((s) => ({ ttsSpeaking: { ...s.ttsSpeaking, [sessionId]: true } }));
+      getAudioManager().noteTurnDispatch(turnId);
       void dispatchSpeakChunks(
         { sentences: [sentence], emotion, turn_id: turnId },
         {
@@ -600,10 +636,18 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
           },
         },
         controller.signal,
-      ).catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        console.warn('[VTuber] live finalize dispatch failed:', err);
-      });
+      )
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          console.warn('[VTuber] live finalize dispatch failed:', err);
+        })
+        .finally(() => {
+          getAudioManager().noteTurnReceive(turnId);
+        });
     }
+    // 더 이상 새 dispatch 가 없을 것임을 AudioManager 에 알린다.
+    // 이 호출 다음, pending=0 이 되는 순간 턴은 drained 가 되어
+    // 다음 턴으로 이행 가능하다.
+    getAudioManager().markTurnFinalized(turnId);
   },
 }));
