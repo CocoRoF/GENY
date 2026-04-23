@@ -149,12 +149,32 @@ export class AudioManager {
   }
 
   /**
+   * 새 턴 시작 시 호출 — 첫 번째로 재생할 seq를 명시적으로 등록한다.
+   *
+   * **왜 필요한가**: enqueue 가 자동으로 nextSeq 를 추적하긴 하지만,
+   * "처음 도착한 seq" 를 expected 로 잡기 때문에 seq=1 이 seq=0 보다
+   * 먼저 도착하면 seq=1 을 expected 로 인식해 그대로 재생해 버린다.
+   * 턴 시작 시점에 expected=startSeq (보통 0) 를 박아두면 seq=1 이
+   * 먼저 와도 _waitForSeq 가 seq=0 을 기다리도록 강제할 수 있다.
+   */
+  registerTurnStart(turnId: string, startSeq = 0): void {
+    this._nextSeqByTurn.set(turnId, startSeq);
+    // retired 목록에 들어있다면 제거 (재사용 가능)
+    const idx = this._retiredTurns.indexOf(turnId);
+    if (idx !== -1) this._retiredTurns.splice(idx, 1);
+  }
+
+  /**
    * TTS 응답을 큐에 추가. 현재 재생 중이면 대기, 아니면 즉시 재생.
    * 이전 재생을 중단하지 않고 순차적으로 재생한다.
    *
    * ``opts.turnId`` / ``opts.seq`` 를 지정하면 같은 턴 안에서 strict
    * 순서로 재생된다. 중간 seq 가 아직 도착하지 않았으면 뒤따라 온
    * 높은 seq 가 있어도 대기한다.
+   *
+   * **중요**: strict ordering 이 필요하면 턴 시작 시점에
+   * ``registerTurnStart(turnId, 0)`` 을 먼저 불러야 첫 enqueue 가
+   * 잘못된 seq (예: 1 이 0 보다 먼저 도착) 로 expected 를 잠그지 않는다.
    */
   async enqueue(
     response: Response,
@@ -194,9 +214,10 @@ export class AudioManager {
         }
       }
       if (!inserted) this._queue.push(item);
-      // 턴의 nextSeq 초기화 (가장 작은 seq 로 설정되도록 min 추적)
-      const currentNext = this._nextSeqByTurn.get(turnId);
-      if (currentNext === undefined || seq < currentNext) {
+      // nextSeq 가 아직 등록되지 않았다면 (registerTurnStart 미호출 케이스)
+      // 도착한 seq 중 가장 작은 값으로 fallback. 이 경로는 strict ordering
+      // 보장이 깨질 수 있으므로 호출자가 registerTurnStart 를 부르는 게 정석.
+      if (!this._nextSeqByTurn.has(turnId)) {
         this._nextSeqByTurn.set(turnId, seq);
       }
     } else {

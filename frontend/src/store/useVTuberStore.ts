@@ -477,6 +477,10 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     _liveTurnIndex.set(sessionId, nextIdx);
     const newTurn = `${sessionId}:${nextIdx}`;
     _liveEmittedByTurn.set(newTurn, 0);
+    // **중요**: AudioManager 의 expected seq 를 0 으로 미리 박아둔다.
+    // 이거 안 하면 seq=1 응답이 seq=0 보다 빨리 도착했을 때 expected=1
+    // 로 잠겨 seq=0 이 영영 재생 안 되는 순서 뒤바뀜 버그 발생.
+    getAudioManager().registerTurnStart(newTurn, 0);
     get().addLog(sessionId, 'debug', 'TTS', `Live turn started: ${newTurn}`);
   },
 
