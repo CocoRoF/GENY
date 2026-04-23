@@ -84,4 +84,36 @@ describe('SentenceStreamExtractor', () => {
     expect(ex.push('a', 'One. Three.')).toEqual(['Three.']);
     expect(ex.push('b', 'Two. Four.')).toEqual(['Four.']);
   });
+
+  it('coalesces short sentences when minChars is set', () => {
+    const ex = new SentenceStreamExtractor({ minChars: 20 });
+    // 짧은 문장 3개 (각 5/8/10자) — 합쳐야 minChars 충족
+    expect(ex.push('k', 'Hi! ')).toEqual([]); // 3자 → hold
+    expect(ex.push('k', 'Hi! Hello. ')).toEqual([]); // 3+6=9자 → hold
+    expect(ex.push('k', 'Hi! Hello. World peace? ')).toEqual([
+      'Hi! Hello. World peace?',
+    ]); // 9+13=22자 ≥ 20 → emit
+  });
+
+  it('does not coalesce when sentence already ≥ minChars', () => {
+    const ex = new SentenceStreamExtractor({ minChars: 10 });
+    expect(ex.push('k', 'This is a long sentence.')).toEqual([
+      'This is a long sentence.',
+    ]);
+  });
+
+  it('flush emits short holding tail even below minChars', () => {
+    const ex = new SentenceStreamExtractor({ minChars: 50 });
+    ex.push('k', 'Short. ');
+    // 6자 < 50 이지만 flush 시 강제 emit
+    expect(ex.flush('k', 'Short. Tail')).toEqual(['Short. Tail']);
+  });
+
+  it('reset clears holding too', () => {
+    const ex = new SentenceStreamExtractor({ minChars: 20 });
+    ex.push('k', 'Hi. ');
+    ex.reset('k');
+    // reset 후에는 holding 도 비어있어야 새 문장만 emit
+    expect(ex.push('k', 'Long enough sentence.')).toEqual(['Long enough sentence.']);
+  });
 });

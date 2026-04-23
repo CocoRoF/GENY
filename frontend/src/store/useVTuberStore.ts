@@ -22,7 +22,14 @@ const _ttsAbortControllers: Map<string, AbortController> = new Map();
 const _liveTurnIndex: Map<string, number> = new Map();
 const _liveAbortControllers: Map<string, AbortController> = new Map();
 const _liveEmittedByTurn: Map<string, number> = new Map(); // turnId → next seq
-const _liveExtractor = new SentenceStreamExtractor();
+// 짧은 문장은 묶어서 내보낸다. TTS 요청 1건당 fixed 오버헤드 (커넥션 풀
+// + GPU 워밍업 + RTF 비효율) 가 크기 때문에, "안녕!" (3자) 같은 미니
+// 클립 여러 개로 GPU/네트워크를 도배하면 오히려 전체 지연이 늘어난다.
+//
+// 20자 임계값은 한국어 1-2 어절 ≈ 한 호흡 분량. 이 정도면 fixed 오버
+// 헤드 대비 합성 시간 비율이 충분히 합리적.
+const LIVE_TTS_MIN_CHARS = 20;
+const _liveExtractor = new SentenceStreamExtractor({ minChars: LIVE_TTS_MIN_CHARS });
 
 function _currentTurnId(sessionId: string): string {
   const idx = _liveTurnIndex.get(sessionId) ?? 0;

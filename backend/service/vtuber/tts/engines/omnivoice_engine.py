@@ -63,12 +63,18 @@ async def _get_client(api_url: str, read_timeout: float) -> httpx.AsyncClient:
             connect=10.0,
             read=read_timeout,
             write=30.0,
-            pool=10.0,
+            # 풀 대기 — OmniVoice 서버 측 GPU 세마포어 (max_concurrency)
+            # 때문에 5번째 이후 요청은 60초+ 대기할 수 있다. 풀 타임아웃을
+            # read_timeout 과 같이 가져가서 "커넥션 자체를 못 받음" 으로
+            # 인한 PoolTimeout 을 GPU 대기와 구별 가능하게 한다.
+            pool=read_timeout,
         )
         limits = httpx.Limits(
-            max_keepalive_connections=4,
-            max_connections=8,
-            keepalive_expiry=30.0,
+            # GPU concurrency=8 + 프런트가 한 턴에 ~16 문장 동시 발사하는
+            # 최악 케이스를 흡수. keepalive=8 로 따뜻한 커넥션 유지.
+            max_keepalive_connections=8,
+            max_connections=64,
+            keepalive_expiry=60.0,
         )
         client = httpx.AsyncClient(timeout=timeout, limits=limits)
         _clients[key] = client

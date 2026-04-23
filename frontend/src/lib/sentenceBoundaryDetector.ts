@@ -128,12 +128,62 @@ export function extractCompletedSentences(
  *
  * 같은 `key`(세션/턴 조합)로 반복 호출하면 누적 버퍼 전략으로 동작하고,
  * `reset(key)`로 턴 경계에서 버퍼를 비울 수 있다.
+ *
+ * **문장 병합 (coalescing)**:
+ *   `minChars` 옵션을 주면, 추출된 문장이 그 길이 미만이면 다음 문장과
+ *   합쳐질 때까지 holding 버퍼에 보류한다. TTS 요청 1건당 fixed 오버헤드
+ *   (커넥션 풀 + GPU 워밍업 + RTF 비효율) 가 크기 때문에, "안녕!" 같은
+ *   극단적으로 짧은 클립이 큐를 점유하지 않게 막는다. `flush()` 시점에는
+ *   minChars 미만이어도 holding 잔여를 강제로 emit 한다.
  */
+export interface ExtractorOptions {
+  /** 한 emit 클립의 최소 문자 수. 미만이면 다음 문장과 병합. (default 0 = 비활성) */
+  minChars?: number;
+  /** 두 문장을 이어붙일 때 사이에 넣는 구분자 (default ' ') */
+  joiner?: string;
+}
+
 export class SentenceStreamExtractor {
   private _emitted = new Map<string, string>();
+  private _holding = new Map<string, string>();
+  private readonly _minChars: number;
+  private readonly _joiner: string;
+
+  constructor(opts: ExtractorOptions = {}) {
+    this._minChars = Math.max(0, opts.minChars ?? 0);
+    this._joiner = opts.joiner ?? ' ';
+  }
+
+  /**
+   * 추출된 문장 배열을 minChars 기준으로 병합한다.
+   * 마지막 그룹이 minChars 미만이면 holding 으로 보류, 다음 push 때 합침.
+   */
+  private _coalesce(key: string, sentences: string[], force: boolean): string[] {
+    if (this._minChars <= 0) {
+      // 비활성: holding 무시하고 그대로 반환.
+      return sentences;
+    }
+    const out: string[] = [];
+    let buf = this._holding.get(key) ?? '';
+    for (const s of sentences) {
+      buf = buf ? `${buf}${this._joiner}${s}` : s;
+      if (buf.length >= this._minChars) {
+        out.push(buf);
+        buf = '';
+      }
+    }
+    if (force && buf) {
+      out.push(buf);
+      buf = '';
+    }
+    if (buf) this._holding.set(key, buf);
+    else this._holding.delete(key);
+    return out;
+  }
 
   /**
    * 누적 텍스트에서 새로 완성된 문장들을 뽑고 내부 상태를 갱신한다.
+   * `minChars` 가 설정되어 있으면 짧은 문장은 holding 버퍼에 모아 병합.
    */
   push(key: string, fullText: string): string[] {
     const prev = this._emitted.get(key) ?? '';
@@ -141,20 +191,23 @@ export class SentenceStreamExtractor {
     if (sentences.length > 0 || consumed > prev.length) {
       this._emitted.set(key, fullText.slice(0, consumed));
     }
-    return sentences;
+    return this._coalesce(key, sentences, /* force */ false);
   }
 
   /**
-   * 턴 종료 — 미완 꼬리가 있으면 마지막 문장으로 포함하여 반환.
+   * 턴 종료 — 미완 꼬리 + holding 잔여까지 모두 강제 emit.
    */
   flush(key: string, fullText: string): string[] {
     const prev = this._emitted.get(key) ?? '';
     const { sentences } = extractCompletedSentences(fullText, prev, { forceFinal: true });
+    const out = this._coalesce(key, sentences, /* force */ true);
     this._emitted.delete(key);
-    return sentences;
+    this._holding.delete(key);
+    return out;
   }
 
   reset(key: string): void {
     this._emitted.delete(key);
+    this._holding.delete(key);
   }
 }
