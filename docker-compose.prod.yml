@@ -221,9 +221,17 @@ services:
       - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
       - OMNIVOICE_DEVICE=${OMNIVOICE_DEVICE:-cuda:0}
       - OMNIVOICE_DTYPE=${OMNIVOICE_DTYPE:-float16}
-      # GPU 병렬 합성 개수. GTX 1070 (8GB, float16, ~2-3GB 모델) 기준 4 권장.
-      # OOM 발생 시 3 → 2 로 내리고, 여유 있으면 6까지 시도 가능.
-      - OMNIVOICE_MAX_CONCURRENCY=${OMNIVOICE_MAX_CONCURRENCY:-2}
+      # GPU 동시 합성 슬롯. 측정 결과 GTX 1070(Pascal, no Tensor cores)은
+      # SM 컴퓨트 한계로 동시성을 올리면 RTF 가 폭증함 (c=1 RTF~6, c=2 ~8, c=4 ~25).
+      # 1070 에서는 1 이 최적. RTX 4070+ 등 Tensor-core GPU 로 갈 때 2~4 로 올리기.
+      - OMNIVOICE_MAX_CONCURRENCY=${OMNIVOICE_MAX_CONCURRENCY:-1}
+      # Diffusion outer-loop step 수. 32 가 원본 기본값이지만 GPU 시간이
+      # 여기에 정비례. 16 으로 절반 단축해도 voice clone 품질 차이 거의 없음.
+      # 음질 우선이면 24, 속도 우선이면 8 까지 내릴 수 있음.
+      - OMNIVOICE_DEFAULT_NUM_STEP=${OMNIVOICE_DEFAULT_NUM_STEP:-16}
+      # CUDA 컨텍스트 메모리 단편화 방지. 0.7 = 8GB GPU 에서 5.6GB 예약.
+      # 0 으로 두면 비활성화 (기존 동작).
+      - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.7}
       - OMNIVOICE_AUTO_ASR=${OMNIVOICE_AUTO_ASR:-false}
       - OMNIVOICE_LOG_LEVEL=${OMNIVOICE_LOG_LEVEL:-info}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}

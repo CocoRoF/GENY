@@ -36,7 +36,10 @@ class OmniVoiceConfig(BaseConfig):
     language: str = ""  # empty string = auto-detect
 
     # ── Generation parameters ───────────────────────────────────────
-    num_step: int = 32
+    # num_step: diffusion outer-loop iterations. GPU 시간이 정비례.
+    #   32 = 원본 기본값(품질 최고), 16 = 절반 단축 (Pascal/clone 모드 권장),
+    #   8 = 4배 빠르나 음질 미세 거칠어짐. 짧은 문장은 어차피 차이 안 보임.
+    num_step: int = 16
     guidance_scale: float = 2.0
     speed: float = 1.0
     duration_seconds: float = 0.0  # 0 → use speed

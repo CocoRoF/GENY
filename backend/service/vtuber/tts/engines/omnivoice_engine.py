@@ -181,13 +181,25 @@ class OmniVoiceEngine(TTSEngine):
         profile = request.voice_profile or config.voice_profile or ""
         mode = (config.mode or "clone").lower()
 
+        # Adaptive num_step: 짧은 문장은 더 적은 step 으로도 충분히 자연스럽고
+        # GPU 시간이 step 수에 정비례하므로 RTF 가 크게 좋아진다.
+        # config.num_step 을 상한으로 두고 텍스트 길이에 따라 단계적으로 낮춤.
+        cfg_num_step = max(1, int(config.num_step))
+        text_len = len(request.text or "")
+        if text_len <= 30:
+            adaptive_num_step = min(cfg_num_step, 12)
+        elif text_len <= 80:
+            adaptive_num_step = min(cfg_num_step, 16)
+        else:
+            adaptive_num_step = cfg_num_step
+
         payload: dict = {
             "text": request.text,
             "mode": mode,
             "language": (config.language or request.language or "") or None,
             "speed": float(config.speed) * float(request.speed or 1.0),
             "duration": float(config.duration_seconds) if config.duration_seconds > 0 else None,
-            "num_step": int(config.num_step),
+            "num_step": adaptive_num_step,
             "guidance_scale": float(config.guidance_scale),
             "denoise": bool(config.denoise),
             "audio_format": (config.audio_format or request.audio_format.value or "wav"),
