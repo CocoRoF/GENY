@@ -25,13 +25,15 @@ playwright>=1.49.0
 # (plugs into Pipeline.from_manifest_async via the ToolProvider Protocol
 # shipped in 0.35.0). pyyaml>=6.0 becomes a core dep. All additive;
 # existing AgentSession usage unaffected.
-# 0.37.x (executor uplift Phase 5): subprocess hooks land. Stage 10
-# router fires PRE_TOOL_USE / POST_TOOL_USE / POST_TOOL_FAILURE around
-# every dispatch, honouring the returned HookOutcome (block /
-# modify_input). Two-switch opt-in (HookConfig.enabled +
-# GENY_ALLOW_HOOKS=1) plus fail-open semantics — without a runner
-# attached, dispatch is byte-identical to 0.36.x.
-geny-executor[web]>=0.37.0,<0.38.0
+# 0.38.x (executor uplift Phase 6 — MCP uplift): per-server FSM
+# (PENDING/CONNECTED/FAILED/NEEDS_AUTH/DISABLED), MCPManager
+# disable_server / enable_server admin lifecycle, MCP tool annotations
+# (readOnlyHint / destructiveHint / idempotentHint / openWorldHint)
+# flow into ToolCapabilities so PartitionExecutor can fan read-only
+# MCP tools out in parallel, and Pipeline.attach_runtime(mcp_manager=
+# ...) lets us swap a live manager into a built pipeline. is_connected
+# stays derived for back-compat — additive only.
+geny-executor[web]>=0.38.0,<0.39.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
