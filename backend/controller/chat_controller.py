@@ -15,6 +15,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from logging import getLogger
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -33,6 +34,39 @@ from service.execution.agent_executor import (
 )
 
 logger = getLogger(__name__)
+
+
+# Absolute path of the on-disk upload root that backs ``/static/uploads/...``
+# URLs emitted by ``controller/upload_controller``. Kept here (not in
+# ``service/langgraph``) because the URL↔path mapping is intrinsically a
+# chat-layer concern: it converts the *web* URL the frontend sees into a
+# local-filesystem reference the executor pipeline can read. Everything
+# downstream of this boundary (``geny-executor`` s01 normalizer) handles
+# ``file://`` URIs in a vendor-agnostic way.
+_UPLOAD_ROOT: Path = Path(__file__).resolve().parent.parent / "static" / "uploads"
+
+
+def _rewrite_local_attachment_url(att: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite a server-relative upload URL to a ``file://`` URI.
+
+    The executor's ``MultimodalNormalizer`` knows how to inline
+    ``file://`` URIs and absolute filesystem paths as base64 image
+    sources, but it has no way to resolve Geny's web-layer
+    ``/static/uploads/<shard>/<sha>.<ext>`` convention on its own. We
+    perform that single mapping here so the rest of the pipeline only
+    sees vendor-neutral references.
+
+    Returns a *new* dict; never mutates the input. Attachments that are
+    already ``data``/``https://``/``file://`` are passed through.
+    """
+    out = dict(att)
+    url = (out.get("url") or "").strip()
+    if not url or not url.startswith("/static/uploads/"):
+        return out
+    rel = url[len("/static/uploads/") :]
+    abs_path = (_UPLOAD_ROOT / rel).resolve()
+    out["url"] = abs_path.as_uri()  # "file:///..."
+    return out
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -426,7 +460,10 @@ async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
     # when executors thread them through ``**invoke_kwargs``.
     attachments_payload: Optional[List[Dict[str, Any]]] = None
     if has_attachments:
-        attachments_payload = [a.model_dump(exclude_none=True) for a in request.attachments]
+        attachments_payload = [
+            _rewrite_local_attachment_url(a.model_dump(exclude_none=True))
+            for a in request.attachments
+        ]
 
     # 1. Save user message
     try:
