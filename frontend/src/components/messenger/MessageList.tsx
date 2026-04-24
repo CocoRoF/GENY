@@ -4,10 +4,10 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useMessengerStore } from '@/store/useMessengerStore';
 import { useAppStore } from '@/store/useAppStore';
 import { useI18n } from '@/lib/i18n';
-import { Bot, User, Loader2, MessageCircle, Clock, ChevronDown, ChevronRight, XCircle } from 'lucide-react';
+import { Bot, User, Loader2, MessageCircle, Clock, ChevronDown, ChevronRight, XCircle, Paperclip } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
-import type { ChatRoomMessage, AgentLogEntry } from '@/types';
+import type { ChatRoomMessage, AgentLogEntry, ChatAttachment } from '@/types';
 import { ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, getRoleColor, formatTime, formatDate } from '@/components/chat';
 
 const MiniAvatar = dynamic(() => import('@/components/live2d/MiniAvatar'), { ssr: false });
@@ -33,6 +33,60 @@ function buildFlatList(messages: ChatRoomMessage[]): ListItem[] {
   return items;
 }
 
+// ── Attachment rendering (shared between user + agent bubbles) ──
+
+function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
+  if (!attachments.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {attachments.map((att, i) => {
+        const href = att.url ?? att.data;
+        const key = `${att.attachment_id ?? att.url ?? i}`;
+
+        if (att.kind === 'image' && href) {
+          return (
+            <a
+              key={key}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={href}
+                alt={att.name ?? 'image'}
+                className="max-w-[180px] max-h-[180px] object-cover rounded-md border border-[var(--border-color)]"
+              />
+            </a>
+          );
+        }
+
+        const inner = (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] max-w-[240px]">
+            <Paperclip size={12} className="text-[var(--text-muted)] shrink-0" />
+            <span className="truncate">{att.name ?? att.kind}</span>
+          </div>
+        );
+
+        return href ? (
+          <a
+            key={key}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="no-underline"
+          >
+            {inner}
+          </a>
+        ) : (
+          <div key={key}>{inner}</div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Message Components ──
 
 function UserMessage({ msg }: { msg: ChatRoomMessage }) {
@@ -53,9 +107,14 @@ function UserMessage({ msg }: { msg: ChatRoomMessage }) {
             {formatTime(msg.timestamp)}
           </span>
         </div>
-        <div className="text-[0.8125rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-keep">
-          {msg.content}
-        </div>
+        {msg.content && (
+          <div className="text-[0.8125rem] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-keep">
+            {msg.content}
+          </div>
+        )}
+        {msg.attachments && msg.attachments.length > 0 && (
+          <AttachmentList attachments={msg.attachments} />
+        )}
       </div>
     </div>
   );
@@ -92,6 +151,9 @@ function AgentMessage({ msg }: { msg: ChatRoomMessage }) {
           <ExecutionMeta durationMs={msg.duration_ms} />
         </div>
         <ChatMarkdown content={msg.content} />
+        {msg.attachments && msg.attachments.length > 0 && (
+          <AttachmentList attachments={msg.attachments} />
+        )}
         {msg.file_changes && msg.file_changes.length > 0 && (
           <FileChangeSummary fileChanges={msg.file_changes} onViewDetail={setFileChangeDetail} />
         )}
