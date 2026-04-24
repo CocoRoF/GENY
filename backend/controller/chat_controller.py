@@ -58,13 +58,39 @@ def _rewrite_local_attachment_url(att: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns a *new* dict; never mutates the input. Attachments that are
     already ``data``/``https://``/``file://`` are passed through.
+
+    Cycle 20260424_3 PR-2 — fail loudly when the referenced file is
+    missing on disk or the URL escapes the upload root, instead of
+    letting the executor silently drop the image block downstream.
     """
     out = dict(att)
     url = (out.get("url") or "").strip()
     if not url or not url.startswith("/static/uploads/"):
         return out
     rel = url[len("/static/uploads/") :]
-    abs_path = (_UPLOAD_ROOT / rel).resolve()
+    upload_root = _UPLOAD_ROOT.resolve()
+    abs_path = (upload_root / rel).resolve()
+    # Defend against path traversal: `/static/uploads/../../etc/passwd`
+    try:
+        abs_path.relative_to(upload_root)
+    except ValueError:
+        logger.warning(
+            "rejected attachment outside upload root: url=%r resolved=%s",
+            url, abs_path,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid attachment url: {url}",
+        )
+    if not abs_path.is_file():
+        logger.warning(
+            "attachment missing on disk: url=%r path=%s — refusing broadcast",
+            url, abs_path,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"attachment not found on server: {url}",
+        )
     out["url"] = abs_path.as_uri()  # "file:///..."
     return out
 
