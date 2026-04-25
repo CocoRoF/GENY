@@ -19,6 +19,7 @@ import json
 from logging import getLogger
 from typing import Optional
 
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 logger = getLogger(__name__)
@@ -68,6 +69,8 @@ class MemoryWriteTool(BaseTool):
         "decisions, knowledge, or insights as a structured note with metadata. "
         "The note will be stored as a Markdown file with YAML frontmatter."
     )
+    # New file write — must serialize to avoid filename collision.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
 
     def run(
         self,
@@ -126,6 +129,7 @@ class MemoryReadTool(BaseTool):
         "Read a specific memory note by its filename. Returns the full content "
         "including metadata (tags, category, importance) and body text."
     )
+    CAPABILITIES = ToolCapabilities(concurrency_safe=True, read_only=True, idempotent=True)
 
     def run(self, session_id: str, filename: str) -> str:
         """Read a memory note.
@@ -157,6 +161,8 @@ class MemoryUpdateTool(BaseTool):
         "Update an existing memory note. You can change its body content, "
         "tags, or importance level. Only provided fields will be updated."
     )
+    # File mutation — must serialize against concurrent updates to same note.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
 
     def run(
         self,
@@ -209,6 +215,10 @@ class MemoryDeleteTool(BaseTool):
         "Delete a memory note permanently. Use with caution — "
         "this removes the note from both file storage and database."
     )
+    # Permanent delete — destructive, idempotent (deleting twice is a no-op).
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, destructive=True, idempotent=True,
+    )
 
     def run(self, session_id: str, filename: str) -> str:
         """Delete a memory note.
@@ -240,6 +250,10 @@ class MemorySearchTool(BaseTool):
         "Search your memory for relevant notes. Uses both text matching "
         "and semantic vector search to find the most relevant results. "
         "Great for recalling past decisions, knowledge, or context."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        max_result_chars=20_000,
     )
 
     def run(
@@ -289,6 +303,7 @@ class MemoryListTool(BaseTool):
         "(topics, decisions, insights, people, projects, reference) "
         "or by tag to narrow down results."
     )
+    CAPABILITIES = ToolCapabilities(concurrency_safe=True, read_only=True, idempotent=True)
 
     def run(
         self,
@@ -335,6 +350,8 @@ class MemoryLinkTool(BaseTool):
         "This helps build a connected knowledge graph where related "
         "notes reference each other."
     )
+    # Mutates note bodies — must serialize. Idempotent (same link added twice = no-op).
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, idempotent=True)
 
     def run(
         self,

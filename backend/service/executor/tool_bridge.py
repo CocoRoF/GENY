@@ -117,6 +117,23 @@ class _GenyToolAdapter:
             "input_schema": self.input_schema,
         }
 
+    def capabilities(self, input: Dict[str, Any]) -> Any:
+        """Forward executor-side capability flags to Stage 10.
+
+        Reads the wrapped tool's class-level ``CAPABILITIES`` attribute
+        (a :class:`geny_executor.tools.base.ToolCapabilities`) when the
+        author has declared one. Returns the executor's fail-closed
+        baseline otherwise — same default as :meth:`Tool.capabilities`.
+        """
+        from geny_executor.tools.base import ToolCapabilities
+
+        declared = getattr(type(self._tool), "CAPABILITIES", None) or getattr(
+            self._tool, "CAPABILITIES", None
+        )
+        if isinstance(declared, ToolCapabilities):
+            return declared
+        return ToolCapabilities()
+
     async def execute(
         self, input: Dict[str, Any], context: Any = None
     ) -> Any:

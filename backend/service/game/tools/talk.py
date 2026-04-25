@@ -24,6 +24,7 @@ from service.state import (
     current_mutation_buffer,
     is_vtuber_role,
 )
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 from .rules import TALK_KINDS
@@ -35,6 +36,8 @@ FAMILIARITY_DELTA = 0.3
 
 class TalkTool(BaseTool):
     name = "talk"
+    # Meta-action — bumps familiarity + records beat. Idempotent in narration only.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, idempotent=True)
     description = (
         "Mark a conversational beat. Use this for meta actions only — "
         "ordinary dialogue does NOT need this tool. Kinds: ``greet`` "

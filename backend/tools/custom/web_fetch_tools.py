@@ -15,6 +15,7 @@ import json
 import re
 import asyncio
 from typing import Optional
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 import httpx
@@ -78,6 +79,10 @@ class WebFetchTool(BaseTool):
         "Strips HTML tags and returns clean readable text. "
         "Use for reading documentation, articles, API responses, "
         "or any static web page. Fast and lightweight."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        network_egress=True, max_result_chars=50_000,
     )
 
     def run(
@@ -232,6 +237,10 @@ class WebFetchMultipleTool(BaseTool):
         "Fetch multiple web pages in parallel (up to 5 URLs). "
         "Returns extracted text content from each page. "
         "Use when comparing sources or gathering data from multiple URLs."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        network_egress=True, max_result_chars=100_000,
     )
 
     def run(

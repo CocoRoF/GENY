@@ -34,9 +34,21 @@ import asyncio
 import json
 from logging import getLogger
 
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 logger = getLogger(__name__)
+
+
+# ─── Capability presets shared across the Geny platform tools ──────
+# Pure read-only directory / message lookups — safe to fan out.
+_LOOKUP = ToolCapabilities(concurrency_safe=True, read_only=True, idempotent=True)
+# Mutating session / room state — must serialize.
+_MUTATE = ToolCapabilities(concurrency_safe=False)
+# Sending messages — multiple sends in parallel are safe (different
+# rooms / recipients) but each send creates an observable event, so
+# not idempotent.
+_SEND = ToolCapabilities(concurrency_safe=True)
 
 
 # ============================================================================
@@ -241,6 +253,7 @@ class SessionListTool(BaseTool):
         "see which team members exist, or look up someone before inviting them to a room. "
         "Think of it as viewing the company directory or employee roster."
     )
+    CAPABILITIES = _LOOKUP
 
     def run(self) -> str:
         """List all team members currently in the company.
@@ -273,6 +286,7 @@ class SessionInfoTool(BaseTool):
         "Returns their role, status, model, and creation time — like an employee profile card. "
         "Use this to check on a specific colleague's details before assigning work or inviting them."
     )
+    CAPABILITIES = _LOOKUP
 
     def run(self, session_id: str) -> str:
         """Get a team member's profile.
@@ -329,6 +343,7 @@ class SessionCreateTool(BaseTool):
         "get a researcher, recruit a new member, bring in a staff member, add a new member, etc. "
         "The new member is immediately available and can be invited to chat rooms afterwards."
     )
+    CAPABILITIES = _MUTATE
 
     def __init__(self):
         super().__init__()
@@ -479,6 +494,7 @@ class RoomListTool(BaseTool):
         "Use this to find where the team is collaborating, check existing rooms before creating new ones, "
         "or find the right room to invite someone to."
     )
+    CAPABILITIES = _LOOKUP
 
     def run(self) -> str:
         """List all chat rooms in the company.
@@ -522,6 +538,7 @@ class RoomCreateTool(BaseTool):
         "make a room for the team, gather people for a meeting, etc. "
         "Tip: use session_list first to find member IDs, or session_create to hire new members."
     )
+    CAPABILITIES = _MUTATE
 
     def run(self, room_name: str, session_ids: str) -> str:
         """Create a new chat room and add team members.
@@ -567,6 +584,7 @@ class RoomInfoTool(BaseTool):
         "Returns the room name, member session IDs, message count, "
         "and timestamps."
     )
+    CAPABILITIES = _LOOKUP
 
     def run(self, room_id: str) -> str:
         """Get detailed info about a chat room.
@@ -616,6 +634,8 @@ class RoomAddMembersTool(BaseTool):
         "bring someone into the conversation, invite to a chat room, add a member, etc. "
         "Tip: use session_list to find member IDs, and room_list to find room IDs."
     )
+    # Adding the same member twice is a no-op → idempotent.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, idempotent=True)
 
     def run(self, room_id: str, session_ids: str) -> str:
         """Invite team members to an existing chat room.
@@ -679,6 +699,7 @@ class SendRoomMessageTool(BaseTool):
         "The message is saved to the room's history for all members to see. "
         "Use this to share updates, ask questions, or communicate with the team in a room."
     )
+    CAPABILITIES = _SEND
 
     def run(self, room_id: str, content: str, sender_session_id: str = "", sender_name: str = "") -> str:
         """Post a message in a chat room.
@@ -732,6 +753,7 @@ class SendDirectMessageExternalTool(BaseTool):
         "(VTuber↔Sub-Worker), use send_direct_message_internal instead "
         "— that tool cannot misroute and needs no target id."
     )
+    CAPABILITIES = _SEND
 
     def run(
         self,
@@ -816,6 +838,7 @@ class SendDirectMessageInternalTool(BaseTool):
         "over send_direct_message_external whenever you want to reach "
         "your paired counterpart, because it cannot misroute."
     )
+    CAPABILITIES = _SEND
 
     def run(self, session_id: str, content: str) -> str:
         """Send *content* to the caller's linked counterpart.
@@ -914,6 +937,7 @@ class ReadRoomMessagesTool(BaseTool):
         "Use this to catch up on a conversation, check what the team discussed, "
         "or review decisions made in a room."
     )
+    CAPABILITIES = _LOOKUP
 
     def run(self, room_id: str, limit: int = 20) -> str:
         """Read recent messages from a chat room.
@@ -966,6 +990,8 @@ class ReadInboxTool(BaseTool):
         "Returns recent DMs with sender info — like checking your email or private messages. "
         "Use unread_only=true to see only new messages, and mark_read=true to mark them as read."
     )
+    # Drains queued DMs (mark_read mutates) — must serialize. Idempotent at message level.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, idempotent=True)
 
     def run(
         self,

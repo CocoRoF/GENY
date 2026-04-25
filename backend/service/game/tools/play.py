@@ -29,6 +29,7 @@ from service.state import (
     current_mutation_buffer,
     is_vtuber_role,
 )
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 from .rules import play_rule_for
@@ -38,6 +39,8 @@ logger = getLogger(__name__)
 
 class PlayTool(BaseTool):
     name = "play"
+    # Mutates creature stamina + bond — must serialize.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, destructive=False, idempotent=False)
     description = (
         "Engage the creature in physical or interactive play. Choose a "
         "``kind`` matching the described action: ``cuddle`` for quiet "

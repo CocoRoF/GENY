@@ -27,6 +27,7 @@ from service.state import (
     current_mutation_buffer,
     is_vtuber_role,
 )
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 from .rules import feed_rule_for
@@ -36,6 +37,8 @@ logger = getLogger(__name__)
 
 class FeedTool(BaseTool):
     name = "feed"
+    # Mutates creature vitals + bond via MutationBuffer — must serialize.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, destructive=False, idempotent=False)
     description = (
         "Give the creature food. Use this when the player offers something "
         "to eat, or when the creature explicitly requests food. Choose a "

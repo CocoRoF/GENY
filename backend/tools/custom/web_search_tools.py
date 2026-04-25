@@ -12,6 +12,7 @@ Requires:
 
 import json
 from typing import Optional
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 
@@ -42,6 +43,10 @@ class WebSearchTool(BaseTool):
         "Search the web for information. Returns titles, URLs, and snippets "
         "from multiple search engines. Use for finding documentation, articles, "
         "code examples, current events, or any web-accessible information."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        network_egress=True, max_result_chars=10_000,
     )
 
     def run(
@@ -111,6 +116,10 @@ class NewsSearchTool(BaseTool):
         "Search for recent news articles on a topic. Returns headlines, "
         "sources, publication dates, and URLs. Use for current events, "
         "industry news, or any time-sensitive information."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        network_egress=True, max_result_chars=10_000,
     )
 
     def run(
