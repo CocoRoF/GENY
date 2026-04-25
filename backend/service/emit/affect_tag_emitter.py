@@ -154,7 +154,25 @@ class AffectTagEmitter(Emitter):
             a debug log) so a confused LLM can't spam mood +N in one
             turn. Stripping from ``final_text`` still applies to all
             matches — the cap only gates mutation emission.
+
+    Scheduling hints (geny-executor 1.0+ S7.11):
+
+    * ``requires = ()`` — no prerequisites; runs as soon as the chain
+      enters the affect emitter. Downstream emitters that consume
+      sanitised ``final_text`` (TTS / VTuber) can declare
+      ``requires=("affect_tag",)`` once an :class:`OrderedEmitterChain`
+      is wired in for ordering guarantees.
+    * ``timeout_seconds = None`` — affect parsing is in-process and
+      cheap; bounding it adds no value.
+
+    These class-attr defaults are no-ops under the current
+    :class:`EmitterChain` (executor's default), but they let an
+    ``OrderedEmitterChain`` wrapper (planned in a follow-up) place
+    this emitter correctly without further code changes here.
     """
+
+    requires: tuple[str, ...] = ()
+    timeout_seconds: float | None = None
 
     def __init__(
         self,
