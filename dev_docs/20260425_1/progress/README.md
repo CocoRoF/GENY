@@ -36,7 +36,7 @@
 
 | Sprint | PR | 머지 | 진행률 |
 |---|---|---|---|
-| G6.1 | — | ⏳ | pending |
+| G6.1 | [#303](https://github.com/CocoRoF/Geny/pull/303) | 2026-04-25 | ✅ [g6.1_tool_capabilities.md](g6.1_tool_capabilities.md) |
 | G6.2 | — | ⏳ | pending |
 | G6.3 | — | ⏳ | pending |
 | G6.4 | — | ⏳ | pending |
