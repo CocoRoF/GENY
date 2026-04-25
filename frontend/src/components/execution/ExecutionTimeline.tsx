@@ -20,6 +20,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldX,
+  Lock,
+  ShieldOff,
 } from 'lucide-react';
 
 // ── Level metadata ──
@@ -63,10 +65,55 @@ type ReviewVisual = {
 function getToolReviewVisual(meta: LogEntryMetadata | undefined): ReviewVisual | null {
   if (!meta) return null;
   const evt = meta.event_type;
+  const data = (meta.data || {}) as Record<string, unknown>;
+
+  // G6.6: Stage 4 guard escalations + Stage 10 hook blocks surface as
+  // ``loop_signal`` events (agent_session bridges loop.escalate /
+  // loop.error). Render with a Lock / ShieldOff so operators can spot
+  // permission / hook denials at a glance instead of fishing through
+  // generic STAGE rows.
+  if (evt === 'loop_signal') {
+    const signal = (typeof data.signal === 'string' ? data.signal : '').toLowerCase();
+    if (signal.includes('permission')) {
+      return {
+        icon: Lock,
+        color: '#ef4444',
+        bgColor: 'rgba(239,68,68,0.10)',
+        label: 'Denied',
+        description: `Permission denied: ${signal}`,
+      };
+    }
+    if (signal.includes('hook')) {
+      return {
+        icon: ShieldOff,
+        color: '#ef4444',
+        bgColor: 'rgba(239,68,68,0.10)',
+        label: 'Hook block',
+        description: `Hook blocked: ${signal}`,
+      };
+    }
+    if (signal.includes('budget') || signal.includes('iteration')) {
+      return {
+        icon: ShieldOff,
+        color: '#f59e0b',
+        bgColor: 'rgba(245,158,11,0.10)',
+        label: 'Guard',
+        description: `Guard escalation: ${signal}`,
+      };
+    }
+    // Generic loop signal — neutral icon, amber tone.
+    return {
+      icon: ShieldAlert,
+      color: '#f59e0b',
+      bgColor: 'rgba(245,158,11,0.10)',
+      label: 'Loop signal',
+      description: signal || 'loop escalation',
+    };
+  }
+
   if (evt !== 'tool_review_flag' && evt !== 'tool_review_error' && evt !== 'tool_review_summary') {
     return null;
   }
-  const data = (meta.data || {}) as Record<string, unknown>;
 
   if (evt === 'tool_review_summary') {
     const flags = typeof data.flags === 'number' ? data.flags : 0;
