@@ -10,6 +10,7 @@ import ExecutionTimeline from '@/components/execution/ExecutionTimeline';
 import StepDetailPanel from '@/components/execution/StepDetailPanel';
 import HITLApprovalModal from '@/components/modals/HITLApprovalModal';
 import RestoreCheckpointModal from '@/components/modals/RestoreCheckpointModal';
+import SkillPanel from '@/components/skills/SkillPanel';
 import {
   Square,
   Loader2,
@@ -628,6 +629,22 @@ export default function CommandTab() {
           {isMobile ? 'Tap Run to execute · Enter for newline' : 'Enter to execute · Shift+Enter for newline'}
         </span>
       </div>
+
+      {/* ── Skill picker (G7.4) ── */}
+      {selectedSessionId && !isMobile && (
+        <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          <SkillPanel
+            onPickSkill={(slash) => {
+              const cur = (sessionData?.input ?? '').trimStart();
+              const next = cur.startsWith('/')
+                ? cur.replace(/^\S+/, slash)
+                : `${slash} ${cur}`.trimEnd();
+              updateSessionData(selectedSessionId, { input: next + ' ' });
+              textareaRef.current?.focus();
+            }}
+          />
+        </div>
+      )}
 
       {/* ── Main execution area: Split pane (Timeline | Detail) ── */}
       <div className="flex-1 flex min-h-0 relative">
