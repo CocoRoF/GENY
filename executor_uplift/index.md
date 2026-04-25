@@ -1,8 +1,9 @@
 # Geny Executor Uplift — Master Index
 
 **위치:** `Geny/executor_uplift/`
-**목적:** `geny-executor` 의 16-stage 실행 엔진과 Geny 의 통합 레이어 (tool / MCP / skills / prompt / runtime) 를 **확장성 있는 인터페이스** 로 고도화하기 위한 설계 문서 모음.
+**목적:** `geny-executor` 실행 엔진과 Geny 의 통합 레이어 (tool / MCP / skills / prompt / runtime) 를 **확장성 있는 인터페이스** 로 고도화하기 위한 설계 문서 모음.
 **참조 레퍼런스:** `claude-code-main` (Anthropic Claude Code CLI 소스, 워크스페이스 루트).
+**v3 상태:** geny-executor `1.0.0` (Sub-phase 9a) — pipeline 이 16 → **21 stages** 로 확장. 신규 5개 scaffold (`tool_review` / `task_registry` / `hitl` / `summarize` / `persist`). 자세한 매핑은 [`02_current_state_geny_executor.md`](02_current_state_geny_executor.md) §A 참조.
 
 ---
 
@@ -13,7 +14,7 @@
 | 단계 | 문서 | 역할 |
 |---|---|---|
 | **A. Overview** | [`01_overview.md`](01_overview.md) | 이 uplift 의 goal · 원칙 · 용어 · 성공 기준 |
-| **B. Current state** | [`02_current_state_geny_executor.md`](02_current_state_geny_executor.md) | geny-executor 16-stage 아키텍처 전수 스냅샷 |
+| **B. Current state** | [`02_current_state_geny_executor.md`](02_current_state_geny_executor.md) | geny-executor 아키텍처 전수 스냅샷 (v2 16-stage baseline + §A. v3 21-stage layout) |
 | | [`03_current_state_geny_integration.md`](03_current_state_geny_integration.md) | Geny 의 tool/MCP/runtime 통합 현재 |
 | **C. Reference** | [`04_reference_claude_code.md`](04_reference_claude_code.md) | claude-code-main 의 tool/MCP/skill/hook 패턴 |
 | **D. Gap** | [`05_gap_analysis.md`](05_gap_analysis.md) | 02/03 ↔ 04 를 교차해 도출한 결핍·중복·설계 부채 |
@@ -47,12 +48,18 @@
                                      geny-executor (PyPI) Pipeline
                                                      │
   ┌──────────────────────────────────────────────────┴──────────────┐
-  │ 16 Stages (Phase A ingress · Phase B loop · Phase C egress)     │
+  │ 21 Stages — v3 layout (geny-executor 1.0+, Sub-phase 9a)        │
+  │ Phase A ingress · Phase B agent loop · Phase C finalize         │
   │                                                                 │
-  │  [1 Input] [2 Context] [3 System] [4 Guard] [5 Cache] [6 API]  │
-  │  [7 Token] [8 Think]  [9 Parse]  [10 Tool] [11 Agent]          │
-  │  [12 Evaluate] [13 Loop]  ←── loop body 2-13                    │
-  │  [14 Emit] [15 Memory] [16 Yield] ←── finalize 14-16            │
+  │  [1 Input]                                                      │
+  │  [2 Context] [3 System/Plan] [4 Guard] [5 Cache] [6 API]        │
+  │  [7 Token] [8 Think] [9 Parse] [10 Tool] [11 ToolReview*]       │
+  │  [12 Agent] [13 TaskRegistry*] [14 Evaluate] [15 HITL*]         │
+  │  [16 Loop]   ←── loop body 2–16                                 │
+  │  [17 Emit] [18 Memory] [19 Summarize*] [20 Persist*] [21 Yield] │
+  │                              ←── finalize 17–21                 │
+  │                                                                 │
+  │  * = scaffold added in Sub-phase 9a; per-preset opt-in.         │
   └─────────────────────────────────────────────────────────────────┘
 
   Extension surfaces (현재):
@@ -70,22 +77,22 @@
 2. **Built-in tool 카탈로그** — executor 가 6 종 (Read/Write/Edit/Bash/Glob/Grep) 만 내장. WebFetch / WebSearch / AgentTool / SkillTool / TaskTool / TodoWrite / Schedule / NotebookEdit 등 범용 tool 을 executor 가 **기본 제공** 하도록. Geny 는 그 위에 플랫폼 특화 tool (게임·세션·캐릭터) 만 얹는다.
 3. **MCP 통합** — 정적 JSON 로더에 머물러 있음. 런타임 등록·헬스체크·여러 transport (stdio/SSE/HTTP/WS/SDK) · OAuth 통합을 어떻게 표준화할까?
 4. **Skills** — Geny 는 "role prompt" 로 skill 역할을 대신하고 있음. claude-code 스타일의 `SKILL.md` 프론트매터 기반 skill 이 있으면 사용자 확장 friction 이 어떻게 줄어들까?
-5. **16-stage 확장 포인트의 일관성** — `attach_runtime(...)` kwargs, Stage-level `*_override`, `state.shared` dict, manifest, event bus 등 **여러 확장 메커니즘이 동거** 하고 있음. 하나의 통합된 "Extension Interface" 로 정리 가능한가?
-6. **Stage별 고도화** — 각 Stage (특히 Tool(10), Agent(11), Guard(4), Memory(15)) 가 claude-code 의 어떤 성숙도에 비해 어떤 단계에 있고, 다음 수준으로 가기 위한 구체적 변경은? 그리고 **필요 시 stage 를 16 → 17 로 늘릴 수도 있는가** (major version bump 조건부로)?
+5. **확장 포인트의 일관성** — `attach_runtime(...)` kwargs, Stage-level `*_override`, `state.shared` dict, manifest, event bus 등 **여러 확장 메커니즘이 동거** 하고 있음. 하나의 통합된 "Extension Interface" 로 정리 가능한가?
+6. **Stage별 고도화** — 각 Stage (특히 Tool(10), Agent(12 in v3), Guard(4), Memory(18 in v3)) 가 claude-code 의 어떤 성숙도에 비해 어떤 단계에 있고, 다음 수준으로 가기 위한 구체적 변경은? **16 → 21 stage 확장은 1.0.0 major bump 로 이미 흡수됨** (Sub-phase 9a, v3); 다음 질문은 신규 scaffold (`tool_review` / `task_registry` / `hitl` / `summarize` / `persist`) 의 strategy 풀을 어떻게 더 넓힐 것인가.
 
 각 질문의 답은 06–10 의 design 문서에 담겨.
 
 ## 이 uplift 의 두 방향성
 
 1. **geny-executor first, Geny follows.** 모든 capability 계약·구현은 executor 에 먼저 자리잡고, Geny (그리고 앞으로 등장할 타 프로젝트) 는 executor 를 소비하는 쪽. 같은 범용 tool 을 여러 호스트가 각자 구현하는 것을 막는 원칙.
-2. **16 → 21 stage 재구성 (필수).** 5 개 신설 stage (Tool Review · Task Registry · HITL · Summarize · Persist) 모두 승격. 한 번의 `1.0.0` major bump 로 흡수. 10 design §13 + 11 roadmap Phase 9 + 12 detailed plan 에서 구현 manual 제공.
+2. **16 → 21 stage 재구성 (✅ 완료, v1.0.0).** 5 개 신설 stage (Tool Review · Task Registry · HITL · Summarize · Persist) 모두 승격. 한 번의 `1.0.0` major bump 로 흡수 — Sub-phase 9a 사이클 (2026-04 ~ 2026-04-25). Geny 측 통합도 G1.x / G2.x / G3.x / G4.x 사이클로 마무리됨 (`Geny/integration_plan/` 진행 로그 참조).
 
 ---
 
 ## 산출물 요약 (우선 완성 목표)
 
 - [ ] 01 Overview — 우리의 설계 원칙 + 성공 기준
-- [ ] 02 Current state (geny-executor) — 16-stage 표 + core primitives + 확장 포인트 매트릭스
+- [ ] 02 Current state (geny-executor) — v2 16-stage 표 + core primitives + 확장 포인트 매트릭스 + §A v3 21-stage layout
 - [ ] 03 Current state (Geny integration) — tool/MCP/persona/memory wiring
 - [ ] 04 Reference patterns — claude-code Tool 계약 / MCP transport / Skill 로드 / Hook 이벤트 / Permission
 - [ ] 05 Gap analysis — 결핍·중복 top list + 우선순위

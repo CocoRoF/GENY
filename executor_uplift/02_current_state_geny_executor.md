@@ -1,9 +1,11 @@
-# 02. Current State — geny-executor 16-stage Architecture
+# 02. Current State — geny-executor Architecture (v2 baseline + v3 21-stage)
 
-**Status:** Draft
-**Date:** 2026-04-24
-**Source:** `/home/geny-workspace/geny-executor/` (현재 PyPI `>=0.31.2,<0.32.0`)
-**Audit log:** 세 번째 사이클 Explore agent 보고서 (2026-04-24)
+**Status:** Updated — v3 layout shipped
+**Date:** 2026-04-25
+**Source:** `/home/geny-workspace/geny-executor/` (현재 PyPI `>=1.0.0`)
+**Audit log:** 세 번째 사이클 Explore agent 보고서 (2026-04-24) + Sub-phase 9a 통합 사이클 (2026-04-25)
+
+> **Note on versioning.** Sections 1–7 below describe the **v2 16-stage baseline** that this uplift started from. As of geny-executor `1.0.0` (Sub-phase 9a) the engine ships **21 stages**: the original 16 stay in place, the agent-loop tail is renumbered (`agent` 11→12, `evaluate` 12→14, `loop` 13→16, `emit` 14→17, `memory` 15→18, `yield` 16→21), and **5 new scaffold stages** land — `tool_review` (11), `task_registry` (13), `hitl` (15), `summarize` (19), `persist` (20). See **§A. v3 21-stage layout** at the bottom of this document for the wired-vs-scaffold delta and which §8 gap items the new stages now address.
 
 이 문서는 **현재 존재하는** 구조의 스냅샷이야. "이랬으면 좋겠다" 는 06–10 의 design 문서에서 다룸.
 
@@ -314,8 +316,9 @@ tests/
 
 ## 8. 현재 구조에서의 "고도화 여지" (Explore 보고서 요약)
 
-### 8.1 관측성 (dashboard 부재)
+### 8.1 관측성 (dashboard 부재) — **부분 해결 (v3)**
 - EventBus 로 이벤트 방출 중. **시각화 UI 없음**. 운영자가 stage 실행·상태·mutation·token 을 실시간으로 볼 방법 부재.
+- v3 업데이트: Geny 측에 21-stage `PipelineCanvas` (`frontend/src/components/session-env/PipelineCanvas.tsx`) 가 manifest 기반 read-only 시각화를 제공. 실시간 실행 상태 dashboard 는 여전히 미구현.
 
 ### 8.2 Adaptive model routing
 - `model_override` 는 존재하지만 **언제 어떤 override 를 쓸지** 결정하는 router / classifier 없음. 토큰 비용의 30–50% 절약 기회.
@@ -326,11 +329,17 @@ tests/
 ### 8.4 Streaming granularity
 - `create_message_stream()` 은 `APIResponse` 단위로 yield. **토큰/블록 단위 스트리밍** 과 custom chunking 없음.
 
-### 8.5 Human-in-the-loop / approval gate
-- Stage hook (`on_enter` 등) 존재하나 **pause/resume 프로토콜** 과 UI 승인 흐름 없음. 고위험 tool (파일 삭제, 외부 API) 앞 승인 gate 부재.
+### 8.5 Human-in-the-loop / approval gate — **해결 (v3)**
+- ~~Stage hook (`on_enter` 등) 존재하나 **pause/resume 프로토콜** 과 UI 승인 흐름 없음. 고위험 tool (파일 삭제, 외부 API) 앞 승인 gate 부재.~~
+- v3 업데이트: **Stage 15 (HITL)** 가 `PipelineResumeRequester` + `Pipeline.resume(token, decision)` 을 통해 cross-request pause/resume 을 표준화. Geny 측에 `HITLApprovalModal` + `/api/agents/{id}/hitl/{pending,resume,{token}}` REST 가 wired (G2.5 / G4.1 사이클).
 
 ### 8.6 Composite agent DAG
 - Stage 11 (Agent) 는 slot + orchestrator 가 있지만 **DAG 수준의 multi-agent graph** 표현 부재. LangGraph / AutoGen 에 비해 explicit topology 표현이 약함.
+- v3 메모: **Stage 13 (`task_registry`)** 가 scaffold 로 등장 — 향후 multi-agent task plan 의 carrier 가 될 자리. 현재는 advisory 만.
+
+### 8.7 Tool-level review chain — **해결 (v3, 신규 항목)**
+- v2 에는 tool 호출 직전 정책 검사 layer 가 없었음 (Stage 4 Guard 는 pre-flight budget 만).
+- v3 업데이트: **Stage 11 (`tool_review`)** 가 5-단계 reviewer chain (`schema → sensitive → destructive → network → size`) 으로 worker_adaptive 에서 활성. 위반 시 severity-tagged flag 가 `tool_review.flag` 이벤트로 방출되며 timeline 에 inline 렌더 (G2.4 / G4.2 사이클).
 
 이 목록은 `05_gap_analysis.md` 에서 claude-code 측 관점과 교차하여 우선순위를 재평가함.
 
@@ -341,3 +350,63 @@ tests/
 - [`03_current_state_geny_integration.md`](03_current_state_geny_integration.md) — geny-executor 위에 올라간 Geny 측 레이어 (tool loader, MCP loader, policy, persona, environment service)
 - [`04_reference_claude_code.md`](04_reference_claude_code.md) — claude-code-main 의 참조 패턴
 - [`05_gap_analysis.md`](05_gap_analysis.md) — 본 문서 + 03 을 04 와 교차
+
+---
+
+## A. v3 21-stage layout (geny-executor 1.0+, Sub-phase 9a)
+
+> 이 섹션은 v3 의 변경된 stage 번호와 신규 5개 scaffold 만 정리하는 reference. 구현 세부는 위 §1–7 의 v2 표가 그대로 유효 — 단, 번호가 바뀐 stage 들은 아래 매핑을 적용.
+
+### A.1 Layout 매핑 (v2 → v3)
+
+| v2 # | v2 name | v3 # | v3 name | 변경 |
+|---|---|---|---|---|
+| 1–10 | input … tool | 1–10 | input … tool | 동일 |
+| — | (없음) | **11** | **tool_review** | 신규 scaffold (5-reviewer chain) |
+| 11 | agent | **12** | agent | 번호만 +1 |
+| — | (없음) | **13** | **task_registry** | 신규 scaffold (multi-agent task plan carrier) |
+| 12 | evaluate | **14** | evaluate | 번호만 +2 |
+| — | (없음) | **15** | **hitl** | 신규 scaffold (cross-request approval gate) |
+| 13 | loop | **16** | loop | 번호만 +3 |
+| 14 | emit | **17** | emit | 번호만 +3 |
+| 15 | memory | **18** | memory | 번호만 +3 |
+| — | (없음) | **19** | **summarize** | 신규 scaffold (turn-end importance + summarize) |
+| — | (없음) | **20** | **persist** | 신규 scaffold (FilePersister + on_significant) |
+| 16 | yield | **21** | yield | 번호만 +5 |
+
+### A.2 Phase 경계
+
+- **Phase A (Ingress):** Stage 1 (= v2)
+- **Phase B (Agent Loop):** Stage 2–16 (loop body 가 길어짐 — `LOOP_END` 가 13 → 16)
+- **Phase C (Egress / Finalize):** Stage 17–21 (`FINALIZE_START` 가 14 → 17, `FINALIZE_END` 가 16 → 21)
+
+### A.3 신규 scaffold 활성화 (preset-by-preset)
+
+`build_default_manifest(preset)` 의 `_PRESET_SCAFFOLD_OVERRIDES` 표 (`Geny/backend/service/executor/default_manifest.py`) 가 각 preset 별로 어떤 scaffold 를 manifest 에서 `active=True` 로 켜는지 결정. 현재 상태:
+
+| Preset | `tool_review` (11) | `task_registry` (13) | `hitl` (15) | `summarize` (19) | `persist` (20) |
+|---|---|---|---|---|---|
+| `worker_adaptive` | ✅ G2.4 | ⏸ scaffold-off | ✅ G2.5 (null requester → install_pipeline_resume_requester) | ✅ G2.2 (rule_based + heuristic) | ✅ G2.3 (no_persist → install_file_persister) |
+| `worker_easy` | ⏸ off (single-turn Q&A) | ⏸ off | ⏸ off | ⏸ off | ⏸ off |
+| `vtuber` | ⏸ off (no general tools) | ⏸ off | ⏸ off (no approval surface) | ⏸ off | ⏸ off |
+
+`runtime-only` swap 패턴: `summarize` 와 `persist` 와 `hitl` 은 manifest 에 placeholder 를 두고 (`no_persist`, `null` requester), session-build time 에 `service.persist.install_file_persister` / `service.hitl.install_pipeline_resume_requester` 가 실제 객체로 교체. Pipeline 참조가 필요하거나 storage path 가 runtime 결정이라서 manifest-serialisable 하지 않은 의존성을 다루는 표준 방식.
+
+### A.4 새 이벤트 채널
+
+| Stage | 이벤트 | 용도 |
+|---|---|---|
+| 11 (tool_review) | `tool_review.flag` | reviewer 1건 마다 — severity / reviewer / reason 동봉 |
+| 11 (tool_review) | `tool_review.reviewer_error` | reviewer 가 raise 한 경우 |
+| 11 (tool_review) | `tool_review.completed` | turn 단위 요약 (flags 개수) |
+| 15 (hitl) | `hitl.request` | 모달이 listen — token / severity / reason / data |
+| 15 (hitl) | `hitl.decision` | resume 결과 echo (모달 닫힘 신호) |
+| 15 (hitl) | `hitl.timeout` | timeout policy fire |
+
+이벤트는 모두 `session_logger.log_stage_event` 를 거쳐 `LogLevel.STAGE` 행으로 직렬화 → WS `log` 이벤트로 frontend 로 흐름. Geny `CommandTab` 의 `deriveHitlFromLogEvent` 헬퍼와 `ExecutionTimeline` 의 `getToolReviewVisual` 헬퍼가 metadata.event_type 을 보고 분기.
+
+### A.5 관련 문서
+
+- [`10_design_stage_enhancements.md`](10_design_stage_enhancements.md) §13 — 21-stage 재구성의 설계 근거
+- [`11_migration_roadmap.md`](11_migration_roadmap.md) Phase 9 — Sub-phase 9a 실행 일정
+- [`12_detailed_plan.md`](12_detailed_plan.md) — 사이클별 PR 분해
