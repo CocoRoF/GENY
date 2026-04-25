@@ -323,6 +323,18 @@ export const agentApi = {
       { method: 'POST', body: JSON.stringify({ checkpoint_id: checkpointId }) },
     ),
 
+  /** GET /api/skills/list — registered SKILL.md inventory (G7.4). */
+  skillsList: () =>
+    apiCall<{
+      skills: Array<{
+        id: string | null;
+        name: string | null;
+        description: string | null;
+        model: string | null;
+        allowed_tools: string[];
+      }>;
+    }>(`/api/skills/list`),
+
   /** GET /api/agents/{id}/graph — graph structure */
   getGraph: (id: string) => apiCall<GraphStructure>(`/api/agents/${id}/graph`),
 

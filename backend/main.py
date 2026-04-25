@@ -34,6 +34,7 @@ from controller.chat_controller import router as chat_router
 from controller.upload_controller import router as upload_router
 from controller.tool_preset_controller import router as tool_preset_router
 from controller.tool_controller import router as tool_catalog_router
+from controller.skills_controller import router as skills_router
 from controller.docs_controller import router as docs_router
 from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
@@ -581,6 +582,7 @@ app.include_router(chat_router)  # Chat broadcast
 app.include_router(upload_router)  # File / image uploads (multipart)
 app.include_router(tool_preset_router)  # Tool preset management
 app.include_router(tool_catalog_router)  # Tool catalog API
+app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(docs_router)  # Documentation API
 app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
