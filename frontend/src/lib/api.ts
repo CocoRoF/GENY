@@ -335,6 +335,34 @@ export const agentApi = {
       }>;
     }>(`/api/skills/list`),
 
+  /** Per-session MCP admin endpoints (G8.1 / G8.3). */
+  mcpServersList: (id: string) =>
+    apiCall<{
+      session_id: string;
+      servers: Array<{ name: string; state: string; last_error: string | null }>;
+    }>(`/api/agents/${id}/mcp/servers`),
+
+  mcpServerAdd: (id: string, name: string, config: Record<string, unknown>) =>
+    apiCall<{ session_id: string; server: { name: string; state: string; last_error: string | null } }>(
+      `/api/agents/${id}/mcp/servers`,
+      { method: 'POST', body: JSON.stringify({ name, config }) },
+    ),
+
+  mcpServerDisconnect: (id: string, name: string) =>
+    apiCall<{ session_id: string; name: string; disconnected: boolean }>(
+      `/api/agents/${id}/mcp/servers/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
+    ),
+
+  mcpServerControl: (id: string, name: string, action: 'disable' | 'enable' | 'test') =>
+    apiCall<{
+      session_id: string; name: string; action: string; result: string;
+      server: { name: string; state: string; last_error: string | null };
+    }>(
+      `/api/agents/${id}/mcp/servers/${encodeURIComponent(name)}/${action}`,
+      { method: 'POST' },
+    ),
+
   /** GET /api/agents/{id}/graph — graph structure */
   getGraph: (id: string) => apiCall<GraphStructure>(`/api/agents/${id}/graph`),
 

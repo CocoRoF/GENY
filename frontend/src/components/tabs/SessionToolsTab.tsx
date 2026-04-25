@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, Wrench, Check, Server, Search, Boxes,
 } from 'lucide-react';
 import type { ToolInfo } from '@/types';
+import MCPAdminPanel from '@/components/mcp/MCPAdminPanel';
 
 export default function SessionToolsTab() {
   const { selectedSessionId, sessions } = useAppStore();
@@ -332,6 +333,13 @@ export default function SessionToolsTab() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* G8.3: per-session MCP runtime admin (live FSM state + add/disable/test) */}
+        {selectedSessionId && (
+          <div className="border-t border-[var(--border-color)] mt-3">
+            <MCPAdminPanel sessionId={selectedSessionId} />
           </div>
         )}
       </div>
