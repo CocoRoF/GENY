@@ -26,6 +26,7 @@ from service.state import (
     current_mutation_buffer,
     is_vtuber_role,
 )
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 from .rules import gift_rule_for
@@ -35,6 +36,8 @@ logger = getLogger(__name__)
 
 class GiftTool(BaseTool):
     name = "gift"
+    # Mutates creature affection / inventory — must serialize.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, destructive=False, idempotent=False)
     description = (
         "Give the creature a present. ``flower`` for simple gestures, "
         "``toy`` for playful items that boost mood, ``accessory`` for "

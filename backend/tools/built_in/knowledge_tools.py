@@ -18,9 +18,17 @@ from __future__ import annotations
 import json
 from logging import getLogger
 
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 logger = getLogger(__name__)
+
+
+# Read-only knowledge / Opsidian browse defaults — every search/read/list
+# is idempotent and safe to fan out. Only KnowledgePromote mutates.
+_READ_ONLY_KNOWLEDGE = ToolCapabilities(
+    concurrency_safe=True, read_only=True, idempotent=True,
+)
 
 
 # ============================================================================
@@ -100,6 +108,7 @@ class KnowledgeSearchTool(BaseTool):
         "These are quality-verified notes that have been refined from the "
         "user's personal knowledge vault. Returns the most relevant results."
     )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
     def run(
         self,
@@ -149,6 +158,7 @@ class KnowledgeReadTool(BaseTool):
         "Read a specific curated knowledge note by its filename. "
         "Returns the full content including metadata and body text."
     )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
     def run(self, session_id: str, filename: str) -> str:
         """Read a curated knowledge note.
@@ -183,6 +193,7 @@ class KnowledgeListTool(BaseTool):
         "List curated knowledge notes. You can filter by category or tag. "
         "Useful for browsing the user's verified knowledge base."
     )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
     def run(
         self,
@@ -232,6 +243,8 @@ class KnowledgePromoteTool(BaseTool):
         "knowledge base. This makes the knowledge persistent across sessions "
         "and accessible to future agents."
     )
+    # Cross-store mutation — must serialize.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
 
     def run(self, session_id: str, filename: str) -> str:
         """Promote a session note to curated knowledge.
@@ -285,6 +298,7 @@ class OpsidianBrowseTool(BaseTool):
         "Lists available notes with titles, categories, and tags. "
         "Use this to discover what knowledge the user has."
     )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
     def run(
         self,
@@ -334,6 +348,7 @@ class OpsidianReadTool(BaseTool):
         "This gives you access to the user's raw personal knowledge. "
         "Use opsidian_browse first to find the filename."
     )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
     def run(self, session_id: str, filename: str) -> str:
         """Read a User Opsidian note.

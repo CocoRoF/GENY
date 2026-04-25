@@ -52,6 +52,12 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     parameters: Optional[Dict[str, Any]] = None
+    # Optional executor-side runtime traits (`geny_executor.tools.base.ToolCapabilities`).
+    # Subclasses opt in by setting this; the adapter forwards to executor's
+    # `Tool.capabilities()` when set, else falls back to the fail-closed default.
+    # Stored as `Any` to avoid an import-time dependency on geny_executor at
+    # tools/base.py load — the adapter does the typed read.
+    CAPABILITIES: Optional[Any] = None
 
     def __init__(self):
         if not self.name:

@@ -25,7 +25,14 @@ import base64
 import json
 import re
 from typing import Optional
+from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
+
+
+# All browser_* tools share the singleton _BrowserManager / Chromium
+# instance, so concurrent invocations would race. Capability flags
+# below all set ``concurrency_safe=False`` to force Stage 10's
+# PartitionExecutor to serialize them.
 
 
 # ── Lazy singleton browser manager ──
@@ -179,6 +186,10 @@ class BrowserNavigateTool(BaseTool):
         "Use for SPAs, JS-rendered pages, or when web_fetch returns incomplete content. "
         "Browser session persists across calls (cookies, login state retained)."
     )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, read_only=True,
+        network_egress=True, max_result_chars=50_000,
+    )
 
     def run(
         self,
@@ -259,6 +270,9 @@ class BrowserClickTool(BaseTool):
         "Use after browser_navigate to interact with buttons, links, menus, etc. "
         "Returns the updated page content after clicking."
     )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, max_result_chars=50_000,
+    )
 
     def run(self, selector: str, max_length: int = 50000) -> str:
         """Click an element.
@@ -321,6 +335,7 @@ class BrowserFillTool(BaseTool):
         "Use a CSS selector to target the field. "
         "Optionally press Enter to submit after filling."
     )
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
 
     def run(
         self,
@@ -390,6 +405,11 @@ class BrowserScreenshotTool(BaseTool):
         "Take a screenshot of the current browser page. "
         "Returns a base64-encoded PNG image. "
         "Use for visual inspection of page state or capturing errors."
+    )
+    # max_result_chars=0 disables truncation — base64 PNGs are large but bounded.
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, read_only=True, idempotent=True,
+        max_result_chars=0,
     )
 
     def run(
@@ -461,6 +481,8 @@ class BrowserEvaluateTool(BaseTool):
         "Use for precise data extraction, DOM queries, scrolling, "
         "or any custom browser-side logic."
     )
+    # Arbitrary JS exec — opaque side-effects; not idempotent, may mutate DOM.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
 
     def run(self, expression: str) -> str:
         """Execute JavaScript.
@@ -510,6 +532,10 @@ class BrowserGetPageInfoTool(BaseTool):
     description = (
         "Get the current browser page URL, title, and list of interactive elements "
         "(links, buttons, inputs). Use to inspect page state before interacting."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, read_only=True, idempotent=True,
+        max_result_chars=50_000,
     )
 
     def run(self, include_elements: bool = True) -> str:
@@ -588,6 +614,10 @@ class BrowserCloseTool(BaseTool):
         "Close the browser and release all resources. "
         "Clears cookies, session, and page state. "
         "A fresh browser starts on the next browser_navigate call."
+    )
+    # Tears down session — destructive of cookies/localStorage; idempotent.
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, destructive=True, idempotent=True,
     )
 
     def run(self) -> str:
