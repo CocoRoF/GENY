@@ -33,14 +33,11 @@ Design highlights
      wraps every actual call into the OmniVoice model
      (``generate`` / ``create_voice_clone_prompt`` / ``transcribe``).
      The model is **not** thread-safe — it carries shared internal
-     buffers, mutates ``self.eval()`` state, and (when
-     ``torch.compile(mode="reduce-overhead")`` is on) replays a
-     CUDA Graph whose static memory regions are reused across
-     calls. Concurrent invocation manifested as
-     ``CUDA error: unspecified launch failure`` deep inside the
-     Qwen3 attention / RMSNorm kernels — recovery is impossible
-     without a full process restart, so we hard-serialise the GPU
-     instead.
+     buffers and mutates ``self.eval()`` state. Concurrent invocation
+     manifested as ``CUDA error: unspecified launch failure`` deep
+     inside the Qwen3 attention / RMSNorm kernels — recovery is
+     impossible without a full process restart, so we hard-serialise
+     the GPU instead.
 
   Synthesis itself runs in a worker thread so the event loop stays
   responsive while the GPU lock is held.
@@ -288,6 +285,25 @@ def maybe_compile(model: OmniVoice, settings: Settings) -> OmniVoice:
     Logs the decision either way so operators can confirm the gate fired
     as expected. Failures fall back to the eager model — we never let
     an Inductor compile error keep the service from coming up.
+
+    Mode choice
+    -----------
+    We deliberately use ``mode="default"`` (Inductor kernel fusion only)
+    instead of ``mode="reduce-overhead"`` (kernel fusion + CUDA Graphs).
+
+    Reduce-overhead captures the entire forward as a CUDA Graph and
+    replays it from a private memory pool. That works while every CUDA
+    op for the request lives inside the captured forward. OmniVoice
+    breaks that contract: ``create_voice_clone_prompt`` runs the
+    HuBERT-based ``audio_tokenizer.encode`` on the same default stream
+    *outside* the captured graph. Once the graph is live, those
+    non-captured kernels (e.g. HuBERT's first ``F.conv1d``) hit the
+    graph's reserved regions and abort with
+    ``CUDA error: unspecified launch failure`` — which then poisons the
+    whole CUDA context for the rest of the process. Plain
+    ``mode="default"`` keeps the Inductor speedup we actually care
+    about (fused matmul + RoPE + RMSNorm in the LLM hot loop) and
+    avoids the graph-replay foot-gun entirely.
     """
     if not _should_compile(settings):
         cap = _device_capability(settings.device)
@@ -297,10 +313,10 @@ def maybe_compile(model: OmniVoice, settings: Settings) -> OmniVoice:
         )
         return model
     try:
-        compiled = torch.compile(model, mode="reduce-overhead", fullgraph=False)
+        compiled = torch.compile(model, mode="default", fullgraph=False)
         logger.info(
-            "torch.compile gate: ON (mode=%s, capability=%s) — "
-            "first request will pay one-time compile cost",
+            "torch.compile gate: ON (mode=%s, capability=%s, inductor=default/no-cudagraphs) "
+            "— first request will pay one-time compile cost",
             settings.use_compile, _device_capability(settings.device),
         )
         return compiled  # type: ignore[return-value]
@@ -598,6 +614,49 @@ async def warmup() -> None:
         "This is a warmup probe utterance for the omnivoice service. "
     )
     try:
+        # Probe 0: exercise the HuBERT-based ``audio_tokenizer.encode``
+        # path *before* anything else. Without this the very first
+        # production clone request was the first time HuBERT ran on the
+        # device, and on Blackwell (sm_120, fp16 main model + fp32
+        # tokenizer) that first-touch path was crashing with
+        # ``unspecified launch failure`` inside ``F.conv1d`` —
+        # poisoning the CUDA context for every subsequent request.
+        # Hitting it here means any HuBERT/conv-init issue surfaces in
+        # the warmup log, not in user traffic.
+        try:
+            ref_audio_path = _resolve_warmup_ref_audio(settings)
+        except Exception:
+            logger.exception("warmup: failed to resolve clone-probe ref audio; skipping")
+            ref_audio_path = None
+        if ref_audio_path is not None:
+            try:
+                logger.info(
+                    "warmup: clone-probe (HuBERT path) using ref=%s",
+                    ref_audio_path,
+                )
+                await synthesize(
+                    text=base_sentence.strip(),
+                    mode="clone",
+                    ref_audio_path=ref_audio_path,
+                    ref_text=None,
+                    instruct=None,
+                    language=None,
+                    speed=1.0,
+                    duration=1.0,
+                    num_step=settings.default_num_step,
+                    guidance_scale=settings.default_guidance_scale,
+                    denoise=True,
+                    preprocess_prompt=True,
+                    postprocess_output=True,
+                )
+            except Exception:
+                logger.exception("warmup: clone-probe failed; continuing")
+        else:
+            logger.info(
+                "warmup: no voice profile available — skipping HuBERT "
+                "probe; first clone request will pay the cold cost"
+            )
+
         for bucket in settings.warmup_buckets_seconds:
             bucket_s = float(bucket)
             # Roughly 3 chars per second of speech; round up so we never
@@ -629,3 +688,36 @@ async def warmup() -> None:
                 logger.exception("warmup bucket %.1fs failed; continuing", bucket_s)
     finally:
         set_phase("ok")
+
+
+def _resolve_warmup_ref_audio(settings: Settings) -> Optional[str]:
+    """Pick a ref_audio path for the clone-mode warmup probe.
+
+    Order of preference:
+      1. ``settings.warmup_voice_profile`` if set and resolvable to
+         a neutral (or first-available) ref under ``voices_dir``.
+      2. The first profile discovered by ``voices.list_profiles`` that
+         has at least one ref audio.
+      3. ``None`` — caller will skip the clone probe.
+    """
+    # Local import to keep the engine module importable in unit-test
+    # paths that monkey-patch out the voices module.
+    from server import voices
+
+    if settings.warmup_voice_profile:
+        ref = voices.resolve_ref_audio(
+            settings.voices_dir, settings.warmup_voice_profile, "neutral",
+        )
+        if ref is not None:
+            return ref.file
+        logger.warning(
+            "warmup_voice_profile=%r not found under %s; falling back to "
+            "first available profile",
+            settings.warmup_voice_profile, settings.voices_dir,
+        )
+
+    profiles = voices.list_profiles(settings.voices_dir)
+    for profile in profiles:
+        if profile.ref_audios:
+            return profile.ref_audios[0].file
+    return None
