@@ -73,15 +73,21 @@ playwright>=1.49.0
 #   Skill records with prompt metadata in extras.
 # 0.45.x (executor uplift Phase 9 Sub-phase 9a close —
 # S9a.1 + S9a.2 + S9a.3 + S9a.4 + S9a.5): canonical pipeline grew
-# 16 → 21 slots. No-op behaviour-wise — five new slots
-# (tool_review / task_registry / hitl / summarize / persist) are
-# pass-through / bypass scaffolds. Existing pipelines run
-# identically; v1/v2 manifests auto-pad to v3 on load.
-# PipelineBuilder gains 5 new opt-in `with_*` methods. Real
-# behaviour for each new slot lands in Sub-phase 9b.
+# 16 → 21 slots. Five new slots are pass-through / bypass
+# scaffolds. v1/v2 manifests auto-pad to v3 on load.
+# 0.46.x (executor uplift Phase 9 Sub-phase 9b close —
+# S9b.1 + S9b.2 + S9b.3 + S9b.4 + S9b.5): every former scaffold
+# has real strategy-slot behaviour now. Phase 9 complete.
+# - Stage 11 Tool Review: 5-reviewer chain.
+# - Stage 13 Task Registry: registry + policy slots.
+# - Stage 15 HITL: requester + timeout slots.
+# - Stage 19 Summarize: summarizer + importance slots.
+# - Stage 20 Persist: persister + frequency slots.
+# Defaults preserve pre-0.46.0 behaviour. Pipeline.resume_from_
+# checkpoint and Pipeline.resume remain on the follow-up backlog.
 # All surfaces independently opt-in; without consuming them
-# behaviour is identical to 0.44.x.
-geny-executor[web]>=0.45.0,<0.46.0
+# behaviour is identical to 0.45.x.
+geny-executor[web]>=0.46.0,<0.47.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
