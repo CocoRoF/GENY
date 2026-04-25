@@ -1572,9 +1572,36 @@ class AgentSession:
         success = True
         error_msg = None
 
-        # Create PipelineState with session context
+        # Create PipelineState with session context.
+        #
+        # R2 (audit 20260425_3): if a checkpoint restore endpoint
+        # has stashed a previous PipelineState on ``self._restored_state``,
+        # consume it as the starting state for THIS turn instead of
+        # the fresh-per-turn default. Cleared after consumption so a
+        # second turn doesn't re-apply the same checkpoint. The
+        # session_id is rebound because the restored state may have
+        # been written under an earlier session id (mid-restart).
         from geny_executor.core.state import PipelineState as _PipelineState
-        _state = _PipelineState(session_id=self._session_id)
+
+        restored = getattr(self, "_restored_state", None)
+        if restored is not None:
+            _state = restored
+            try:
+                _state.session_id = self._session_id
+            except Exception:
+                logger.warning(
+                    f"[{self._session_id}] could not rebind session_id on "
+                    "restored state; using fresh state instead"
+                )
+                _state = _PipelineState(session_id=self._session_id)
+            self._restored_state = None  # one-shot
+            logger.info(
+                f"[{self._session_id}] resumed from checkpoint — "
+                f"messages={len(getattr(_state, 'messages', []) or [])}, "
+                f"iteration={getattr(_state, 'iteration', 0)}"
+            )
+        else:
+            _state = _PipelineState(session_id=self._session_id)
 
         # Creature state hydrate (PR-X3-5). Skipped when no state_provider
         # is wired — classic session mode. A failed hydrate leaves
@@ -1943,9 +1970,36 @@ class AgentSession:
         iterations = 0
         success = True
 
-        # Create PipelineState with session context
+        # Create PipelineState with session context.
+        #
+        # R2 (audit 20260425_3): if a checkpoint restore endpoint
+        # has stashed a previous PipelineState on ``self._restored_state``,
+        # consume it as the starting state for THIS turn instead of
+        # the fresh-per-turn default. Cleared after consumption so a
+        # second turn doesn't re-apply the same checkpoint. The
+        # session_id is rebound because the restored state may have
+        # been written under an earlier session id (mid-restart).
         from geny_executor.core.state import PipelineState as _PipelineState
-        _state = _PipelineState(session_id=self._session_id)
+
+        restored = getattr(self, "_restored_state", None)
+        if restored is not None:
+            _state = restored
+            try:
+                _state.session_id = self._session_id
+            except Exception:
+                logger.warning(
+                    f"[{self._session_id}] could not rebind session_id on "
+                    "restored state; using fresh state instead"
+                )
+                _state = _PipelineState(session_id=self._session_id)
+            self._restored_state = None  # one-shot
+            logger.info(
+                f"[{self._session_id}] resumed from checkpoint — "
+                f"messages={len(getattr(_state, 'messages', []) or [])}, "
+                f"iteration={getattr(_state, 'iteration', 0)}"
+            )
+        else:
+            _state = _PipelineState(session_id=self._session_id)
 
         # Creature state hydrate (PR-X3-5, mirrors _invoke_pipeline).
         _state_registry = self._build_state_registry()
