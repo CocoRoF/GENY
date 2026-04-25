@@ -61,9 +61,19 @@ dependencies = [
     #   per-turn budget sizing. Hosts call ThinkStage.apply_planned_budget
     #   from a pre-Stage-6 hook to size thinking_budget_tokens by
     #   prompt size + tools + reflection signals.
+    # 0.43.x (executor uplift Phase 7 close — S7.11 + S7.12):
+    # - OrderedEmitterChain — Stage 14 alternative chain with
+    #   topological dep ordering (Emitter.requires), dep-failure
+    #   skip, and timeout-based per-emitter backpressure
+    #   (Emitter.timeout_seconds + consecutive-timeout counter).
+    #   EmitResult gains emitter_name for clean producer pairing.
+    # - MultiFormatFormatter — Stage 16 yields text + structured +
+    #   markdown in one pass; final_output becomes a dict keyed by
+    #   format. include_thinking toggle for thinking visibility in
+    #   markdown. build_structured / build_markdown helpers exposed.
     # All surfaces independently opt-in; without consuming them
-    # behaviour is identical to 0.41.x.
-    "geny-executor[web]>=0.42.0,<0.43.0",
+    # behaviour is identical to 0.42.x.
+    "geny-executor[web]>=0.43.0,<0.44.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
