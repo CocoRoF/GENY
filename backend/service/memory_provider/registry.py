@@ -131,12 +131,61 @@ class MemorySessionRegistry:
     def attach_to_pipeline(self, pipeline: Any, provider: MemoryProvider) -> None:
         """Wire ``provider`` into memory-aware stages of a pipeline.
 
-        Currently that is only Stage 2 (``ContextStage.provider``). Not
-        invoked anywhere yet — Phase 4 flips the switch.
+        G3.1: now actively called by AgentSessionManager. Wires the
+        provider into three places so all uplift surfaces see it
+        without separate plumbing per stage:
+
+        1. Stage 2 (Context) — ``stage.provider`` for retriever-aware
+           strategies that consult the unified provider.
+        2. Stage 18 (Memory) — ``stage.provider`` so ``record_turn`` /
+           ``record_execution`` / ``reflect`` flow through (geny-
+           executor 1.0 Sub-phase 9a renumber: was Stage 15).
+        3. ``state.session_runtime.memory_provider`` — Stage 19
+           Summarize (S9b.4) probes this attribute via the
+           runtime; setting it here lets ``record_summary``
+           forward through. The runtime container is created on
+           demand if the host hasn't attached one.
+
+        Each step is best-effort: missing stages or runtime
+        attributes are silently skipped so partial pipelines still
+        attach successfully.
         """
-        stage = pipeline.get_stage(2)
-        if stage is not None and hasattr(stage, "provider"):
-            stage.provider = provider
+        # Stage 2 — Context.
+        context_stage = pipeline.get_stage(2)
+        if context_stage is not None and hasattr(context_stage, "provider"):
+            context_stage.provider = provider
+
+        # Stage 18 — Memory (was 15 pre-1.0).
+        memory_stage = pipeline.get_stage(18)
+        if memory_stage is not None and hasattr(memory_stage, "provider"):
+            memory_stage.provider = provider
+
+        # session_runtime.memory_provider — read by Stage 19 Summarize.
+        # The pipeline only owns ``_attached_session_runtime``;
+        # ``state.session_runtime`` is set from that at run start.
+        runtime = getattr(pipeline, "_attached_session_runtime", None)
+        if runtime is None:
+            runtime = _SimpleRuntimeContainer()
+            try:
+                pipeline._attached_session_runtime = runtime  # type: ignore[attr-defined]
+            except AttributeError:
+                runtime = None
+        if runtime is not None:
+            try:
+                runtime.memory_provider = provider  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+
+
+class _SimpleRuntimeContainer:
+    """Minimal duck-typed stand-in for ``state.session_runtime``.
+
+    Used only when the host hasn't attached a richer runtime
+    container. Carries the ``memory_provider`` attribute Stage 19
+    Summarize probes for; everything else is opt-in via setattr.
+    """
+
+    memory_provider: Any = None
 
     # ── introspection ───────────────────────────────────────────────
 
