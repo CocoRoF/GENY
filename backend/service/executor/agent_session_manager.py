@@ -741,7 +741,9 @@ class AgentSessionManager:
                                 agent._pipeline, provider
                             )
                             logger.info(
-                                f"[{session_id}] MemoryProvider attached to Stage 2"
+                                f"[{session_id}] MemoryProvider attached "
+                                f"(Stage 2 Context + Stage 18 Memory + "
+                                f"session_runtime.memory_provider)"
                             )
                         except Exception as attach_exc:
                             logger.warning(
