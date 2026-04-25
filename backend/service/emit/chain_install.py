@@ -1,4 +1,4 @@
-"""Install :class:`AffectTagEmitter` onto a prebuilt pipeline's s14 chain.
+"""Install :class:`AffectTagEmitter` onto a prebuilt pipeline's emit chain.
 
 The executor composes the emit chain from manifest declarations; its
 registry only knows the four default emitters (text/callback/vtuber/tts).
@@ -9,6 +9,16 @@ CreatureState concerns.
 
 Placement: **prepended** so its ``final_text`` rewrite (tag strip) is
 visible to any later emitter (vtuber / tts / text) in the same chain.
+
+Stage order updated for geny-executor 1.0+ — emit moved 14 → 17 in
+the 21-stage layout (Sub-phase 9a). The order constant is exported
+and asserted in chain_install tests so a future renumber surfaces
+loudly.
+
+The :class:`AffectTagEmitter` declares ``requires=()`` and
+``timeout_seconds=None`` so an :class:`OrderedEmitterChain`
+wrapper (planned in a follow-up executor enhancement) can place it
+correctly without further changes here.
 """
 
 from __future__ import annotations
@@ -23,7 +33,8 @@ from service.emit.affect_tag_emitter import (
 
 logger = logging.getLogger(__name__)
 
-EMIT_STAGE_ORDER: int = 14
+# geny-executor 1.0+ Sub-phase 9a: emit moved 14 → 17.
+EMIT_STAGE_ORDER: int = 17
 
 
 def install_affect_tag_emitter(

@@ -1,9 +1,10 @@
 """chain_install.install_affect_tag_emitter (cycle 20260421_9 PR-X3-7).
 
 We stub out the pipeline surface rather than constructing a real one:
-the installer only touches ``pipeline.get_stage(14).emitters.items``,
-so a minimal fake captures the contract precisely without dragging in
-manifest / API-key / registry machinery.
+the installer only touches ``pipeline.get_stage(EMIT_STAGE_ORDER).emitters.items``
+(emit moved 14 → 17 in geny-executor 1.0+), so a minimal fake captures
+the contract precisely without dragging in manifest / API-key /
+registry machinery.
 """
 
 from __future__ import annotations
@@ -110,3 +111,26 @@ def test_forwards_max_tags_per_turn_to_emitter() -> None:
     inst = install_affect_tag_emitter(pipe, max_tags_per_turn=5)
     assert inst is not None
     assert inst._max_tags_per_turn == 5
+
+
+def test_emit_stage_order_matches_executor_emit_stage() -> None:
+    """Regression guard: EMIT_STAGE_ORDER must equal the actual
+    EmitStage class's order property in the installed
+    geny-executor. Prevents silent drift when the executor renumbers
+    stages (as happened 14 → 17 in Sub-phase 9a)."""
+    from geny_executor.stages.s17_emit.artifact.default.stage import EmitStage
+
+    assert EmitStage().order == EMIT_STAGE_ORDER, (
+        f"EmitStage().order={EmitStage().order} but EMIT_STAGE_ORDER={EMIT_STAGE_ORDER}; "
+        f"update service/emit/chain_install.py:EMIT_STAGE_ORDER to match."
+    )
+
+
+def test_affect_tag_emitter_declares_ordered_chain_hints() -> None:
+    """AffectTagEmitter declares ``requires=()`` and
+    ``timeout_seconds=None`` so an OrderedEmitterChain wrapper
+    (planned executor enhancement) places it correctly without
+    further changes here."""
+    em = AffectTagEmitter()
+    assert em.requires == ()
+    assert em.timeout_seconds is None
