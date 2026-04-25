@@ -146,6 +146,46 @@ def attach_provider(registry: Any) -> Optional[Any]:
     return SkillToolProvider(registry)
 
 
+async def bridge_mcp_prompts(registry: Any, mcp_manager: Any) -> int:
+    """G10.4 — pull every connected MCP server's prompts into ``registry``.
+
+    Each MCP prompt becomes a :class:`Skill` registered under
+    ``mcp__<server>__<prompt>`` (the executor's id convention).
+    Returns the number of skills added.
+
+    No-op when:
+    - the executor's ``mcp_prompts_to_skills`` helper isn't importable,
+    - ``registry`` or ``mcp_manager`` is None,
+    - no connected server exposes any prompts.
+    """
+    if registry is None or mcp_manager is None:
+        return 0
+    try:
+        from geny_executor.skills import mcp_prompts_to_skills
+    except ImportError:
+        return 0
+
+    try:
+        skills = await mcp_prompts_to_skills(mcp_manager)
+    except Exception as exc:
+        logger.warning("bridge_mcp_prompts: helper raised: %s", exc)
+        return 0
+
+    added = 0
+    for skill in skills:
+        try:
+            registry.register(skill)
+            added += 1
+        except Exception as exc:
+            logger.warning(
+                "bridge_mcp_prompts: failed to register %r: %s",
+                getattr(skill, "id", "?"), exc,
+            )
+    if added:
+        logger.info("bridge_mcp_prompts: %d MCP prompt(s) registered as skills", added)
+    return added
+
+
 __all__ = [
     "BUNDLED_SKILLS_DIR",
     "SKILLS_OPT_IN_ENV",
