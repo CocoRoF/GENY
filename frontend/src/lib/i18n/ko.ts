@@ -233,6 +233,16 @@ const ko: Translations = {
     noActivity: '무응답',
   },
 
+  // ─── 체크포인트 복원 모달 (Stage 20 / G7.2) ───
+  restore: {
+    modalTitle: '체크포인트에서 복원',
+    loadingList: '체크포인트 목록 불러오는 중…',
+    empty: '이 세션에 저장된 체크포인트가 없습니다.',
+    restoreBtn: '복원',
+    restoringBtn: '복원 중…',
+    restoredCount: '복원됨 ({count}개 메시지)',
+  },
+
   // ─── HITL 승인 모달 (Stage 15) ───
   hitl: {
     modalTitle: '승인 필요',

@@ -299,6 +299,30 @@ export const agentApi = {
       { method: 'DELETE' },
     ),
 
+  /**
+   * Crash-recovery checkpoint endpoints (G7.1 / G7.2).
+   *
+   * `checkpointsList` returns the available checkpoint ids for a
+   * session (empty when the persist write side hasn't fired or the
+   * preset keeps Stage 20 off). `checkpointsRestore` rebuilds
+   * pipeline state from a single checkpoint — runtime fields
+   * (llm_client, persister, hook_runner) stay bound from the
+   * original attach_runtime call; only the message/iteration/tasks
+   * snapshot is restored.
+   */
+  checkpointsList: (id: string) =>
+    apiCall<{
+      session_id: string;
+      checkpoints: Array<{ checkpoint_id: string; written_at: number; size_bytes: number }>;
+    }>(`/api/agents/${id}/checkpoints`),
+
+  /** POST /api/agents/{id}/checkpoints/restore — restore a checkpoint. */
+  checkpointsRestore: (id: string, checkpointId: string) =>
+    apiCall<{ session_id: string; checkpoint_id: string; restored: boolean; messages_restored: number }>(
+      `/api/agents/${id}/checkpoints/restore`,
+      { method: 'POST', body: JSON.stringify({ checkpoint_id: checkpointId }) },
+    ),
+
   /** GET /api/agents/{id}/graph — graph structure */
   getGraph: (id: string) => apiCall<GraphStructure>(`/api/agents/${id}/graph`),
 
