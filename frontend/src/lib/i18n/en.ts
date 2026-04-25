@@ -233,6 +233,16 @@ const en = {
     noActivity: 'no activity',
   },
 
+  // ─── Crash-recovery checkpoint modal (Stage 20 / G7.2) ───
+  restore: {
+    modalTitle: 'Restore from checkpoint',
+    loadingList: 'Loading checkpoints…',
+    empty: 'No checkpoints written for this session yet.',
+    restoreBtn: 'Restore',
+    restoringBtn: 'Restoring…',
+    restoredCount: 'Restored ({count} msgs)',
+  },
+
   // ─── HITL approval modal (Stage 15) ───
   hitl: {
     modalTitle: 'Approval required',

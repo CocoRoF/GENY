@@ -9,6 +9,7 @@ import type { LogEntry } from '@/types';
 import ExecutionTimeline from '@/components/execution/ExecutionTimeline';
 import StepDetailPanel from '@/components/execution/StepDetailPanel';
 import HITLApprovalModal from '@/components/modals/HITLApprovalModal';
+import RestoreCheckpointModal from '@/components/modals/RestoreCheckpointModal';
 import {
   Square,
   Loader2,
@@ -22,6 +23,7 @@ import {
   PanelRightClose,
   ScrollText,
   FileOutput,
+  History,
 } from 'lucide-react';
 
 /**
@@ -495,6 +497,12 @@ export default function CommandTab() {
     updateSessionData(selectedSessionId, { pendingHitl: null });
   }, [selectedSessionId, updateSessionData]);
 
+  // ── Restore-from-checkpoint modal (G7.2) — operator-triggered.
+  // Visible button appears whenever the session has reached an
+  // error / connection-lost state where a rewind is the natural recovery.
+  const [showRestore, setShowRestore] = useState(false);
+  const restoreEligible = sessionData?.status === 'error';
+
   return (
     <div className="flex flex-col h-full bg-[var(--bg-primary)] relative">
       {/* HITL approval modal — global to the session view */}
@@ -503,6 +511,13 @@ export default function CommandTab() {
           sessionId={selectedSessionId}
           request={pendingHitl}
           onClose={handleHitlClose}
+        />
+      )}
+      {/* Restore-from-checkpoint modal */}
+      {selectedSessionId && showRestore && (
+        <RestoreCheckpointModal
+          sessionId={selectedSessionId}
+          onClose={() => setShowRestore(false)}
         />
       )}
       {/* ── Header ── */}
@@ -573,6 +588,15 @@ export default function CommandTab() {
             {isExecuting && (
               <button className="h-7 w-7 rounded-md bg-[var(--danger-color)] hover:brightness-110 text-white flex items-center justify-center transition-all border-none cursor-pointer" onClick={handleStop} title={t('commandTab.stopBtn')}>
                 <Square size={12} />
+              </button>
+            )}
+            {restoreEligible && !isExecuting && (
+              <button
+                className="h-7 w-7 rounded-md bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] text-[var(--primary-color)] flex items-center justify-center transition-all border border-[var(--border-color)] cursor-pointer"
+                onClick={() => setShowRestore(true)}
+                title={t('restore.modalTitle')}
+              >
+                <History size={12} />
               </button>
             )}
             <button
