@@ -89,6 +89,8 @@ const ko: Translations = {
     memory: '메모리',
     vtuber: 'VTuber',
     playground2d: '플레이그라운드 2D',
+    tasks: '작업',
+    cron: '스케줄',
   },
 
   // ─── Sidebar ───

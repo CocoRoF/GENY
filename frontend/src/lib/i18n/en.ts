@@ -89,6 +89,8 @@ const en = {
     memory: 'Memory',
     vtuber: 'VTuber',
     playground2d: 'Playground 2D',
+    tasks: 'Tasks',
+    cron: 'Cron',
   },
 
   // ─── Sidebar ───
