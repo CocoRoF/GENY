@@ -125,6 +125,39 @@ class NotificationsConfigSection(BaseModel):
         return v
 
 
+class MemoryConfigSection(BaseModel):
+    """``settings.memory`` schema (G.1 / cycle 20260426_2).
+
+    Mirrors the keys ``service.memory_provider.config`` resolves with
+    settings.json-first → env-fallback semantics. Every field is
+    optional; an absent ``provider`` keeps the legacy
+    ``SessionMemoryManager`` path authoritative (operators must opt
+    in explicitly).
+    """
+
+    provider: Optional[str] = Field(
+        None,
+        description='disabled | ephemeral | file | sql (omit to disable)',
+    )
+    scope: Optional[str] = Field(
+        None,
+        description='session (default) | per-user | global …',
+    )
+    root: Optional[str] = Field(
+        None,
+        description="Filesystem root for provider=file",
+    )
+    dsn: Optional[str] = Field(
+        None,
+        description="DSN for provider=sql (sqlite:// or postgresql://)",
+    )
+    dialect: Optional[str] = Field(
+        None,
+        description="sqlite | postgres (overrides DSN auto-detect)",
+    )
+    timezone: Optional[str] = None
+
+
 class PermissionsConfigSection(BaseModel):
     """``settings.permissions`` schema (K.2 / cycle 20260426_2).
 
@@ -160,4 +193,5 @@ __all__ = [
     "NotificationsConfigSection",
     "NotificationsChannel",
     "PermissionsConfigSection",
+    "MemoryConfigSection",
 ]

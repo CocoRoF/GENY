@@ -59,6 +59,10 @@ SECTION_READERS: Dict[str, List[str]] = {
     "permissions": [
         "service.permission.install",
     ],
+    # G.1 (cycle 20260426_2) — memory provider config.
+    "memory": [
+        "service.memory_provider.config",
+    ],
 }
 
 
