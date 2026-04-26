@@ -17,7 +17,15 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from service.settings.sections import PresetSection, VTuberSection
+from service.settings.sections import (
+    HooksConfigSection,
+    ModelConfigSection,
+    NotificationsConfigSection,
+    PresetSection,
+    SkillsConfigSection,
+    TelemetryConfigSection,
+    VTuberSection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +57,16 @@ def install_geny_settings() -> Optional[Any]:
 
     register_section("preset", PresetSection)
     register_section("vtuber", VTuberSection)
+    # PR-F.1.1..F.1.5 — framework subsystem section schemas. The
+    # executor's hooks/skills/model/etc. modules read these sections
+    # from settings.json today; registering Pydantic schemas turns
+    # raw-dict reads into validated parses + drives the
+    # /api/framework-settings UI editor (PR-F.1.6).
+    register_section("hooks", HooksConfigSection)
+    register_section("skills", SkillsConfigSection)
+    register_section("model", ModelConfigSection)
+    register_section("telemetry", TelemetryConfigSection)
+    register_section("notifications", NotificationsConfigSection)
 
     loaded = loader.load()
     logger.info(
