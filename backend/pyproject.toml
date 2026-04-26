@@ -135,11 +135,12 @@ dependencies = [
     #   surfaces, and manifest v3 schema are all stable.
     # No breaking changes vs 0.46.x — this pin is a stability marker
     # that also unlocks the Sub-phase 9c APIs.
-    # Bumped to 1.2.0 for new-executor-uplift Cycle B executor side
-    # (in-process hooks / auto-compaction frequency / settings.json /
-    # richer SKILL.md / acceptEdits+dontAsk permission modes).
+    # Bumped to 1.3.0 for new-executor-uplift Cycle D phase 5
+    # (Workspace value object + WorkspaceStack; Worktree/LSP tools
+    # workspace-aware; SubagentTypeOrchestrator threads workspace
+    # snapshot to sub-pipelines).
     # cron extra pulls croniter for the scheduling daemon.
-    "geny-executor[web,cron]>=1.2.0,<1.3.0",
+    "geny-executor[web,cron]>=1.3.0,<1.4.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
