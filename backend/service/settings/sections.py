@@ -125,6 +125,25 @@ class NotificationsConfigSection(BaseModel):
         return v
 
 
+class AffectConfigSection(BaseModel):
+    """``settings.affect`` schema (G.3 / cycle 20260426_2).
+
+    Knobs for ``service.emit.AffectTagEmitter`` — Geny's per-turn
+    pipeline emitter that strips ``[emotion]`` tags from LLM output and
+    folds them into CreatureState mutations.
+    """
+
+    max_tags_per_turn: Optional[int] = Field(
+        None,
+        ge=0,
+        description=(
+            "Cap on the number of ``[emotion]`` tags consumed per turn. "
+            "Defaults to the executor's "
+            "DEFAULT_MAX_TAG_MUTATIONS_PER_TURN constant."
+        ),
+    )
+
+
 class MemoryTuningSection(BaseModel):
     """``settings.memory.tuning`` knobs (G.2 / cycle 20260426_2).
 
@@ -224,4 +243,5 @@ __all__ = [
     "PermissionsConfigSection",
     "MemoryConfigSection",
     "MemoryTuningSection",
+    "AffectConfigSection",
 ]

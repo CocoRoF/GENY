@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from service.settings.sections import (
+    AffectConfigSection,
     HooksConfigSection,
     MemoryConfigSection,
     ModelConfigSection,
@@ -77,6 +78,8 @@ def install_geny_settings() -> Optional[Any]:
     # service.memory_provider.config.build_default_memory_config with
     # env-fallback semantics.
     register_section("memory", MemoryConfigSection)
+    # G.3 (cycle 20260426_2) — affect tag emitter knob.
+    register_section("affect", AffectConfigSection)
 
     loaded = loader.load()
     logger.info(

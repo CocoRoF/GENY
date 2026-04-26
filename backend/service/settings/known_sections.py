@@ -63,6 +63,10 @@ SECTION_READERS: Dict[str, List[str]] = {
     "memory": [
         "service.memory_provider.config",
     ],
+    # G.3 (cycle 20260426_2) — affect tag emitter knob.
+    "affect": [
+        "service.emit.chain_install",
+    ],
 }
 
 
