@@ -24,6 +24,22 @@ interface SkillRow {
   name: string | null;
   description: string | null;
   allowed_tools: string[];
+  // PR-D.3.3 — richer SKILL.md fields exposed after executor 1.2.0.
+  // Optional / default-empty so older payloads still render.
+  category?: string | null;
+  effort?: string | null;
+  examples?: string[];
+}
+
+// Effort indicator: low ●○○ / medium ●●○ / high ●●●. Returns null
+// for unknown / missing so the badge is skipped.
+function effortDots(effort?: string | null): string | null {
+  switch ((effort || '').toLowerCase()) {
+    case 'low': return '●○○';
+    case 'medium': return '●●○';
+    case 'high': return '●●●';
+    default: return null;
+  }
 }
 
 export default function SkillPanel({ onPickSkill }: Props) {
@@ -91,21 +107,45 @@ export default function SkillPanel({ onPickSkill }: Props) {
       <span className="text-[0.625rem] text-[var(--text-muted)] uppercase tracking-wider font-semibold mr-1">
         Skills
       </span>
-      {skills.map((skill, idx) => (
-        <button
-          key={skill.id ?? `skill-${idx}`}
-          className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] text-[0.6875rem] text-[var(--text-secondary)] border border-[var(--border-color)] transition-colors"
-          onClick={() => onPickSkill(`/${skill.id ?? ''}`)}
-          title={skill.description ?? skill.name ?? ''}
-        >
-          <span className="font-mono">/{skill.id}</span>
-          {skill.allowed_tools.length > 0 && (
-            <span className="text-[0.5625rem] text-[var(--text-muted)] opacity-70">
-              · {skill.allowed_tools.length} tool{skill.allowed_tools.length === 1 ? '' : 's'}
-            </span>
-          )}
-        </button>
-      ))}
+      {skills.map((skill, idx) => {
+        const dots = effortDots(skill.effort);
+        // Tooltip aggregates the new metadata so a hover surfaces
+        // category/effort/examples without dedicating screen space.
+        const tooltipParts = [
+          skill.description ?? skill.name ?? '',
+          skill.category ? `[${skill.category}]` : '',
+          skill.effort ? `effort: ${skill.effort}` : '',
+          (skill.examples?.length ?? 0) > 0
+            ? `examples:\n  - ${skill.examples!.join('\n  - ')}`
+            : '',
+        ].filter(Boolean).join('\n');
+
+        return (
+          <button
+            key={skill.id ?? `skill-${idx}`}
+            className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] text-[0.6875rem] text-[var(--text-secondary)] border border-[var(--border-color)] transition-colors"
+            onClick={() => onPickSkill(`/${skill.id ?? ''}`)}
+            title={tooltipParts}
+          >
+            <span className="font-mono">/{skill.id}</span>
+            {skill.category && (
+              <span className="text-[0.5625rem] uppercase tracking-wide text-[var(--primary-color)] opacity-80">
+                {skill.category}
+              </span>
+            )}
+            {dots && (
+              <span className="text-[0.5625rem] text-[var(--text-muted)] opacity-70 font-mono">
+                {dots}
+              </span>
+            )}
+            {skill.allowed_tools.length > 0 && (
+              <span className="text-[0.5625rem] text-[var(--text-muted)] opacity-70">
+                · {skill.allowed_tools.length} tool{skill.allowed_tools.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </button>
+        );
+      })}
       <button
         className="ml-auto h-5 w-5 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center justify-center"
         onClick={reload}

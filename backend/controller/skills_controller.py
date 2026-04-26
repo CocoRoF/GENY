@@ -29,6 +29,12 @@ class SkillSummary(BaseModel):
     description: Optional[str] = Field(None, description="Short description")
     model: Optional[str] = Field(None, description="Optional model override")
     allowed_tools: List[str] = Field(default_factory=list)
+    # PR-D.3.3 — richer SKILL.md schema fields shipped in executor 1.2.0
+    # (PR-B.4.1). Optional + default so older skills without these
+    # fields still serialise cleanly.
+    category: Optional[str] = Field(None, description="Discovery category")
+    effort: Optional[str] = Field(None, description="Token+time hint: low|medium|high")
+    examples: List[str] = Field(default_factory=list, description="Example invocations")
 
 
 class SkillListResponse(BaseModel):
@@ -44,4 +50,27 @@ async def list_skills_endpoint(_auth: dict = Depends(require_auth)):
     process started — the env var is read at request time so a
     re-export takes effect on the next call without process restart.
     """
-    return SkillListResponse(skills=[SkillSummary(**s) for s in list_skills()])
+    return SkillListResponse(skills=[_to_summary(s) for s in list_skills()])
+
+
+def _to_summary(skill_dict: dict) -> SkillSummary:
+    """Map a list_skills() row into the API model. The row may carry
+    extra keys (extras / source / etc.) — pydantic ignores them, so
+    we only need to coerce the few that have type-divergent shapes."""
+    examples_raw = skill_dict.get("examples")
+    if isinstance(examples_raw, tuple):
+        examples = list(examples_raw)
+    elif isinstance(examples_raw, list):
+        examples = examples_raw
+    else:
+        examples = []
+    return SkillSummary(
+        id=skill_dict.get("id"),
+        name=skill_dict.get("name"),
+        description=skill_dict.get("description"),
+        model=skill_dict.get("model"),
+        allowed_tools=list(skill_dict.get("allowed_tools") or []),
+        category=skill_dict.get("category"),
+        effort=skill_dict.get("effort"),
+        examples=examples,
+    )

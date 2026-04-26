@@ -133,16 +133,32 @@ def list_skills() -> List[dict]:
 
     Used by the ``/api/skills/list`` endpoint (G7.4) so the frontend
     panel knows which slash commands are available.
+
+    PR-D.3.3 — surface the richer metadata shipped in executor 1.2.0
+    (category / effort / examples). Reads ``skill.metadata`` when
+    present so older executors that don't have these fields still
+    serialise cleanly (every new field defaults to None / []).
     """
     _, skills = install_skill_registry()
     out: List[dict] = []
     for skill in skills:
+        metadata = getattr(skill, "metadata", None)
+        # metadata fields take priority; flat-attr fallbacks keep
+        # very-old skill shapes working.
+        def _get(field_name: str, default=None):
+            if metadata is not None and hasattr(metadata, field_name):
+                return getattr(metadata, field_name)
+            return getattr(skill, field_name, default)
+
         out.append({
             "id": getattr(skill, "id", None),
-            "name": getattr(skill, "name", None),
-            "description": getattr(skill, "description", None),
-            "model": getattr(skill, "model", None),
-            "allowed_tools": list(getattr(skill, "allowed_tools", []) or []),
+            "name": _get("name"),
+            "description": _get("description"),
+            "model": _get("model_override") or getattr(skill, "model", None),
+            "allowed_tools": list(_get("allowed_tools", []) or []),
+            "category": _get("category"),
+            "effort": _get("effort"),
+            "examples": list(_get("examples", []) or []),
         })
     return out
 
