@@ -41,11 +41,12 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   command: CommandTab,
   logs: LogsTab,
   storage: StorageTab,
-  // Consolidated Environment (global + session). Old activeTab values
-  // for the now-sub-tabs are handled by useAppStore.setActiveTab,
-  // which redirects them to environment / sessionEnvironment with the
-  // appropriate sub-tab pre-selected.
-  environment: EnvironmentTab,
+  // Consolidated Environment surfaces:
+  //  - `library` = global pipeline DESIGN (system-wide files).
+  //  - `sessionEnvironment` = per-session bound-env view.
+  // Old activeTab values for the now-sub-tabs are handled by
+  // useAppStore.setActiveTab redirects.
+  library: EnvironmentTab,
   sessionEnvironment: SessionEnvironmentRootTab,
   // Legacy aliases — kept so direct mounts still work even if a code
   // path bypasses setActiveTab. They render the same components the
