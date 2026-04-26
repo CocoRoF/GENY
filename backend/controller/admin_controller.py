@@ -1,22 +1,21 @@
 """Read-only admin endpoints (G13).
 
-- GET /api/permissions/list  — current rule list with source breakdown
-- GET /api/hooks/list        — current hook config + env opt-in status
+- GET /api/permissions/list   — current rule list with source breakdown
+- GET /api/hooks/list         — current hook config + env opt-in status
+- GET /api/admin/hook-fires   — recent HookRunner audit events (PR-E.3.2)
 
 Skills are already covered by /api/skills/list (G7.4).
-
-These endpoints exist so the operator UI can answer "what's loaded?"
-without tailing the server log. Hand-edit YAML is still the only
-write path; an editor UI is a follow-up.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from logging import getLogger
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from controller.auth_controller import require_auth
@@ -137,4 +136,120 @@ async def list_hooks(_auth: dict = Depends(require_auth)):
         env_opt_in=env_opt_in,
         config_path=str(path),
         entries=entries,
+    )
+
+
+# ── Recent hook fires (PR-E.3.2) ───────────────────────────────────
+
+
+class HookFireRecord(BaseModel):
+    """One row in the hook audit log JSONL.
+
+    Schema mirrors what HookRunner writes to ``audit_log_path``: an
+    arbitrary dict keyed by the runner's record format (event,
+    payload, outcome, timing). We pass it through as a free-form dict
+    so future runner enrichments don't need a parallel update here.
+    """
+    record: Dict[str, Any]
+
+
+class HookFiresResponse(BaseModel):
+    audit_path: Optional[str] = Field(
+        None,
+        description="Resolved audit log path. None when hooks aren't configured.",
+    )
+    exists: bool = False
+    fires: List[HookFireRecord] = Field(default_factory=list)
+    truncated: bool = Field(
+        False,
+        description="True when more rows existed than the requested limit.",
+    )
+
+
+def _resolve_audit_path() -> Optional[Path]:
+    """Pull audit_log_path from settings.json:hooks → fall back to None.
+
+    Mirrors the hook install layer (settings.json wins; legacy yaml is
+    not consulted here since the editor only writes settings.json)."""
+    try:
+        from geny_executor.settings import get_default_loader
+
+        section = get_default_loader().get_section("hooks")
+    except Exception:
+        return None
+    if not isinstance(section, dict):
+        return None
+    raw = section.get("audit_log_path")
+    if not isinstance(raw, str) or not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+@router.get(
+    "/admin/hook-fires",
+    response_model=HookFiresResponse,
+    summary="Recent HookRunner audit-log entries",
+)
+async def list_hook_fires(
+    limit: int = 100,
+    _auth: dict = Depends(require_auth),
+):
+    """Return the last *limit* JSONL records from the configured
+    ``hooks.audit_log_path``. Acts as a poor-operator's ring buffer
+    until the executor exposes one natively (planned executor 1.4.0).
+
+    Empty payload (with ``audit_path=None``) when hooks aren't
+    configured to write an audit log — that's the expected state for
+    most installs.
+    """
+    if limit <= 0 or limit > 1000:
+        raise HTTPException(400, "limit must be in 1..1000")
+
+    path = _resolve_audit_path()
+    if path is None:
+        return HookFiresResponse(audit_path=None, exists=False, fires=[])
+    if not path.exists():
+        return HookFiresResponse(audit_path=str(path), exists=False, fires=[])
+
+    # Tail the file by reading all lines and slicing — JSONL hook
+    # files are usually small (one row per fire); if they grow large
+    # the operator should rotate. Avoid pulling > 5MB into memory.
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise HTTPException(500, f"audit log stat failed: {exc}")
+    if size > 5 * 1024 * 1024:
+        raise HTTPException(
+            413,
+            f"audit log {path} too large ({size}B); rotate or shrink",
+        )
+
+    truncated = False
+    fires: List[HookFireRecord] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        raise HTTPException(500, f"audit log read failed: {exc}")
+
+    if len(lines) > limit:
+        truncated = True
+        lines = lines[-limit:]
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            # Malformed line — skip but don't fail the whole call.
+            continue
+        if isinstance(record, dict):
+            fires.append(HookFireRecord(record=record))
+
+    return HookFiresResponse(
+        audit_path=str(path),
+        exists=True,
+        fires=fires,
+        truncated=truncated,
     )
