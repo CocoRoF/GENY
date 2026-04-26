@@ -208,10 +208,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveTab: (tab) => {
-    // Back-compat: tabs that were promoted to sub-tabs of the
-    // consolidated Environment tab redirect transparently. Old
-    // sidebar bookmarks / persisted state keep working.
-    const ENV_SUB_REDIRECT: Record<string, string> = {
+    // Back-compat: pipeline-component tabs that became sub-tabs
+    // redirect to the right scope:
+    //   - Global pipeline-design sub-tabs   → `library`
+    //   - Per-session env sub-tabs          → `sessionEnvironment`
+    //
+    // CRITICAL: legacy `environment` was always the session-scoped
+    // tab (sidebar / persisted state). It MUST redirect to
+    // sessionEnvironment, not the global Library — that collision
+    // was the bug that bounced operators back to "select a session"
+    // when clicking Library.
+    const LIBRARY_SUB_REDIRECT: Record<string, string> = {
       toolSets: 'toolSets',
       toolCatalog: 'toolCatalog',
       permissions: 'permissions',
@@ -222,12 +229,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       builder: 'library',
     };
     const SESSION_ENV_SUB_REDIRECT: Record<string, string> = {
-      environment: 'manifest',
+      environment: 'manifest', // legacy session-env id
       graph: 'manifest',
       sessionTools: 'tools',
     };
-    if (ENV_SUB_REDIRECT[tab]) {
-      set({ activeTab: 'environment', envSubTab: ENV_SUB_REDIRECT[tab] });
+    if (LIBRARY_SUB_REDIRECT[tab]) {
+      set({ activeTab: 'library', envSubTab: LIBRARY_SUB_REDIRECT[tab] });
       return;
     }
     if (SESSION_ENV_SUB_REDIRECT[tab]) {

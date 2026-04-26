@@ -12,14 +12,22 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));
 }
 
-// Consolidated tab strip: pipeline-component tabs (toolSets /
-// toolCatalog / permissions / hooks / skills / mcpServers /
-// environments) live as sub-tabs of `environment` now. They stay in
-// TabContent.TAB_MAP for back-compat but aren't surfaced here.
+// Consolidated tab strip:
+//   - `library` (global) hosts pipeline-DESIGN sub-tabs: env catalog,
+//     tool sets, permission rules, hooks, skills, mcp server defs.
+//     Operates on system-wide files (settings.json, mcp/custom/, ...).
+//   - `sessionEnvironment` (session) hosts per-session sub-tabs:
+//     manifest of bound env, currently-loaded tools, workspace stack.
+//
+// Critical: global ID is `library`, NOT `environment`. The old
+// `environment` ID was always the session-scoped tab and we keep that
+// meaning via setActiveTab back-compat redirect — colliding ids would
+// bounce the operator to the wrong scope (which is exactly what the
+// previous PR did).
 //
 // Playground / Playground2D are intentionally omitted — code path
 // kept; UI surface hidden until they become first-class again.
-const GLOBAL_TAB_IDS = ['main', 'environment', 'sharedFolder', 'admin', 'settings'] as const;
+const GLOBAL_TAB_IDS = ['main', 'library', 'sharedFolder', 'admin', 'settings'] as const;
 const SESSION_TAB_DEFS = [
   { id: 'command', accent: true },
   { id: 'vtuber' },
@@ -33,7 +41,7 @@ const SESSION_TAB_DEFS = [
 ] as const;
 
 // Tabs hidden in Normal mode
-const DEV_ONLY_GLOBAL = new Set(['environment', 'admin', 'settings']);
+const DEV_ONLY_GLOBAL = new Set(['library', 'admin', 'settings']);
 // 'logs' is intentionally NOT in this set — it must be visible in User mode too (e.g. mobile)
 const DEV_ONLY_SESSION = new Set(['sessionEnvironment']);
 
