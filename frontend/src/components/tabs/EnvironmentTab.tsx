@@ -25,7 +25,7 @@
 
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
-import { SubTabNav, type SubTabDef } from '@/components/layout';
+import { SubTabNav, type SubTabDef, NextSessionBanner } from '@/components/layout';
 import {
   Library,
   FolderTree,
@@ -93,6 +93,7 @@ export default function EnvironmentTab() {
           · System-wide pipeline definitions and shared components (settings.json, mcp/custom/, environments/)
         </span>
       </div>
+      <NextSessionBanner variant="library" />
       <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
       <div className="flex-1 min-h-0 overflow-hidden">
         <Active />

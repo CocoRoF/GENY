@@ -16,4 +16,5 @@ export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './StatusBadge';
 export { ActionButton, type ActionButtonProps } from './ActionButton';
 export { SubTabNav, type SubTabNavProps, type SubTabDef } from './SubTabNav';
+export { NextSessionBanner, type NextSessionBannerProps } from './NextSessionBanner';
 export { cn } from './cn';

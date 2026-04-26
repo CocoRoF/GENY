@@ -20,7 +20,12 @@
 
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
-import { SubTabNav, type SubTabDef, EmptyState } from '@/components/layout';
+import {
+  SubTabNav,
+  type SubTabDef,
+  EmptyState,
+  NextSessionBanner,
+} from '@/components/layout';
 import { Folder, Layers, Wrench, FolderOpen } from 'lucide-react';
 
 const SessionEnvironmentTab = dynamic(
@@ -105,6 +110,7 @@ export default function SessionEnvironmentRootTab() {
           </span>
         )}
       </div>
+      <NextSessionBanner variant="session" />
       <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
       <div className="flex-1 min-h-0 overflow-hidden">
         <Active />
