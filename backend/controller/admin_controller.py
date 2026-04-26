@@ -806,7 +806,8 @@ async def integration_health(request: Request, _auth: dict = Depends(require_aut
 # ── Live reload (E.1 / cycle 20260426_1) ─────────────────────────
 
 
-_RELOAD_SCOPES = {"permissions", "hooks", "all"}
+# O.1 (cycle 20260426_3) — extended to memory_tuning + affect.
+_RELOAD_SCOPES = {"permissions", "hooks", "memory_tuning", "affect", "all"}
 
 
 class ReloadRuntimeRequest(BaseModel):

@@ -934,7 +934,15 @@ class AgentSession:
 
     # ── E.1 (cycle 20260426_1) — between-turn live reload ──
 
-    _RUNTIME_REFRESH_SCOPES = ("permissions", "hooks", "all")
+    # O.1 (cycle 20260426_3) — extended scope set; "all" still applies
+    # every available branch.
+    _RUNTIME_REFRESH_SCOPES = (
+        "permissions",
+        "hooks",
+        "memory_tuning",
+        "affect",
+        "all",
+    )
 
     def queue_runtime_refresh(self, scope: str) -> bool:
         """Queue a between-turn refresh of permission rules / hook
@@ -1024,6 +1032,113 @@ class AgentSession:
                     "[%s] runtime refresh: hooks reload failed",
                     self._session_id,
                 )
+
+        if scope in ("memory_tuning", "all"):
+            try:
+                self._reload_memory_tuning(pipeline)
+            except Exception:
+                logger.exception(
+                    "[%s] runtime refresh: memory_tuning reload failed",
+                    self._session_id,
+                )
+
+        if scope in ("affect", "all"):
+            try:
+                self._reload_affect_emitter(pipeline)
+            except Exception:
+                logger.exception(
+                    "[%s] runtime refresh: affect reload failed",
+                    self._session_id,
+                )
+
+    def _reload_memory_tuning(self, pipeline: Any) -> None:
+        """O.1 (cycle 20260426_3) — re-read ``settings.json:memory.tuning``
+        and mutate the live ``GenyMemoryRetriever`` / ``GenyMemoryStrategy``
+        instances on Stage 2 (context) and Stage 18 (memory).
+
+        Mutates instance attrs directly because the executor's
+        retriever / strategy classes don't expose a "reset config"
+        method. Field names (``_max_inject``, ``_recent_turns``,
+        ``_enable_vector``, ``_enable_reflection``) come from
+        ``geny_executor.memory.retriever.GenyMemoryRetriever`` and
+        ``geny_executor.memory.strategy.GenyMemoryStrategy``. If those
+        ever rename, the change is silent (``getattr`` guards) and the
+        live session keeps the pre-refresh values.
+        """
+        from service.memory_provider.config import load_memory_tuning
+
+        is_vtuber = getattr(self._role, "value", None) == "vtuber" or (
+            isinstance(self._role, str) and self._role == "vtuber"
+        )
+        tuning = load_memory_tuning(is_vtuber=is_vtuber)
+
+        applied: list[str] = []
+        for stage in pipeline._stages.values():
+            slots = (
+                stage.get_strategy_slots()
+                if hasattr(stage, "get_strategy_slots")
+                else {}
+            )
+            if stage.name == "context":
+                slot = slots.get("retriever")
+                retriever = getattr(slot, "strategy", None) if slot else None
+                if retriever is not None:
+                    if hasattr(retriever, "_max_inject"):
+                        retriever._max_inject = tuning["max_inject_chars"]
+                        applied.append("max_inject_chars")
+                    if hasattr(retriever, "_recent_turns"):
+                        retriever._recent_turns = tuning["recent_turns"]
+                        applied.append("recent_turns")
+                    if hasattr(retriever, "_enable_vector"):
+                        retriever._enable_vector = tuning["enable_vector_search"]
+                        applied.append("enable_vector_search")
+            elif stage.name == "memory":
+                slot = slots.get("strategy")
+                strategy = getattr(slot, "strategy", None) if slot else None
+                if strategy is not None and hasattr(strategy, "_enable_reflection"):
+                    strategy._enable_reflection = tuning["enable_reflection"]
+                    applied.append("enable_reflection")
+
+        logger.info(
+            "[%s] runtime refresh applied: memory_tuning reloaded (%s)",
+            self._session_id,
+            ", ".join(applied) if applied else "no slots matched",
+        )
+
+    def _reload_affect_emitter(self, pipeline: Any) -> None:
+        """O.1 (cycle 20260426_3) — re-read
+        ``settings.json:affect.max_tags_per_turn`` and mutate the live
+        ``AffectTagEmitter._max_tags_per_turn`` on Stage 17 (emit)."""
+        from service.emit.chain_install import _resolve_max_tags
+        from service.emit.affect_tag_emitter import (
+            DEFAULT_MAX_TAG_MUTATIONS_PER_TURN,
+        )
+
+        new_max = _resolve_max_tags(DEFAULT_MAX_TAG_MUTATIONS_PER_TURN)
+        mutated = False
+        for stage in pipeline._stages.values():
+            if stage.name != "emit":
+                continue
+            chain = getattr(stage, "emitters", None)
+            if chain is None or not hasattr(chain, "items"):
+                continue
+            for emitter in chain.items:
+                if getattr(emitter, "name", None) != "affect_tag":
+                    continue
+                if hasattr(emitter, "_max_tags_per_turn"):
+                    emitter._max_tags_per_turn = new_max
+                    mutated = True
+
+        if mutated:
+            logger.info(
+                "[%s] runtime refresh applied: affect max_tags_per_turn=%d",
+                self._session_id, new_max,
+            )
+        else:
+            logger.debug(
+                "[%s] runtime refresh: no AffectTagEmitter on chain — skipped",
+                self._session_id,
+            )
 
     def _apply_session_limits_to_pipeline(self) -> None:
         """B.1 (cycle 20260426_1) — bridge UI session limits into the
