@@ -13,10 +13,12 @@ import { useEffect, useState } from 'react';
 import {
   agentApi,
   adminTelemetryApi,
+  subagentTypeApi,
   RecentToolEvent,
   RecentPermissionDecision,
+  SubagentTypeRow,
 } from '@/lib/api';
-import { Shield, Plug, Sparkles, AlertCircle, RefreshCw, FileText, Activity, Lock } from 'lucide-react';
+import { Shield, Plug, Sparkles, AlertCircle, RefreshCw, FileText, Activity, Lock, Users } from 'lucide-react';
 
 interface PermissionRow {
   tool_name: string;
@@ -99,6 +101,8 @@ export default function AdminPanel() {
   // PR-E.4.4 — recent activity rings.
   const [recentTools, setRecentTools] = useState<RecentToolEvent[]>([]);
   const [recentPerms, setRecentPerms] = useState<RecentPermissionDecision[]>([]);
+  // PR-F.3.4 — Subagent types panel.
+  const [subagentTypes, setSubagentTypes] = useState<SubagentTypeRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const loadAll = () => {
@@ -118,6 +122,9 @@ export default function AdminPanel() {
     adminTelemetryApi.recentPermissions(50)
       .then((r) => setRecentPerms(r.decisions))
       .catch((e) => setError((p) => p ?? `recent permissions: ${e.message}`));
+    subagentTypeApi.list()
+      .then((r) => setSubagentTypes(r.types))
+      .catch((e) => setError((p) => p ?? `subagent types: ${e.message}`));
   };
 
   useEffect(() => {
@@ -230,6 +237,38 @@ export default function AdminPanel() {
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </div>
+      </Section>
+
+      {/* ── Subagent Types (PR-F.3.4) ── */}
+      <Section title="Subagent types" Icon={Users} count={subagentTypes.length} onReload={loadAll}>
+        <div className="px-3">
+          {subagentTypes.length === 0 ? (
+            <div className="text-[0.6875rem] text-[var(--text-muted)] italic py-2">
+              No subagent types registered.
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {subagentTypes.map((t) => (
+                <li
+                  key={t.agent_type}
+                  className="px-2 py-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[0.6875rem]"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[var(--primary-color)]">{t.agent_type}</span>
+                    {t.allowed_tools.length > 0 && (
+                      <span className="text-[var(--text-muted)] opacity-70">
+                        {t.allowed_tools.length} tool{t.allowed_tools.length === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                  {t.description && (
+                    <div className="text-[var(--text-secondary)] mt-0.5">{t.description}</div>
+                  )}
+                </li>
+              ))}
             </ul>
           )}
         </div>

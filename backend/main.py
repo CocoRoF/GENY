@@ -43,6 +43,7 @@ from controller.permission_controller import router as permission_router  # PR-E
 from controller.hook_controller import router as hook_router  # PR-E.3.1
 from controller.agent_workspace_controller import router as agent_workspace_router  # PR-E.4.3
 from controller.framework_settings_controller import router as framework_settings_router  # PR-F.1.x
+from controller.subagent_type_controller import router as subagent_type_router  # PR-F.3.1
 from controller.mcp_oauth_controller import (
     agent_oauth_router,
     mcp_resource_router,
@@ -677,6 +678,7 @@ app.include_router(permission_router)  # Permission rules CRUD (PR-E.2.1)
 app.include_router(hook_router)  # Hook entries CRUD (PR-E.3.1)
 app.include_router(agent_workspace_router)  # Per-agent workspace stack (PR-E.4.3)
 app.include_router(framework_settings_router)  # Framework settings sections (PR-F.1.x)
+app.include_router(subagent_type_router)  # Subagent types viewer (PR-F.3.1)
 app.include_router(agent_oauth_router)  # MCP OAuth start (G10.2)
 app.include_router(mcp_resource_router)  # mcp:// URI resolver (G10.3)
 app.include_router(docs_router)  # Documentation API
