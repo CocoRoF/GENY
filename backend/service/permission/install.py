@@ -40,7 +40,42 @@ _DEFAULT_EXECUTOR_MODE = "default"
 _EXECUTOR_MODE_ENV_VAR = "GENY_PERMISSION_EXEC_MODE"
 
 
+def _settings_section() -> Optional[dict]:
+    """R.1 (cycle 20260426_2) — return ``settings.json:permissions``
+    coerced to a dict, or ``None`` when unavailable.
+
+    Same coercion as the hooks install layer (H.1) — ``get_section``
+    returns either a registered Pydantic model or a raw dict; we want
+    a uniform dict.
+    """
+    try:
+        from geny_executor.settings import get_default_loader
+    except ImportError:
+        return None
+    section = get_default_loader().get_section("permissions")
+    if section is None:
+        return None
+    if hasattr(section, "model_dump"):
+        return section.model_dump(exclude_none=True)
+    if isinstance(section, dict):
+        return dict(section)
+    return None
+
+
 def _resolve_executor_mode() -> str:
+    """R.1 (cycle 20260426_2) — settings.json:permissions.executor_mode
+    wins; env var is fallback. Empty / unknown values fall through to
+    the default and log."""
+    section = _settings_section() or {}
+    raw_section = section.get("executor_mode")
+    if isinstance(raw_section, str) and raw_section.strip():
+        candidate = raw_section.strip()
+        if candidate in EXECUTOR_PERMISSION_MODES:
+            return candidate
+        logger.warning(
+            "install_permission_rules: unknown settings.json:permissions.executor_mode=%r; "
+            "falling back to env var", raw_section,
+        )
     raw = os.environ.get(
         _EXECUTOR_MODE_ENV_VAR, _DEFAULT_EXECUTOR_MODE,
     ).strip()
@@ -60,6 +95,18 @@ def permissions_yaml_path() -> Path:
 
 
 def _resolve_mode() -> str:
+    """R.1 (cycle 20260426_2) — settings.json:permissions.mode wins;
+    env var is fallback."""
+    section = _settings_section() or {}
+    raw_section = section.get("mode")
+    if isinstance(raw_section, str) and raw_section.strip():
+        candidate = raw_section.strip().lower()
+        if candidate in PERMISSION_MODES:
+            return candidate
+        logger.warning(
+            "install_permission_rules: unknown settings.json:permissions.mode=%r; "
+            "falling back to env var", raw_section,
+        )
     raw = os.environ.get(_MODE_ENV_VAR, _DEFAULT_MODE).strip().lower()
     if raw not in PERMISSION_MODES:
         logger.warning(

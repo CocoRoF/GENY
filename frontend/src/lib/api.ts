@@ -578,7 +578,25 @@ export interface PermissionRulePayload {
 export interface PermissionRulesResponse {
   rules: PermissionRulePayload[];
   settings_path: string;
+  // R.1 (cycle 20260426_2) — currently-resolved modes (null = absent).
+  mode?: string | null;
+  executor_mode?: string | null;
 }
+
+export interface PermissionModePatch {
+  mode?: string | null;
+  executor_mode?: string | null;
+}
+
+export const PERMISSION_MODES = ['advisory', 'enforce'] as const;
+export const EXECUTOR_PERMISSION_MODES = [
+  'default',
+  'plan',
+  'auto',
+  'bypass',
+  'acceptEdits',
+  'dontAsk',
+] as const;
 
 // Admin viewer's enriched response (cascade-merged + sources_consulted).
 export interface PermissionListResponse {
@@ -736,6 +754,13 @@ export const permissionApi = {
   remove: (idx: number) =>
     apiCall<PermissionRulesResponse>(`/api/permissions/rules/${idx}`, {
       method: 'DELETE',
+    }),
+
+  // R.1 (cycle 20260426_2) — set advisory↔enforce + executor_mode.
+  patchMode: (patch: PermissionModePatch) =>
+    apiCall<PermissionRulesResponse>('/api/permissions/mode', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
     }),
 
   // Cascade-merged inspection (advisory|enforce + every source).
