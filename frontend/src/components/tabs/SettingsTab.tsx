@@ -6,6 +6,7 @@ import { twMerge } from 'tailwind-merge';
 import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
+import FrameworkSettingsPanel from '@/components/settings/FrameworkSettingsPanel';
 import { useI18n, type Locale } from '@/lib/i18n';
 import type { ConfigItem, ConfigCategory, ConfigField, ConfigSchema, ConfigI18nLocale } from '@/types';
 
@@ -168,6 +169,16 @@ export default function SettingsTab() {
               <span className="flex-1">{t('settings.all')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{configs.length}</span>
             </button>
+            {/* PR-F.1.6 — synthetic "Framework" category swaps the
+                right pane for the FrameworkSettingsPanel. */}
+            <button
+              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === '__framework__' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              onClick={() => setSelectedCategory('__framework__')}
+              title="Edit framework subsystem settings (hooks/skills/model/telemetry/notifications)"
+            >
+              <span className="flex-1">Framework</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">5+</span>
+            </button>
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
               return (
@@ -185,7 +196,9 @@ export default function SettingsTab() {
 
         {/* Config List */}
         <div className="flex-1 overflow-y-auto p-3 md:p-5">
-          {filtered.length === 0 ? (
+          {selectedCategory === '__framework__' ? (
+            <FrameworkSettingsPanel />
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4"><p className="text-[0.8125rem] text-[var(--text-muted)]">{t('settings.noConfigs')}</p></div>
           ) : (
             <div className="flex flex-col gap-3">

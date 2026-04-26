@@ -776,6 +776,34 @@ export const agentWorkspaceApi = {
     }),
 };
 
+// ==================== Framework settings (PR-F.1.x) ==============
+
+export interface FrameworkSectionSummary {
+  name: string;
+  has_schema: boolean;
+  has_data: boolean;
+}
+
+export interface FrameworkSectionResponse {
+  name: string;
+  has_schema: boolean;
+  schema: Record<string, unknown> | null;
+  values: Record<string, unknown>;
+  settings_path: string;
+}
+
+export const frameworkSettingsApi = {
+  list: () =>
+    apiCall<{ sections: FrameworkSectionSummary[] }>('/api/framework-settings'),
+  get: (name: string) =>
+    apiCall<FrameworkSectionResponse>(`/api/framework-settings/${encodeURIComponent(name)}`),
+  patch: (name: string, values: Record<string, unknown>) =>
+    apiCall<FrameworkSectionResponse>(`/api/framework-settings/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ values }),
+    }),
+};
+
 // ==================== Slash Commands API (PR-A.6.2) =============
 
 export interface SlashCommandSummary {
