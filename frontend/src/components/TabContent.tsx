@@ -23,6 +23,8 @@ const MemoryTab = dynamic(() => import('@/components/tabs/MemoryTab'));
 const EnvironmentsTab = dynamic(() => import('@/components/tabs/EnvironmentsTab'));
 const VTuberTab = dynamic(() => import('@/components/tabs/VTuberTab'), { ssr: false });
 const Playground2DTab = dynamic(() => import('@/components/tabs/Playground2DTab'), { ssr: false });
+const TasksTab = dynamic(() => import('@/components/tabs/TasksTab').then(m => m.TasksTab));
+const CronTab = dynamic(() => import('@/components/tabs/CronTab').then(m => m.CronTab));
 
 const TAB_MAP: Record<string, React.ComponentType> = {
   main: MainTab,
@@ -48,6 +50,10 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   // activeTab values to the same component, which switches into builder
   // mode when useEnvironmentStore.builderEnvId is set.
   builder: EnvironmentsTab,
+  // PR-D.3.1 — Cycle A+B follow-up: surface BackgroundTaskRunner +
+  // CronRunner state in the sidebar.
+  tasks: TasksTab,
+  cron: CronTab,
 };
 
 // Tabs that should stay mounted once activated (KeepAlive)

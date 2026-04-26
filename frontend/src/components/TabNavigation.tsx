@@ -18,6 +18,8 @@ const SESSION_TAB_DEFS = [
   { id: 'vtuber' },
   { id: 'environment' },
   { id: 'memory' },
+  { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer
+  { id: 'cron' },      // PR-D.3.1 — CronRunner viewer
   { id: 'storage' },
   { id: 'sessionTools' },
   { id: 'dashboard' },
