@@ -18,17 +18,22 @@ import { RefreshCw, ChevronDown, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminTelemetryApi } from '@/lib/api';
 
-const SCOPES: Array<{ value: 'permissions' | 'hooks' | 'all'; label: string }> = [
-  { value: 'all', label: 'All (permissions + hooks)' },
+// O.1 (cycle 20260426_3) — adds memory_tuning + affect scopes.
+type ReloadScope = 'permissions' | 'hooks' | 'memory_tuning' | 'affect' | 'all';
+
+const SCOPES: Array<{ value: ReloadScope; label: string }> = [
+  { value: 'all', label: 'All (permissions + hooks + memory + affect)' },
   { value: 'permissions', label: 'Permissions only' },
   { value: 'hooks', label: 'Hooks only' },
+  { value: 'memory_tuning', label: 'Memory tuning only' },
+  { value: 'affect', label: 'Affect emitter only' },
 ];
 
 export function ReloadRuntimeButton() {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const send = async (scope: 'permissions' | 'hooks' | 'all') => {
+  const send = async (scope: ReloadScope) => {
     setBusy(true);
     setOpen(false);
     try {

@@ -868,7 +868,8 @@ export const adminTelemetryApi = {
   // C.2 (cycle 20260426_1) — single-call wiring snapshot.
   integrationHealth: () => apiCall<IntegrationHealthResponse>('/api/admin/integration-health'),
   // E.1 (cycle 20260426_1) — between-turn runtime refresh.
-  reloadRuntime: (scope: 'permissions' | 'hooks' | 'all') =>
+  // O.1 (cycle 20260426_3) — extended scopes: memory_tuning + affect.
+  reloadRuntime: (scope: 'permissions' | 'hooks' | 'memory_tuning' | 'affect' | 'all') =>
     apiCall<ReloadRuntimeResponse>('/api/admin/reload-runtime', {
       method: 'POST',
       body: JSON.stringify({ scope }),
