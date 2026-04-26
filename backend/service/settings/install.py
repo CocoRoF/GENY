@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from service.settings.sections import (
     HooksConfigSection,
+    MemoryConfigSection,
     ModelConfigSection,
     NotificationsConfigSection,
     PermissionsConfigSection,
@@ -72,6 +73,10 @@ def install_geny_settings() -> Optional[Any]:
     # FrameworkSettingsPanel can edit it consistently with the others
     # and the D.2 reader map carries the entry.
     register_section("permissions", PermissionsConfigSection)
+    # G.1 (cycle 20260426_2) — memory provider section. Read by
+    # service.memory_provider.config.build_default_memory_config with
+    # env-fallback semantics.
+    register_section("memory", MemoryConfigSection)
 
     loaded = loader.load()
     logger.info(

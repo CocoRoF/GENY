@@ -32,46 +32,79 @@ def _env(name: str, default: str = "") -> str:
     return (os.getenv(name, default) or default).strip()
 
 
+def _settings_section() -> Dict[str, Any]:
+    """G.1 (cycle 20260426_2) — best-effort read of
+    ``settings.json:memory``. Returns ``{}`` when unavailable so the
+    caller can fall back to env vars.
+    """
+    try:
+        from geny_executor.settings import get_default_loader
+    except ImportError:
+        return {}
+    section = get_default_loader().get_section("memory")
+    if section is None:
+        return {}
+    if hasattr(section, "model_dump"):
+        return section.model_dump(exclude_none=True)
+    if isinstance(section, dict):
+        return dict(section)
+    return {}
+
+
+def _resolve(name_settings: str, env_name: str, default: str = "") -> str:
+    """Settings.json key wins; env var is fallback."""
+    settings_val = _settings_section().get(name_settings)
+    if isinstance(settings_val, str) and settings_val.strip():
+        return settings_val.strip()
+    return _env(env_name, default)
+
+
 def build_default_memory_config() -> Optional[Dict[str, Any]]:
     """Assemble the default factory config dict, or ``None`` if disabled.
 
+    Resolution priority for every field:
+      1. ``settings.json:memory.<field>`` (G.1)
+      2. ``MEMORY_<FIELD>`` env var
+      3. Hardcoded default (where applicable).
+
     Unlike ``geny-executor-web`` (greenfield), Geny is a legacy target —
-    when ``MEMORY_PROVIDER`` is **unset**, the registry stays dormant and
-    the existing ``SessionMemoryManager`` keeps full ownership. Operators
-    must opt in explicitly.
+    when ``MEMORY_PROVIDER`` is **unset everywhere**, the registry stays
+    dormant and the existing ``SessionMemoryManager`` keeps full
+    ownership. Operators must opt in explicitly.
 
     Raises :class:`MemoryConfigError` when the declared provider needs
-    extra vars that weren't supplied — surfaces a clear startup failure
-    instead of crashing later on first session create.
+    extra fields that weren't supplied.
     """
-    provider = _env("MEMORY_PROVIDER").lower()
+    provider = _resolve("provider", "MEMORY_PROVIDER").lower()
     if provider in ("", _DISABLED, "off", "none"):
         return None
 
     cfg: Dict[str, Any] = {
         "provider": provider,
-        "scope": _env("MEMORY_SCOPE", "session") or "session",
+        "scope": _resolve("scope", "MEMORY_SCOPE", "session") or "session",
     }
 
     if provider == "file":
-        root = _env("MEMORY_ROOT")
+        root = _resolve("root", "MEMORY_ROOT")
         if not root:
             raise MemoryConfigError(
-                "MEMORY_PROVIDER=file requires MEMORY_ROOT to be set"
+                "MEMORY_PROVIDER=file requires settings.json:memory.root or "
+                "MEMORY_ROOT env var to be set",
             )
         cfg["root"] = root
     elif provider == "sql":
-        dsn = _env("MEMORY_DSN")
+        dsn = _resolve("dsn", "MEMORY_DSN")
         if not dsn:
             raise MemoryConfigError(
-                "MEMORY_PROVIDER=sql requires MEMORY_DSN to be set"
+                "MEMORY_PROVIDER=sql requires settings.json:memory.dsn or "
+                "MEMORY_DSN env var to be set",
             )
         cfg["dsn"] = dsn
-        dialect = _env("MEMORY_DIALECT")
+        dialect = _resolve("dialect", "MEMORY_DIALECT")
         if dialect:
             cfg["dialect"] = dialect.lower()
 
-    tz = _env("MEMORY_TIMEZONE")
+    tz = _resolve("timezone", "MEMORY_TIMEZONE")
     if tz:
         cfg["timezone"] = tz
 
