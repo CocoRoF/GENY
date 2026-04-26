@@ -32,8 +32,28 @@ from geny_executor.stages.s13_task_registry import (
 logger = logging.getLogger(__name__)
 
 
-def _build_registry():
+def _build_registry(app_state=None):
     backend = os.getenv("GENY_TASK_BACKEND", "memory").lower()
+    if backend == "postgres":
+        # PR-D.1.1 — multi-host durable backend. Reuses Geny's existing
+        # DatabaseManager pool, no new dependency.
+        db_manager = getattr(app_state, "app_db", None) if app_state else None
+        if db_manager is None:
+            logger.warning(
+                "task_backend=postgres requested but app_state.app_db not "
+                "available; falling back to memory",
+            )
+            return InMemoryRegistry()
+        try:
+            from service.tasks.store_postgres import PostgresTaskRegistryStore
+        except ImportError as exc:
+            logger.warning(
+                "task_backend=postgres requested but store_postgres unavailable "
+                "(%s); falling back to memory", exc,
+            )
+            return InMemoryRegistry()
+        logger.info("task_backend=postgres")
+        return PostgresTaskRegistryStore(db_manager)
     if backend == "file":
         path = os.getenv(
             "GENY_TASK_STORE_PATH",
@@ -59,7 +79,7 @@ def _orchestrator_factory(app_state):
 
 
 def install_task_runtime(app_state) -> Dict[str, Any]:
-    registry = _build_registry()
+    registry = _build_registry(app_state)
     runner = BackgroundTaskRunner(
         registry,
         executors={

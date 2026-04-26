@@ -15,6 +15,10 @@ from service.database.models.chat_message import ChatMessageModel
 from service.database.models.session_log import SessionLogModel
 from service.database.models.session_memory_entry import SessionMemoryEntryModel
 from service.database.models.admin_user import AdminUserModel
+from service.database.models.background_task import (
+    BackgroundTaskModel,
+    BackgroundTaskOutputModel,
+)
 
 __all__ = [
     'BaseModel',
@@ -25,6 +29,8 @@ __all__ = [
     'SessionLogModel',
     'SessionMemoryEntryModel',
     'AdminUserModel',
+    'BackgroundTaskModel',
+    'BackgroundTaskOutputModel',
 ]
 
 # List of models used by the application
@@ -38,4 +44,6 @@ APPLICATION_MODELS = [
     SessionLogModel,
     SessionMemoryEntryModel,
     AdminUserModel,
+    BackgroundTaskModel,
+    BackgroundTaskOutputModel,
 ]
