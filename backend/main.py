@@ -463,6 +463,20 @@ async def lifespan(app: FastAPI):
         app.state.task_registry = None
         app.state.task_runner = None
 
+    # ── Notification + Messaging Channels ──────────────────────────────
+    try:
+        from service.notifications import (
+            install_notification_endpoints,
+            install_send_message_channels,
+        )
+        app.state.notification_endpoints = install_notification_endpoints()
+        app.state.send_message_channels = install_send_message_channels()
+        logger.info("   ✅ notifications + messaging channels wired")
+    except Exception as e:
+        logger.warning(f"   ⚠️  notifications/channels: skipped ({e})")
+        app.state.notification_endpoints = None
+        app.state.send_message_channels = None
+
     # ── Slash Commands ────────────────────────────────────────────────
     # Imports built_in/__init__.py which auto-installs the 12 framework
     # commands. install_geny_slash_commands then registers Geny-domain
