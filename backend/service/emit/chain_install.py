@@ -37,10 +37,33 @@ logger = logging.getLogger(__name__)
 EMIT_STAGE_ORDER: int = 17
 
 
+def _resolve_max_tags(default: int) -> int:
+    """G.3 (cycle 20260426_2) — read ``settings.json:affect.max_tags_per_turn``,
+    fall back to the supplied default. Same coercion as the other
+    settings-section readers across the cycle."""
+    try:
+        from geny_executor.settings import get_default_loader
+    except ImportError:
+        return default
+    section = get_default_loader().get_section("affect")
+    if section is None:
+        return default
+    if hasattr(section, "model_dump"):
+        section_dict = section.model_dump(exclude_none=True)
+    elif isinstance(section, dict):
+        section_dict = section
+    else:
+        return default
+    raw = section_dict.get("max_tags_per_turn")
+    if isinstance(raw, int) and raw >= 0:
+        return raw
+    return default
+
+
 def install_affect_tag_emitter(
     pipeline: Any,
     *,
-    max_tags_per_turn: int = DEFAULT_MAX_TAG_MUTATIONS_PER_TURN,
+    max_tags_per_turn: Optional[int] = None,
 ) -> Optional[AffectTagEmitter]:
     """Prepend an :class:`AffectTagEmitter` onto the pipeline's s14 chain.
 
@@ -50,7 +73,15 @@ def install_affect_tag_emitter(
 
     The helper is idempotent: calling it twice on the same pipeline
     adds at most one emitter.
+
+    G.3 (cycle 20260426_2): when ``max_tags_per_turn`` is left as
+    ``None`` we read it from ``settings.json:affect.max_tags_per_turn``
+    (falling back to the executor's
+    ``DEFAULT_MAX_TAG_MUTATIONS_PER_TURN``). Callers can still override
+    by passing an explicit int.
     """
+    if max_tags_per_turn is None:
+        max_tags_per_turn = _resolve_max_tags(DEFAULT_MAX_TAG_MUTATIONS_PER_TURN)
     stage = _get_emit_stage(pipeline)
     if stage is None:
         logger.debug(
