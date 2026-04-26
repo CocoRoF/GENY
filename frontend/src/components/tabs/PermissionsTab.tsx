@@ -25,6 +25,8 @@ import {
   PermissionSource,
   PermissionListResponse,
   PermissionRulesResponse,
+  PERMISSION_MODES,
+  EXECUTOR_PERMISSION_MODES,
 } from '@/lib/api';
 import { RefreshCw, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 import {
@@ -90,6 +92,10 @@ export function PermissionsTab() {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [form, setForm] = useState<RuleFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  // R.1 (cycle 20260426_2) — mode pickers reflect settings.json values
+  // (null = section absent → install layer falls back to env / default).
+  const [savingMode, setSavingMode] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -176,6 +182,27 @@ export function PermissionsTab() {
     }
   };
 
+  const handleModeChange = async (
+    field: 'mode' | 'executor_mode',
+    value: string,
+  ) => {
+    setSavingMode(true);
+    setError(null);
+    try {
+      const res = await permissionApi.patchMode({ [field]: value });
+      setEditable(res);
+      try {
+        const ins = await permissionApi.inspect();
+        setInspect(ins);
+      } catch {/* keep stale inspect */}
+      toast.success(`Permission ${field} = ${value}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingMode(false);
+    }
+  };
+
   const deleteRule = async (idx: number) => {
     const target = editable?.rules[idx];
     if (!target) return;
@@ -212,6 +239,45 @@ export function PermissionsTab() {
       }
       actions={
         <>
+          {/* R.1 — mode pickers. Reflect settings.json:permissions
+              values; falling back to inspect's resolved value (which
+              accounts for env / defaults) when the file omits them. */}
+          <div className="hidden md:flex items-center gap-1.5">
+            <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider">
+              Mode
+            </span>
+            <Select
+              value={editable?.mode ?? inspect?.mode ?? 'advisory'}
+              onValueChange={(v) => handleModeChange('mode', v)}
+              disabled={savingMode}
+            >
+              <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PERMISSION_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider ml-2">
+              Exec
+            </span>
+            <Select
+              value={editable?.executor_mode ?? 'default'}
+              onValueChange={(v) => handleModeChange('executor_mode', v)}
+              disabled={savingMode}
+            >
+              <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXECUTOR_PERMISSION_MODES.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
             Add rule
           </ActionButton>

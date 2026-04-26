@@ -45,6 +45,12 @@ router = APIRouter(prefix="/api/permissions", tags=["permissions"])
 _BEHAVIORS = {"allow", "deny", "ask"}
 _SOURCES = {"user", "project", "local", "cli", "preset"}
 
+# R.1 (cycle 20260426_2) — Geny advisory↔enforce + executor PermissionMode.
+# Mirrors service.permission.install constants so the values stay in
+# sync without an import cycle.
+_GENY_MODES = {"advisory", "enforce"}
+_EXECUTOR_MODES = {"default", "plan", "auto", "bypass", "acceptEdits", "dontAsk"}
+
 
 # ── Schemas ──────────────────────────────────────────────
 
@@ -62,6 +68,18 @@ class RulesResponse(BaseModel):
     re-renders without a follow-up GET."""
     rules: List[PermissionRulePayload]
     settings_path: str
+    # R.1 (cycle 20260426_2) — currently-resolved modes. None = section
+    # absent (install layer falls back to env / defaults).
+    mode: Optional[str] = None
+    executor_mode: Optional[str] = None
+
+
+class PermissionModePatch(BaseModel):
+    """R.1 (cycle 20260426_2) — partial update of the two mode knobs.
+    Either / both may be set; absent fields are left as-is on disk."""
+
+    mode: Optional[str] = None  # advisory | enforce
+    executor_mode: Optional[str] = None  # default | plan | auto | bypass | acceptEdits | dontAsk
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -153,8 +171,17 @@ def _reload_loader() -> None:
         logger.warning("permission_rules: loader reload failed: %s", exc)
 
 
+def _get_perms_block(data: Dict[str, Any]) -> Dict[str, Any]:
+    perms = data.get("permissions")
+    if not isinstance(perms, dict):
+        perms = {}
+        data["permissions"] = perms
+    return perms
+
+
 def _build_response(data: Dict[str, Any], path: Path) -> RulesResponse:
     raw_rules = _get_rules_section(data)
+    perms = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
     return RulesResponse(
         rules=[
             PermissionRulePayload(
@@ -168,6 +195,8 @@ def _build_response(data: Dict[str, Any], path: Path) -> RulesResponse:
             if isinstance(r, dict)
         ],
         settings_path=str(path),
+        mode=perms.get("mode") if isinstance(perms.get("mode"), str) else None,
+        executor_mode=perms.get("executor_mode") if isinstance(perms.get("executor_mode"), str) else None,
     )
 
 
@@ -238,6 +267,55 @@ async def delete_rule(
         raise HTTPException(404, f"rule index {idx} out of range (0..{len(rules) - 1})")
     rules.pop(idx)
     _set_rules_section(data, rules)
+    _write_settings_atomic(path, data)
+    _reload_loader()
+    return _build_response(data, path)
+
+
+@router.patch("/mode", response_model=RulesResponse)
+async def patch_mode(
+    body: PermissionModePatch,
+    _auth: dict = Depends(require_auth),
+):
+    """R.1 (cycle 20260426_2) — set ``permissions.mode`` (advisory↔
+    enforce) and/or ``permissions.executor_mode`` (PermissionMode enum)
+    in user-scope settings.json.
+
+    Both fields are optional; a request with all fields ``None`` is a
+    no-op (returns the current state). To explicitly clear a mode, send
+    an empty string — it is removed from settings.json and the install
+    layer falls back to the env var / default.
+    """
+    if body.mode is not None and body.mode and body.mode not in _GENY_MODES:
+        raise HTTPException(
+            400, f"mode must be one of {sorted(_GENY_MODES)}; got {body.mode!r}",
+        )
+    if (
+        body.executor_mode is not None
+        and body.executor_mode
+        and body.executor_mode not in _EXECUTOR_MODES
+    ):
+        raise HTTPException(
+            400,
+            f"executor_mode must be one of {sorted(_EXECUTOR_MODES)}; "
+            f"got {body.executor_mode!r}",
+        )
+
+    path = _user_settings_path()
+    data = _read_settings(path)
+    perms = _get_perms_block(data)
+
+    if body.mode is not None:
+        if body.mode == "":
+            perms.pop("mode", None)
+        else:
+            perms["mode"] = body.mode
+    if body.executor_mode is not None:
+        if body.executor_mode == "":
+            perms.pop("executor_mode", None)
+        else:
+            perms["executor_mode"] = body.executor_mode
+
     _write_settings_atomic(path, data)
     _reload_loader()
     return _build_response(data, path)
