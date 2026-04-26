@@ -1499,6 +1499,18 @@ const ko: Translations = {
     renameTag: '태그 이름 변경',
     removeTagFromAll: '모든 노트에서 제거',
   },
+
+  // ─── Next-session banner (cycle 20260426_1 / C.1) ───
+  nextSessionBanner: {
+    library: {
+      title: '다음 세션부터 적용됩니다.',
+      body: '라이브러리 변경(권한·훅·스킬·MCP·매니페스트)은 새 세션이 시작될 때 읽힙니다. 이미 실행 중인 세션은 시작 시점 스냅샷을 그대로 유지합니다.',
+    },
+    session: {
+      title: '이 세션의 읽기 전용 스냅샷입니다.',
+      body: '바인딩된 환경 매니페스트를 수정해도 세션이 재생성될 때 적용됩니다. 변경 사항을 반영하려면 세션을 재시작하세요.',
+    },
+  },
 };
 
 export default ko;

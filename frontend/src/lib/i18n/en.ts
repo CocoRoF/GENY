@@ -1498,6 +1498,18 @@ const en = {
     renameTag: 'Rename Tag',
     removeTagFromAll: 'Remove from All Notes',
   },
+
+  // ─── Next-session banner (cycle 20260426_1 / C.1) ───
+  nextSessionBanner: {
+    library: {
+      title: 'Applies to the next session.',
+      body: 'Library changes (permissions, hooks, skills, MCP, manifests) are read when a new session starts. Active sessions keep their startup snapshot.',
+    },
+    session: {
+      title: 'Read-only snapshot of this session.',
+      body: 'Edits to the underlying environment manifest take effect when the session is recreated. Restart the session to pick up changes.',
+    },
+  },
 };
 
 export default en;
