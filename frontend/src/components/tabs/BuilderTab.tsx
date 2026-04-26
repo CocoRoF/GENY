@@ -46,6 +46,11 @@ interface StageDraft {
   strategies: Record<string, string>;
   strategyConfigs: Record<string, Record<string, unknown>>;
   chainOrder: Record<string, string[]>;
+  // S.1 (cycle 20260426_2) — per-stage ModelConfig override.
+  // Stored as raw JSON text so an empty / null value cleanly maps to
+  // "no override" and operators can paste any subset of ModelConfig
+  // fields without the editor enforcing a particular shape.
+  modelOverrideText: string;
 }
 
 function stageDraftFromEntry(entry: StageManifestEntry): StageDraft {
@@ -63,6 +68,10 @@ function stageDraftFromEntry(entry: StageManifestEntry): StageDraft {
     chainOrder: Object.fromEntries(
       Object.entries(entry.chain_order ?? {}).map(([k, v]) => [k, [...v]]),
     ),
+    modelOverrideText:
+      entry.model_override == null
+        ? ''
+        : JSON.stringify(entry.model_override, null, 2),
   };
 }
 
@@ -220,6 +229,12 @@ export default function BuilderTab() {
     if (draft.active !== selectedStage.active) return true;
     const original = JSON.stringify(selectedStage.config ?? {}, null, 2);
     if (draft.configText.trim() !== original.trim()) return true;
+    // S.1 — model_override.
+    const moOriginal =
+      selectedStage.model_override == null
+        ? ''
+        : JSON.stringify(selectedStage.model_override, null, 2);
+    if (draft.modelOverrideText.trim() !== moOriginal.trim()) return true;
     if (
       JSON.stringify(draft.strategies) !==
       JSON.stringify(selectedStage.strategies ?? {})
@@ -338,6 +353,27 @@ export default function BuilderTab() {
       return;
     }
     const parsed = configParse && configParse.ok ? configParse.value : {};
+
+    // S.1 — model_override: empty text means "no override". A non-empty
+    // value must be a JSON object.
+    let modelOverride: Record<string, unknown> | null = null;
+    const moTrim = draft.modelOverrideText.trim();
+    if (moTrim) {
+      try {
+        const v = JSON.parse(moTrim);
+        if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+          setSaveError('model_override must be a JSON object (or empty to clear)');
+          return;
+        }
+        modelOverride = v as Record<string, unknown>;
+      } catch (e) {
+        setSaveError(
+          'model_override: invalid JSON (' + (e instanceof Error ? e.message : 'parse error') + ')',
+        );
+        return;
+      }
+    }
+
     setSaving(true);
     setSaveError('');
     setSavedFlash(false);
@@ -349,6 +385,12 @@ export default function BuilderTab() {
         strategies: draft.strategies,
         strategy_configs: draft.strategyConfigs,
         chain_order: draft.chainOrder,
+        // ``modelOverride`` is null when the operator left the textarea
+        // empty — backend treats null as "leave as-is" (None ignored).
+        // To explicitly clear an existing override, the operator can
+        // edit the manifest via ImportManifestModal — same convention
+        // as the Pipeline / Model editors.
+        ...(modelOverride !== null ? { model_override: modelOverride } : {}),
       });
       setSavedFlash(true);
     } catch (e: unknown) {
@@ -845,6 +887,31 @@ export default function BuilderTab() {
                     />
                   </div>
                 ) : null}
+
+                {/* S.1 (cycle 20260426_2) — per-stage model_override.
+                    Subset of ModelConfig fields; empty = inherit
+                    pipeline defaults. JSON textarea kept simple since
+                    overrides are rare and operators typically know
+                    the field names. */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
+                    Model override <span className="opacity-60 normal-case">(optional)</span>
+                  </label>
+                  <textarea
+                    value={draft.modelOverrideText}
+                    onChange={e =>
+                      setDraft({ ...draft, modelOverrideText: e.target.value })
+                    }
+                    rows={5}
+                    spellCheck={false}
+                    placeholder={'(empty = inherit pipeline model)\nExample:\n{"model": "claude-haiku-3-5", "temperature": 0.2}'}
+                    className="py-2 px-3 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] focus:border-[var(--primary-color)] font-mono text-[0.75rem] leading-[1.5] text-[var(--text-primary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] resize-y"
+                  />
+                  <small className="text-[0.6875rem] text-[var(--text-muted)]">
+                    Subset of ModelConfig fields (model / temperature / max_tokens / thinking_*) applied
+                    only to this stage. Empty textarea inherits the pipeline-level model.
+                  </small>
+                </div>
 
                 {/* Error / saved flash */}
                 {saveError && (
