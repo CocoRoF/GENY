@@ -61,10 +61,6 @@ function formatRelative(iso: string | null | undefined): string {
   }
 }
 
-function cn(...c: (string | boolean | undefined | null)[]) {
-  return twMerge(c.filter(Boolean).join(' '));
-}
-
 const POLL_INTERVAL_MS = 30_000;
 
 export function CronTab() {
