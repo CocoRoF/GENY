@@ -1084,8 +1084,9 @@ const ko: Translations = {
     memoryDialectAuto: 'DSN 스킴으로 자동 감지',
     memoryScope: 'Scope',
     memoryTimezone: 'Timezone',
-    maxTurns: '최대 턴',
-    maxTurnsHelp: '단일 Claude CLI 호출 내 최대 도구 사용 턴 수. 각 턴 = 하나의 도구 호출 + 결과 확인 사이클.',
+    // ``maxTurns`` 제거 (2026-04-26): CLI deprecate 이후 executor 강제
+    // 경로가 없었음. ``info.fields.maxTurns`` 는 InfoTab 의 레거시
+    // 세션 read-only 표시용으로 유지.
     timeout: '타임아웃 (초)',
     timeoutHelp: '단일 Claude CLI 호출의 최대 실행 시간(초). 초과 시 프로세스가 강제 종료됩니다.',
     graphWorkflow: '그래프 워크플로우',

@@ -1084,8 +1084,9 @@ const en = {
     memoryDialectAuto: 'Auto-detect from DSN scheme',
     memoryScope: 'Scope',
     memoryTimezone: 'Timezone',
-    maxTurns: 'Max Turns',
-    maxTurnsHelp: 'Maximum tool-use turns per single Claude CLI invocation. Each turn = one tool call + result cycle within a single model call.',
+    // ``maxTurns`` removed (2026-04-26): the field had no executor
+    // enforcement post-CLI deprecation. ``info.fields.maxTurns`` is
+    // kept for the read-only InfoTab display of legacy session data.
     timeout: 'Timeout (s)',
     timeoutHelp: 'Maximum wall-clock seconds for a single Claude CLI invocation before it is forcefully terminated.',
     graphWorkflow: 'Graph Workflow',
