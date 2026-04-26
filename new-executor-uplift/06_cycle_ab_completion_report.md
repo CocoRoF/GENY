@@ -151,3 +151,73 @@ Suggested cycle C+1 scope (after operating cycles A+B for ~1 week):
 3. Frontend nav wiring for TasksTab + CronTab + SlashCommandAutocomplete in CommandTab.
 4. Operational data audit: check ring buffer growth, cron miss rate, in-process hook latency vs subprocess baseline.
 5. Worktree+LSP integration depth on the executor side (B.6.1).
+
+---
+
+## Cycle D closeout (2026-04-26)
+
+Cycle D executed the [`followup/`](followup/index.md) plan in five phases.
+13 PR (executor 5 + Geny 8) closed every deferred item from cycles A+B:
+
+### Phase 1 — Frontend completion (4 PR)
+
+- **PR-D.3.1** Wire TasksTab + CronTab into TabNavigation
+- **PR-D.3.2** SlashCommandAutocomplete + server-side dispatch in CommandTab
+- **PR-D.3.3** SkillPanel surfaces category/effort/examples
+- **PR-D.3.4** Permissions config — runner_mode + executor_mode
+
+### Phase 3 — Postgres backends (2 PR; D.1.3 + D.1.4 folded in)
+
+- **PR-D.1.1** PostgresTaskRegistryStore + selector (`GENY_TASK_BACKEND=postgres`)
+- **PR-D.1.2** PostgresCronJobStore + selector (`GENY_CRON_BACKEND=postgres`)
+
+Both reuse Geny's existing psycopg3 connection pool. Tables auto-created
+via `APPLICATION_MODELS`. Selectors fall back to memory with a warning
+when `app.state.app_db` is unavailable.
+
+### Phase 4 — install.py swap to settings.json (2 PR; D.2.2 + D.2.3 bundled)
+
+- **PR-D.2.1** Permission install dual-read (settings.json wins; yaml fallback)
+- **PR-D.2.2 + D.2.3** Hooks + Skills install dual-read
+
+Operators with existing yaml see no behaviour change beyond a one-line
+"consider migrating" log. settings.json users get single-source-of-truth
+config.
+
+### Phase 5 — Workspace abstraction (executor 1.3.0; 3 executor + 1 Geny PR)
+
+Executor side (released as **v1.3.0**):
+- **PR-D.4.1** Workspace value object + WorkspaceStack
+- **PR-D.4.2** Worktree + LSP tools workspace-aware
+- **PR-D.4.3** SubagentTypeOrchestrator threads workspace_snapshot
+
+Geny side: pin bump 1.2.x → 1.3.x (this PR).
+
+### Phase 2 — Operational validation (no code; ops doc lives in [`followup/05_operational_validation.md`](followup/05_operational_validation.md))
+
+Smoke checklists, baseline metrics, monitoring queries, and a
+triage runbook. Executed against each Cycle D deploy.
+
+### Cycle D stats
+
+- 13 PR (executor 5 + Geny 8)
+- ~3,500 lines of code + ~1,200 lines of tests
+- Executor full suite: **2157 passing** (+25 since 1.2.0)
+- Geny: 8 new modules + 4 frontend changes
+- 0 breaking changes; 0 regressions on prior tests
+- 3 executor minor releases now in production: 1.1.0, 1.2.0, 1.3.0
+
+---
+
+## What did NOT ship (post-Cycle-D deferrals)
+
+The followup plan's 14 estimated PRs are all closed. The remaining
+items below are intentionally out of scope (would balloon the
+follow-up cycle):
+
+| Item | Reason |
+|---|---|
+| Frontend session-aware Workspace badge | Cosmetic; small follow-up after operators provide feedback on whether the info is useful |
+| Workspace.lsp_session_id wired to a real LSP session manager | The hook is in place; the session manager belongs in a future LSP-deepening cycle |
+| Postgres `LISTEN/NOTIFY` for stream_output (vs polling) | Polling at 1s cadence is fine for current load; noted in `01_postgres_backends.md` §D.1.1 risk table |
+| Yaml fallback removal from install.py paths | One operator-adoption cycle (~1 month of prod) before removing the fallbacks |
