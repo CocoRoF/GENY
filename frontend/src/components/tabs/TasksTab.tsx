@@ -14,9 +14,12 @@ import { useAppStore } from '@/store/useAppStore';
 import {
   backgroundTaskApi,
   BackgroundTaskRecord,
+  cronApi,
+  subagentTypeApi,
+  SubagentTypeRow,
 } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
-import { RefreshCw, Square, Eye } from 'lucide-react';
+import { RefreshCw, Square, Eye, Plus, X, Clock } from 'lucide-react';
 
 function cn(...c: (string | boolean | undefined | null)[]) {
   return twMerge(c.filter(Boolean).join(' '));
@@ -49,6 +52,19 @@ export function TasksTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // PR-F.3.2 — New Task modal.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newKind, setNewKind] = useState('shell');
+  const [newPayload, setNewPayload] = useState('{}');
+  const [newSubagentType, setNewSubagentType] = useState<string>('');
+  const [subagentTypes, setSubagentTypes] = useState<SubagentTypeRow[]>([]);
+
+  useEffect(() => {
+    subagentTypeApi.list()
+      .then((r) => setSubagentTypes(r.types))
+      .catch(() => {/* viewer is optional */});
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
@@ -87,6 +103,64 @@ export function TasksTab() {
     [sessionId, refresh],
   );
 
+  // PR-F.3.2 — submit a new background task.
+  const handleCreate = async () => {
+    if (!sessionId) return;
+    let payload: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(newPayload);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('payload must be a JSON object');
+      }
+      payload = parsed as Record<string, unknown>;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (newSubagentType) {
+      payload.subagent_type = newSubagentType;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      await backgroundTaskApi.create(sessionId, newKind.trim() || 'shell', payload);
+      setCreateOpen(false);
+      setNewPayload('{}');
+      setNewSubagentType('');
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // PR-F.3.3 — schedule a row as a recurring cron job. Convention:
+  // jobs land with name `task-<task_id_prefix>` so the operator can
+  // see the link in CronTab.
+  const handleSchedule = async (row: BackgroundTaskRecord) => {
+    if (!sessionId) return;
+    const cronExpr = window.prompt(
+      'Cron expression (e.g. "*/30 * * * *" for every 30 minutes):',
+      '0 * * * *',
+    );
+    if (!cronExpr) return;
+    try {
+      await cronApi.create({
+        name: `task-${row.task_id.slice(0, 12)}`,
+        cron_expr: cronExpr,
+        target_kind: row.kind,
+        payload: { ...row.payload, scheduled_from_task: row.task_id },
+        description: `Cloned from background task ${row.task_id}`,
+      });
+      window.alert(
+        `Scheduled. View it in the Cron tab as task-${row.task_id.slice(0, 12)}.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   if (!sessionId) {
     return (
       <div className="p-6 text-sm text-slate-500">
@@ -112,6 +186,14 @@ export function TasksTab() {
             <option value="failed">Failed</option>
             <option value="cancelled">Cancelled</option>
           </select>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-1 text-sm bg-[var(--primary-color)] text-white rounded px-2 py-1"
+          >
+            <Plus className="w-4 h-4" />
+            New task
+          </button>
           <button
             type="button"
             onClick={refresh}
@@ -186,6 +268,14 @@ export function TasksTab() {
                       </a>
                       <button
                         type="button"
+                        onClick={() => handleSchedule(row)}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
+                        title="Schedule a recurring cron job with the same payload"
+                      >
+                        <Clock className="w-3 h-3" /> Schedule
+                      </button>
+                      <button
+                        type="button"
                         disabled={isTerminal}
                         onClick={() => handleStop(row.task_id)}
                         className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline disabled:text-slate-400 disabled:hover:no-underline"
@@ -198,6 +288,86 @@ export function TasksTab() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* PR-F.3.2 — New Task modal */}
+      {createOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !creating && setCreateOpen(false)}
+        >
+          <div
+            className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border-color)] w-full max-w-lg p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">New background task</h3>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                disabled={creating}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+            <div className="grid gap-2 text-[0.75rem]">
+              <label>
+                <div className="text-[var(--text-muted)] mb-0.5">Kind</div>
+                <input
+                  value={newKind}
+                  onChange={(e) => setNewKind(e.target.value)}
+                  placeholder="shell, agent, …"
+                  className="w-full border rounded px-2 py-1 text-[0.8125rem]"
+                />
+              </label>
+              {subagentTypes.length > 0 && (
+                <label>
+                  <div className="text-[var(--text-muted)] mb-0.5">Subagent type (optional)</div>
+                  <select
+                    value={newSubagentType}
+                    onChange={(e) => setNewSubagentType(e.target.value)}
+                    className="w-full border rounded px-2 py-1 text-[0.8125rem]"
+                  >
+                    <option value="">— none —</option>
+                    {subagentTypes.map((t) => (
+                      <option key={t.agent_type} value={t.agent_type}>
+                        {t.agent_type} — {t.description.slice(0, 60)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                <div className="text-[var(--text-muted)] mb-0.5">Payload (JSON object)</div>
+                <textarea
+                  value={newPayload}
+                  onChange={(e) => setNewPayload(e.target.value)}
+                  rows={6}
+                  className="w-full border rounded px-2 py-1 text-[0.75rem] font-mono"
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                disabled={creating}
+                className="text-xs border rounded px-3 py-1"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={creating || !newKind.trim()}
+                className="text-xs bg-[var(--primary-color)] text-white rounded px-3 py-1 disabled:opacity-50"
+              >
+                {creating ? 'Submitting…' : 'Create'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

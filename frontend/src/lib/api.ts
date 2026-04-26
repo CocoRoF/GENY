@@ -820,6 +820,18 @@ export interface UserSkillUpsertRequest {
   examples?: string[];
 }
 
+// ==================== Subagent Types (PR-F.3.1) ==================
+
+export interface SubagentTypeRow {
+  agent_type: string;
+  description: string;
+  allowed_tools: string[];
+}
+
+export const subagentTypeApi = {
+  list: () => apiCall<{ types: SubagentTypeRow[] }>('/api/subagent-types'),
+};
+
 export const skillsApi = {
   get: (skillId: string) => apiCall<SkillDetail>(`/api/skills/${encodeURIComponent(skillId)}`),
 
