@@ -50,7 +50,10 @@ export default function CreateSessionModal({ onClose }: Props) {
     session_name: '',
     role: 'developer',
     model: '',
-    max_turns: 50,
+    // max_turns removed (2026-04-26): advisory-only field with no
+    // executor enforcement; left out of the form to avoid misleading
+    // operators. Backend still accepts it on the request schema for
+    // restored sessions.
     timeout: 21600,
     max_iterations: 50,
     system_prompt: '',
@@ -365,20 +368,18 @@ export default function CreateSessionModal({ onClose }: Props) {
             </div>
           )}
 
-          {/* Max Turns + Timeout */}
+          {/* Timeout + Max Iterations
+              ``max_turns`` removed (2026-04-26): with env-driven pipelines
+              "turn" reduces to "one chat message" governed by the chat
+              layer, not the executor pipeline. The field was advisory-
+              only (display + log) and gave operators a misleading
+              control. The per-invoke iteration cap lives on
+              ``max_iterations`` (B.1, cycle 20260426_1). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.maxTurns')} <InfoTooltip text={t('createSession.maxTurnsHelp')} /></label>
-              <NumberStepper value={formState.max_turns ?? 50} onChange={v => setFormState(f => ({ ...f, max_turns: v }))} min={1} max={500} step={5} />
-            </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.timeout')} <InfoTooltip text={t('createSession.timeoutHelp')} /></label>
               <NumberStepper value={formState.timeout ?? 21600} onChange={v => setFormState(f => ({ ...f, timeout: v }))} min={10} max={86400} step={60} />
             </div>
-          </div>
-
-          {/* Max Iterations */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.maxIterations')} <InfoTooltip text={t('createSession.maxIterationsHelp')} /></label>
               <NumberStepper value={formState.max_iterations ?? 30} onChange={v => setFormState(f => ({ ...f, max_iterations: v }))} min={1} max={500} step={5} />
