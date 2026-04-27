@@ -577,7 +577,6 @@ const en = {
   // ─── Tool Sets Tab ───
   toolSetsTab: {
     title: 'Tool Sets',
-    subtitle: 'Manage tool presets for agent sessions. Pick which custom tools, MCP servers, and framework built-ins each agent can use.',
     subtitleCatalog: 'Browse the framework tool catalog (read-only). Click a tool to see its capabilities and input schema.',
     subtitleEditing: 'Editing preset: {name}',
     subtitleEmpty: 'Pick a preset on the left, browse the catalog, or create a new tool set.',
