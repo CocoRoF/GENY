@@ -72,10 +72,12 @@ export default function Stage11ToolReviewEditor({ order, entry }: Props) {
     ? intro!.strategy_chains[chainName]
     : null;
 
-  const currentChain =
-    (chainName && (entry.chain_order?.[chainName] as string[] | undefined)) ??
-    chain?.current_impls ??
-    [];
+  // Narrow explicitly — `chainName && X` collapses to "" when chainName is
+  // an empty string, which would leak `""` through the `??` chain (the
+  // empty string isn't nullish so `??` doesn't substitute it).
+  const currentChain: string[] = (chainName
+    ? (entry.chain_order?.[chainName] as string[] | undefined)
+    : undefined) ?? chain?.current_impls ?? [];
   const available = chain?.available_impls ?? [];
   const inChain = new Set(currentChain);
   const remaining = available.filter((n) => !inChain.has(n));
