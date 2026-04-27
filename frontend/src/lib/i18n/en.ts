@@ -144,6 +144,8 @@ const en = {
     unknownTab: 'Unknown tab',
     selectOption: '-- Select --',
     noOutput: 'No output yet',
+    required: 'required',
+    add: 'Add',
   },
 
   // ─── Main Tab ───

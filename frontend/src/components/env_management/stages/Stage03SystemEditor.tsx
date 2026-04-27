@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { catalogApi } from '@/lib/environmentApi';
+import { localizeIntrospection } from '../stage_locale';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type {
   StageIntrospection,
@@ -59,6 +60,7 @@ interface Props {
 
 export default function Stage03SystemEditor({ order, entry }: Props) {
   const { t } = useI18n();
+  const locale = useI18n((s) => s.locale);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
 
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
@@ -69,13 +71,13 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
     catalogApi
       .stage(order)
       .then((res) => {
-        if (!cancelled) setIntro(res);
+        if (!cancelled) setIntro(localizeIntrospection(res, locale));
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [order]);
+  }, [order, locale]);
 
   const availableBuilder = new Set(
     intro?.strategy_slots?.['builder']?.available_impls ??

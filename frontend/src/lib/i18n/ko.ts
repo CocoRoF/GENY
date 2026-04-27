@@ -144,6 +144,8 @@ const ko: Translations = {
     unknownTab: '알 수 없는 탭',
     selectOption: '-- 선택 --',
     noOutput: '아직 출력이 없습니다',
+    required: '필수',
+    add: '추가',
   },
 
   // ─── Main Tab ───
