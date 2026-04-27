@@ -15,10 +15,8 @@
  */
 
 import { useI18n } from '@/lib/i18n';
-import {
-  getStageMetaByOrder,
-  getCategoryColor,
-} from '@/components/session-env/stageMetadata';
+import { useTheme } from '@/lib/theme';
+import { getStageMetaByOrder } from '@/components/session-env/stageMetadata';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import StageGenericEditor from './StageGenericEditor';
 import Stage01InputEditor from './stages/Stage01InputEditor';
@@ -28,6 +26,26 @@ import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
 import Stage14EvaluateEditor from './stages/Stage14EvaluateEditor';
 import Stage15HitlEditor from './stages/Stage15HitlEditor';
 import Stage18MemoryEditor from './stages/Stage18MemoryEditor';
+
+// Theme-aware palette mirroring StageProgressBar so the detail-view
+// header circle reads the same as the navigator circle for the same
+// stage. Active = subtle emerald, idle = neutral outline.
+const HEADER_PALETTE = {
+  light: {
+    activeBg: 'rgb(220 252 231)', // emerald-100
+    activeFg: 'rgb(4 120 87)', // emerald-700
+    activeBorder: 'rgb(16 185 129)', // emerald-500
+    badgeBg: 'rgb(220 252 231)',
+    badgeFg: 'rgb(4 120 87)',
+  },
+  dark: {
+    activeBg: 'rgb(6 78 59 / 0.45)', // emerald-900 @ 45%
+    activeFg: 'rgb(110 231 183)', // emerald-300
+    activeBorder: 'rgb(52 211 153)', // emerald-400
+    badgeBg: 'rgb(6 78 59 / 0.4)',
+    badgeFg: 'rgb(110 231 183)',
+  },
+} as const;
 
 const CURATED_EDITORS: Record<
   number,
@@ -49,6 +67,8 @@ export interface StageDetailViewProps {
 export default function StageDetailView({ order }: StageDetailViewProps) {
   const locale = useI18n((s) => s.locale);
   const { t } = useI18n();
+  const { theme } = useTheme();
+  const palette = HEADER_PALETTE[theme === 'dark' ? 'dark' : 'light'];
   const draft = useEnvironmentDraftStore((s) => s.draft);
 
   if (!draft) return null;
@@ -64,22 +84,36 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
     );
   }
 
-  const categoryColor = meta ? getCategoryColor(meta.category) : null;
   const Curated = CURATED_EDITORS[order];
   const Editor = Curated ?? StageGenericEditor;
+  const isActive = !!entry.active;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-[hsl(var(--background))]">
       <div className="max-w-[840px] mx-auto p-6 flex flex-col gap-6">
         {/* ── Stage header ── */}
-        <header className="flex items-start gap-3">
+        <header className="flex items-center gap-3">
+          {/* Stage number circle — outlined, matches StageProgressBar
+              circle style. Active stages get the emerald palette;
+              inactive stages stay neutral so the user can tell at a
+              glance whether the stage is enabled in the manifest. */}
           <span
-            className="inline-flex items-center justify-center w-12 h-12 rounded-2xl text-[0.9375rem] font-bold tabular-nums shrink-0"
-            style={{
-              background: categoryColor?.bg ?? 'hsl(var(--accent))',
-              color: categoryColor?.accent ?? 'hsl(var(--foreground))',
-              border: `2px solid ${categoryColor?.accent ?? 'hsl(var(--border))'}`,
-            }}
+            className="inline-flex items-center justify-center w-12 h-12 rounded-full text-[1rem] font-bold tabular-nums shrink-0"
+            style={
+              isActive
+                ? {
+                    background: palette.activeBg,
+                    color: palette.activeFg,
+                    border: `2px solid ${palette.activeBorder}`,
+                    boxShadow:
+                      '0 1px 4px -1px rgb(16 185 129 / 0.18)',
+                  }
+                : {
+                    background: 'hsl(var(--background))',
+                    color: 'hsl(var(--muted-foreground))',
+                    border: '2px solid hsl(var(--border))',
+                  }
+            }
           >
             {order}
           </span>
@@ -92,8 +126,8 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
                 <span
                   className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium"
                   style={{
-                    background: categoryColor?.bg ?? 'transparent',
-                    color: categoryColor?.accent ?? 'hsl(var(--muted-foreground))',
+                    background: isActive ? palette.badgeBg : 'hsl(var(--accent))',
+                    color: isActive ? palette.badgeFg : 'hsl(var(--muted-foreground))',
                   }}
                 >
                   {meta.categoryLabel}
