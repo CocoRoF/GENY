@@ -17,9 +17,11 @@ import { useI18n } from '@/lib/i18n';
 import { getStageMetaByOrder, getCategoryColor } from '@/components/session-env/stageMetadata';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import StageGenericEditor from './StageGenericEditor';
+import Stage01InputEditor from './stages/Stage01InputEditor';
 import Stage06ApiEditor from './stages/Stage06ApiEditor';
 import Stage10ToolsEditor from './stages/Stage10ToolsEditor';
 import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
+import Stage14EvaluateEditor from './stages/Stage14EvaluateEditor';
 import Stage15HitlEditor from './stages/Stage15HitlEditor';
 import Stage18MemoryEditor from './stages/Stage18MemoryEditor';
 
@@ -29,9 +31,11 @@ const CURATED_EDITORS: Record<
   number,
   React.ComponentType<{ order: number; entry: import('@/types/environment').StageManifestEntry }>
 > = {
+  1: Stage01InputEditor,
   6: Stage06ApiEditor,
   10: Stage10ToolsEditor,
   11: Stage11ToolReviewEditor,
+  14: Stage14EvaluateEditor,
   15: Stage15HitlEditor,
   18: Stage18MemoryEditor,
 };
