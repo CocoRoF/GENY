@@ -589,7 +589,6 @@ const ko: Translations = {
     officialTemplates: '공식 템플릿',
     customPresets: '커스텀 도구 세트',
     noCustom: '커스텀 도구 세트가 없습니다',
-    noDescription: '설명 없음',
     template: '템플릿',
     deleteConfirm: '도구 세트 "{name}"을(를) 삭제하시겠습니까?',
     readOnly: '읽기 전용',
