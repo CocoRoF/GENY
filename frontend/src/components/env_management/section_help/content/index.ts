@@ -53,6 +53,8 @@ import { stage14StrategiesHelp } from './Stage14Strategies';
 import { stage15RequesterHelp } from './Stage15Requester';
 import { stage15TimeoutHelp } from './Stage15Timeout';
 
+import { stage16ControllerHelp } from './Stage16Controller';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -111,6 +113,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 15 — HITL
   'stage15.requester': stage15RequesterHelp,
   'stage15.timeout': stage15TimeoutHelp,
+
+  // Stage 16 — Loop
+  'stage16.controller': stage16ControllerHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
