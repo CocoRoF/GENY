@@ -21,6 +21,23 @@ import { notebookEditToolHelp } from './NotebookEdit';
 // ── shell family ──
 import { bashToolHelp } from './Bash';
 
+// ── agent family ──
+import { agentToolHelp } from './Agent';
+
+// ── meta family ──
+import { toolSearchToolHelp } from './ToolSearch';
+import { enterPlanModeToolHelp } from './EnterPlanMode';
+import { exitPlanModeToolHelp } from './ExitPlanMode';
+
+// ── workflow family ──
+import { todoWriteToolHelp } from './TodoWrite';
+
+// ── interaction family ──
+import { askUserQuestionToolHelp } from './AskUserQuestion';
+
+// ── notification family ──
+import { pushNotificationToolHelp } from './PushNotification';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -29,3 +46,15 @@ registerToolDetail('Grep', grepToolHelp);
 registerToolDetail('NotebookEdit', notebookEditToolHelp);
 
 registerToolDetail('Bash', bashToolHelp);
+
+registerToolDetail('Agent', agentToolHelp);
+
+registerToolDetail('ToolSearch', toolSearchToolHelp);
+registerToolDetail('EnterPlanMode', enterPlanModeToolHelp);
+registerToolDetail('ExitPlanMode', exitPlanModeToolHelp);
+
+registerToolDetail('TodoWrite', todoWriteToolHelp);
+
+registerToolDetail('AskUserQuestion', askUserQuestionToolHelp);
+
+registerToolDetail('PushNotification', pushNotificationToolHelp);
