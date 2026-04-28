@@ -34,6 +34,7 @@ import type {
 import JsonSchemaForm, {
   type JsonSchema,
 } from '@/components/environment/JsonSchemaForm';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
@@ -121,6 +122,7 @@ export default function Stage11ToolReviewEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage11.chainTitle')}
           </h4>
+          <SectionHelpButton helpId="stage11.chain" />
           {chainName && (
             <code className="text-[0.625rem] font-mono text-[hsl(var(--muted-foreground))]">
               {chainName}
