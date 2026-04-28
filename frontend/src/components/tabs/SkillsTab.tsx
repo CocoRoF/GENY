@@ -124,7 +124,7 @@ export interface SkillsTabProps {
   embedded?: boolean;
 }
 
-export function SkillsTab({ embedded = false }: SkillsTabProps = {}) {
+export function SkillsTab({ embedded = false }: SkillsTabProps) {
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [userSkillsEnabled, setUserSkillsEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);

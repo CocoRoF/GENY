@@ -196,7 +196,7 @@ export interface HooksTabProps {
   embedded?: boolean;
 }
 
-export function HooksTab({ embedded = false }: HooksTabProps = {}) {
+export function HooksTab({ embedded = false }: HooksTabProps) {
   const [editable, setEditable] = useState<HookEntriesResponse | null>(null);
   const [inspect, setInspect] = useState<HookListResponse | null>(null);
   const [fires, setFires] = useState<HookFiresResponse | null>(null);

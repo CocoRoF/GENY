@@ -88,7 +88,7 @@ export interface PermissionsTabProps {
   embedded?: boolean;
 }
 
-export function PermissionsTab({ embedded = false }: PermissionsTabProps = {}) {
+export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
   const [editable, setEditable] = useState<PermissionRulesResponse | null>(null);
   const [inspect, setInspect] = useState<PermissionListResponse | null>(null);
   const [loading, setLoading] = useState(false);
