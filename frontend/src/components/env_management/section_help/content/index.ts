@@ -21,6 +21,9 @@ import { stage02RetrieverHelp } from './Stage02Retriever';
 import { stage03BuilderHelp } from './Stage03Builder';
 import { stage03SystemPromptHelp } from './Stage03SystemPrompt';
 
+import { stage04ConfigHelp } from './Stage04Config';
+import { stage04ChainHelp } from './Stage04Chain';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -35,6 +38,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 3 — System
   'stage03.builder': stage03BuilderHelp,
   'stage03.systemPrompt': stage03SystemPromptHelp,
+
+  // Stage 4 — Guard
+  'stage04.config': stage04ConfigHelp,
+  'stage04.chain': stage04ChainHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
