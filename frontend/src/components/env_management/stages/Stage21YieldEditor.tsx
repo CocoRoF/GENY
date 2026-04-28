@@ -86,6 +86,7 @@ export default function Stage21YieldEditor({ order, entry }: Props) {
     <div className="flex flex-col gap-4">
       <TilePicker
         titleKey="envManagement.stage21.formatterTitle"
+        helpId="stage21.formatter"
         hintKey="envManagement.stage21.formatterHint"
         options={FORMATTER_OPTIONS}
         available={available}

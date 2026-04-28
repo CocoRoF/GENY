@@ -67,6 +67,8 @@ import { stage19ImportanceHelp } from './Stage19Importance';
 import { stage20PersisterHelp } from './Stage20Persister';
 import { stage20FrequencyHelp } from './Stage20Frequency';
 
+import { stage21FormatterHelp } from './Stage21Formatter';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -144,6 +146,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 20 — Persist
   'stage20.persister': stage20PersisterHelp,
   'stage20.frequency': stage20FrequencyHelp,
+
+  // Stage 21 — Yield
+  'stage21.formatter': stage21FormatterHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
