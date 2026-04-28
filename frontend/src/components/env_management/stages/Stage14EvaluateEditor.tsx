@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import {
   StrategiesEditor,
 } from '@/components/environment/StrategyEditors';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
@@ -124,6 +125,7 @@ export default function Stage14EvaluateEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage14.budgetsTitle')}
           </h4>
+          <SectionHelpButton helpId="stage14.budgets" />
           <span className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300">
             {t('envManagement.stage14.pipelineLevelBadge')}
           </span>
@@ -196,9 +198,12 @@ export default function Stage14EvaluateEditor({ order, entry }: Props) {
       {/* ── Strategy picker (convergence / retry) ── */}
       {intro && Object.keys(intro.strategy_slots).length > 0 && (
         <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-          <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.stage14.strategiesTitle')}
-          </h4>
+          <header className="flex items-center gap-2">
+            <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+              {t('envManagement.stage14.strategiesTitle')}
+            </h4>
+            <SectionHelpButton helpId="stage14.strategies" />
+          </header>
           <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
             {t('envManagement.stage14.strategiesHint')}
           </p>
