@@ -944,6 +944,89 @@ const ko: Translations = {
       advancedTitle: '고급',
       advancedHint: 'artifact / strategies / chains / 원시 config',
     },
+    stage07: {
+      activeDesc: '7단계는 토큰 사용량을 기록하고 비용을 계산합니다. 끄면 state.token_usage 와 total_cost_usd 가 업데이트되지 않아 — 4단계 budget guard 가 입력을 잃습니다.',
+      trackerTitle: '토큰 트래커',
+      trackerHint: '호출별 사용량 페이로드를 어디서 읽을지.',
+      tracker: {
+        default: { title: '기본', desc: 'APIResponse.usage 에서 직접 읽음.' },
+        detailed: { title: '상세', desc: '동일 + state.metadata.token_breakdown 에 반복별 분해 저장.' },
+      },
+      calcTitle: '비용 계산기',
+      calcHint: '토큰을 USD 로 환산하는 방법. 멀티 프로바이더 파이프라인은 \'unified\' 권장.',
+      calc: {
+        anthropic: { title: 'Anthropic 가격', desc: 'Anthropic 전용 가격표 (cache_write / cache_read 포함).' },
+        custom: { title: '커스텀 정액', desc: '단일 input + output 요율. 프로바이더 무관.' },
+        unified: { title: '통합', desc: 'Anthropic + OpenAI + Google 가격표. 혼합 에이전트에 권장.' },
+      },
+      config: {
+        custom: {
+          inputRate: 'Input ($ / 1M 토큰)',
+          inputRateHint: '백만 토큰당 input 정액 요율.',
+          outputRate: 'Output ($ / 1M 토큰)',
+          outputRateHint: '백만 토큰당 output 정액 요율.',
+        },
+      },
+    },
+    stage08: {
+      activeDesc: '8단계는 thinking 블록을 최종 출력에서 분리하고 (선택적으로) 턴별 thinking 예산을 계획합니다. 끄면 thinking 블록이 그대로 통과합니다.',
+      processorTitle: 'Thinking 프로세서',
+      processorHint: 'thinking 블록이 저장 전에 어떻게 처리될지.',
+      processor: {
+        passthrough: { title: 'Passthrough', desc: 'thinking 블록 그대로 유지.' },
+        extract: { title: '추출 + 저장', desc: '각 블록을 state.thinking_history 에 추가.' },
+        filter: { title: '필터', desc: '차단 substring 이 포함된 블록 제거.' },
+      },
+      budgetTitle: 'Thinking 예산 플래너',
+      budgetHint: '턴별 thinking 예산을 어떻게 정할지. 6단계가 API 호출 시 state.thinking_budget_tokens 를 읽습니다.',
+      budget: {
+        static: { title: 'Static', desc: '매 턴 동일한 고정 예산.' },
+        adaptive: { title: 'Adaptive', desc: '프롬프트 크기 / state.tools / reflection 플래그를 바탕으로 휴리스틱 결정.' },
+      },
+      config: {
+        filter: {
+          excludePatterns: '제외 패턴',
+          excludePatternsHint: 'substring — thinking 블록에 하나라도 포함되면 저장 전 제거.',
+          placeholder: '패턴 입력 후 Enter',
+        },
+        static: {
+          budgetTokens: '예산 토큰',
+          budgetTokensHint: '턴별 고정 thinking 예산.',
+        },
+        adaptive: {
+          base: '기본',
+          min: '최소',
+          max: '최대',
+          toolsBonus: '도구 보너스',
+          toolsBonusHint: 'state.tools 가 비어있지 않을 때 추가 예산.',
+          reflectionBonus: '리플렉션 보너스',
+          reflectionBonusHint: 'state.metadata.needs_reflection 이 켜져 있을 때 추가 예산.',
+        },
+      },
+    },
+    stage09: {
+      activeDesc: '9단계는 API 응답에서 텍스트, 도구 호출, thinking, completion signal 을 추출합니다. 9단계는 필수 — 끄면 파이프라인이 정지합니다.',
+      parserTitle: '응답 파서',
+      parserHint: '응답을 어떤 형태로 해석할지.',
+      parser: {
+        default: { title: '기본', desc: '텍스트 + 도구 호출 + thinking 블록 그대로 추출.' },
+        structured: { title: '구조화 (JSON)', desc: '텍스트에서 JSON 을 파싱하고 (선택적으로) JSON Schema 검증.' },
+      },
+      signalTitle: '완료 신호 감지기',
+      signalHint: 'CONTINUE / COMPLETE / ERROR / DELEGATE 등을 어떻게 감지할지.',
+      signal: {
+        regex: { title: 'Regex', desc: '응답 텍스트에서 약속된 마커 문자열 매칭.' },
+        structured: { title: '구조화', desc: '약속된 JSON 필드에서 신호 읽기.' },
+        hybrid: { title: '하이브리드', desc: '구조화 우선, 실패 시 regex 로 폴백.' },
+      },
+      config: {
+        structured: {
+          schema: 'JSON Schema (선택)',
+          schemaHint: '파싱된 JSON 을 이 Draft-07 스키마로 검증. 비우면 검증 없이 파싱만.',
+          errorObject: '스키마는 JSON 객체여야 합니다.',
+        },
+      },
+    },
     stage10: {
       activeTitle: '이 단계 실행',
       activeDesc: '10단계는 LLM이 요청한 도구를 실행합니다. 어떤 도구도 호출하지 못하게 막을 샌드박스가 아니라면 켜두세요.',

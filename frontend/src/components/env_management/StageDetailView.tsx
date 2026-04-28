@@ -30,6 +30,9 @@ import Stage03SystemEditor from './stages/Stage03SystemEditor';
 import Stage04GuardEditor from './stages/Stage04GuardEditor';
 import Stage05CacheEditor from './stages/Stage05CacheEditor';
 import Stage06ApiEditor from './stages/Stage06ApiEditor';
+import Stage07TokenEditor from './stages/Stage07TokenEditor';
+import Stage08ThinkEditor from './stages/Stage08ThinkEditor';
+import Stage09ParseEditor from './stages/Stage09ParseEditor';
 import Stage10ToolsEditor from './stages/Stage10ToolsEditor';
 import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
 import Stage14EvaluateEditor from './stages/Stage14EvaluateEditor';
@@ -66,6 +69,9 @@ const CURATED_EDITORS: Record<
   4: Stage04GuardEditor,
   5: Stage05CacheEditor,
   6: Stage06ApiEditor,
+  7: Stage07TokenEditor,
+  8: Stage08ThinkEditor,
+  9: Stage09ParseEditor,
   10: Stage10ToolsEditor,
   11: Stage11ToolReviewEditor,
   14: Stage14EvaluateEditor,
