@@ -17,7 +17,7 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import { Input } from '@/components/ui/input';
-import { Advanced, TilePicker, type TileOption } from './_CuratedHelpers';
+import { TilePicker, type TileOption } from './_CuratedHelpers';
 
 const ORCHESTRATOR_OPTIONS: TileOption[] = [
   { id: 'single_agent', titleKey: 'envManagement.stage12.orch.single.title', descKey: 'envManagement.stage12.orch.single.desc' },
@@ -36,7 +36,6 @@ export default function Stage12AgentEditor({ order, entry }: Props) {
   const locale = useI18n((s) => s.locale);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +90,6 @@ export default function Stage12AgentEditor({ order, entry }: Props) {
         />
       </section>
 
-      <Advanced order={order} entry={entry} open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)} />
     </div>
   );
 }

@@ -20,7 +20,6 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import {
-  Advanced,
   BoolRow,
   ChipList,
   InlinePanel,
@@ -61,7 +60,6 @@ export default function Stage20PersistEditor({ order, entry }: Props) {
   const locale = useI18n((s) => s.locale);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,7 +164,6 @@ export default function Stage20PersistEditor({ order, entry }: Props) {
         )}
       </TilePicker>
 
-      <Advanced order={order} entry={entry} open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)} />
     </div>
   );
 }

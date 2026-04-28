@@ -24,6 +24,7 @@ import StageActiveCard from './StageActiveCard';
 import StageArtifactPicker from './StageArtifactPicker';
 import StageGenericEditor from './StageGenericEditor';
 import StageInfoModal from './stage_info/StageInfoModal';
+import StageViewModeToggle, { type StageViewMode } from './StageViewModeToggle';
 import Stage01InputEditor from './stages/Stage01InputEditor';
 import Stage02ContextEditor from './stages/Stage02ContextEditor';
 import Stage03SystemEditor from './stages/Stage03SystemEditor';
@@ -104,6 +105,9 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
   const palette = HEADER_PALETTE[theme === 'dark' ? 'dark' : 'light'];
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const [infoOpen, setInfoOpen] = useState(false);
+  // Mode persists across stage switches — useful when the user is in
+  // dev-mode debugging multiple stages back-to-back.
+  const [viewMode, setViewMode] = useState<StageViewMode>('basic');
 
   if (!draft) return null;
 
@@ -178,6 +182,10 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
             )}
           </div>
 
+          {/* View-mode toggle — flips body between curated (basic) and
+              raw (developer). Mode persists across stage switches. */}
+          <StageViewModeToggle mode={viewMode} onChange={setViewMode} />
+
           {/* Artifact picker — universal across every stage, sits to
               the left of the Detail button so it reads as part of the
               header chrome rather than a per-stage form field. */}
@@ -199,12 +207,15 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
             header, identical shape on every stage. ── */}
         <StageActiveCard order={order} entry={entry} />
 
-        {/* ── Editor body ── */}
-        <Editor order={order} entry={entry} />
-
-        {/* The old inline "About this stage" <details> was moved into
-            the StageInfoModal which the Detail button (header right)
-            opens. Keeps the editor body focused on configuration. */}
+        {/* ── Editor body ── basic mode renders the curated editor
+            (friendly UI for the most-used knobs); developer mode
+            renders StageGenericEditor (raw access to every editable
+            field, with N/A badges for fields the executor ignores). */}
+        {viewMode === 'basic' ? (
+          <Editor order={order} entry={entry} />
+        ) : (
+          <StageGenericEditor order={order} entry={entry} />
+        )}
       </div>
 
       <StageInfoModal

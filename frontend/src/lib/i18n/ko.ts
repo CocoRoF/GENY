@@ -796,6 +796,12 @@ const ko: Translations = {
       advancedHint: 'artifact / 원시 config 키',
     },
     advancedHintGeneric: '편집 가능한 모든 필드 (raw)',
+    viewMode: {
+      basic: '기본',
+      developer: '개발자',
+      basicTip: '큐레이션 편집 — 자주 쓰는 설정의 친화적 UI',
+      developerTip: '편집 가능한 모든 필드 (raw) — 파워 유저 / 디버깅용',
+    },
     sectionHelp: {
       eyebrow: '섹션 도움말',
       openTip: '이 섹션의 상세 설명 열기',

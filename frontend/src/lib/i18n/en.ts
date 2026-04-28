@@ -796,6 +796,12 @@ const en = {
       advancedHint: 'artifact / raw config keys',
     },
     advancedHintGeneric: 'every editable field, raw',
+    viewMode: {
+      basic: 'Basic',
+      developer: 'Developer',
+      basicTip: 'Curated editing — friendly UI for the most-used knobs',
+      developerTip: 'All editable fields, raw — for power users / debugging',
+    },
     sectionHelp: {
       eyebrow: 'Section help',
       openTip: 'Open detailed help for this section',

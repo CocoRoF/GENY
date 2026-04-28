@@ -36,7 +36,6 @@ import type {
 } from '@/types/environment';
 import ToolCheckboxGrid from '../ToolCheckboxGrid';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
   order: number;
@@ -52,7 +51,6 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
   const setEnvSubTab = useAppStore((s) => s.setEnvSubTab);
 
   const [bindingOpen, setBindingOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const builtInList = (draft?.tools?.built_in ?? []) as string[];
   const mcpServers = (draft?.tools?.mcp_servers ?? []) as Array<
@@ -256,29 +254,6 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
         )}
       </section>
 
-      {/* ── Advanced ── */}
-      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-        >
-          {advancedOpen ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-          {t('envManagement.stage10.advancedTitle')}
-          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.stage10.advancedHint')}
-          </span>
-        </button>
-        {advancedOpen && (
-          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-            <StageGenericEditor order={order} entry={entry} />
-          </div>
-        )}
-      </section>
     </div>
   );
 }
