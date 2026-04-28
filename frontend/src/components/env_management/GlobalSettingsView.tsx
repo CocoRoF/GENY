@@ -14,7 +14,7 @@
  *     1. 기본 모델 설정       → ModelConfigEditor
  *     2. 스테이지 기본 설정   → PipelineConfigEditor
  *     3. Executor Built-in    → ToolCheckboxGrid (manifest.tools.built_in)
- *     4. Geny Built-in        → GenyToolsPicker  (manifest.tools.external)
+ *     4. Geny Built-in        → GenyToolsExplorer (manifest.tools.external)
  *     5. MCP                  → env MCP-server count + Library link
  *
  *   Host-scoped (lives outside the manifest — shared across every
@@ -54,7 +54,7 @@ import {
   inferProvider,
   type ProviderId,
 } from '@/lib/modelCatalog';
-import GenyToolsPicker from './GenyToolsPicker';
+import GenyToolsExplorer from './GenyToolsExplorer';
 import MCPServerEditor, { type MCPServerEntry } from './MCPServerEditor';
 import BuiltinToolsExplorer from './BuiltinToolsExplorer';
 import SectionHelpButton from './section_help/SectionHelpButton';
@@ -289,7 +289,7 @@ export default function GlobalSettingsView() {
                   title={t('envManagement.globals.genyTools.title')}
                   description={t('envManagement.globals.genyTools.description')}
                 />
-                <GenyToolsPicker
+                <GenyToolsExplorer
                   value={(draft.tools?.external ?? []) as string[]}
                   onChange={(names) => patchTools({ external: names })}
                 />
