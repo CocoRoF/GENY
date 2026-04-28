@@ -44,6 +44,9 @@ import { stage11ChainHelp } from './Stage11Chain';
 
 import { stage12OrchestratorHelp } from './Stage12Orchestrator';
 
+import { stage13RegistryHelp } from './Stage13Registry';
+import { stage13PolicyHelp } from './Stage13Policy';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -90,6 +93,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
 
   // Stage 12 — Agent
   'stage12.orchestrator': stage12OrchestratorHelp,
+
+  // Stage 13 — Task registry
+  'stage13.registry': stage13RegistryHelp,
+  'stage13.policy': stage13PolicyHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
