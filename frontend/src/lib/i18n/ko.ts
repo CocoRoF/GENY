@@ -795,6 +795,111 @@ const ko: Translations = {
       advancedTitle: '고급',
       advancedHint: 'artifact / 원시 config 키',
     },
+    advancedHintGeneric: '편집 가능한 모든 필드 (raw)',
+    stage02: {
+      activeDesc: '2단계가 대화 히스토리를 LLM 에 읽어 들입니다. 끄면 최신 사용자 메시지만 전달되고 이전 턴은 보이지 않습니다.',
+      statelessTitle: 'Stateless',
+      statelessDesc: '컨텍스트 조립을 완전히 우회합니다 (대화 히스토리 없음). 일회성 API 에이전트에 적합.',
+      strategyTitle: '컨텍스트 전략',
+      strategyHint: 'LLM 호출 전에 히스토리를 어떻게 모을지.',
+      compactorTitle: '히스토리 압축기',
+      compactorHint: '히스토리가 컨텍스트 윈도우 한계를 넘으면 어떻게 줄일지.',
+      retrieverTitle: '메모리 리트리버',
+      retrieverHint: '메모리 청크를 컨텍스트에 어떻게 끌어올지.',
+      unavailable: '현재 빌드에서 사용할 수 없음',
+      strategy: {
+        simple_load: { title: '단순', desc: 'state 의 메시지를 그대로 사용. 가장 일반적.' },
+        hybrid: { title: '하이브리드', desc: '최근 N 턴 + 메모리 주입.' },
+        progressive_disclosure: { title: '점진적 공개', desc: '첫 턴 + 최근 N 턴 유지; 그 사이는 요약 마커로 대체.' },
+      },
+      compactor: {
+        truncate: { title: 'Truncate', desc: '한계 초과 시 오래된 메시지부터 버림.' },
+        summary: { title: '요약', desc: '버려질 메시지를 요약 placeholder 로 대체.' },
+        sliding_window: { title: '슬라이딩 윈도우', desc: '고정 크기 윈도우; 초과분은 한 줄 요약 마커로 압축.' },
+      },
+      retriever: {
+        null: { title: '없음', desc: '메모리 검색 안 함.' },
+        static: { title: 'Static', desc: '호스트가 미리 로드한 메모리 청크 주입.' },
+      },
+      config: {
+        hybrid: {
+          maxRecentTurns: '최대 최근 턴 수',
+          maxRecentTurnsHint: '유지할 user+assistant 턴 쌍 개수.',
+        },
+        progressive: {
+          summaryThreshold: '요약 임계값 (턴)',
+          summaryThresholdHint: '히스토리가 이 턴 쌍 수를 넘으면 오래된 턴은 요약으로 폴드.',
+        },
+        truncate: {
+          keepLast: '유지할 최근 메시지 수',
+          keepLastHint: '한계 초과 시 마지막 N개 메시지 외에는 모두 버림.',
+        },
+        summary: {
+          keepRecent: '유지할 최근 메시지 수',
+          keepRecentHint: '원문 그대로 유지할 최근 메시지 개수.',
+          summaryText: '요약 placeholder',
+          summaryTextHint: '선택적 정적 요약 문구. 비우면 기본 placeholder 사용.',
+        },
+        slidingWindow: {
+          windowSize: '윈도우 크기 (메시지)',
+          windowSizeHint: '롤링 윈도우의 고정 크기.',
+        },
+      },
+    },
+    stage04: {
+      activeDesc: '4단계가 사전 안전 점검을 실행합니다. 끄면 토큰 / 비용 / 반복 / 권한 한계가 모두 비활성 — 파이프라인이 무제한으로 돌 수 있습니다.',
+      failFastTitle: '즉시 중단 (fail-fast)',
+      failFastDesc: '가드 하나라도 실패하면 즉시 중단. 끄면 모든 가드를 실행하고 실패를 모두 수집.',
+      maxChainLengthTitle: '최대 체인 길이',
+      maxChainLengthDesc: '이 개수보다 많은 가드가 연결된 매니페스트는 거부됩니다.',
+      chainTitle: '가드 체인',
+      chainHint: 'fail-fast 가 켜져 있으면 순서가 중요합니다. 화살표로 재정렬.',
+      empty: '가드가 없습니다. 한계를 강제하려면 가드를 추가하세요.',
+      addGuardPick: '+ 가드 추가…',
+      guards: {
+        token_budget: { title: '토큰 예산', desc: '컨텍스트 윈도우에 다음 호출이 안 들어가면 거부.' },
+        cost_budget: { title: '비용 예산', desc: '누적 비용이 한도를 넘으면 거부.' },
+        iteration: { title: '반복 한계', desc: '턴 수를 제한해 무한 루프 방지.' },
+        permission: { title: '도구 권한', desc: '도구 호출 화이트/블랙리스트.' },
+      },
+      config: {
+        token_budget: {
+          minRemaining: '최소 남은 토큰',
+        },
+        cost_budget: {
+          maxCost: '최대 비용 (USD)',
+          useSession: '세션 예산 사용',
+        },
+        iteration: {
+          maxIterations: '최대 반복 수',
+          useSession: '세션 한도 사용',
+        },
+        permission: {
+          allowed: '허용 도구',
+          allowedHint: '비우면 화이트리스트 필터 없음 (블록 리스트만 적용).',
+          blocked: '차단 도구',
+          blockedHint: '화이트리스트와 무관하게 항상 거부.',
+        },
+      },
+    },
+    stage05: {
+      activeDesc: '5단계가 Anthropic 프롬프트 캐시 마커를 삽입합니다. 끄면 캐싱이 빠지고 매 호출마다 system + history 를 모두 다시 읽습니다.',
+      strategyTitle: '캐시 전략',
+      strategyHint: 'Claude 모델만 이 마커를 사용. OpenAI / Google 은 자동 캐싱이 따로 있어 이 단계를 우회합니다.',
+      strategy: {
+        no_cache: { title: '없음', desc: '캐시 마커 없음.' },
+        system_cache: { title: '시스템만', desc: '시스템 프롬프트만 캐시.' },
+        aggressive_cache: { title: '공격적', desc: '시스템 + 도구 + 안정 히스토리 prefix 까지 캐시.' },
+      },
+      config: {
+        aggressive: {
+          stableOffset: '안정 히스토리 오프셋 (끝에서부터 메시지)',
+          stableOffsetHint: '히스토리 끝에서 이 개수만큼 앞에 캐시 breakpoint 를 둠.',
+        },
+      },
+      cachePrefixTitle: '캐시 키 prefix',
+      cachePrefixDesc: '캐시 키 앞에 붙일 선택적 네임스페이스. 여러 에이전트가 키를 공유할 때 유용.',
+    },
     stage03: {
       activeTitle: '이 단계 실행',
       activeDesc: '3단계가 LLM 이 보는 시스템 프롬프트를 만듭니다. 끄면 LLM 이 페르소나 없이 대화에 들어가 — 자기 역할에 대한 맥락 없이 무미건조하게 답합니다.',

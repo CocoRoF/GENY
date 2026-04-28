@@ -795,6 +795,111 @@ const en = {
       advancedTitle: 'Advanced',
       advancedHint: 'artifact / raw config keys',
     },
+    advancedHintGeneric: 'every editable field, raw',
+    stage02: {
+      activeDesc: 'Stage 2 reads conversation history into the LLM. Disabling it sends only the latest user message — older turns won\'t be visible.',
+      statelessTitle: 'Stateless',
+      statelessDesc: 'Bypass context assembly entirely (no conversation history). Useful for one-shot API agents.',
+      strategyTitle: 'Context strategy',
+      strategyHint: 'How history is collected before the LLM call.',
+      compactorTitle: 'History compactor',
+      compactorHint: 'How history is shortened when it grows past the context window budget.',
+      retrieverTitle: 'Memory retriever',
+      retrieverHint: 'How memory chunks are pulled into context.',
+      unavailable: 'Not available in this build',
+      strategy: {
+        simple_load: { title: 'Simple', desc: 'Use messages already in state as-is. Most common.' },
+        hybrid: { title: 'Hybrid', desc: 'Keep last N turns + memory injection.' },
+        progressive_disclosure: { title: 'Progressive', desc: 'Keep first turn + recent N; older turns become a summary marker.' },
+      },
+      compactor: {
+        truncate: { title: 'Truncate', desc: 'Drop oldest messages once history exceeds the threshold.' },
+        summary: { title: 'Summary', desc: 'Replace dropped messages with a summary placeholder.' },
+        sliding_window: { title: 'Sliding window', desc: 'Fixed-size window; overflow collapses into one summary marker.' },
+      },
+      retriever: {
+        null: { title: 'None', desc: 'No memory retrieval.' },
+        static: { title: 'Static', desc: 'Inject pre-loaded memory chunks (configured by the host).' },
+      },
+      config: {
+        hybrid: {
+          maxRecentTurns: 'Max recent turns',
+          maxRecentTurnsHint: 'Number of most recent user+assistant turn pairs to keep.',
+        },
+        progressive: {
+          summaryThreshold: 'Summary threshold (turns)',
+          summaryThresholdHint: 'Older turns fold into a summary once history exceeds this many turn pairs.',
+        },
+        truncate: {
+          keepLast: 'Keep last (messages)',
+          keepLastHint: 'Drop everything older than the last N messages once history exceeds the threshold.',
+        },
+        summary: {
+          keepRecent: 'Keep recent (messages)',
+          keepRecentHint: 'Number of most recent messages to keep verbatim.',
+          summaryText: 'Summary placeholder',
+          summaryTextHint: 'Optional static summary text. If empty, a generic placeholder is used.',
+        },
+        slidingWindow: {
+          windowSize: 'Window size (messages)',
+          windowSizeHint: 'Fixed size of the rolling window.',
+        },
+      },
+    },
+    stage04: {
+      activeDesc: 'Stage 4 runs pre-flight safety checks. Disabling it skips token / cost / iteration / permission limits — the pipeline can run unbounded.',
+      failFastTitle: 'Fail fast',
+      failFastDesc: 'Abort on the first failing guard. When off, all guards run and failures are collected.',
+      maxChainLengthTitle: 'Max chain length',
+      maxChainLengthDesc: 'Reject the manifest if more than this many guards are chained.',
+      chainTitle: 'Guard chain',
+      chainHint: 'Order matters when fail-fast is on. Drag handles or use the arrows to reorder.',
+      empty: 'No guards. Add one to start enforcing limits.',
+      addGuardPick: '+ Add guard…',
+      guards: {
+        token_budget: { title: 'Token budget', desc: 'Reject the turn if the context window can\'t fit the next call.' },
+        cost_budget: { title: 'Cost budget', desc: 'Reject when cumulative cost would exceed the cap.' },
+        iteration: { title: 'Iteration limit', desc: 'Prevent infinite loops by capping turn count.' },
+        permission: { title: 'Tool permission', desc: 'Allowlist / blocklist for tool calls.' },
+      },
+      config: {
+        token_budget: {
+          minRemaining: 'Min remaining tokens',
+        },
+        cost_budget: {
+          maxCost: 'Max cost (USD)',
+          useSession: 'use session budget',
+        },
+        iteration: {
+          maxIterations: 'Max iterations',
+          useSession: 'use session limit',
+        },
+        permission: {
+          allowed: 'Allowed tools',
+          allowedHint: 'Empty = no allowlist filter (all tools allowed unless blocked).',
+          blocked: 'Blocked tools',
+          blockedHint: 'Always rejected, regardless of allowlist.',
+        },
+      },
+    },
+    stage05: {
+      activeDesc: 'Stage 5 inserts Anthropic prompt-cache markers. Disabling it removes caching — every call re-reads the full system + history.',
+      strategyTitle: 'Cache strategy',
+      strategyHint: 'Only Claude models use these markers; OpenAI / Google have their own automatic caching and bypass this stage.',
+      strategy: {
+        no_cache: { title: 'None', desc: 'No cache markers.' },
+        system_cache: { title: 'System only', desc: 'Cache the system prompt.' },
+        aggressive_cache: { title: 'Aggressive', desc: 'Cache system + tools + stable history prefix.' },
+      },
+      config: {
+        aggressive: {
+          stableOffset: 'Stable history offset (messages from end)',
+          stableOffsetHint: 'Place a cache breakpoint this many messages before the end of history.',
+        },
+      },
+      cachePrefixTitle: 'Cache key prefix',
+      cachePrefixDesc: 'Optional namespace prepended to cache keys. Useful when sharing keys across agents.',
+    },
     stage03: {
       activeTitle: 'Run this stage',
       activeDesc: 'Stage 3 builds the system prompt the LLM sees. Disabling it sends the LLM into the conversation with no persona — the agent answers blandly without context about its role.',
