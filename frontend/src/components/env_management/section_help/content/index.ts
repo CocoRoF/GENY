@@ -42,6 +42,8 @@ import { stage10MCPHelp } from './Stage10MCP';
 
 import { stage11ChainHelp } from './Stage11Chain';
 
+import { stage12OrchestratorHelp } from './Stage12Orchestrator';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -85,6 +87,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
 
   // Stage 11 — Tool review
   'stage11.chain': stage11ChainHelp,
+
+  // Stage 12 — Agent
+  'stage12.orchestrator': stage12OrchestratorHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
