@@ -26,6 +26,8 @@ import { stage04ChainHelp } from './Stage04Chain';
 
 import { stage05StrategyHelp } from './Stage05Strategy';
 
+import { stage06ModelOverrideHelp } from './Stage06ModelOverride';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -47,6 +49,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
 
   // Stage 5 — Cache
   'stage05.strategy': stage05StrategyHelp,
+
+  // Stage 6 — API
+  'stage06.modelOverride': stage06ModelOverrideHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {

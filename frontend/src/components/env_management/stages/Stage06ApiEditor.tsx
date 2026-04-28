@@ -23,6 +23,7 @@ import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type { StageManifestEntry, StageModelOverride } from '@/types/environment';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { Switch } from '@/components/ui/switch';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
@@ -59,8 +60,11 @@ export default function Stage06ApiEditor({ order, entry }: Props) {
       <section className="flex flex-col gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.stage06.modelTitle')}
+            <div className="flex items-center gap-2">
+              <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+                {t('envManagement.stage06.modelTitle')}
+              </span>
+              <SectionHelpButton helpId="stage06.modelOverride" />
             </div>
             <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
               {overrideOn
