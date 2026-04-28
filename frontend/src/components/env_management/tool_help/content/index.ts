@@ -53,6 +53,18 @@ import { lspToolHelp } from './LSP';
 import { replToolHelp } from './REPL';
 import { briefToolHelp } from './Brief';
 
+// ── web family ──
+import { webFetchToolHelp } from './WebFetch';
+import { webSearchToolHelp } from './WebSearch';
+
+// ── tasks family ──
+import { taskCreateToolHelp } from './TaskCreate';
+import { taskGetToolHelp } from './TaskGet';
+import { taskListToolHelp } from './TaskList';
+import { taskUpdateToolHelp } from './TaskUpdate';
+import { taskOutputToolHelp } from './TaskOutput';
+import { taskStopToolHelp } from './TaskStop';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -85,3 +97,13 @@ registerToolDetail('ExitWorktree', exitWorktreeToolHelp);
 registerToolDetail('LSP', lspToolHelp);
 registerToolDetail('REPL', replToolHelp);
 registerToolDetail('Brief', briefToolHelp);
+
+registerToolDetail('WebFetch', webFetchToolHelp);
+registerToolDetail('WebSearch', webSearchToolHelp);
+
+registerToolDetail('TaskCreate', taskCreateToolHelp);
+registerToolDetail('TaskGet', taskGetToolHelp);
+registerToolDetail('TaskList', taskListToolHelp);
+registerToolDetail('TaskUpdate', taskUpdateToolHelp);
+registerToolDetail('TaskOutput', taskOutputToolHelp);
+registerToolDetail('TaskStop', taskStopToolHelp);
