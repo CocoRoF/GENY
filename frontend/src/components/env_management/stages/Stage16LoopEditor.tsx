@@ -70,6 +70,7 @@ export default function Stage16LoopEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage16.controllerTitle"
         hintKey="envManagement.stage16.controllerHint"
+        helpId="stage16.controller"
         options={CONTROLLER_OPTIONS}
         available={available}
         current={current}
