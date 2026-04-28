@@ -944,6 +944,89 @@ const en = {
       advancedTitle: 'Advanced',
       advancedHint: 'artifact / strategies / chains / raw config',
     },
+    stage07: {
+      activeDesc: 'Stage 7 records token usage and computes cost. Disabling it leaves state.token_usage and total_cost_usd untouched — budget guards (Stage 4) lose their input.',
+      trackerTitle: 'Token tracker',
+      trackerHint: 'Where the per-call usage payload comes from.',
+      tracker: {
+        default: { title: 'Default', desc: 'Read usage straight from APIResponse.usage.' },
+        detailed: { title: 'Detailed', desc: 'Same, plus per-iteration breakdown stored under state.metadata.token_breakdown.' },
+      },
+      calcTitle: 'Cost calculator',
+      calcHint: 'How tokens are converted to USD. Pick \'unified\' for multi-provider pipelines.',
+      calc: {
+        anthropic: { title: 'Anthropic pricing', desc: 'Anthropic-only price table with cache_write / cache_read rates.' },
+        custom: { title: 'Custom flat rate', desc: 'Single input rate + single output rate. Provider-agnostic.' },
+        unified: { title: 'Unified', desc: 'Anthropic + OpenAI + Google price tables. Recommended for mixed agents.' },
+      },
+      config: {
+        custom: {
+          inputRate: 'Input ($ / 1M tokens)',
+          inputRateHint: 'Flat input rate per million tokens.',
+          outputRate: 'Output ($ / 1M tokens)',
+          outputRateHint: 'Flat output rate per million tokens.',
+        },
+      },
+    },
+    stage08: {
+      activeDesc: 'Stage 8 separates thinking content from final output and (optionally) sizes the per-turn thinking budget. Disabling it forwards thinking blocks unchanged.',
+      processorTitle: 'Thinking processor',
+      processorHint: 'What happens to thinking blocks before they\'re stored.',
+      processor: {
+        passthrough: { title: 'Passthrough', desc: 'Keep thinking blocks as-is.' },
+        extract: { title: 'Extract & store', desc: 'Append each block to state.thinking_history.' },
+        filter: { title: 'Filter', desc: 'Drop blocks containing any blocked substring.' },
+      },
+      budgetTitle: 'Thinking budget planner',
+      budgetHint: 'How much thinking budget to plan per turn. Stage 6 reads state.thinking_budget_tokens at API call time.',
+      budget: {
+        static: { title: 'Static', desc: 'Same fixed budget every turn.' },
+        adaptive: { title: 'Adaptive', desc: 'Heuristic sizing based on prompt length, tools-on-state, and reflection flag.' },
+      },
+      config: {
+        filter: {
+          excludePatterns: 'Exclude patterns',
+          excludePatternsHint: 'Substrings — any thinking block containing one is dropped before storage.',
+          placeholder: 'pattern, then Enter',
+        },
+        static: {
+          budgetTokens: 'Budget tokens',
+          budgetTokensHint: 'Fixed thinking budget per turn.',
+        },
+        adaptive: {
+          base: 'Base',
+          min: 'Min',
+          max: 'Max',
+          toolsBonus: 'Tools bonus',
+          toolsBonusHint: 'Extra budget when state.tools is non-empty.',
+          reflectionBonus: 'Reflection bonus',
+          reflectionBonusHint: 'Extra budget when state.metadata.needs_reflection is set.',
+        },
+      },
+    },
+    stage09: {
+      activeDesc: 'Stage 9 extracts text, tool calls, thinking, and completion signal from the API response. Stage 9 is required — disabling it stalls the pipeline.',
+      parserTitle: 'Response parser',
+      parserHint: 'What shape the response is interpreted as.',
+      parser: {
+        default: { title: 'Default', desc: 'Plain extraction of text + tool calls + thinking blocks.' },
+        structured: { title: 'Structured (JSON)', desc: 'Parse JSON from the text and (optionally) validate against a JSON Schema.' },
+      },
+      signalTitle: 'Completion signal detector',
+      signalHint: 'How CONTINUE / COMPLETE / ERROR / DELEGATE etc. are detected.',
+      signal: {
+        regex: { title: 'Regex', desc: 'Match well-known marker strings in the response text.' },
+        structured: { title: 'Structured', desc: 'Read the signal from a known JSON field.' },
+        hybrid: { title: 'Hybrid', desc: 'Try structured first, fall back to regex.' },
+      },
+      config: {
+        structured: {
+          schema: 'JSON Schema (optional)',
+          schemaHint: 'Validate the parsed JSON against this Draft-07 schema. Empty = parse without validation.',
+          errorObject: 'Schema must be a JSON object.',
+        },
+      },
+    },
     stage10: {
       activeTitle: 'Run this stage',
       activeDesc: 'Stage 10 executes tools requested by the LLM. Turn off only for sandboxes that should never call any tool.',
