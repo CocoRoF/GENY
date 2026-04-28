@@ -43,7 +43,13 @@ interface ProseProps {
   text: string;
   /** Extra Tailwind on the outer flex column. */
   className?: string;
-  /** Cap line length on `<p>` blocks. Default ≈ 62ch. */
+  /**
+   * Optional max-width cap on `<p>` and `<ul>` blocks. Default is
+   * empty — long-form prose fills its container's width so the
+   * surrounding modal/panel padding sets the natural line length.
+   * Pass e.g. `'max-w-[68ch]'` for sub-content where shorter lines
+   * help scanability.
+   */
   maxWidthClass?: string;
 }
 
@@ -54,7 +60,7 @@ interface ProseProps {
 export function Prose({
   text,
   className,
-  maxWidthClass = 'max-w-[62ch]',
+  maxWidthClass = '',
 }: ProseProps) {
   const blocks = splitIntoBlocks(text);
   return (

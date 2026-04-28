@@ -58,7 +58,7 @@ export default function SectionHelpModal({
             <h2 className="text-[1.5rem] font-semibold text-[hsl(var(--foreground))] mt-2 leading-tight">
               {content.title}
             </h2>
-            <p className="text-[0.9375rem] text-[hsl(var(--muted-foreground))] mt-3.5 leading-7 max-w-[68ch]">
+            <p className="text-[0.9375rem] text-[hsl(var(--muted-foreground))] mt-3.5 leading-7">
               <InlineMarkup text={content.summary} />
             </p>
           </div>
@@ -100,7 +100,7 @@ export default function SectionHelpModal({
           {/* Related sections */}
           {content.relatedSections && content.relatedSections.length > 0 && (
             <Block title={t('envManagement.sectionHelp.related')}>
-              <ul className="flex flex-col gap-3.5 max-w-[78ch]">
+              <ul className="flex flex-col gap-3.5">
                 {content.relatedSections.map((rel, idx) => (
                   <RelatedRow key={idx} item={rel} />
                 ))}
@@ -198,7 +198,7 @@ function ConfigRow({ field }: { field: ConfigField }) {
       </div>
 
       {/* Description (with markup) */}
-      <div className="text-[0.875rem] text-[hsl(var(--muted-foreground))] leading-7 max-w-[68ch]">
+      <div className="text-[0.875rem] text-[hsl(var(--muted-foreground))] leading-7">
         <InlineMarkup text={field.description} />
       </div>
     </div>
@@ -299,7 +299,7 @@ function BulletList({
             <span
               className={`w-1.5 h-1.5 rounded-full mt-[0.625rem] shrink-0 ${dotColor}`}
             />
-            <span className="max-w-[58ch]">
+            <span>
               <InlineMarkup text={it} />
             </span>
           </li>
