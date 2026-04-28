@@ -7,8 +7,25 @@
  * right-side GlobalSettingsDrawer: globals are now selectable from
  * the stage progress bar like any pipeline stage.
  *
- * Layout mirrors StageDetailView so the visual rhythm stays consistent
- * when the user clicks between stage 0 and stages 1..21.
+ * Cycle 20260428 Phase 1 — restructured from 4 panels to 8, grouped
+ * by scope:
+ *
+ *   Environment-scoped (lives in `manifest.*` — env-specific):
+ *     1. 기본 모델 설정       → ModelConfigEditor
+ *     2. 스테이지 기본 설정   → PipelineConfigEditor
+ *     3. Executor Built-in    → ToolCheckboxGrid (manifest.tools.built_in)
+ *     4. Geny Built-in        → GenyToolsPicker  (manifest.tools.external)
+ *     5. MCP                  → env MCP-server count + Library link
+ *
+ *   Host-scoped (lives outside the manifest — shared across every
+ *   environment, host-level files):
+ *     6. 훅       → .geny/hooks.yaml
+ *     7. 권한     → settings.json
+ *     8. 스킬     → ~/.geny/skills + project skills/
+ *
+ * Phase 2 will add per-tab SectionHelpModal content. Phase 3 will
+ * embed the host-level editors inline (extracted from HooksTab,
+ * PermissionsTab, SkillsTab, MCPAdminPanel).
  */
 
 import { useState } from 'react';
@@ -16,11 +33,13 @@ import {
   Cpu,
   ExternalLink,
   Layers,
+  Network,
   Plug,
   Settings2,
   Shield,
   Sparkles,
   Wrench,
+  Boxes,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -36,10 +55,20 @@ import {
   type ProviderId,
 } from '@/lib/modelCatalog';
 import ToolCheckboxGrid from './ToolCheckboxGrid';
+import GenyToolsPicker from './GenyToolsPicker';
+import HostScopedLinkPanel from './HostScopedLinkPanel';
 
 const S06_API_ORDER = 6;
 
-type Panel = 'model' | 'pipeline' | 'tools' | 'externals';
+type Panel =
+  | 'model'
+  | 'pipeline'
+  | 'executorTools'
+  | 'genyTools'
+  | 'mcp'
+  | 'hooks'
+  | 'permissions'
+  | 'skills';
 
 const HEADER_PALETTE = {
   light: {
@@ -71,30 +100,22 @@ export default function GlobalSettingsView() {
   if (!draft) return null;
 
   const builtInCount = (draft.tools?.built_in ?? []).length;
+  const genyCount = (draft.tools?.external ?? []).length;
   const mcpCount = (draft.tools?.mcp_servers ?? []).length;
-  const adhocCount = (draft.tools?.adhoc ?? []).length;
 
   // ── Provider state ──
-  // Source of truth is `manifest.stages[s06_api].config.provider`. When
-  // that's unset we fall back to inferring from the model id prefix
-  // (executor's `_infer_api_artifact` parity).
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
   const apiConfig = (apiStage?.config ?? {}) as Record<string, unknown>;
   const explicitProvider =
     typeof apiConfig.provider === 'string' ? (apiConfig.provider as string) : '';
   const validIds: string[] = PROVIDERS.map((p) => p.id);
-  const provider: ProviderId = (
-    validIds.includes(explicitProvider)
-      ? (explicitProvider as ProviderId)
-      : inferProvider(draft.model?.model as string | undefined)
-  );
+  const provider: ProviderId = validIds.includes(explicitProvider)
+    ? (explicitProvider as ProviderId)
+    : inferProvider(draft.model?.model as string | undefined);
 
   const handleProviderChange = (next: ProviderId) => {
     patchStage(S06_API_ORDER, { config: { ...apiConfig, provider: next } });
-    // vLLM is free-form — leave whatever the user typed last alone.
     if (next === 'vllm') return;
-    // If the current model already lives in the new provider's
-    // catalog, keep it. Otherwise drop to the recommended default.
     const currentModel = (draft.model?.model as string | undefined) ?? '';
     const inCatalog = MODEL_CATALOG[next].some((o) => o.id === currentModel);
     if (!inCatalog) {
@@ -143,31 +164,66 @@ export default function GlobalSettingsView() {
 
         {/* ── Sub-tab strip + body ── */}
         <div className="flex gap-4 min-h-0">
-          <nav className="flex flex-col gap-0.5 w-44 shrink-0">
+          <nav className="flex flex-col gap-0.5 w-52 shrink-0">
+            <NavGroupLabel label={t('envManagement.globals.navGroupEnv')} />
             <SubTabButton
               icon={Cpu}
-              label={t('envManagement.global.model')}
+              label={t('envManagement.globals.navModel')}
               active={panel === 'model'}
               onClick={() => setPanel('model')}
             />
             <SubTabButton
               icon={Layers}
-              label={t('envManagement.global.pipeline')}
+              label={t('envManagement.globals.navPipeline')}
               active={panel === 'pipeline'}
               onClick={() => setPanel('pipeline')}
             />
             <SubTabButton
               icon={Wrench}
-              label={t('envManagement.global.tools')}
-              active={panel === 'tools'}
-              onClick={() => setPanel('tools')}
-              badge={`${builtInCount + mcpCount + adhocCount}`}
+              label={t('envManagement.globals.navExecutorTools')}
+              active={panel === 'executorTools'}
+              onClick={() => setPanel('executorTools')}
+              badge={`${builtInCount}`}
             />
             <SubTabButton
-              icon={ExternalLink}
-              label={t('envManagement.global.externals')}
-              active={panel === 'externals'}
-              onClick={() => setPanel('externals')}
+              icon={Boxes}
+              label={t('envManagement.globals.navGenyTools')}
+              active={panel === 'genyTools'}
+              onClick={() => setPanel('genyTools')}
+              badge={`${genyCount}`}
+            />
+            <SubTabButton
+              icon={Network}
+              label={t('envManagement.globals.navMcp')}
+              active={panel === 'mcp'}
+              onClick={() => setPanel('mcp')}
+              badge={`${mcpCount}`}
+            />
+
+            <NavGroupLabel
+              label={t('envManagement.globals.navGroupHost')}
+              className="mt-3"
+            />
+            <SubTabButton
+              icon={Plug}
+              label={t('envManagement.globals.navHooks')}
+              active={panel === 'hooks'}
+              onClick={() => setPanel('hooks')}
+              hostBadge
+            />
+            <SubTabButton
+              icon={Shield}
+              label={t('envManagement.globals.navPermissions')}
+              active={panel === 'permissions'}
+              onClick={() => setPanel('permissions')}
+              hostBadge
+            />
+            <SubTabButton
+              icon={Sparkles}
+              label={t('envManagement.globals.navSkills')}
+              active={panel === 'skills'}
+              onClick={() => setPanel('skills')}
+              hostBadge
             />
           </nav>
 
@@ -183,6 +239,7 @@ export default function GlobalSettingsView() {
                 onProviderChange={handleProviderChange}
               />
             )}
+
             {panel === 'pipeline' && (
               <PipelineConfigEditor
                 initial={draft.pipeline ?? {}}
@@ -192,25 +249,15 @@ export default function GlobalSettingsView() {
                 onClearError={() => {}}
               />
             )}
-            {panel === 'tools' && (
-              <div className="flex flex-col gap-3">
-                <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))]">
-                  {t('envManagement.global.toolsHint')}
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  <ToolStatCard
-                    label={t('envManagement.global.builtInTools')}
-                    count={builtInCount}
-                  />
-                  <ToolStatCard
-                    label={t('envManagement.global.mcpServers')}
-                    count={mcpCount}
-                  />
-                  <ToolStatCard
-                    label={t('envManagement.global.customTools')}
-                    count={adhocCount}
-                  />
-                </div>
+
+            {panel === 'executorTools' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.executorTools.title')}
+                  description={t(
+                    'envManagement.globals.executorTools.description',
+                  )}
+                />
                 <ToolCheckboxGrid
                   value={(draft.tools?.built_in ?? []) as string[]}
                   onChange={(names) => patchTools({ built_in: names })}
@@ -219,36 +266,99 @@ export default function GlobalSettingsView() {
                 />
               </div>
             )}
-            {panel === 'externals' && (
-              <div className="flex flex-col gap-3">
-                <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))]">
-                  {t('envManagement.global.externalsHint')}
-                </p>
-                <div className="flex flex-col gap-2">
-                  <ExternalLinkRow
-                    icon={Plug}
-                    label={t('tabs.hooks') ?? 'Hooks'}
-                    description={t('envManagement.global.hooksDesc')}
-                    onClick={() => goToLibrary('hooks')}
-                  />
-                  <ExternalLinkRow
-                    icon={Shield}
-                    label={t('tabs.permissions') ?? 'Permissions'}
-                    description={t('envManagement.global.permissionsDesc')}
-                    onClick={() => goToLibrary('permissions')}
-                  />
-                  <ExternalLinkRow
-                    icon={Sparkles}
-                    label={t('tabs.skills') ?? 'Skills'}
-                    description={t('envManagement.global.skillsDesc')}
-                    onClick={() => goToLibrary('skills')}
-                  />
-                </div>
+
+            {panel === 'genyTools' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.genyTools.title')}
+                  description={t('envManagement.globals.genyTools.description')}
+                />
+                <GenyToolsPicker
+                  value={(draft.tools?.external ?? []) as string[]}
+                  onChange={(names) => patchTools({ external: names })}
+                />
               </div>
+            )}
+
+            {panel === 'mcp' && (
+              <HostScopedLinkPanel
+                icon={Network}
+                hostBadge={false}
+                title={t('envManagement.globals.mcp.title')}
+                description={t('envManagement.globals.mcp.description')}
+                primaryActionLabel={t('envManagement.globals.mcp.manageLink')}
+                onPrimaryAction={() => goToLibrary('mcpServers')}
+              >
+                <div className="px-3 py-2 rounded-md bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[0.8125rem] text-[hsl(var(--foreground))]">
+                  {mcpCount === 0
+                    ? t('envManagement.globals.mcp.envCountZero')
+                    : t('envManagement.globals.mcp.envCount', {
+                        n: String(mcpCount),
+                      })}
+                </div>
+              </HostScopedLinkPanel>
+            )}
+
+            {panel === 'hooks' && (
+              <HostScopedLinkPanel
+                icon={Plug}
+                title={t('envManagement.globals.hooks.title')}
+                description={t('envManagement.globals.hooks.description')}
+                primaryActionLabel={t('envManagement.globals.hooks.manageLink')}
+                onPrimaryAction={() => goToLibrary('hooks')}
+              >
+                <Bullets keyPath="envManagement.globals.hooks.bullets" />
+              </HostScopedLinkPanel>
+            )}
+
+            {panel === 'permissions' && (
+              <HostScopedLinkPanel
+                icon={Shield}
+                title={t('envManagement.globals.permissions.title')}
+                description={t(
+                  'envManagement.globals.permissions.description',
+                )}
+                primaryActionLabel={t(
+                  'envManagement.globals.permissions.manageLink',
+                )}
+                onPrimaryAction={() => goToLibrary('permissions')}
+              >
+                <Bullets keyPath="envManagement.globals.permissions.bullets" />
+              </HostScopedLinkPanel>
+            )}
+
+            {panel === 'skills' && (
+              <HostScopedLinkPanel
+                icon={Sparkles}
+                title={t('envManagement.globals.skills.title')}
+                description={t('envManagement.globals.skills.description')}
+                primaryActionLabel={t(
+                  'envManagement.globals.skills.manageLink',
+                )}
+                onPrimaryAction={() => goToLibrary('skills')}
+              >
+                <Bullets keyPath="envManagement.globals.skills.bullets" />
+              </HostScopedLinkPanel>
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NavGroupLabel({
+  label,
+  className = '',
+}: {
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`px-2 pt-1 pb-1 text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))] ${className}`}
+    >
+      {label}
     </div>
   );
 }
@@ -259,12 +369,14 @@ function SubTabButton({
   active,
   onClick,
   badge,
+  hostBadge,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   active: boolean;
   onClick: () => void;
   badge?: string;
+  hostBadge?: boolean;
 }) {
   return (
     <button
@@ -276,57 +388,55 @@ function SubTabButton({
           : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]/60 hover:text-[hsl(var(--foreground))]'
       }`}
     >
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className="w-3.5 h-3.5 shrink-0" />
       <span className="flex-1 truncate">{label}</span>
       {badge !== undefined && (
-        <span className="text-[0.6875rem] tabular-nums text-[hsl(var(--muted-foreground))]">
+        <span className="text-[0.6875rem] tabular-nums text-[hsl(var(--muted-foreground))] shrink-0">
           {badge}
         </span>
+      )}
+      {hostBadge && (
+        <ExternalLink className="w-3 h-3 text-[hsl(var(--muted-foreground))] shrink-0" />
       )}
     </button>
   );
 }
 
-function ToolStatCard({ label, count }: { label: string; count: number }) {
+function PanelHeader({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
-    <div className="flex flex-col gap-0.5 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))]">
-      <span className="text-[0.6875rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-        {label}
-      </span>
-      <span className="text-lg font-semibold tabular-nums text-[hsl(var(--foreground))]">
-        {count}
-      </span>
+    <div className="flex flex-col gap-0.5">
+      <h3 className="text-[0.9375rem] font-semibold text-[hsl(var(--foreground))]">
+        {title}
+      </h3>
+      <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+        {description}
+      </p>
     </div>
   );
 }
 
-function ExternalLinkRow({
-  icon: Icon,
-  label,
-  description,
-  onClick,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  description: string;
-  onClick: () => void;
-}) {
+/** Bullet list rendered from an i18n key whose raw value is a string[]. */
+function Bullets({ keyPath }: { keyPath: string }) {
+  const { tRaw } = useI18n();
+  const items = tRaw<string[] | undefined>(keyPath);
+  if (!Array.isArray(items) || items.length === 0) return null;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-start gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--accent))] transition-colors text-left group"
-    >
-      <Icon className="w-4 h-4 text-[hsl(var(--primary))] mt-0.5 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
-          {label}
-        </div>
-        <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))] mt-0.5">
-          {description}
-        </div>
-      </div>
-      <ExternalLink className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--primary))] mt-0.5 shrink-0" />
-    </button>
+    <ul className="flex flex-col gap-1.5 pl-1">
+      {items.map((b, i) => (
+        <li
+          key={i}
+          className="flex items-start gap-2 text-[0.8125rem] text-[hsl(var(--foreground))]"
+        >
+          <span className="mt-2 w-1 h-1 rounded-full bg-[hsl(var(--muted-foreground))] shrink-0" />
+          <span className="leading-relaxed">{b}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
