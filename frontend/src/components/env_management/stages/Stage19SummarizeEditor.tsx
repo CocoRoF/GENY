@@ -89,6 +89,7 @@ export default function Stage19SummarizeEditor({ order, entry }: Props) {
     <div className="flex flex-col gap-4">
       <TilePicker
         titleKey="envManagement.stage19.summarizerTitle"
+        helpId="stage19.summarizer"
         hintKey="envManagement.stage19.summarizerHint"
         options={SUMMARIZER_OPTIONS}
         available={sumAvail}
@@ -131,6 +132,7 @@ export default function Stage19SummarizeEditor({ order, entry }: Props) {
 
       <TilePicker
         titleKey="envManagement.stage19.importanceTitle"
+        helpId="stage19.importance"
         hintKey="envManagement.stage19.importanceHint"
         options={IMPORTANCE_OPTIONS}
         available={impAvail}
