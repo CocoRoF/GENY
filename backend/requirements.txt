@@ -96,7 +96,7 @@ playwright>=1.49.0
 # Workspace abstraction). cron extra pulls croniter for the scheduling
 # daemon. Pin matches backend/pyproject.toml so docker layer cache and
 # pip lockstep agree on the resolved version.
-geny-executor[web,cron]>=1.3.0,<1.4.0
+geny-executor[web,cron]>=1.3.1,<1.4.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

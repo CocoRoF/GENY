@@ -139,8 +139,13 @@ dependencies = [
     # (Workspace value object + WorkspaceStack; Worktree/LSP tools
     # workspace-aware; SubagentTypeOrchestrator threads workspace
     # snapshot to sub-pipelines).
+    # 1.3.1 lands the default-model bump from claude-sonnet-4-20250514
+    # to claude-sonnet-4-6 across ModelConfig / PipelineState /
+    # PipelineBuilder / presets, matching the Geny frontend's
+    # provider-aware model picker recommended default. Pricing
+    # tables retain the legacy id for historical billing rows.
     # cron extra pulls croniter for the scheduling daemon.
-    "geny-executor[web,cron]>=1.3.0,<1.4.0",
+    "geny-executor[web,cron]>=1.3.1,<1.4.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
