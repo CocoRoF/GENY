@@ -19,6 +19,7 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import { Input } from '@/components/ui/input';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const STRATEGY_OPTIONS = [
@@ -99,6 +100,7 @@ export default function Stage05CacheEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage05.strategyTitle')}
           </h4>
+          <SectionHelpButton helpId="stage05.strategy" />
         </header>
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           {t('envManagement.stage05.strategyHint')}

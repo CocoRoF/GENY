@@ -24,6 +24,8 @@ import { stage03SystemPromptHelp } from './Stage03SystemPrompt';
 import { stage04ConfigHelp } from './Stage04Config';
 import { stage04ChainHelp } from './Stage04Chain';
 
+import { stage05StrategyHelp } from './Stage05Strategy';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -42,6 +44,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 4 — Guard
   'stage04.config': stage04ConfigHelp,
   'stage04.chain': stage04ChainHelp,
+
+  // Stage 5 — Cache
+  'stage05.strategy': stage05StrategyHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
