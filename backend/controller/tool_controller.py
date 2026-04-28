@@ -8,13 +8,15 @@ Provides read-only endpoints to browse all available tools
 from __future__ import annotations
 
 from logging import getLogger
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from service.tool_loader import get_tool_loader
 from service.mcp_loader import get_global_mcp_config, get_builtin_mcp_config, get_mcp_loader_instance
+
+from controller._tool_descriptions_ko import TOOL_DESCRIPTIONS_KO
 
 logger = getLogger(__name__)
 
@@ -234,7 +236,16 @@ class ExternalToolCatalogResponse(BaseModel):
 
 
 @router.get("/catalog/external", response_model=ExternalToolCatalogResponse)
-async def get_external_tools():
+async def get_external_tools(
+    lang: Literal["en", "ko"] = Query(
+        "en",
+        description=(
+            "Locale for tool descriptions. ``ko`` returns Korean translations "
+            "from controller/_tool_descriptions_ko.py; ``en`` (default) returns "
+            "the English description authored on the tool class."
+        ),
+    ),
+):
     """T.1 (cycle 20260426_2) — names that ``GenyToolProvider`` would
     surface to the executor as candidates for ``manifest.tools.external``.
 
@@ -244,17 +255,24 @@ async def get_external_tools():
     """
     loader = get_tool_loader()
     out: List[ExternalToolEntry] = []
+
+    def _describe(name: str, tool: Any) -> str:
+        en = getattr(tool, "description", "") or ""
+        if lang == "ko":
+            return TOOL_DESCRIPTIONS_KO.get(name, en)
+        return en
+
     for name, tool in (loader.builtin_tools or {}).items():
         out.append(ExternalToolEntry(
             name=name,
             category="built_in",
-            description=getattr(tool, "description", "") or "",
+            description=_describe(name, tool),
         ))
     for name, tool in (loader.custom_tools or {}).items():
         out.append(ExternalToolEntry(
             name=name,
             category="custom",
-            description=getattr(tool, "description", "") or "",
+            description=_describe(name, tool),
         ))
     out.sort(key=lambda r: (r.category != "built_in", r.name))
     return ExternalToolCatalogResponse(tools=out)

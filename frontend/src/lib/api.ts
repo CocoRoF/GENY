@@ -570,7 +570,12 @@ export interface ExternalToolCatalogResponse {
 }
 
 export const externalToolCatalogApi = {
-  list: () => apiCall<ExternalToolCatalogResponse>('/api/tools/catalog/external'),
+  list: (lang?: 'en' | 'ko') =>
+    apiCall<ExternalToolCatalogResponse>(
+      lang
+        ? `/api/tools/catalog/external?lang=${encodeURIComponent(lang)}`
+        : '/api/tools/catalog/external',
+    ),
 };
 
 // ==================== Permissions CRUD API (PR-E.2.1) ============
