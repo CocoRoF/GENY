@@ -97,6 +97,17 @@ import { knowledgePromoteToolHelp } from './KnowledgePromote';
 import { opsidianBrowseToolHelp } from './OpsidianBrowse';
 import { opsidianReadToolHelp } from './OpsidianRead';
 
+// ── Geny session family ──
+import { sessionListToolHelp } from './SessionList';
+import { sessionInfoToolHelp } from './SessionInfo';
+import { sessionCreateToolHelp } from './SessionCreate';
+
+// ── Geny room family ──
+import { roomListToolHelp } from './RoomList';
+import { roomCreateToolHelp } from './RoomCreate';
+import { roomInfoToolHelp } from './RoomInfo';
+import { roomAddMembersToolHelp } from './RoomAddMembers';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -165,3 +176,12 @@ registerToolDetail('knowledge_promote', knowledgePromoteToolHelp);
 
 registerToolDetail('opsidian_browse', opsidianBrowseToolHelp);
 registerToolDetail('opsidian_read', opsidianReadToolHelp);
+
+registerToolDetail('session_list', sessionListToolHelp);
+registerToolDetail('session_info', sessionInfoToolHelp);
+registerToolDetail('session_create', sessionCreateToolHelp);
+
+registerToolDetail('room_list', roomListToolHelp);
+registerToolDetail('room_create', roomCreateToolHelp);
+registerToolDetail('room_info', roomInfoToolHelp);
+registerToolDetail('room_add_members', roomAddMembersToolHelp);
