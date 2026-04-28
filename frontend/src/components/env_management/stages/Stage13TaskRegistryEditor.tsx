@@ -80,6 +80,7 @@ export default function Stage13TaskRegistryEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage13.registryTitle"
         hintKey="envManagement.stage13.registryHint"
+        helpId="stage13.registry"
         options={REGISTRY_OPTIONS}
         available={regAvail}
         current={currentReg}
@@ -90,6 +91,7 @@ export default function Stage13TaskRegistryEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage13.policyTitle"
         hintKey="envManagement.stage13.policyHint"
+        helpId="stage13.policy"
         options={POLICY_OPTIONS}
         available={polAvail}
         current={currentPol}
