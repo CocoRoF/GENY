@@ -64,6 +64,7 @@ export default function Stage12AgentEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage12.orchTitle"
         hintKey="envManagement.stage12.orchHint"
+        helpId="stage12.orchestrator"
         options={ORCHESTRATOR_OPTIONS}
         available={available}
         current={current}
