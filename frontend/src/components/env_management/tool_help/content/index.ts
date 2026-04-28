@@ -121,6 +121,21 @@ import { giftToolHelp } from './Gift';
 import { playToolHelp } from './Play';
 import { talkToolHelp } from './Talk';
 
+// ── Geny browser family ──
+import { browserNavigateToolHelp } from './BrowserNavigate';
+import { browserClickToolHelp } from './BrowserClick';
+import { browserFillToolHelp } from './BrowserFill';
+import { browserEvaluateToolHelp } from './BrowserEvaluate';
+import { browserScreenshotToolHelp } from './BrowserScreenshot';
+import { browserPageInfoToolHelp } from './BrowserPageInfo';
+import { browserCloseToolHelp } from './BrowserClose';
+
+// ── Geny web family ──
+import { webFetchGenyToolHelp } from './WebFetchGeny';
+import { webFetchMultipleToolHelp } from './WebFetchMultiple';
+import { webSearchGenyToolHelp } from './WebSearchGeny';
+import { newsSearchToolHelp } from './NewsSearch';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -209,3 +224,16 @@ registerToolDetail('feed', feedToolHelp);
 registerToolDetail('gift', giftToolHelp);
 registerToolDetail('play', playToolHelp);
 registerToolDetail('talk', talkToolHelp);
+
+registerToolDetail('browser_navigate', browserNavigateToolHelp);
+registerToolDetail('browser_click', browserClickToolHelp);
+registerToolDetail('browser_fill', browserFillToolHelp);
+registerToolDetail('browser_evaluate', browserEvaluateToolHelp);
+registerToolDetail('browser_screenshot', browserScreenshotToolHelp);
+registerToolDetail('browser_page_info', browserPageInfoToolHelp);
+registerToolDetail('browser_close', browserCloseToolHelp);
+
+registerToolDetail('web_fetch', webFetchGenyToolHelp);
+registerToolDetail('web_fetch_multiple', webFetchMultipleToolHelp);
+registerToolDetail('web_search', webSearchGenyToolHelp);
+registerToolDetail('news_search', newsSearchToolHelp);
