@@ -47,6 +47,9 @@ import { stage12OrchestratorHelp } from './Stage12Orchestrator';
 import { stage13RegistryHelp } from './Stage13Registry';
 import { stage13PolicyHelp } from './Stage13Policy';
 
+import { stage14BudgetsHelp } from './Stage14Budgets';
+import { stage14StrategiesHelp } from './Stage14Strategies';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -97,6 +100,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 13 — Task registry
   'stage13.registry': stage13RegistryHelp,
   'stage13.policy': stage13PolicyHelp,
+
+  // Stage 14 — Evaluate
+  'stage14.budgets': stage14BudgetsHelp,
+  'stage14.strategies': stage14StrategiesHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
