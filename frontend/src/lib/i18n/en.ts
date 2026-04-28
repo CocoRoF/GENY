@@ -1237,6 +1237,87 @@ const en = {
         },
       },
     },
+    stage19: {
+      activeDesc: 'Stage 19 produces a turn summary + importance grade and forwards both to the memory provider. Disabling it leaves no audit trail of what changed this turn.',
+      summarizerTitle: 'Summarizer',
+      summarizerHint: 'How the turn is summarised. \'Rule-based\' is local; LLM-based summarizers can be plugged in via Advanced.',
+      summarizer: {
+        no_summary: { title: 'None', desc: 'Skip summarisation. The stage is a no-op.' },
+        rule_based: { title: 'Rule-based', desc: 'Local sentence-split + capitalised-token extraction. No extra LLM calls.' },
+      },
+      importanceTitle: 'Importance grader',
+      importanceHint: 'How each summary\'s importance grade is decided.',
+      importance: {
+        fixed: { title: 'Fixed', desc: 'Always emit the same grade.' },
+        heuristic: { title: 'Heuristic', desc: 'Bump grade based on keywords / fact count / tool errors.' },
+      },
+      config: {
+        rule: {
+          maxSentences: 'Max sentences',
+          maxFacts: 'Max facts',
+          maxEntities: 'Max entities',
+          extraTags: 'Extra tags',
+          extraTagsHint: 'Tags appended after the default \'rule_based\' tag.',
+          extraTagsPlaceholder: 'tag-name',
+        },
+        fixed: {
+          grade: 'Grade',
+          gradeHint: 'Importance grade applied to every summary.',
+        },
+      },
+    },
+    stage20: {
+      activeDesc: 'Stage 20 writes durable checkpoints. Disabling it skips checkpointing entirely — sessions can\'t be resumed across restarts.',
+      persisterTitle: 'Persister',
+      persisterHint: 'Where checkpoints are written.',
+      persister: {
+        no_persist: { title: 'None', desc: 'No-op persister. Use this when you don\'t need durability.' },
+        file: { title: 'File', desc: 'JSON file per checkpoint, grouped by session under base_dir.' },
+      },
+      frequencyTitle: 'Frequency',
+      frequencyHint: 'How often a checkpoint is written.',
+      frequency: {
+        every_turn: { title: 'Every turn', desc: 'Highest durability, highest IO cost.' },
+        every_n_turns: { title: 'Every N turns', desc: 'Periodic checkpoint at iterations 0, N, 2N…' },
+        on_significant: { title: 'On significant', desc: 'Only when a significant signal fires this turn.' },
+      },
+      config: {
+        file: {
+          baseDir: 'Base directory',
+          baseDirHint: 'Filesystem root for checkpoint files. Per-session subfolders are created automatically.',
+        },
+        everyN: {
+          n: 'N',
+          nHint: 'Persist on iterations 0, N, 2N, …',
+        },
+        significant: {
+          events: 'Significant event types',
+          eventsHint: 'Event types that trigger a checkpoint when emitted this turn. Defaults cover hitl/tool-review/memory/summary/task events.',
+          escalate: 'Escalate on HIGH/CRITICAL summary',
+          escalateHint: 'Persist when state.shared.turn_summary.importance is HIGH or CRITICAL.',
+        },
+      },
+    },
+    stage21: {
+      activeDesc: 'Stage 21 formats the final result. Stage 21 is required — disabling stalls the pipeline.',
+      formatterTitle: 'Result formatter',
+      formatterHint: 'How state.final_text / state.final_output are shaped before they leave the pipeline.',
+      formatter: {
+        default: { title: 'Default', desc: 'Pass-through. state.final_text stays as-is.' },
+        structured: { title: 'Structured', desc: 'Wrap final text + cost + token usage + completion signal in a single dict.' },
+        streaming: { title: 'Streaming', desc: 'Emit a yield.summary event with the same structured shape.' },
+        multi_format: { title: 'Multi-format', desc: 'Emit several formats simultaneously (text + structured + markdown).' },
+      },
+      config: {
+        multi: {
+          formats: 'Formats',
+          formatsHint: 'Subset to emit. Order matters — the dict keys are ordered as picked.',
+          minOne: 'At least one format must remain selected.',
+          includeThinking: 'Include thinking in markdown',
+          includeThinkingHint: 'Fold the most recent thinking turn into the markdown output.',
+        },
+      },
+    },
   },
 
   // ─── Environments Tab ───

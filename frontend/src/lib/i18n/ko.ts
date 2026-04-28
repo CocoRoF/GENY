@@ -1237,6 +1237,87 @@ const ko: Translations = {
         },
       },
     },
+    stage19: {
+      activeDesc: '19단계는 턴 요약과 중요도 등급을 만들어 메모리 프로바이더에 전달합니다. 끄면 이번 턴에 무엇이 바뀌었는지 감사 흔적이 남지 않습니다.',
+      summarizerTitle: '요약기',
+      summarizerHint: '턴을 어떻게 요약할지. \'규칙 기반\' 은 로컬; LLM 기반 요약기는 고급에서 추가 가능.',
+      summarizer: {
+        no_summary: { title: '없음', desc: '요약 건너뜀. 단계가 no-op.' },
+        rule_based: { title: '규칙 기반', desc: '로컬 문장 분리 + 대문자 토큰 추출. 추가 LLM 호출 없음.' },
+      },
+      importanceTitle: '중요도 평가',
+      importanceHint: '각 요약의 중요도 등급을 어떻게 정할지.',
+      importance: {
+        fixed: { title: '고정', desc: '항상 같은 등급 emit.' },
+        heuristic: { title: '휴리스틱', desc: '키워드 / fact 수 / 도구 오류 등에 따라 등급 조정.' },
+      },
+      config: {
+        rule: {
+          maxSentences: '최대 문장 수',
+          maxFacts: '최대 fact 수',
+          maxEntities: '최대 entity 수',
+          extraTags: '추가 태그',
+          extraTagsHint: '기본 \'rule_based\' 태그 뒤에 붙는 추가 태그.',
+          extraTagsPlaceholder: 'tag-name',
+        },
+        fixed: {
+          grade: '등급',
+          gradeHint: '모든 요약에 적용될 중요도 등급.',
+        },
+      },
+    },
+    stage20: {
+      activeDesc: '20단계는 영속 체크포인트를 씁니다. 끄면 체크포인트가 전혀 안 만들어져 — 재시작 후 세션 재개가 불가능합니다.',
+      persisterTitle: 'Persister',
+      persisterHint: '체크포인트를 어디에 쓸지.',
+      persister: {
+        no_persist: { title: '없음', desc: 'No-op. 영속성이 필요 없을 때.' },
+        file: { title: '파일', desc: '체크포인트당 JSON 파일 1개, base_dir 아래 세션별 폴더로 그룹.' },
+      },
+      frequencyTitle: '빈도',
+      frequencyHint: '체크포인트를 얼마나 자주 쓸지.',
+      frequency: {
+        every_turn: { title: '매 턴', desc: '최고 영속성, 최고 IO 비용.' },
+        every_n_turns: { title: 'N 턴마다', desc: 'iteration 0, N, 2N… 에서 주기적 체크포인트.' },
+        on_significant: { title: '중요 신호 시', desc: '이번 턴에 중요 신호가 발생했을 때만.' },
+      },
+      config: {
+        file: {
+          baseDir: '베이스 디렉토리',
+          baseDirHint: '체크포인트 파일의 파일시스템 루트. 세션별 하위 폴더는 자동 생성.',
+        },
+        everyN: {
+          n: 'N',
+          nHint: 'iteration 0, N, 2N, … 에서 영속화.',
+        },
+        significant: {
+          events: '중요 이벤트 타입',
+          eventsHint: '이번 턴에 emit 되면 체크포인트를 trigger 하는 이벤트 타입. 기본값은 hitl / tool_review / memory / summary / task 이벤트 커버.',
+          escalate: 'HIGH/CRITICAL 요약 시 escalate',
+          escalateHint: 'state.shared.turn_summary.importance 가 HIGH 또는 CRITICAL 일 때 영속화.',
+        },
+      },
+    },
+    stage21: {
+      activeDesc: '21단계는 최종 결과를 포맷합니다. 21단계는 필수 — 끄면 파이프라인이 정지합니다.',
+      formatterTitle: '결과 포맷터',
+      formatterHint: 'state.final_text / state.final_output 가 파이프라인을 떠나기 전에 어떤 모양으로 가공될지.',
+      formatter: {
+        default: { title: '기본', desc: '통과. state.final_text 그대로.' },
+        structured: { title: '구조화', desc: 'final text + 비용 + 토큰 사용량 + 완료 신호를 dict 로 묶음.' },
+        streaming: { title: '스트리밍', desc: '동일 구조의 yield.summary 이벤트 emit.' },
+        multi_format: { title: '멀티 포맷', desc: '여러 포맷 동시 emit (text + structured + markdown).' },
+      },
+      config: {
+        multi: {
+          formats: '포맷',
+          formatsHint: 'emit 할 부분집합. 순서가 중요 — 선택 순으로 dict 키 정렬.',
+          minOne: '최소 1개 포맷은 선택되어 있어야 합니다.',
+          includeThinking: 'markdown 에 thinking 포함',
+          includeThinkingHint: '최근 thinking 턴을 markdown 출력에 폴드.',
+        },
+      },
+    },
   },
 
   // ─── Environments Tab ───
