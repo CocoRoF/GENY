@@ -670,7 +670,6 @@ const en = {
     canvasPlaceholderHint: 'Click "New draft" above to start building. The 21-stage canvas appears here once a draft is created.',
     canvasHint: 'Click any stage to configure it',
     compactBar: {
-      noDraft: 'Pick a starting point below to begin.',
       descriptionTip: 'Description',
       globalsLabel: 'Globals',
       globalsTip: 'Open global settings (model / pipeline / tools / linked)',
