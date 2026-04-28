@@ -4,8 +4,6 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useI18n, type Locale } from '@/lib/i18n';
-import { configApi } from '@/lib/api';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import TabNavigation from '@/components/TabNavigation';
@@ -14,7 +12,6 @@ import TabContent from '@/components/TabContent';
 export default function Home() {
   const { loadSessions, loadDeletedSessions, checkHealth, loadPrompts } = useAppStore();
   const { checkAuth, initialized, hasUsers } = useAuthStore();
-  const setLocale = useI18n(s => s.setLocale);
   const router = useRouter();
 
   // Check auth status on mount
@@ -35,12 +32,6 @@ export default function Home() {
     checkHealth();
     loadPrompts();
 
-    // Sync locale from backend LanguageConfig
-    configApi.get('language').then(res => {
-      const lang = res.values?.language;
-      if (lang === 'en' || lang === 'ko') setLocale(lang as Locale);
-    }).catch(() => {});
-
     const healthInterval = setInterval(checkHealth, 15000);
     const sessionInterval = setInterval(loadSessions, 10000);
 
@@ -48,7 +39,7 @@ export default function Home() {
       clearInterval(healthInterval);
       clearInterval(sessionInterval);
     };
-  }, [loadSessions, loadDeletedSessions, checkHealth, loadPrompts, setLocale]);
+  }, [loadSessions, loadDeletedSessions, checkHealth, loadPrompts]);
 
   return (
     <div className="flex flex-col h-screen h-[100dvh] overflow-hidden">

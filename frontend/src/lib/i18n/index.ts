@@ -6,8 +6,13 @@
  *   - A Zustand store holds the current locale and exposes `t()`.
  *   - `t()` resolves dot-path keys with {var} interpolation.
  *   - Missing Korean keys automatically fall back to English.
- *   - Language preference syncs bidirectionally with the backend
- *     LanguageConfig via the /api/config/* endpoints (best-effort).
+ *   - `setLocale` writes the choice to localStorage so it survives
+ *     reloads on every route. <LocaleHydrator/> at the root layout
+ *     reads it back on mount; an inline init script in <head> sets
+ *     <html lang> before hydration to avoid a flash of English.
+ *   - Language preference also syncs bidirectionally with the backend
+ *     LanguageConfig via the /api/config/* endpoints (best-effort,
+ *     for cross-device consistency).
  *
  * Usage in components:
  *   import { useI18n } from '@/lib/i18n';
@@ -23,6 +28,10 @@ import ko from './ko';
 export type Locale = 'en' | 'ko';
 
 const locales: Record<Locale, Translations> = { en, ko };
+
+// localStorage key — also used by the inline init script in
+// app/layout.tsx (keep them in sync).
+export const LOCALE_STORAGE_KEY = 'geny-locale';
 
 // Module-level current locale (kept in sync by the Zustand store's setLocale)
 let currentLocale: Locale = 'en';
@@ -111,6 +120,14 @@ export const useI18n = create<I18nState>((set, get) => ({
     // Sync HTML lang attribute
     if (typeof document !== 'undefined') {
       document.documentElement.lang = locale;
+    }
+    // Persist so a reload on any route keeps the user's choice.
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      } catch {
+        /* private mode / quota — best-effort */
+      }
     }
     set({
       locale,
