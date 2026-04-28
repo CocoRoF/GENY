@@ -78,6 +78,15 @@ import { cronCreateToolHelp } from './CronCreate';
 import { cronDeleteToolHelp } from './CronDelete';
 import { cronListToolHelp } from './CronList';
 
+// ── Geny memory family ──
+import { memoryWriteToolHelp } from './MemoryWrite';
+import { memoryReadToolHelp } from './MemoryRead';
+import { memorySearchToolHelp } from './MemorySearch';
+import { memoryListToolHelp } from './MemoryList';
+import { memoryUpdateToolHelp } from './MemoryUpdate';
+import { memoryDeleteToolHelp } from './MemoryDelete';
+import { memoryLinkToolHelp } from './MemoryLink';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -130,3 +139,11 @@ registerToolDetail('SendMessage', sendMessageToolHelp);
 registerToolDetail('CronCreate', cronCreateToolHelp);
 registerToolDetail('CronDelete', cronDeleteToolHelp);
 registerToolDetail('CronList', cronListToolHelp);
+
+registerToolDetail('memory_write', memoryWriteToolHelp);
+registerToolDetail('memory_read', memoryReadToolHelp);
+registerToolDetail('memory_search', memorySearchToolHelp);
+registerToolDetail('memory_list', memoryListToolHelp);
+registerToolDetail('memory_update', memoryUpdateToolHelp);
+registerToolDetail('memory_delete', memoryDeleteToolHelp);
+registerToolDetail('memory_link', memoryLinkToolHelp);
