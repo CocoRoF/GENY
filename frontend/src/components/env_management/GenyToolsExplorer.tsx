@@ -30,6 +30,7 @@ import {
   FolderTree,
   Gamepad2,
   Globe,
+  HelpCircle,
   Inbox,
   Loader2,
   MessageCircle,
@@ -51,6 +52,7 @@ import {
   type ExternalToolEntry,
 } from '@/lib/api';
 import { Input } from '@/components/ui/input';
+import ToolDetailModal from './tool_help/ToolDetailModal';
 
 export interface GenyToolsExplorerProps {
   value: string[];
@@ -156,6 +158,7 @@ export default function GenyToolsExplorer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [detailTool, setDetailTool] = useState<ExternalToolEntry | null>(null);
 
   // Re-fetch whenever the locale flips so descriptions stay in sync.
   useEffect(() => {
@@ -364,6 +367,7 @@ export default function GenyToolsExplorer({
             selectedSet={selectedSet}
             onToggleTool={toggleTool}
             onToggleFamily={toggleFamily}
+            onShowDetail={(tool) => setDetailTool(tool)}
           />
         ))}
         {filteredGroups.size === 0 && (
@@ -372,6 +376,14 @@ export default function GenyToolsExplorer({
           </div>
         )}
       </section>
+
+      <ToolDetailModal
+        open={detailTool !== null}
+        onClose={() => setDetailTool(null)}
+        name={detailTool?.name ?? null}
+        description={detailTool?.description ?? ''}
+        family={detailTool?.category}
+      />
     </div>
   );
 }
@@ -383,6 +395,7 @@ function FamilySection({
   selectedSet,
   onToggleTool,
   onToggleFamily,
+  onShowDetail,
 }: {
   family: string;
   list: ExternalToolEntry[];
@@ -390,6 +403,7 @@ function FamilySection({
   selectedSet: Set<string>;
   onToggleTool: (name: string) => void;
   onToggleFamily: (family: string) => void;
+  onShowDetail: (tool: ExternalToolEntry) => void;
 }) {
   const { t } = useI18n();
   const Icon = familyIcon(family);
@@ -437,6 +451,7 @@ function FamilySection({
             tool={tool}
             checked={selectedSet.has(tool.name)}
             onToggle={() => onToggleTool(tool.name)}
+            onShowDetail={() => onShowDetail(tool)}
           />
         ))}
       </div>
@@ -448,22 +463,36 @@ function ToolCard({
   tool,
   checked,
   onToggle,
+  onShowDetail,
 }: {
   tool: ExternalToolEntry;
   checked: boolean;
   onToggle: () => void;
+  onShowDetail: () => void;
 }) {
+  const { t } = useI18n();
   return (
-    <button
-      type="button"
+    <div
       onClick={onToggle}
-      className={`group flex flex-col gap-2 p-3 rounded-md border text-left transition-all ${
+      className={`group relative flex flex-col gap-2 p-3 rounded-md border text-left cursor-pointer transition-all ${
         checked
           ? 'border-[hsl(var(--primary)/0.5)] bg-[hsl(var(--primary)/0.06)] shadow-sm'
           : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:bg-[hsl(var(--accent))]'
       }`}
     >
-      <div className="flex items-start gap-2">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onShowDetail();
+        }}
+        title={t('envManagement.toolDetail.openTip')}
+        aria-label={t('envManagement.toolDetail.openTip')}
+        className="absolute right-2 top-2 inline-flex items-center justify-center w-6 h-6 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] hover:bg-[hsl(var(--accent))] transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+      >
+        <HelpCircle className="w-3.5 h-3.5" />
+      </button>
+      <div className="flex items-start gap-2 pr-6">
         <span
           className={`shrink-0 mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded transition-colors ${
             checked
@@ -491,6 +520,6 @@ function ToolCard({
           {tool.description}
         </p>
       )}
-    </button>
+    </div>
   );
 }
