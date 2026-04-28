@@ -29,6 +29,7 @@ import type {
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const STRATEGY_OPTIONS = [
@@ -173,6 +174,7 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage18.strategyTitle')}
           </h4>
+          <SectionHelpButton helpId="stage18.strategy" />
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {STRATEGY_OPTIONS.map((opt) => {
@@ -215,6 +217,7 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage18.persistTitle')}
           </h4>
+          <SectionHelpButton helpId="stage18.persist" />
         </header>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           {PERSISTENCE_OPTIONS.map((opt) => {
@@ -279,8 +282,11 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.stage18.modelTitle')}
+            <div className="flex items-center gap-2">
+              <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+                {t('envManagement.stage18.modelTitle')}
+              </span>
+              <SectionHelpButton helpId="stage18.model" />
             </div>
             <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
               {reflectiveActive
