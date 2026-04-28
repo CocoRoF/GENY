@@ -115,6 +115,7 @@ export default function Stage09ParseEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage09.parserTitle"
         hintKey="envManagement.stage09.parserHint"
+        helpId="stage09.parser"
         options={PARSER_OPTIONS}
         available={parserAvail}
         current={currentParser}
@@ -150,6 +151,7 @@ export default function Stage09ParseEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage09.signalTitle"
         hintKey="envManagement.stage09.signalHint"
+        helpId="stage09.signal"
         options={SIGNAL_OPTIONS}
         available={sigAvail}
         current={currentSig}
