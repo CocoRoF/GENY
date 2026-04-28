@@ -65,6 +65,19 @@ import { taskUpdateToolHelp } from './TaskUpdate';
 import { taskOutputToolHelp } from './TaskOutput';
 import { taskStopToolHelp } from './TaskStop';
 
+// ── operator family ──
+import { configToolHelp } from './Config';
+import { monitorToolHelp } from './Monitor';
+import { sendUserFileToolHelp } from './SendUserFile';
+
+// ── messaging family ──
+import { sendMessageToolHelp } from './SendMessage';
+
+// ── cron family ──
+import { cronCreateToolHelp } from './CronCreate';
+import { cronDeleteToolHelp } from './CronDelete';
+import { cronListToolHelp } from './CronList';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -107,3 +120,13 @@ registerToolDetail('TaskList', taskListToolHelp);
 registerToolDetail('TaskUpdate', taskUpdateToolHelp);
 registerToolDetail('TaskOutput', taskOutputToolHelp);
 registerToolDetail('TaskStop', taskStopToolHelp);
+
+registerToolDetail('Config', configToolHelp);
+registerToolDetail('Monitor', monitorToolHelp);
+registerToolDetail('SendUserFile', sendUserFileToolHelp);
+
+registerToolDetail('SendMessage', sendMessageToolHelp);
+
+registerToolDetail('CronCreate', cronCreateToolHelp);
+registerToolDetail('CronDelete', cronDeleteToolHelp);
+registerToolDetail('CronList', cronListToolHelp);
