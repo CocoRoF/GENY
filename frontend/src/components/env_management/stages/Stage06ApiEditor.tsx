@@ -16,15 +16,12 @@
  * patchStage(6, { model_override: ... }).
  */
 
-import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type { StageManifestEntry, StageModelOverride } from '@/types/environment';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { Switch } from '@/components/ui/switch';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
   order: number;
@@ -36,7 +33,6 @@ export default function Stage06ApiEditor({ order, entry }: Props) {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
 
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const overrideOn = entry.model_override !== null && entry.model_override !== undefined;
   const pipelineModel = (draft?.model ?? {}) as Record<string, unknown>;
@@ -119,29 +115,6 @@ export default function Stage06ApiEditor({ order, entry }: Props) {
         )}
       </section>
 
-      {/* ── Advanced (artifact / strategies / chains / config) ── */}
-      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-        >
-          {advancedOpen ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-          {t('envManagement.stage06.advancedTitle')}
-          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.stage06.advancedHint')}
-          </span>
-        </button>
-        {advancedOpen && (
-          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-            <StageGenericEditor order={order} entry={entry} />
-          </div>
-        )}
-      </section>
     </div>
   );
 }

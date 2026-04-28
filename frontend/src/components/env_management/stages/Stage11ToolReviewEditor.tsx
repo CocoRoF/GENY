@@ -35,7 +35,6 @@ import JsonSchemaForm, {
   type JsonSchema,
 } from '@/components/environment/JsonSchemaForm';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
   order: number;
@@ -48,7 +47,6 @@ export default function Stage11ToolReviewEditor({ order, entry }: Props) {
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
 
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [expandedConfig, setExpandedConfig] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -258,29 +256,6 @@ export default function Stage11ToolReviewEditor({ order, entry }: Props) {
         )}
       </section>
 
-      {/* ── Advanced ── */}
-      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-        >
-          {advancedOpen ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-          {t('envManagement.stage11.advancedTitle')}
-          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.stage11.advancedHint')}
-          </span>
-        </button>
-        {advancedOpen && (
-          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-            <StageGenericEditor order={order} entry={entry} />
-          </div>
-        )}
-      </section>
     </div>
   );
 }

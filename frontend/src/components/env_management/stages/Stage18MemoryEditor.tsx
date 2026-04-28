@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, HardDrive } from 'lucide-react';
+import { HardDrive } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { catalogApi } from '@/lib/environmentApi';
 import { localizeIntrospection } from '../stage_locale';
@@ -30,7 +30,6 @@ import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 const STRATEGY_OPTIONS = [
   {
@@ -87,7 +86,6 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
 
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -328,29 +326,6 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
         )}
       </section>
 
-      {/* ── Advanced ── */}
-      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-        >
-          {advancedOpen ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-          {t('envManagement.stage18.advancedTitle')}
-          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.stage18.advancedHint')}
-          </span>
-        </button>
-        {advancedOpen && (
-          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-            <StageGenericEditor order={order} entry={entry} />
-          </div>
-        )}
-      </section>
     </div>
   );
 }

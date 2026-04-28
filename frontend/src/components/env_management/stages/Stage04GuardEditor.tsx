@@ -12,8 +12,6 @@ import { useEffect, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
-  ChevronDown,
-  ChevronRight,
   Plus,
   Trash2,
   X,
@@ -29,7 +27,6 @@ import type {
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 const GUARD_META: Record<
   string,
@@ -63,7 +60,6 @@ export default function Stage04GuardEditor({ order, entry }: Props) {
   const locale = useI18n((s) => s.locale);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,25 +270,6 @@ export default function Stage04GuardEditor({ order, entry }: Props) {
         )}
       </section>
 
-      {/* ── Advanced ── */}
-      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-        >
-          {advancedOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          {t('envManagement.advancedTitle')}
-          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.advancedHintGeneric')}
-          </span>
-        </button>
-        {advancedOpen && (
-          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-            <StageGenericEditor order={order} entry={entry} />
-          </div>
-        )}
-      </section>
     </div>
   );
 }

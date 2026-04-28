@@ -3,22 +3,21 @@
 /**
  * Shared building blocks for curated stage editors.
  *
- * Every curated editor follows the same shape: tile picker for the
- * registered impl keys, conditional inline panel when the picked
- * impl exposes runtime config, and an Advanced wrapper that drops
- * into StageGenericEditor for raw-everything access. Centralising
- * the JSX here keeps each stage editor short and visually identical.
+ * Every curated editor uses the same shape: tile picker for the
+ * registered impl keys, plus conditional inline panels when the
+ * picked impl exposes runtime config. The raw "developer" view is
+ * a sibling rendered by StageDetailView based on the view-mode
+ * toggle — curated editors no longer embed it themselves.
  */
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import type { StageManifestEntry } from '@/types/environment';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import SectionHelpButton from '../section_help/SectionHelpButton';
-import StageGenericEditor from '../StageGenericEditor';
 
 export interface TileOption {
   id: string;
@@ -317,37 +316,6 @@ export function InlinePanel({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col gap-2 pt-3 mt-1 border-t border-[hsl(var(--border))]">
       {children}
     </div>
-  );
-}
-
-interface AdvancedProps {
-  order: number;
-  entry: StageManifestEntry;
-  open: boolean;
-  onToggle: () => void;
-}
-
-export function Advanced({ order, entry, open, onToggle }: AdvancedProps) {
-  const { t } = useI18n();
-  return (
-    <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
-      >
-        {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        {t('envManagement.advancedTitle')}
-        <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
-          {t('envManagement.advancedHintGeneric')}
-        </span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3">
-          <StageGenericEditor order={order} entry={entry} />
-        </div>
-      )}
-    </section>
   );
 }
 

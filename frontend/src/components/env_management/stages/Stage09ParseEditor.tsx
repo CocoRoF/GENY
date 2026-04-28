@@ -19,7 +19,6 @@ import type {
 } from '@/types/environment';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Advanced,
   InlinePanel,
   TilePicker,
   readSlotConfig,
@@ -47,7 +46,6 @@ export default function Stage09ParseEditor({ order, entry }: Props) {
   const locale = useI18n((s) => s.locale);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const [intro, setIntro] = useState<StageIntrospection | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +157,6 @@ export default function Stage09ParseEditor({ order, entry }: Props) {
         cols={3}
       />
 
-      <Advanced order={order} entry={entry} open={advancedOpen} onToggle={() => setAdvancedOpen((v) => !v)} />
     </div>
   );
 }
