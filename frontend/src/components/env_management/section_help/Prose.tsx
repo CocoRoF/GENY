@@ -15,12 +15,13 @@
  *     "- "                     into one <ul>)
  *   - Inline `code`          → mono pill with subtle background
  *   - Inline **bold**        → semibold text
+ *   - Inline *italic*        → emphasised text
  *
  * Unsupported (intentional): headings, links, tables, images, code
- * blocks, blockquotes, italics. If we ever need those, we'll add
- * them — but right now keeping the surface tight forces content
- * authors to keep prose scannable instead of reaching for
- * structural escape hatches.
+ * blocks, blockquotes. If we ever need those, we'll add them — but
+ * right now keeping the surface tight forces content authors to
+ * keep prose scannable instead of reaching for structural escape
+ * hatches.
  */
 
 import React from 'react';
@@ -129,16 +130,16 @@ function splitIntoBlocks(text: string): Block[] {
 }
 
 /**
- * Tokenize a single line on `code` and **bold** spans. Plain text
- * goes through as a string node; matched spans become <code> or
- * <strong> elements. Order-preserving.
+ * Tokenize a single line on `code`, **bold**, and *italic* spans.
+ * Plain text passes through as a string node; matched spans become
+ * <code> / <strong> / <em> elements. Order-preserving.
+ *
+ * Regex alternation order matters — `**bold**` is tried before
+ * `*italic*` so the inner asterisks of a bold span don't trigger
+ * italic matches.
  */
 function parseInline(text: string): React.ReactNode[] {
-  // Match either `code` or **bold**. Greedy within delimiters; a
-  // single regex handles both. Both must be on the same line —
-  // multi-line code spans aren't supported and shouldn't appear in
-  // the kind of content we're rendering.
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const pattern = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`)/g;
   const out: React.ReactNode[] = [];
   let last = 0;
   let key = 0;
@@ -157,6 +158,15 @@ function parseInline(text: string): React.ReactNode[] {
         >
           {token.slice(2, -2)}
         </strong>,
+      );
+    } else if (token.startsWith('*')) {
+      out.push(
+        <span
+          key={`i-${key++}`}
+          className="italic text-[hsl(var(--foreground))]"
+        >
+          {token.slice(1, -1)}
+        </span>,
       );
     } else {
       out.push(
