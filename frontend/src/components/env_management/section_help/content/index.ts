@@ -57,6 +57,10 @@ import { stage16ControllerHelp } from './Stage16Controller';
 
 import { stage17EmittersHelp } from './Stage17Emitters';
 
+import { stage18StrategyHelp } from './Stage18Strategy';
+import { stage18PersistHelp } from './Stage18Persist';
+import { stage18ModelHelp } from './Stage18Model';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -121,6 +125,11 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
 
   // Stage 17 — Emit
   'stage17.emitters': stage17EmittersHelp,
+
+  // Stage 18 — Memory
+  'stage18.strategy': stage18StrategyHelp,
+  'stage18.persist': stage18PersistHelp,
+  'stage18.model': stage18ModelHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
