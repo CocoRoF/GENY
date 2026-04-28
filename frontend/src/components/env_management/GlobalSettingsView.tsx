@@ -60,6 +60,7 @@ import HostScopedLinkPanel from './HostScopedLinkPanel';
 import MCPServerEditor from './MCPServerEditor';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import { HooksTab } from '@/components/tabs/HooksTab';
+import { PermissionsTab } from '@/components/tabs/PermissionsTab';
 
 const S06_API_ORDER = 6;
 
@@ -349,19 +350,16 @@ export default function GlobalSettingsView() {
             )}
 
             {panel === 'permissions' && (
-              <HostScopedLinkPanel
-                icon={Shield}
-                title={t('envManagement.globals.permissions.title')}
-                description={t(
-                  'envManagement.globals.permissions.description',
-                )}
-                primaryActionLabel={t(
-                  'envManagement.globals.permissions.manageLink',
-                )}
-                onPrimaryAction={() => goToLibrary('permissions')}
-              >
-                <Bullets keyPath="envManagement.globals.permissions.bullets" />
-              </HostScopedLinkPanel>
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.permissions.title')}
+                  description={t(
+                    'envManagement.globals.permissions.description',
+                  )}
+                />
+                <HostBadge />
+                <PermissionsTab embedded />
+              </div>
             )}
 
             {panel === 'skills' && (
