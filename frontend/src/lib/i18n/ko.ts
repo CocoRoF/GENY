@@ -704,7 +704,28 @@ const ko: Translations = {
     stageStrategies: '전략',
     stageChains: '체인',
     stageConfig: '단계 설정',
+    modelOverrideTitle: '모델 오버라이드',
+    toolBindingTitle: '도구 바인딩',
     loadingSchema: '단계 스키마 로딩…',
+    advanced: {
+      notApplicable: '이 단계 미사용',
+      noStrategies: '이 단계는 전략 슬롯이 없습니다.',
+      noChains: '이 단계는 전략 체인이 없습니다.',
+      noConfig: '이 단계는 config 스키마가 없습니다.',
+      modelOverrideHint:
+        '이 단계만 파이프라인 모델을 덮어씁니다 (모델명, 시스템 프롬프트, max_tokens, temperature, top_p).',
+      modelOverrideNA:
+        '이 단계는 LLM 을 호출하지 않으므로 model_override 는 런타임에 무시됩니다.',
+      modelOverrideNAEditing:
+        '이 단계는 LLM 을 호출하지 않습니다. 여기 입력해도 매니페스트에는 저장되지만 런타임은 무시합니다.',
+      toolBindingHint:
+        '이 단계가 호출 가능한 도구를 제한합니다. allowed/blocked 는 도구 이름 리스트 (null = 제한 없음).',
+      toolBindingNA:
+        '이 단계는 도구를 호출하지 않으므로 tool_binding 는 런타임에 무시됩니다.',
+      toolBindingNAEditing:
+        '이 단계는 도구를 호출하지 않습니다. 여기 입력해도 매니페스트에는 저장되지만 런타임은 무시합니다.',
+      toolBindingErrorObject: 'tool_binding 은 JSON 객체여야 합니다.',
+    },
     modelOverrideHint: '이 단계는 모델 override 를 지원합니다. 전용 선택기는 PR-B에서 제공됩니다.',
     toolBindingHint: '이 단계는 도구 바인딩을 지원합니다. 전용 선택기는 PR-C에서 제공됩니다.',
     aboutThisStage: '이 단계 자세히',
@@ -760,6 +781,16 @@ const ko: Translations = {
           title: '멀티모달',
           desc: '텍스트와 함께 이미지, 오디오, 혼합 미디어 콘텐츠 블록 수용.',
         },
+      },
+      blockedPatterns: {
+        label: '차단 패턴',
+        hint: '거부할 부분 문자열 (대소문자 무시). 입력에 패턴 중 하나라도 포함되면 LLM 호출 전에 거부됩니다.',
+        placeholder: '차단할 패턴 입력 후 Enter',
+      },
+      schema: {
+        label: 'JSON Schema',
+        hint: 'strategy_configs.validator.schema 에 저장됩니다. 현재 SchemaValidator 는 최상위 "required" 목록만 검증합니다. JSON 객체여야 합니다.',
+        errorObject: '스키마는 JSON 객체여야 합니다.',
       },
       advancedTitle: '고급',
       advancedHint: 'artifact / 원시 config 키',

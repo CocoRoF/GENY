@@ -704,7 +704,28 @@ const en = {
     stageStrategies: 'Strategies',
     stageChains: 'Chains',
     stageConfig: 'Stage config',
+    modelOverrideTitle: 'Model override',
+    toolBindingTitle: 'Tool binding',
     loadingSchema: 'Loading stage schema…',
+    advanced: {
+      notApplicable: 'Not used by this stage',
+      noStrategies: 'This stage has no strategy slots.',
+      noChains: 'This stage has no strategy chains.',
+      noConfig: 'This stage has no config schema.',
+      modelOverrideHint:
+        'Override the pipeline model for this stage only (model name, system prompt, max_tokens, temperature, top_p).',
+      modelOverrideNA:
+        'This stage does not call an LLM, so model_override is ignored at runtime.',
+      modelOverrideNAEditing:
+        'This stage does not call an LLM. Editing here writes to the manifest but the runtime ignores it.',
+      toolBindingHint:
+        'Restrict which tools this stage may call. allowed/blocked are tool name lists (null = no filter).',
+      toolBindingNA:
+        'This stage does not call tools, so tool_binding is ignored at runtime.',
+      toolBindingNAEditing:
+        'This stage does not call tools. Editing here writes to the manifest but the runtime ignores it.',
+      toolBindingErrorObject: 'tool_binding must be a JSON object.',
+    },
     modelOverrideHint: 'This stage supports a model override. Curated picker arrives in PR-B.',
     toolBindingHint: 'This stage supports tool binding. Curated picker arrives in PR-C.',
     aboutThisStage: 'About this stage',
@@ -760,6 +781,16 @@ const en = {
           title: 'Multimodal',
           desc: 'Accepts images, audio, and mixed-media content blocks alongside text.',
         },
+      },
+      blockedPatterns: {
+        label: 'Blocked patterns',
+        hint: 'Substrings to reject (case-insensitive). Inputs containing any pattern are rejected before any LLM call.',
+        placeholder: 'pattern to block, then Enter',
+      },
+      schema: {
+        label: 'JSON Schema',
+        hint: 'Stored at strategy_configs.validator.schema. SchemaValidator currently checks the top-level "required" list. Must be a JSON object.',
+        errorObject: 'Schema must be a JSON object.',
       },
       advancedTitle: 'Advanced',
       advancedHint: 'artifact / raw config keys',
