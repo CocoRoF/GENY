@@ -40,6 +40,8 @@ import { stage09SignalHelp } from './Stage09Signal';
 import { stage10BuiltInHelp } from './Stage10BuiltIn';
 import { stage10MCPHelp } from './Stage10MCP';
 
+import { stage11ChainHelp } from './Stage11Chain';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -80,6 +82,9 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 10 — Tools
   'stage10.builtIn': stage10BuiltInHelp,
   'stage10.mcp': stage10MCPHelp,
+
+  // Stage 11 — Tool review
+  'stage11.chain': stage11ChainHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
