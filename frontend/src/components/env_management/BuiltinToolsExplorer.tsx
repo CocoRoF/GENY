@@ -62,6 +62,7 @@ import {
   frameworkToolApi,
   type FrameworkToolDetail,
 } from '@/lib/api';
+import { EXECUTOR_TOOL_DESCRIPTIONS_KO } from '@/lib/executorToolDescriptionsKo';
 import { Input } from '@/components/ui/input';
 
 export interface BuiltinToolsExplorerProps {
@@ -129,11 +130,24 @@ export default function BuiltinToolsExplorer({
   onChange,
 }: BuiltinToolsExplorerProps) {
   const { t } = useI18n();
+  const locale = useI18n((s) => s.locale);
   const [tools, setTools] = useState<FrameworkToolDetail[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<CapabilityFilter>('all');
+
+  // Localised tool list — when locale is ko, swap the description for
+  // the frontend-side Korean translation if we have one registered;
+  // fall back to the executor's English description otherwise.
+  const localizedTools = useMemo(() => {
+    if (!tools) return null;
+    if (locale !== 'ko') return tools;
+    return tools.map((tool) => {
+      const ko = EXECUTOR_TOOL_DESCRIPTIONS_KO[tool.name];
+      return ko ? { ...tool, description: ko } : tool;
+    });
+  }, [tools, locale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,8 +175,8 @@ export default function BuiltinToolsExplorer({
 
   const grouped = useMemo(() => {
     const m = new Map<string, FrameworkToolDetail[]>();
-    if (!tools) return m;
-    for (const tool of tools) {
+    if (!localizedTools) return m;
+    for (const tool of localizedTools) {
       const g = tool.feature_group || 'other';
       if (!m.has(g)) m.set(g, []);
       m.get(g)!.push(tool);
@@ -177,10 +191,10 @@ export default function BuiltinToolsExplorer({
       if (!ordered.has(k)) ordered.set(k, v);
     }
     return ordered;
-  }, [tools]);
+  }, [localizedTools]);
 
   const filteredGroups = useMemo(() => {
-    if (!tools) return new Map<string, FrameworkToolDetail[]>();
+    if (!localizedTools) return new Map<string, FrameworkToolDetail[]>();
     const q = search.trim().toLowerCase();
     const out = new Map<string, FrameworkToolDetail[]>();
     for (const [family, list] of grouped) {
@@ -198,7 +212,7 @@ export default function BuiltinToolsExplorer({
       if (hits.length > 0) out.set(family, hits);
     }
     return out;
-  }, [grouped, search, filter, tools]);
+  }, [grouped, search, filter, localizedTools]);
 
   const totalCount = tools?.length ?? 0;
   const selectedCount = isWildcard ? totalCount : value.length;
