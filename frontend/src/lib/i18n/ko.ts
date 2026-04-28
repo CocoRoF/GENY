@@ -706,6 +706,7 @@ const ko: Translations = {
       navPermissions: '권한',
       navSkills: '스킬',
       hostBadge: '호스트',
+      hostBadgeNote: '여기서의 편집은 현재 편집 중인 환경 뿐 아니라 이 호스트의 모든 환경에 적용됩니다. 데이터는 매니페스트 외부의 공유 파일 / 설정 저장소에 저장됩니다.',
       executorTools: {
         title: 'Executor 빌트인 도구',
         description: 'geny-executor 자체에 포함된 38개 도구 (Read / Write / Bash / Agent / MCP 등). 체크된 이름이 `manifest.tools.built_in`에 들어가고, 단계 10이 매 턴마다 이 화이트리스트에서 도구를 골라 LLM에 노출합니다.',

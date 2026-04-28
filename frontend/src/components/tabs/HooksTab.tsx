@@ -187,7 +187,16 @@ function KvEditor({
   );
 }
 
-export function HooksTab() {
+export interface HooksTabProps {
+  /** When true, renders without the outer TabShell chrome — meant for
+   *  embedding inside another panel (e.g. the env-management Globals
+   *  view's Hooks sub-tab). The action buttons + status badges that
+   *  TabShell would have surfaced in its header are inlined as a slim
+   *  top toolbar so the user still has access to them. */
+  embedded?: boolean;
+}
+
+export function HooksTab({ embedded = false }: HooksTabProps = {}) {
   const [editable, setEditable] = useState<HookEntriesResponse | null>(null);
   const [inspect, setInspect] = useState<HookListResponse | null>(null);
   const [fires, setFires] = useState<HookFiresResponse | null>(null);
@@ -330,55 +339,52 @@ export function HooksTab() {
   const envOptIn = inspect?.env_opt_in ?? false;
   const willFire = fileEnabled && envOptIn;
 
-  return (
-    <TabShell
-      title="Hooks"
-      icon={Plug}
-      subtitle={
-        <>
-          File:{' '}
-          <StatusBadge
-            tone={fileEnabled ? 'success' : 'neutral'}
-            icon={Power}
-            onClick={toggleEnabled}
-          >
-            {fileEnabled ? 'enabled' : 'disabled'}
-          </StatusBadge>
-          {' · Env '}
-          <span className="font-mono">GENY_ALLOW_HOOKS</span>:{' '}
-          <span className={'font-mono ' + (envOptIn ? 'text-green-700' : 'text-red-600')}>
-            {envOptIn ? 'set' : 'unset'}
-          </span>
-          {' · '}
-          {totalEditable} editable / {totalLoaded} loaded
-          {editable && <> · <span className="font-mono">{editable.settings_path}</span></>}
-        </>
-      }
-      actions={
-        <>
-          <StatusBadge
-            tone={willFire ? 'success' : 'warning'}
-            uppercase
-            title={
-              willFire
-                ? 'Both file flag and GENY_ALLOW_HOOKS are set — hooks will fire.'
-                : 'Hooks will NOT fire — both file flag AND GENY_ALLOW_HOOKS env var must be set.'
-            }
-          >
-            {willFire ? 'live' : 'gated'}
-          </StatusBadge>
-          <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-            Add hook
-          </ActionButton>
-          <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-            Refresh
-          </ActionButton>
-        </>
-      }
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      <div className="h-full min-h-0 overflow-y-auto p-3 space-y-4">
+  const subtitle = (
+    <>
+      File:{' '}
+      <StatusBadge
+        tone={fileEnabled ? 'success' : 'neutral'}
+        icon={Power}
+        onClick={toggleEnabled}
+      >
+        {fileEnabled ? 'enabled' : 'disabled'}
+      </StatusBadge>
+      {' · Env '}
+      <span className="font-mono">GENY_ALLOW_HOOKS</span>:{' '}
+      <span className={'font-mono ' + (envOptIn ? 'text-green-700' : 'text-red-600')}>
+        {envOptIn ? 'set' : 'unset'}
+      </span>
+      {' · '}
+      {totalEditable} editable / {totalLoaded} loaded
+      {editable && <> · <span className="font-mono">{editable.settings_path}</span></>}
+    </>
+  );
+
+  const actions = (
+    <>
+      <StatusBadge
+        tone={willFire ? 'success' : 'warning'}
+        uppercase
+        title={
+          willFire
+            ? 'Both file flag and GENY_ALLOW_HOOKS are set — hooks will fire.'
+            : 'Hooks will NOT fire — both file flag AND GENY_ALLOW_HOOKS env var must be set.'
+        }
+      >
+        {willFire ? 'live' : 'gated'}
+      </StatusBadge>
+      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
+        Add hook
+      </ActionButton>
+      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
+        Refresh
+      </ActionButton>
+    </>
+  );
+
+  const body = (
+    <>
+      <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
         {/* ── Audit log path ── */}
         <section className="border border-[var(--border-color)] rounded p-3">
           <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
@@ -525,11 +531,14 @@ export function HooksTab() {
           )}
         </section>
       </div>
+    </>
+  );
 
-      <EditorModal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        title={editingTarget ? `Edit ${editingTarget.event}#${editingTarget.idx}` : 'Add hook'}
+  const modal = (
+    <EditorModal
+      open={editorOpen}
+      onClose={() => setEditorOpen(false)}
+      title={editingTarget ? `Edit ${editingTarget.event}#${editingTarget.idx}` : 'Add hook'}
         saving={saving}
         footer={
           <>
@@ -634,6 +643,46 @@ export function HooksTab() {
           </div>
         </div>
       </EditorModal>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex flex-col gap-3">
+        {error && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-[0.7rem] underline hover:no-underline"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
+            {subtitle}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">{actions}</div>
+        </div>
+        {body}
+        {modal}
+      </div>
+    );
+  }
+
+  return (
+    <TabShell
+      title="Hooks"
+      icon={Plug}
+      subtitle={subtitle}
+      actions={actions}
+      error={error}
+      onDismissError={() => setError(null)}
+    >
+      {body}
+      {modal}
     </TabShell>
   );
 }
