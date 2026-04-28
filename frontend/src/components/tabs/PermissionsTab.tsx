@@ -82,7 +82,13 @@ function formToPayload(f: RuleFormState): PermissionRulePayload {
   };
 }
 
-export function PermissionsTab() {
+export interface PermissionsTabProps {
+  /** When true, renders without the TabShell outer chrome (for embedding
+   *  inside another panel — see Globals view). */
+  embedded?: boolean;
+}
+
+export function PermissionsTab({ embedded = false }: PermissionsTabProps = {}) {
   const [editable, setEditable] = useState<PermissionRulesResponse | null>(null);
   const [inspect, setInspect] = useState<PermissionListResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -224,72 +230,68 @@ export function PermissionsTab() {
     }
   };
 
-  return (
-    <TabShell
-      title="Permissions"
-      icon={Shield}
-      subtitle={
-        <>
-          Mode: <span className="font-mono uppercase">{inspect?.mode ?? '—'}</span>{' '}
-          · {inspectCount} rule{inspectCount === 1 ? '' : 's'} loaded
-          {editable && (
-            <> · {editableCount} editable in <span className="font-mono">{editable.settings_path}</span></>
-          )}
-        </>
-      }
-      actions={
-        <>
-          {/* R.1 — mode pickers. Reflect settings.json:permissions
-              values; falling back to inspect's resolved value (which
-              accounts for env / defaults) when the file omits them. */}
-          <div className="hidden md:flex items-center gap-1.5">
-            <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider">
-              Mode
-            </span>
-            <Select
-              value={editable?.mode ?? inspect?.mode ?? 'advisory'}
-              onValueChange={(v) => handleModeChange('mode', v)}
-              disabled={savingMode}
-            >
-              <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERMISSION_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider ml-2">
-              Exec
-            </span>
-            <Select
-              value={editable?.executor_mode ?? 'default'}
-              onValueChange={(v) => handleModeChange('executor_mode', v)}
-              disabled={savingMode}
-            >
-              <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTOR_PERMISSION_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-            Add rule
-          </ActionButton>
-          <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-            Refresh
-          </ActionButton>
-        </>
-      }
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      <div className="h-full min-h-0 overflow-y-auto p-3">
+  const subtitle = (
+    <>
+      Mode: <span className="font-mono uppercase">{inspect?.mode ?? '—'}</span>{' '}
+      · {inspectCount} rule{inspectCount === 1 ? '' : 's'} loaded
+      {editable && (
+        <> · {editableCount} editable in <span className="font-mono">{editable.settings_path}</span></>
+      )}
+    </>
+  );
+
+  const actions = (
+    <>
+      {/* R.1 — mode pickers. Reflect settings.json:permissions
+          values; falling back to inspect's resolved value (which
+          accounts for env / defaults) when the file omits them. */}
+      <div className="hidden md:flex items-center gap-1.5">
+        <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider">
+          Mode
+        </span>
+        <Select
+          value={editable?.mode ?? inspect?.mode ?? 'advisory'}
+          onValueChange={(v) => handleModeChange('mode', v)}
+          disabled={savingMode}
+        >
+          <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PERMISSION_MODES.map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider ml-2">
+          Exec
+        </span>
+        <Select
+          value={editable?.executor_mode ?? 'default'}
+          onValueChange={(v) => handleModeChange('executor_mode', v)}
+          disabled={savingMode}
+        >
+          <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EXECUTOR_PERMISSION_MODES.map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
+        Add rule
+      </ActionButton>
+      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
+        Refresh
+      </ActionButton>
+    </>
+  );
+
+  const body = (
+    <div className={embedded ? 'p-0' : 'h-full min-h-0 overflow-y-auto p-3'}>
         <table className="w-full text-[0.8125rem]">
           <thead>
             <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)]">
@@ -374,12 +376,14 @@ export function PermissionsTab() {
             </ul>
           </details>
         )}
-      </div>
+    </div>
+  );
 
-      <EditorModal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        title={editingIdx === null ? 'Add rule' : `Edit rule #${editingIdx}`}
+  const modal = (
+    <EditorModal
+      open={editorOpen}
+      onClose={() => setEditorOpen(false)}
+      title={editingIdx === null ? 'Add rule' : `Edit rule #${editingIdx}`}
         saving={saving}
         footer={
           <>
@@ -460,6 +464,46 @@ export function PermissionsTab() {
           </div>
         </div>
       </EditorModal>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex flex-col gap-3">
+        {error && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-[0.7rem] underline hover:no-underline"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
+            {subtitle}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">{actions}</div>
+        </div>
+        {body}
+        {modal}
+      </div>
+    );
+  }
+
+  return (
+    <TabShell
+      title="Permissions"
+      icon={Shield}
+      subtitle={subtitle}
+      actions={actions}
+      error={error}
+      onDismissError={() => setError(null)}
+    >
+      {body}
+      {modal}
     </TabShell>
   );
 }
