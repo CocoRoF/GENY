@@ -89,6 +89,7 @@ export default function Stage08ThinkEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage08.processorTitle"
         hintKey="envManagement.stage08.processorHint"
+        helpId="stage08.processor"
         options={PROCESSOR_OPTIONS}
         available={procAvail}
         current={currentProc}
@@ -115,6 +116,7 @@ export default function Stage08ThinkEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage08.budgetTitle"
         hintKey="envManagement.stage08.budgetHint"
+        helpId="stage08.budgetPlanner"
         options={BUDGET_OPTIONS}
         available={budAvail}
         current={currentBud}
