@@ -14,17 +14,19 @@
  * parent's width. Containers (e.g. GlobalSettingsView) decide the
  * outer max-width.
  *
- * Model picker: a curated catalog (see `lib/modelCatalog.ts`) is
- * exposed via a native <datalist> behind the input. Users get
- * dropdown suggestions on focus but can still type any custom
- * identifier — the manifest field is free-form because `base_url`
- * can point at non-Anthropic endpoints.
+ * Provider awareness: when a parent passes `provider`/`onProviderChange`
+ * (the global model panel does, per-stage `model_override` cards do
+ * not), the editor renders a segmented Anthropic / OpenAI / Google /
+ * vLLM selector at the top and uses ModelPicker — provider-keyed
+ * catalogs from `lib/modelCatalog.ts`, free-form for vLLM. Without
+ * those props the editor falls back to a free-form model input
+ * (the per-stage override case).
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Save, RotateCcw } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
-import { MODEL_CATALOG } from '@/lib/modelCatalog';
+import { PROVIDERS, type ProviderId } from '@/lib/modelCatalog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -37,6 +39,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ActionButton } from '@/components/layout';
+import { ModelPicker } from './ModelPicker';
 
 const THINKING_TYPE_VALUES = ['enabled', 'disabled', 'adaptive'] as const;
 const THINKING_DISPLAY_VALUES = ['summarized', 'omitted'] as const;
@@ -62,6 +65,11 @@ export interface ModelConfigEditorProps {
   error: string | null;
   onSave: (changes: Record<string, unknown>) => void;
   onClearError: () => void;
+  /** Provider awareness — when both are supplied, render a provider
+   *  selector and a curated model picker. When omitted (per-stage
+   *  override cards), fall back to a plain free-form model input. */
+  provider?: ProviderId;
+  onProviderChange?: (next: ProviderId) => void;
 }
 
 function snapshotToDraft(src: Record<string, unknown>): ModelDraft {
@@ -152,17 +160,18 @@ function buildChanges(
   return { ok: true, changes: out };
 }
 
-const MODEL_DATALIST_ID = 'model-config-options';
-
 export function ModelConfigEditor({
   initial,
   saving,
   error,
   onSave,
   onClearError,
+  provider,
+  onProviderChange,
 }: ModelConfigEditorProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<ModelDraft>(() => snapshotToDraft(initial));
+  const providerAware = provider !== undefined && onProviderChange !== undefined;
 
   useEffect(() => {
     setDraft(snapshotToDraft(initial));
@@ -224,25 +233,60 @@ export function ModelConfigEditor({
         </div>
       )}
 
+      {providerAware && (
+        <div className="grid gap-1.5">
+          <Label>{t('envManagement.modelEditor.providerLabel')}</Label>
+          <div className="inline-flex items-center p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] w-fit">
+            {PROVIDERS.map((p) => {
+              const active = p.id === provider;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onProviderChange!(p.id)}
+                  className={`h-7 px-3 text-[0.75rem] font-medium rounded transition-colors ${
+                    active
+                      ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
+                      : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+            {t('envManagement.modelEditor.providerHint')}
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-1.5">
         <Label htmlFor="md-model">
           {t('envManagement.modelEditor.modelLabel')}
         </Label>
-        <Input
-          id="md-model"
-          list={MODEL_DATALIST_ID}
-          value={draft.model}
-          onChange={(e) => update('model', e.target.value)}
-          placeholder="claude-sonnet-4-20250514"
-          className="font-mono text-[0.75rem]"
-        />
-        <datalist id={MODEL_DATALIST_ID}>
-          {MODEL_CATALOG.map((m) => (
-            <option key={m.id} value={m.id} label={m.label} />
-          ))}
-        </datalist>
+        {providerAware ? (
+          <ModelPicker
+            id="md-model"
+            provider={provider!}
+            value={draft.model}
+            onChange={(v) => update('model', v)}
+          />
+        ) : (
+          <Input
+            id="md-model"
+            value={draft.model}
+            onChange={(e) => update('model', e.target.value)}
+            placeholder="claude-sonnet-4-6"
+            className="font-mono text-[0.75rem]"
+          />
+        )}
         <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
-          {t('envManagement.modelEditor.modelHint')}
+          {t(
+            providerAware && provider === 'vllm'
+              ? 'envManagement.modelEditor.vllmHint'
+              : 'envManagement.modelEditor.modelHint',
+          )}
         </p>
       </div>
 

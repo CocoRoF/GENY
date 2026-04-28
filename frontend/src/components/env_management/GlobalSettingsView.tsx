@@ -28,7 +28,16 @@ import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { PipelineConfigEditor } from '@/components/builder/PipelineConfigEditor';
+import {
+  MODEL_CATALOG,
+  PROVIDER_DEFAULT_MODEL,
+  PROVIDERS,
+  inferProvider,
+  type ProviderId,
+} from '@/lib/modelCatalog';
 import ToolCheckboxGrid from './ToolCheckboxGrid';
+
+const S06_API_ORDER = 6;
 
 type Panel = 'model' | 'pipeline' | 'tools' | 'externals';
 
@@ -53,6 +62,7 @@ export default function GlobalSettingsView() {
   const patchModel = useEnvironmentDraftStore((s) => s.patchModel);
   const patchPipeline = useEnvironmentDraftStore((s) => s.patchPipeline);
   const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
+  const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const setEnvSubTab = useAppStore((s) => s.setEnvSubTab);
 
@@ -63,6 +73,34 @@ export default function GlobalSettingsView() {
   const builtInCount = (draft.tools?.built_in ?? []).length;
   const mcpCount = (draft.tools?.mcp_servers ?? []).length;
   const adhocCount = (draft.tools?.adhoc ?? []).length;
+
+  // ── Provider state ──
+  // Source of truth is `manifest.stages[s06_api].config.provider`. When
+  // that's unset we fall back to inferring from the model id prefix
+  // (executor's `_infer_api_artifact` parity).
+  const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
+  const apiConfig = (apiStage?.config ?? {}) as Record<string, unknown>;
+  const explicitProvider =
+    typeof apiConfig.provider === 'string' ? (apiConfig.provider as string) : '';
+  const validIds: string[] = PROVIDERS.map((p) => p.id);
+  const provider: ProviderId = (
+    validIds.includes(explicitProvider)
+      ? (explicitProvider as ProviderId)
+      : inferProvider(draft.model?.model as string | undefined)
+  );
+
+  const handleProviderChange = (next: ProviderId) => {
+    patchStage(S06_API_ORDER, { config: { ...apiConfig, provider: next } });
+    // vLLM is free-form — leave whatever the user typed last alone.
+    if (next === 'vllm') return;
+    // If the current model already lives in the new provider's
+    // catalog, keep it. Otherwise drop to the recommended default.
+    const currentModel = (draft.model?.model as string | undefined) ?? '';
+    const inCatalog = MODEL_CATALOG[next].some((o) => o.id === currentModel);
+    if (!inCatalog) {
+      patchModel({ model: PROVIDER_DEFAULT_MODEL[next] });
+    }
+  };
 
   const goToLibrary = (sub: string) => {
     setActiveTab('library');
@@ -141,6 +179,8 @@ export default function GlobalSettingsView() {
                 error={null}
                 onSave={(changes) => patchModel(changes)}
                 onClearError={() => {}}
+                provider={provider}
+                onProviderChange={handleProviderChange}
               />
             )}
             {panel === 'pipeline' && (
