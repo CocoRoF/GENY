@@ -25,7 +25,10 @@ import StageArtifactPicker from './StageArtifactPicker';
 import StageGenericEditor from './StageGenericEditor';
 import StageInfoModal from './stage_info/StageInfoModal';
 import Stage01InputEditor from './stages/Stage01InputEditor';
+import Stage02ContextEditor from './stages/Stage02ContextEditor';
 import Stage03SystemEditor from './stages/Stage03SystemEditor';
+import Stage04GuardEditor from './stages/Stage04GuardEditor';
+import Stage05CacheEditor from './stages/Stage05CacheEditor';
 import Stage06ApiEditor from './stages/Stage06ApiEditor';
 import Stage10ToolsEditor from './stages/Stage10ToolsEditor';
 import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
@@ -58,7 +61,10 @@ const CURATED_EDITORS: Record<
   React.ComponentType<{ order: number; entry: import('@/types/environment').StageManifestEntry }>
 > = {
   1: Stage01InputEditor,
+  2: Stage02ContextEditor,
   3: Stage03SystemEditor,
+  4: Stage04GuardEditor,
+  5: Stage05CacheEditor,
   6: Stage06ApiEditor,
   10: Stage10ToolsEditor,
   11: Stage11ToolReviewEditor,
