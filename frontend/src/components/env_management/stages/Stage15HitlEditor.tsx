@@ -24,6 +24,7 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import { Input } from '@/components/ui/input';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const REQUESTER_OPTIONS = [
@@ -142,6 +143,7 @@ export default function Stage15HitlEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage15.requesterTitle')}
           </h4>
+          <SectionHelpButton helpId="stage15.requester" />
         </header>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           {REQUESTER_OPTIONS.map((opt) => {
@@ -184,6 +186,7 @@ export default function Stage15HitlEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage15.timeoutTitle')}
           </h4>
+          <SectionHelpButton helpId="stage15.timeout" />
         </header>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           {TIMEOUT_OPTIONS.map((opt) => {

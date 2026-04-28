@@ -50,6 +50,9 @@ import { stage13PolicyHelp } from './Stage13Policy';
 import { stage14BudgetsHelp } from './Stage14Budgets';
 import { stage14StrategiesHelp } from './Stage14Strategies';
 
+import { stage15RequesterHelp } from './Stage15Requester';
+import { stage15TimeoutHelp } from './Stage15Timeout';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -104,6 +107,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 14 — Evaluate
   'stage14.budgets': stage14BudgetsHelp,
   'stage14.strategies': stage14StrategiesHelp,
+
+  // Stage 15 — HITL
+  'stage15.requester': stage15RequesterHelp,
+  'stage15.timeout': stage15TimeoutHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
