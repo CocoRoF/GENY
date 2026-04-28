@@ -1,13 +1,12 @@
 'use client';
 
 /**
- * StageViewModeToggle — segmented control in the stage header that
- * flips the body between curated ("basic") and raw ("developer")
- * views. The header chrome (artifact picker, detail button, active
- * card) stays unchanged across modes; only the body swaps.
+ * StageViewModeToggle — segmented control in the stage header.
  *
- * Lifted into StageDetailView as a single state so the choice
- * persists when the user clicks across stages.
+ * Total height matches h-8 (the canonical control height across the
+ * stage header chrome): outer p-0.5 + inner buttons h-7. Same
+ * border / radius / background as the artifact dropdown and detail
+ * button so the three controls read as a unified bar.
  */
 
 import { Code2, Wand2 } from 'lucide-react';
@@ -26,21 +25,22 @@ export default function StageViewModeToggle({ mode, onChange }: Props) {
   return (
     <div
       role="group"
-      className="inline-flex items-center rounded-md border border-[hsl(var(--border))] p-0.5 bg-[hsl(var(--background))] shrink-0"
+      aria-label="View mode"
+      className="inline-flex items-center h-8 p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0"
     >
       <ModeButton
         active={mode === 'basic'}
         onClick={() => onChange('basic')}
         label={t('envManagement.viewMode.basic')}
         title={t('envManagement.viewMode.basicTip')}
-        icon={<Wand2 className="w-3 h-3" />}
+        icon={<Wand2 className="w-3.5 h-3.5" />}
       />
       <ModeButton
         active={mode === 'developer'}
         onClick={() => onChange('developer')}
         label={t('envManagement.viewMode.developer')}
         title={t('envManagement.viewMode.developerTip')}
-        icon={<Code2 className="w-3 h-3" />}
+        icon={<Code2 className="w-3.5 h-3.5" />}
       />
     </div>
   );
@@ -64,12 +64,12 @@ function ModeButton({
       type="button"
       onClick={onClick}
       title={title}
-      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-[0.7rem] font-medium transition-colors ${
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-[0.75rem] font-medium transition-colors ${
         active
           ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
-          : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]'
+          : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
       }`}
-      aria-pressed={active}
     >
       {icon}
       {label}

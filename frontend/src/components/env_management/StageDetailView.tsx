@@ -182,25 +182,23 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
             )}
           </div>
 
-          {/* View-mode toggle — flips body between curated (basic) and
-              raw (developer). Mode persists across stage switches. */}
-          <StageViewModeToggle mode={viewMode} onChange={setViewMode} />
-
-          {/* Artifact picker — universal across every stage, sits to
-              the left of the Detail button so it reads as part of the
-              header chrome rather than a per-stage form field. */}
-          <StageArtifactPicker order={order} entry={entry} />
-
-          {/* Detail button — opens the rich info modal. */}
-          <button
-            type="button"
-            onClick={() => setInfoOpen(true)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] hover:border-[hsl(var(--primary)/0.4)] hover:bg-[hsl(var(--accent))] transition-colors shrink-0 self-start"
-            title={t('envManagement.info.openTip')}
-          >
-            <Info className="w-3.5 h-3.5" />
-            {t('envManagement.info.openLabel')}
-          </button>
+          {/* Header control bar — three sibling pills, all h-8, in
+              order: Artifact picker → View mode toggle → Detail
+              button. Tight gap-1.5 keeps them visually grouped as
+              one unit. */}
+          <div className="flex items-center gap-1.5 shrink-0 self-start">
+            <StageArtifactPicker order={order} entry={entry} />
+            <StageViewModeToggle mode={viewMode} onChange={setViewMode} />
+            <button
+              type="button"
+              onClick={() => setInfoOpen(true)}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors shrink-0"
+              title={t('envManagement.info.openTip')}
+            >
+              <Info className="w-3.5 h-3.5" />
+              {t('envManagement.info.openLabel')}
+            </button>
+          </div>
         </header>
 
         {/* ── Stage active toggle — always the first card under the
