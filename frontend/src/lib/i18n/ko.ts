@@ -1071,6 +1071,68 @@ const ko: Translations = {
       advancedTitle: '고급',
       advancedHint: 'artifact / strategies / 원시 chain JSON',
     },
+    stage12: {
+      activeDesc: '12단계는 턴을 오케스트레이터에 전달합니다. 끄면 어떤 오케스트레이터를 골라도 단일 에이전트 실행으로 폴백.',
+      orchTitle: '오케스트레이터',
+      orchHint: '턴별 서브 에이전트 디스패치 방식.',
+      orch: {
+        single: { title: '단일 에이전트', desc: '위임 없음 — 그대로 통과. 가장 일반적.' },
+        delegate: { title: '위임', desc: 'state.delegate_requests 가 있으면 위임.' },
+        evaluator: { title: '평가자', desc: 'Generator/Evaluator 패턴 (2-pass 턴).' },
+        subagent: { title: '서브 에이전트 타입', desc: 'SubagentTypeRegistry 통한 타입 디스패치.' },
+      },
+      maxDelegationsTitle: '턴당 최대 위임 수',
+      maxDelegationsDesc: '한 턴 내 서브 에이전트 호출 횟수 제한.',
+    },
+    stage13: {
+      activeDesc: '13단계는 state.shared 의 대기 작업을 빼내어 registry + policy 로 라우팅합니다. 끄면 작업이 큐에 쌓입니다.',
+      registryTitle: '작업 레지스트리',
+      registryHint: '실행 중 작업을 어디에 보관할지.',
+      registry: {
+        in_memory: { title: 'In-memory', desc: '프로세스 수명 스토어; 종료 시 작업 소멸.' },
+      },
+      policyTitle: '실행 정책',
+      policyHint: '작업을 await 할지 / 어떻게 할지.',
+      policy: {
+        fire: { title: 'Fire & forget', desc: '등록 후 즉시 반환.' },
+        eager: { title: 'Eager wait', desc: '각 작업을 동기 await 후 진행.' },
+        timed: { title: 'Timed wait', desc: '작업당 timeout 까지 bounded wait.' },
+      },
+      config: {
+        timed: {
+          timeoutSeconds: 'Timeout (초)',
+          timeoutSecondsHint: '작업당 최대 대기 시간; 넘으면 포기.',
+        },
+      },
+    },
+    stage16: {
+      activeDesc: '16단계는 루프 continue/complete/error/escalate 를 결정합니다. 필수 — 끄면 파이프라인이 정지.',
+      controllerTitle: '루프 컨트롤러',
+      controllerHint: '루프 continue/complete/error 결정 방식.',
+      controller: {
+        standard: { title: '표준', desc: 'tool_use 면 continue; 신호로 결정. 가장 일반적.' },
+        single_turn: { title: '단일 턴', desc: '항상 1턴 후 완료.' },
+        budget_aware: { title: '예산 인식', desc: '비용 / 토큰 예산이 한계에 가까우면 중단.' },
+        multi_dim_budget: { title: '다차원 예산', desc: '플러그형 예산 차원 (반복 / 비용 / 토큰 / 시간 / 도구 호출).' },
+      },
+      maxTurnsTitle: '최대 턴 수',
+      maxTurnsDesc: '0 = 무제한. 컨트롤러와 무관하게 적용되는 하드 ceiling.',
+      earlyStopTitle: '조기 종료 신호',
+      earlyStopDesc: '루프를 즉시 중단하는 완료 신호 목록. 예: COMPLETE, ERROR, BLOCKED.',
+    },
+    stage17: {
+      activeDesc: '17단계는 최종 결과를 소비자에게 전달합니다. 끄면 콜백 / TTS / VTuber 감정 업데이트 등이 모두 억제됩니다.',
+      chainTitle: '이미터 체인',
+      chainHint: '순서가 중요 — 매 턴 위에서 아래로 실행됩니다. 화살표로 재정렬.',
+      empty: '이미터가 없습니다. 결과를 소비자에게 전달하려면 추가하세요.',
+      addPick: '+ 이미터 추가…',
+      emit: {
+        text: { title: '텍스트', desc: '호스트의 text 콜백으로 평문 전달.' },
+        callback: { title: '콜백', desc: 'state 전체 접근 가능한 범용 콜백.' },
+        vtuber: { title: 'VTuber', desc: '감정 추출 + live2d 콜백으로 아바타 상태 푸시.' },
+        tts: { title: 'TTS', desc: 'TTS 콜백으로 음성 합성.' },
+      },
+    },
     stage14: {
       activeTitle: '이 단계 실행',
       activeDesc: '14단계는 루프 종료 여부를 결정합니다. 끄면 pipeline.single_turn 과 무관하게 single-turn 모드로 강제됩니다.',
