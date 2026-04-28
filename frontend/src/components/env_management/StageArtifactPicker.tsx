@@ -1,14 +1,20 @@
 'use client';
 
 /**
- * StageArtifactPicker — compact artifact dropdown that lives in the
- * stage header (left of the "자세히" button). Hydrates the available
- * artifact list via `catalogApi.listArtifacts(order)`; until the
- * response lands, falls back to the entry's current pick + 'default'
- * so the control is always interactive.
+ * StageArtifactPicker — compact artifact dropdown for the stage
+ * header. Renders as a self-contained pill: a small Layers icon + the
+ * current artifact name + chevron. The "ARTIFACT" label is dropped
+ * from the surrounding chrome — the icon carries the affordance and
+ * the tooltip names the field for screen readers / hover discovery.
+ *
+ * Hydrates the available artifact list via
+ * `catalogApi.listArtifacts(order)`; until the response lands, falls
+ * back to the entry's current pick + 'default' so the control stays
+ * interactive.
  */
 
 import { useEffect, useState } from 'react';
+import { Layers } from 'lucide-react';
 import { catalogApi } from '@/lib/environmentApi';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -60,25 +66,27 @@ export default function StageArtifactPicker({ order, entry }: Props) {
   })();
 
   return (
-    <div className="flex items-center gap-1.5 shrink-0 self-start">
-      <span className="text-[0.6875rem] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider whitespace-nowrap">
-        {t('envManagement.stageArtifact')}
-      </span>
-      <Select
-        value={current}
-        onValueChange={(v) => patchStage(order, { artifact: v })}
+    <Select
+      value={current}
+      onValueChange={(v) => patchStage(order, { artifact: v })}
+    >
+      <SelectTrigger
+        className="h-8 px-3 min-w-[170px] text-[0.75rem] font-medium shrink-0"
+        title={t('envManagement.stageArtifact')}
+        aria-label={t('envManagement.stageArtifact')}
       >
-        <SelectTrigger className="h-8 min-w-[160px] text-[0.75rem]">
+        <span className="inline-flex items-center gap-2 min-w-0">
+          <Layers className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
           <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((name) => (
-            <SelectItem key={name} value={name} className="text-[0.75rem]">
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((name) => (
+          <SelectItem key={name} value={name} className="text-[0.75rem]">
+            {name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
