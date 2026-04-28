@@ -87,6 +87,16 @@ import { memoryUpdateToolHelp } from './MemoryUpdate';
 import { memoryDeleteToolHelp } from './MemoryDelete';
 import { memoryLinkToolHelp } from './MemoryLink';
 
+// ── Geny knowledge family ──
+import { knowledgeSearchToolHelp } from './KnowledgeSearch';
+import { knowledgeReadToolHelp } from './KnowledgeRead';
+import { knowledgeListToolHelp } from './KnowledgeList';
+import { knowledgePromoteToolHelp } from './KnowledgePromote';
+
+// ── Geny opsidian family ──
+import { opsidianBrowseToolHelp } from './OpsidianBrowse';
+import { opsidianReadToolHelp } from './OpsidianRead';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -147,3 +157,11 @@ registerToolDetail('memory_list', memoryListToolHelp);
 registerToolDetail('memory_update', memoryUpdateToolHelp);
 registerToolDetail('memory_delete', memoryDeleteToolHelp);
 registerToolDetail('memory_link', memoryLinkToolHelp);
+
+registerToolDetail('knowledge_search', knowledgeSearchToolHelp);
+registerToolDetail('knowledge_read', knowledgeReadToolHelp);
+registerToolDetail('knowledge_list', knowledgeListToolHelp);
+registerToolDetail('knowledge_promote', knowledgePromoteToolHelp);
+
+registerToolDetail('opsidian_browse', opsidianBrowseToolHelp);
+registerToolDetail('opsidian_read', opsidianReadToolHelp);
