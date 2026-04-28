@@ -3,8 +3,8 @@
 /**
  * StageViewModeToggle — segmented control in the stage header.
  *
- * Total height matches h-8 (the canonical control height across the
- * stage header chrome): outer p-0.5 + inner buttons h-7. Same
+ * Total height matches h-9 (the canonical control height across the
+ * stage header chrome): outer p-0.5 + inner buttons h-8. Same
  * border / radius / background as the artifact dropdown and detail
  * button so the three controls read as a unified bar.
  */
@@ -26,7 +26,7 @@ export default function StageViewModeToggle({ mode, onChange }: Props) {
     <div
       role="group"
       aria-label="View mode"
-      className="inline-flex items-center h-8 p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0"
+      className="inline-flex items-center h-9 p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0"
     >
       <ModeButton
         active={mode === 'basic'}
@@ -65,7 +65,7 @@ function ModeButton({
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-[0.75rem] font-medium transition-colors ${
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded text-[0.75rem] font-medium transition-colors ${
         active
           ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
           : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
