@@ -38,10 +38,13 @@ import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
 import Stage12AgentEditor from './stages/Stage12AgentEditor';
 import Stage13TaskRegistryEditor from './stages/Stage13TaskRegistryEditor';
 import Stage14EvaluateEditor from './stages/Stage14EvaluateEditor';
+import Stage15HitlEditor from './stages/Stage15HitlEditor';
 import Stage16LoopEditor from './stages/Stage16LoopEditor';
 import Stage17EmitEditor from './stages/Stage17EmitEditor';
-import Stage15HitlEditor from './stages/Stage15HitlEditor';
 import Stage18MemoryEditor from './stages/Stage18MemoryEditor';
+import Stage19SummarizeEditor from './stages/Stage19SummarizeEditor';
+import Stage20PersistEditor from './stages/Stage20PersistEditor';
+import Stage21YieldEditor from './stages/Stage21YieldEditor';
 
 // Theme-aware palette mirroring StageProgressBar so the detail-view
 // header circle reads the same as the navigator circle for the same
@@ -85,6 +88,9 @@ const CURATED_EDITORS: Record<
   16: Stage16LoopEditor,
   17: Stage17EmitEditor,
   18: Stage18MemoryEditor,
+  19: Stage19SummarizeEditor,
+  20: Stage20PersistEditor,
+  21: Stage21YieldEditor,
 };
 
 export interface StageDetailViewProps {
