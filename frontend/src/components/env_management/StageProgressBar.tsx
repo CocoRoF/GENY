@@ -124,10 +124,15 @@ export default function StageProgressBar({
 
   // Centre the middle-copy button for `order` in the viewport. We
   // always target copy 1 (the canonical position) so a smooth scroll
-  // never has to cross a copy boundary mid-animation, where it could
-  // collide with the edge-jump in onScroll. If the viewport is
-  // currently parked in copy 0 or copy 2, we pre-warp scrollLeft into
-  // copy 1's equivalent position first (silent), then animate.
+  // never has to cross a copy boundary mid-animation, where it would
+  // collide with the edge-jump in onScroll.
+  //
+  // The pre-warp threshold is keyed on the *viewport centre*, not on
+  // scrollLeft. scrollLeft for a viewport whose centre lands on
+  // copy 1's stage 3 is roughly W - 600 (for clientWidth=1200) — well
+  // below W, even though the user is plainly looking at copy 1. A
+  // scrollLeft-based threshold would warp them anyway, sending the
+  // smooth scroll the long way round (the bug behind 3 → 0 → 21 → 4).
   const centreOnOrder = useCallback(
     (order: number, smooth: boolean) => {
       const sc = scrollRef.current;
@@ -136,8 +141,9 @@ export default function StageProgressBar({
       if (!mid) return;
       const W = segmentWidthRef.current;
       if (W > 0) {
-        if (sc.scrollLeft < W) sc.scrollLeft += W;
-        else if (sc.scrollLeft > 2 * W) sc.scrollLeft -= W;
+        const centre = sc.scrollLeft + sc.clientWidth / 2;
+        if (centre < W) sc.scrollLeft += W;
+        else if (centre >= 2 * W) sc.scrollLeft -= W;
       }
       const target =
         mid.offsetLeft + mid.offsetWidth / 2 - sc.clientWidth / 2;
@@ -180,15 +186,28 @@ export default function StageProgressBar({
   // Edge-jump: when the viewport drifts into the leading or trailing
   // copy, silently warp scrollLeft by one segment width to keep the
   // user inside the middle copy. Looks like infinite rotation.
+  //
+  // Threshold is on viewport CENTRE (with 0.5W hysteresis around copy
+  // 1's [W, 2W] range) — using scrollLeft here would fire spuriously
+  // when the centre is plainly inside copy 1.
+  //
+  // Drag-math invariant: while a drag is in progress, the pointermove
+  // handler keeps recomputing `scrollLeft = startScroll - dx`. If we
+  // warp scrollLeft without also shifting startScroll by the same
+  // amount, the next pointermove silently undoes the warp — and the
+  // wheel never wraps at the 21 ↔ 0 seam. Update both together.
   const onScroll = useCallback(() => {
     const sc = scrollRef.current;
     if (!sc) return;
     const W = segmentWidthRef.current;
     if (W <= 0) return;
-    if (sc.scrollLeft < W * 0.5) {
+    const centre = sc.scrollLeft + sc.clientWidth / 2;
+    if (centre < W * 0.5) {
       sc.scrollLeft += W;
-    } else if (sc.scrollLeft > W * 2.5) {
+      dragRef.current.startScroll += W;
+    } else if (centre > W * 2.5) {
       sc.scrollLeft -= W;
+      dragRef.current.startScroll -= W;
     }
   }, []);
 
