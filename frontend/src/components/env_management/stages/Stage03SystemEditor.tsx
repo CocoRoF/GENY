@@ -22,6 +22,7 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import { Textarea } from '@/components/ui/textarea';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const STARTER_CHIPS = [
@@ -32,14 +33,19 @@ const STARTER_CHIPS = [
   { id: 'safety', textKey: 'envManagement.stage03.starters.safety' },
 ];
 
+// Tile ids must match geny-executor's registered impl keys exactly.
+// builder slot registry: static | composable | dynamic_persona.
+// (Class names like "StaticPromptBuilder" are NOT what
+// catalog.available_impls returns — using them silently disables
+// every tile.)
 const BUILDER_OPTIONS = [
   {
-    id: 'StaticPromptBuilder',
+    id: 'static',
     titleKey: 'envManagement.stage03.builder.static.title',
     descKey: 'envManagement.stage03.builder.static.desc',
   },
   {
-    id: 'ComposablePromptBuilder',
+    id: 'composable',
     titleKey: 'envManagement.stage03.builder.composable.title',
     descKey: 'envManagement.stage03.builder.composable.desc',
   },
@@ -78,7 +84,7 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
   const currentBuilder =
     entry.strategies?.['builder'] ??
     intro?.strategy_slots?.['builder']?.current_impl ??
-    'StaticPromptBuilder';
+    'static';
 
   const setBuilder = (id: string) =>
     patchStage(order, {
@@ -103,7 +109,7 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
     setPrompt(prompt + sep + text);
   };
 
-  const isStatic = currentBuilder === 'StaticPromptBuilder';
+  const isStatic = currentBuilder === 'static';
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,6 +119,7 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage03.builderTitle')}
           </h4>
+          <SectionHelpButton helpId="stage03.builder" />
         </header>
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           {t('envManagement.stage03.builderHint')}
@@ -152,9 +159,12 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
       {isStatic && (
         <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
           <header className="flex items-center justify-between gap-2">
-            <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.stage03.systemPromptTitle')}
-            </h4>
+            <div className="flex items-center gap-2">
+              <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+                {t('envManagement.stage03.systemPromptTitle')}
+              </h4>
+              <SectionHelpButton helpId="stage03.systemPrompt" />
+            </div>
             <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] tabular-nums">
               {t('envManagement.stage03.charCount', { n: String(charCount) })}
             </span>
