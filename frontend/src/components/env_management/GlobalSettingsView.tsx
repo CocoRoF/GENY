@@ -54,9 +54,9 @@ import {
   inferProvider,
   type ProviderId,
 } from '@/lib/modelCatalog';
-import ToolCheckboxGrid from './ToolCheckboxGrid';
 import GenyToolsPicker from './GenyToolsPicker';
 import MCPServerEditor, { type MCPServerEntry } from './MCPServerEditor';
+import BuiltinToolsExplorer from './BuiltinToolsExplorer';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import { HooksTab } from '@/components/tabs/HooksTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
@@ -276,11 +276,9 @@ export default function GlobalSettingsView() {
                     'envManagement.globals.executorTools.description',
                   )}
                 />
-                <ToolCheckboxGrid
+                <BuiltinToolsExplorer
                   value={(draft.tools?.built_in ?? []) as string[]}
                   onChange={(names) => patchTools({ built_in: names })}
-                  mode="allowlist"
-                  hint={t('envManagement.global.toolsPickerHint')}
                 />
               </div>
             )}
