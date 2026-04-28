@@ -69,7 +69,27 @@ import { stage20FrequencyHelp } from './Stage20Frequency';
 
 import { stage21FormatterHelp } from './Stage21Formatter';
 
+// Globals (stage 0) — 8 sub-tabs.
+import { globalsModelHelp } from './GlobalsModel';
+import { globalsPipelineHelp } from './GlobalsPipeline';
+import { globalsExecutorToolsHelp } from './GlobalsExecutorTools';
+import { globalsGenyToolsHelp } from './GlobalsGenyTools';
+import { globalsMcpHelp } from './GlobalsMCP';
+import { globalsHooksHelp } from './GlobalsHooks';
+import { globalsPermissionsHelp } from './GlobalsPermissions';
+import { globalsSkillsHelp } from './GlobalsSkills';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
+  // Globals (stage 0)
+  'globals.model': globalsModelHelp,
+  'globals.pipeline': globalsPipelineHelp,
+  'globals.executorTools': globalsExecutorToolsHelp,
+  'globals.genyTools': globalsGenyToolsHelp,
+  'globals.mcp': globalsMcpHelp,
+  'globals.hooks': globalsHooksHelp,
+  'globals.permissions': globalsPermissionsHelp,
+  'globals.skills': globalsSkillsHelp,
+
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
   'stage01.normalizer': stage01NormalizerHelp,
