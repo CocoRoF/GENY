@@ -108,6 +108,19 @@ import { roomCreateToolHelp } from './RoomCreate';
 import { roomInfoToolHelp } from './RoomInfo';
 import { roomAddMembersToolHelp } from './RoomAddMembers';
 
+// ── Geny messaging family ──
+import { sendRoomMessageToolHelp } from './SendRoomMessage';
+import { readRoomMessagesToolHelp } from './ReadRoomMessages';
+import { sendDirectMessageInternalToolHelp } from './SendDirectMessageInternal';
+import { sendDirectMessageExternalToolHelp } from './SendDirectMessageExternal';
+import { readInboxToolHelp } from './ReadInbox';
+
+// ── Geny game family ──
+import { feedToolHelp } from './Feed';
+import { giftToolHelp } from './Gift';
+import { playToolHelp } from './Play';
+import { talkToolHelp } from './Talk';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -185,3 +198,14 @@ registerToolDetail('room_list', roomListToolHelp);
 registerToolDetail('room_create', roomCreateToolHelp);
 registerToolDetail('room_info', roomInfoToolHelp);
 registerToolDetail('room_add_members', roomAddMembersToolHelp);
+
+registerToolDetail('send_room_message', sendRoomMessageToolHelp);
+registerToolDetail('read_room_messages', readRoomMessagesToolHelp);
+registerToolDetail('send_direct_message_internal', sendDirectMessageInternalToolHelp);
+registerToolDetail('send_direct_message_external', sendDirectMessageExternalToolHelp);
+registerToolDetail('read_inbox', readInboxToolHelp);
+
+registerToolDetail('feed', feedToolHelp);
+registerToolDetail('gift', giftToolHelp);
+registerToolDetail('play', playToolHelp);
+registerToolDetail('talk', talkToolHelp);
