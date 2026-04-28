@@ -30,6 +30,7 @@ import type {
 } from '@/types/environment';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 // Friendly choice tiles for the two main slot picks. The catalog is
@@ -196,6 +197,7 @@ export default function Stage01InputEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage01.validatorTitle')}
           </h4>
+          <SectionHelpButton helpId="stage01.validator" />
         </header>
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           {t('envManagement.stage01.validatorHint')}
@@ -271,6 +273,7 @@ export default function Stage01InputEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage01.normalizerTitle')}
           </h4>
+          <SectionHelpButton helpId="stage01.normalizer" />
         </header>
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           {t('envManagement.stage01.normalizerHint')}
