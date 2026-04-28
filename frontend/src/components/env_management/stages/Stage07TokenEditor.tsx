@@ -80,6 +80,7 @@ export default function Stage07TokenEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage07.trackerTitle"
         hintKey="envManagement.stage07.trackerHint"
+        helpId="stage07.tracker"
         options={TRACKER_OPTIONS}
         available={trackerAvail}
         current={currentTracker}
@@ -90,6 +91,7 @@ export default function Stage07TokenEditor({ order, entry }: Props) {
       <TilePicker
         titleKey="envManagement.stage07.calcTitle"
         hintKey="envManagement.stage07.calcHint"
+        helpId="stage07.calculator"
         options={CALC_OPTIONS}
         available={calcAvail}
         current={currentCalc}

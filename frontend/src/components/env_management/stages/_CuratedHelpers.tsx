@@ -17,6 +17,7 @@ import type { StageManifestEntry } from '@/types/environment';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 export interface TileOption {
@@ -28,6 +29,7 @@ export interface TileOption {
 interface TilePickerProps {
   titleKey: string;
   hintKey?: string;
+  helpId?: string;
   options: TileOption[];
   available: Set<string>;
   current: string;
@@ -39,6 +41,7 @@ interface TilePickerProps {
 export function TilePicker({
   titleKey,
   hintKey,
+  helpId,
   options,
   available,
   current,
@@ -55,6 +58,7 @@ export function TilePicker({
         <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
           {t(titleKey)}
         </h4>
+        {helpId && <SectionHelpButton helpId={helpId} />}
       </header>
       {hintKey && (
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
