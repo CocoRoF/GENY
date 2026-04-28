@@ -35,7 +35,11 @@ import Stage08ThinkEditor from './stages/Stage08ThinkEditor';
 import Stage09ParseEditor from './stages/Stage09ParseEditor';
 import Stage10ToolsEditor from './stages/Stage10ToolsEditor';
 import Stage11ToolReviewEditor from './stages/Stage11ToolReviewEditor';
+import Stage12AgentEditor from './stages/Stage12AgentEditor';
+import Stage13TaskRegistryEditor from './stages/Stage13TaskRegistryEditor';
 import Stage14EvaluateEditor from './stages/Stage14EvaluateEditor';
+import Stage16LoopEditor from './stages/Stage16LoopEditor';
+import Stage17EmitEditor from './stages/Stage17EmitEditor';
 import Stage15HitlEditor from './stages/Stage15HitlEditor';
 import Stage18MemoryEditor from './stages/Stage18MemoryEditor';
 
@@ -74,8 +78,12 @@ const CURATED_EDITORS: Record<
   9: Stage09ParseEditor,
   10: Stage10ToolsEditor,
   11: Stage11ToolReviewEditor,
+  12: Stage12AgentEditor,
+  13: Stage13TaskRegistryEditor,
   14: Stage14EvaluateEditor,
   15: Stage15HitlEditor,
+  16: Stage16LoopEditor,
+  17: Stage17EmitEditor,
   18: Stage18MemoryEditor,
 };
 

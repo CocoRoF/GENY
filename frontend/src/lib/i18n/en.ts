@@ -1071,6 +1071,68 @@ const en = {
       advancedTitle: 'Advanced',
       advancedHint: 'artifact / strategies / raw chain JSON',
     },
+    stage12: {
+      activeDesc: 'Stage 12 routes the turn through an orchestrator. Disabling it falls back to single-agent execution regardless of orchestrator pick.',
+      orchTitle: 'Orchestrator',
+      orchHint: 'How sub-agents are dispatched per turn.',
+      orch: {
+        single: { title: 'Single agent', desc: 'No delegation — pass-through. Most common.' },
+        delegate: { title: 'Delegate', desc: 'Hand off when state.delegate_requests is set.' },
+        evaluator: { title: 'Evaluator', desc: 'Generator/evaluator pattern (two-pass turn).' },
+        subagent: { title: 'Subagent type', desc: 'Typed dispatch via SubagentTypeRegistry.' },
+      },
+      maxDelegationsTitle: 'Max delegations per turn',
+      maxDelegationsDesc: 'Hard cap on sub-agent calls within a single turn.',
+    },
+    stage13: {
+      activeDesc: 'Stage 13 drains pending tasks from state.shared and routes them through a registry + policy. Disabling it leaves tasks queued.',
+      registryTitle: 'Task registry',
+      registryHint: 'Where tasks live during the run.',
+      registry: {
+        in_memory: { title: 'In-memory', desc: 'Process-lifetime store; tasks vanish when the process exits.' },
+      },
+      policyTitle: 'Execution policy',
+      policyHint: 'How tasks are awaited (or not).',
+      policy: {
+        fire: { title: 'Fire & forget', desc: 'Register and return immediately.' },
+        eager: { title: 'Eager wait', desc: 'Sync-await each task before continuing.' },
+        timed: { title: 'Timed wait', desc: 'Bounded wait with a per-task timeout.' },
+      },
+      config: {
+        timed: {
+          timeoutSeconds: 'Timeout (seconds)',
+          timeoutSecondsHint: 'Wait at most this long before giving up on a task.',
+        },
+      },
+    },
+    stage16: {
+      activeDesc: 'Stage 16 decides whether the loop continues, completes, errors, or escalates. Required — disabling stalls the pipeline.',
+      controllerTitle: 'Loop controller',
+      controllerHint: 'How loop continue/complete/error decisions are made.',
+      controller: {
+        standard: { title: 'Standard', desc: 'tool_use continues; signals decide. Most common.' },
+        single_turn: { title: 'Single turn', desc: 'Always complete after one turn.' },
+        budget_aware: { title: 'Budget-aware', desc: 'Stop when cost / token budgets are near limits.' },
+        multi_dim_budget: { title: 'Multi-dim budget', desc: 'Pluggable budget dimensions (iteration / cost / tokens / wall-clock / tool calls).' },
+      },
+      maxTurnsTitle: 'Max turns',
+      maxTurnsDesc: '0 = no cap. Hard ceiling on loop iterations regardless of controller.',
+      earlyStopTitle: 'Early-stop signals',
+      earlyStopDesc: 'Completion signals that abort the loop immediately. e.g. COMPLETE, ERROR, BLOCKED.',
+    },
+    stage17: {
+      activeDesc: 'Stage 17 delivers the final result to consumers. Disabling it suppresses callbacks, TTS, vtuber emotion updates, etc.',
+      chainTitle: 'Emitter chain',
+      chainHint: 'Order matters — emitters run top-to-bottom each turn. Reorder with the arrows.',
+      empty: 'No emitters. Add one to deliver final results to consumers.',
+      addPick: '+ Add emitter…',
+      emit: {
+        text: { title: 'Text', desc: 'Emit plain text via the host\'s text callback.' },
+        callback: { title: 'Callback', desc: 'Generic callback with full state access.' },
+        vtuber: { title: 'VTuber', desc: 'Extract emotion + push avatar state to the live2d callback.' },
+        tts: { title: 'TTS', desc: 'Text-to-speech synthesis via the TTS callback.' },
+      },
+    },
     stage14: {
       activeTitle: 'Run this stage',
       activeDesc: 'Stage 14 decides whether to loop back or terminate. Turning it off forces the pipeline into single-turn mode regardless of pipeline.single_turn.',
