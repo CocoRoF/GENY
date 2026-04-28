@@ -1,26 +1,29 @@
 'use client';
 
 /**
- * StageProgressBar — premium horizontal stage navigator (cycle
- * 20260427_2 PR-3 → polished in PR-4).
+ * StageProgressBar — premium horizontal stage navigator with an
+ * infinite-rotation wheel (cycle 20260427_2 PR-3 → polished in PR-4
+ * → wheel made circular here).
  *
- * Layout fix: circle row + label row are split so the connecting rail
- * passes exactly through the circle centres (was hitting the label
- * gap before).
+ * Layout: circle row + label row are split so the connecting rail
+ * passes exactly through the circle centres.
  *
- * Active state: stages active in the manifest get a clearly distinct
- * GOLD/AMBER look, regardless of category. Selected (currently being
- * edited) gets a strong PRIMARY-blue gradient + ring + glow that's
- * visible in both light and dark themes.
+ * State colours: pipeline stages use green ("active in manifest") and
+ * blue ("currently selected"); stage 0 (globals) uses violet so it
+ * reads as a meta entry rather than a pipeline step.
  *
- * Drag fix: previous version used setPointerCapture inside
- * pointerdown, which on some browsers pre-empts the child button's
- * click event. Switched to window-level pointermove/pointerup listeners
- * attached on pointerdown and removed on pointerup — child clicks
- * fire normally.
+ * Infinite wheel: the strip renders three back-to-back copies of
+ * [0..21]. Initial scroll lands inside the middle copy. An onScroll
+ * handler watches scrollLeft and silently jumps it by one segment
+ * width when it crosses into the leading or trailing copy — the user
+ * perceives unbounded scrolling, with stage 21 ↔ stage 0 wrapping
+ * naturally.
+ *
+ * Drag: window-level pointermove/pointerup (no setPointerCapture) so
+ * child clicks still fire normally.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { ArrowLeft, Settings2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -83,6 +86,15 @@ export interface StageProgressBarProps {
 // pipeline stages from the executor manifest.
 const ALL_ORDERS = [0, ...Array.from({ length: 21 }, (_, i) => i + 1)];
 
+// Render N copies of ALL_ORDERS back-to-back so scrolling can wrap
+// silently between them. Three is enough to keep one full segment of
+// buffer on either side of the visible viewport at common widths.
+const WHEEL_COPIES = 3;
+const REPEATED_ITEMS: { order: number; copy: number }[] = [];
+for (let c = 0; c < WHEEL_COPIES; c++) {
+  for (const order of ALL_ORDERS) REPEATED_ITEMS.push({ order, copy: c });
+}
+
 const DRAG_THRESHOLD_PX = 5;
 const FRICTION = 0.92;
 const MIN_VELOCITY = 0.4; // px/frame at ~60fps
@@ -102,21 +114,83 @@ export default function StageProgressBar({
   const palette = PALETTE[theme === 'dark' ? 'dark' : 'light'];
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  // Buttons keyed by `${copy}-${order}`; one entry per rendered copy.
+  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const rafRef = useRef<number | null>(null);
   const wasDraggingRef = useRef(false);
+  // Width of one full [0..21] segment, measured at layout time.
+  const segmentWidthRef = useRef(0);
+  const initialisedRef = useRef(false);
 
-  // Auto-centre selected stage on change.
-  useEffect(() => {
-    const el = itemRefs.current.get(selectedOrder);
-    if (el && scrollRef.current) {
-      el.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
-        inline: 'center',
+  // Centre the middle-copy button for `order` in the viewport. We
+  // always target copy 1 (the canonical position) so a smooth scroll
+  // never has to cross a copy boundary mid-animation, where it could
+  // collide with the edge-jump in onScroll. If the viewport is
+  // currently parked in copy 0 or copy 2, we pre-warp scrollLeft into
+  // copy 1's equivalent position first (silent), then animate.
+  const centreOnOrder = useCallback(
+    (order: number, smooth: boolean) => {
+      const sc = scrollRef.current;
+      if (!sc) return;
+      const mid = itemRefs.current.get(`1-${order}`);
+      if (!mid) return;
+      const W = segmentWidthRef.current;
+      if (W > 0) {
+        if (sc.scrollLeft < W) sc.scrollLeft += W;
+        else if (sc.scrollLeft > 2 * W) sc.scrollLeft -= W;
+      }
+      const target =
+        mid.offsetLeft + mid.offsetWidth / 2 - sc.clientWidth / 2;
+      sc.scrollTo({
+        left: target,
+        behavior: smooth ? 'smooth' : 'auto',
       });
+    },
+    [],
+  );
+
+  // Initial centring: drop straight into the middle copy at the
+  // currently selected order. Runs once after refs settle.
+  useLayoutEffect(() => {
+    if (initialisedRef.current) return;
+    const sc = scrollRef.current;
+    if (!sc) return;
+    if (itemRefs.current.size < WHEEL_COPIES * ALL_ORDERS.length) return;
+    // Measure segment width from any two adjacent copies of order 0.
+    const a = itemRefs.current.get(`0-0`);
+    const b = itemRefs.current.get(`1-0`);
+    if (a && b) {
+      segmentWidthRef.current = b.offsetLeft - a.offsetLeft;
     }
-  }, [selectedOrder]);
+    // Place the middle-copy button for selectedOrder at the viewport centre.
+    const mid = itemRefs.current.get(`1-${selectedOrder}`);
+    if (mid) {
+      sc.scrollLeft =
+        mid.offsetLeft + mid.offsetWidth / 2 - sc.clientWidth / 2;
+    }
+    initialisedRef.current = true;
+  });
+
+  // Auto-centre selected stage when it changes (after init).
+  useEffect(() => {
+    if (!initialisedRef.current) return;
+    centreOnOrder(selectedOrder, true);
+  }, [selectedOrder, centreOnOrder]);
+
+  // Edge-jump: when the viewport drifts into the leading or trailing
+  // copy, silently warp scrollLeft by one segment width to keep the
+  // user inside the middle copy. Looks like infinite rotation.
+  const onScroll = useCallback(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const W = segmentWidthRef.current;
+    if (W <= 0) return;
+    if (sc.scrollLeft < W * 0.5) {
+      sc.scrollLeft += W;
+    } else if (sc.scrollLeft > W * 2.5) {
+      sc.scrollLeft -= W;
+    }
+  }, []);
 
   // Cancel any in-flight momentum on unmount.
   useEffect(() => {
@@ -281,6 +355,7 @@ export default function StageProgressBar({
         ref={scrollRef}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
+        onScroll={onScroll}
         className="relative z-10 flex flex-col flex-1 min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide cursor-grab active:cursor-grabbing select-none"
         style={{
           maskImage:
@@ -303,9 +378,12 @@ export default function StageProgressBar({
             }}
           />
 
-          {/* Items + connectors share a flex row aligned to the circle level */}
+          {/* Items + connectors share a flex row aligned to the circle level.
+              We render WHEEL_COPIES copies of [0..21] back-to-back; the
+              edge-jump in onScroll keeps the viewport inside the middle
+              copy so it feels like infinite rotation. */}
           <div className="relative flex items-start">
-            {ALL_ORDERS.map((order, idx) => {
+            {REPEATED_ITEMS.map(({ order, copy }, idx) => {
               const isGlobals = order === 0;
               const meta = isGlobals
                 ? undefined
@@ -316,8 +394,9 @@ export default function StageProgressBar({
               const label = isGlobals
                 ? t('envManagement.compactBar.globalsLabel')
                 : (meta?.displayName ?? `Stage ${order}`);
-              const isLast = idx === ALL_ORDERS.length - 1;
+              const isLast = idx === REPEATED_ITEMS.length - 1;
               const nextActive = activeOrders.has(order + 1);
+              const refKey = `${copy}-${order}`;
 
               const circleStyle: React.CSSProperties = isSelected
                 ? {
@@ -355,7 +434,7 @@ export default function StageProgressBar({
                     : 'hsl(var(--muted-foreground))';
 
               return (
-                <div key={order} className="flex items-start">
+                <div key={refKey} className="flex items-start">
                   <div className="flex flex-col items-center min-w-[84px]">
                     {/* Circle row — fixed height so circles align with rail */}
                     <div
@@ -364,8 +443,8 @@ export default function StageProgressBar({
                     >
                       <button
                         ref={(el) => {
-                          if (el) itemRefs.current.set(order, el);
-                          else itemRefs.current.delete(order);
+                          if (el) itemRefs.current.set(refKey, el);
+                          else itemRefs.current.delete(refKey);
                         }}
                         data-stage-button
                         type="button"
