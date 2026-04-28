@@ -23,6 +23,7 @@ import type {
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const STRATEGY_OPTIONS = [
@@ -97,8 +98,11 @@ export default function Stage02ContextEditor({ order, entry }: Props) {
       {/* ── Stateless toggle (stage.config) ── */}
       <section className="flex items-center justify-between gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <div className="min-w-0">
-          <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.stage02.statelessTitle')}
+          <div className="flex items-center gap-2">
+            <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+              {t('envManagement.stage02.statelessTitle')}
+            </span>
+            <SectionHelpButton helpId="stage02.stateless" />
           </div>
           <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] mt-0.5">
             {t('envManagement.stage02.statelessDesc')}
@@ -111,6 +115,7 @@ export default function Stage02ContextEditor({ order, entry }: Props) {
       <SlotSection
         titleKey="envManagement.stage02.strategyTitle"
         hintKey="envManagement.stage02.strategyHint"
+        helpId="stage02.strategy"
         options={STRATEGY_OPTIONS}
         available={availableStrategy}
         current={currentStrategy}
@@ -141,6 +146,7 @@ export default function Stage02ContextEditor({ order, entry }: Props) {
       <SlotSection
         titleKey="envManagement.stage02.compactorTitle"
         hintKey="envManagement.stage02.compactorHint"
+        helpId="stage02.compactor"
         options={COMPACTOR_OPTIONS}
         available={availableCompactor}
         current={currentCompactor}
@@ -188,6 +194,7 @@ export default function Stage02ContextEditor({ order, entry }: Props) {
       <SlotSection
         titleKey="envManagement.stage02.retrieverTitle"
         hintKey="envManagement.stage02.retrieverHint"
+        helpId="stage02.retriever"
         options={RETRIEVER_OPTIONS}
         available={availableRetriever}
         current={currentRetriever}
@@ -231,6 +238,7 @@ interface SlotOption {
 interface SlotSectionProps {
   titleKey: string;
   hintKey: string;
+  helpId?: string;
   options: SlotOption[];
   available: Set<string>;
   current: string;
@@ -242,6 +250,7 @@ interface SlotSectionProps {
 function SlotSection({
   titleKey,
   hintKey,
+  helpId,
   options,
   available,
   current,
@@ -256,6 +265,7 @@ function SlotSection({
         <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
           {t(titleKey)}
         </h4>
+        {helpId && <SectionHelpButton helpId={helpId} />}
       </header>
       <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
         {t(hintKey)}
