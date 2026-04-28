@@ -28,6 +28,7 @@ import type {
 } from '@/types/environment';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 const GUARD_META: Record<
@@ -128,8 +129,11 @@ export default function Stage04GuardEditor({ order, entry }: Props) {
       <section className="flex flex-col gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.stage04.failFastTitle')}
+            <div className="flex items-center gap-2">
+              <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+                {t('envManagement.stage04.failFastTitle')}
+              </span>
+              <SectionHelpButton helpId="stage04.config" />
             </div>
             <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] mt-0.5">
               {t('envManagement.stage04.failFastDesc')}
@@ -162,9 +166,12 @@ export default function Stage04GuardEditor({ order, entry }: Props) {
       {/* ── Guard chain ── */}
       <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <header className="flex items-center justify-between gap-2">
-          <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.stage04.chainTitle')}
-          </h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+              {t('envManagement.stage04.chainTitle')}
+            </h4>
+            <SectionHelpButton helpId="stage04.chain" />
+          </div>
           <span className="text-[0.625rem] text-[hsl(var(--muted-foreground))] tabular-nums">
             {currentChain.length} / {availableGuards.length}
           </span>
