@@ -36,7 +36,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
-interface MCPServerEntry {
+export interface MCPServerEntry {
   name: string;
   command: string;
   args?: string[];

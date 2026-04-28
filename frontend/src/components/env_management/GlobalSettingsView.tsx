@@ -56,7 +56,7 @@ import {
 } from '@/lib/modelCatalog';
 import ToolCheckboxGrid from './ToolCheckboxGrid';
 import GenyToolsPicker from './GenyToolsPicker';
-import MCPServerEditor from './MCPServerEditor';
+import MCPServerEditor, { type MCPServerEntry } from './MCPServerEditor';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import { HooksTab } from '@/components/tabs/HooksTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
@@ -306,9 +306,7 @@ export default function GlobalSettingsView() {
                 />
                 <MCPServerEditor
                   value={
-                    (draft.tools?.mcp_servers ?? []) as Parameters<
-                      typeof MCPServerEditor
-                    >[0]['value']
+                    (draft.tools?.mcp_servers ?? []) as unknown as MCPServerEntry[]
                   }
                   onChange={(next) =>
                     patchTools({
