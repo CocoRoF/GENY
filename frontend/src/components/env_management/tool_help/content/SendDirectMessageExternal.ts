@@ -37,7 +37,7 @@ Hosts may rate-limit external DMs more aggressively than internal ones to discou
       caption: 'Ask a security specialist for a quick check',
       body: `{
   "session_id": "sess_security_reviewer_42",
-  "body": "Quick question outside our usual pair — does this regex pattern leak any PII? `^[a-z0-9._%+-]+@[a-z0-9.-]+`"
+  "body": "Quick question outside our usual pair — does this regex pattern leak any PII? \`^[a-z0-9._%+-]+@[a-z0-9.-]+\`"
 }`,
       note: 'Goes to the named session\'s inbox. They reply at their pace.',
     },
