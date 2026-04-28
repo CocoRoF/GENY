@@ -25,6 +25,7 @@ import type {
   StageManifestEntry,
 } from '@/types/environment';
 import { Advanced } from './_CuratedHelpers';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 
 const EMITTER_META: Record<string, { titleKey: string; descKey: string }> = {
   text: { titleKey: 'envManagement.stage17.emit.text.title', descKey: 'envManagement.stage17.emit.text.desc' },
@@ -81,9 +82,12 @@ export default function Stage17EmitEditor({ order, entry }: Props) {
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <header className="flex items-center justify-between gap-2">
-          <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.stage17.chainTitle')}
-          </h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+              {t('envManagement.stage17.chainTitle')}
+            </h4>
+            <SectionHelpButton helpId="stage17.emitters" />
+          </div>
           <span className="text-[0.625rem] text-[hsl(var(--muted-foreground))] tabular-nums">
             {currentChain.length} / {availableEmitters.length}
           </span>
