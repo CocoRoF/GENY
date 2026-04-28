@@ -22,7 +22,6 @@ const en = {
     devMode: 'Dev',
     normalMode: 'Normal',
     wiki: 'Wiki',
-    ttsStudio: 'TTS Studio',
     ttsVoice: 'TTS Voice',
     envManagement: 'Environments',
     login: 'Login',

@@ -22,7 +22,6 @@ const ko: Translations = {
     devMode: '개발',
     normalMode: '일반',
     wiki: '위키',
-    ttsStudio: 'TTS Studio',
     ttsVoice: 'TTS Voice',
     envManagement: '환경 관리',
     login: '로그인',
