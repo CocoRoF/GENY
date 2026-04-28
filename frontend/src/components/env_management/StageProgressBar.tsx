@@ -21,15 +21,19 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Settings2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { getStageMetaByOrder } from '@/components/session-env/stageMetadata';
 
-// Theme-aware palettes for the three stage states. Light values are
+// Theme-aware palettes for the four stage states. Light values are
 // the gentle pastels we landed on in PR #471; dark values flip to
-// translucent deep tints with brighter foregrounds so the green/blue
+// translucent deep tints with brighter foregrounds so the colour
 // signal still reads cleanly against the dark card background.
+//
+// "globals" is reserved for stage 0 — env-wide settings — and uses
+// a violet/purple tint to set it apart from the green/blue pipeline
+// states.
 const PALETTE = {
   light: {
     activeBg: 'rgb(220 252 231)', // emerald-100
@@ -41,6 +45,10 @@ const PALETTE = {
     selectedBorder: 'rgb(59 130 246)', // blue-500
     selectedRing:
       '0 0 0 3px hsl(var(--card)), 0 0 0 4.5px rgb(59 130 246 / 0.55), 0 3px 10px -3px rgb(59 130 246 / 0.3)',
+    globalsBg: 'rgb(237 233 254)', // violet-100
+    globalsFg: 'rgb(91 33 182)', // violet-700
+    globalsBorder: 'rgb(139 92 246)', // violet-500
+    globalsShadow: '0 1px 4px -1px rgb(139 92 246 / 0.25)',
     connectorActive: 'rgb(16 185 129)',
   },
   dark: {
@@ -54,6 +62,11 @@ const PALETTE = {
     selectedBorder: 'rgb(96 165 250)', // blue-400
     selectedRing:
       '0 0 0 3px hsl(var(--card)), 0 0 0 4.5px rgb(96 165 250 / 0.55), 0 3px 12px -2px rgb(96 165 250 / 0.4)',
+    globalsBg: 'rgb(76 29 149 / 0.45)', // violet-900 @ 45%
+    globalsFg: 'rgb(196 181 253)', // violet-300
+    globalsBorder: 'rgb(167 139 250)', // violet-400
+    globalsShadow:
+      '0 0 0 1px rgb(139 92 246 / 0.15), 0 1px 6px -1px rgb(139 92 246 / 0.3)',
     connectorActive: 'rgb(52 211 153)',
   },
 } as const;
@@ -66,7 +79,9 @@ export interface StageProgressBarProps {
   activeOrders: ReadonlySet<number>;
 }
 
-const ALL_ORDERS = Array.from({ length: 21 }, (_, i) => i + 1);
+// Stage 0 is the env-wide "globals" entry; stages 1..21 are the
+// pipeline stages from the executor manifest.
+const ALL_ORDERS = [0, ...Array.from({ length: 21 }, (_, i) => i + 1)];
 
 const DRAG_THRESHOLD_PX = 5;
 const FRICTION = 0.92;
@@ -291,13 +306,53 @@ export default function StageProgressBar({
           {/* Items + connectors share a flex row aligned to the circle level */}
           <div className="relative flex items-start">
             {ALL_ORDERS.map((order, idx) => {
-              const meta = getStageMetaByOrder(order, locale);
+              const isGlobals = order === 0;
+              const meta = isGlobals
+                ? undefined
+                : getStageMetaByOrder(order, locale);
               const isSelected = order === selectedOrder;
               const isStageActive = activeOrders.has(order);
               const isDirty = dirtyOrders.has(order);
-              const label = meta?.displayName ?? `Stage ${order}`;
+              const label = isGlobals
+                ? t('envManagement.compactBar.globalsLabel')
+                : (meta?.displayName ?? `Stage ${order}`);
               const isLast = idx === ALL_ORDERS.length - 1;
               const nextActive = activeOrders.has(order + 1);
+
+              const circleStyle: React.CSSProperties = isSelected
+                ? {
+                    background: palette.selectedBg,
+                    color: palette.selectedFg,
+                    border: `2px solid ${palette.selectedBorder}`,
+                    boxShadow: palette.selectedRing,
+                  }
+                : isGlobals
+                  ? {
+                      background: palette.globalsBg,
+                      color: palette.globalsFg,
+                      border: `2px solid ${palette.globalsBorder}`,
+                      boxShadow: palette.globalsShadow,
+                    }
+                  : isStageActive
+                    ? {
+                        background: palette.activeBg,
+                        color: palette.activeFg,
+                        border: `2px solid ${palette.activeBorder}`,
+                        boxShadow: palette.activeShadow,
+                      }
+                    : {
+                        background: 'hsl(var(--background))',
+                        color: 'hsl(var(--muted-foreground))',
+                        border: '2px solid hsl(var(--border))',
+                      };
+
+              const labelColor = isSelected
+                ? palette.selectedFg
+                : isGlobals
+                  ? palette.globalsFg
+                  : isStageActive
+                    ? palette.activeFg
+                    : 'hsl(var(--muted-foreground))';
 
               return (
                 <div key={order} className="flex items-start">
@@ -323,34 +378,13 @@ export default function StageProgressBar({
                             The visual difference is colour + ring, not size. */}
                         <span
                           className="relative flex items-center justify-center rounded-full font-semibold tabular-nums transition-all duration-200 w-[48px] h-[48px] text-[0.9375rem] group-hover:scale-105"
-                          style={
-                            isSelected
-                              ? {
-                                  // Subtle blue (은은한 파란빛). Light/dark
-                                  // tints from PALETTE so the contrast stays
-                                  // legible against either card background.
-                                  background: palette.selectedBg,
-                                  color: palette.selectedFg,
-                                  border: `2px solid ${palette.selectedBorder}`,
-                                  boxShadow: palette.selectedRing,
-                                }
-                              : isStageActive
-                                ? {
-                                    // Subtle green (은은한 초록빛) — clear
-                                    // "this stage is on" signal, theme-aware.
-                                    background: palette.activeBg,
-                                    color: palette.activeFg,
-                                    border: `2px solid ${palette.activeBorder}`,
-                                    boxShadow: palette.activeShadow,
-                                  }
-                                : {
-                                    background: 'hsl(var(--background))',
-                                    color: 'hsl(var(--muted-foreground))',
-                                    border: '2px solid hsl(var(--border))',
-                                  }
-                          }
+                          style={circleStyle}
                         >
-                          {order}
+                          {isGlobals ? (
+                            <Settings2 className="w-5 h-5" />
+                          ) : (
+                            order
+                          )}
                           {/* Dirty marker */}
                           {isDirty && (
                             <span
@@ -369,26 +403,22 @@ export default function StageProgressBar({
                     {/* Label below the circle */}
                     <span
                       className={`mt-1.5 text-[0.75rem] tracking-tight truncate max-w-[88px] leading-tight transition-colors ${
-                        isSelected
+                        isSelected || isGlobals
                           ? 'font-semibold'
                           : isStageActive
                             ? 'font-medium'
                             : ''
                       }`}
-                      style={{
-                        color: isSelected
-                          ? palette.selectedFg
-                          : isStageActive
-                            ? palette.activeFg
-                            : 'hsl(var(--muted-foreground))',
-                      }}
+                      style={{ color: labelColor }}
                     >
                       {label}
                     </span>
                   </div>
 
                   {/* Connector — sits at the same vertical level as the
-                      circle row so it visually bridges the rail. */}
+                      circle row so it visually bridges the rail. The
+                      globals→stage1 link uses a neutral connector so
+                      the violet accent doesn't bleed into pipeline. */}
                   {!isLast && (
                     <div
                       style={{ height: ROW_HEIGHT }}
@@ -400,10 +430,13 @@ export default function StageProgressBar({
                         style={{
                           width: 22,
                           background:
-                            isStageActive && nextActive
+                            !isGlobals && isStageActive && nextActive
                               ? palette.connectorActive
                               : 'hsl(var(--border))',
-                          opacity: isStageActive && nextActive ? 0.6 : 0.5,
+                          opacity:
+                            !isGlobals && isStageActive && nextActive
+                              ? 0.6
+                              : 0.5,
                         }}
                       />
                     </div>
