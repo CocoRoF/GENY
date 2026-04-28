@@ -71,11 +71,11 @@ export default function StageArtifactPicker({ order, entry }: Props) {
       onValueChange={(v) => patchStage(order, { artifact: v })}
     >
       <SelectTrigger
-        className="h-8 px-3 min-w-[170px] text-[0.75rem] font-medium shrink-0"
+        className="h-8 w-[180px] px-2.5 text-[0.75rem] font-medium shrink-0"
         title={t('envManagement.stageArtifact')}
         aria-label={t('envManagement.stageArtifact')}
       >
-        <span className="inline-flex items-center gap-2 min-w-0">
+        <span className="inline-flex items-center gap-1.5 min-w-0">
           <Layers className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
           <SelectValue />
         </span>
