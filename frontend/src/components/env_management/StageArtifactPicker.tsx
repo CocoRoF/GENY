@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * StageArtifactPicker — compact artifact dropdown for the stage
- * header. Renders as a self-contained pill: a small Layers icon + the
- * current artifact name + chevron. The "ARTIFACT" label is dropped
- * from the surrounding chrome — the icon carries the affordance and
- * the tooltip names the field for screen readers / hover discovery.
+ * StageArtifactPicker — labeled artifact dropdown for the stage
+ * header. Renders as a single bordered pill with two regions: a
+ * left-side eyebrow label ("ARTIFACT" + Layers icon) on a tinted
+ * background, and a borderless dropdown on the right showing the
+ * current pick. The whole thing reads as one labeled compound
+ * control instead of an unmarked pill.
  *
  * Hydrates the available artifact list via
  * `catalogApi.listArtifacts(order)`; until the response lands, falls
@@ -66,27 +67,31 @@ export default function StageArtifactPicker({ order, entry }: Props) {
   })();
 
   return (
-    <Select
-      value={current}
-      onValueChange={(v) => patchStage(order, { artifact: v })}
-    >
-      <SelectTrigger
-        className="h-8 w-[180px] px-2.5 text-[0.75rem] font-medium shrink-0"
-        title={t('envManagement.stageArtifact')}
-        aria-label={t('envManagement.stageArtifact')}
-      >
-        <span className="inline-flex items-center gap-1.5 min-w-0">
-          <Layers className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
-          <SelectValue />
+    <div className="inline-flex items-stretch h-9 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0 overflow-hidden">
+      <span className="inline-flex items-center gap-1.5 px-2.5 bg-[hsl(var(--accent))] border-r border-[hsl(var(--border))]">
+        <Layers className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
+        <span className="text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
+          {t('envManagement.stageArtifact')}
         </span>
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((name) => (
-          <SelectItem key={name} value={name} className="text-[0.75rem]">
-            {name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      </span>
+      <Select
+        value={current}
+        onValueChange={(v) => patchStage(order, { artifact: v })}
+      >
+        <SelectTrigger
+          className="h-9 w-[180px] border-0 rounded-none px-2.5 text-[0.75rem] font-medium focus:ring-0 focus:ring-offset-0"
+          aria-label={t('envManagement.stageArtifact')}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((name) => (
+            <SelectItem key={name} value={name} className="text-[0.75rem]">
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }

@@ -192,7 +192,7 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
             <button
               type="button"
               onClick={() => setInfoOpen(true)}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors shrink-0"
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors shrink-0"
               title={t('envManagement.info.openTip')}
             >
               <Info className="w-3.5 h-3.5" />
