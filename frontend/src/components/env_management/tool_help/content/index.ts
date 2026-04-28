@@ -38,6 +38,21 @@ import { askUserQuestionToolHelp } from './AskUserQuestion';
 // ── notification family ──
 import { pushNotificationToolHelp } from './PushNotification';
 
+// ── mcp family ──
+import { mcpToolHelp } from './MCP';
+import { listMcpResourcesToolHelp } from './ListMcpResources';
+import { readMcpResourceToolHelp } from './ReadMcpResource';
+import { mcpAuthToolHelp } from './McpAuth';
+
+// ── worktree family ──
+import { enterWorktreeToolHelp } from './EnterWorktree';
+import { exitWorktreeToolHelp } from './ExitWorktree';
+
+// ── dev family ──
+import { lspToolHelp } from './LSP';
+import { replToolHelp } from './REPL';
+import { briefToolHelp } from './Brief';
+
 registerToolDetail('Read', readToolHelp);
 registerToolDetail('Write', writeToolHelp);
 registerToolDetail('Edit', editToolHelp);
@@ -58,3 +73,15 @@ registerToolDetail('TodoWrite', todoWriteToolHelp);
 registerToolDetail('AskUserQuestion', askUserQuestionToolHelp);
 
 registerToolDetail('PushNotification', pushNotificationToolHelp);
+
+registerToolDetail('MCP', mcpToolHelp);
+registerToolDetail('ListMcpResources', listMcpResourcesToolHelp);
+registerToolDetail('ReadMcpResource', readMcpResourceToolHelp);
+registerToolDetail('McpAuth', mcpAuthToolHelp);
+
+registerToolDetail('EnterWorktree', enterWorktreeToolHelp);
+registerToolDetail('ExitWorktree', exitWorktreeToolHelp);
+
+registerToolDetail('LSP', lspToolHelp);
+registerToolDetail('REPL', replToolHelp);
+registerToolDetail('Brief', briefToolHelp);
