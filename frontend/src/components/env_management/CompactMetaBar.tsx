@@ -1,14 +1,17 @@
 'use client';
 
 /**
- * CompactMetaBar — single-row environment metadata + actions bar.
- *
- * Replaces the bulky multi-row TopBar form (cycle 20260427_2 PR-2).
- * Sits directly below the page header so the canvas can take the rest
- * of the viewport.
+ * CompactMetaBar — single-row, full-width header for the environment
+ * builder. This is the *only* header chrome on the /environments page;
+ * the route wrapper renders nothing of its own above it.
  *
  * Layout (left → right):
- *   [name input] [tags + popover for desc] | [warnings] | [⚙ globals] [Save]
+ *   [← Home] | [✨ Page title] | [name input] [ⓘ desc] [tags] | [warnings] | [Globals] [Discard] [Save]
+ *
+ * Empty state (no draft): just the leading nav cluster — back link +
+ * title — so the bar is the same height/shape as the editing state.
+ * The "pick a starting point" prompt belongs to the OverviewView body
+ * (which already has its own welcome card), not a second header row.
  *
  * Description and full validation list move into popovers (click the
  * ⓘ button or "X warnings" chip) so the bar stays at ~52px tall
@@ -16,12 +19,15 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
+  ArrowLeft,
   Info,
   Plus,
   Save,
   Settings2,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -74,13 +80,11 @@ export default function CompactMetaBar({
   }, [descOpen, validOpen]);
 
   if (!draft) {
-    // No draft yet — still render the bar with disabled actions so the
-    // chrome stays consistent across overview / stage / empty views.
+    // No draft yet — render only the leading nav cluster. The body's
+    // welcome card explains how to start, so we don't repeat it here.
     return (
       <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-        <span className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] italic">
-          {t('envManagement.compactBar.noDraft')}
-        </span>
+        <LeadingNav t={t} />
         <div className="flex-1" />
         {errorBanner && (
           <button
@@ -139,6 +143,8 @@ export default function CompactMetaBar({
 
   return (
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
+      <LeadingNav t={t} />
+
       {/* ── Name input ── */}
       <div className="flex items-center gap-1.5">
         <span className="text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
@@ -312,6 +318,26 @@ export default function CompactMetaBar({
           {saving ? t('envManagement.saving') : t('envManagement.save')}
         </ActionButton>
       </div>
+    </div>
+  );
+}
+
+function LeadingNav({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1 text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors px-1.5 py-1 rounded hover:bg-[hsl(var(--accent))]"
+      >
+        <ArrowLeft size={13} />
+        {t('envManagement.backToHome')}
+      </Link>
+      <div className="w-px h-4 bg-[hsl(var(--border))]" />
+      <Sparkles size={13} className="text-[hsl(var(--primary))]" />
+      <h1 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] truncate">
+        {t('envManagement.pageTitle')}
+      </h1>
+      <div className="w-px h-4 bg-[hsl(var(--border))]" />
     </div>
   );
 }
