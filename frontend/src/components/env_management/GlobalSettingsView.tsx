@@ -57,6 +57,7 @@ import {
 import ToolCheckboxGrid from './ToolCheckboxGrid';
 import GenyToolsPicker from './GenyToolsPicker';
 import HostScopedLinkPanel from './HostScopedLinkPanel';
+import MCPServerEditor from './MCPServerEditor';
 import SectionHelpButton from './section_help/SectionHelpButton';
 
 const S06_API_ORDER = 6;
@@ -296,22 +297,43 @@ export default function GlobalSettingsView() {
             )}
 
             {panel === 'mcp' && (
-              <HostScopedLinkPanel
-                icon={Network}
-                hostBadge={false}
-                title={t('envManagement.globals.mcp.title')}
-                description={t('envManagement.globals.mcp.description')}
-                primaryActionLabel={t('envManagement.globals.mcp.manageLink')}
-                onPrimaryAction={() => goToLibrary('mcpServers')}
-              >
-                <div className="px-3 py-2 rounded-md bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[0.8125rem] text-[hsl(var(--foreground))]">
-                  {mcpCount === 0
-                    ? t('envManagement.globals.mcp.envCountZero')
-                    : t('envManagement.globals.mcp.envCount', {
-                        n: String(mcpCount),
-                      })}
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.mcp.title')}
+                  description={t('envManagement.globals.mcp.description')}
+                />
+                <MCPServerEditor
+                  value={
+                    (draft.tools?.mcp_servers ?? []) as Parameters<
+                      typeof MCPServerEditor
+                    >[0]['value']
+                  }
+                  onChange={(next) =>
+                    patchTools({
+                      mcp_servers: next as unknown as Array<
+                        Record<string, unknown>
+                      >,
+                    })
+                  }
+                />
+                <div className="pt-3 border-t border-[hsl(var(--border))] flex items-center justify-between gap-3">
+                  <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+                    {mcpCount === 0
+                      ? t('envManagement.globals.mcp.envCountZero')
+                      : t('envManagement.globals.mcp.envCount', {
+                          n: String(mcpCount),
+                        })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => goToLibrary('mcpServers')}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    {t('envManagement.globals.mcp.manageLink')}
+                  </button>
                 </div>
-              </HostScopedLinkPanel>
+              </div>
             )}
 
             {panel === 'hooks' && (
