@@ -122,31 +122,54 @@ export default function StageProgressBar({
   const segmentWidthRef = useRef(0);
   const initialisedRef = useRef(false);
 
-  // Centre the middle-copy button for `order` in the viewport. We
-  // always target copy 1 (the canonical position) so a smooth scroll
-  // never has to cross a copy boundary mid-animation, where it would
-  // collide with the edge-jump in onScroll.
+  // Centre the closest copy of `order` in the viewport so smooth
+  // scroll always takes the shortest path — including across the
+  // 21 ↔ 0 seam.
   //
-  // The pre-warp threshold is keyed on the *viewport centre*, not on
-  // scrollLeft. scrollLeft for a viewport whose centre lands on
-  // copy 1's stage 3 is roughly W - 600 (for clientWidth=1200) — well
-  // below W, even though the user is plainly looking at copy 1. A
-  // scrollLeft-based threshold would warp them anyway, sending the
-  // smooth scroll the long way round (the bug behind 3 → 0 → 21 → 4).
+  // Two-step approach:
+  //
+  //   1. Pre-warp: if the viewport centre is currently parked outside
+  //      copy 1's [W, 2W] band, silently shift scrollLeft by ±W to
+  //      bring the centre back into copy 1. (Threshold uses viewport
+  //      *centre*, not scrollLeft — for wide viewports scrollLeft can
+  //      be < W while the centre is plainly inside copy 1.)
+  //
+  //   2. Closest copy: with the centre in copy 1, the nearest button
+  //      for `order` could live in copy 0 (stages near the right of
+  //      the wrap) or copy 2 (stages near the left of the wrap).
+  //      Picking it directly means the animation distance is bounded
+  //      by half a segment and naturally chooses the short direction
+  //      for wraparound clicks like 2 → 21.
+  //
+  // Because the pre-warp anchors centre in [W, 2W] and the chosen
+  // copy is at most W/2 away, the ensuing smooth scroll never crosses
+  // the 0.5W or 2.5W edge-jump thresholds — no collision with onScroll.
   const centreOnOrder = useCallback(
     (order: number, smooth: boolean) => {
       const sc = scrollRef.current;
       if (!sc) return;
-      const mid = itemRefs.current.get(`1-${order}`);
-      if (!mid) return;
       const W = segmentWidthRef.current;
       if (W > 0) {
         const centre = sc.scrollLeft + sc.clientWidth / 2;
         if (centre < W) sc.scrollLeft += W;
         else if (centre >= 2 * W) sc.scrollLeft -= W;
       }
+      const viewCentre = sc.scrollLeft + sc.clientWidth / 2;
+      let closest: HTMLButtonElement | null = null;
+      let closestDist = Infinity;
+      for (let c = 0; c < WHEEL_COPIES; c++) {
+        const b = itemRefs.current.get(`${c}-${order}`);
+        if (!b) continue;
+        const bC = b.offsetLeft + b.offsetWidth / 2;
+        const d = Math.abs(bC - viewCentre);
+        if (d < closestDist) {
+          closestDist = d;
+          closest = b;
+        }
+      }
+      if (!closest) return;
       const target =
-        mid.offsetLeft + mid.offsetWidth / 2 - sc.clientWidth / 2;
+        closest.offsetLeft + closest.offsetWidth / 2 - sc.clientWidth / 2;
       sc.scrollTo({
         left: target,
         behavior: smooth ? 'smooth' : 'auto',
