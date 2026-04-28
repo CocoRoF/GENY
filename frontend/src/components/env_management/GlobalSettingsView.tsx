@@ -1,49 +1,54 @@
 'use client';
 
 /**
- * GlobalSettingsDrawer — right-side slide-in panel for env-wide
- * settings (model / pipeline / tools / externals).
+ * GlobalSettingsView — body view for "stage 0" (env-wide globals).
  *
- * Replaces the old inline GlobalSection (cycle 20260427_2 PR-2). Sits
- * outside the canvas / stage editor so it doesn't compete for vertical
- * real estate. Toggled by the ⚙ button in CompactMetaBar.
+ * Lives in the same body slot as StageDetailView. Replaces the old
+ * right-side GlobalSettingsDrawer: globals are now selectable from
+ * the stage progress bar like any pipeline stage.
  *
- * Closes on:
- *   - X button
- *   - Escape key
- *   - Click outside the drawer (overlay click)
+ * Layout mirrors StageDetailView so the visual rhythm stays consistent
+ * when the user clicks between stage 0 and stages 1..21.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Cpu,
   ExternalLink,
   Layers,
   Plug,
+  Settings2,
   Shield,
   Sparkles,
   Wrench,
-  X,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
+import { useTheme } from '@/lib/theme';
 import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { PipelineConfigEditor } from '@/components/builder/PipelineConfigEditor';
 import ToolCheckboxGrid from './ToolCheckboxGrid';
 
-export interface GlobalSettingsDrawerProps {
-  open: boolean;
-  onClose: () => void;
-}
-
 type Panel = 'model' | 'pipeline' | 'tools' | 'externals';
 
-export default function GlobalSettingsDrawer({
-  open,
-  onClose,
-}: GlobalSettingsDrawerProps) {
+const HEADER_PALETTE = {
+  light: {
+    bg: 'rgb(237 233 254)',
+    fg: 'rgb(91 33 182)',
+    border: 'rgb(139 92 246)',
+  },
+  dark: {
+    bg: 'rgb(76 29 149 / 0.45)',
+    fg: 'rgb(196 181 253)',
+    border: 'rgb(167 139 250)',
+  },
+} as const;
+
+export default function GlobalSettingsView() {
   const { t } = useI18n();
+  const { theme } = useTheme();
+  const palette = HEADER_PALETTE[theme === 'dark' ? 'dark' : 'light'];
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchModel = useEnvironmentDraftStore((s) => s.patchModel);
   const patchPipeline = useEnvironmentDraftStore((s) => s.patchPipeline);
@@ -53,63 +58,54 @@ export default function GlobalSettingsDrawer({
 
   const [panel, setPanel] = useState<Panel>('model');
 
-  // Esc to close
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
-
-  if (!open || !draft) return null;
-
-  const goToLibrary = (sub: string) => {
-    setActiveTab('library');
-    setEnvSubTab(sub);
-    onClose();
-  };
+  if (!draft) return null;
 
   const builtInCount = (draft.tools?.built_in ?? []).length;
   const mcpCount = (draft.tools?.mcp_servers ?? []).length;
   const adhocCount = (draft.tools?.adhoc ?? []).length;
 
+  const goToLibrary = (sub: string) => {
+    setActiveTab('library');
+    setEnvSubTab(sub);
+  };
+
   return (
-    <>
-      {/* Overlay */}
-      <div
-        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px]"
-        onClick={onClose}
-        aria-hidden
-      />
-      {/* Drawer */}
-      <aside
-        className="fixed top-0 right-0 z-50 h-full w-full max-w-[640px] bg-[hsl(var(--background))] border-l border-[hsl(var(--border))] shadow-2xl flex flex-col"
-        role="dialog"
-        aria-label={t('envManagement.globalSectionTitle')}
-      >
-        {/* Header */}
-        <header className="flex items-center justify-between gap-3 px-4 h-12 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Layers className="w-4 h-4 text-[hsl(var(--primary))] shrink-0" />
-            <h3 className="text-[0.875rem] font-semibold truncate">
-              {t('envManagement.globalSectionTitle')}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
-            aria-label="close"
+    <div className="flex-1 min-h-0 overflow-y-auto bg-[hsl(var(--background))]">
+      <div className="max-w-[1300px] mx-auto p-6 flex flex-col gap-6">
+        {/* ── Header ── */}
+        <header className="flex items-center gap-3">
+          <span
+            className="inline-flex items-center justify-center w-12 h-12 rounded-full text-[1rem] font-bold tabular-nums shrink-0"
+            style={{
+              background: palette.bg,
+              color: palette.fg,
+              border: `2px solid ${palette.border}`,
+              boxShadow: '0 1px 4px -1px rgb(139 92 246 / 0.18)',
+            }}
           >
-            <X className="w-4 h-4" />
-          </button>
+            <Settings2 className="w-5 h-5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-[1.125rem] font-semibold text-[hsl(var(--foreground))]">
+                {t('envManagement.globalSectionTitle')}
+              </h2>
+              <span
+                className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium"
+                style={{ background: palette.bg, color: palette.fg }}
+              >
+                {t('envManagement.compactBar.globalsLabel')}
+              </span>
+            </div>
+            <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] mt-1 leading-relaxed">
+              {t('envManagement.globalSectionHint')}
+            </p>
+          </div>
         </header>
 
-        {/* Sub-tab strip + body */}
-        <div className="flex flex-1 min-h-0">
-          <nav className="flex flex-col gap-0.5 p-2 w-44 shrink-0 border-r border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-y-auto">
+        {/* ── Sub-tab strip + body ── */}
+        <div className="flex gap-4 min-h-0">
+          <nav className="flex flex-col gap-0.5 w-44 shrink-0">
             <SubTabButton
               icon={Cpu}
               label={t('envManagement.global.model')}
@@ -137,7 +133,7 @@ export default function GlobalSettingsDrawer({
             />
           </nav>
 
-          <div className="flex-1 min-w-0 p-4 overflow-y-auto">
+          <div className="flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
             {panel === 'model' && (
               <ModelConfigEditor
                 initial={draft.model ?? {}}
@@ -212,12 +208,10 @@ export default function GlobalSettingsDrawer({
             )}
           </div>
         </div>
-      </aside>
-    </>
+      </div>
+    </div>
   );
 }
-
-// ── Helpers ──
 
 function SubTabButton({
   icon: Icon,
@@ -255,7 +249,7 @@ function SubTabButton({
 
 function ToolStatCard({ label, count }: { label: string; count: number }) {
   return (
-    <div className="flex flex-col gap-0.5 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+    <div className="flex flex-col gap-0.5 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))]">
       <span className="text-[0.6875rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
         {label}
       </span>
@@ -281,7 +275,7 @@ function ExternalLinkRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-start gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left group"
+      className="flex items-start gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--accent))] transition-colors text-left group"
     >
       <Icon className="w-4 h-4 text-[hsl(var(--primary))] mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">

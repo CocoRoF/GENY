@@ -3,32 +3,31 @@
 /**
  * EnvManagementShell — visual 21-stage environment builder body.
  *
- * Hosted by /app/environments/page.tsx. The page wrapper owns the
- * route-level chrome (back link, page title, post-save navigation);
- * this shell owns the editor body itself.
+ * Hosted by /app/environments/page.tsx. The page is now header-less;
+ * this shell owns the entire chrome (CompactMetaBar at top, then
+ * canvas/progress bar/body underneath).
  *
- * Cycle 20260427_2 PR-2 — canvas-first redesign:
+ * Layout:
  *
  *   ┌─ CompactMetaBar (52px) ─────────────────────────────┐
- *   │ name, tags, status, [⚙ Globals] [Discard] [Save]    │
+ *   │ ← Home | ✨ Title | name, tags, status, actions     │
  *   ├──────────────────────────────────────────────────────┤
  *   │ Mode A — overview:                                   │
- *   │   ┌──────────────────────────────────────────────┐   │
- *   │   │ Big PipelineCanvas (or StartFromPicker)      │   │
- *   │   └──────────────────────────────────────────────┘   │
+ *   │   PipelineCanvas (or StartFromPicker)                │
  *   │                                                       │
- *   │ Mode B — stage detail:                               │
- *   │   StageProgressBar (68px, scrollable)                │
+ *   │ Mode B — stage detail (order 0..21):                 │
+ *   │   StageProgressBar (scrollable, infinite-wheel)      │
  *   │   ┌──────────────────────────────────────────────┐   │
- *   │   │ StageDetailView (curated/generic editor)     │   │
+ *   │   │ order === 0 → GlobalSettingsView              │   │
+ *   │   │ order >= 1  → StageDetailView                 │   │
  *   │   └──────────────────────────────────────────────┘   │
  *   └──────────────────────────────────────────────────────┘
  *
- *   GlobalSettingsDrawer slides over from the right when ⚙ is clicked.
- *
- * Mode is internal state — overview ↔ stage detail. Clicking a stage
- * on the canvas opens its detail view; clicking back on the progress
- * bar returns to the canvas.
+ * Stage 0 is a special "globals" entry — it lives in the same body
+ * slot as a normal stage but renders the env-wide settings (model /
+ * pipeline / tools / externals). The old right-side
+ * GlobalSettingsDrawer is gone; the meta bar's "Globals" button just
+ * navigates to stage 0.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -37,7 +36,7 @@ import CompactMetaBar from './CompactMetaBar';
 import OverviewView from './OverviewView';
 import StageProgressBar from './StageProgressBar';
 import StageDetailView from './StageDetailView';
-import GlobalSettingsDrawer from './GlobalSettingsDrawer';
+import GlobalSettingsView from './GlobalSettingsView';
 
 export interface EnvManagementShellProps {
   /** Called after a successful Save with the new env id. The page
@@ -57,7 +56,6 @@ export default function EnvManagementShell({
   const stageDirty = useEnvironmentDraftStore((s) => s.stageDirty);
 
   const [view, setView] = useState<ViewMode>({ mode: 'overview' });
-  const [globalsOpen, setGlobalsOpen] = useState(false);
 
   // beforeunload guard for browser tab close while dirty
   useEffect(() => {
@@ -89,7 +87,6 @@ export default function EnvManagementShell({
 
   const handleSaved = (newEnvId: string) => {
     setView({ mode: 'overview' });
-    setGlobalsOpen(false);
     resetDraft();
     onSaved?.(newEnvId);
   };
@@ -98,7 +95,7 @@ export default function EnvManagementShell({
     <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))]">
       <CompactMetaBar
         onSaved={handleSaved}
-        onOpenGlobals={() => setGlobalsOpen(true)}
+        onOpenGlobals={() => setView({ mode: 'stage', order: 0 })}
       />
 
       {view.mode === 'overview' && (
@@ -116,14 +113,13 @@ export default function EnvManagementShell({
             dirtyOrders={stageDirty}
             activeOrders={activeOrders}
           />
-          <StageDetailView order={view.order} />
+          {view.order === 0 ? (
+            <GlobalSettingsView />
+          ) : (
+            <StageDetailView order={view.order} />
+          )}
         </>
       )}
-
-      <GlobalSettingsDrawer
-        open={globalsOpen}
-        onClose={() => setGlobalsOpen(false)}
-      />
     </div>
   );
 }
