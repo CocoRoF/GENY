@@ -61,6 +61,9 @@ import { stage18StrategyHelp } from './Stage18Strategy';
 import { stage18PersistHelp } from './Stage18Persist';
 import { stage18ModelHelp } from './Stage18Model';
 
+import { stage19SummarizerHelp } from './Stage19Summarizer';
+import { stage19ImportanceHelp } from './Stage19Importance';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -130,6 +133,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   'stage18.strategy': stage18StrategyHelp,
   'stage18.persist': stage18PersistHelp,
   'stage18.model': stage18ModelHelp,
+
+  // Stage 19 — Summarize
+  'stage19.summarizer': stage19SummarizerHelp,
+  'stage19.importance': stage19ImportanceHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
