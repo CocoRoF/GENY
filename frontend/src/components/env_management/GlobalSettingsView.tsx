@@ -57,6 +57,7 @@ import {
 import ToolCheckboxGrid from './ToolCheckboxGrid';
 import GenyToolsPicker from './GenyToolsPicker';
 import HostScopedLinkPanel from './HostScopedLinkPanel';
+import SectionHelpButton from './section_help/SectionHelpButton';
 
 const S06_API_ORDER = 6;
 
@@ -69,6 +70,17 @@ type Panel =
   | 'hooks'
   | 'permissions'
   | 'skills';
+
+const PANEL_HELP_ID: Record<Panel, string> = {
+  model: 'globals.model',
+  pipeline: 'globals.pipeline',
+  executorTools: 'globals.executorTools',
+  genyTools: 'globals.genyTools',
+  mcp: 'globals.mcp',
+  hooks: 'globals.hooks',
+  permissions: 'globals.permissions',
+  skills: 'globals.skills',
+};
 
 const HEADER_PALETTE = {
   light: {
@@ -227,7 +239,10 @@ export default function GlobalSettingsView() {
             />
           </nav>
 
-          <div className="flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+          <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+            <div className="absolute right-3 top-3 z-10">
+              <SectionHelpButton helpId={PANEL_HELP_ID[panel]} />
+            </div>
             {panel === 'model' && (
               <ModelConfigEditor
                 initial={draft.model ?? {}}
