@@ -56,11 +56,11 @@ import {
 } from '@/lib/modelCatalog';
 import ToolCheckboxGrid from './ToolCheckboxGrid';
 import GenyToolsPicker from './GenyToolsPicker';
-import HostScopedLinkPanel from './HostScopedLinkPanel';
 import MCPServerEditor from './MCPServerEditor';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import { HooksTab } from '@/components/tabs/HooksTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
+import { SkillsTab } from '@/components/tabs/SkillsTab';
 
 const S06_API_ORDER = 6;
 
@@ -363,17 +363,14 @@ export default function GlobalSettingsView() {
             )}
 
             {panel === 'skills' && (
-              <HostScopedLinkPanel
-                icon={Sparkles}
-                title={t('envManagement.globals.skills.title')}
-                description={t('envManagement.globals.skills.description')}
-                primaryActionLabel={t(
-                  'envManagement.globals.skills.manageLink',
-                )}
-                onPrimaryAction={() => goToLibrary('skills')}
-              >
-                <Bullets keyPath="envManagement.globals.skills.bullets" />
-              </HostScopedLinkPanel>
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.skills.title')}
+                  description={t('envManagement.globals.skills.description')}
+                />
+                <HostBadge />
+                <SkillsTab embedded />
+              </div>
             )}
           </div>
         </div>
@@ -468,22 +465,3 @@ function HostBadge() {
   );
 }
 
-/** Bullet list rendered from an i18n key whose raw value is a string[]. */
-function Bullets({ keyPath }: { keyPath: string }) {
-  const { tRaw } = useI18n();
-  const items = tRaw<string[] | undefined>(keyPath);
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <ul className="flex flex-col gap-1.5 pl-1">
-      {items.map((b, i) => (
-        <li
-          key={i}
-          className="flex items-start gap-2 text-[0.8125rem] text-[hsl(var(--foreground))]"
-        >
-          <span className="mt-2 w-1 h-1 rounded-full bg-[hsl(var(--muted-foreground))] shrink-0" />
-          <span className="leading-relaxed">{b}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}

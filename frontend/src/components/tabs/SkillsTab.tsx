@@ -120,7 +120,11 @@ function detailToForm(d: SkillDetail): FormState {
   };
 }
 
-export function SkillsTab() {
+export interface SkillsTabProps {
+  embedded?: boolean;
+}
+
+export function SkillsTab({ embedded = false }: SkillsTabProps = {}) {
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [userSkillsEnabled, setUserSkillsEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
@@ -245,41 +249,37 @@ export function SkillsTab() {
     }
   };
 
-  return (
-    <TabShell
-      title="Skills"
-      icon={Sparkles}
-      subtitle={
+  const subtitle = (
+    <>
+      {skills.length} loaded · {userIds.size} user
+      {userSkillsEnabled !== null && (
         <>
-          {skills.length} loaded · {userIds.size} user
-          {userSkillsEnabled !== null && (
-            <>
-              {' · '}
-              <StatusBadge
-                tone={userSkillsEnabled ? 'success' : 'neutral'}
-                icon={Power}
-                onClick={onToggleEnabled}
-              >
-                user_skills_enabled: {userSkillsEnabled ? 'true' : 'false'}
-              </StatusBadge>
-            </>
-          )}
+          {' · '}
+          <StatusBadge
+            tone={userSkillsEnabled ? 'success' : 'neutral'}
+            icon={Power}
+            onClick={onToggleEnabled}
+          >
+            user_skills_enabled: {userSkillsEnabled ? 'true' : 'false'}
+          </StatusBadge>
         </>
-      }
-      actions={
-        <>
-          <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-            Add user skill
-          </ActionButton>
-          <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-            Refresh
-          </ActionButton>
-        </>
-      }
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      <div className="h-full min-h-0 overflow-y-auto p-3 space-y-4">
+      )}
+    </>
+  );
+
+  const actions = (
+    <>
+      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
+        Add user skill
+      </ActionButton>
+      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
+        Refresh
+      </ActionButton>
+    </>
+  );
+
+  const body = (
+    <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
         {Array.from(grouped.entries()).map(([cat, rows]) => (
           <section key={cat}>
             <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1">
@@ -333,12 +333,14 @@ export function SkillsTab() {
         {!loading && skills.length === 0 && (
           <EmptyState icon={Sparkles} title="No skills loaded." />
         )}
-      </div>
+    </div>
+  );
 
-      <EditorModal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        title={editingExisting ? `Edit /${form.id}` : 'New user skill'}
+  const modal = (
+    <EditorModal
+      open={editorOpen}
+      onClose={() => setEditorOpen(false)}
+      title={editingExisting ? `Edit /${form.id}` : 'New user skill'}
         saving={saving}
         width="xl"
         footer={
@@ -477,6 +479,46 @@ export function SkillsTab() {
           </div>
         </div>
       </EditorModal>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex flex-col gap-3">
+        {error && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-[0.7rem] underline hover:no-underline"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
+            {subtitle}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">{actions}</div>
+        </div>
+        {body}
+        {modal}
+      </div>
+    );
+  }
+
+  return (
+    <TabShell
+      title="Skills"
+      icon={Sparkles}
+      subtitle={subtitle}
+      actions={actions}
+      error={error}
+      onDismissError={() => setError(null)}
+    >
+      {body}
+      {modal}
     </TabShell>
   );
 }
