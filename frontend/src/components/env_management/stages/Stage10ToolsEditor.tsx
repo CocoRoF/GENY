@@ -35,6 +35,7 @@ import type {
   StageToolBinding,
 } from '@/types/environment';
 import ToolCheckboxGrid from '../ToolCheckboxGrid';
+import SectionHelpButton from '../section_help/SectionHelpButton';
 import StageGenericEditor from '../StageGenericEditor';
 
 interface Props {
@@ -117,6 +118,7 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
           <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
             {t('envManagement.stage10.builtInTitle')}
           </h4>
+          <SectionHelpButton helpId="stage10.builtIn" />
         </header>
         <ToolCheckboxGrid
           value={builtInList}
@@ -133,6 +135,7 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
             <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
               {t('envManagement.stage10.mcpTitle')}
             </h4>
+            <SectionHelpButton helpId="stage10.mcp" />
             <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] tabular-nums">
               ({mcpServers.length})
             </span>

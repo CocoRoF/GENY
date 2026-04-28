@@ -37,6 +37,9 @@ import { stage08BudgetPlannerHelp } from './Stage08BudgetPlanner';
 import { stage09ParserHelp } from './Stage09Parser';
 import { stage09SignalHelp } from './Stage09Signal';
 
+import { stage10BuiltInHelp } from './Stage10BuiltIn';
+import { stage10MCPHelp } from './Stage10MCP';
+
 const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 1 — Input
   'stage01.validator': stage01ValidatorHelp,
@@ -73,6 +76,10 @@ const REGISTRY: Record<string, SectionHelpFactory> = {
   // Stage 9 — Parse
   'stage09.parser': stage09ParserHelp,
   'stage09.signal': stage09SignalHelp,
+
+  // Stage 10 — Tools
+  'stage10.builtIn': stage10BuiltInHelp,
+  'stage10.mcp': stage10MCPHelp,
 };
 
 export function getSectionHelp(id: string): SectionHelpFactory | undefined {
