@@ -1,20 +1,30 @@
 'use client';
 
 /**
- * ModelConfigEditor — P.2 (cycle 20260426_2).
- *
- * Form panel for ``manifest.model`` (a.k.a. ``ModelConfig``). Mirrors
- * every field on executor's ``ModelConfig`` except ``api_key`` (deploy
- * secret).
+ * ModelConfigEditor — form panel for `manifest.model` (a.k.a.
+ * `ModelConfig`). Mirrors every field on the executor's `ModelConfig`
+ * except `api_key` (a deploy-time secret).
  *
  * Save semantics: shallow-merge against current values; only changed
  * keys are PATCHed. Empty inputs are treated as "leave unchanged"
  * rather than "clear" — to clear an optional field, edit the manifest
  * via ImportManifestModal.
+ *
+ * Layout: this component is a pure form section that fills its
+ * parent's width. Containers (e.g. GlobalSettingsView) decide the
+ * outer max-width.
+ *
+ * Model picker: a curated catalog (see `lib/modelCatalog.ts`) is
+ * exposed via a native <datalist> behind the input. Users get
+ * dropdown suggestions on focus but can still type any custom
+ * identifier — the manifest field is free-form because `base_url`
+ * can point at non-Anthropic endpoints.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Save, RotateCcw } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
+import { MODEL_CATALOG } from '@/lib/modelCatalog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -55,11 +65,6 @@ export interface ModelConfigEditorProps {
 }
 
 function snapshotToDraft(src: Record<string, unknown>): ModelDraft {
-  // Cast the readonly tuples through ``readonly string[]`` so .includes()
-  // accepts any string — the union types include ``''`` (empty = use
-  // global), but the tuple itself doesn't list it. Without this cast
-  // ``includes(... as ThinkingDisplay)`` fails to compile because
-  // ``''`` isn't a member of the tuple's element type.
   const tt =
     typeof src.thinking_type === 'string' &&
     (THINKING_TYPE_VALUES as readonly string[]).includes(src.thinking_type)
@@ -96,7 +101,6 @@ function buildChanges(
 
   if (draft.model && draft.model !== initial.model) out.model = draft.model;
 
-  // ints
   for (const [key, raw, min] of [
     ['max_tokens', draft.max_tokens, 1] as const,
     ['top_k', draft.top_k, 1] as const,
@@ -110,7 +114,6 @@ function buildChanges(
     if (n !== initial[key]) out[key] = n;
   }
 
-  // floats with bounds
   if (draft.temperature.trim()) {
     const n = Number.parseFloat(draft.temperature);
     if (Number.isNaN(n) || n < 0 || n > 2) {
@@ -126,7 +129,6 @@ function buildChanges(
     if (n !== initial.top_p) out.top_p = n;
   }
 
-  // stop_sequences (newline-delimited)
   if (draft.stop_sequences.trim()) {
     const arr = draft.stop_sequences
       .split(/\r?\n/)
@@ -150,6 +152,8 @@ function buildChanges(
   return { ok: true, changes: out };
 }
 
+const MODEL_DATALIST_ID = 'model-config-options';
+
 export function ModelConfigEditor({
   initial,
   saving,
@@ -157,6 +161,7 @@ export function ModelConfigEditor({
   onSave,
   onClearError,
 }: ModelConfigEditorProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<ModelDraft>(() => snapshotToDraft(initial));
 
   useEffect(() => {
@@ -183,21 +188,19 @@ export function ModelConfigEditor({
   };
 
   return (
-    <section className="flex flex-col gap-4 max-w-[720px]">
-      <header className="flex items-center justify-between">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">
-            Model config
+    <section className="flex flex-col gap-4 w-full">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <h3 className="text-[1rem] font-semibold text-[hsl(var(--foreground))]">
+            {t('envManagement.modelEditor.title')}
           </h3>
-          <p className="text-[0.75rem] text-[var(--text-muted)]">
-            Sampling parameters + extended thinking knobs. Shallow-merged on
-            save — only changed fields are sent. ``api_key`` is intentionally
-            not editable here.
+          <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+            {t('envManagement.modelEditor.description')}
           </p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <ActionButton icon={RotateCcw} onClick={handleReset} disabled={saving || !dirty}>
-            Reset
+            {t('common.reset')}
           </ActionButton>
           <ActionButton
             variant="primary"
@@ -205,7 +208,7 @@ export function ModelConfigEditor({
             onClick={handleSave}
             disabled={saving || !dirty || !buildResult.ok}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('envManagement.saving') : t('common.save')}
           </ActionButton>
         </div>
       </header>
@@ -222,20 +225,34 @@ export function ModelConfigEditor({
       )}
 
       <div className="grid gap-1.5">
-        <Label htmlFor="md-model">model</Label>
+        <Label htmlFor="md-model">
+          {t('envManagement.modelEditor.modelLabel')}
+        </Label>
         <Input
           id="md-model"
+          list={MODEL_DATALIST_ID}
           value={draft.model}
           onChange={(e) => update('model', e.target.value)}
           placeholder="claude-sonnet-4-20250514"
           className="font-mono text-[0.75rem]"
         />
+        <datalist id={MODEL_DATALIST_ID}>
+          {MODEL_CATALOG.map((m) => (
+            <option key={m.id} value={m.id} label={m.label} />
+          ))}
+        </datalist>
+        <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+          {t('envManagement.modelEditor.modelHint')}
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="grid gap-1.5">
           <Label htmlFor="md-max-tokens">
-            max_tokens <span className="opacity-60">(int &gt;= 1)</span>
+            {t('envManagement.modelEditor.maxTokens')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.modelEditor.maxTokensHint')})
+            </span>
           </Label>
           <Input
             id="md-max-tokens"
@@ -247,7 +264,10 @@ export function ModelConfigEditor({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="md-temp">
-            temperature <span className="opacity-60">(0.0 – 2.0)</span>
+            {t('envManagement.modelEditor.temperature')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.modelEditor.temperatureHint')})
+            </span>
           </Label>
           <Input
             id="md-temp"
@@ -259,25 +279,31 @@ export function ModelConfigEditor({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="md-top-p">
-            top_p <span className="opacity-60">(0.0 – 1.0)</span>
+            {t('envManagement.modelEditor.topP')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.modelEditor.topPHint')})
+            </span>
           </Label>
           <Input
             id="md-top-p"
             value={draft.top_p}
             onChange={(e) => update('top_p', e.target.value)}
-            placeholder="(unset)"
+            placeholder={t('envManagement.modelEditor.unset')}
             inputMode="decimal"
           />
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="md-top-k">
-            top_k <span className="opacity-60">(int &gt;= 1)</span>
+            {t('envManagement.modelEditor.topK')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.modelEditor.topKHint')})
+            </span>
           </Label>
           <Input
             id="md-top-k"
             value={draft.top_k}
             onChange={(e) => update('top_k', e.target.value)}
-            placeholder="(unset)"
+            placeholder={t('envManagement.modelEditor.unset')}
             inputMode="numeric"
           />
         </div>
@@ -285,7 +311,10 @@ export function ModelConfigEditor({
 
       <div className="grid gap-1.5">
         <Label htmlFor="md-stop">
-          stop_sequences <span className="opacity-60">(one per line)</span>
+          {t('envManagement.modelEditor.stopSequences')}{' '}
+          <span className="opacity-60">
+            ({t('envManagement.modelEditor.stopSequencesHint')})
+          </span>
         </Label>
         <Textarea
           id="md-stop"
@@ -293,25 +322,28 @@ export function ModelConfigEditor({
           onChange={(e) => update('stop_sequences', e.target.value)}
           rows={3}
           className="font-mono text-[0.75rem]"
-          placeholder={'</response>\nSTOP'}
+          placeholder={t('envManagement.modelEditor.stopSequencesPlaceholder')}
         />
       </div>
 
-      <fieldset className="grid gap-3 border border-[var(--border-color)] rounded-md p-3">
-        <legend className="px-1 text-[0.75rem] font-medium text-[var(--text-secondary)]">
-          Extended thinking
+      <fieldset className="grid gap-3 border border-[hsl(var(--border))] rounded-md p-3">
+        <legend className="px-1 text-[0.75rem] font-medium text-[hsl(var(--foreground))]">
+          {t('envManagement.modelEditor.thinkingFieldset')}
         </legend>
         <label className="flex items-center gap-2 text-[0.8125rem] cursor-pointer">
           <Switch
             checked={draft.thinking_enabled}
             onCheckedChange={(v) => update('thinking_enabled', !!v)}
           />
-          thinking_enabled
+          {t('envManagement.modelEditor.thinkingEnabled')}
         </label>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="grid gap-1.5">
             <Label htmlFor="md-think-budget">
-              thinking_budget_tokens <span className="opacity-60">(int &gt;= 1)</span>
+              {t('envManagement.modelEditor.thinkingBudget')}{' '}
+              <span className="opacity-60">
+                ({t('envManagement.modelEditor.thinkingBudgetHint')})
+              </span>
             </Label>
             <Input
               id="md-think-budget"
@@ -323,7 +355,7 @@ export function ModelConfigEditor({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>thinking_type</Label>
+            <Label>{t('envManagement.modelEditor.thinkingType')}</Label>
             <Select
               value={draft.thinking_type || undefined}
               onValueChange={(v) => update('thinking_type', v as ThinkingType)}
@@ -340,14 +372,14 @@ export function ModelConfigEditor({
             </Select>
           </div>
           <div className="grid gap-1.5">
-            <Label>thinking_display</Label>
+            <Label>{t('envManagement.modelEditor.thinkingDisplay')}</Label>
             <Select
               value={draft.thinking_display || undefined}
               onValueChange={(v) => update('thinking_display', v as ThinkingDisplay)}
               disabled={!draft.thinking_enabled}
             >
               <SelectTrigger>
-                <SelectValue placeholder="(default)" />
+                <SelectValue placeholder={t('envManagement.modelEditor.thinkingDisplayDefault')} />
               </SelectTrigger>
               <SelectContent>
                 {THINKING_DISPLAY_VALUES.map((v) => (

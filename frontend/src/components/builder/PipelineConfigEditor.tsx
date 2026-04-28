@@ -1,19 +1,22 @@
 'use client';
 
 /**
- * PipelineConfigEditor — P.2 (cycle 20260426_2).
- *
- * Form panel for ``manifest.pipeline`` (a.k.a. ``PipelineConfig``).
- * Mirrors the executor's `PipelineConfig` field set, omitting the
- * deploy-time secret (``api_key``) and the nested ``model`` block
- * (which has its own editor — ``ModelConfigEditor``).
+ * PipelineConfigEditor — form panel for `manifest.pipeline` (a.k.a.
+ * `PipelineConfig`). Mirrors the executor's `PipelineConfig` field
+ * set, omitting the deploy-time secret (`api_key`) and the nested
+ * `model` block (which has its own editor — `ModelConfigEditor`).
  *
  * Save semantics: shallow-merge against current values; only changed
- * keys are PATCHed. ``Reset`` reverts to the on-disk snapshot.
+ * keys are PATCHed. `Reset` reverts to the on-disk snapshot.
+ *
+ * Layout: this component is a pure form section that fills its
+ * parent's width — containers (e.g. GlobalSettingsView) decide the
+ * outer max-width.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Save, RotateCcw } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -73,19 +76,15 @@ function tryParseJsonObject(s: string): { ok: true; value: Record<string, unknow
   }
 }
 
-/** Build the changes payload, comparing draft against initial values.
- *  Returns undefined when validation fails. */
 function buildChanges(
   initial: Record<string, unknown>,
   draft: PipelineDraft,
 ): { ok: true; changes: Record<string, unknown> } | { ok: false; error: string } {
   const out: Record<string, unknown> = {};
 
-  // Strings — only emit when changed and non-empty.
   if (draft.name && draft.name !== initial.name) out.name = draft.name;
   if (draft.base_url && draft.base_url !== initial.base_url) out.base_url = draft.base_url;
 
-  // Numeric ints.
   for (const [key, raw] of Object.entries({
     max_iterations: draft.max_iterations,
     context_window_budget: draft.context_window_budget,
@@ -98,7 +97,6 @@ function buildChanges(
     if (n !== initial[key]) out[key] = n;
   }
 
-  // Numeric float.
   if (draft.cost_budget_usd.trim()) {
     const n = Number.parseFloat(draft.cost_budget_usd);
     if (Number.isNaN(n) || n < 0) {
@@ -107,11 +105,9 @@ function buildChanges(
     if (n !== initial.cost_budget_usd) out.cost_budget_usd = n;
   }
 
-  // Booleans.
   if (draft.stream !== initial.stream) out.stream = draft.stream;
   if (draft.single_turn !== initial.single_turn) out.single_turn = draft.single_turn;
 
-  // JSON dicts.
   for (const [key, raw] of Object.entries({
     artifacts: draft.artifacts,
     metadata: draft.metadata,
@@ -135,10 +131,9 @@ export function PipelineConfigEditor({
   onSave,
   onClearError,
 }: PipelineConfigEditorProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<PipelineDraft>(() => snapshotToDraft(initial));
 
-  // Re-sync when initial changes (after a successful save the parent
-  // re-fetches and passes a new initial through).
   useEffect(() => {
     setDraft(snapshotToDraft(initial));
   }, [initial]);
@@ -163,20 +158,19 @@ export function PipelineConfigEditor({
   };
 
   return (
-    <section className="flex flex-col gap-4 max-w-[720px]">
-      <header className="flex items-center justify-between">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">
-            Pipeline config
+    <section className="flex flex-col gap-4 w-full">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <h3 className="text-[1rem] font-semibold text-[hsl(var(--foreground))]">
+            {t('envManagement.pipelineEditor.title')}
           </h3>
-          <p className="text-[0.75rem] text-[var(--text-muted)]">
-            Limits and run-time toggles for the pipeline. Shallow-merged on save —
-            only changed fields are sent.
+          <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+            {t('envManagement.pipelineEditor.description')}
           </p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <ActionButton icon={RotateCcw} onClick={handleReset} disabled={saving || !dirty}>
-            Reset
+            {t('common.reset')}
           </ActionButton>
           <ActionButton
             variant="primary"
@@ -184,7 +178,7 @@ export function PipelineConfigEditor({
             onClick={handleSave}
             disabled={saving || !dirty || !buildResult.ok}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('envManagement.saving') : t('common.save')}
           </ActionButton>
         </div>
       </header>
@@ -200,32 +194,39 @@ export function PipelineConfigEditor({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="grid gap-1.5">
-          <Label htmlFor="pl-name">Name</Label>
+          <Label htmlFor="pl-name">
+            {t('envManagement.pipelineEditor.name')}
+          </Label>
           <Input
             id="pl-name"
             value={draft.name}
             onChange={(e) => update('name', e.target.value)}
-            placeholder="default"
+            placeholder={t('envManagement.pipelineEditor.namePlaceholder')}
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="pl-base-url">Base URL</Label>
+          <Label htmlFor="pl-base-url">
+            {t('envManagement.pipelineEditor.baseUrl')}
+          </Label>
           <Input
             id="pl-base-url"
             value={draft.base_url}
             onChange={(e) => update('base_url', e.target.value)}
-            placeholder="https://api.anthropic.com (leave blank for default)"
+            placeholder={t('envManagement.pipelineEditor.baseUrlPlaceholder')}
             className="font-mono text-[0.75rem]"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="grid gap-1.5">
           <Label htmlFor="pl-max-iter">
-            max_iterations <span className="opacity-60">(int &gt;= 1)</span>
+            {t('envManagement.pipelineEditor.maxIterations')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.pipelineEditor.maxIterationsHint')})
+            </span>
           </Label>
           <Input
             id="pl-max-iter"
@@ -237,7 +238,10 @@ export function PipelineConfigEditor({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="pl-ctx">
-            context_window_budget <span className="opacity-60">(int &gt;= 1024)</span>
+            {t('envManagement.pipelineEditor.contextWindow')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.pipelineEditor.contextWindowHint')})
+            </span>
           </Label>
           <Input
             id="pl-ctx"
@@ -249,27 +253,30 @@ export function PipelineConfigEditor({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="pl-cost">
-            cost_budget_usd <span className="opacity-60">(float &gt;= 0)</span>
+            {t('envManagement.pipelineEditor.costBudget')}{' '}
+            <span className="opacity-60">
+              ({t('envManagement.pipelineEditor.costBudgetHint')})
+            </span>
           </Label>
           <Input
             id="pl-cost"
             value={draft.cost_budget_usd}
             onChange={(e) => update('cost_budget_usd', e.target.value)}
-            placeholder="(unbounded)"
+            placeholder={t('envManagement.pipelineEditor.costBudgetPlaceholder')}
             inputMode="decimal"
           />
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label className="flex items-center gap-2 text-[0.8125rem] cursor-pointer">
           <Switch
             checked={draft.stream}
             onCheckedChange={(v) => update('stream', !!v)}
           />
-          stream
-          <span className="text-[var(--text-muted)] text-[0.6875rem]">
-            (event stream during execution)
+          {t('envManagement.pipelineEditor.stream')}
+          <span className="text-[hsl(var(--muted-foreground))] text-[0.6875rem]">
+            ({t('envManagement.pipelineEditor.streamHint')})
           </span>
         </label>
         <label className="flex items-center gap-2 text-[0.8125rem] cursor-pointer">
@@ -277,16 +284,19 @@ export function PipelineConfigEditor({
             checked={draft.single_turn}
             onCheckedChange={(v) => update('single_turn', !!v)}
           />
-          single_turn
-          <span className="text-[var(--text-muted)] text-[0.6875rem]">
-            (skip the agent loop)
+          {t('envManagement.pipelineEditor.singleTurn')}
+          <span className="text-[hsl(var(--muted-foreground))] text-[0.6875rem]">
+            ({t('envManagement.pipelineEditor.singleTurnHint')})
           </span>
         </label>
       </div>
 
       <div className="grid gap-1.5">
         <Label htmlFor="pl-artifacts">
-          artifacts <span className="opacity-60">(JSON object — stage_name → artifact override)</span>
+          {t('envManagement.pipelineEditor.artifacts')}{' '}
+          <span className="opacity-60">
+            ({t('envManagement.pipelineEditor.artifactsHint')})
+          </span>
         </Label>
         <Textarea
           id="pl-artifacts"
@@ -300,7 +310,10 @@ export function PipelineConfigEditor({
 
       <div className="grid gap-1.5">
         <Label htmlFor="pl-metadata">
-          metadata <span className="opacity-60">(JSON object — free-form)</span>
+          {t('envManagement.pipelineEditor.metadata')}{' '}
+          <span className="opacity-60">
+            ({t('envManagement.pipelineEditor.metadataHint')})
+          </span>
         </Label>
         <Textarea
           id="pl-metadata"
