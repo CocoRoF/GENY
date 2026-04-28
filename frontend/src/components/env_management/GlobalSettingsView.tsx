@@ -59,6 +59,7 @@ import GenyToolsPicker from './GenyToolsPicker';
 import HostScopedLinkPanel from './HostScopedLinkPanel';
 import MCPServerEditor from './MCPServerEditor';
 import SectionHelpButton from './section_help/SectionHelpButton';
+import { HooksTab } from '@/components/tabs/HooksTab';
 
 const S06_API_ORDER = 6;
 
@@ -337,15 +338,14 @@ export default function GlobalSettingsView() {
             )}
 
             {panel === 'hooks' && (
-              <HostScopedLinkPanel
-                icon={Plug}
-                title={t('envManagement.globals.hooks.title')}
-                description={t('envManagement.globals.hooks.description')}
-                primaryActionLabel={t('envManagement.globals.hooks.manageLink')}
-                onPrimaryAction={() => goToLibrary('hooks')}
-              >
-                <Bullets keyPath="envManagement.globals.hooks.bullets" />
-              </HostScopedLinkPanel>
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.hooks.title')}
+                  description={t('envManagement.globals.hooks.description')}
+                />
+                <HostBadge />
+                <HooksTab embedded />
+              </div>
             )}
 
             {panel === 'permissions' && (
@@ -454,6 +454,18 @@ function PanelHeader({
       <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
         {description}
       </p>
+    </div>
+  );
+}
+
+function HostBadge() {
+  const { t } = useI18n();
+  return (
+    <div className="px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[0.7rem] text-amber-800 dark:text-amber-300 leading-relaxed">
+      <span className="font-semibold uppercase tracking-wider mr-2">
+        {t('envManagement.globals.hostBadge')}
+      </span>
+      {t('envManagement.globals.hostBadgeNote')}
     </div>
   );
 }

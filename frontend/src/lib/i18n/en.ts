@@ -706,6 +706,7 @@ const en = {
       navPermissions: 'Permissions',
       navSkills: 'Skills',
       hostBadge: 'Host-level',
+      hostBadgeNote: 'Edits here apply to every environment on this host — not just the one you\'re currently editing. The data lives outside the manifest in a shared file / settings store.',
       executorTools: {
         title: 'Executor built-in tools',
         description: 'The 38 tools that ship inside geny-executor itself (Read, Write, Bash, Agent, MCP, etc.). Selected names land in `manifest.tools.built_in` — Stage 10 picks from this allowlist on every turn.',
