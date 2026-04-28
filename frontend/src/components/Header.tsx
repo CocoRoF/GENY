@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, Code2, User, BookOpen, Mic, AudioLines, LogIn, LogOut, Brain, Layers } from 'lucide-react';
+import { Menu, Sun, Moon, Code2, User, BookOpen, AudioLines, LogIn, LogOut, Brain, Layers } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 
@@ -18,13 +18,6 @@ export default function Header() {
 
   useEffect(() => { hydrateDevMode(); }, [hydrateDevMode]);
 
-  // TTS Studio URL (GPT-SoVITS WebUI)
-  const [ttsStudioUrl, setTtsStudioUrl] = useState<string>('/tts-studio/');
-  useEffect(() => {
-    if (process.env.NEXT_PUBLIC_API_URL !== undefined) return;
-    const port = process.env.NEXT_PUBLIC_GPT_SOVITS_WEBUI_PORT || '9874';
-    setTtsStudioUrl(`${window.location.protocol}//${window.location.hostname}:${port}`);
-  }, []);
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
 
@@ -92,17 +85,6 @@ export default function Header() {
         >
           <BookOpen size={14} />
         </Link>
-
-        {/* ── TTS Studio Button — hidden on mobile ── */}
-        <a
-          href={ttsStudioUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
-          title={t('header.ttsStudio')}
-        >
-          <Mic size={14} />
-        </a>
 
         {/* ── TTS Voice Button — hidden on mobile ── */}
         <Link
