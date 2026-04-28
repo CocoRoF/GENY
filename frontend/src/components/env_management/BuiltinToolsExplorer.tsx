@@ -66,6 +66,8 @@ import {
 import { EXECUTOR_TOOL_DESCRIPTIONS_KO } from '@/lib/executorToolDescriptionsKo';
 import { Input } from '@/components/ui/input';
 import ToolDetailModal from './tool_help/ToolDetailModal';
+// Side-effect: registers per-tool deep content into the help registry.
+import './tool_help/content';
 
 export interface BuiltinToolsExplorerProps {
   value: string[];

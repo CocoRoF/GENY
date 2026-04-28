@@ -53,6 +53,8 @@ import {
 } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import ToolDetailModal from './tool_help/ToolDetailModal';
+// Side-effect: registers per-tool deep content into the help registry.
+import './tool_help/content';
 
 export interface GenyToolsExplorerProps {
   value: string[];
