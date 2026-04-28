@@ -99,6 +99,7 @@ export default function Stage20PersistEditor({ order, entry }: Props) {
     <div className="flex flex-col gap-4">
       <TilePicker
         titleKey="envManagement.stage20.persisterTitle"
+        helpId="stage20.persister"
         hintKey="envManagement.stage20.persisterHint"
         options={PERSISTER_OPTIONS}
         available={persAvail}
@@ -121,6 +122,7 @@ export default function Stage20PersistEditor({ order, entry }: Props) {
 
       <TilePicker
         titleKey="envManagement.stage20.frequencyTitle"
+        helpId="stage20.frequency"
         hintKey="envManagement.stage20.frequencyHint"
         options={FREQ_OPTIONS}
         available={freqAvail}
