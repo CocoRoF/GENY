@@ -27,6 +27,12 @@ import type {
   StageModelOverride,
 } from '@/types/environment';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
+import {
+  MODEL_CATALOG,
+  PROVIDER_DEFAULT_MODEL,
+  inferProvider,
+  type ProviderId,
+} from '@/lib/modelCatalog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import SectionHelpButton from '../section_help/SectionHelpButton';
@@ -321,6 +327,32 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
                 });
               }}
               onClearError={() => {}}
+              provider={inferProvider(
+                (entry.model_override?.model as string | undefined) ?? '',
+              )}
+              onProviderChange={(next: ProviderId) => {
+                // Per-stage overrides don't carry an explicit provider
+                // field — the executor infers from the model id prefix.
+                // Keep the model in the new provider's catalog so the
+                // inference resolves the way the user expects; vLLM
+                // leaves the value alone (free-form).
+                const current = (entry.model_override ??
+                  {}) as Record<string, unknown>;
+                if (next === 'vllm') return;
+                const currentModel =
+                  (current.model as string | undefined) ?? '';
+                const inCatalog = MODEL_CATALOG[next].some(
+                  (o) => o.id === currentModel,
+                );
+                if (!inCatalog) {
+                  patchStage(order, {
+                    model_override: {
+                      ...current,
+                      model: PROVIDER_DEFAULT_MODEL[next],
+                    } as unknown as StageModelOverride,
+                  });
+                }
+              }}
             />
           </div>
         )}

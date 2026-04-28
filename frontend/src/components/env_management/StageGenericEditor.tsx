@@ -46,6 +46,12 @@ import JsonSchemaForm, {
   type JsonSchema,
 } from '@/components/environment/JsonSchemaForm';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
+import {
+  MODEL_CATALOG,
+  PROVIDER_DEFAULT_MODEL,
+  inferProvider,
+  type ProviderId,
+} from '@/lib/modelCatalog';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -286,6 +292,27 @@ function ModelOverridePanel({
               });
             }}
             onClearError={() => {}}
+            provider={inferProvider(
+              (entry.model_override?.model as string | undefined) ?? '',
+            )}
+            onProviderChange={(next: ProviderId) => {
+              const current = (entry.model_override ??
+                {}) as Record<string, unknown>;
+              if (next === 'vllm') return;
+              const currentModel =
+                (current.model as string | undefined) ?? '';
+              const inCatalog = MODEL_CATALOG[next].some(
+                (o) => o.id === currentModel,
+              );
+              if (!inCatalog) {
+                patchStage(order, {
+                  model_override: {
+                    ...current,
+                    model: PROVIDER_DEFAULT_MODEL[next],
+                  } as unknown as StageModelOverride,
+                });
+              }
+            }}
           />
         </div>
       )}
