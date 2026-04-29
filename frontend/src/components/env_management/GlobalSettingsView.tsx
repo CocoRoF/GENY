@@ -3,33 +3,34 @@
 /**
  * GlobalSettingsView — body view for "stage 0" (env-wide globals).
  *
- * Lives in the same body slot as StageDetailView. Replaces the old
- * right-side GlobalSettingsDrawer: globals are now selectable from
- * the stage progress bar like any pipeline stage.
- *
- * Cycle 20260429 — hooks/skills/permissions promoted from "호스트
- * 단위 (공용)" to env-pickable. They still live host-level (one
- * registry per machine), but each manifest now records which subset
- * is *active for this env* via geny-executor 1.3.3's
- * `manifest.host_selections`. The panels render the env-side picker
- * on top + the existing host-side CRUD editor below.
+ * Lives in the same body slot as StageDetailView. Cycle 20260429
+ * Phase 5 simplified the host-shared sections to pure pickers —
+ * the host CRUD that used to ride along inside a collapsible was
+ * promoted to top-level tabs (#553 / Phase 2), and a slim
+ * `RegistryEditorLink` row points the user there when they need
+ * to register or edit a host item.
  *
  *   All env-scoped (lives in `manifest.*`):
  *     1. 기본 모델 설정       → ModelConfigEditor
  *     2. 스테이지 기본 설정   → PipelineConfigEditor
- *     3. Executor Built-in    → ToolCheckboxGrid (manifest.tools.built_in)
- *     4. Geny Built-in        → GenyToolsExplorer (manifest.tools.external)
- *     5. MCP                  → env MCP-server count + Library link
- *     6. 훅                   → host_selections.hooks picker + HooksTab
- *     7. 권한 (preview)        → host_selections.permissions placeholder
- *     8. 스킬                 → host_selections.skills picker + SkillsTab
+ *     3. Executor Built-in    → BuiltinToolsExplorer  (manifest.tools.built_in)
+ *     4. Geny Built-in        → GenyToolsExplorer     (manifest.tools.external)
+ *     5. MCP                  → MCPServerEditor       (manifest.tools.mcp_servers)
+ *     6. 훅                   → HookEnvPicker         (manifest.host_selections.hooks)
+ *     7. 권한 (preview)       → PermissionEnvPicker   (manifest.host_selections.permissions)
+ *     8. 스킬                 → SkillEnvPicker        (manifest.host_selections.skills)
  *
  * Permission narrowing is recorded in the manifest but not yet
- * enforced runtime-side; the picker is disabled and labelled. Hooks
- * and skills default to `["*"]` (every host registration applies).
+ * enforced runtime-side; the picker is disabled and labelled.
+ *
+ * The new-draft seeder (`seedDefaultToolLists` in the draft store)
+ * pre-populates `host_selections.{hooks,skills,permissions}` from
+ * `/api/env-defaults` (Phase 1), so a fresh env opens with
+ * whatever the operator has marked ★ on the host registry tabs.
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   Cpu,
   ExternalLink,
@@ -64,9 +65,6 @@ import {
   PermissionEnvPicker,
   SkillEnvPicker,
 } from './HostSelectionPickers';
-import { HooksTab } from '@/components/tabs/HooksTab';
-import { PermissionsTab } from '@/components/tabs/PermissionsTab';
-import { SkillsTab } from '@/components/tabs/SkillsTab';
 
 const S06_API_ORDER = 6;
 
@@ -358,9 +356,7 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.hooks.description')}
                 />
                 <HookEnvPicker />
-                <HostRegistryEditor>
-                  <HooksTab embedded />
-                </HostRegistryEditor>
+                <RegistryEditorLink tab="hooks" />
               </div>
             )}
 
@@ -373,9 +369,7 @@ export default function GlobalSettingsView() {
                   )}
                 />
                 <PermissionEnvPicker />
-                <HostRegistryEditor>
-                  <PermissionsTab embedded />
-                </HostRegistryEditor>
+                <RegistryEditorLink tab="permissions" />
               </div>
             )}
 
@@ -386,9 +380,7 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.skills.description')}
                 />
                 <SkillEnvPicker />
-                <HostRegistryEditor>
-                  <SkillsTab embedded />
-                </HostRegistryEditor>
+                <RegistryEditorLink tab="skills" />
               </div>
             )}
           </div>
@@ -467,57 +459,55 @@ function PanelHeader({
   );
 }
 
-function HostBadge() {
-  const { t } = useI18n();
-  return (
-    <div className="px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[0.7rem] text-amber-800 dark:text-amber-300 leading-relaxed">
-      <span className="font-semibold uppercase tracking-wider mr-2">
-        {t('envManagement.globals.hostBadge')}
-      </span>
-      {t('envManagement.globals.hostBadgeNote')}
-    </div>
-  );
-}
 
 /**
- * HostRegistryEditor — collapsible wrapper around the existing
- * HooksTab / PermissionsTab / SkillsTab editors. The host registry
- * is shared across every environment on this machine, so the
- * editor's effects are NOT scoped to the current draft. We hide it
- * by default to keep the env-side picker (the thing that *is*
- * scoped to this manifest) visually primary, and let the user
- * expand it when they need to register a new hook/skill or fix a
- * misconfigured rule.
+ * RegistryEditorLink — slim "go to host registry editor" link that
+ * navigates to the corresponding top-level tab (cycle 20260429 PR
+ * #553). Replaces the previous in-panel collapsible
+ * `HostRegistryEditor` — the host CRUD now lives one click away in
+ * the dedicated MCP / SKILLS / HOOK / 권한 tabs, so embedding it
+ * inside the env picker doubled the surface area without adding
+ * value.
  */
-function HostRegistryEditor({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function RegistryEditorLink({
+  tab,
+}: {
+  tab: 'hooks' | 'skills' | 'permissions' | 'mcp';
+}) {
+  const labels: Record<typeof tab, { name: string; hint: string }> = {
+    hooks: {
+      name: '훅 등록소',
+      hint: '훅 항목을 추가/수정하려면 호스트 등록소로 이동',
+    },
+    skills: {
+      name: '스킬 등록소',
+      hint: '스킬을 추가/수정하려면 호스트 등록소로 이동',
+    },
+    permissions: {
+      name: '권한 등록소',
+      hint: '권한 룰을 추가/수정하려면 호스트 등록소로 이동',
+    },
+    mcp: {
+      name: 'MCP 등록소',
+      hint: 'MCP 서버를 추가/수정하려면 호스트 등록소로 이동',
+    },
+  };
+  const { name, hint } = labels[tab];
   return (
-    <div className="border-t border-[hsl(var(--border))] pt-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-between w-full text-left"
+    <div className="border-t border-[hsl(var(--border))] pt-3 flex items-center gap-3">
+      <span className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shrink-0">
+        호스트 공용
+      </span>
+      <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))] flex-1 leading-relaxed">
+        {hint} (모든 환경에 영향).
+      </span>
+      <Link
+        href={`/environments?tab=${tab}`}
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors no-underline shrink-0"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
-            호스트 공용
-          </span>
-          <span className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
-            호스트 등록소 편집
-          </span>
-          <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
-            (모든 환경에 영향)
-          </span>
-        </div>
-        <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
-          {open ? '닫기 ▴' : '열기 ▾'}
-        </span>
-      </button>
-      {open && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-          {children}
-        </div>
-      )}
+        <ExternalLink className="w-3 h-3" />
+        {name} 열기
+      </Link>
     </div>
   );
 }

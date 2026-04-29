@@ -30,6 +30,7 @@
 import { create } from 'zustand';
 import { environmentApi } from '@/lib/environmentApi';
 import { externalToolCatalogApi, frameworkToolApi } from '@/lib/api';
+import { envDefaultsApi } from '@/lib/envDefaultsApi';
 import { isExcludedFromSeedDefault } from '@/lib/genyToolFamily';
 import type {
   EnvironmentManifest,
@@ -63,31 +64,35 @@ function emptyTools(): ToolsSnapshot {
 
 /**
  * Materialise the executor + Geny tool catalogs into the explicit
- * lists the env-management UI shows as "all checked by default".
+ * lists the env-management UI shows as "all checked by default",
+ * and apply the env-defaults curation set to host_selections.
  *
- * Why explicit lists instead of the wildcard `["*"]` sentinel? The
- * picker already supports both, but the user's mental model for a
- * fresh env is "every box is ticked individually" — wildcard mode
- * shows a banner and reads as a power-user shortcut, not a
- * default. Materialising on seed lets the user uncheck one box
- * later without first having to flip out of wildcard.
+ * Tool catalogs (framework + external):
+ *   The picker supports the wildcard `["*"]` sentinel but the
+ *   user's mental model for a fresh env is "every box is ticked
+ *   individually". Wildcard mode shows a banner and reads as a
+ *   power-user shortcut, not a default. Materialising on seed
+ *   lets the user uncheck one box later without first having to
+ *   flip out of wildcard. Geny built-ins drop families listed in
+ *   `GENY_FAMILIES_EXCLUDED_FROM_SEED_DEFAULT` (currently `game`).
  *
- * Geny built-ins exclude one or more families per
- * `GENY_FAMILIES_EXCLUDED_FROM_SEED_DEFAULT` (currently `game`):
- * most envs aren't vtuber companion agents, so shipping with feed/
- * gift/play/talk on tends to confuse the LLM. The user can still
- * toggle them in via the picker; new families dropped from the
- * default ship as a one-line edit to that constant.
+ * Host selections (hooks / skills / permissions / mcp_servers):
+ *   `/api/env-defaults` (Phase 1) is the host-curated list of ★ ids
+ *   per category. When the operator has marked some items, the
+ *   seeder writes those exact ids into manifest.host_selections so
+ *   a fresh env opens with their curated defaults rather than the
+ *   wildcard "every host registration on" fallback. An empty list
+ *   for a category means the operator hasn't curated yet — keep
+ *   wildcard so the env still gets every host registration.
  *
- * Failures are non-fatal — if a catalog endpoint is unreachable we
- * fall back to whatever the seed manifest had (typically `["*"]`
- * for built_in post geny-executor 1.3.3). The user still gets a
- * usable env; the side panel will just look like wildcard mode.
+ * Failures are non-fatal: any unreachable endpoint falls back to
+ * whatever the seed manifest had (typically `["*"]`). The env is
+ * still usable; the picker just reads as wildcard mode.
  */
 async function seedDefaultToolLists(
   fresh: EnvironmentManifest,
 ): Promise<void> {
-  const [framework, external] = await Promise.all([
+  const [framework, external, envDefaults] = await Promise.all([
     frameworkToolApi.list().catch((err) => {
       // eslint-disable-next-line no-console
       console.warn('[draft seed] framework tool catalog unavailable:', err);
@@ -96,6 +101,11 @@ async function seedDefaultToolLists(
     externalToolCatalogApi.list('ko').catch((err) => {
       // eslint-disable-next-line no-console
       console.warn('[draft seed] external tool catalog unavailable:', err);
+      return null;
+    }),
+    envDefaultsApi.getAll().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[draft seed] env-defaults unavailable:', err);
       return null;
     }),
   ]);
@@ -110,6 +120,33 @@ async function seedDefaultToolLists(
     fresh.tools.external = external.tools
       .map((t) => t.name)
       .filter((name) => !isExcludedFromSeedDefault(name));
+  }
+
+  // Apply env-defaults to host_selections. Empty list = uncurated;
+  // leave the manifest's existing wildcard so the env gets every
+  // host registration. Non-empty = literal narrowing.
+  if (envDefaults) {
+    if (!fresh.host_selections) {
+      fresh.host_selections = {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+    }
+    if ((envDefaults.hooks ?? []).length > 0) {
+      fresh.host_selections.hooks = [...envDefaults.hooks];
+    }
+    if ((envDefaults.skills ?? []).length > 0) {
+      fresh.host_selections.skills = [...envDefaults.skills];
+    }
+    if ((envDefaults.permissions ?? []).length > 0) {
+      fresh.host_selections.permissions = [...envDefaults.permissions];
+    }
+    // mcp_servers is per-env declarative (lives in tools.mcp_servers),
+    // not a host_selections category — the env-defaults list there
+    // serves a different role (Phase 6 will surface it as a "auto-add
+    // this server when creating a new env" hint, separate from the
+    // env-side picker for the other three).
   }
 }
 
