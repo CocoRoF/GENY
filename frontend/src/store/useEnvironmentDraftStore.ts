@@ -32,6 +32,7 @@ import { environmentApi } from '@/lib/environmentApi';
 import type {
   EnvironmentManifest,
   EnvironmentMetadata,
+  HostSelections,
   StageManifestEntry,
   ToolsSnapshot,
 } from '@/types/environment';
@@ -161,6 +162,7 @@ export interface EnvironmentDraftState {
   modelDirty: boolean;
   pipelineDirty: boolean;
   toolsDirty: boolean;
+  hostSelectionsDirty: boolean;
   /** Per-path validation errors keyed by dotted path
    *  (e.g. `metadata.name`, `stages.6.config.system_prompt`). */
   validationErrors: ValidationError[];
@@ -183,6 +185,12 @@ export interface EnvironmentDraftState {
   patchModel: (patch: Record<string, unknown>) => void;
   patchPipeline: (patch: Record<string, unknown>) => void;
   patchTools: (patch: Partial<ToolsSnapshot>) => void;
+  /** Patch the env-level subset selection of host-registered hooks /
+   *  skills / permissions. Each field accepts the wildcard sentinel
+   *  ``['*']`` (= "use everything the host has, including future
+   *  registrations"), an empty array (= "use none"), or a literal
+   *  list of names (intersected with the host registry at runtime). */
+  patchHostSelections: (patch: Partial<HostSelections>) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -221,6 +229,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
     modelDirty: false,
     pipelineDirty: false,
     toolsDirty: false,
+    hostSelectionsDirty: false,
     validationErrors: [],
     error: null,
     saving: false,
@@ -264,6 +273,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           modelDirty: false,
           pipelineDirty: false,
           toolsDirty: false,
+          hostSelectionsDirty: false,
           validationErrors: runValidation(fresh),
           error: null,
           seeding: false,
@@ -308,6 +318,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           modelDirty: false,
           pipelineDirty: false,
           toolsDirty: false,
+          hostSelectionsDirty: false,
           validationErrors: runValidation(fresh),
           error: null,
           seeding: false,
@@ -330,6 +341,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         modelDirty: false,
         pipelineDirty: false,
         toolsDirty: false,
+        hostSelectionsDirty: false,
         validationErrors: [],
         error: null,
         saving: false,
@@ -379,6 +391,26 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       set({
         draft: next,
         toolsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    patchHostSelections: (patch) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      // Defaults match geny-executor 1.3.3 HostSelections — wildcard
+      // for every section so a missing draft.host_selections still
+      // means "all on" rather than silently flipping to opt-out.
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      next.host_selections = { ...current, ...patch };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
         validationErrors: runValidation(next),
       });
     },
@@ -435,7 +467,8 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         s.metadataDirty ||
         s.modelDirty ||
         s.pipelineDirty ||
-        s.toolsDirty
+        s.toolsDirty ||
+        s.hostSelectionsDirty
       );
     },
 
@@ -470,6 +503,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           modelDirty: false,
           pipelineDirty: false,
           toolsDirty: false,
+          hostSelectionsDirty: false,
           validationErrors: [],
           saving: false,
         });
