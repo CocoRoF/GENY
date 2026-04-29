@@ -750,7 +750,7 @@ const en = {
           headersHint: 'HTTP request headers (optional). e.g. Authorization, X-Api-Key.',
           envEmptyKey: 'key',
           envEmptyValue: 'value',
-          addRow: '+ Add',
+          addRow: 'Add',
           removeRow: 'Remove',
           modeStructured: 'Structured',
           modeJson: 'JSON',
