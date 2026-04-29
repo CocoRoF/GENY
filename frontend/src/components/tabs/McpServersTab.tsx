@@ -415,7 +415,7 @@ export function McpServersTab() {
       onDismissError={() => setError(null)}
     >
       <div className="px-3 pt-3">
-        <HostRegistryBanner note="custom MCP 서버는 backend/mcp/custom/*.json에 저장되어 모든 환경에서 공유됩니다." />
+        <HostRegistryBanner note="★ 표시한 서버는 새 env 생성 시 manifest.tools.mcp_servers에 스냅샷으로 자동 추가 — 이후 env가 자기 복사본을 소유하므로 호스트 변경은 기존 env에 영향 없음." />
       </div>
       <TwoPaneBody
         sidebar={sidebar}
