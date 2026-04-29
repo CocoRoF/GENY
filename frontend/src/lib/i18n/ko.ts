@@ -766,7 +766,7 @@ const ko: Translations = {
           headersHint: 'HTTP 요청 헤더 (선택). 예: Authorization, X-Api-Key.',
           envEmptyKey: '키',
           envEmptyValue: '값',
-          addRow: '+ 추가',
+          addRow: '추가',
           removeRow: '제거',
           // 모드 토글
           modeStructured: '구조화',
