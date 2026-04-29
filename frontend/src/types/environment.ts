@@ -74,6 +74,25 @@ export interface ToolsSnapshot {
   global_blocklist?: string[];
 }
 
+/**
+ * Per-environment subset selection of host-registered hooks, skills,
+ * and permission rules. Mirrors `geny_executor.HostSelections` (added
+ * in geny-executor 1.3.3).
+ *
+ * Sentinel `["*"]` = "use everything the host has, plus future
+ * additions". Empty list `[]` = explicit opt-out. A name list = the
+ * intersection of selection × what the host has registered.
+ *
+ * `permissions` is reserved — the runtime does not yet enforce it.
+ * The picker UI ships as a placeholder so manifests written today are
+ * forward-compatible.
+ */
+export interface HostSelections {
+  hooks?: string[];
+  skills?: string[];
+  permissions?: string[];
+}
+
 export interface EnvironmentManifest {
   version: string;
   metadata: EnvironmentMetadata;
@@ -81,6 +100,7 @@ export interface EnvironmentManifest {
   pipeline: Record<string, unknown>;
   stages: StageManifestEntry[];
   tools?: ToolsSnapshot;
+  host_selections?: HostSelections;
 }
 
 // ── Request/response shapes for the v2 endpoints ──────────────────

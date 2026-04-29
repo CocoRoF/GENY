@@ -7,25 +7,26 @@
  * right-side GlobalSettingsDrawer: globals are now selectable from
  * the stage progress bar like any pipeline stage.
  *
- * Cycle 20260428 Phase 1 — restructured from 4 panels to 8, grouped
- * by scope:
+ * Cycle 20260429 — hooks/skills/permissions promoted from "호스트
+ * 단위 (공용)" to env-pickable. They still live host-level (one
+ * registry per machine), but each manifest now records which subset
+ * is *active for this env* via geny-executor 1.3.3's
+ * `manifest.host_selections`. The panels render the env-side picker
+ * on top + the existing host-side CRUD editor below.
  *
- *   Environment-scoped (lives in `manifest.*` — env-specific):
+ *   All env-scoped (lives in `manifest.*`):
  *     1. 기본 모델 설정       → ModelConfigEditor
  *     2. 스테이지 기본 설정   → PipelineConfigEditor
  *     3. Executor Built-in    → ToolCheckboxGrid (manifest.tools.built_in)
  *     4. Geny Built-in        → GenyToolsExplorer (manifest.tools.external)
  *     5. MCP                  → env MCP-server count + Library link
+ *     6. 훅                   → host_selections.hooks picker + HooksTab
+ *     7. 권한 (preview)        → host_selections.permissions placeholder
+ *     8. 스킬                 → host_selections.skills picker + SkillsTab
  *
- *   Host-scoped (lives outside the manifest — shared across every
- *   environment, host-level files):
- *     6. 훅       → .geny/hooks.yaml
- *     7. 권한     → settings.json
- *     8. 스킬     → ~/.geny/skills + project skills/
- *
- * Phase 2 will add per-tab SectionHelpModal content. Phase 3 will
- * embed the host-level editors inline (extracted from HooksTab,
- * PermissionsTab, SkillsTab, MCPAdminPanel).
+ * Permission narrowing is recorded in the manifest but not yet
+ * enforced runtime-side; the picker is disabled and labelled. Hooks
+ * and skills default to `["*"]` (every host registration applies).
  */
 
 import { useState } from 'react';
@@ -58,6 +59,11 @@ import GenyToolsExplorer from './GenyToolsExplorer';
 import MCPServerEditor, { type MCPServerEntry } from './MCPServerEditor';
 import BuiltinToolsExplorer from './BuiltinToolsExplorer';
 import SectionHelpButton from './section_help/SectionHelpButton';
+import {
+  HookEnvPicker,
+  PermissionEnvPicker,
+  SkillEnvPicker,
+} from './HostSelectionPickers';
 import { HooksTab } from '@/components/tabs/HooksTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
 import { SkillsTab } from '@/components/tabs/SkillsTab';
@@ -117,6 +123,15 @@ export default function GlobalSettingsView() {
   const builtInCount = (draft.tools?.built_in ?? []).length;
   const genyCount = (draft.tools?.external ?? []).length;
   const mcpCount = (draft.tools?.mcp_servers ?? []).length;
+
+  // host_selections badges — show "★" for wildcard (matches every
+  // host registration), the literal count otherwise. Pre-1.3.3
+  // manifests have no host_selections object; treat that as wildcard.
+  const hookSelection = draft.host_selections?.hooks ?? ['*'];
+  const skillSelection = draft.host_selections?.skills ?? ['*'];
+  const permSelection = draft.host_selections?.permissions ?? ['*'];
+  const selectionBadge = (sel: string[]): string =>
+    sel.includes('*') ? '★' : `${sel.length}`;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -214,31 +229,26 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('mcp')}
               badge={`${mcpCount}`}
             />
-
-            <NavGroupLabel
-              label={t('envManagement.globals.navGroupHost')}
-              className="mt-3"
-            />
             <SubTabButton
               icon={Plug}
               label={t('envManagement.globals.navHooks')}
               active={panel === 'hooks'}
               onClick={() => setPanel('hooks')}
-              hostBadge
+              badge={selectionBadge(hookSelection)}
             />
             <SubTabButton
               icon={Shield}
               label={t('envManagement.globals.navPermissions')}
               active={panel === 'permissions'}
               onClick={() => setPanel('permissions')}
-              hostBadge
+              badge={selectionBadge(permSelection)}
             />
             <SubTabButton
               icon={Sparkles}
               label={t('envManagement.globals.navSkills')}
               active={panel === 'skills'}
               onClick={() => setPanel('skills')}
-              hostBadge
+              badge={selectionBadge(skillSelection)}
             />
           </nav>
 
@@ -340,8 +350,10 @@ export default function GlobalSettingsView() {
                   title={t('envManagement.globals.hooks.title')}
                   description={t('envManagement.globals.hooks.description')}
                 />
-                <HostBadge />
-                <HooksTab embedded />
+                <HookEnvPicker />
+                <HostRegistryEditor>
+                  <HooksTab embedded />
+                </HostRegistryEditor>
               </div>
             )}
 
@@ -353,8 +365,10 @@ export default function GlobalSettingsView() {
                     'envManagement.globals.permissions.description',
                   )}
                 />
-                <HostBadge />
-                <PermissionsTab embedded />
+                <PermissionEnvPicker />
+                <HostRegistryEditor>
+                  <PermissionsTab embedded />
+                </HostRegistryEditor>
               </div>
             )}
 
@@ -364,8 +378,10 @@ export default function GlobalSettingsView() {
                   title={t('envManagement.globals.skills.title')}
                   description={t('envManagement.globals.skills.description')}
                 />
-                <HostBadge />
-                <SkillsTab embedded />
+                <SkillEnvPicker />
+                <HostRegistryEditor>
+                  <SkillsTab embedded />
+                </HostRegistryEditor>
               </div>
             )}
           </div>
@@ -397,14 +413,12 @@ function SubTabButton({
   active,
   onClick,
   badge,
-  hostBadge,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   active: boolean;
   onClick: () => void;
   badge?: string;
-  hostBadge?: boolean;
 }) {
   return (
     <button
@@ -422,9 +436,6 @@ function SubTabButton({
         <span className="text-[0.6875rem] tabular-nums text-[hsl(var(--muted-foreground))] shrink-0">
           {badge}
         </span>
-      )}
-      {hostBadge && (
-        <ExternalLink className="w-3 h-3 text-[hsl(var(--muted-foreground))] shrink-0" />
       )}
     </button>
   );
@@ -457,6 +468,49 @@ function HostBadge() {
         {t('envManagement.globals.hostBadge')}
       </span>
       {t('envManagement.globals.hostBadgeNote')}
+    </div>
+  );
+}
+
+/**
+ * HostRegistryEditor — collapsible wrapper around the existing
+ * HooksTab / PermissionsTab / SkillsTab editors. The host registry
+ * is shared across every environment on this machine, so the
+ * editor's effects are NOT scoped to the current draft. We hide it
+ * by default to keep the env-side picker (the thing that *is*
+ * scoped to this manifest) visually primary, and let the user
+ * expand it when they need to register a new hook/skill or fix a
+ * misconfigured rule.
+ */
+function HostRegistryEditor({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-[hsl(var(--border))] pt-4 flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+            호스트 공용
+          </span>
+          <span className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+            호스트 등록소 편집
+          </span>
+          <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
+            (모든 환경에 영향)
+          </span>
+        </div>
+        <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
+          {open ? '닫기 ▴' : '열기 ▾'}
+        </span>
+      </button>
+      {open && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
