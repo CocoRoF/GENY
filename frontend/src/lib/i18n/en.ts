@@ -673,6 +673,18 @@ const en = {
       globalsLabel: 'Globals',
       globalsTip: 'Open global settings (model / pipeline / tools / linked)',
     },
+    topTabs: {
+      environments: 'Environments',
+      environmentsHint: 'Build and edit 21-stage pipeline environments',
+      mcp: 'MCP',
+      mcpHint: 'Host-registered MCP servers — pick which seed new envs',
+      skills: 'Skills',
+      skillsHint: 'Host-registered skills — pick which seed new envs',
+      hooks: 'Hooks',
+      hooksHint: 'Host-registered hooks — pick which seed new envs',
+      permissions: 'Permissions',
+      permissionsHint: 'Host-registered permission rules — preview, no enforcement yet',
+    },
     progress: {
       back: 'Overview',
       backTip: 'Back to the 21-stage canvas',

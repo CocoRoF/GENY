@@ -1,42 +1,60 @@
 'use client';
 
 /**
- * EnvManagementShell — visual 21-stage environment builder body.
+ * EnvManagementShell — body of the /environments route.
  *
- * Hosted by /app/environments/page.tsx. The page is now header-less;
- * this shell owns the entire chrome (CompactMetaBar at top, then
- * canvas/progress bar/body underneath).
+ * Cycle 20260429 — restructured to host five top-level tabs:
  *
- * Layout:
+ *   ┌─ EnvManagementHeader (44px) ─────────────────────────────────────┐
+ *   │ ← Home | [환경관리] [MCP] [SKILLS] [HOOK] [권한]                 │
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │ Tab=environments (default):                                      │
+ *   │   CompactMetaBar (52px) — name / tags / actions                  │
+ *   │   Body: OverviewView OR StageProgressBar + StageDetailView /     │
+ *   │         GlobalSettingsView                                       │
+ *   │                                                                  │
+ *   │ Tab=mcp / skills / hooks / permissions:                          │
+ *   │   Host-level registry editor for that category. The existing     │
+ *   │   *Tab components (HooksTab, SkillsTab, PermissionsTab,          │
+ *   │   McpServersTab) ship their own TabShell chrome, so nothing else │
+ *   │   from this shell competes for vertical space.                   │
+ *   └──────────────────────────────────────────────────────────────────┘
  *
- *   ┌─ CompactMetaBar (52px) ─────────────────────────────┐
- *   │ ← Home | ✨ Title | name, tags, status, actions     │
- *   ├──────────────────────────────────────────────────────┤
- *   │ Mode A — overview:                                   │
- *   │   PipelineCanvas (or StartFromPicker)                │
- *   │                                                       │
- *   │ Mode B — stage detail (order 0..21):                 │
- *   │   StageProgressBar (scrollable, infinite-wheel)      │
- *   │   ┌──────────────────────────────────────────────┐   │
- *   │   │ order === 0 → GlobalSettingsView              │   │
- *   │   │ order >= 1  → StageDetailView                 │   │
- *   │   └──────────────────────────────────────────────┘   │
- *   └──────────────────────────────────────────────────────┘
+ * Why this layout
+ * ---------------
+ * The four registry tabs used to be sub-tabs of the main app's
+ * "Library" tab — a prototype surface that conflated env CRUD with
+ * host-level admin. They now live next to "환경관리" so the
+ * operator's mental model is "/environments is the hub for
+ * everything that participates in env composition."
  *
- * Stage 0 is a special "globals" entry — it lives in the same body
- * slot as a normal stage but renders the env-wide settings (model /
- * pipeline / tools / externals). The old right-side
- * GlobalSettingsDrawer is gone; the meta bar's "Globals" button just
- * navigates to stage 0.
+ * Stage 0 (the env-side picker for hooks/skills/permissions) only
+ * makes sense when an env draft is loaded, so it stays scoped to
+ * the `environments` tab. Picking a non-env tab does not touch the
+ * draft state — flipping back to `environments` finds the draft
+ * exactly as you left it.
+ *
+ * URL state: `?tab={mcp|skills|hooks|permissions}`. Default
+ * (`environments`) drops the param so the canonical URL is
+ * `/environments`.
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import CompactMetaBar from './CompactMetaBar';
 import OverviewView from './OverviewView';
 import StageProgressBar from './StageProgressBar';
 import StageDetailView from './StageDetailView';
 import GlobalSettingsView from './GlobalSettingsView';
+import EnvManagementHeader, {
+  parseTab,
+  type EnvManagementTab,
+} from './EnvManagementHeader';
+import { HooksTab } from '@/components/tabs/HooksTab';
+import { SkillsTab } from '@/components/tabs/SkillsTab';
+import { PermissionsTab } from '@/components/tabs/PermissionsTab';
+import { McpServersTab } from '@/components/tabs/McpServersTab';
 
 export interface EnvManagementShellProps {
   /** Called after a successful Save with the new env id. The page
@@ -54,6 +72,9 @@ export default function EnvManagementShell({
   const isDirty = useEnvironmentDraftStore((s) => s.isDirty);
   const resetDraft = useEnvironmentDraftStore((s) => s.resetDraft);
   const stageDirty = useEnvironmentDraftStore((s) => s.stageDirty);
+
+  const searchParams = useSearchParams();
+  const activeTab: EnvManagementTab = parseTab(searchParams.get('tab'));
 
   const [view, setView] = useState<ViewMode>({ mode: 'overview' });
 
@@ -93,8 +114,69 @@ export default function EnvManagementShell({
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))]">
+      <EnvManagementHeader active={activeTab} />
+
+      {activeTab === 'environments' && (
+        <EnvironmentsTabBody
+          view={view}
+          setView={setView}
+          activeOrders={activeOrders}
+          stageDirty={stageDirty}
+          draft={draft}
+          onSaved={handleSaved}
+        />
+      )}
+
+      {activeTab === 'mcp' && (
+        <RegistryTabSlot>
+          <McpServersTab />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'skills' && (
+        <RegistryTabSlot>
+          <SkillsTab />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'hooks' && (
+        <RegistryTabSlot>
+          <HooksTab />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'permissions' && (
+        <RegistryTabSlot>
+          <PermissionsTab />
+        </RegistryTabSlot>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-bodies ─────────────────────────────────────────────────────
+
+interface EnvironmentsTabBodyProps {
+  view: ViewMode;
+  setView: (v: ViewMode) => void;
+  activeOrders: Set<number>;
+  stageDirty: Set<number>;
+  draft: ReturnType<typeof useEnvironmentDraftStore.getState>['draft'];
+  onSaved: (id: string) => void;
+}
+
+function EnvironmentsTabBody({
+  view,
+  setView,
+  activeOrders,
+  stageDirty,
+  draft,
+  onSaved,
+}: EnvironmentsTabBodyProps) {
+  return (
+    <>
       <CompactMetaBar
-        onSaved={handleSaved}
+        onSaved={onSaved}
         onOpenGlobals={() => setView({ mode: 'stage', order: 0 })}
       />
 
@@ -120,6 +202,16 @@ export default function EnvManagementShell({
           )}
         </>
       )}
-    </div>
+    </>
   );
+}
+
+/**
+ * RegistryTabSlot — thin wrapper that lets the host registry tabs
+ * own their full TabShell chrome (header + body + actions). The
+ * registry tabs already render their own scrolling shell, so we
+ * just give them the remaining vertical space.
+ */
+function RegistryTabSlot({ children }: { children: React.ReactNode }) {
+  return <div className="flex-1 min-h-0 flex flex-col">{children}</div>;
 }
