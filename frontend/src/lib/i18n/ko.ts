@@ -803,6 +803,77 @@ const ko: Translations = {
         sectionBundled: '번들',
         sectionUser: '사용자',
         toolsCount: '{n}개 도구',
+        // ── 새 모달용 (Phase 9.3) ──
+        form: {
+          createTitle: '새 스킬 만들기',
+          editTitle: '스킬 편집 — /{id}',
+          createBtn: '만들기',
+          editBtn: '저장',
+          // 섹션
+          sectionIdentity: '식별 정보',
+          sectionMeta: '분류 & 메타',
+          sectionExecution: '도구 & 실행',
+          sectionExamples: '예시 — LLM이 언제 이 스킬을 부를지',
+          sectionBody: '본문 (LLM이 보는 내용)',
+          sectionExtras: '고급 설정',
+          // 식별
+          idLabel: 'ID',
+          idHint: '슬래시 명령으로 호출됩니다 (예: /{id}). 소문자/숫자/대시/언더스코어만.',
+          idPlaceholder: 'lower-case, dash/underscore allowed',
+          nameLabel: '이름',
+          nameHint: '사람이 읽는 이름. 스킬 카드 + 검색 결과에 노출.',
+          namePlaceholder: '예: PR 작성, 회의록 요약',
+          descriptionLabel: '설명',
+          descriptionHint:
+            'LLM이 "이 스킬을 호출해야 하나?"를 판단할 때 보는 한 줄. 무엇을 하는지 + 언제 쓰는지 명확하게.',
+          descriptionPlaceholder: '예: 현재 git diff를 검토해 GitHub PR 제목/본문을 작성합니다.',
+          // 메타
+          categoryLabel: '카테고리',
+          categoryHint: '검색/필터용 그룹 (선택). 예: code, research, communication.',
+          categoryPlaceholder: '예: code',
+          effortLabel: 'Effort',
+          effortHint: 'LLM이 호출 비용을 가늠할 때 참고. low / medium / high.',
+          effortPlaceholder: 'low / medium / high',
+          versionLabel: '버전',
+          versionHint: 'semver 권장. 동일 ID로 업데이트할 때 추적 (선택).',
+          versionPlaceholder: '예: 1.0.0',
+          // 실행
+          modelOverrideLabel: '모델 오버라이드',
+          modelOverrideHint:
+            '특정 모델로 강제 (선택). 비우면 부모 환경의 모델을 따름.',
+          modelOverridePlaceholder: '예: claude-haiku-4-5-20251001',
+          executionModeLabel: '실행 모드',
+          executionModeHint:
+            'inline = 같은 프로세스에서 실행 (기본). fork = 별도 서브프로세스 격리 (느리지만 안전).',
+          executionModeInline: 'inline (기본)',
+          executionModeFork: 'fork (격리)',
+          allowedToolsLabel: '허용 도구',
+          allowedToolsHint:
+            '이 스킬 안에서 LLM이 쓸 수 있는 도구 목록 (CSV). 비우면 부모 환경의 도구 셋을 그대로 상속.',
+          allowedToolsPlaceholder: '예: Read, Grep, Bash',
+          // 예시
+          examplesLabel: '예시 (한 줄에 하나)',
+          examplesHint:
+            '실제 사용자가 이 스킬을 부를 만한 문장. LLM이 의도 매칭에 활용합니다. 3~5개 권장.',
+          examplesPlaceholder:
+            '예:\n현재 변경사항으로 PR 만들어줘\nGit diff 보고 PR 제목 뽑아줘\n이 브랜치 PR description 작성',
+          // 본문
+          bodyLabel: '스킬 본문 (markdown)',
+          bodyHint:
+            'LLM이 스킬을 호출하면 이 본문이 컨텍스트에 주입됩니다. 무엇을, 어떻게, 어떤 도구로 — 단계적으로 작성하세요.',
+          bodyPlaceholder:
+            '## 무엇\n현재 작업 트리의 git diff를 검토해 GitHub에 올릴 PR 제목 + body 초안을 만든다.\n\n## 어떻게\n1. `git diff origin/main...HEAD` 결과를 Read로 가져온다\n2. 변경 의도를 한 줄로 요약 (제목)\n3. 영향 범위, 테스트 방법, 후속 작업을 body에 정리\n\n## 출력\n```\nTitle: <title>\nBody:\n<body>\n```',
+          // 고급
+          extrasLabel: 'Extras (JSON object)',
+          extrasHint:
+            '호스트 전용 메타데이터 (선택). flat scalar(string/number/bool)만 허용.',
+          extrasPlaceholder: '(empty = no extras)\n{"icon": "🛠", "owner": "ops"}',
+          // 검증
+          errorRequired: 'ID, 이름, 설명은 모두 필수입니다.',
+          errorBadId:
+            'ID는 소문자/숫자/대시/언더스코어만 허용 (첫 글자는 알파벳/숫자).',
+          errorBadExtras: 'Extras JSON 파싱 실패: {detail}',
+        },
       },
       hooks: {
         title: '훅',
