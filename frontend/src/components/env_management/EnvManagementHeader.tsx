@@ -1,35 +1,39 @@
 'use client';
 
 /**
- * EnvManagementHeader — top-level navigation for the /environments
- * route. Hosts the 5-tab strip the operator restructure introduced:
+ * EnvManagementHeader — single-row navigation chrome for /environments.
  *
- *   ← Home | ✨ 환경 관리 | [환경관리] [MCP] [SKILLS] [HOOK] [권한]
+ * Cycle 20260429 follow-up — replaced the always-visible 5-tab strip
+ * with a single dropdown switcher button. Click the current-tab
+ * button → a 5-option panel pops in (spring/bounce animation) below
+ * → pick one → router.replace to that tab. The dropdown always
+ * shows where you ARE (current tab in the trigger) and where you
+ * could GO (the 5 options). One row, no double-header competition
+ * with CompactMetaBar.
  *
- * Tabs are mutually exclusive — picking one swaps the entire body
- * of `EnvManagementShell`. The "환경관리" tab is the home tab and
- * keeps the existing `CompactMetaBar` + canvas/stage editor flow.
- * The other four mount the host-level registry editor for that
- * category (hooks/skills/permissions/mcp_servers) so the operator
- * has a single hub for everything that participates in env
- * composition.
+ * Behaviour:
+ *   - Click trigger → toggle dropdown
+ *   - Click an option → navigate via `?tab=`, close dropdown
+ *   - Click outside dropdown → close
+ *   - Escape → close
  *
- * Tab state is held in the URL via `?tab=...` so deep links from
- * a wiki page or another teammate land on the right tab. Default
- * is `environments` when the param is missing or unknown.
+ * Visual: the trigger looks like a regular tab button when closed
+ * (matches the operator's mental model of "I'm on this tab"); the
+ * dropdown panel uses `animate-dropdown-pop` (defined in globals.css)
+ * for the spring effect — Quart-Out cubic-bezier with overshoot, so
+ * it pops out then settles instead of fading flatly in.
  *
- * Visual: dense single-row, no decorative chrome — leading nav and
- * tabs share the same horizontal strip. The bar sits ABOVE
- * CompactMetaBar (which only renders for the `environments` tab),
- * so non-env tabs get just one header row. This intentionally
- * undercuts the old "stack a header for each concern" pattern —
- * the user only edits one tab at a time.
+ * URL state: `?tab=...` (unchanged from Phase 2). Default tab
+ * (`environments`) drops the param so the canonical URL stays
+ * `/environments`.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
+  ChevronDown,
   Layers,
   Network,
   Plug,
@@ -57,12 +61,8 @@ const TAB_ORDER: EnvManagementTab[] = [
 interface TabDef {
   id: EnvManagementTab;
   icon: LucideIcon;
-  // Translation keys live under envManagement.topTabs.{label,hint}.
-  // Hardcoded fallbacks below match the Korean source so a missing
-  // key shows something sensible rather than the raw `topTabs.mcp`.
   fallbackLabel: string;
   fallbackHint: string;
-  // i18n key suffix.
   key: string;
 }
 
@@ -111,22 +111,56 @@ export function parseTab(value: string | null | undefined): EnvManagementTab {
   return 'environments';
 }
 
-export interface EnvManagementHeaderProps {
+// ── Standalone dropdown switcher ────────────────────────────────
+
+export interface TabSwitcherDropdownProps {
   active: EnvManagementTab;
 }
 
-export default function EnvManagementHeader({
-  active,
-}: EnvManagementHeaderProps) {
+/**
+ * The bare dropdown switcher. Renders just the trigger + popover —
+ * caller embeds it in whatever row chrome they own (CompactMetaBar
+ * uses it on the leading edge).
+ */
+export function TabSwitcherDropdown({ active }: TabSwitcherDropdownProps) {
   const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const activeDef = TABS.find((tt) => tt.id === active) ?? TABS[0];
+  const ActiveIcon = activeDef.icon;
+  const activeLabel =
+    t(`envManagement.topTabs.${activeDef.key}`) || activeDef.fallbackLabel;
+
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   const switchTo = (tab: EnvManagementTab) => {
+    setOpen(false);
     if (tab === active) return;
     const next = new URLSearchParams(searchParams.toString());
     if (tab === 'environments') {
-      // Default tab — drop the param so the URL stays short.
       next.delete('tab');
     } else {
       next.set('tab', tab);
@@ -136,8 +170,96 @@ export default function EnvManagementHeader({
   };
 
   return (
-    <div className="flex items-center gap-1 px-3 h-11 shrink-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-      {/* Leading: ← Home */}
+    <div ref={wrapperRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[0.8125rem] font-semibold border transition-colors ${
+          open
+            ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/40'
+            : 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30 hover:bg-violet-500/15'
+        }`}
+      >
+        <ActiveIcon size={13} />
+        {activeLabel}
+        <ChevronDown
+          size={13}
+          className={`transition-transform duration-200 ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="animate-dropdown-pop absolute left-0 top-full mt-1 z-40 min-w-[200px] py-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg"
+        >
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = tab.id === active;
+            const label =
+              t(`envManagement.topTabs.${tab.key}`) || tab.fallbackLabel;
+            const hint =
+              t(`envManagement.topTabs.${tab.key}Hint`) || tab.fallbackHint;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="menuitem"
+                onClick={() => switchTo(tab.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors ${
+                  isActive
+                    ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300 font-semibold'
+                    : 'text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]'
+                }`}
+              >
+                <Icon size={13} className="mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[0.8125rem] font-medium">{label}</div>
+                  <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] leading-snug">
+                    {hint}
+                  </div>
+                </div>
+                {isActive && (
+                  <span
+                    className="mt-1 w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0"
+                    aria-hidden
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Backwards-compat default export ──────────────────────────────
+
+/**
+ * Legacy `EnvManagementHeader` — kept as a thin wrapper that
+ * renders just the leading nav cluster (← 홈으로 + dropdown
+ * switcher) on its own bordered row. Used on the FIRST screen
+ * (env overview, no draft). When a draft is loaded or a host
+ * registry tab is active, `CompactMetaBar` embeds the
+ * `TabSwitcherDropdown` directly instead, so the chrome stays
+ * one row.
+ */
+export interface EnvManagementHeaderProps {
+  active: EnvManagementTab;
+}
+
+export default function EnvManagementHeader({
+  active,
+}: EnvManagementHeaderProps) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-2 px-3 h-11 shrink-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
       <Link
         href="/"
         className="inline-flex items-center gap-1 text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors px-2 py-1 rounded hover:bg-[hsl(var(--accent))]"
@@ -145,37 +267,8 @@ export default function EnvManagementHeader({
         <ArrowLeft size={13} />
         {t('envManagement.backToHome')}
       </Link>
-
       <div className="w-px h-4 bg-[hsl(var(--border))] mx-1" />
-
-      {/* Tabs */}
-      <nav className="flex items-center gap-0.5">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = tab.id === active;
-          const label =
-            t(`envManagement.topTabs.${tab.key}`) || tab.fallbackLabel;
-          const hint =
-            t(`envManagement.topTabs.${tab.key}Hint`) || tab.fallbackHint;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => switchTo(tab.id)}
-              title={hint}
-              aria-current={isActive ? 'page' : undefined}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[0.8125rem] transition-colors ${
-                isActive
-                  ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-500/40 font-semibold'
-                  : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]/60 border border-transparent'
-              }`}
-            >
-              <Icon size={13} />
-              {label}
-            </button>
-          );
-        })}
-      </nav>
+      <TabSwitcherDropdown active={active} />
     </div>
   );
 }
