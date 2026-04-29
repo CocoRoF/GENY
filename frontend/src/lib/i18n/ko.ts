@@ -879,6 +879,62 @@ const ko: Translations = {
         title: '훅',
         subtitle: 'pre/post 도구 호출 시점에 발화하는 외부 명령',
         addLabel: '훅 추가',
+        // ── 새 모달용 (Phase 9.4) ──
+        form: {
+          createTitle: '새 훅 등록',
+          editTitle: '훅 편집 — {event} #{idx}',
+          createBtn: '만들기',
+          editBtn: '저장',
+          // 섹션
+          sectionTrigger: '트리거',
+          sectionExecution: '실행 명령',
+          sectionMatch: '매칭 조건 (선택)',
+          sectionRuntime: '실행 환경',
+          // 트리거
+          eventLabel: '발화 시점',
+          eventHint: '이 이벤트가 일어날 때마다 hook이 실행됩니다.',
+          eventCantChangeHint: '편집 시에는 변경 불가 — 삭제 후 재등록.',
+          // 명령
+          commandLabel: '실행 파일',
+          commandHint: 'PATH의 실행 파일 또는 절대 경로.',
+          commandPlaceholder: '예: /usr/local/bin/audit-hook',
+          argsLabel: '인자 (한 줄에 하나)',
+          argsHint:
+            '셸 보간 없음 (literal). ${var} 형태는 hook payload의 필드로 치환됩니다.',
+          argsPlaceholder: '예:\n--session\n${session_id}\n--tool\n${tool_name}',
+          // 매칭
+          matchHint:
+            '비우면 위 이벤트의 모든 발생에 대해 발화. 현재는 "tool" 키만 enforced. 예: tool=Bash → Bash 호출일 때만.',
+          // 실행 환경
+          timeoutLabel: '타임아웃 (ms)',
+          timeoutHint: '0 또는 비움 = 기본값. 길어지면 메인 파이프라인이 블록됩니다.',
+          timeoutPlaceholder: '예: 5000',
+          workingDirLabel: '작업 디렉토리',
+          workingDirHint: '비우면 Geny 백엔드의 cwd 그대로.',
+          workingDirPlaceholder: '예: /tmp',
+          envHint: '서브프로세스 환경 변수 (선택). 부모 env 위에 추가/덮어쓰기.',
+          // 검증
+          errorRequired: '발화 시점과 실행 파일은 필수입니다.',
+          // 이벤트 설명
+          events: {
+            session_start: '세션이 시작될 때 — 사용자가 채팅을 열거나 agent를 시작',
+            session_end: '세션이 종료될 때 — 정리 / 알림 용도',
+            pipeline_start: '파이프라인 한 사이클 시작 — 사용자 입력이 들어올 때',
+            pipeline_end: '파이프라인 한 사이클 종료 — 응답을 다 보낸 후',
+            stage_enter: '21단계 중 한 stage에 진입 — stage_id로 필터링',
+            stage_exit: '21단계 중 한 stage에서 빠져나갈 때',
+            user_prompt_submit: '사용자가 prompt를 제출 직후',
+            pre_tool_use: '도구 호출 직전 — audit log / 권한 확인에 적합',
+            post_tool_use: '도구 호출 성공 후 — 사이드이펙트 미러링',
+            post_tool_failure: '도구 호출 실패 후 — 에러 로깅',
+            permission_request: '권한 요청 발생 — 외부 acl 시스템 연동',
+            permission_denied: '권한 거부됨 — alert 발송 등',
+            loop_iteration_end: 'agent 루프 한 iteration 종료',
+            cwd_changed: 'agent가 작업 디렉토리를 변경',
+            mcp_server_state: 'MCP 서버 상태 변경 (connected / disconnected / error)',
+            notification: '범용 알림 이벤트 (커스텀 시그널)',
+          },
+        },
         entitySingular: '훅',
         bannerNote: '훅은 모든 도구 호출의 전후로 발화 — 운영 시 audit log를 비워두지 마세요.',
         emptyTitle: '등록된 훅이 없습니다.',
@@ -894,6 +950,43 @@ const ko: Translations = {
         bannerNote: '권한 룰의 env 별 narrowing은 매니페스트에 저장되지만 실제 enforcement는 호스트의 settings.json이 그대로 적용 (preview).',
         emptyTitle: '등록된 권한 룰이 없습니다.',
         countLabel: '{n}개 룰',
+        // ── 새 모달용 (Phase 9.5) ──
+        form: {
+          createTitle: '새 권한 룰',
+          editTitle: '권한 룰 편집 — #{idx}',
+          createBtn: '만들기',
+          editBtn: '저장',
+          // 섹션
+          sectionIdentity: '대상',
+          sectionPolicy: '정책',
+          sectionContext: '컨텍스트 (선택)',
+          // 대상
+          toolLabel: '도구 이름',
+          toolHint:
+            '룰을 적용할 도구 이름. 정확한 매칭 (Bash) 또는 와일드카드 (*) — Bash, Read, Write, mcp__*, etc.',
+          toolPlaceholder: '예: Bash',
+          patternLabel: '패턴 (선택)',
+          patternHint:
+            '도구 인자에 대한 추가 매칭. Bash라면 "rm" → rm 시작 명령만, Write라면 "./" → 워크스페이스 경로만.',
+          patternPlaceholder: '예: rm, ./, https://api.example.com/*',
+          // 정책
+          behaviorLabel: '동작',
+          behaviorHint: '매칭 시 어떻게 처리할지.',
+          behaviorAllowLabel: 'Allow',
+          behaviorAllowHint: '바로 통과 — agent가 묻지 않고 실행',
+          behaviorDenyLabel: 'Deny',
+          behaviorDenyHint: '거부 — 호출 자체 차단, 사용자에게 안내',
+          behaviorAskLabel: 'Ask',
+          behaviorAskHint: '확인 요청 — 사용자에게 매번 물어봄',
+          // 컨텍스트
+          sourceLabel: '출처',
+          sourceHint: '이 룰의 의도된 적용 범위 — 매니페스트에는 기록되나 우선순위는 user > project > local.',
+          reasonLabel: '사유',
+          reasonHint: '왜 이 룰을 추가했는지 짧게 (선택). audit log에 함께 남습니다.',
+          reasonPlaceholder: '예: 운영 환경에서 rm 차단',
+          // 검증
+          errorRequired: '도구 이름과 동작은 필수입니다.',
+        },
       },
     },
     progress: {
