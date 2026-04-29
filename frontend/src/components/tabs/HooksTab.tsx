@@ -30,14 +30,8 @@ import {
   HookListResponse,
   HookFiresResponse,
 } from '@/lib/api';
-import { RefreshCw, Plus, Pencil, Trash2, Power, Plug, X } from 'lucide-react';
-import {
-  TabShell,
-  EditorModal,
-  EmptyState,
-  StatusBadge,
-  ActionButton,
-} from '@/components/layout';
+import { Pencil, Plug, Trash2, X } from 'lucide-react';
+import { EditorModal, ActionButton } from '@/components/layout';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -48,10 +42,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { hookIdFromEditable } from '@/lib/envDefaultsApi';
+import {
+  RegistryPageShell,
+  RegistrySection,
+  RegistryCard,
+  RegistryEmptyState,
+  RegistryActionButton,
+} from '@/components/env_management/registry';
+
+type HookRow = HookEntryRow;
 
 interface KvRow {
   key: string;
@@ -192,15 +195,14 @@ function KvEditor({
 }
 
 export interface HooksTabProps {
-  /** When true, renders without the outer TabShell chrome — meant for
-   *  embedding inside another panel (e.g. the env-management Globals
-   *  view's Hooks sub-tab). The action buttons + status badges that
-   *  TabShell would have surfaced in its header are inlined as a slim
-   *  top toolbar so the user still has access to them. */
+  /** Deprecated — embedded mode is no longer used after Phase 5
+   *  (env-side picker uses HostEnvSelectionPicker). The prop
+   *  remains for callers still passing it; it has no effect. */
   embedded?: boolean;
 }
 
-export function HooksTab({ embedded = false }: HooksTabProps) {
+export function HooksTab(_props: HooksTabProps = {}) {
+  const { t } = useI18n();
   const [editable, setEditable] = useState<HookEntriesResponse | null>(null);
   const [inspect, setInspect] = useState<HookListResponse | null>(null);
   const [fires, setFires] = useState<HookFiresResponse | null>(null);
@@ -211,8 +213,8 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
   // each row firing its own GET. The store de-dups concurrent calls.
   const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
   useEffect(() => {
-    if (!embedded) loadEnvDefaultsOnce();
-  }, [embedded, loadEnvDefaultsOnce]);
+    loadEnvDefaultsOnce();
+  }, [loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTarget, setEditingTarget] = useState<{ event: string; idx: number } | null>(null);
@@ -349,218 +351,158 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
   const fileEnabled = editable?.enabled ?? false;
   const envOptIn = inspect?.env_opt_in ?? false;
   const willFire = fileEnabled && envOptIn;
+  const addLabel = t('envManagement.registry.hooks.addLabel');
 
   const subtitle = (
     <>
       File:{' '}
-      <StatusBadge
-        tone={fileEnabled ? 'success' : 'neutral'}
-        icon={Power}
+      <button
+        type="button"
         onClick={toggleEnabled}
+        className={`font-mono ${
+          fileEnabled
+            ? 'text-emerald-600 dark:text-emerald-400'
+            : 'text-[hsl(var(--muted-foreground))]'
+        } hover:underline`}
+        title="Toggle"
       >
         {fileEnabled ? 'enabled' : 'disabled'}
-      </StatusBadge>
+      </button>
       {' · Env '}
       <span className="font-mono">GENY_ALLOW_HOOKS</span>:{' '}
-      <span className={'font-mono ' + (envOptIn ? 'text-green-700' : 'text-red-600')}>
+      <span
+        className={
+          'font-mono ' +
+          (envOptIn ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600')
+        }
+      >
         {envOptIn ? 'set' : 'unset'}
       </span>
       {' · '}
       {totalEditable} editable / {totalLoaded} loaded
-      {editable && <> · <span className="font-mono">{editable.settings_path}</span></>}
+      {editable && (
+        <>
+          {' · '}
+          <span className="font-mono">{editable.settings_path}</span>
+        </>
+      )}
     </>
   );
 
-  const actions = (
-    <>
-      <StatusBadge
-        tone={willFire ? 'success' : 'warning'}
-        uppercase
-        title={
-          willFire
-            ? 'Both file flag and GENY_ALLOW_HOOKS are set — hooks will fire.'
-            : 'Hooks will NOT fire — both file flag AND GENY_ALLOW_HOOKS env var must be set.'
-        }
-      >
-        {willFire ? 'live' : 'gated'}
-      </StatusBadge>
-      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-        Add hook
-      </ActionButton>
-      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-        Refresh
-      </ActionButton>
-    </>
+  const liveBadge = (
+    <span
+      className={`inline-flex items-center h-7 px-2 rounded-md text-[0.6875rem] uppercase tracking-wider font-semibold border ${
+        willFire
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+          : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+      }`}
+      title={
+        willFire
+          ? 'Both file flag and GENY_ALLOW_HOOKS are set — hooks will fire.'
+          : 'Hooks will NOT fire — both file flag AND GENY_ALLOW_HOOKS env var must be set.'
+      }
+    >
+      {willFire ? 'live' : 'gated'}
+    </span>
   );
 
-  const body = (
-    <>
-      <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
-        {!embedded && (
-          <HostRegistryBanner note="훅은 모든 도구 호출의 전후로 발화 — 운영 시 audit log를 비워두지 마세요." />
-        )}
-        {/* ── Audit log path ── */}
-        <section className="border border-[var(--border-color)] rounded p-3">
-          <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
-            Audit log
-          </h3>
-          <div className="flex gap-1.5 items-center">
-            <Input
-              value={auditDraft}
-              onChange={(e) => setAuditDraft(e.target.value)}
-              placeholder="/var/log/geny/hooks.jsonl"
-              className="font-mono text-[0.75rem]"
-            />
-            <ActionButton
-              onClick={saveAuditLog}
-              disabled={savingAudit || (auditDraft.trim() === (editable?.audit_log_path ?? ''))}
-            >
-              {savingAudit ? 'Saving…' : 'Save'}
-            </ActionButton>
-          </div>
-          <div className="mt-1 text-[0.6875rem] text-[var(--text-muted)]">
-            Empty = no audit log. Recommended for production so each fire is traceable.
-          </div>
-        </section>
+  const isEmpty = totalEditable === 0 && !loading;
 
-        {/* ── Entries grouped by event ── */}
-        <section>
-          <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
-            Entries
-          </h3>
-          {totalEditable === 0 && !loading ? (
-            <EmptyState
-              compact
-              title="No entries"
-              description={<>Click <span className="font-mono">Add hook</span> to create one.</>}
-            />
-          ) : (
-            <div className="space-y-3">
-              {Array.from(grouped.entries()).map(([event, rows]) => (
-                <div key={event} className="border border-[var(--border-color)] rounded">
-                  <div className="px-2 py-1 bg-[var(--bg-tertiary)] font-mono text-[0.75rem] font-semibold border-b border-[var(--border-color)]">
-                    {event} <span className="text-[var(--text-muted)] font-normal">({rows.length})</span>
-                  </div>
-                  <table className="w-full text-[0.8125rem]">
-                    <thead>
-                      <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)]">
-                        <th className="text-left py-1 px-2 w-8">#</th>
-                        {!embedded && (
-                          <th className="text-center py-1 px-2 w-10" title="새 env 기본 포함">★</th>
-                        )}
-                        <th className="text-left py-1 px-2">Command</th>
-                        <th className="text-left py-1 px-2">Args</th>
-                        <th className="text-left py-1 px-2 w-20">Timeout</th>
-                        <th className="text-left py-1 px-2 w-40">Match</th>
-                        <th className="text-right py-1 px-2 w-20">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row) => (
-                        <tr key={`${row.event}-${row.idx}`} className="border-t border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]">
-                          <td className="py-1 px-2 text-[var(--text-muted)] font-mono text-[0.75rem]">{row.idx}</td>
-                          {!embedded && (
-                            <td className="py-1 px-2 text-center">
-                              <EnvDefaultStarToggle
-                                category="hooks"
-                                itemId={hookIdFromEditable({
-                                  event: row.event,
-                                  command: row.command,
-                                  args: row.args,
-                                })}
-                              />
-                            </td>
-                          )}
-                          <td className="py-1 px-2 font-mono text-[0.75rem] truncate max-w-[200px]">{row.command || '—'}</td>
-                          <td className="py-1 px-2 font-mono text-[0.75rem] text-[var(--text-secondary)] truncate max-w-[200px]">
-                            {(row.args ?? []).join(' ') || '—'}
-                          </td>
-                          <td className="py-1 px-2 text-[0.75rem]">{row.timeout_ms != null ? `${row.timeout_ms}ms` : '—'}</td>
-                          <td className="py-1 px-2 text-[0.75rem] font-mono text-[var(--text-secondary)] truncate">
-                            {summarizeMatch(row.match)}
-                          </td>
-                          <td className="py-1 px-2 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                onClick={() => openEdit(row)}
-                                className="text-[var(--text-muted)] hover:text-[var(--primary-color)]"
-                                title="Edit"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteEntry(row)}
-                                className="text-[var(--text-muted)] hover:text-red-600"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── Recent fires ── */}
-        <section>
-          <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
-            Recent fires
-            {fires?.audit_path && (
-              <span className="ml-2 text-[var(--text-muted)] font-normal font-mono normal-case">
-                {fires.audit_path}
-              </span>
-            )}
-          </h3>
-          {!fires?.audit_path ? (
-            <div className="text-[0.75rem] text-[var(--text-muted)]">
-              No <span className="font-mono">audit_log_path</span> configured. Set one above to capture fires.
-            </div>
-          ) : !fires.exists ? (
-            <div className="text-[0.75rem] text-[var(--text-muted)]">
-              Audit log file not yet created — fires will appear here once a hook runs.
-            </div>
-          ) : fires.fires.length === 0 ? (
-            <div className="text-[0.75rem] text-[var(--text-muted)]">No fires yet.</div>
-          ) : (
-            <div className="border border-[var(--border-color)] rounded overflow-hidden">
-              {fires.truncated && (
-                <div className="px-2 py-1 text-[0.6875rem] text-amber-800 bg-amber-50 border-b border-amber-200">
-                  Truncated — older fires omitted.
-                </div>
-              )}
-              <ul className="max-h-72 overflow-y-auto divide-y divide-[var(--border-color)]">
-                {fires.fires.slice().reverse().map((row, i) => (
-                  <li key={i} className="px-2 py-1.5 text-[0.75rem] font-mono">
-                    <details>
-                      <summary className="cursor-pointer truncate">
-                        {String(row.record.event ?? row.record.hook_event ?? 'fire')}
-                        {' · '}
-                        {String(row.record.tool_name ?? row.record.payload_tool_name ?? '')}
-                        {' · '}
-                        <span className="text-[var(--text-muted)]">
-                          {String(row.record.ts ?? row.record.timestamp ?? '')}
-                        </span>
-                      </summary>
-                      <pre className="mt-1 text-[0.6875rem] text-[var(--text-secondary)] whitespace-pre-wrap">
-                        {JSON.stringify(row.record, null, 2)}
-                      </pre>
-                    </details>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
+  const auditLogSection = (
+    <section className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[0.6875rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold">
+          Audit log
+        </h3>
+        <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+          fires-tracking · 권장
+        </span>
       </div>
-    </>
+      <div className="flex gap-1.5 items-center">
+        <Input
+          value={auditDraft}
+          onChange={(e) => setAuditDraft(e.target.value)}
+          placeholder="/var/log/geny/hooks.jsonl"
+          className="font-mono text-[0.75rem]"
+        />
+        <ActionButton
+          onClick={saveAuditLog}
+          disabled={
+            savingAudit ||
+            auditDraft.trim() === (editable?.audit_log_path ?? '')
+          }
+        >
+          {savingAudit ? 'Saving…' : 'Save'}
+        </ActionButton>
+      </div>
+      <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+        Empty = no audit log. 운영 환경에선 비워두지 마세요 — 발화가 추적되지
+        않습니다.
+      </div>
+    </section>
+  );
+
+  const recentFiresSection = (
+    <section>
+      <h3 className="text-[0.6875rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold mb-2 flex items-center gap-2">
+        Recent fires
+        {fires?.audit_path && (
+          <span className="text-[hsl(var(--muted-foreground))] font-normal font-mono normal-case">
+            {fires.audit_path}
+          </span>
+        )}
+      </h3>
+      {!fires?.audit_path ? (
+        <div className="text-[0.75rem] text-[hsl(var(--muted-foreground))]">
+          No <span className="font-mono">audit_log_path</span> configured. Set
+          one above to capture fires.
+        </div>
+      ) : !fires.exists ? (
+        <div className="text-[0.75rem] text-[hsl(var(--muted-foreground))]">
+          Audit log file not yet created — fires will appear here once a hook
+          runs.
+        </div>
+      ) : fires.fires.length === 0 ? (
+        <div className="text-[0.75rem] text-[hsl(var(--muted-foreground))]">
+          No fires yet.
+        </div>
+      ) : (
+        <div className="rounded-lg border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
+          {fires.truncated && (
+            <div className="px-2 py-1 text-[0.6875rem] text-amber-800 bg-amber-500/10 border-b border-amber-500/30">
+              Truncated — older fires omitted.
+            </div>
+          )}
+          <ul className="max-h-72 overflow-y-auto divide-y divide-[hsl(var(--border))]">
+            {fires.fires
+              .slice()
+              .reverse()
+              .map((row, i) => (
+                <li key={i} className="px-2 py-1.5 text-[0.75rem] font-mono">
+                  <details>
+                    <summary className="cursor-pointer truncate">
+                      {String(row.record.event ?? row.record.hook_event ?? 'fire')}
+                      {' · '}
+                      {String(
+                        row.record.tool_name ??
+                          row.record.payload_tool_name ??
+                          '',
+                      )}
+                      {' · '}
+                      <span className="text-[hsl(var(--muted-foreground))]">
+                        {String(row.record.ts ?? row.record.timestamp ?? '')}
+                      </span>
+                    </summary>
+                    <pre className="mt-1 text-[0.6875rem] text-[hsl(var(--muted-foreground))] whitespace-pre-wrap">
+                      {JSON.stringify(row.record, null, 2)}
+                    </pre>
+                  </details>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 
   const modal = (
@@ -674,46 +616,135 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
       </EditorModal>
   );
 
-  if (embedded) {
-    return (
-      <div className="flex flex-col gap-3">
-        {error && (
-          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
-            <span>{error}</span>
-            <button
-              type="button"
-              onClick={() => setError(null)}
-              className="text-[0.7rem] underline hover:no-underline"
-            >
-              dismiss
-            </button>
-          </div>
-        )}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
-            {subtitle}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">{actions}</div>
-        </div>
-        {body}
-        {modal}
-      </div>
-    );
-  }
-
   return (
-    <TabShell
-      title="Hooks"
-      icon={Plug}
-      subtitle={subtitle}
-      actions={actions}
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      {body}
+    <>
+      <RegistryPageShell
+        icon={Plug}
+        title={t('envManagement.registry.hooks.title')}
+        subtitle={subtitle}
+        countLabel={t('envManagement.registry.hooks.countLabel', {
+          n: String(totalEditable),
+        })}
+        bannerNote={t('envManagement.registry.hooks.bannerNote')}
+        addLabel={addLabel}
+        onAdd={openCreate}
+        onRefresh={refresh}
+        loading={loading}
+        error={error}
+        onDismissError={() => setError(null)}
+        headerExtras={liveBadge}
+      >
+        {auditLogSection}
+
+        {isEmpty ? (
+          <RegistryEmptyState
+            icon={Plug}
+            title={t('envManagement.registry.hooks.emptyTitle')}
+            hint={t('envManagement.registry.emptyHint', { addLabel })}
+            addLabel={addLabel}
+            onAdd={openCreate}
+          />
+        ) : (
+          Array.from(grouped.entries()).map(([event, rows]) => (
+            <RegistrySection key={event} label={event} count={rows.length}>
+              {rows.map((row) => (
+                <HookCard
+                  key={`${row.event}-${row.idx}`}
+                  row={row}
+                  onEdit={() => openEdit(row)}
+                  onDelete={() => deleteEntry(row)}
+                />
+              ))}
+            </RegistrySection>
+          ))
+        )}
+
+        {recentFiresSection}
+      </RegistryPageShell>
+
       {modal}
-    </TabShell>
+    </>
   );
 }
 
 export default HooksTab;
+
+// ── Card ─────────────────────────────────────────────────────────
+
+function HookCard({
+  row,
+  onEdit,
+  onDelete,
+}: {
+  row: HookRow;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
+  const argsCount = (row.args ?? []).length;
+  const matchSummary = summarizeMatch(row.match);
+  return (
+    <RegistryCard
+      icon={Plug}
+      title={row.command || '—'}
+      titleMono
+      subtitle={
+        argsCount > 0 ? (
+          <span className="opacity-80">{(row.args ?? []).join(' ')}</span>
+        ) : undefined
+      }
+      badges={[
+        ...(row.timeout_ms != null
+          ? [
+              {
+                label: t('envManagement.registry.hooks.timeoutMs', {
+                  n: String(row.timeout_ms),
+                }),
+                tone: 'neutral' as const,
+              },
+            ]
+          : []),
+        ...(matchSummary && matchSummary !== '—'
+          ? [{ label: matchSummary, tone: 'info' as const }]
+          : []),
+        ...(argsCount > 0
+          ? [
+              {
+                label: t('envManagement.registry.hooks.argsCount', {
+                  n: String(argsCount),
+                }),
+                tone: 'neutral' as const,
+              },
+            ]
+          : []),
+      ]}
+      meta={`#${row.idx}`}
+      star={
+        <EnvDefaultStarToggle
+          category="hooks"
+          itemId={hookIdFromEditable({
+            event: row.event,
+            command: row.command,
+            args: row.args,
+          })}
+        />
+      }
+      actions={
+        <>
+          <RegistryActionButton
+            icon={Pencil}
+            onClick={onEdit}
+            title={t('envManagement.registry.editTip')}
+            variant="primary"
+          />
+          <RegistryActionButton
+            icon={Trash2}
+            onClick={onDelete}
+            title={t('envManagement.registry.deleteTip')}
+            variant="danger"
+          />
+        </>
+      }
+    />
+  );
+}

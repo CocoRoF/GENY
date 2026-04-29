@@ -687,6 +687,77 @@ const ko: Translations = {
       permissions: '권한',
       permissionsHint: '호스트에 등록된 권한 룰 — 새 env 기본 포함 여부 선택 (preview)',
     },
+    // ── 공통 호스트 레지스트리 (MCP / SKILLS / HOOK / 권한) ──
+    registry: {
+      // 공통 액션
+      add: '추가',
+      addEntity: '{entity} 추가',
+      refresh: '새로고침',
+      edit: '편집',
+      delete: '삭제',
+      save: '저장',
+      cancel: '취소',
+      saving: '저장 중…',
+      loading: '불러오는 중…',
+      // 카드 액션 툴팁
+      starOnTip: '새 환경 기본 포함 — 클릭하여 끄기',
+      starOffTip: '클릭하면 새 환경에서 기본 포함',
+      starDisabledTip: 'env-defaults 저장 실패',
+      editTip: '편집',
+      deleteTip: '삭제',
+      // 빈 상태
+      emptyTitle: '아직 등록된 항목이 없습니다.',
+      emptyHint: '"{addLabel}" 버튼으로 첫 항목을 등록하세요.',
+      // 그룹 헤더
+      countSuffix: '개',
+      // 검색
+      searchPlaceholder: '검색…',
+      noSearchResults: "'{query}'와 매칭되는 항목이 없습니다.",
+      // 호스트 공용 알림
+      hostShared: '호스트 공용',
+      // 카테고리별 라벨
+      mcp: {
+        title: 'MCP 서버',
+        subtitle: '커스텀 MCP 서버 — 모든 환경이 공유',
+        addLabel: 'MCP 서버 추가',
+        entitySingular: 'MCP 서버',
+        bannerNote: '★ 표시한 서버는 새 env 생성 시 manifest.tools.mcp_servers에 스냅샷으로 자동 추가 — 이후 env가 자기 복사본을 소유.',
+        emptyTitle: '등록된 MCP 서버가 없습니다.',
+        countLabel: '{n}개 서버',
+      },
+      skills: {
+        title: '스킬',
+        subtitle: 'LLM이 사용할 수 있는 명세 + 코드',
+        addLabel: '사용자 스킬 추가',
+        entitySingular: '스킬',
+        bannerNote: '스킬은 LLM이 사용할 수 있는 명세 + 코드 — 호스트 사용자별로 등록됩니다.',
+        emptyTitle: '등록된 스킬이 없습니다.',
+        countLabel: '{n}개 스킬',
+        sectionBundled: '번들',
+        sectionUser: '사용자',
+        toolsCount: '{n}개 도구',
+      },
+      hooks: {
+        title: '훅',
+        subtitle: 'pre/post 도구 호출 시점에 발화하는 외부 명령',
+        addLabel: '훅 추가',
+        entitySingular: '훅',
+        bannerNote: '훅은 모든 도구 호출의 전후로 발화 — 운영 시 audit log를 비워두지 마세요.',
+        emptyTitle: '등록된 훅이 없습니다.',
+        countLabel: '{n}개 훅',
+        timeoutMs: '{n}ms',
+        argsCount: '{n}개 인자',
+      },
+      permissions: {
+        title: '권한 룰',
+        subtitle: '도구 호출 허용/거부/확인 정책 (preview)',
+        addLabel: '권한 룰 추가',
+        entitySingular: '권한 룰',
+        bannerNote: '권한 룰의 env 별 narrowing은 매니페스트에 저장되지만 실제 enforcement는 호스트의 settings.json이 그대로 적용 (preview).',
+        emptyTitle: '등록된 권한 룰이 없습니다.',
+        countLabel: '{n}개 룰',
+      },
+    },
     progress: {
       back: '전체 보기',
       backTip: '21단계 캔버스로 돌아가기',

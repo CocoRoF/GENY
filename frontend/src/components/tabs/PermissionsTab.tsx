@@ -28,14 +28,8 @@ import {
   PERMISSION_MODES,
   EXECUTOR_PERMISSION_MODES,
 } from '@/lib/api';
-import { RefreshCw, Plus, Pencil, Trash2, Shield } from 'lucide-react';
-import {
-  TabShell,
-  EditorModal,
-  StatusBadge,
-  ActionButton,
-  type BadgeTone,
-} from '@/components/layout';
+import { Pencil, Shield, Trash2 } from 'lucide-react';
+import { EditorModal, ActionButton } from '@/components/layout';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -46,19 +40,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { permissionId } from '@/lib/envDefaultsApi';
+import {
+  RegistryPageShell,
+  RegistryGrid,
+  RegistryCard,
+  RegistryEmptyState,
+  RegistryActionButton,
+} from '@/components/env_management/registry';
 
 const BEHAVIOR_OPTIONS: PermissionBehavior[] = ['allow', 'deny', 'ask'];
 const SOURCE_OPTIONS: PermissionSource[] = ['user', 'project', 'local', 'cli', 'preset'];
-
-const BEHAVIOR_TONE: Record<string, BadgeTone> = {
-  allow: 'success',
-  deny: 'danger',
-  ask: 'warning',
-};
 
 interface RuleFormState {
   tool_name: string;
@@ -87,12 +82,12 @@ function formToPayload(f: RuleFormState): PermissionRulePayload {
 }
 
 export interface PermissionsTabProps {
-  /** When true, renders without the TabShell outer chrome (for embedding
-   *  inside another panel — see Globals view). */
+  /** Deprecated — embedded mode is no longer used after Phase 5. */
   embedded?: boolean;
 }
 
-export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
+export function PermissionsTab(_props: PermissionsTabProps = {}) {
+  const { t } = useI18n();
   const [editable, setEditable] = useState<PermissionRulesResponse | null>(null);
   const [inspect, setInspect] = useState<PermissionListResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,8 +95,8 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
 
   const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
   useEffect(() => {
-    if (!embedded) loadEnvDefaultsOnce();
-  }, [embedded, loadEnvDefaultsOnce]);
+    loadEnvDefaultsOnce();
+  }, [loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -242,169 +237,76 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
   const subtitle = (
     <>
       Mode: <span className="font-mono uppercase">{inspect?.mode ?? '—'}</span>{' '}
-      · {inspectCount} rule{inspectCount === 1 ? '' : 's'} loaded
+      · {inspectCount} loaded · {editableCount} editable
       {editable && (
-        <> · {editableCount} editable in <span className="font-mono">{editable.settings_path}</span></>
+        <>
+          {' · '}
+          <span className="font-mono">{editable.settings_path}</span>
+        </>
       )}
     </>
   );
 
-  const actions = (
-    <>
-      {/* R.1 — mode pickers. Reflect settings.json:permissions
-          values; falling back to inspect's resolved value (which
-          accounts for env / defaults) when the file omits them. */}
-      <div className="hidden md:flex items-center gap-1.5">
-        <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider">
-          Mode
-        </span>
-        <Select
-          value={editable?.mode ?? inspect?.mode ?? 'advisory'}
-          onValueChange={(v) => handleModeChange('mode', v)}
-          disabled={savingMode}
-        >
-          <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PERMISSION_MODES.map((m) => (
-              <SelectItem key={m} value={m}>{m}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-[0.6875rem] uppercase text-[var(--text-muted)] font-semibold tracking-wider ml-2">
-          Exec
-        </span>
-        <Select
-          value={editable?.executor_mode ?? 'default'}
-          onValueChange={(v) => handleModeChange('executor_mode', v)}
-          disabled={savingMode}
-        >
-          <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {EXECUTOR_PERMISSION_MODES.map((m) => (
-              <SelectItem key={m} value={m}>{m}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-        Add rule
-      </ActionButton>
-      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-        Refresh
-      </ActionButton>
-    </>
-  );
-
-  const body = (
-    <div className={embedded ? 'p-0' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
-        {!embedded && (
-          <HostRegistryBanner note="권한 룰의 env 별 narrowing은 매니페스트에 저장되지만 실제 enforcement는 호스트의 settings.json이 그대로 적용 (preview)." />
-        )}
-        <table className="w-full text-[0.8125rem]">
-          <thead>
-            <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)]">
-              <th className="text-left py-1.5 px-2">Tool</th>
-              <th className="text-left py-1.5 px-2">Behavior</th>
-              <th className="text-left py-1.5 px-2">Pattern</th>
-              <th className="text-left py-1.5 px-2">Source</th>
-              <th className="text-left py-1.5 px-2">Reason</th>
-              {!embedded && (
-                <th className="text-center py-1.5 px-2 w-10" title="새 env 기본 포함">★</th>
-              )}
-              <th className="text-right py-1.5 px-2 w-20">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(inspect?.rules ?? []).map((r, viewIdx) => {
-              const key = `${r.tool_name}::${r.pattern ?? ''}::${r.behavior}::${r.source}`;
-              const editIdx = editableIdxByKey.get(key);
-              const editable_ = editIdx !== undefined;
-              return (
-                <tr
-                  key={`${key}-${viewIdx}`}
-                  className="border-b border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]"
-                >
-                  <td className="py-1.5 px-2 font-mono">{r.tool_name}</td>
-                  <td className="py-1.5 px-2">
-                    <StatusBadge tone={BEHAVIOR_TONE[r.behavior] ?? 'neutral'}>
-                      {r.behavior}
-                    </StatusBadge>
-                  </td>
-                  <td className="py-1.5 px-2 font-mono text-[0.75rem]">{r.pattern ?? '—'}</td>
-                  <td className="py-1.5 px-2 text-[0.75rem]">{r.source}</td>
-                  <td className="py-1.5 px-2 text-[0.75rem] text-[var(--text-secondary)]">
-                    {r.reason ?? ''}
-                  </td>
-                  {!embedded && (
-                    <td className="py-1.5 px-2 text-center">
-                      <EnvDefaultStarToggle
-                        category="permissions"
-                        itemId={permissionId({
-                          tool_name: r.tool_name,
-                          pattern: r.pattern,
-                          behavior: r.behavior,
-                        })}
-                      />
-                    </td>
-                  )}
-                  <td className="py-1.5 px-2 text-right">
-                    {editable_ ? (
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(editIdx!)}
-                          className="text-[var(--text-muted)] hover:text-[var(--primary-color)]"
-                          title="Edit"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteRule(editIdx!)}
-                          className="text-[var(--text-muted)] hover:text-red-600"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span
-                        className="text-[0.625rem] text-[var(--text-muted)] italic"
-                        title="Read-only — defined outside user-scope settings.json"
-                      >
-                        external
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {(inspect?.rules ?? []).length === 0 && !loading && (
-              <tr>
-                <td colSpan={embedded ? 6 : 7} className="text-center py-6 text-[var(--text-muted)]">
-                  No rules. Click <span className="font-mono">Add rule</span> to create one.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        {inspect?.sources_consulted && inspect.sources_consulted.length > 0 && (
-          <details className="mt-4 text-[0.75rem] text-[var(--text-muted)]">
-            <summary className="cursor-pointer">Sources consulted ({inspect.sources_consulted.length})</summary>
-            <ul className="mt-1 ml-4 list-disc">
-              {inspect.sources_consulted.map((p) => (
-                <li key={p} className="font-mono">{p}</li>
-              ))}
-            </ul>
-          </details>
-        )}
+  const modeSelectors = (
+    <div className="hidden md:flex items-center gap-1.5">
+      <span className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider">
+        Mode
+      </span>
+      <Select
+        value={editable?.mode ?? inspect?.mode ?? 'advisory'}
+        onValueChange={(v) => handleModeChange('mode', v)}
+        disabled={savingMode}
+      >
+        <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PERMISSION_MODES.map((m) => (
+            <SelectItem key={m} value={m}>
+              {m}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider ml-2">
+        Exec
+      </span>
+      <Select
+        value={editable?.executor_mode ?? 'default'}
+        onValueChange={(v) => handleModeChange('executor_mode', v)}
+        disabled={savingMode}
+      >
+        <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {EXECUTOR_PERMISSION_MODES.map((m) => (
+            <SelectItem key={m} value={m}>
+              {m}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
+
+  const sourcesFooter = inspect?.sources_consulted &&
+    inspect.sources_consulted.length > 0 && (
+      <details className="text-[0.75rem] text-[hsl(var(--muted-foreground))]">
+        <summary className="cursor-pointer">
+          Sources consulted ({inspect.sources_consulted.length})
+        </summary>
+        <ul className="mt-1 ml-4 list-disc">
+          {inspect.sources_consulted.map((p) => (
+            <li key={p} className="font-mono">
+              {p}
+            </li>
+          ))}
+        </ul>
+      </details>
+    );
+
+  const isEmpty = (inspect?.rules ?? []).length === 0 && !loading;
 
   const modal = (
     <EditorModal
@@ -493,46 +395,130 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
       </EditorModal>
   );
 
-  if (embedded) {
-    return (
-      <div className="flex flex-col gap-3">
-        {error && (
-          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
-            <span>{error}</span>
-            <button
-              type="button"
-              onClick={() => setError(null)}
-              className="text-[0.7rem] underline hover:no-underline"
-            >
-              dismiss
-            </button>
-          </div>
-        )}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
-            {subtitle}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">{actions}</div>
-        </div>
-        {body}
-        {modal}
-      </div>
-    );
-  }
+  const addLabel = t('envManagement.registry.permissions.addLabel');
 
   return (
-    <TabShell
-      title="Permissions"
-      icon={Shield}
-      subtitle={subtitle}
-      actions={actions}
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      {body}
+    <>
+      <RegistryPageShell
+        icon={Shield}
+        title={t('envManagement.registry.permissions.title')}
+        subtitle={subtitle}
+        countLabel={t('envManagement.registry.permissions.countLabel', {
+          n: String(inspectCount),
+        })}
+        bannerNote={t('envManagement.registry.permissions.bannerNote')}
+        addLabel={addLabel}
+        onAdd={openCreate}
+        onRefresh={refresh}
+        loading={loading}
+        error={error}
+        onDismissError={() => setError(null)}
+        headerExtras={modeSelectors}
+      >
+        {isEmpty ? (
+          <RegistryEmptyState
+            icon={Shield}
+            title={t('envManagement.registry.permissions.emptyTitle')}
+            hint={t('envManagement.registry.emptyHint', { addLabel })}
+            addLabel={addLabel}
+            onAdd={openCreate}
+          />
+        ) : (
+          <RegistryGrid>
+            {(inspect?.rules ?? []).map((r, viewIdx) => {
+              const key = `${r.tool_name}::${r.pattern ?? ''}::${r.behavior}::${r.source}`;
+              const editIdx = editableIdxByKey.get(key);
+              const editableRow = editIdx !== undefined;
+              return (
+                <PermissionCard
+                  key={`${key}-${viewIdx}`}
+                  rule={r}
+                  editable={editableRow}
+                  onEdit={editableRow ? () => openEdit(editIdx!) : undefined}
+                  onDelete={editableRow ? () => deleteRule(editIdx!) : undefined}
+                />
+              );
+            })}
+          </RegistryGrid>
+        )}
+
+        {sourcesFooter}
+      </RegistryPageShell>
+
       {modal}
-    </TabShell>
+    </>
   );
 }
 
 export default PermissionsTab;
+
+// ── Card ─────────────────────────────────────────────────────────
+
+function PermissionCard({
+  rule,
+  editable,
+  onEdit,
+  onDelete,
+}: {
+  rule: { tool_name: string; pattern: string | null; behavior: string; source: string; reason: string | null };
+  editable: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <RegistryCard
+      icon={Shield}
+      title={rule.tool_name}
+      titleMono
+      subtitle={rule.pattern ? rule.pattern : undefined}
+      description={rule.reason ?? undefined}
+      badges={[
+        {
+          label: rule.behavior,
+          tone:
+            rule.behavior === 'allow'
+              ? 'good'
+              : rule.behavior === 'deny'
+                ? 'danger'
+                : 'warn',
+        },
+        { label: rule.source, tone: editable ? 'neutral' : 'info' },
+      ]}
+      variant={editable ? 'default' : 'muted'}
+      meta={editable ? undefined : 'external'}
+      star={
+        <EnvDefaultStarToggle
+          category="permissions"
+          itemId={permissionId({
+            tool_name: rule.tool_name,
+            pattern: rule.pattern,
+            behavior: rule.behavior,
+          })}
+        />
+      }
+      actions={
+        editable ? (
+          <>
+            {onEdit && (
+              <RegistryActionButton
+                icon={Pencil}
+                onClick={onEdit}
+                title={t('envManagement.registry.editTip')}
+                variant="primary"
+              />
+            )}
+            {onDelete && (
+              <RegistryActionButton
+                icon={Trash2}
+                onClick={onDelete}
+                title={t('envManagement.registry.deleteTip')}
+                variant="danger"
+              />
+            )}
+          </>
+        ) : null
+      }
+    />
+  );
+}
