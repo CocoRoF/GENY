@@ -243,13 +243,17 @@ export default function McpServerFormModal({
     form.mode,
   ]);
 
-  if (!open) return null;
-
-  const error = innerError ?? externalError ?? null;
-
   // Live JSON of the structured form. In structured mode, this is
   // the preview; in JSON mode, the textarea owns the source of
   // truth and this still shows the parsed result for symmetry.
+  //
+  // IMPORTANT: this hook MUST sit above the `if (!open) return null`
+  // bail. Hooks have to fire in the same order on every render, and
+  // since the parent renders this component on every state change
+  // (just toggling `open`), the early return changing the hook count
+  // triggers React #310. Computing the JSON on a closed modal is
+  // cheap (the form state is still EMPTY_FORM or the last-saved
+  // shape), so there's no win in gating it.
   const liveJson = useMemo(() => {
     if (form.mode === 'json') {
       try {
@@ -261,6 +265,10 @@ export default function McpServerFormModal({
     }
     return JSON.stringify(structuredToJson(form), null, 2);
   }, [form]);
+
+  if (!open) return null;
+
+  const error = innerError ?? externalError ?? null;
 
   const switchMode = (next: 'structured' | 'json') => {
     if (next === form.mode) return;
