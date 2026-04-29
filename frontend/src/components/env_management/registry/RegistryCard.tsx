@@ -29,7 +29,8 @@
  * stay independently focusable.
  */
 
-import type { LucideIcon, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
 export interface RegistryCardBadge {
   label: ReactNode;

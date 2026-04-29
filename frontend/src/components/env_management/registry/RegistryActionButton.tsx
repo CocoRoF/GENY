@@ -17,7 +17,8 @@
  * card is hovered, keeping the resting state clean.
  */
 
-import type { LucideIcon, MouseEventHandler } from 'react';
+import type { MouseEventHandler } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
 export interface RegistryActionButtonProps {
   icon: LucideIcon;
