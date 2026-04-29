@@ -636,7 +636,7 @@ const ko: Translations = {
     title: '환경 관리',
     subtitle: '21단계 파이프라인을 클릭하며 환경을 직접 설계합니다. 마지막에 한 번 저장합니다.',
     welcomeTitle: '새로운 환경 만들기',
-    welcomeDescription: '"새 드래프트"를 누르면 빈 21단계 매니페스트로 시작합니다. 각 단계를 클릭하면 편집할 수 있고, 손댄 단계만 "수정됨"으로 표시됩니다. 끝에 한 번 저장하면 라이브러리 카탈로그에 새 환경이 등록됩니다.',
+    welcomeDescription: '빈 21단계 매니페스트로 시작하거나, 기존 환경에서 클론해 편집하세요.',
     newDraft: '새 드래프트',
     seeding: '드래프트 준비 중…',
     nameLabel: '이름',

@@ -636,7 +636,7 @@ const en = {
     title: 'Environment Management',
     subtitle: 'Build an environment by clicking a stage in the 21-stage pipeline and editing it. Save once at the end.',
     welcomeTitle: 'Build a new environment',
-    welcomeDescription: 'Click "New draft" to start with a blank 21-stage manifest. Each stage is editable; only the ones you touch get marked as edited. Save once when you\'re done — the env appears in the regular Library catalog.',
+    welcomeDescription: 'Start with a blank 21-stage manifest, or clone an existing env to edit.',
     newDraft: 'New draft',
     seeding: 'Preparing draft…',
     nameLabel: 'Name',
