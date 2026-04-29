@@ -45,7 +45,6 @@ import {
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
-import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import { ModelConfigEditor } from '@/components/builder/ModelConfigEditor';
 import { PipelineConfigEditor } from '@/components/builder/PipelineConfigEditor';
@@ -111,8 +110,6 @@ export default function GlobalSettingsView() {
   const patchPipeline = useEnvironmentDraftStore((s) => s.patchPipeline);
   const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
-  const setActiveTab = useAppStore((s) => s.setActiveTab);
-  const setEnvSubTab = useAppStore((s) => s.setEnvSubTab);
 
   const [panel, setPanel] = useState<Panel>('model');
 
@@ -158,9 +155,21 @@ export default function GlobalSettingsView() {
     }
   };
 
+  // Phase 6: legacy goToLibrary helper. The Library tab is gone — the
+  // host registries live as /environments?tab={mcp|skills|hooks|permissions}
+  // top-level tabs. Keep the helper signature so existing call sites
+  // don't need a second-pass refactor; under the hood it just navigates.
   const goToLibrary = (sub: string) => {
-    setActiveTab('library');
-    setEnvSubTab(sub);
+    const map: Record<string, string> = {
+      mcpServers: 'mcp',
+      hooks: 'hooks',
+      skills: 'skills',
+      permissions: 'permissions',
+    };
+    const tab = map[sub];
+    if (tab) {
+      window.location.href = `/environments?tab=${tab}`;
+    }
   };
 
   return (

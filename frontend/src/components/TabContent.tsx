@@ -18,23 +18,18 @@ const SharedFolderTab = dynamic(() => import('@/components/tabs/SharedFolderTab'
 const SessionToolsTab = dynamic(() => import('@/components/tabs/SessionToolsTab'));
 const DashboardTab = dynamic(() => import('@/components/tabs/DashboardTab'));
 const AdminPanel = dynamic(() => import('@/components/admin/AdminPanel'));
-const ToolSetsTab = dynamic(() => import('@/components/tabs/ToolSetsTab'));
 const MemoryTab = dynamic(() => import('@/components/tabs/MemoryTab'));
-const EnvironmentsTab = dynamic(() => import('@/components/tabs/EnvironmentsTab'));
 const VTuberTab = dynamic(() => import('@/components/tabs/VTuberTab'), { ssr: false });
 const Playground2DTab = dynamic(() => import('@/components/tabs/Playground2DTab'), { ssr: false });
 const TasksTab = dynamic(() => import('@/components/tabs/TasksTab').then(m => m.TasksTab));
 const CronTab = dynamic(() => import('@/components/tabs/CronTab').then(m => m.CronTab));
-const PermissionsTab = dynamic(() => import('@/components/tabs/PermissionsTab').then(m => m.PermissionsTab));
-const HooksTab = dynamic(() => import('@/components/tabs/HooksTab').then(m => m.HooksTab));
-const SkillsTab = dynamic(() => import('@/components/tabs/SkillsTab').then(m => m.SkillsTab));
-const McpServersTab = dynamic(() => import('@/components/tabs/McpServersTab').then(m => m.McpServersTab));
-// Consolidated Environment tabs (philosophy: env = pipeline; tools /
-// permissions / hooks / skills / mcp are all components of it).
-const EnvironmentTab = dynamic(() => import('@/components/tabs/EnvironmentTab'));
+// Cycle 20260429 Phase 6 — main-app `library` tab and its sub-tabs
+// (hooks/skills/permissions/mcpServers/toolSets) are gone. They were
+// the prototype that conflated env CRUD with host registries; the
+// dedicated /environments route owns both surfaces now. Legacy
+// activeTab values for those ids redirect to /environments?tab=...
+// in useAppStore.setActiveTab.
 const SessionEnvironmentRootTab = dynamic(() => import('@/components/tabs/SessionEnvironmentRootTab'));
-// Cycle 20260427_1 — visual 21-stage env builder lives at /environments
-// (own page) since 20260427_2; no longer a tab here.
 
 const TAB_MAP: Record<string, React.ComponentType> = {
   main: MainTab,
@@ -42,16 +37,7 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   command: CommandTab,
   logs: LogsTab,
   storage: StorageTab,
-  // Consolidated Environment surfaces:
-  //  - `library` = global pipeline DESIGN (system-wide files).
-  //  - `sessionEnvironment` = per-session bound-env view.
-  // Old activeTab values for the now-sub-tabs are handled by
-  // useAppStore.setActiveTab redirects.
-  library: EnvironmentTab,
   sessionEnvironment: SessionEnvironmentRootTab,
-  // Legacy aliases — kept so direct mounts still work even if a code
-  // path bypasses setActiveTab. They render the same components the
-  // sub-tabs do.
   graph: SessionEnvironmentTab,
   sharedFolder: SharedFolderTab,
   info: InfoTab,
@@ -59,22 +45,11 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   sessionTools: SessionToolsTab,
   dashboard: DashboardTab,
   admin: AdminPanel,
-  toolSets: ToolSetsTab,
   memory: MemoryTab,
   vtuber: VTuberTab,
   playground2d: Playground2DTab,
-  environments: EnvironmentsTab,
-  builder: EnvironmentsTab,
   tasks: TasksTab,
   cron: CronTab,
-  // PR-Merge — toolCatalog removed; the catalog browser is now a
-  // sidebar entry inside the unified Tool Sets tab. Direct mounts via
-  // legacy activeTab='toolCatalog' get redirected by setActiveTab.
-  toolCatalog: ToolSetsTab,
-  permissions: PermissionsTab,
-  hooks: HooksTab,
-  skills: SkillsTab,
-  mcpServers: McpServersTab,
 };
 
 // Tabs that should stay mounted once activated (KeepAlive)
