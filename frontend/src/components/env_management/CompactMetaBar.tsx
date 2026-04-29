@@ -1,17 +1,17 @@
 'use client';
 
 /**
- * CompactMetaBar — single-row, full-width header for the environment
- * builder. This is the *only* header chrome on the /environments page;
- * the route wrapper renders nothing of its own above it.
+ * CompactMetaBar — env-specific metadata + actions row for the
+ * `환경관리` tab of /environments. Cycle 20260429 promoted the
+ * leading-nav cluster (← Home + page title) to `EnvManagementHeader`
+ * so this bar now owns ONLY env-specific concerns.
  *
  * Layout (left → right):
- *   [← Home] | [✨ Page title] | [name input] [ⓘ desc] [tags] | [warnings] | [Globals] [Discard] [Save]
+ *   [name input] [ⓘ desc] [tags] | [warnings] | [Globals] [Discard] [Save]
  *
- * Empty state (no draft): just the leading nav cluster — back link +
- * title — so the bar is the same height/shape as the editing state.
- * The "pick a starting point" prompt belongs to the OverviewView body
- * (which already has its own welcome card), not a second header row.
+ * Empty state (no draft): renders nothing (or a thin error banner if
+ * a load/save error needs surfacing). The OverviewView welcome card
+ * is the only body chrome the user sees pre-draft.
  *
  * Description and full validation list move into popovers (click the
  * ⓘ button or "X warnings" chip) so the bar stays at ~52px tall
@@ -19,15 +19,12 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
 import {
   AlertTriangle,
-  ArrowLeft,
   Info,
   Plus,
   Save,
   Settings2,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -80,23 +77,24 @@ export default function CompactMetaBar({
   }, [descOpen, validOpen]);
 
   if (!draft) {
-    // No draft yet — render only the leading nav cluster. The body's
-    // welcome card explains how to start, so we don't repeat it here.
+    // No draft yet — the welcome card in OverviewView explains how
+    // to start. The leading-nav row (back / page title) was promoted
+    // to EnvManagementHeader cycle 20260429, so this bar only owns
+    // env-specific metadata; with no draft there's nothing to show
+    // except a possible error banner. Returning null when clean
+    // keeps the canvas vertically tighter.
+    if (!errorBanner) return null;
     return (
-      <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-        <LeadingNav t={t} />
-        <div className="flex-1" />
-        {errorBanner && (
-          <button
-            type="button"
-            onClick={clearError}
-            className="inline-flex items-center gap-1 text-[0.7rem] text-red-600 dark:text-red-400 hover:underline"
-          >
-            <AlertTriangle className="w-3 h-3" />
-            {errorBanner}
-            <X className="w-3 h-3 ml-1" />
-          </button>
-        )}
+      <div className="flex items-center gap-3 h-[36px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
+        <button
+          type="button"
+          onClick={clearError}
+          className="inline-flex items-center gap-1 text-[0.7rem] text-red-600 dark:text-red-400 hover:underline"
+        >
+          <AlertTriangle className="w-3 h-3" />
+          {errorBanner}
+          <X className="w-3 h-3 ml-1" />
+        </button>
       </div>
     );
   }
@@ -143,8 +141,6 @@ export default function CompactMetaBar({
 
   return (
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-      <LeadingNav t={t} />
-
       {/* ── Name input ── */}
       <div className="flex items-center gap-1.5">
         <span className="text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
@@ -322,22 +318,3 @@ export default function CompactMetaBar({
   );
 }
 
-function LeadingNav({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="flex items-center gap-2 shrink-0">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors px-1.5 py-1 rounded hover:bg-[hsl(var(--accent))]"
-      >
-        <ArrowLeft size={13} />
-        {t('envManagement.backToHome')}
-      </Link>
-      <div className="w-px h-4 bg-[hsl(var(--border))]" />
-      <Sparkles size={13} className="text-[hsl(var(--primary))]" />
-      <h1 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] truncate">
-        {t('envManagement.pageTitle')}
-      </h1>
-      <div className="w-px h-4 bg-[hsl(var(--border))]" />
-    </div>
-  );
-}

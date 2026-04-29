@@ -673,6 +673,20 @@ const ko: Translations = {
       globalsLabel: '전역',
       globalsTip: '전역 설정 열기 (모델 / 파이프라인 / 도구 / 연결)',
     },
+    topTabs: {
+      // 환경관리: 환경(Manifest) CRUD + 단계별 편집
+      environments: '환경관리',
+      environmentsHint: '21단계 파이프라인 환경 만들기/편집',
+      // 호스트 등록소 — 모든 환경에서 공유. 각 환경의 picker로 부분 사용.
+      mcp: 'MCP',
+      mcpHint: '호스트에 등록된 MCP 서버 — 새 env 기본 포함 여부 선택',
+      skills: 'SKILLS',
+      skillsHint: '호스트에 등록된 스킬 — 새 env 기본 포함 여부 선택',
+      hooks: 'HOOK',
+      hooksHint: '호스트에 등록된 훅 — 새 env 기본 포함 여부 선택',
+      permissions: '권한',
+      permissionsHint: '호스트에 등록된 권한 룰 — 새 env 기본 포함 여부 선택 (preview)',
+    },
     progress: {
       back: '전체 보기',
       backTip: '21단계 캔버스로 돌아가기',
