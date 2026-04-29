@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
 
 interface KvRow {
   key: string;
@@ -385,6 +386,9 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
   const body = (
     <>
       <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
+        {!embedded && (
+          <HostRegistryBanner note="훅은 모든 도구 호출의 전후로 발화 — 운영 시 audit log를 비워두지 마세요." />
+        )}
         {/* ── Audit log path ── */}
         <section className="border border-[var(--border-color)] rounded p-3">
           <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">

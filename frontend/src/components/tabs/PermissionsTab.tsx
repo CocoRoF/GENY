@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
 
 const BEHAVIOR_OPTIONS: PermissionBehavior[] = ['allow', 'deny', 'ask'];
 const SOURCE_OPTIONS: PermissionSource[] = ['user', 'project', 'local', 'cli', 'preset'];
@@ -291,7 +292,10 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
   );
 
   const body = (
-    <div className={embedded ? 'p-0' : 'h-full min-h-0 overflow-y-auto p-3'}>
+    <div className={embedded ? 'p-0' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
+        {!embedded && (
+          <HostRegistryBanner note="권한 룰의 env 별 narrowing은 매니페스트에 저장되지만 실제 enforcement는 호스트의 settings.json이 그대로 적용 (preview)." />
+        )}
         <table className="w-full text-[0.8125rem]">
           <thead>
             <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--border-color)]">
