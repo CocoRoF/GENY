@@ -18,8 +18,7 @@
  * registry tabs read at the same polish level when bare.
  */
 
-import type { LucideIcon } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, type LucideIcon } from 'lucide-react';
 
 export interface RegistryEmptyStateProps {
   icon: LucideIcon;

@@ -26,8 +26,8 @@
  * @/components/layout for the modal primitive.
  */
 
-import type { LucideIcon, ReactNode } from 'react';
-import { AlertCircle, Plus, RefreshCw, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { AlertCircle, Plus, RefreshCw, X, type LucideIcon } from 'lucide-react';
 import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
 
 export interface RegistryPageShellProps {

@@ -16,7 +16,8 @@
  * card under the heading) — grid wrapper is suppressed.
  */
 
-import type { LucideIcon, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import RegistryGrid from './RegistryGrid';
 
 export interface RegistrySectionProps {
