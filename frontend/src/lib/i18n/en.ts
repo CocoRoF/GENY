@@ -783,6 +783,68 @@ const en = {
         sectionBundled: 'Bundled',
         sectionUser: 'User',
         toolsCount: '{n} tool(s)',
+        form: {
+          createTitle: 'New skill',
+          editTitle: 'Edit skill — /{id}',
+          createBtn: 'Create',
+          editBtn: 'Save',
+          sectionIdentity: 'Identity',
+          sectionMeta: 'Metadata',
+          sectionExecution: 'Tools & execution',
+          sectionExamples: 'Examples — when the LLM should call this',
+          sectionBody: 'Body (what the LLM sees)',
+          sectionExtras: 'Advanced',
+          idLabel: 'ID',
+          idHint: 'Invoked as a slash command (e.g. /{id}). Lower-case / digit / dash / underscore only.',
+          idPlaceholder: 'lower-case, dash/underscore allowed',
+          nameLabel: 'Name',
+          nameHint: 'Human-readable name shown on the skill card + search results.',
+          namePlaceholder: 'e.g. Draft PR, Summarize meeting',
+          descriptionLabel: 'Description',
+          descriptionHint:
+            'One line the LLM uses to decide whether to call this skill. State what it does AND when to use it.',
+          descriptionPlaceholder: 'e.g. Inspect the current git diff and write a PR title + body.',
+          categoryLabel: 'Category',
+          categoryHint: 'Search/filter group (optional). e.g. code, research, communication.',
+          categoryPlaceholder: 'e.g. code',
+          effortLabel: 'Effort',
+          effortHint: 'Cost hint the LLM uses when scheduling. low / medium / high.',
+          effortPlaceholder: 'low / medium / high',
+          versionLabel: 'Version',
+          versionHint: 'semver recommended. Tracks updates under the same ID (optional).',
+          versionPlaceholder: 'e.g. 1.0.0',
+          modelOverrideLabel: 'Model override',
+          modelOverrideHint:
+            'Pin to a specific model (optional). Empty = inherit from the parent env.',
+          modelOverridePlaceholder: 'e.g. claude-haiku-4-5-20251001',
+          executionModeLabel: 'Execution mode',
+          executionModeHint:
+            'inline = run in the same process (default). fork = isolate in a subprocess (slower but safer).',
+          executionModeInline: 'inline (default)',
+          executionModeFork: 'fork (isolated)',
+          allowedToolsLabel: 'Allowed tools',
+          allowedToolsHint:
+            'Tools the LLM can use inside this skill (CSV). Empty = inherit the parent env\'s tool set.',
+          allowedToolsPlaceholder: 'e.g. Read, Grep, Bash',
+          examplesLabel: 'Examples (one per line)',
+          examplesHint:
+            'Phrasings real users would say to invoke this. The LLM uses these for intent matching. 3-5 recommended.',
+          examplesPlaceholder:
+            'e.g.\nDraft a PR for these changes\nFrom this diff, write a PR title\nMake a PR description for this branch',
+          bodyLabel: 'Skill body (markdown)',
+          bodyHint:
+            'Injected into the LLM context when this skill is invoked. State what, how, and which tools — step by step.',
+          bodyPlaceholder:
+            '## What\nReview the current working-tree diff and draft a PR title + body for GitHub.\n\n## How\n1. Read the output of `git diff origin/main...HEAD`\n2. Summarise the change intent in one line (title)\n3. Cover scope / test plan / follow-ups in the body\n\n## Output\n```\nTitle: <title>\nBody:\n<body>\n```',
+          extrasLabel: 'Extras (JSON object)',
+          extrasHint:
+            'Host-specific metadata (optional). Flat scalars only (string / number / bool).',
+          extrasPlaceholder: '(empty = no extras)\n{"icon": "🛠", "owner": "ops"}',
+          errorRequired: 'ID, Name, and Description are all required.',
+          errorBadId:
+            'ID must be lower-case / digit / dash / underscore (first char alphanumeric).',
+          errorBadExtras: 'Extras JSON parse failed: {detail}',
+        },
       },
       hooks: {
         title: 'Hooks',
