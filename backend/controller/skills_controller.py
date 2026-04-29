@@ -289,6 +289,165 @@ async def delete_user_skill(
     return {"deleted": True, "id": skill_id}
 
 
+# ── Dry-run validator (Phase 9.7) ──────────────────────────────────
+#
+# Lets the form modal preview what the executor would see *without*
+# writing to disk or invoking an LLM. Composes the SKILL.md text via
+# the same ``_build_skill_md`` helper the create/replace path uses,
+# parses it with the executor's frontmatter parser, and returns a
+# structured report (errors / warnings / metadata snapshot). The
+# operator can iterate on the form until ``ok == True`` before saving.
+
+
+class SkillTestRequest(UserSkillUpsertRequest):
+    """Same payload shape as create/replace — no separate model needed,
+    but we re-export under a friendly name so the OpenAPI schema is
+    self-documenting."""
+
+
+class SkillTestResponse(BaseModel):
+    ok: bool = Field(..., description="True iff the parser accepted the composed SKILL.md")
+    skill_md: str = Field(..., description="Composed SKILL.md text (frontmatter + body)")
+    metadata: Optional[dict] = Field(
+        None,
+        description="Frontmatter dict as the executor parser saw it, or None on failure",
+    )
+    body_chars: int = 0
+    body_lines: int = 0
+    warnings: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+
+@router.post("/test", response_model=SkillTestResponse)
+async def test_skill(req: SkillTestRequest, _auth: dict = Depends(require_auth)):
+    """Dry-run a draft skill against the executor's parser.
+
+    No filesystem write, no LLM call. Returns a structured pass/fail
+    report so the form modal can surface lint output inline.
+    """
+    skill_md = _build_skill_md(req)
+    body_text = req.body or ""
+    body_chars = len(body_text)
+    body_lines = body_text.count("\n") + (1 if body_text else 0)
+
+    errors: List[str] = []
+    warnings: List[str] = []
+    metadata_dict: Optional[dict] = None
+
+    try:
+        from geny_executor.skills.frontmatter import parse_frontmatter
+        from geny_executor.skills.types import validate_execution_mode
+    except Exception as exc:  # pragma: no cover — executor import guard
+        errors.append(f"executor parser unavailable: {exc}")
+        return SkillTestResponse(
+            ok=False,
+            skill_md=skill_md,
+            metadata=None,
+            body_chars=body_chars,
+            body_lines=body_lines,
+            warnings=warnings,
+            errors=errors,
+        )
+
+    try:
+        meta_dict, parsed_body = parse_frontmatter(skill_md)
+    except Exception as exc:
+        errors.append(f"frontmatter parse failed: {exc}")
+        return SkillTestResponse(
+            ok=False,
+            skill_md=skill_md,
+            metadata=None,
+            body_chars=body_chars,
+            body_lines=body_lines,
+            warnings=warnings,
+            errors=errors,
+        )
+
+    if not meta_dict:
+        errors.append("frontmatter is empty — expected a '---' YAML block")
+    else:
+        metadata_dict = dict(meta_dict)
+        # Replicate parse_skill_file's required-field checks so the dry
+        # run surfaces the same failure modes the loader would hit.
+        name = meta_dict.get("name")
+        description = meta_dict.get("description")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("'name' is required and must be a non-empty string")
+        if not isinstance(description, str) or not description.strip():
+            errors.append("'description' is required and must be a non-empty string")
+        raw_allowed = meta_dict.get("allowed_tools", [])
+        if raw_allowed not in (None, "") and not isinstance(raw_allowed, list):
+            errors.append("'allowed_tools' must be a list of strings")
+        elif isinstance(raw_allowed, list) and not all(
+            isinstance(x, str) for x in raw_allowed
+        ):
+            errors.append("every entry in 'allowed_tools' must be a string")
+        execution_mode = meta_dict.get("execution_mode", "inline")
+        try:
+            validate_execution_mode(str(execution_mode))
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    # Soft warnings — never block save, just nudge the operator.
+    if isinstance(metadata_dict, dict):
+        if (
+            isinstance(metadata_dict.get("name"), str)
+            and isinstance(metadata_dict.get("description"), str)
+            and metadata_dict["name"].strip()
+            and metadata_dict["name"].strip() == metadata_dict["description"].strip()
+        ):
+            warnings.append("description duplicates name — describe what/when, not the label")
+    if not req.examples:
+        warnings.append("no examples provided — intent matching will be weaker")
+    if 0 < body_chars < 20:
+        warnings.append(
+            "body is very short — the LLM will have little context when this skill is dispatched"
+        )
+    if body_chars == 0:
+        warnings.append("body is empty — the LLM will see only frontmatter when invoked")
+
+    # Cross-check allowed_tools against the executor + Geny catalogs.
+    # Best-effort: a missing executor module is not an error. Names
+    # starting with ``mcp__`` are MCP-tool prefixes — accepted blindly.
+    if req.allowed_tools:
+        known: set = set()
+        try:
+            from geny_executor.tools.built_in import BUILT_IN_TOOL_CLASSES  # type: ignore
+            known |= set(BUILT_IN_TOOL_CLASSES.keys())
+        except Exception:
+            pass
+        try:
+            from service.tool_loader import get_tool_loader  # type: ignore
+            loader = get_tool_loader()
+            known |= set(loader.builtin_tools.keys())
+            known |= set(loader.custom_tools.keys())
+        except Exception:
+            pass
+        if known:
+            unknown = [
+                tool
+                for tool in req.allowed_tools
+                if tool not in known and not tool.startswith("mcp__")
+            ]
+            if unknown:
+                warnings.append(
+                    "allowed_tools contains names not in the executor catalog: "
+                    + ", ".join(unknown)
+                )
+
+    _ = parsed_body  # reserved for future body-content checks
+
+    return SkillTestResponse(
+        ok=not errors,
+        skill_md=skill_md,
+        metadata=metadata_dict,
+        body_chars=body_chars,
+        body_lines=body_lines,
+        warnings=warnings,
+        errors=errors,
+    )
+
+
 def _to_summary(skill_dict: dict) -> SkillSummary:
     """Map a list_skills() row into the API model. The row may carry
     extra keys (extras / source / etc.) — pydantic ignores them, so

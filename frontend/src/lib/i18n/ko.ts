@@ -873,6 +873,20 @@ const ko: Translations = {
           errorBadId:
             'ID는 소문자/숫자/대시/언더스코어만 허용 (첫 글자는 알파벳/숫자).',
           errorBadExtras: 'Extras JSON 파싱 실패: {detail}',
+          // ── 테스트 / 드라이런 (Phase 9.7) ──
+          testBtn: '테스트',
+          testingLabel: '검사 중…',
+          testHint:
+            '저장 없이 executor 파서로 검증 — 메타데이터 / 본문 / allowed_tools 흠집을 미리 발견합니다.',
+          testOk: '검증 통과',
+          testFailed: '검증 실패 — 저장 전에 수정하세요',
+          testNoMetadata: '(파싱된 메타데이터 없음)',
+          testWarnings: '경고',
+          testErrors: '오류',
+          testBodyStats: '본문 {chars}자 · {lines}줄',
+          testCompiled: '컴파일된 SKILL.md',
+          testCompiledHint: '실제로 디스크에 쓰일 형태입니다 (frontmatter + 본문).',
+          testCloseLabel: '결과 숨기기',
         },
       },
       hooks: {

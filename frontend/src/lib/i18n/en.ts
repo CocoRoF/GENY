@@ -844,6 +844,19 @@ const en = {
           errorBadId:
             'ID must be lower-case / digit / dash / underscore (first char alphanumeric).',
           errorBadExtras: 'Extras JSON parse failed: {detail}',
+          testBtn: 'Test',
+          testingLabel: 'Checking…',
+          testHint:
+            'Validate against the executor parser without saving — catches metadata / body / allowed_tools issues up front.',
+          testOk: 'Validation passed',
+          testFailed: 'Validation failed — fix before saving',
+          testNoMetadata: '(no parsed metadata)',
+          testWarnings: 'Warnings',
+          testErrors: 'Errors',
+          testBodyStats: 'Body: {chars} chars · {lines} lines',
+          testCompiled: 'Compiled SKILL.md',
+          testCompiledHint: 'This is exactly what would be written to disk (frontmatter + body).',
+          testCloseLabel: 'Hide results',
         },
       },
       hooks: {

@@ -1158,6 +1158,16 @@ export const subagentTypeApi = {
   list: () => apiCall<{ types: SubagentTypeRow[] }>('/api/subagent-types'),
 };
 
+export interface SkillTestResponse {
+  ok: boolean;
+  skill_md: string;
+  metadata: Record<string, unknown> | null;
+  body_chars: number;
+  body_lines: number;
+  warnings: string[];
+  errors: string[];
+}
+
 export const skillsApi = {
   get: (skillId: string) => apiCall<SkillDetail>(`/api/skills/${encodeURIComponent(skillId)}`),
 
@@ -1176,6 +1186,15 @@ export const skillsApi = {
   deleteUserSkill: (skillId: string) =>
     apiCall<{ deleted: boolean; id: string }>(`/api/skills/user/${encodeURIComponent(skillId)}`, {
       method: 'DELETE',
+    }),
+
+  /** Dry-run a draft skill against the executor's parser without
+   *  saving (Phase 9.7). Used by the form modal's "테스트 / Test"
+   *  button so beginners can verify before committing. */
+  test: (req: UserSkillUpsertRequest) =>
+    apiCall<SkillTestResponse>('/api/skills/test', {
+      method: 'POST',
+      body: JSON.stringify(req),
     }),
 };
 

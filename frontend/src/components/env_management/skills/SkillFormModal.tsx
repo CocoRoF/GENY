@@ -35,9 +35,12 @@
 
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Cpu,
+  FlaskConical,
   HelpCircle,
   Info,
   ListChecks,
@@ -46,6 +49,7 @@ import {
   Tag,
   Wrench,
   X,
+  XCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
@@ -58,7 +62,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { SkillDetail } from '@/lib/api';
+import { skillsApi, type SkillDetail, type SkillTestResponse } from '@/lib/api';
 
 // ─────────────────────────────────────────────────────────────
 // Form state model
@@ -229,6 +233,9 @@ export default function SkillFormModal({
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [innerError, setInnerError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<SkillTestResponse | null>(null);
+  const [compiledOpen, setCompiledOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -239,6 +246,8 @@ export default function SkillFormModal({
     }
     setInnerError(null);
     setAdvancedOpen(false);
+    setTestResult(null);
+    setCompiledOpen(false);
   }, [open, editingExisting, initialDetail]);
 
   if (!open) return null;
@@ -255,6 +264,40 @@ export default function SkillFormModal({
       return;
     }
     onSubmit(payload);
+  };
+
+  const runTest = async () => {
+    setInnerError(null);
+    const { payload, error: errKey, errorVars } = formToPayload(form);
+    if (!payload) {
+      setInnerError(
+        errKey ? t(`envManagement.registry.skills.form.${errKey}`, errorVars) : 'Invalid form',
+      );
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await skillsApi.test({
+        id: payload.id,
+        name: payload.name,
+        description: payload.description,
+        body: payload.body,
+        model_override: payload.model_override,
+        allowed_tools: payload.allowed_tools,
+        category: payload.category,
+        effort: payload.effort,
+        examples: payload.examples,
+        version: payload.version,
+        execution_mode: payload.execution_mode,
+        ...(payload.extras ? { extras: payload.extras } : {}),
+      });
+      setTestResult(res);
+      setCompiledOpen(false);
+    } catch (e) {
+      setInnerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
   };
 
   const slashPreview = form.id.trim() || 'your-skill';
@@ -309,6 +352,15 @@ export default function SkillFormModal({
             onToggle={() => setAdvancedOpen((v) => !v)}
           />
 
+          {testResult && (
+            <TestResultPanel
+              result={testResult}
+              compiledOpen={compiledOpen}
+              onToggleCompiled={() => setCompiledOpen((v) => !v)}
+              onClose={() => setTestResult(null)}
+            />
+          )}
+
           {error && (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-[0.75rem] text-red-700 dark:text-red-300">
               <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -318,36 +370,169 @@ export default function SkillFormModal({
         </div>
 
         {/* ── Footer ── */}
-        <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
+        <footer className="flex items-center justify-between gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
           <button
             type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+            onClick={runTest}
+            disabled={saving || testing}
+            title={t('envManagement.registry.skills.form.testHint')}
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
           >
-            {t('envManagement.registry.cancel')}
+            <FlaskConical className={`w-4 h-4 ${testing ? 'animate-pulse' : ''}`} />
+            {testing
+              ? t('envManagement.registry.skills.form.testingLabel')
+              : t('envManagement.registry.skills.form.testBtn')}
           </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
-          >
-            {saving ? (
-              <>
-                <Save className="w-4 h-4 animate-pulse" />
-                {t('envManagement.registry.saving')}
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                {editingExisting
-                  ? t('envManagement.registry.skills.form.editBtn')
-                  : t('envManagement.registry.skills.form.createBtn')}
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+            >
+              {t('envManagement.registry.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
+            >
+              {saving ? (
+                <>
+                  <Save className="w-4 h-4 animate-pulse" />
+                  {t('envManagement.registry.saving')}
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  {editingExisting
+                    ? t('envManagement.registry.skills.form.editBtn')
+                    : t('envManagement.registry.skills.form.createBtn')}
+                </>
+              )}
+            </button>
+          </div>
         </footer>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Test result panel (Phase 9.7)
+// ─────────────────────────────────────────────────────────────
+
+function TestResultPanel({
+  result,
+  compiledOpen,
+  onToggleCompiled,
+  onClose,
+}: {
+  result: SkillTestResponse;
+  compiledOpen: boolean;
+  onToggleCompiled: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const ok = result.ok;
+  return (
+    <div
+      className={`rounded-xl border p-3 flex flex-col gap-2 ${
+        ok
+          ? 'border-emerald-500/40 bg-emerald-500/5'
+          : 'border-red-500/40 bg-red-500/5'
+      }`}
+    >
+      <header className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {ok ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+          )}
+          <span
+            className={`text-[0.8125rem] font-semibold ${
+              ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'
+            }`}
+          >
+            {ok
+              ? t('envManagement.registry.skills.form.testOk')
+              : t('envManagement.registry.skills.form.testFailed')}
+          </span>
+          <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+            {t('envManagement.registry.skills.form.testBodyStats', {
+              chars: String(result.body_chars),
+              lines: String(result.body_lines),
+            })}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:underline"
+        >
+          {t('envManagement.registry.skills.form.testCloseLabel')}
+        </button>
+      </header>
+
+      {result.errors.length > 0 && (
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-2">
+          <div className="flex items-center gap-1.5 mb-1">
+            <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+            <span className="text-[0.6875rem] uppercase tracking-wider font-semibold text-red-700 dark:text-red-300">
+              {t('envManagement.registry.skills.form.testErrors')} ({result.errors.length})
+            </span>
+          </div>
+          <ul className="text-[0.75rem] text-red-700 dark:text-red-300 space-y-0.5 list-disc ml-4">
+            {result.errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {result.warnings.length > 0 && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+          <div className="flex items-center gap-1.5 mb-1">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span className="text-[0.6875rem] uppercase tracking-wider font-semibold text-amber-700 dark:text-amber-300">
+              {t('envManagement.registry.skills.form.testWarnings')} ({result.warnings.length})
+            </span>
+          </div>
+          <ul className="text-[0.75rem] text-amber-800 dark:text-amber-200 space-y-0.5 list-disc ml-4">
+            {result.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))]">
+        <button
+          type="button"
+          onClick={onToggleCompiled}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-[hsl(var(--accent))]/40 transition-colors"
+        >
+          <div className="flex items-center gap-1.5">
+            {compiledOpen ? (
+              <ChevronDown className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
+            )}
+            <span className="text-[0.6875rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
+              {t('envManagement.registry.skills.form.testCompiled')}
+            </span>
+          </div>
+          <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))]">
+            {t('envManagement.registry.skills.form.testCompiledHint')}
+          </span>
+        </button>
+        {compiledOpen && (
+          <pre className="border-t border-[hsl(var(--border))] px-3 py-2 text-[0.7rem] font-mono whitespace-pre-wrap break-words max-h-64 overflow-y-auto text-[hsl(var(--foreground))]">
+            {result.skill_md}
+          </pre>
+        )}
       </div>
     </div>
   );
