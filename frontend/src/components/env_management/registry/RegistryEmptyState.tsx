@@ -1,21 +1,26 @@
 'use client';
 
 /**
- * RegistryEmptyState — centered empty state for registries with no
- * entries. Surfaces the primary action prominently so the operator
- * always knows what to do next.
+ * RegistryEmptyState — centered card mirroring the env welcome's
+ * primary-CTA pattern. Lives inside the body of `RegistryPageShell`
+ * when the registry has no entries yet.
  *
- *   ┌─ centered card ──────────────────────────────────────┐
- *   │       (large icon)                                   │
- *   │                                                       │
- *   │       {title}                                         │
- *   │       {hint}                                          │
- *   │                                                       │
- *   │       [+ Add entity]                                  │
- *   └───────────────────────────────────────────────────────┘
+ *   ┌─ rounded-xl card, generous padding ───────────────────────────┐
+ *   │                                                                │
+ *   │                  [icon-tile, large]                            │
+ *   │                                                                │
+ *   │                       {title}                                  │
+ *   │                  {hint, muted, narrow}                         │
+ *   │                                                                │
+ *   │                    [+ Add entity]                              │
+ *   │                                                                │
+ *   └────────────────────────────────────────────────────────────────┘
  *
- * Mirrors the env welcome card's centered-with-CTA pattern so the
- * registry tabs read at the same polish level when bare.
+ * Cycle 20260429 Phase 8.1 — promoted from a thin dashed-border
+ * notice to a card with the same rhythm as `OverviewView`'s
+ * welcome card. The four registry tabs felt sparse + unloved
+ * before; the larger card reads "this is a real surface, here's
+ * what to do".
  */
 
 import { Plus, type LucideIcon } from 'lucide-react';
@@ -37,30 +42,32 @@ export default function RegistryEmptyState({
   onAdd,
 }: RegistryEmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 px-6 rounded-lg border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))]/40">
-      <div className="w-12 h-12 rounded-full bg-violet-500/10 flex items-center justify-center text-violet-500">
-        <Icon className="w-6 h-6" />
-      </div>
-      <div className="text-center">
-        <div className="text-[0.9375rem] font-semibold text-[hsl(var(--foreground))]">
-          {title}
+    <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+      <div className="flex flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[hsl(var(--primary)/0.08)]">
+          <Icon className="w-7 h-7 text-[hsl(var(--primary))]" strokeWidth={1.75} />
         </div>
-        {hint && (
-          <div className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] mt-1 leading-relaxed max-w-md">
-            {hint}
+        <div className="space-y-1.5 max-w-[480px]">
+          <div className="text-[1rem] font-semibold text-[hsl(var(--foreground))]">
+            {title}
           </div>
+          {hint && (
+            <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+              {hint}
+            </p>
+          )}
+        </div>
+        {onAdd && addLabel && (
+          <button
+            type="button"
+            onClick={onAdd}
+            className="mt-1 inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            {addLabel}
+          </button>
         )}
       </div>
-      {onAdd && addLabel && (
-        <button
-          type="button"
-          onClick={onAdd}
-          className="mt-2 inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          {addLabel}
-        </button>
-      )}
     </div>
   );
 }
