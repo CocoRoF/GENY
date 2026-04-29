@@ -41,6 +41,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Globe,
@@ -48,13 +49,17 @@ import {
   Info,
   Plus,
   Radio,
+  RefreshCw,
   Save,
   Server,
   Terminal,
+  XCircle,
   X,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
+import { customMcpApi, type MCPTestConnectionResponse } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -198,6 +203,10 @@ export default function McpServerFormModal({
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [innerError, setInnerError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    MCPTestConnectionResponse | null
+  >(null);
 
   // Reset form when the modal opens or initial values change.
   useEffect(() => {
@@ -215,7 +224,24 @@ export default function McpServerFormModal({
       setForm(EMPTY_FORM);
     }
     setInnerError(null);
+    setTestResult(null);
   }, [open, editingExisting, initialName, initialDescription, initialConfig]);
+
+  // Stale the test result whenever the form changes — yesterday's
+  // "connected" tells the operator nothing about the config they
+  // just edited.
+  useEffect(() => {
+    setTestResult(null);
+  }, [
+    form.transport,
+    form.command,
+    form.argsText,
+    form.url,
+    form.envRows,
+    form.headerRows,
+    form.configJson,
+    form.mode,
+  ]);
 
   if (!open) return null;
 
@@ -260,6 +286,54 @@ export default function McpServerFormModal({
           }),
         );
       }
+    }
+  };
+
+  /** Build the wire-shape config the test endpoint expects. Mirrors
+   *  `submit()` minus the validation gates — we want the server to
+   *  echo back its real error if e.g. the command is missing,
+   *  rather than refusing to fire because the structured form
+   *  isn't fully populated yet. */
+  const buildConfigForTest = (): Record<string, unknown> | null => {
+    if (form.mode === 'structured') {
+      return structuredToJson(form);
+    }
+    try {
+      const parsed = JSON.parse(form.configJson || '{}');
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleTest = async () => {
+    setInnerError(null);
+    const config = buildConfigForTest();
+    if (config === null) {
+      setInnerError(
+        t('envManagement.registry.mcp.form.errorBadJson', {
+          detail: 'config is not a valid JSON object',
+        }),
+      );
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await customMcpApi.test(form.name.trim() || 'preflight', config);
+      setTestResult(res);
+    } catch (e) {
+      setTestResult({
+        success: false,
+        latency_ms: 0,
+        tools_discovered: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -401,10 +475,32 @@ export default function McpServerFormModal({
               <div className="flex-1">{error}</div>
             </div>
           )}
+
+          {testResult && <TestResultChip result={testResult} t={t} />}
         </div>
 
         {/* ── Footer ── */}
-        <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
+        <footer className="flex items-center gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testing || saving}
+            title={t('envManagement.registry.mcp.form.testHint')}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {testing ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                {t('envManagement.registry.mcp.form.testRunning')}
+              </>
+            ) : (
+              <>
+                <Zap className="w-3.5 h-3.5" />
+                {t('envManagement.registry.mcp.form.testButton')}
+              </>
+            )}
+          </button>
+          <div className="flex-1" />
           <button
             type="button"
             onClick={onClose}
@@ -837,6 +933,54 @@ function JsonPreviewSection({
         </div>
       )}
     </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Test connection result chip
+// ─────────────────────────────────────────────────────────────
+
+function TestResultChip({
+  result,
+  t,
+}: {
+  result: MCPTestConnectionResponse;
+  t: (k: string, v?: Record<string, string>) => string;
+}) {
+  if (result.success) {
+    return (
+      <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-[0.75rem] text-emerald-700 dark:text-emerald-300">
+        <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+        <div className="flex-1">
+          <div className="font-semibold">
+            {t('envManagement.registry.mcp.form.testSuccess', {
+              n: String(result.tools_discovered),
+            })}
+          </div>
+          <div className="text-[0.6875rem] opacity-80 tabular-nums mt-0.5">
+            {result.latency_ms.toFixed(1)}ms
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/10 text-[0.75rem] text-red-700 dark:text-red-300">
+      <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold">
+          {t('envManagement.registry.mcp.form.testFailed', {
+            detail: '',
+          }).replace(/:\s*$/, '')}
+        </div>
+        <pre className="text-[0.6875rem] opacity-90 mt-1 whitespace-pre-wrap break-words font-mono">
+          {result.error ?? '(no error message)'}
+        </pre>
+        <div className="text-[0.6875rem] opacity-70 tabular-nums mt-1">
+          {result.latency_ms.toFixed(1)}ms
+        </div>
+      </div>
+    </div>
   );
 }
 

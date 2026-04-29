@@ -1,6 +1,6 @@
 [project]
 name = "geny"
-version = "1.0.2"
+version = "1.0.3"
 description = "Geny (Geny Execute, Not You) - Autonomous Multi-Agent System"
 readme = "README.md"
 requires-python = ">=3.11"
