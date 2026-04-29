@@ -18,85 +18,12 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor: Pipeline-based execution engine
-# 0.36.x (executor uplift Phase 4 Weeks 7-8): Skills system lands in
-# inline-execution form. Adds geny_executor.skills subpackage — SKILL
-# .md frontmatter parser, loader, registry, SkillTool + SkillToolProvider
-# (plugs into Pipeline.from_manifest_async via the ToolProvider Protocol
-# shipped in 0.35.0). pyyaml>=6.0 becomes a core dep. All additive;
-# existing AgentSession usage unaffected.
-# 0.41.x (executor uplift Phase 7 sprint batch S7.5 + S7.6 + S7.7):
-# - SubagentTypeOrchestrator + SubagentTypeRegistry — typed sub-
-#   agent dispatch for Stage 11 with rich descriptor metadata
-#   (description / allowed_tools / model_override). Foundation for
-#   Skill fork-mode dispatch.
-# - EvaluationChain — Stage 12 sequential evaluator composition
-#   with first-definitive-verdict-wins semantics.
-# - MultiDimensionalBudgetController + 5 BudgetDimension types
-#   (iteration / cost / tokens / wall-clock / tool calls) — Stage
-#   13 pluggable budget registry replacing the fixed two-dim
-#   controller.
-# 0.42.x (executor uplift Phase 7 sprint batch S7.8 + S7.9 + S7.10):
-# - ModelRouter ABC + Passthrough/Adaptive routers — Stage 6 third
-#   strategy slot for per-call model selection (heuristic Opus /
-#   Sonnet / Haiku tier picking based on thinking flag, char-count
-#   thresholds, tools-on-state). Stage emits api.model_routed on
-#   actual swaps; never blocks on router exceptions.
-# - StructuredReflectiveStrategy + s15_memory.insight helpers —
-#   Stage 15 typed Insight record path replacing the legacy
-#   needs_reflection free-form flag. Re-uses existing
-#   memory.provider.Insight / Importance schema.
-# - ThinkingBudgetPlanner ABC + Static/Adaptive planners — Stage 8
-#   per-turn budget sizing. Hosts call ThinkStage.apply_planned_budget
-#   from a pre-Stage-6 hook to size thinking_budget_tokens by
-#   prompt size + tools + reflection signals.
-# 0.43.x (executor uplift Phase 7 close — S7.11 + S7.12):
-# - OrderedEmitterChain — Stage 14 alternative chain with topological
-#   dep ordering (Emitter.requires), dep-failure skip, and timeout-
-#   based per-emitter backpressure (Emitter.timeout_seconds +
-#   consecutive-timeout counter). EmitResult gains emitter_name.
-# - MultiFormatFormatter — Stage 16 yields text + structured +
-#   markdown in one pass; final_output becomes a dict keyed by
-#   format. include_thinking toggle for thinking visibility in
-#   markdown. build_structured / build_markdown helpers exposed.
-# 0.44.x (executor uplift Phase 8 close — S8.1 + S8.2 + S8.3 + S8.4):
-# - CredentialStore Protocol + Memory/File implementations
-#   (mode-0600 atomic writes). Foundation for OAuth.
-# - OAuthFlow — full OAuth 2.0 authorization-code dance (CSRF
-#   state, localhost callback HTTP server, injectable token-
-#   exchange http_post). Persists tokens under mcp:<server>.
-# - mcp:// URI scheme + MCPManager.read_mcp_resource /
-#   list_all_resources for cross-server resource references.
-# - prompts → Skills bridge: per-connection list_prompts /
-#   get_prompt + manager-level list_all_prompts / get_mcp_prompt
-#   + mcp_prompts_to_skills(manager) advisory bridge producing
-#   Skill records with prompt metadata in extras.
-# 0.45.x (executor uplift Phase 9 Sub-phase 9a close —
-# S9a.1 + S9a.2 + S9a.3 + S9a.4 + S9a.5): canonical pipeline grew
-# 16 → 21 slots. Five new slots are pass-through / bypass
-# scaffolds. v1/v2 manifests auto-pad to v3 on load.
-# 0.46.x (executor uplift Phase 9 Sub-phase 9b close —
-# S9b.1 + S9b.2 + S9b.3 + S9b.4 + S9b.5): every former scaffold
-# has real strategy-slot behaviour now. Phase 9 complete.
-# - Stage 11 Tool Review: 5-reviewer chain.
-# - Stage 13 Task Registry: registry + policy slots.
-# - Stage 15 HITL: requester + timeout slots.
-# - Stage 19 Summarize: summarizer + importance slots.
-# - Stage 20 Persist: persister + frequency slots.
-# Defaults preserve pre-0.46.0 behaviour.
-# 1.0.0 (executor uplift roadmap close — first stable release):
-# - Sub-phase 9c shipped Pipeline.resume(token, decision) +
-#   PipelineResumeRequester for cross-request HITL approvals,
-#   plus restore_state_from_checkpoint helpers for crash recovery.
-# - PyPI classifier Beta → Production/Stable. Stability commitment:
-#   breaking changes require a 2.0 bump; 21-stage layout, slot
-#   interfaces, and manifest v3 schema are stable.
 # Bumped to 1.3.0 for new-executor-uplift Cycle A+B+D (Task lifecycle /
 # Slash commands / Cron / settings.json / SKILL.md richer / PLAN modes /
 # Workspace abstraction). cron extra pulls croniter for the scheduling
 # daemon. Pin matches backend/pyproject.toml so docker layer cache and
 # pip lockstep agree on the resolved version.
-geny-executor[web,cron]>=1.3.1,<1.4.0
+geny-executor[web,cron]>=1.3.3,<1.4.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
