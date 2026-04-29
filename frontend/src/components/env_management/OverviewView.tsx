@@ -79,11 +79,7 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
         icon={Layers}
         title={t('envManagement.welcomeTitle')}
         subtitle={t('envManagement.welcomeDescription')}
-        countLabel={
-          envCount !== null
-            ? `${envCount}${t('envManagement.registry.countSuffix') || ''}개 환경`
-            : undefined
-        }
+        countLabel={envCount !== null ? `${envCount}개 환경` : undefined}
         addLabel={
           seeding ? t('envManagement.seeding') : t('envManagement.newDraft')
         }
