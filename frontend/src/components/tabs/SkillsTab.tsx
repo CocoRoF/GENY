@@ -1,32 +1,47 @@
 'use client';
 
 /**
- * SkillsTab — view + edit user skills (PR-F.2.4 + PR-F.2.5).
+ * SkillsTab — host-shared skill registry. Lists every loaded skill
+ * (bundled + user) and lets the operator create / edit / delete user
+ * skills via /api/skills/user. A header toggle flips
+ * `settings.skills.user_skills_enabled` so the skills actually load
+ * on the next session.
  *
- * Lists every loaded skill (bundled + user) and lets the operator
- * create / edit / delete user skills via /api/skills/user. A header
- * toggle flips ``settings.skills.user_skills_enabled`` so the skills
- * actually load on the next session — no env var required.
+ * Cycle 20260429 Phase 8 — refactored onto the shared registry
+ * primitives (RegistryPageShell + RegistrySection + RegistryCard).
+ * The previous bespoke chrome (custom subtitle, hand-rolled card
+ * grid) is gone; visual vocabulary now matches the env welcome
+ * card and the other three host registries.
+ *
+ * Removed `embedded` mode — the env-side picker uses
+ * HostEnvSelectionPicker (Phase 5), so this tab no longer ships
+ * dual chrome.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { agentApi, skillsApi, frameworkSettingsApi, SkillDetail } from '@/lib/api';
-import { Sparkles, Plus, Pencil, Trash2, RefreshCw, Power } from 'lucide-react';
 import {
-  TabShell,
-  EditorModal,
-  EmptyState,
-  StatusBadge,
-  ActionButton,
-} from '@/components/layout';
+  agentApi,
+  skillsApi,
+  frameworkSettingsApi,
+  type SkillDetail,
+} from '@/lib/api';
+import { Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { EditorModal, ActionButton } from '@/components/layout';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { skillId } from '@/lib/envDefaultsApi';
+import {
+  RegistryPageShell,
+  RegistrySection,
+  RegistryCard,
+  RegistryEmptyState,
+  RegistryActionButton,
+} from '@/components/env_management/registry';
 
 interface SkillRow {
   id: string | null;
@@ -48,10 +63,9 @@ interface FormState {
   model_override: string;
   allowed_tools: string;
   examples: string;
-  // K.1 (cycle 20260426_2) — additional SkillMetadata fields.
   version: string;
-  execution_mode: string;     // '' | 'inline' | 'fork'
-  extrasText: string;         // JSON object as text; empty = no extras
+  execution_mode: string;
+  extrasText: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -84,7 +98,6 @@ function formToPayload(f: FormState) {
         }
       }
     } catch {
-      // Caller validates separately; emit empty extras to fall back.
       extras = undefined;
     }
   }
@@ -125,10 +138,14 @@ function detailToForm(d: SkillDetail): FormState {
 }
 
 export interface SkillsTabProps {
+  /** Deprecated — embedded mode is no longer used after Phase 5
+   *  (env-side picker uses HostEnvSelectionPicker). The prop
+   *  remains for callers still passing it; it has no effect. */
   embedded?: boolean;
 }
 
-export function SkillsTab({ embedded = false }: SkillsTabProps) {
+export function SkillsTab(_props: SkillsTabProps = {}) {
+  const { t } = useI18n();
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [userSkillsEnabled, setUserSkillsEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
@@ -136,15 +153,14 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
 
   const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
   useEffect(() => {
-    if (!embedded) loadEnvDefaultsOnce();
-  }, [embedded, loadEnvDefaultsOnce]);
+    loadEnvDefaultsOnce();
+  }, [loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingExisting, setEditingExisting] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // Map id → details cache so we know which rows are user-editable.
   const [userIds, setUserIds] = useState<Set<string>>(new Set());
 
   const refresh = async () => {
@@ -154,9 +170,7 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
       const list = await agentApi.skillsList();
       setSkills(list.skills as SkillRow[]);
 
-      // Probe each detail to identify user skills (cheap — there are
-      // typically <30 skills total and these endpoints are local).
-      const ids = (list.skills.map((s) => s.id).filter(Boolean) as string[]);
+      const ids = list.skills.map((s) => s.id).filter(Boolean) as string[];
       const details = await Promise.allSettled(ids.map((id) => skillsApi.get(id)));
       const userSet = new Set<string>();
       details.forEach((r) => {
@@ -164,7 +178,6 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
       });
       setUserIds(userSet);
 
-      // Settings.json side: skills.user_skills_enabled.
       try {
         const sec = await frameworkSettingsApi.get('skills');
         const v = sec.values as { user_skills_enabled?: boolean };
@@ -183,14 +196,18 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
     refresh();
   }, []);
 
+  /** Group by `bundled` vs `user` for the section header. The
+   *  registered category field is informational and rendered as a
+   *  badge on each card; we keep grouping coarse so the operator
+   *  scans bundled-then-user, not 6 small clusters. */
   const grouped = useMemo(() => {
-    const map = new Map<string, SkillRow[]>();
+    const bundled: SkillRow[] = [];
+    const user: SkillRow[] = [];
     skills.forEach((s) => {
-      const cat = s.category || (s.id && userIds.has(s.id) ? 'user' : 'bundled');
-      if (!map.has(cat)) map.set(cat, []);
-      map.get(cat)!.push(s);
+      if (s.id && userIds.has(s.id)) user.push(s);
+      else bundled.push(s);
     });
-    return map;
+    return { bundled, user };
   }, [skills, userIds]);
 
   const openCreate = () => {
@@ -258,109 +275,91 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
     }
   };
 
-  const subtitle = (
+  const enabledBadge = userSkillsEnabled !== null && (
+    <button
+      type="button"
+      onClick={onToggleEnabled}
+      title={`user_skills_enabled: ${userSkillsEnabled ? 'true' : 'false'} — 클릭하여 토글`}
+      className={`inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.6875rem] font-medium border transition-colors ${
+        userSkillsEnabled
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15'
+          : 'border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'
+      }`}
+    >
+      <Power className="w-3 h-3" />
+      {userSkillsEnabled ? 'enabled' : 'disabled'}
+    </button>
+  );
+
+  const isEmpty = !loading && skills.length === 0;
+  const addLabel = t('envManagement.registry.skills.addLabel');
+
+  return (
     <>
-      {skills.length} loaded · {userIds.size} user
-      {userSkillsEnabled !== null && (
-        <>
-          {' · '}
-          <StatusBadge
-            tone={userSkillsEnabled ? 'success' : 'neutral'}
-            icon={Power}
-            onClick={onToggleEnabled}
-          >
-            user_skills_enabled: {userSkillsEnabled ? 'true' : 'false'}
-          </StatusBadge>
-        </>
-      )}
-    </>
-  );
-
-  const actions = (
-    <>
-      <ActionButton variant="primary" icon={Plus} onClick={openCreate}>
-        Add user skill
-      </ActionButton>
-      <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-        Refresh
-      </ActionButton>
-    </>
-  );
-
-  const body = (
-    <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
-        {!embedded && (
-          <HostRegistryBanner note="스킬은 LLM이 사용할 수 있는 명세 + 코드 — 호스트 사용자별로 등록됩니다." />
+      <RegistryPageShell
+        icon={Sparkles}
+        title={t('envManagement.registry.skills.title')}
+        subtitle={t('envManagement.registry.skills.subtitle')}
+        countLabel={t('envManagement.registry.skills.countLabel', {
+          n: String(skills.length),
+        })}
+        bannerNote={t('envManagement.registry.skills.bannerNote')}
+        addLabel={addLabel}
+        onAdd={openCreate}
+        onRefresh={refresh}
+        loading={loading}
+        error={error}
+        onDismissError={() => setError(null)}
+        headerExtras={enabledBadge}
+      >
+        {isEmpty ? (
+          <RegistryEmptyState
+            icon={Sparkles}
+            title={t('envManagement.registry.skills.emptyTitle')}
+            hint={t('envManagement.registry.emptyHint', { addLabel })}
+            addLabel={addLabel}
+            onAdd={openCreate}
+          />
+        ) : (
+          <>
+            {grouped.bundled.length > 0 && (
+              <RegistrySection
+                label={t('envManagement.registry.skills.sectionBundled')}
+                count={grouped.bundled.length}
+              >
+                {grouped.bundled.map((s, i) => (
+                  <SkillCard
+                    key={s.id ?? `bundled-${i}`}
+                    skill={s}
+                    isUser={false}
+                  />
+                ))}
+              </RegistrySection>
+            )}
+            {grouped.user.length > 0 && (
+              <RegistrySection
+                label={t('envManagement.registry.skills.sectionUser')}
+                count={grouped.user.length}
+              >
+                {grouped.user.map((s, i) => (
+                  <SkillCard
+                    key={s.id ?? `user-${i}`}
+                    skill={s}
+                    isUser={true}
+                    onEdit={() => s.id && openEdit(s.id)}
+                    onDelete={() => s.id && onDelete(s.id)}
+                  />
+                ))}
+              </RegistrySection>
+            )}
+          </>
         )}
-        {Array.from(grouped.entries()).map(([cat, rows]) => (
-          <section key={cat}>
-            <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1">
-              {cat} <span className="font-normal">({rows.length})</span>
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-              {rows.map((s, idx) => {
-                const isUser = !!(s.id && userIds.has(s.id));
-                return (
-                  <div
-                    key={s.id ?? `${cat}-${idx}`}
-                    className="border border-[var(--border-color)] rounded p-2 hover:border-[var(--primary-color)]"
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono font-semibold text-[0.8125rem] truncate">/{s.id}</span>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {!embedded && (
-                          <EnvDefaultStarToggle
-                            category="skills"
-                            itemId={skillId(s)}
-                          />
-                        )}
-                        {isUser && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => s.id && openEdit(s.id)}
-                              className="text-[var(--text-muted)] hover:text-[var(--primary-color)]"
-                              title="Edit"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => s.id && onDelete(s.id)}
-                              className="text-[var(--text-muted)] hover:text-red-600"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-[0.75rem] text-[var(--text-secondary)] mt-1 line-clamp-2">
-                      {s.description ?? s.name ?? '—'}
-                    </div>
-                    {s.allowed_tools.length > 0 && (
-                      <div className="text-[0.625rem] text-[var(--text-muted)] mt-1">
-                        {s.allowed_tools.length} tool{s.allowed_tools.length === 1 ? '' : 's'}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-        {!loading && skills.length === 0 && (
-          <EmptyState icon={Sparkles} title="No skills loaded." />
-        )}
-    </div>
-  );
+      </RegistryPageShell>
 
-  const modal = (
-    <EditorModal
-      open={editorOpen}
-      onClose={() => setEditorOpen(false)}
-      title={editingExisting ? `Edit /${form.id}` : 'New user skill'}
+      <EditorModal
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={editingExisting ? `Edit /${form.id}` : 'New user skill'}
         saving={saving}
         width="xl"
         footer={
@@ -425,23 +424,32 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
               <Input
                 id="skill-model"
                 value={form.model_override}
-                onChange={(e) => setForm({ ...form, model_override: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, model_override: e.target.value })
+                }
                 className="font-mono"
               />
             </div>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="skill-tools">Allowed tools <span className="opacity-60">(CSV; empty = inherit)</span></Label>
+            <Label htmlFor="skill-tools">
+              Allowed tools{' '}
+              <span className="opacity-60">(CSV; empty = inherit)</span>
+            </Label>
             <Input
               id="skill-tools"
               value={form.allowed_tools}
-              onChange={(e) => setForm({ ...form, allowed_tools: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, allowed_tools: e.target.value })
+              }
               placeholder="Read, Write, Bash"
               className="font-mono"
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="skill-ex">Examples <span className="opacity-60">(one per line)</span></Label>
+            <Label htmlFor="skill-ex">
+              Examples <span className="opacity-60">(one per line)</span>
+            </Label>
             <Textarea
               id="skill-ex"
               value={form.examples}
@@ -450,10 +458,11 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
               className="font-mono"
             />
           </div>
-          {/* K.1 (cycle 20260426_2) — version + execution_mode + extras. */}
           <div className="grid grid-cols-2 gap-2">
             <div className="grid gap-1.5">
-              <Label htmlFor="skill-version">Version <span className="opacity-60">(optional)</span></Label>
+              <Label htmlFor="skill-version">
+                Version <span className="opacity-60">(optional)</span>
+              </Label>
               <Input
                 id="skill-version"
                 value={form.version}
@@ -467,7 +476,9 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
               <Input
                 id="skill-exec"
                 value={form.execution_mode}
-                onChange={(e) => setForm({ ...form, execution_mode: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, execution_mode: e.target.value })
+                }
                 placeholder="(empty = inline) inline | fork"
                 className="font-mono text-[0.75rem]"
               />
@@ -475,12 +486,18 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="skill-extras">
-              Extras <span className="opacity-60">(JSON object, optional — host-specific metadata; flat scalars only)</span>
+              Extras{' '}
+              <span className="opacity-60">
+                (JSON object, optional — host-specific metadata; flat scalars
+                only)
+              </span>
             </Label>
             <Textarea
               id="skill-extras"
               value={form.extrasText}
-              onChange={(e) => setForm({ ...form, extrasText: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, extrasText: e.target.value })
+              }
               rows={3}
               spellCheck={false}
               placeholder={'(empty = no extras)\n{"icon": "🛠", "owner": "ops"}'}
@@ -488,7 +505,10 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="skill-body">Body <span className="opacity-60">(markdown — what the LLM sees)</span></Label>
+            <Label htmlFor="skill-body">
+              Body{' '}
+              <span className="opacity-60">(markdown — what the LLM sees)</span>
+            </Label>
             <Textarea
               id="skill-body"
               value={form.body}
@@ -499,48 +519,78 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
           </div>
         </div>
       </EditorModal>
-  );
-
-  if (embedded) {
-    return (
-      <div className="flex flex-col gap-3">
-        {error && (
-          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] text-[0.75rem] text-[var(--danger-color)]">
-            <span>{error}</span>
-            <button
-              type="button"
-              onClick={() => setError(null)}
-              className="text-[0.7rem] underline hover:no-underline"
-            >
-              dismiss
-            </button>
-          </div>
-        )}
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] flex-1 min-w-0">
-            {subtitle}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">{actions}</div>
-        </div>
-        {body}
-        {modal}
-      </div>
-    );
-  }
-
-  return (
-    <TabShell
-      title="Skills"
-      icon={Sparkles}
-      subtitle={subtitle}
-      actions={actions}
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      {body}
-      {modal}
-    </TabShell>
+    </>
   );
 }
 
 export default SkillsTab;
+
+// ── Card ─────────────────────────────────────────────────────────
+
+function SkillCard({
+  skill,
+  isUser,
+  onEdit,
+  onDelete,
+}: {
+  skill: SkillRow;
+  isUser: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const { t } = useI18n();
+  const id = skill.id ?? '(unnamed)';
+  const badges = [
+    ...(skill.category
+      ? [{ label: skill.category, tone: 'info' as const }]
+      : []),
+    ...(skill.effort
+      ? [{ label: skill.effort, tone: 'neutral' as const }]
+      : []),
+  ];
+  return (
+    <RegistryCard
+      icon={Sparkles}
+      title={`/${id}`}
+      titleMono
+      description={skill.description ?? skill.name ?? '—'}
+      badges={badges}
+      meta={
+        skill.allowed_tools.length > 0
+          ? t('envManagement.registry.skills.toolsCount', {
+              n: String(skill.allowed_tools.length),
+            })
+          : undefined
+      }
+      variant={isUser ? 'default' : 'muted'}
+      star={
+        <EnvDefaultStarToggle
+          category="skills"
+          itemId={skillId(skill)}
+        />
+      }
+      actions={
+        isUser ? (
+          <>
+            {onEdit && (
+              <RegistryActionButton
+                icon={Pencil}
+                onClick={onEdit}
+                title={t('envManagement.registry.editTip')}
+                variant="primary"
+              />
+            )}
+            {onDelete && (
+              <RegistryActionButton
+                icon={Trash2}
+                onClick={onDelete}
+                title={t('envManagement.registry.deleteTip')}
+                variant="danger"
+              />
+            )}
+          </>
+        ) : null
+      }
+    />
+  );
+}

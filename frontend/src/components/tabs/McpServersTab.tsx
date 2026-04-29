@@ -1,36 +1,42 @@
 'use client';
 
 /**
- * McpServersTab — manage custom MCP server JSON files.
+ * McpServersTab — host-shared registry for custom MCP servers.
  *
- * Reads from /api/mcp/custom. The config can be edited two ways:
- *   - Structured form (T.3 / cycle 20260426_2): per-transport fields
- *     (stdio: command + args + env; http/sse: url + headers + env).
- *   - Raw JSON textarea: free-form fallback for any field structured
- *     mode doesn't model yet.
+ * Reads from /api/mcp/custom. Cycle 20260429 Phase 8 refactored
+ * the layout from a two-pane (sidebar list + JSON detail) into
+ * the shared registry primitives — one card per server, edit
+ * happens in a modal that doubles as the JSON inspector. Net
+ * result: the four host-registry tabs all read the same way at
+ * a glance instead of MCP being the odd shaped one.
  *
- * The two modes share state — switching between them serialises the
- * structured fields into JSON or parses JSON back into structured
- * fields (best-effort; unknown keys land in the raw JSON view).
+ * Form supports two modes:
+ *   - Structured: per-transport fields (stdio command/args, http/
+ *     sse url/headers, plus shared env)
+ *   - Raw JSON: fallback for any field structured mode doesn't yet
+ *     model
  *
  * Per-session OAuth flow lives inside MCPAdminPanel.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { customMcpApi, CustomMcpServerSummary, CustomMcpServerDetail } from '@/lib/api';
-import { Plus, RefreshCw, Save, Trash2, Plug, X } from 'lucide-react';
+import { customMcpApi, CustomMcpServerSummary } from '@/lib/api';
 import {
-  TabShell,
-  TwoPaneBody,
-  EditorModal,
-  EmptyState,
-  ActionButton,
-} from '@/components/layout';
+  Globe,
+  Network,
+  Pencil,
+  Save,
+  Server,
+  Terminal,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { EditorModal, ActionButton } from '@/components/layout';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import {
@@ -40,6 +46,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  RegistryPageShell,
+  RegistryGrid,
+  RegistryCard,
+  RegistryEmptyState,
+  RegistryActionButton,
+} from '@/components/env_management/registry';
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
@@ -195,15 +208,14 @@ function KvEditor({
 }
 
 export function McpServersTab() {
+  const { t } = useI18n();
   const [servers, setServers] = useState<CustomMcpServerSummary[]>([]);
   const [customDir, setCustomDir] = useState<string>('');
-  const [active, setActive] = useState<string | null>(null);
 
   const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
   useEffect(() => {
     loadEnvDefaultsOnce();
   }, [loadEnvDefaultsOnce]);
-  const [detail, setDetail] = useState<CustomMcpServerDetail | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editingExisting, setEditingExisting] = useState(false);
@@ -228,18 +240,6 @@ export function McpServersTab() {
   useEffect(() => {
     refresh();
   }, []);
-
-  useEffect(() => {
-    if (!active) {
-      setDetail(null);
-      return;
-    }
-    let cancelled = false;
-    customMcpApi.get(active)
-      .then((r) => { if (!cancelled) setDetail(r); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { cancelled = true; };
-  }, [active]);
 
   const openCreate = () => {
     setEditingExisting(false);
@@ -337,7 +337,6 @@ export function McpServersTab() {
     if (!window.confirm(`Delete custom MCP server "${name}"?`)) return;
     try {
       await customMcpApi.remove(name);
-      if (active === name) setActive(null);
       toast.success(`Deleted ${name}`);
       await refresh();
     } catch (e) {
@@ -345,116 +344,56 @@ export function McpServersTab() {
     }
   };
 
-  const detailJson = useMemo(
-    () => (detail ? JSON.stringify(detail.config, null, 2) : ''),
-    [detail],
-  );
-
-  const sidebar = (
-    <>
-      <ActionButton
-        variant="primary"
-        icon={Plus}
-        onClick={openCreate}
-        className="w-full justify-center mb-2"
-      >
-        Add server
-      </ActionButton>
-      {servers.length === 0 ? (
-        <div className="px-2 py-1 text-[0.6875rem] text-[var(--text-muted)] italic">
-          {loading ? 'Loading…' : 'None.'}
-        </div>
-      ) : (
-        servers.map((s) => (
-          <div
-            key={s.name}
-            className={`flex items-start rounded hover:bg-[var(--bg-tertiary)] ${
-              active === s.name ? 'bg-[var(--bg-tertiary)] font-semibold' : ''
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setActive(s.name)}
-              className="flex-1 min-w-0 text-left px-2 py-1.5 text-[0.8125rem]"
-            >
-              <span className="font-mono">{s.name}</span>
-              {s.type && (
-                <span className="text-[0.5625rem] uppercase text-[var(--text-muted)] ml-1">{s.type}</span>
-              )}
-              {s.description && (
-                <div className="text-[0.6875rem] text-[var(--text-secondary)] line-clamp-1">
-                  {s.description}
-                </div>
-              )}
-            </button>
-            <div className="px-1 py-1 shrink-0">
-              <EnvDefaultStarToggle category="mcp_servers" itemId={s.name} />
-            </div>
-          </div>
-        ))
-      )}
-    </>
-  );
+  const isEmpty = !loading && servers.length === 0;
+  const addLabel = t('envManagement.registry.mcp.addLabel');
 
   return (
-    <TabShell
-      title="MCP Servers"
-      icon={Plug}
-      subtitle={
-        <>
-          Custom servers persist as JSON files under{' '}
-          <span className="font-mono">{customDir}</span>. Live-session OAuth lives in the per-session tools panel.
-        </>
-      }
-      actions={
-        <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-          Refresh
-        </ActionButton>
-      }
-      error={error}
-      onDismissError={() => setError(null)}
-    >
-      <div className="px-3 pt-3">
-        <HostRegistryBanner note="★ 표시한 서버는 새 env 생성 시 manifest.tools.mcp_servers에 스냅샷으로 자동 추가 — 이후 env가 자기 복사본을 소유하므로 호스트 변경은 기존 env에 영향 없음." />
-      </div>
-      <TwoPaneBody
-        sidebar={sidebar}
-        sidebarTitle="Custom MCP servers"
-        sidebarWidth="wide"
-        mainPadding="lg"
+    <>
+      <RegistryPageShell
+        icon={Network}
+        title={t('envManagement.registry.mcp.title')}
+        subtitle={
+          customDir ? (
+            <>
+              {t('envManagement.registry.mcp.subtitle')} ·{' '}
+              <span className="font-mono">{customDir}</span>
+            </>
+          ) : (
+            t('envManagement.registry.mcp.subtitle')
+          )
+        }
+        countLabel={t('envManagement.registry.mcp.countLabel', {
+          n: String(servers.length),
+        })}
+        bannerNote={t('envManagement.registry.mcp.bannerNote')}
+        addLabel={addLabel}
+        onAdd={openCreate}
+        onRefresh={refresh}
+        loading={loading}
+        error={error}
+        onDismissError={() => setError(null)}
       >
-        {!active ? (
-          <EmptyState
-            icon={Plug}
-            title="Pick a server on the left"
-            description={<>or click <span className="font-mono">Add server</span> to create one.</>}
+        {isEmpty ? (
+          <RegistryEmptyState
+            icon={Network}
+            title={t('envManagement.registry.mcp.emptyTitle')}
+            hint={t('envManagement.registry.emptyHint', { addLabel })}
+            addLabel={addLabel}
+            onAdd={openCreate}
           />
-        ) : detail ? (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold font-mono">{detail.name}</h3>
-              <div className="flex items-center gap-1">
-                <ActionButton onClick={() => openEdit(detail.name)}>Edit</ActionButton>
-                <ActionButton
-                  variant="danger"
-                  icon={Trash2}
-                  onClick={() => onDelete(detail.name)}
-                >
-                  Delete
-                </ActionButton>
-              </div>
-            </div>
-            <p className="text-[0.6875rem] text-[var(--text-muted)] mb-2 font-mono">
-              {detail.path}
-            </p>
-            <pre className="text-[0.75rem] font-mono bg-[var(--bg-tertiary)] rounded p-3 overflow-x-auto">
-              {detailJson}
-            </pre>
-          </div>
         ) : (
-          <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+          <RegistryGrid>
+            {servers.map((s) => (
+              <McpServerCard
+                key={s.name}
+                summary={s}
+                onEdit={() => openEdit(s.name)}
+                onDelete={() => onDelete(s.name)}
+              />
+            ))}
+          </RegistryGrid>
         )}
-      </TwoPaneBody>
+      </RegistryPageShell>
 
       <EditorModal
         open={editorOpen}
@@ -608,8 +547,68 @@ export function McpServersTab() {
           )}
         </div>
       </EditorModal>
-    </TabShell>
+    </>
   );
 }
 
 export default McpServersTab;
+
+// ── Card ────────────────────────────────────────────────────────
+
+function McpServerCard({
+  summary,
+  onEdit,
+  onDelete,
+}: {
+  summary: CustomMcpServerSummary;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
+  // Read transport from the summary's `type` field if present
+  // (controller surfaces it as a hint for the list view). Default
+  // to stdio for back-compat with summaries that don't carry it.
+  const transport = (summary.type ?? 'stdio') as
+    | 'stdio'
+    | 'http'
+    | 'sse'
+    | string;
+  const isStdio = transport === 'stdio';
+  const TransportIcon = isStdio ? Terminal : Globe;
+  const transportTone = isStdio
+    ? 'good'
+    : transport === 'sse'
+      ? 'info'
+      : 'info';
+
+  return (
+    <RegistryCard
+      icon={Server}
+      title={summary.name}
+      titleMono
+      description={summary.description ?? '—'}
+      badges={[
+        { label: transport, tone: transportTone, icon: TransportIcon },
+      ]}
+      star={
+        <EnvDefaultStarToggle category="mcp_servers" itemId={summary.name} />
+      }
+      actions={
+        <>
+          <RegistryActionButton
+            icon={Pencil}
+            onClick={onEdit}
+            title={t('envManagement.registry.editTip')}
+            variant="primary"
+          />
+          <RegistryActionButton
+            icon={Trash2}
+            onClick={onDelete}
+            title={t('envManagement.registry.deleteTip')}
+            variant="danger"
+          />
+        </>
+      }
+    />
+  );
+}
