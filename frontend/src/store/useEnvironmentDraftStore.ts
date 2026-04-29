@@ -29,9 +29,10 @@
 
 import { create } from 'zustand';
 import { environmentApi } from '@/lib/environmentApi';
-import { externalToolCatalogApi, frameworkToolApi } from '@/lib/api';
+import { customMcpApi, externalToolCatalogApi, frameworkToolApi } from '@/lib/api';
 import { envDefaultsApi } from '@/lib/envDefaultsApi';
 import { isExcludedFromSeedDefault } from '@/lib/genyToolFamily';
+import { customMcpToEnvEntry } from '@/lib/mcpServerEntry';
 import type {
   EnvironmentManifest,
   EnvironmentMetadata,
@@ -142,11 +143,52 @@ async function seedDefaultToolLists(
     if ((envDefaults.permissions ?? []).length > 0) {
       fresh.host_selections.permissions = [...envDefaults.permissions];
     }
-    // mcp_servers is per-env declarative (lives in tools.mcp_servers),
-    // not a host_selections category — the env-defaults list there
-    // serves a different role (Phase 6 will surface it as a "auto-add
-    // this server when creating a new env" hint, separate from the
-    // env-side picker for the other three).
+
+    // mcp_servers is per-env DECLARATIVE — manifest.tools.mcp_servers
+    // stores full server configs, not selection ids — so the env-
+    // defaults list of names is materialised here into actual configs
+    // by joining against /api/mcp/custom. Once seeded, the env owns
+    // its own snapshot: editing a host MCP config later will NOT
+    // ripple into existing envs (that's the snapshot model). New
+    // envs always pick up the latest host config at creation time.
+    //
+    // Concurrency: customMcpApi.get is fired in parallel for every
+    // ★ name. Failures are silent per-server; missing one config
+    // shouldn't block the other 3-5 from seeding. The picker can
+    // still let the operator add it manually later.
+    if ((envDefaults.mcp_servers ?? []).length > 0) {
+      if (!fresh.tools) fresh.tools = emptyTools();
+      const existing = new Set(
+        (fresh.tools.mcp_servers ?? []).map(
+          (e) => (e as { name?: string }).name ?? '',
+        ),
+      );
+      const fetched = await Promise.all(
+        envDefaults.mcp_servers.map(async (name) => {
+          if (existing.has(name)) return null; // idempotent — preset already had it
+          try {
+            const detail = await customMcpApi.get(name);
+            return customMcpToEnvEntry(name, detail.config ?? {});
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[draft seed] mcp custom '${name}' unavailable, skipping:`,
+              err,
+            );
+            return null;
+          }
+        }),
+      );
+      const additions = fetched.filter(
+        (e): e is NonNullable<typeof e> => e != null,
+      );
+      if (additions.length > 0) {
+        fresh.tools.mcp_servers = [
+          ...(fresh.tools.mcp_servers ?? []),
+          ...(additions as Array<Record<string, unknown>>),
+        ];
+      }
+    }
   }
 }
 
