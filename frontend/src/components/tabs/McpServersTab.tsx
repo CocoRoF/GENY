@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
 import {
   Select,
   SelectContent,
@@ -399,6 +400,9 @@ export function McpServersTab() {
       error={error}
       onDismissError={() => setError(null)}
     >
+      <div className="px-3 pt-3">
+        <HostRegistryBanner note="custom MCP 서버는 backend/mcp/custom/*.json에 저장되어 모든 환경에서 공유됩니다." />
+      </div>
       <TwoPaneBody
         sidebar={sidebar}
         sidebarTitle="Custom MCP servers"

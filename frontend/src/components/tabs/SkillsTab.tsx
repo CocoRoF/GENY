@@ -23,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
 
 interface SkillRow {
   id: string | null;
@@ -280,6 +281,9 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
 
   const body = (
     <div className={embedded ? 'p-0 space-y-4' : 'h-full min-h-0 overflow-y-auto p-3 space-y-4'}>
+        {!embedded && (
+          <HostRegistryBanner note="스킬은 LLM이 사용할 수 있는 명세 + 코드 — 호스트 사용자별로 등록됩니다." />
+        )}
         {Array.from(grouped.entries()).map(([cat, rows]) => (
           <section key={cat}>
             <h3 className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-1">
