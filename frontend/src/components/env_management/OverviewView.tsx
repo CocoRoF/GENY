@@ -4,7 +4,10 @@
  * OverviewView — the canvas-first first-page view (cycle 20260427_2 PR-2).
  *
  * Two states:
- *   - draft === null  → centered StartFromPicker card
+ *   - draft === null  → RegistryPageShell + StartFromPicker (cycle
+ *                       20260429 Phase 8.2: same chrome as the four
+ *                       host-registry tabs so /environments reads
+ *                       uniformly across all tabs)
  *   - draft !== null  → big PipelineCanvas + a "click any stage to
  *                       configure it" hint pill at the bottom
  *
@@ -12,11 +15,14 @@
  * which switches the shell to the "stage" view mode.
  */
 
-import { MousePointerClick, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Layers, MousePointerClick } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
+import { environmentApi } from '@/lib/environmentApi';
 import PipelineCanvas from '@/components/session-env/PipelineCanvas';
 import StartFromPicker from './StartFromPicker';
+import { RegistryPageShell } from './registry';
 
 export interface OverviewViewProps {
   onSelectStage: (order: number) => void;
@@ -26,28 +32,67 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
   const { t } = useI18n();
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const stageDirty = useEnvironmentDraftStore((s) => s.stageDirty);
+  const newDraft = useEnvironmentDraftStore((s) => s.newDraft);
+  const seeding = useEnvironmentDraftStore((s) => s.seeding);
+
+  // Count of existing envs — surfaced in the shell's header chip
+  // so the welcome page reads at the same density as the host
+  // registry tabs ("3 servers loaded" / "21 hooks loaded" / etc.).
+  const [envCount, setEnvCount] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tick, setTick] = useState(0); // forces StartFromPicker remount on refresh
+
+  useEffect(() => {
+    let cancelled = false;
+    environmentApi
+      .list()
+      .then((envs) => {
+        if (!cancelled) setEnvCount(envs.length);
+      })
+      .catch(() => {
+        if (!cancelled) setEnvCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
 
   // ── Empty state — no draft yet
   if (!draft) {
+    const handleAdd = async () => {
+      try {
+        await newDraft();
+      } catch {
+        /* error surfaces via store.error → CompactMetaBar banner */
+      }
+    };
+    const handleRefresh = () => {
+      setRefreshing(true);
+      setTick((v) => v + 1);
+      // The StartFromPicker re-fetches on remount; clear the
+      // spinner after a short tick so the affordance reads as
+      // "I clicked refresh" without flashing.
+      setTimeout(() => setRefreshing(false), 400);
+    };
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto bg-[hsl(var(--background))]">
-        <div className="max-w-[920px] mx-auto px-6 py-12 flex flex-col gap-6">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[hsl(var(--primary)/0.1)] mb-4">
-              <Sparkles className="w-7 h-7 text-[hsl(var(--primary))]" />
-            </div>
-            <h2 className="text-[1.5rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.welcomeTitle')}
-            </h2>
-            <p className="text-[0.875rem] text-[hsl(var(--muted-foreground))] mt-2 max-w-[640px] mx-auto leading-relaxed">
-              {t('envManagement.welcomeDescription')}
-            </p>
-          </div>
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5">
-            <StartFromPicker />
-          </div>
-        </div>
-      </div>
+      <RegistryPageShell
+        icon={Layers}
+        title={t('envManagement.welcomeTitle')}
+        subtitle={t('envManagement.welcomeDescription')}
+        countLabel={
+          envCount !== null
+            ? `${envCount}${t('envManagement.registry.countSuffix') || ''}개 환경`
+            : undefined
+        }
+        addLabel={
+          seeding ? t('envManagement.seeding') : t('envManagement.newDraft')
+        }
+        onAdd={handleAdd}
+        onRefresh={handleRefresh}
+        loading={seeding || refreshing}
+      >
+        <StartFromPicker key={tick} omitBlankRow />
+      </RegistryPageShell>
     );
   }
 

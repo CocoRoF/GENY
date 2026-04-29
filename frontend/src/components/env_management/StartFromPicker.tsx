@@ -7,7 +7,10 @@
  *   - an existing env in the library
  *   - a "preset" tagged env (filtered to those tagged with "preset")
  *
- * Renders inline below the welcome header in TopBar's empty state.
+ * Cycle 20260429 Phase 8.2 — when wrapped by `RegistryPageShell`,
+ * the host's hero already exposes a primary "새 드래프트" button.
+ * Pass `omitBlankRow` to skip the blank-start row inside the picker
+ * so the same affordance isn't surfaced twice.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,7 +21,14 @@ import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type { EnvironmentSummary } from '@/types/environment';
 import { ActionButton } from '@/components/layout';
 
-export default function StartFromPicker() {
+export interface StartFromPickerProps {
+  /** When true, skip the leading "빈 환경으로 시작" row — the
+   *  parent surface already exposes a primary "새 드래프트" CTA
+   *  (e.g. RegistryPageShell's header onAdd). */
+  omitBlankRow?: boolean;
+}
+
+export default function StartFromPicker({ omitBlankRow = false }: StartFromPickerProps = {}) {
   const { t } = useI18n();
   const newDraft = useEnvironmentDraftStore((s) => s.newDraft);
   const newDraftFromExisting = useEnvironmentDraftStore(
@@ -78,29 +88,31 @@ export default function StartFromPicker() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Blank ── */}
-      <div className="flex items-center gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-500/15 to-purple-500/15 flex items-center justify-center shrink-0">
-          <Plus className="w-5 h-5 text-[hsl(var(--primary))]" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.startFrom.blankTitle')}
+      {/* ── Blank ── (suppressed when the parent surface owns the primary CTA) */}
+      {!omitBlankRow && (
+        <div className="flex items-center gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+          <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-500/15 to-purple-500/15 flex items-center justify-center shrink-0">
+            <Plus className="w-5 h-5 text-[hsl(var(--primary))]" />
           </div>
-          <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))] mt-0.5">
-            {t('envManagement.startFrom.blankDesc')}
+          <div className="flex-1 min-w-0">
+            <div className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
+              {t('envManagement.startFrom.blankTitle')}
+            </div>
+            <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))] mt-0.5">
+              {t('envManagement.startFrom.blankDesc')}
+            </div>
           </div>
+          <ActionButton
+            variant="primary"
+            icon={Plus}
+            onClick={handleBlank}
+            disabled={seeding}
+            spinIcon={seeding}
+          >
+            {seeding ? t('envManagement.seeding') : t('envManagement.newDraft')}
+          </ActionButton>
         </div>
-        <ActionButton
-          variant="primary"
-          icon={Plus}
-          onClick={handleBlank}
-          disabled={seeding}
-          spinIcon={seeding}
-        >
-          {seeding ? t('envManagement.seeding') : t('envManagement.newDraft')}
-        </ActionButton>
-      </div>
+      )}
 
       {/* ── Presets (tagged with "preset") ── */}
       {presetEnvs.length > 0 && (
