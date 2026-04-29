@@ -1,14 +1,15 @@
 /**
- * envDefaultsApi — client for /api/env-defaults (Phase 1, PR #552).
+ * envDefaultsApi — id derivation helpers for the env-defaults
+ * categories (Phase 1, PR #552).
  *
- * The backend stores one row per category in Geny's
- * `persistent_configs` table; this client exposes a typed
- * read/write surface plus the canonical id-derivation rules each
- * category uses. Keeping the rules here (vs. each *Tab.tsx)
- * guarantees the toggle endpoint and the seeder agree on what id
- * a hook/skill/etc. has — diverging would mean the user toggles
- * "audit" on the picker but the seeder records something
- * different and never re-applies.
+ * The HTTP client + types live in `lib/api.ts` to match Geny's
+ * "all *Api consts in one file, apiCall stays private" convention.
+ * This file owns the canonical id-derivation rules per category —
+ * keeping them here (not inline in each *Tab.tsx) guarantees the
+ * toggle endpoint and the seeder agree on what id a given row
+ * has. Diverging would mean the user toggles "audit" on the
+ * picker but the seeder records something different and never
+ * re-applies.
  *
  * The four categories:
  *
@@ -20,53 +21,16 @@
  *   mcp_servers:  server name (custom-MCP filename without .json)
  */
 
-import { apiCall } from '@/lib/api';
-
-export type EnvDefaultsCategory =
-  | 'hooks'
-  | 'skills'
-  | 'permissions'
-  | 'mcp_servers';
-
-export interface EnvDefaultsResponse {
-  hooks: string[];
-  skills: string[];
-  permissions: string[];
-  mcp_servers: string[];
-}
-
-export interface CategoryResponse {
-  category: EnvDefaultsCategory;
-  ids: string[];
-}
-
-export const envDefaultsApi = {
-  /** All four categories in one round-trip. */
-  getAll: () => apiCall<EnvDefaultsResponse>('/api/env-defaults'),
-
-  /** Single category — used when only one tab is mounted. */
-  get: (category: EnvDefaultsCategory) =>
-    apiCall<CategoryResponse>(
-      `/api/env-defaults/${encodeURIComponent(category)}`,
-    ),
-
-  /** Replace a category's id list outright. */
-  set: (category: EnvDefaultsCategory, ids: string[]) =>
-    apiCall<CategoryResponse>(
-      `/api/env-defaults/${encodeURIComponent(category)}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ ids }),
-      },
-    ),
-
-  /** Flip one id on/off, response is the new full list. */
-  toggle: (category: EnvDefaultsCategory, itemId: string) =>
-    apiCall<CategoryResponse>(
-      `/api/env-defaults/${encodeURIComponent(category)}/toggle/${encodeURIComponent(itemId)}`,
-      { method: 'POST' },
-    ),
-};
+// Re-export the API surface from api.ts so existing import sites
+// (`import { envDefaultsApi, EnvDefaultsCategory } from
+// '@/lib/envDefaultsApi'`) keep compiling — the canonical home is
+// `lib/api.ts` but the move was internal.
+export {
+  envDefaultsApi,
+  type EnvDefaultsCategory,
+  type EnvDefaultsResponse,
+  type EnvDefaultsCategoryResponse,
+} from '@/lib/api';
 
 // ── Per-category id derivation ────────────────────────────────
 

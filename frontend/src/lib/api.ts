@@ -578,6 +578,65 @@ export const externalToolCatalogApi = {
     ),
 };
 
+// ==================== env-defaults (Phase 1, PR #552) ============
+//
+// Per-category id list of host registrations marked default-on for
+// new envs. Storage uses Geny's `persistent_configs` table; the
+// id derivation rules per category live in `lib/envDefaultsApi.ts`
+// alongside the helpers (`hookId` / `skillId` / `permissionId` /
+// `mcpServerId`) so the toggle endpoint and the seeder agree on
+// what id a given row has.
+//
+// Empty list per category = "uncurated" — the new-draft seeder
+// falls back to wildcard for hooks/skills/permissions, or no-op
+// for mcp_servers (snapshot model — empty means no auto-add).
+
+export type EnvDefaultsCategory =
+  | 'hooks'
+  | 'skills'
+  | 'permissions'
+  | 'mcp_servers';
+
+export interface EnvDefaultsResponse {
+  hooks: string[];
+  skills: string[];
+  permissions: string[];
+  mcp_servers: string[];
+}
+
+export interface EnvDefaultsCategoryResponse {
+  category: EnvDefaultsCategory;
+  ids: string[];
+}
+
+export const envDefaultsApi = {
+  /** All four categories in one round-trip. */
+  getAll: () => apiCall<EnvDefaultsResponse>('/api/env-defaults'),
+
+  /** Single category — used when only one tab is mounted. */
+  get: (category: EnvDefaultsCategory) =>
+    apiCall<EnvDefaultsCategoryResponse>(
+      `/api/env-defaults/${encodeURIComponent(category)}`,
+    ),
+
+  /** Replace a category's id list outright. */
+  set: (category: EnvDefaultsCategory, ids: string[]) =>
+    apiCall<EnvDefaultsCategoryResponse>(
+      `/api/env-defaults/${encodeURIComponent(category)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ ids }),
+      },
+    ),
+
+  /** Flip one id on/off, response is the new full list. */
+  toggle: (category: EnvDefaultsCategory, itemId: string) =>
+    apiCall<EnvDefaultsCategoryResponse>(
+      `/api/env-defaults/${encodeURIComponent(category)}/toggle/${encodeURIComponent(itemId)}`,
+      { method: 'POST' },
+    ),
+};
+
 // ==================== Permissions CRUD API (PR-E.2.1) ============
 //
 // Read-only inspection lives at /api/permissions/list (admin viewer
