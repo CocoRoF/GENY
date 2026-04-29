@@ -51,6 +51,14 @@ import {
   externalToolCatalogApi,
   type ExternalToolEntry,
 } from '@/lib/api';
+// Family detection is shared with the new-draft seeder so the
+// picker and the seed agree on which tool belongs where —
+// otherwise a tool could be visible in the picker but skipped at
+// seed time, or auto-checked but unfindable in the UI.
+import {
+  GENY_FAMILY_ORDER as FAMILY_ORDER,
+  genyToolFamily as familyOf,
+} from '@/lib/genyToolFamily';
 import { Input } from '@/components/ui/input';
 import ToolDetailModal from './tool_help/ToolDetailModal';
 // Side-effect: registers per-tool deep content into the help registry.
@@ -61,44 +69,17 @@ export interface GenyToolsExplorerProps {
   onChange: (next: string[]) => void;
 }
 
-interface SubFamily {
-  id: string;
-  /** Tool-name prefix used to bucket entries (without trailing _). */
-  prefix: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-/** Sub-categories derived from tool name prefixes. The base catalog
- *  groups everything as `built_in` / `custom`; the prefix-based
- *  family inside is a UI concept that doesn't change semantics. */
-const SUB_FAMILIES: SubFamily[] = [
-  { id: 'memory', prefix: 'memory_', icon: Brain },
-  { id: 'knowledge', prefix: 'knowledge_', icon: BookOpen },
-  { id: 'opsidian', prefix: 'opsidian_', icon: FolderTree },
-  { id: 'session', prefix: 'session_', icon: Users },
-  { id: 'room', prefix: 'room_', icon: MessageCircle },
-  { id: 'browser', prefix: 'browser_', icon: Globe },
-  { id: 'web', prefix: 'web_', icon: Network },
-];
-
-/** Exact-name mappings for tools whose names don't fit a clean prefix. */
-const EXPLICIT_FAMILY_MAP: Record<string, string> = {
-  send_room_message: 'room',
-  send_direct_message_external: 'messaging',
-  send_direct_message_internal: 'messaging',
-  read_room_messages: 'room',
-  read_inbox: 'messaging',
-  news_search: 'web',
-  feed: 'game',
-  gift: 'game',
-  play: 'game',
-  talk: 'game',
-};
-
-const EXTRA_FAMILY_ICONS: Record<
+const FAMILY_ICONS: Record<
   string,
   React.ComponentType<{ className?: string }>
 > = {
+  memory: Brain,
+  knowledge: BookOpen,
+  opsidian: FolderTree,
+  session: Users,
+  room: MessageCircle,
+  browser: Globe,
+  web: Network,
   messaging: Inbox,
   game: Gamepad2,
   news: Newspaper,
@@ -122,33 +103,9 @@ const PRESETS: PresetDef[] = [
   { id: 'game', families: ['game'] },
 ];
 
-function familyOf(toolName: string): string {
-  if (toolName in EXPLICIT_FAMILY_MAP) return EXPLICIT_FAMILY_MAP[toolName];
-  for (const fam of SUB_FAMILIES) {
-    if (toolName.startsWith(fam.prefix)) return fam.id;
-  }
-  return 'other';
-}
-
 function familyIcon(id: string): React.ComponentType<{ className?: string }> {
-  const sub = SUB_FAMILIES.find((s) => s.id === id);
-  if (sub) return sub.icon;
-  if (id in EXTRA_FAMILY_ICONS) return EXTRA_FAMILY_ICONS[id];
-  return Wrench;
+  return FAMILY_ICONS[id] ?? Wrench;
 }
-
-const FAMILY_ORDER = [
-  'memory',
-  'knowledge',
-  'opsidian',
-  'session',
-  'room',
-  'messaging',
-  'game',
-  'browser',
-  'web',
-  'other',
-];
 
 export default function GenyToolsExplorer({
   value,
