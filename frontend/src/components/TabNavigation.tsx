@@ -29,7 +29,12 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 // kept; UI surface hidden until they become first-class again.
 // Cycle 20260427_2 — visual 21-stage env builder relocated to its own
 // /environments page (header nav button), no longer a tab here.
-const GLOBAL_TAB_IDS = ['main', 'library', 'sharedFolder', 'admin', 'settings'] as const;
+// Cycle 20260429 Phase 6 — `library` was the prototype for env+host
+// CRUD; its sub-tabs (hooks/skills/permissions/mcpServers/toolSets)
+// moved to /environments?tab=... top-level tabs (#553). The Header
+// component owns the entry point to /environments via its dedicated
+// link button, so nothing in this strip points to it anymore.
+const GLOBAL_TAB_IDS = ['main', 'sharedFolder', 'admin', 'settings'] as const;
 const SESSION_TAB_DEFS = [
   { id: 'command', accent: true },
   { id: 'vtuber' },
@@ -43,7 +48,7 @@ const SESSION_TAB_DEFS = [
 ] as const;
 
 // Tabs hidden in Normal mode
-const DEV_ONLY_GLOBAL = new Set(['library', 'admin', 'settings']);
+const DEV_ONLY_GLOBAL = new Set(['admin', 'settings']);
 // 'logs' is intentionally NOT in this set — it must be visible in User mode too (e.g. mobile)
 const DEV_ONLY_SESSION = new Set(['sessionEnvironment']);
 

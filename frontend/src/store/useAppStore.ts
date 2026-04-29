@@ -208,34 +208,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveTab: (tab) => {
-    // Back-compat: pipeline-component tabs that became sub-tabs
-    // redirect to the right scope:
-    //   - Global pipeline-design sub-tabs   → `library`
-    //   - Per-session env sub-tabs          → `sessionEnvironment`
+    // Back-compat for legacy persisted activeTab values + sidebar
+    // entry points that bypassed setActiveTab.
     //
-    // CRITICAL: legacy `environment` was always the session-scoped
-    // tab (sidebar / persisted state). It MUST redirect to
-    // sessionEnvironment, not the global Library — that collision
-    // was the bug that bounced operators back to "select a session"
-    // when clicking Library.
-    const LIBRARY_SUB_REDIRECT: Record<string, string> = {
-      toolSets: 'toolSets',
-      // PR-Merge — toolCatalog collapsed into the unified Tool Sets tab.
-      toolCatalog: 'toolSets',
+    // Cycle 20260429 Phase 6 — the main-app `library` tab is gone.
+    // Anything that used to land in Library/<sub-tab> now navigates
+    // to /environments?tab=<sub> instead. Hooks/skills/permissions/
+    // mcpServers all became top-level tabs over there in #553.
+    //
+    // setActiveTab can't push routes (Zustand outside React), so for
+    // legacy ids we fall back to window.location. Real call sites in
+    // the new code path use Next.js Link directly; this branch only
+    // catches stale localStorage state.
+    const ENV_ROUTE_REDIRECT: Record<string, string> = {
+      library: '',
+      environments: '',
+      builder: '',
+      toolSets: 'mcp', // ToolSets tab dissolved; closest replacement is MCP
+      toolCatalog: 'mcp',
       permissions: 'permissions',
       hooks: 'hooks',
       skills: 'skills',
-      mcpServers: 'mcpServers',
-      environments: 'library',
-      builder: 'library',
+      mcpServers: 'mcp',
     };
     const SESSION_ENV_SUB_REDIRECT: Record<string, string> = {
       environment: 'manifest', // legacy session-env id
       graph: 'manifest',
       sessionTools: 'tools',
     };
-    if (LIBRARY_SUB_REDIRECT[tab]) {
-      set({ activeTab: 'library', envSubTab: LIBRARY_SUB_REDIRECT[tab] });
+    if (tab in ENV_ROUTE_REDIRECT) {
+      const sub = ENV_ROUTE_REDIRECT[tab];
+      const url = sub ? `/environments?tab=${sub}` : '/environments';
+      if (typeof window !== 'undefined') {
+        window.location.href = url;
+      }
       return;
     }
     if (SESSION_ENV_SUB_REDIRECT[tab]) {

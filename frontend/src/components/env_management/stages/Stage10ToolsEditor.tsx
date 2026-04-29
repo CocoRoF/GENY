@@ -21,6 +21,7 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   ChevronDown,
   ChevronRight,
@@ -28,7 +29,6 @@ import {
   Filter,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
-import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type {
   StageManifestEntry,
@@ -47,9 +47,6 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
-  const setActiveTab = useAppStore((s) => s.setActiveTab);
-  const setEnvSubTab = useAppStore((s) => s.setEnvSubTab);
-
   const [bindingOpen, setBindingOpen] = useState(false);
 
   const builtInList = (draft?.tools?.built_in ?? []) as string[];
@@ -138,17 +135,13 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
               ({mcpServers.length})
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('library');
-              setEnvSubTab('mcpServers');
-            }}
-            className="inline-flex items-center gap-1 text-[0.7rem] text-[hsl(var(--primary))] hover:underline"
+          <Link
+            href="/environments?tab=mcp"
+            className="inline-flex items-center gap-1 text-[0.7rem] text-[hsl(var(--primary))] hover:underline no-underline"
           >
             {t('envManagement.stage10.mcpManage')}
             <ExternalLink className="w-3 h-3" />
-          </button>
+          </Link>
         </header>
         {mcpServers.length === 0 ? (
           <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] italic py-2">
