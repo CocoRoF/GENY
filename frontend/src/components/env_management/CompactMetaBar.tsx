@@ -1,21 +1,29 @@
 'use client';
 
 /**
- * CompactMetaBar — env-specific metadata + actions row for the
- * `환경관리` tab of /environments. Cycle 20260429 promoted the
- * leading-nav cluster (← Home + page title) to `EnvManagementHeader`
- * so this bar now owns ONLY env-specific concerns.
+ * CompactMetaBar — single-row chrome for /environments.
+ *
+ * Cycle 20260429 follow-up — absorbed the navigation cluster
+ * (← 홈으로 + tab dropdown) so /environments has exactly ONE
+ * header row regardless of state. Operator's previous complaint
+ * (this bar stacked on top of EnvManagementHeader producing a
+ * double header) is fixed by merging both surfaces here.
  *
  * Layout (left → right):
- *   [name input] [ⓘ desc] [tags] | [warnings] | [Globals] [Discard] [Save]
  *
- * Empty state (no draft): renders nothing (or a thin error banner if
- * a load/save error needs surfacing). The OverviewView welcome card
- * is the only body chrome the user sees pre-draft.
+ *   [← 홈으로] [Tab Dropdown ▼]                                  ← always
+ *   ──────────── conditionally, when env tab + draft ────────────
+ *   | [name input] [ⓘ desc] [tags] | [warn] | [전역] [버리기] [저장]
  *
- * Description and full validation list move into popovers (click the
- * ⓘ button or "X warnings" chip) so the bar stays at ~52px tall
- * regardless of content.
+ * The tab dropdown ("환경관리 ▼") replaced the previous 5-tab
+ * strip — clicking it pops a 5-option panel below. Single
+ * trigger = single source of "where am I", which is what the
+ * operator wanted. See `TabSwitcherDropdown` in
+ * EnvManagementHeader.tsx for the dropdown internals.
+ *
+ * Description and full validation list move into popovers (click
+ * the ⓘ button or "X warnings" chip) so the bar stays at ~52px
+ * tall regardless of content.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -35,13 +43,21 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ActionButton } from '@/components/layout';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
+import {
+  TabSwitcherDropdown,
+  type EnvManagementTab,
+} from './EnvManagementHeader';
 
 export interface CompactMetaBarProps {
+  /** Which top-level tab is active. Drives whether env-specific
+   *  fields (name/tags/save) render alongside the nav cluster. */
+  activeTab: EnvManagementTab;
   onSaved: (newEnvId: string) => void;
   onOpenGlobals: () => void;
 }
 
 export default function CompactMetaBar({
+  activeTab,
   onSaved,
   onOpenGlobals,
 }: CompactMetaBarProps) {
@@ -78,36 +94,21 @@ export default function CompactMetaBar({
     return () => document.removeEventListener('mousedown', handler);
   }, [descOpen, validOpen]);
 
-  if (!draft) {
-    // No draft yet — the welcome card in OverviewView explains how
-    // to start. The leading-nav row (back / page title) was promoted
-    // to EnvManagementHeader cycle 20260429, so this bar only owns
-    // env-specific metadata; with no draft there's nothing to show
-    // except a possible error banner. Returning null when clean
-    // keeps the canvas vertically tighter.
-    if (!errorBanner) return null;
-    return (
-      <div className="flex items-center gap-3 h-[36px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-        <button
-          type="button"
-          onClick={clearError}
-          className="inline-flex items-center gap-1 text-[0.7rem] text-red-600 dark:text-red-400 hover:underline"
-        >
-          <AlertTriangle className="w-3 h-3" />
-          {errorBanner}
-          <X className="w-3 h-3 ml-1" />
-        </button>
-      </div>
-    );
-  }
+  // env-edit fields render only when both apply: we're on the
+  // environments tab AND a draft is loaded. Other states (registry
+  // tabs, env tab pre-draft) render just the nav cluster — single
+  // row, no env metadata.
+  const showEnvFields = activeTab === 'environments' && !!draft;
 
-  const nameValid = draft.metadata.name.trim().length > 0;
+  const nameValid = draft ? draft.metadata.name.trim().length > 0 : false;
   const errorCount = validationErrors.filter((e) => e.severity === 'error').length;
   const warningCount = validationErrors.filter((e) => e.severity !== 'error').length;
   const blockedByValidation = errorCount > 0;
-  const saveDisabled = !nameValid || blockedByValidation || saving;
+  const saveDisabled =
+    !showEnvFields || !nameValid || blockedByValidation || saving;
 
   const handleSave = async () => {
+    if (!draft) return;
     try {
       const res = await saveDraft({
         name: draft.metadata.name,
@@ -126,6 +127,7 @@ export default function CompactMetaBar({
   };
 
   const addTag = () => {
+    if (!draft) return;
     const tag = tagInput.trim();
     if (!tag) return;
     if ((draft.metadata.tags || []).includes(tag)) {
@@ -136,10 +138,12 @@ export default function CompactMetaBar({
     setTagInput('');
   };
 
-  const removeTag = (tag: string) =>
+  const removeTag = (tag: string) => {
+    if (!draft) return;
     patchMetadata({
       tags: (draft.metadata.tags || []).filter((t) => t !== tag),
     });
+  };
 
   return (
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
@@ -154,6 +158,116 @@ export default function CompactMetaBar({
       </Link>
       <div className="w-px h-4 bg-[hsl(var(--border))] shrink-0" />
 
+      {/* ── Tab switcher dropdown (always) ── */}
+      <TabSwitcherDropdown active={activeTab} />
+
+      {!showEnvFields && (
+        <>
+          <div className="flex-1" />
+          {errorBanner && (
+            <button
+              type="button"
+              onClick={clearError}
+              className="inline-flex items-center gap-1 text-[0.7rem] text-red-600 dark:text-red-400 hover:underline shrink-0"
+            >
+              <AlertTriangle className="w-3 h-3" />
+              {errorBanner}
+              <X className="w-3 h-3 ml-1" />
+            </button>
+          )}
+        </>
+      )}
+
+      {showEnvFields && draft && (
+        <>
+          <div className="w-px h-4 bg-[hsl(var(--border))] shrink-0" />
+          {/* env-edit fields below — extracted into a fragment so
+              the conditional gate sits at one explicit boundary
+              instead of repeating `showEnvFields &&` per element. */}
+          <EnvEditFields
+            draft={draft}
+            tagInput={tagInput}
+            setTagInput={setTagInput}
+            descOpen={descOpen}
+            setDescOpen={setDescOpen}
+            descRef={descRef}
+            validOpen={validOpen}
+            setValidOpen={setValidOpen}
+            validRef={validRef}
+            stageDirty={stageDirty}
+            validationErrors={validationErrors}
+            errorCount={errorCount}
+            warningCount={warningCount}
+            nameValid={nameValid}
+            saveDisabled={saveDisabled}
+            saving={saving}
+            patchMetadata={patchMetadata}
+            addTag={addTag}
+            removeTag={removeTag}
+            handleSave={handleSave}
+            handleDiscard={handleDiscard}
+            onOpenGlobals={onOpenGlobals}
+            t={t}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+interface EnvEditFieldsProps {
+  draft: NonNullable<ReturnType<typeof useEnvironmentDraftStore.getState>['draft']>;
+  tagInput: string;
+  setTagInput: (v: string) => void;
+  descOpen: boolean;
+  setDescOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
+  descRef: React.RefObject<HTMLDivElement | null>;
+  validOpen: boolean;
+  setValidOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
+  validRef: React.RefObject<HTMLDivElement | null>;
+  stageDirty: Set<number>;
+  validationErrors: ReturnType<typeof useEnvironmentDraftStore.getState>['validationErrors'];
+  errorCount: number;
+  warningCount: number;
+  nameValid: boolean;
+  saveDisabled: boolean;
+  saving: boolean;
+  patchMetadata: ReturnType<typeof useEnvironmentDraftStore.getState>['patchMetadata'];
+  addTag: () => void;
+  removeTag: (tag: string) => void;
+  handleSave: () => Promise<void>;
+  handleDiscard: () => void;
+  onOpenGlobals: () => void;
+  t: (k: string, vars?: Record<string, string>) => string;
+}
+
+function EnvEditFields({
+  draft,
+  tagInput,
+  setTagInput,
+  descOpen,
+  setDescOpen,
+  descRef,
+  validOpen,
+  setValidOpen,
+  validRef,
+  stageDirty,
+  validationErrors,
+  errorCount,
+  warningCount,
+  nameValid,
+  saveDisabled,
+  saving,
+  patchMetadata,
+  addTag,
+  removeTag,
+  handleSave,
+  handleDiscard,
+  onOpenGlobals,
+  t,
+}: EnvEditFieldsProps) {
+  return (
+    <>
       {/* ── Name input ── */}
       <div className="flex items-center gap-1.5">
         <span className="text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
@@ -327,7 +441,7 @@ export default function CompactMetaBar({
           {saving ? t('envManagement.saving') : t('envManagement.save')}
         </ActionButton>
       </div>
-    </div>
+    </>
   );
 }
 
