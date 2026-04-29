@@ -3,30 +3,22 @@
 /**
  * RegistryCard — uniform item card for host-registry tabs.
  *
- *   ┌─────────────────────────────────────────────────────┐
- *   │ [icon] {title}                          [★] [edit] │
- *   │ {subtitle (mono, muted)}                            │
- *   │                                                     │
- *   │ {description — line-clamp 2}                        │
- *   │                                                     │
- *   │ [badge] [badge] [badge]              {meta footer} │
- *   └─────────────────────────────────────────────────────┘
+ * Cycle 20260429 Phase 8.1 — bumped the visual weight to match
+ * the env welcome card: rounded-xl corners, soft shadow on hover,
+ * tinted icon tile, breathing room. Operator's read on the
+ * previous slim-bordered version was "flat / cheap".
  *
- * Slot model (vs prop spread): caller passes the ★ toggle,
- * action buttons, and badges already-rendered. The card is just
- * structural — spacing, hover state, optional click target. This
- * keeps the card framework-agnostic to the underlying registry's
- * data shape (a hook entry has very different fields than a skill).
+ *   ┌─ rounded-xl, hover lifts ─────────────────────────────────────┐
+ *   │ [icon-tile]   {title}                          [★] [edit] [✕]│
+ *   │               {subtitle}                                       │
+ *   │               {description}                                    │
+ *   │                                                                │
+ *   │ [badge] [badge]                              {meta footer}    │
+ *   └────────────────────────────────────────────────────────────────┘
  *
- * Variants:
- *
- *   - default — full bleed, primary border on hover
- *   - muted   — opacity-60, no hover lift; for read-only entries
- *               (bundled skills, external permission rules)
- *
- * Accessibility: when `onClick` is provided the wrapper becomes a
- * button; otherwise it stays a div so the action buttons inside
- * stay independently focusable.
+ * Slot model: caller passes star toggle, action buttons, and badges
+ * already-rendered. The card is structural — typography, spacing,
+ * hover treatment.
  */
 
 import type { ReactNode } from 'react';
@@ -35,34 +27,21 @@ import type { LucideIcon } from 'lucide-react';
 export interface RegistryCardBadge {
   label: ReactNode;
   tone?: 'neutral' | 'good' | 'warn' | 'info' | 'danger';
-  /** Optional small icon. */
   icon?: LucideIcon;
 }
 
 export interface RegistryCardProps {
-  /** Icon shown on the left of the title. */
   icon?: LucideIcon;
-  /** Card title (e.g. skill id, server name, hook event). */
   title: ReactNode;
-  /** Render title in font-mono? Useful for ids / paths. */
   titleMono?: boolean;
-  /** Optional one-line subtitle below the title. */
   subtitle?: ReactNode;
-  /** Multi-line description (line-clamped to 2 lines). */
   description?: ReactNode;
-  /** Status / capability badges below description. */
   badges?: RegistryCardBadge[];
-  /** ★ env-default toggle — pre-rendered by caller. */
   star?: ReactNode;
-  /** Edit/delete/etc action buttons — rendered next to the star. */
   actions?: ReactNode;
-  /** Inline footer line (e.g. "3 tools", "120ms"). */
   meta?: ReactNode;
-  /** Visual emphasis. */
   variant?: 'default' | 'muted';
-  /** Click handler — wraps the card in a button if provided. */
   onClick?: () => void;
-  /** Active/selected ring. */
   active?: boolean;
 }
 
@@ -91,10 +70,10 @@ export default function RegistryCard({
   active = false,
 }: RegistryCardProps) {
   const wrapperClass = [
-    'group relative flex flex-col gap-2 p-3 rounded-lg border transition-colors text-left',
+    'group relative flex flex-col gap-2.5 p-4 rounded-xl border transition-all text-left',
     variant === 'muted'
-      ? 'border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))]/40 opacity-75'
-      : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.4)] hover:shadow-sm',
+      ? 'border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))]/40 opacity-80'
+      : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.4)] hover:shadow-md hover:-translate-y-0.5',
     active ? 'ring-2 ring-violet-500/40 border-violet-500/40' : '',
     onClick ? 'cursor-pointer' : '',
   ]
@@ -109,14 +88,14 @@ export default function RegistryCard({
       onClick={onClick}
       className={wrapperClass}
     >
-      {/* ── Header row: icon + title + actions ── */}
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-3">
         {Icon && (
-          <Icon
-            size={14}
-            strokeWidth={2}
-            className="mt-0.5 text-[hsl(var(--primary))] shrink-0"
-          />
+          <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[hsl(var(--primary)/0.1)] shrink-0">
+            <Icon
+              className="w-4 h-4 text-[hsl(var(--primary))]"
+              strokeWidth={2}
+            />
+          </div>
         )}
         <div className="flex-1 min-w-0">
           <div
@@ -133,23 +112,21 @@ export default function RegistryCard({
           )}
         </div>
         {(star || actions) && (
-          <div className="flex items-center gap-0.5 shrink-0 -mr-1 -mt-1">
+          <div className="flex items-center gap-0.5 shrink-0 -mr-1">
             {star}
             {actions}
           </div>
         )}
       </div>
 
-      {/* ── Description ── */}
       {description && (
-        <div className="text-[0.75rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed">
+        <div className="text-[0.75rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed pl-11">
           {description}
         </div>
       )}
 
-      {/* ── Badges + meta ── */}
       {(badges?.length || meta) && (
-        <div className="flex items-center justify-between gap-2 flex-wrap mt-auto">
+        <div className="flex items-center justify-between gap-2 flex-wrap pl-11 mt-auto">
           <div className="flex items-center gap-1 flex-wrap">
             {badges?.map((badge, i) => {
               const BIcon = badge.icon;
