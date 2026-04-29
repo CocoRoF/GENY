@@ -183,9 +183,15 @@ async function seedDefaultToolLists(
         (e): e is NonNullable<typeof e> => e != null,
       );
       if (additions.length > 0) {
+        // The manifest types `mcp_servers` as `Array<Record<string,
+        // unknown>>` (executor accepts arbitrary dict shapes per
+        // server). MCPServerEntry is the typed *projection* — the
+        // shape is dict-compatible at runtime but lacks the index
+        // signature TS needs for direct assignability, so the cast
+        // routes through unknown.
         fresh.tools.mcp_servers = [
           ...(fresh.tools.mcp_servers ?? []),
-          ...(additions as Array<Record<string, unknown>>),
+          ...(additions as unknown as Array<Record<string, unknown>>),
         ];
       }
     }
