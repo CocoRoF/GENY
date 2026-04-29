@@ -24,6 +24,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
+import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
+import { skillId } from '@/lib/envDefaultsApi';
 
 interface SkillRow {
   id: string | null;
@@ -130,6 +133,11 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
   const [userSkillsEnabled, setUserSkillsEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
+  useEffect(() => {
+    if (!embedded) loadEnvDefaultsOnce();
+  }, [embedded, loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingExisting, setEditingExisting] = useState(false);
@@ -297,28 +305,36 @@ export function SkillsTab({ embedded = false }: SkillsTabProps) {
                     key={s.id ?? `${cat}-${idx}`}
                     className="border border-[var(--border-color)] rounded p-2 hover:border-[var(--primary-color)]"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-semibold text-[0.8125rem]">/{s.id}</span>
-                      {isUser && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => s.id && openEdit(s.id)}
-                            className="text-[var(--text-muted)] hover:text-[var(--primary-color)]"
-                            title="Edit"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => s.id && onDelete(s.id)}
-                            className="text-[var(--text-muted)] hover:text-red-600"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono font-semibold text-[0.8125rem] truncate">/{s.id}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!embedded && (
+                          <EnvDefaultStarToggle
+                            category="skills"
+                            itemId={skillId(s)}
+                          />
+                        )}
+                        {isUser && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => s.id && openEdit(s.id)}
+                              className="text-[var(--text-muted)] hover:text-[var(--primary-color)]"
+                              title="Edit"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => s.id && onDelete(s.id)}
+                              className="text-[var(--text-muted)] hover:text-red-600"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                     <div className="text-[0.75rem] text-[var(--text-secondary)] mt-1 line-clamp-2">
                       {s.description ?? s.name ?? '—'}

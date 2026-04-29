@@ -31,6 +31,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
+import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import {
   Select,
   SelectContent,
@@ -196,6 +198,11 @@ export function McpServersTab() {
   const [servers, setServers] = useState<CustomMcpServerSummary[]>([]);
   const [customDir, setCustomDir] = useState<string>('');
   const [active, setActive] = useState<string | null>(null);
+
+  const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
+  useEffect(() => {
+    loadEnvDefaultsOnce();
+  }, [loadEnvDefaultsOnce]);
   const [detail, setDetail] = useState<CustomMcpServerDetail | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -359,24 +366,31 @@ export function McpServersTab() {
         </div>
       ) : (
         servers.map((s) => (
-          <button
+          <div
             key={s.name}
-            type="button"
-            onClick={() => setActive(s.name)}
-            className={`w-full text-left px-2 py-1.5 rounded text-[0.8125rem] hover:bg-[var(--bg-tertiary)] ${
+            className={`flex items-start rounded hover:bg-[var(--bg-tertiary)] ${
               active === s.name ? 'bg-[var(--bg-tertiary)] font-semibold' : ''
             }`}
           >
-            <span className="font-mono">{s.name}</span>
-            {s.type && (
-              <span className="text-[0.5625rem] uppercase text-[var(--text-muted)] ml-1">{s.type}</span>
-            )}
-            {s.description && (
-              <div className="text-[0.6875rem] text-[var(--text-secondary)] line-clamp-1">
-                {s.description}
-              </div>
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={() => setActive(s.name)}
+              className="flex-1 min-w-0 text-left px-2 py-1.5 text-[0.8125rem]"
+            >
+              <span className="font-mono">{s.name}</span>
+              {s.type && (
+                <span className="text-[0.5625rem] uppercase text-[var(--text-muted)] ml-1">{s.type}</span>
+              )}
+              {s.description && (
+                <div className="text-[0.6875rem] text-[var(--text-secondary)] line-clamp-1">
+                  {s.description}
+                </div>
+              )}
+            </button>
+            <div className="px-1 py-1 shrink-0">
+              <EnvDefaultStarToggle category="mcp_servers" itemId={s.name} />
+            </div>
+          </div>
         ))
       )}
     </>

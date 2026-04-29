@@ -47,6 +47,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
+import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
+import { permissionId } from '@/lib/envDefaultsApi';
 
 const BEHAVIOR_OPTIONS: PermissionBehavior[] = ['allow', 'deny', 'ask'];
 const SOURCE_OPTIONS: PermissionSource[] = ['user', 'project', 'local', 'cli', 'preset'];
@@ -94,6 +97,11 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
   const [inspect, setInspect] = useState<PermissionListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
+  useEffect(() => {
+    if (!embedded) loadEnvDefaultsOnce();
+  }, [embedded, loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -304,6 +312,9 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
               <th className="text-left py-1.5 px-2">Pattern</th>
               <th className="text-left py-1.5 px-2">Source</th>
               <th className="text-left py-1.5 px-2">Reason</th>
+              {!embedded && (
+                <th className="text-center py-1.5 px-2 w-10" title="새 env 기본 포함">★</th>
+              )}
               <th className="text-right py-1.5 px-2 w-20">Actions</th>
             </tr>
           </thead>
@@ -328,6 +339,18 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
                   <td className="py-1.5 px-2 text-[0.75rem] text-[var(--text-secondary)]">
                     {r.reason ?? ''}
                   </td>
+                  {!embedded && (
+                    <td className="py-1.5 px-2 text-center">
+                      <EnvDefaultStarToggle
+                        category="permissions"
+                        itemId={permissionId({
+                          tool_name: r.tool_name,
+                          pattern: r.pattern,
+                          behavior: r.behavior,
+                        })}
+                      />
+                    </td>
+                  )}
                   <td className="py-1.5 px-2 text-right">
                     {editable_ ? (
                       <div className="flex items-center justify-end gap-1">
@@ -362,7 +385,7 @@ export function PermissionsTab({ embedded = false }: PermissionsTabProps) {
             })}
             {(inspect?.rules ?? []).length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="text-center py-6 text-[var(--text-muted)]">
+                <td colSpan={embedded ? 6 : 7} className="text-center py-6 text-[var(--text-muted)]">
                   No rules. Click <span className="font-mono">Add rule</span> to create one.
                 </td>
               </tr>
