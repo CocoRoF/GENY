@@ -1112,6 +1112,13 @@ export interface CustomMcpServerDetail {
   config: Record<string, unknown>;
 }
 
+export interface MCPTestConnectionResponse {
+  success: boolean;
+  latency_ms: number;
+  tools_discovered: number;
+  error: string | null;
+}
+
 export const customMcpApi = {
   list: () => apiCall<{ servers: CustomMcpServerSummary[]; custom_dir: string }>('/api/mcp/custom'),
   get: (name: string) => apiCall<CustomMcpServerDetail>(`/api/mcp/custom/${encodeURIComponent(name)}`),
@@ -1128,6 +1135,14 @@ export const customMcpApi = {
   remove: (name: string) =>
     apiCall<{ deleted: boolean; name: string }>(`/api/mcp/custom/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+    }),
+  /** Dry-run a server config without saving — invokes the executor's
+   *  `MCPManager.test_connection`. Used by the modal's "연결 테스트"
+   *  button so beginners can verify before committing. */
+  test: (name: string, config: Record<string, unknown>) =>
+    apiCall<MCPTestConnectionResponse>('/api/mcp/custom/test', {
+      method: 'POST',
+      body: JSON.stringify({ name, config }),
     }),
 };
 
