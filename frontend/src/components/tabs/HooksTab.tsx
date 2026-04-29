@@ -49,6 +49,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import HostRegistryBanner from '@/components/env_management/HostRegistryBanner';
+import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
+import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
+import { hookIdFromEditable } from '@/lib/envDefaultsApi';
 
 interface KvRow {
   key: string;
@@ -203,6 +206,13 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
   const [fires, setFires] = useState<HookFiresResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Lazy-load env-defaults on mount so the ★ column hydrates without
+  // each row firing its own GET. The store de-dups concurrent calls.
+  const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
+  useEffect(() => {
+    if (!embedded) loadEnvDefaultsOnce();
+  }, [embedded, loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTarget, setEditingTarget] = useState<{ event: string; idx: number } | null>(null);
@@ -435,6 +445,9 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
                     <thead>
                       <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)]">
                         <th className="text-left py-1 px-2 w-8">#</th>
+                        {!embedded && (
+                          <th className="text-center py-1 px-2 w-10" title="새 env 기본 포함">★</th>
+                        )}
                         <th className="text-left py-1 px-2">Command</th>
                         <th className="text-left py-1 px-2">Args</th>
                         <th className="text-left py-1 px-2 w-20">Timeout</th>
@@ -446,6 +459,18 @@ export function HooksTab({ embedded = false }: HooksTabProps) {
                       {rows.map((row) => (
                         <tr key={`${row.event}-${row.idx}`} className="border-t border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]">
                           <td className="py-1 px-2 text-[var(--text-muted)] font-mono text-[0.75rem]">{row.idx}</td>
+                          {!embedded && (
+                            <td className="py-1 px-2 text-center">
+                              <EnvDefaultStarToggle
+                                category="hooks"
+                                itemId={hookIdFromEditable({
+                                  event: row.event,
+                                  command: row.command,
+                                  args: row.args,
+                                })}
+                              />
+                            </td>
+                          )}
                           <td className="py-1 px-2 font-mono text-[0.75rem] truncate max-w-[200px]">{row.command || '—'}</td>
                           <td className="py-1 px-2 font-mono text-[0.75rem] text-[var(--text-secondary)] truncate max-w-[200px]">
                             {(row.args ?? []).join(' ') || '—'}
