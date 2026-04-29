@@ -46,6 +46,7 @@ from controller.framework_settings_controller import router as framework_setting
 from controller.subagent_type_controller import router as subagent_type_router  # PR-F.3.1
 from controller.mcp_custom_controller import router as mcp_custom_router  # Cycle G — MCP UI
 from controller.notifications_controller import router as notifications_router  # Cycle G
+from controller.env_defaults_controller import router as env_defaults_router  # 1.0.2 — env-defaults host config
 from controller.mcp_oauth_controller import (
     agent_oauth_router,
     mcp_resource_router,
@@ -683,6 +684,7 @@ app.include_router(framework_settings_router)  # Framework settings sections (PR
 app.include_router(subagent_type_router)  # Subagent types viewer (PR-F.3.1)
 app.include_router(mcp_custom_router)  # Custom MCP server CRUD (Cycle G)
 app.include_router(notifications_router)  # Notifications viewer (Cycle G)
+app.include_router(env_defaults_router)  # 1.0.2 — env-defaults (host-registered + env-pickable)
 app.include_router(agent_oauth_router)  # MCP OAuth start (G10.2)
 app.include_router(mcp_resource_router)  # mcp:// URI resolver (G10.3)
 app.include_router(docs_router)  # Documentation API
