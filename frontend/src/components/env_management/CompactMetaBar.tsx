@@ -19,8 +19,10 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
+  ArrowLeft,
   Info,
   Plus,
   Save,
@@ -141,6 +143,17 @@ export default function CompactMetaBar({
 
   return (
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
+      {/* ── Back to home ── */}
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1 h-7 px-2 rounded text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors hover:bg-[hsl(var(--accent))] shrink-0"
+        title="메인으로"
+      >
+        <ArrowLeft size={13} />
+        {t('envManagement.backToHome')}
+      </Link>
+      <div className="w-px h-4 bg-[hsl(var(--border))] shrink-0" />
+
       {/* ── Name input ── */}
       <div className="flex items-center gap-1.5">
         <span className="text-[0.625rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
