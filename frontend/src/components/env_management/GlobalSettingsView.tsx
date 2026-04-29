@@ -120,18 +120,25 @@ export default function GlobalSettingsView() {
 
   if (!draft) return null;
 
-  const builtInCount = (draft.tools?.built_in ?? []).length;
-  const genyCount = (draft.tools?.external ?? []).length;
+  // ── Sidebar badges ──
+  // Wildcard `["*"]` reads as a single-element list to `.length`,
+  // which would print "1" next to "Executor Built-in" — misleading
+  // when the manifest actually means "every tool". Render ★ in that
+  // mode and reserve the count for explicit lists.
+  const selectionBadge = (sel: string[] | undefined): string => {
+    if (!sel) return '0';
+    if (sel.includes('*')) return '★';
+    return `${sel.length}`;
+  };
+  const builtInBadge = selectionBadge(draft.tools?.built_in);
+  const genyBadge = selectionBadge(draft.tools?.external);
   const mcpCount = (draft.tools?.mcp_servers ?? []).length;
-
-  // host_selections badges — show "★" for wildcard (matches every
-  // host registration), the literal count otherwise. Pre-1.3.3
-  // manifests have no host_selections object; treat that as wildcard.
+  // Pre-1.3.3 manifests have no host_selections object; treat that
+  // as wildcard so the badge doesn't read "0" for a section that
+  // historically applied in full.
   const hookSelection = draft.host_selections?.hooks ?? ['*'];
   const skillSelection = draft.host_selections?.skills ?? ['*'];
   const permSelection = draft.host_selections?.permissions ?? ['*'];
-  const selectionBadge = (sel: string[]): string =>
-    sel.includes('*') ? '★' : `${sel.length}`;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -213,14 +220,14 @@ export default function GlobalSettingsView() {
               label={t('envManagement.globals.navExecutorTools')}
               active={panel === 'executorTools'}
               onClick={() => setPanel('executorTools')}
-              badge={`${builtInCount}`}
+              badge={builtInBadge}
             />
             <SubTabButton
               icon={Boxes}
               label={t('envManagement.globals.navGenyTools')}
               active={panel === 'genyTools'}
               onClick={() => setPanel('genyTools')}
-              badge={`${genyCount}`}
+              badge={genyBadge}
             />
             <SubTabButton
               icon={Network}

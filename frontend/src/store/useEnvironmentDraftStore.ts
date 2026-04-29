@@ -29,6 +29,8 @@
 
 import { create } from 'zustand';
 import { environmentApi } from '@/lib/environmentApi';
+import { externalToolCatalogApi, frameworkToolApi } from '@/lib/api';
+import { isExcludedFromSeedDefault } from '@/lib/genyToolFamily';
 import type {
   EnvironmentManifest,
   EnvironmentMetadata,
@@ -57,6 +59,58 @@ function emptyTools(): ToolsSnapshot {
     external: [],
     scope: {},
   };
+}
+
+/**
+ * Materialise the executor + Geny tool catalogs into the explicit
+ * lists the env-management UI shows as "all checked by default".
+ *
+ * Why explicit lists instead of the wildcard `["*"]` sentinel? The
+ * picker already supports both, but the user's mental model for a
+ * fresh env is "every box is ticked individually" — wildcard mode
+ * shows a banner and reads as a power-user shortcut, not a
+ * default. Materialising on seed lets the user uncheck one box
+ * later without first having to flip out of wildcard.
+ *
+ * Geny built-ins exclude one or more families per
+ * `GENY_FAMILIES_EXCLUDED_FROM_SEED_DEFAULT` (currently `game`):
+ * most envs aren't vtuber companion agents, so shipping with feed/
+ * gift/play/talk on tends to confuse the LLM. The user can still
+ * toggle them in via the picker; new families dropped from the
+ * default ship as a one-line edit to that constant.
+ *
+ * Failures are non-fatal — if a catalog endpoint is unreachable we
+ * fall back to whatever the seed manifest had (typically `["*"]`
+ * for built_in post geny-executor 1.3.3). The user still gets a
+ * usable env; the side panel will just look like wildcard mode.
+ */
+async function seedDefaultToolLists(
+  fresh: EnvironmentManifest,
+): Promise<void> {
+  const [framework, external] = await Promise.all([
+    frameworkToolApi.list().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[draft seed] framework tool catalog unavailable:', err);
+      return null;
+    }),
+    externalToolCatalogApi.list('ko').catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[draft seed] external tool catalog unavailable:', err);
+      return null;
+    }),
+  ]);
+
+  if (!fresh.tools) {
+    fresh.tools = emptyTools();
+  }
+  if (framework && framework.tools.length > 0) {
+    fresh.tools.built_in = framework.tools.map((t) => t.name);
+  }
+  if (external && external.tools.length > 0) {
+    fresh.tools.external = external.tools
+      .map((t) => t.name)
+      .filter((name) => !isExcludedFromSeedDefault(name));
+  }
 }
 
 /** Run all draft-wide invariants and return the new validationErrors
@@ -266,6 +320,11 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           description: '',
           tags: [],
         };
+        // Replace the executor's wildcard sentinel with explicit
+        // catalog lists so the picker reads as "every box ticked"
+        // instead of "wildcard mode active". Geny built-ins drop
+        // any family marked excluded-by-default (currently `game`).
+        await seedDefaultToolLists(fresh);
         set({
           draft: fresh,
           stageDirty: new Set<number>(),
