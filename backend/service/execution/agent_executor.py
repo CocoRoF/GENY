@@ -23,9 +23,9 @@ Both ``agent_controller`` (command tab) and ``chat_controller``
 import asyncio
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from logging import getLogger
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from service.logging.session_logger import LogLevel
 
@@ -54,13 +54,27 @@ class AlreadyExecutingError(Exception):
 
 @dataclass
 class ExecutionResult:
-    """Immutable result of a single command execution."""
+    """Immutable result of a single command execution.
+
+    ``tool_calls`` carries the per-turn tool execution log captured by
+    :meth:`AgentSession._invoke_pipeline` from ``tool.call_start`` /
+    ``tool.call_complete`` events. Each entry is
+    ``{"name": str, "input": dict, "is_error": bool, "duration_ms": int}``.
+
+    The list lets ``_notify_linked_vtuber`` build a meaningful
+    ``[SUB_WORKER_RESULT]`` payload even when the LLM emitted no final
+    text — typical for "tool-only" turns where the worker only called
+    ``Write`` / ``Bash`` and skipped the chat reply. See
+    ``dev_docs/20260430_1/analysis/01_subworker_dm_dual_dispatch.md``
+    (R1, P0-2) for the rationale.
+    """
     success: bool
     session_id: str
     output: Optional[str] = None
     error: Optional[str] = None
     duration_ms: int = 0
     cost_usd: Optional[float] = None
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -180,6 +194,130 @@ async def _emit_avatar_state(session_id: str, result: 'ExecutionResult') -> None
 # Sub-Worker → VTuber auto-report (called after every execution)
 # ============================================================================
 
+# Tool names whose `input` reliably carries a user-meaningful filesystem
+# artifact (so we can list it under `artifacts:` in the synthesised
+# `[SUB_WORKER_RESULT]` payload). Anything not in this map only
+# contributes to the `Tools used: …` line.
+_ARTIFACT_TOOL_KEYS: Dict[str, tuple] = {
+    "Write": ("file_path", "path"),
+    "Edit": ("file_path", "path"),
+    "NotebookEdit": ("notebook_path", "file_path"),
+    "MultiEdit": ("file_path", "path"),
+}
+
+
+def _extract_artifacts(tool_calls: List[Dict[str, Any]]) -> List[str]:
+    """Pull file-path artifacts out of completed tool calls.
+
+    Only consults the whitelist in :data:`_ARTIFACT_TOOL_KEYS` —
+    every other tool reports through ``Tools used:`` instead of
+    inventing user-facing paths. Skips errored calls so a failed Write
+    doesn't end up looking like a successful artifact.
+    """
+    artifacts: List[str] = []
+    for entry in tool_calls:
+        if entry.get("is_error"):
+            continue
+        keys = _ARTIFACT_TOOL_KEYS.get(entry.get("name", ""))
+        if not keys:
+            continue
+        params = entry.get("input") or {}
+        for key in keys:
+            value = params.get(key)
+            if isinstance(value, str) and value.strip():
+                artifacts.append(value.strip())
+                break
+    # Deduplicate while preserving order — the worker may have edited
+    # the same file twice.
+    seen: set = set()
+    deduped: List[str] = []
+    for a in artifacts:
+        if a in seen:
+            continue
+        seen.add(a)
+        deduped.append(a)
+    return deduped
+
+
+def _compose_subworker_payload_from_tools(
+    result: 'ExecutionResult',
+) -> Optional[str]:
+    """Build a worker.md-shaped ``[SUB_WORKER_RESULT]`` payload from
+    :attr:`ExecutionResult.tool_calls` when the LLM left no final text.
+
+    Returns ``None`` when there is nothing to summarise (no tool calls
+    at all) — the caller should treat that as "no notification" rather
+    than emitting a meaningless "Task finished with no output." line.
+    See ``dev_docs/20260430_1/analysis/01_subworker_dm_dual_dispatch.md``
+    (P0-2 / P0-3).
+    """
+    tool_calls = list(getattr(result, "tool_calls", None) or [])
+    if not tool_calls:
+        return None
+
+    total = len(tool_calls)
+    errors = sum(1 for t in tool_calls if t.get("is_error"))
+    ok = total - errors
+
+    if errors == 0:
+        status = "ok"
+    elif errors == total:
+        status = "failed"
+    else:
+        status = "partial"
+
+    # Distinct tool names in encounter order
+    seen_names: set = set()
+    name_order: List[str] = []
+    for entry in tool_calls:
+        name = entry.get("name") or "unknown"
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        name_order.append(name)
+    tools_line = ", ".join(name_order) if name_order else "—"
+
+    if status == "ok":
+        if total == 1:
+            summary = f"Completed using {tools_line} ({ok} tool call)."
+        else:
+            summary = f"Completed using {tools_line} ({ok} tool calls)."
+    elif status == "failed":
+        summary = (
+            f"Could not complete the task — every tool call failed "
+            f"({errors}/{total})."
+        )
+    else:
+        summary = (
+            f"Partial — {ok} tool call(s) succeeded, {errors} failed "
+            f"using {tools_line}."
+        )
+
+    artifacts = _extract_artifacts(tool_calls)
+
+    details_lines: List[str] = [
+        f"Tools used: {tools_line}",
+        f"Total calls: {total} ({ok} ok, {errors} failed)",
+    ]
+
+    payload_lines = [
+        "[SUB_WORKER_RESULT]",
+        f"status: {status}",
+        f"summary: {summary}",
+        "details: |",
+    ]
+    for line in details_lines:
+        payload_lines.append(f"  {line}")
+    if artifacts:
+        payload_lines.append("artifacts:")
+        for art in artifacts:
+            payload_lines.append(f"  - {art}")
+    else:
+        payload_lines.append("artifacts: []")
+
+    return "\n".join(payload_lines)
+
+
 async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> None:
     """
     If this session is a Sub-Worker linked to a VTuber, fire-and-forget
@@ -232,10 +370,30 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
                 )
             return
 
-        # Build a concise summary for the VTuber
-        if result.success and result.output:
+        # Build a concise summary for the VTuber.
+        #
+        # Priority:
+        #   1. The Sub-Worker's own assistant text (rare but useful when
+        #      it actually narrates).
+        #   2. A worker.md-shaped payload synthesised from the per-turn
+        #      tool log (cycle 20260430_1 P0-2). Covers the common
+        #      tool-only finish path that previously degraded to the
+        #      canned "Task finished with no output." line.
+        #   3. A failure with a real error message.
+        #   4. Last-ditch — actually nothing happened. We still notify
+        #      so the VTuber can close the loop, but P0-3 narrows this
+        #      branch further by skipping the notification entirely.
+        if result.success and result.output and result.output.strip():
             summary = result.output[:2000]
             content = f"[SUB_WORKER_RESULT] Task completed successfully.\n\n{summary}"
+        elif result.success:
+            synthesised = _compose_subworker_payload_from_tools(result)
+            if synthesised is not None:
+                content = synthesised
+            elif result.error:
+                content = f"[SUB_WORKER_RESULT] Task failed: {result.error[:500]}"
+            else:
+                content = "[SUB_WORKER_RESULT] Task finished with no output."
         elif result.error:
             content = f"[SUB_WORKER_RESULT] Task failed: {result.error[:500]}"
         else:
@@ -685,6 +843,18 @@ async def _execute_core(
             if isinstance(invoke_result, dict)
             else None
         )
+        # Cycle 20260430_1 P0-2 — pull the per-turn tool log out of the
+        # invoke envelope so `_notify_linked_vtuber` can build a real
+        # payload for tool-only turns. Older invoke paths that don't
+        # include the key fall back to an empty list — same shape as
+        # before.
+        result_tool_calls: List[Dict[str, Any]] = []
+        if isinstance(invoke_result, dict):
+            raw = invoke_result.get("tool_calls") or []
+            if isinstance(raw, list):
+                result_tool_calls = [
+                    entry for entry in raw if isinstance(entry, dict)
+                ]
         duration_ms = int((time.time() - start_time) * 1000)
 
         logger.info(
@@ -716,6 +886,7 @@ async def _execute_core(
             output=result_text,
             duration_ms=duration_ms,
             cost_usd=result_cost,
+            tool_calls=result_tool_calls,
         )
         holder["result"] = result.to_dict()
         return result
