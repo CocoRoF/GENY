@@ -1,8 +1,8 @@
-"""Regression tests for cycle 20260421_4 memory-model routing.
+"""Regression tests for the memory-model routing wiring.
 
 After ``AgentSession._build_pipeline`` runs:
 
-* Stages 2 (``s02_context``) and 15 (``s15_memory``) carry a
+* Stages 2 (``s02_context``) and 18 (``s18_memory``) carry a
   :class:`ModelConfig` override whose ``model`` matches
   ``APIConfig.memory_model`` (or ``anthropic_model`` when empty).
 * ``state.llm_client`` is a :class:`BaseClient` built via
@@ -10,12 +10,16 @@ After ``AgentSession._build_pipeline`` runs:
 * :class:`GenyMemoryStrategy` receives a non-None resolver and, by
   default, ``llm_reflect=None`` (the native path). The legacy flag
   re-installs the callback.
-* Stages 2/15 missing from the manifest emit a warning but do not
+* Stages 2/18 missing from the manifest emit a warning but do not
   raise — the session still boots.
 
-These tests pin the wiring done in cycle 20260421_4 so a later
-refactor of ``_build_pipeline`` can't silently demote the
-memory-model override back to a pre-cycle no-op.
+History: cycle 20260421_4 introduced the wiring, but at that time
+the pipeline had 18 stages and the memory stage lived at order 15.
+The pipeline expanded to 21 stages (cycle 20260430_x), the memory
+stage moved to order 18, and the wiring was *not* updated until
+cycle 20260501_1 A1. These tests now reflect the corrected target;
+without A1 the prior test file referenced order 15 (HITL) and the
+real memory stage was silently un-wired.
 """
 
 from __future__ import annotations
@@ -91,7 +95,10 @@ def stub_full_pipeline():
     return _StubPipeline([
         _StubStage(2, "context"),
         _StubStage(6, "api"),
-        _StubStage(15, "memory"),
+        _StubStage(15, "hitl"),     # cycle 20260501_1 A1 — HITL is at 15;
+                                    # the wiring must NOT target this
+                                    # stage as memory.
+        _StubStage(18, "memory"),   # the real memory stage
     ])
 
 
@@ -152,11 +159,16 @@ def test_stage_overrides_use_memory_model(stub_full_pipeline, monkeypatch, tmp_p
     session = _make_session(stub_full_pipeline)
     session._build_pipeline()
 
-    s2, _s6, s15 = stub_full_pipeline.stages
+    s2, _s6, s15, s18 = stub_full_pipeline.stages
     assert s2._model_override is not None
     assert s2._model_override.model == "claude-haiku-4-5-20251001"
-    assert s15._model_override is not None
-    assert s15._model_override.model == "claude-haiku-4-5-20251001"
+    # Cycle 20260501_1 A1 — memory_cfg goes to s18, NOT s15.
+    assert s18._model_override is not None
+    assert s18._model_override.model == "claude-haiku-4-5-20251001"
+    assert s15._model_override is None, (
+        "HITL stage must not receive memory_model — that was the "
+        "pre-cycle bug A1 fixed."
+    )
 
 
 def test_empty_memory_model_falls_back_to_main(stub_full_pipeline, monkeypatch, tmp_path):
@@ -167,9 +179,9 @@ def test_empty_memory_model_falls_back_to_main(stub_full_pipeline, monkeypatch, 
     session = _make_session(stub_full_pipeline)
     session._build_pipeline()
 
-    s2, _s6, s15 = stub_full_pipeline.stages
+    s2, _s6, _s15, s18 = stub_full_pipeline.stages
     assert s2._model_override.model == "claude-sonnet-4-6"
-    assert s15._model_override.model == "claude-sonnet-4-6"
+    assert s18._model_override.model == "claude-sonnet-4-6"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -212,7 +224,7 @@ def test_s06_stage_config_synced(stub_full_pipeline, monkeypatch, tmp_path):
     session = _make_session(stub_full_pipeline)
     session._build_pipeline()
 
-    _s2, s6, _s15 = stub_full_pipeline.stages
+    _s2, s6, _s15, _s18 = stub_full_pipeline.stages
     assert s6._config.get("provider") == "anthropic"
     assert s6._config.get("base_url") == "https://custom.example"
 
@@ -234,6 +246,29 @@ def test_memory_strategy_has_resolver_and_no_callback_by_default(
     assert strategy is not None
     assert strategy._llm_reflect is None
     assert strategy._resolver is not None
+
+
+def test_reflection_resolver_targets_s18_memory_stage(
+    stub_full_pipeline, monkeypatch, tmp_path,
+):
+    """Cycle 20260501_1 A1 — ReflectionResolver must read s18's
+    model_override (memory stage), not s15's (HITL). Otherwise the
+    native LLM reflection path either runs under the wrong cfg or
+    never fires at all."""
+    _clear_cycle4_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEMORY_MODEL", "claude-haiku-4-5-20251001")
+
+    session = _make_session(stub_full_pipeline)
+    session._build_pipeline()
+
+    captured = stub_full_pipeline.attach_calls[-1]
+    strategy = captured.get("memory_strategy")
+    resolver = strategy._resolver
+    # has_override() should reflect s18's override (set), not s15's (None)
+    assert resolver.has_override() is True
+    cfg = resolver.resolve_cfg(state=None)
+    assert cfg is not None
+    assert cfg.model == "claude-haiku-4-5-20251001"
 
 
 def test_legacy_flag_restores_callback(stub_full_pipeline, monkeypatch, tmp_path):
@@ -266,5 +301,5 @@ def test_missing_memory_stages_is_warning_not_failure(
     captured = stub_minimal_pipeline.attach_calls[-1]
     assert "llm_client" in captured
     joined = " ".join(rec.message for rec in caplog.records)
-    assert "cycle-4: s02 context stage absent" in joined
-    assert "cycle-4: s15 memory stage absent" in joined
+    assert "memory wiring: s02 context stage absent" in joined
+    assert "memory wiring: s18 memory stage absent" in joined
