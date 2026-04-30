@@ -354,6 +354,18 @@ def infer_input_metadata(
     The helper imports the agent manager lazily to keep
     ``service.memory.interaction_event`` free of circular deps.
     """
+    # Cycle 20260430_2 A6 — user-side chat input. The recorder is the
+    # session whose ``_invoke_pipeline`` is running, and whoever owns
+    # that session is the counterpart we converse with.
+    if role == "user":
+        owner = getattr(recorder_agent, "_owner_username", None)
+        return make_event_metadata(
+            kind=Kind.USER_CHAT,
+            direction=Direction.IN,
+            counterpart_id=canonical_user_id(owner),
+            counterpart_role=CounterpartRole.USER,
+        )
+
     if role != "assistant_dm":
         return None
 
