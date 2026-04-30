@@ -215,6 +215,14 @@ class SessionMemoryManager:
         Both forms merge into a single dict; ``extra`` losers ties on
         key collisions so explicit ``metadata`` always wins.
 
+        Cycle 20260430_3 B — when the merged metadata satisfies the
+        InteractionEvent schema, this method also auto-bootstraps a
+        per-counterpart LTM stub at ``entities/<sanitized>.md``. The
+        helper is silent on missing structured writer / existing file
+        / self / system counterparts, and never raises. record_message
+        therefore stays a single-purpose call from the caller's
+        perspective.
+
         Args:
             role: "user" | "assistant" | "system" | "internal_trigger"
                 | "assistant_dm" — see ``_classify_input_role``.
@@ -232,10 +240,28 @@ class SessionMemoryManager:
         try:
             from service.memory_provider.adapters.stm_adapter import try_record_message
             if try_record_message(self._session_id, role, content, out_meta):
+                # Provider path — still want the entity stub side-effect
+                # so the LTM tree learns the counterpart immediately.
+                self._maybe_bootstrap_entity(out_meta)
                 return
         except Exception as exc:
             logger.warning(f"STM provider adapter failed, using legacy path: {exc}")
         self._stm.add_message(role, content, metadata=out_meta)
+        self._maybe_bootstrap_entity(out_meta)
+
+    def _maybe_bootstrap_entity(self, metadata: Optional[Dict[str, Any]]) -> None:
+        """Best-effort hand-off to the entity-bootstrap helper.
+
+        Called after every successful record_message. Lazy import
+        keeps service.memory.manager free of import-time cycles.
+        """
+        try:
+            from service.memory.entity_bootstrap import maybe_bootstrap_entity
+            maybe_bootstrap_entity(self, metadata)
+        except Exception:
+            logger.debug(
+                "entity bootstrap hook failed — non-critical", exc_info=True,
+            )
 
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""
