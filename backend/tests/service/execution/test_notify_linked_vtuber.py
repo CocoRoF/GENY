@@ -24,6 +24,7 @@ from service.execution.agent_executor import (
     ExecutionResult,
     _compose_subworker_payload_from_tools,
     _save_subworker_reply_to_chat_room,
+    _strip_only_loop_signals,
 )
 
 
@@ -110,6 +111,31 @@ def patched_world(monkeypatch):
         "vtuber": vtuber,
         "sub": sub,
     }
+
+
+# ─────────────────────────────────────────────────────────────────
+# Helper — _strip_only_loop_signals (cycle 20260430_1 P1-3)
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_strip_signals_returns_none_for_lone_task_complete() -> None:
+    assert _strip_only_loop_signals("[TASK_COMPLETE]") is None
+    assert _strip_only_loop_signals("  [TASK_COMPLETE]  ") is None
+
+
+def test_strip_signals_returns_none_for_lone_blocked_or_continue() -> None:
+    assert _strip_only_loop_signals("[BLOCKED: missing creds]") is None
+    assert _strip_only_loop_signals("[CONTINUE: next step]") is None
+
+
+def test_strip_signals_preserves_real_narration() -> None:
+    text = "Wrote self_introduction.md.\n[TASK_COMPLETE]"
+    assert _strip_only_loop_signals(text) == text
+
+
+def test_strip_signals_passthrough_for_empty_or_none() -> None:
+    assert _strip_only_loop_signals("") == ""
+    assert _strip_only_loop_signals(None) is None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -455,6 +481,62 @@ async def test_notify_linked_vtuber_synthesises_payload_from_tool_calls(
     assert "status: ok" in payload
     assert "Task finished with no output." not in payload
     assert "self_introduction.md" in payload
+
+
+@pytest.mark.asyncio
+async def test_notify_linked_vtuber_synthesises_when_output_is_only_loop_signal(
+    monkeypatch, patched_world
+):
+    """Cycle 20260430_1 P1-3 — when the worker's only output is
+    ``[TASK_COMPLETE]`` (or another bare loop signal), the synthesis
+    path must still run instead of wrapping the bare marker as a
+    user-facing summary."""
+    captured: List[Dict[str, Any]] = []
+
+    async def _capture_execute(target: str, content: str, **_kwargs):
+        captured.append({"content": content})
+        return ExecutionResult(success=True, session_id=target, output="ok")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _capture_execute)
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: None
+    )
+
+    created_tasks: List[asyncio.Task] = []
+    original_create_task = asyncio.create_task
+
+    def _capturing_create_task(coro, *args, **kwargs):
+        task = original_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
+
+    sub_result = ExecutionResult(
+        success=True,
+        session_id="sub-1",
+        output="[TASK_COMPLETE]",
+        duration_ms=10,
+        tool_calls=[
+            {
+                "name": "Write",
+                "input": {"file_path": "notes.md"},
+                "is_error": False,
+                "duration_ms": 5,
+            },
+        ],
+    )
+    await agent_executor._notify_linked_vtuber("sub-1", sub_result)
+    for task in created_tasks:
+        await task
+
+    assert len(captured) == 1
+    payload = captured[0]["content"]
+    # Synthesised payload, not the wrapped bare marker.
+    assert "Task completed successfully." not in payload
+    assert "[TASK_COMPLETE]" not in payload
+    assert "status: ok" in payload
+    assert "notes.md" in payload
 
 
 @pytest.mark.asyncio
