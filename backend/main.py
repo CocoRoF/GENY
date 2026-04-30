@@ -348,10 +348,17 @@ async def lifespan(app: FastAPI):
     # (or ENVIRONMENT_STORAGE_PATH). Routers are wired in the follow-up PRs
     # (#6 environment_controller, #7 catalog_controller); until then the
     # service sits on app.state ready for use.
-    from service.environment import EnvironmentService
+    from service.environment import (
+        EnvironmentService,
+        set_environment_service,
+    )
     environment_service = EnvironmentService()
     app.state.environment_service = environment_service
     agent_manager.set_environment_service(environment_service)
+    # Phase 9.9.2 — module-level accessor so service-layer code (e.g.
+    # ``AgentSession._load_permission_host_selection``) can reach the
+    # same instance without a FastAPI ``Request``.
+    set_environment_service(environment_service)
     logger.info(f"   - EnvironmentService: storage={environment_service.storage_path}")
 
     # Seed default environment manifests (WORKER + VTUBER). The two

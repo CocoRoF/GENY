@@ -143,3 +143,94 @@ def test_loader_returns_empty_list_when_section_present_but_no_rules(tmp_path: P
     from service.permission.install import _load_from_settings_section
     out = _load_from_settings_section()
     assert out == []
+
+
+# ── Phase 9.9.2: host_selection narrowing ─────────────────────────────
+
+
+def _seed_three_rules(tmp_path: Path) -> None:
+    _write_settings(tmp_path, {
+        "permissions": {
+            "rules": [
+                {"tool_name": "Read", "behavior": "allow"},
+                {"tool_name": "Bash", "behavior": "deny", "pattern": "rm"},
+                {"tool_name": "Write", "behavior": "allow", "pattern": "./"},
+            ],
+        },
+    })
+    _bind_loader(tmp_path / "settings.json")
+
+
+def test_host_selection_none_keeps_all_rules(tmp_path: Path):
+    _seed_three_rules(tmp_path)
+    from service.permission.install import install_permission_rules
+    rules, _ = install_permission_rules(host_selection=None)
+    assert len(rules) == 3
+
+
+def test_host_selection_wildcard_keeps_all_rules(tmp_path: Path):
+    _seed_three_rules(tmp_path)
+    from service.permission.install import install_permission_rules
+    rules, _ = install_permission_rules(host_selection=["*"])
+    assert len(rules) == 3
+
+
+def test_host_selection_empty_returns_no_rules(tmp_path: Path):
+    """Explicit opt-out — manifest says "use no permission rules in
+    this env" (e.g. a sandbox env that wants every tool unrestricted)."""
+    _seed_three_rules(tmp_path)
+    from service.permission.install import install_permission_rules
+    rules, _ = install_permission_rules(host_selection=[])
+    assert rules == []
+
+
+def test_host_selection_literal_subset(tmp_path: Path):
+    """Selection filters by stable id — kept rules match, others drop."""
+    _seed_three_rules(tmp_path)
+    from service.permission.install import install_permission_rules, rule_id
+    keep_id = rule_id("Read", None, "allow")
+    rules, _ = install_permission_rules(host_selection=[keep_id])
+    assert len(rules) == 1
+    assert rules[0].tool_name == "Read"
+
+
+def test_host_selection_stale_id_dropped(tmp_path: Path):
+    """A selection that names a rule which no longer exists in the host
+    registry is silently ignored — the runtime keeps booting."""
+    _seed_three_rules(tmp_path)
+    from service.permission.install import install_permission_rules
+    rules, _ = install_permission_rules(
+        host_selection=["StaleTool::*::allow"],
+    )
+    assert rules == []
+
+
+def test_rule_id_matches_frontend_format():
+    """`permissionId()` in `frontend/src/lib/envDefaultsApi.ts` produces
+    the same shape — keep them synced."""
+    from service.permission.install import rule_id
+    assert rule_id("Bash", "rm", "deny") == "Bash::rm::deny"
+    # Pattern absent → "*" sentinel (matches frontend).
+    assert rule_id("Read", None, "allow") == "Read::*::allow"
+
+
+def test_attach_kwargs_forwards_host_selection(tmp_path: Path):
+    """`attach_kwargs(host_selection=...)` filters rules before they
+    reach `Pipeline.attach_runtime`."""
+    _seed_three_rules(tmp_path)
+    from service.permission.install import attach_kwargs, rule_id
+    keep = rule_id("Read", None, "allow")
+    out = attach_kwargs(host_selection=[keep])
+    rules = out.get("permission_rules", [])
+    assert len(rules) == 1
+    assert rules[0].tool_name == "Read"
+
+
+def test_attach_kwargs_empty_selection_yields_no_kwargs(tmp_path: Path):
+    """When the selection drops every rule, `attach_kwargs` returns an
+    empty dict (matching the "no rules loaded" path) so the executor
+    keeps every tool open."""
+    _seed_three_rules(tmp_path)
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs(host_selection=[])
+    assert out == {}
