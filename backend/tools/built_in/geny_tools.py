@@ -884,10 +884,32 @@ class SendDirectMessageInternalTool(BaseTool):
 
         sender_name = getattr(self_agent, "session_name", None) or session_id[:8]
 
+        body = content.strip()
+
+        # Cycle 20260430_1 P0-1 — when a paired Sub-Worker uses this tool to
+        # explicitly deliver a `[SUB_WORKER_RESULT]` payload to its VTuber,
+        # mark the caller's session so `_notify_linked_vtuber` skips the
+        # auto-fallback notification at invoke end (otherwise it overwrites
+        # the structured payload with "Task finished with no output."). The
+        # flag is turn-scoped — `AgentSession.invoke`/`astream` reset it at
+        # the next turn boundary.
+        if (
+            getattr(self_agent, "_session_type", None) == "sub"
+            and body.startswith("[SUB_WORKER_RESULT]")
+        ):
+            try:
+                self_agent._explicit_subworker_report_sent = True
+            except Exception:
+                logger.debug(
+                    "could not set explicit_subworker_report_sent on %s",
+                    session_id,
+                    exc_info=True,
+                )
+
         inbox = _get_inbox_manager()
         msg = inbox.deliver(
             target_session_id=resolved_id,
-            content=content.strip(),
+            content=body,
             sender_session_id=session_id,
             sender_name=sender_name,
         )
@@ -896,7 +918,7 @@ class SendDirectMessageInternalTool(BaseTool):
             target_session_id=resolved_id,
             sender_session_id=session_id,
             sender_name=sender_name,
-            content=content.strip(),
+            content=body,
             message_id=msg["id"],
         )
 
@@ -904,7 +926,7 @@ class SendDirectMessageInternalTool(BaseTool):
         # for why this is needed on top of the recipient-side record.
         _record_dm_on_sender_stm(
             session_id=session_id,
-            content=content.strip(),
+            content=body,
             target_label=target.session_name or resolved_id,
             channel="internal",
         )

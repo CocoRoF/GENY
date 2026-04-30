@@ -378,6 +378,16 @@ class AgentSession:
         self._session_type: Optional[str] = None  # "vtuber" | "sub" | "solo" | None
         self._chat_room_id: Optional[str] = None
 
+        # Cycle 20260430_1 P0-1 — turn-scoped flag set by
+        # ``SendDirectMessageInternalTool`` when a paired Sub-Worker
+        # explicitly delivers a ``[SUB_WORKER_RESULT]`` payload to its
+        # VTuber during this invoke. ``_notify_linked_vtuber`` reads it
+        # to suppress the auto-fallback notification (which would
+        # otherwise clobber the structured payload with a "Task finished
+        # with no output." line). Reset at every ``invoke`` / ``astream``
+        # entry so the flag never leaks across turns.
+        self._explicit_subworker_report_sent: bool = False
+
         # Creature state wiring (PR-X3-5). Registry is turn-scoped — a
         # fresh one is built inside ``_invoke_pipeline`` / ``_astream_pipeline``
         # so the snapshot and mutation buffer don't leak across turns. When
@@ -2788,6 +2798,9 @@ class AgentSession:
         self._is_executing = True          # guard: prevent idle monitor interference
         self._current_iteration = 0
         self._execution_start_time = datetime.now()
+        # Cycle 20260430_1 P0-1 — clear the per-turn explicit-report flag
+        # before `send_direct_message_internal` has a chance to set it.
+        self._explicit_subworker_report_sent = False
         thread_id = thread_id or "default"
         effective_max_iterations = max_iterations or self._max_iterations
 
@@ -2871,6 +2884,9 @@ class AgentSession:
 
         self._status = SessionStatus.RUNNING
         self._is_executing = True              # guard: prevent idle monitor interference
+        # Cycle 20260430_1 P0-1 — mirror the invoke() reset so streaming
+        # turns also get a fresh explicit-report state.
+        self._explicit_subworker_report_sent = False
         thread_id = thread_id or "default"
 
         # E.1 (cycle 20260426_1) — drain queued runtime refresh at the
