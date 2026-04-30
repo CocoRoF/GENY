@@ -834,6 +834,11 @@ const en = {
           bodyLabel: 'Skill body (markdown)',
           bodyHint:
             'Injected into the LLM context when this skill is invoked. State what, how, and which tools — step by step.',
+          bodyPreviewToggleOn: 'Preview ON',
+          bodyPreviewToggleOff: 'Preview OFF',
+          bodyPreviewEmpty: 'Body is empty — type markdown on the left and it will render here.',
+          bodyPreviewLabel: 'Preview',
+          bodyEditLabel: 'Edit',
           bodyPlaceholder:
             '## What\nReview the current working-tree diff and draft a PR title + body for GitHub.\n\n## How\n1. Read the output of `git diff origin/main...HEAD`\n2. Summarise the change intent in one line (title)\n3. Cover scope / test plan / follow-ups in the body\n\n## Output\n```\nTitle: <title>\nBody:\n<body>\n```',
           extrasLabel: 'Extras (JSON object)',
