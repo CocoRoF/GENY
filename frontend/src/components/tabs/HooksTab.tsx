@@ -22,30 +22,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   hookApi,
-  HOOK_EVENTS,
-  HookEvent,
-  HookEntryPayload,
   HookEntryRow,
   HookEntriesResponse,
   HookListResponse,
   HookFiresResponse,
 } from '@/lib/api';
-import { Pencil, Plug, Trash2, X } from 'lucide-react';
-import { EditorModal, ActionButton } from '@/components/layout';
+import { Pencil, Plug, Trash2 } from 'lucide-react';
+import { ActionButton } from '@/components/layout';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { hookIdFromEditable } from '@/lib/envDefaultsApi';
+import HookFormModal, {
+  type HookFormSubmit,
+} from '@/components/env_management/hooks/HookFormModal';
 import {
   RegistryPageShell,
   RegistrySection,
@@ -56,142 +47,12 @@ import {
 
 type HookRow = HookEntryRow;
 
-interface KvRow {
-  key: string;
-  value: string;
-}
-
-interface EntryFormState {
-  event: HookEvent;
-  command: string;        // single executable
-  argsText: string;       // one per line
-  timeout_ms: string;     // free-text → parseInt
-  match: KvRow[];         // dict rows
-  env: KvRow[];           // dict rows
-  working_dir: string;
-}
-
-const EMPTY_FORM: EntryFormState = {
-  event: 'pre_tool_use',
-  command: '',
-  argsText: '',
-  timeout_ms: '',
-  match: [],
-  env: [],
-  working_dir: '',
-};
-
-function rowsToDict(rows: KvRow[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const r of rows) {
-    const k = r.key.trim();
-    if (!k) continue;
-    out[k] = r.value;
-  }
-  return out;
-}
-
-function dictToRows(d: Record<string, unknown> | null | undefined): KvRow[] {
-  if (!d || typeof d !== 'object') return [];
-  return Object.entries(d).map(([k, v]) => ({ key: k, value: String(v ?? '') }));
-}
-
-function formToPayload(f: EntryFormState): HookEntryPayload {
-  const ms = f.timeout_ms.trim() ? Number.parseInt(f.timeout_ms.trim(), 10) : null;
-  const args = f.argsText
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  const wd = f.working_dir.trim();
-  return {
-    event: f.event,
-    command: f.command.trim(),
-    args: args.length ? args : undefined,
-    timeout_ms: ms !== null && !Number.isNaN(ms) ? ms : null,
-    match: f.match.length ? rowsToDict(f.match) : undefined,
-    env: f.env.length ? rowsToDict(f.env) : undefined,
-    working_dir: wd.length ? wd : null,
-  };
-}
-
-function rowToForm(row: HookEntryRow): EntryFormState {
-  return {
-    event: row.event as HookEvent,
-    command: row.command,
-    argsText: (row.args ?? []).join('\n'),
-    timeout_ms: row.timeout_ms != null ? String(row.timeout_ms) : '',
-    match: dictToRows(row.match),
-    env: dictToRows(row.env),
-    working_dir: row.working_dir ?? '',
-  };
-}
-
+/** Format a hook entry's match dict for the card meta line. */
 function summarizeMatch(m: Record<string, unknown> | undefined): string {
   if (!m) return '*';
   const entries = Object.entries(m);
   if (entries.length === 0) return '*';
   return entries.map(([k, v]) => `${k}=${String(v)}`).join(', ');
-}
-
-function KvEditor({
-  rows,
-  onChange,
-  keyPlaceholder = 'key',
-  valuePlaceholder = 'value',
-  emptyHint,
-}: {
-  rows: KvRow[];
-  onChange: (rows: KvRow[]) => void;
-  keyPlaceholder?: string;
-  valuePlaceholder?: string;
-  emptyHint?: string;
-}) {
-  return (
-    <div className="grid gap-1.5">
-      {rows.length === 0 && emptyHint && (
-        <div className="text-[0.6875rem] text-[var(--text-muted)] italic">{emptyHint}</div>
-      )}
-      {rows.map((row, i) => (
-        <div key={i} className="flex gap-1.5 items-center">
-          <Input
-            value={row.key}
-            placeholder={keyPlaceholder}
-            onChange={(e) => {
-              const next = [...rows];
-              next[i] = { ...next[i], key: e.target.value };
-              onChange(next);
-            }}
-            className="font-mono text-[0.75rem] flex-1"
-          />
-          <Input
-            value={row.value}
-            placeholder={valuePlaceholder}
-            onChange={(e) => {
-              const next = [...rows];
-              next[i] = { ...next[i], value: e.target.value };
-              onChange(next);
-            }}
-            className="font-mono text-[0.75rem] flex-1"
-          />
-          <button
-            type="button"
-            onClick={() => onChange(rows.filter((_, j) => j !== i))}
-            className="text-[var(--text-muted)] hover:text-red-600 p-1"
-            title="Remove"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={() => onChange([...rows, { key: '', value: '' }])}
-        className="text-[0.75rem] text-[var(--primary-color)] hover:underline self-start"
-      >
-        + Add row
-      </button>
-    </div>
-  );
 }
 
 export interface HooksTabProps {
@@ -218,7 +79,7 @@ export function HooksTab(_props: HooksTabProps = {}) {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTarget, setEditingTarget] = useState<{ event: string; idx: number } | null>(null);
-  const [form, setForm] = useState<EntryFormState>(EMPTY_FORM);
+  const [editingRow, setEditingRow] = useState<HookEntryRow | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [auditDraft, setAuditDraft] = useState('');
@@ -259,28 +120,37 @@ export function HooksTab(_props: HooksTabProps = {}) {
 
   const openCreate = () => {
     setEditingTarget(null);
-    setForm(EMPTY_FORM);
+    setEditingRow(null);
+    setError(null);
     setEditorOpen(true);
   };
 
   const openEdit = (row: HookEntryRow) => {
     setEditingTarget({ event: row.event, idx: row.idx });
-    setForm(rowToForm(row));
+    setEditingRow(row);
+    setError(null);
     setEditorOpen(true);
   };
 
-  const submitForm = async () => {
-    const payload = formToPayload(form);
-    if (!payload.command) {
-      setError('command is required');
-      return;
-    }
+  const handleSubmit = async (payload: HookFormSubmit) => {
     setSaving(true);
     setError(null);
     try {
+      // Coerce HookFormSubmit (which always has the keys) into the
+      // optional-key shape `hookApi` expects — empty dicts/arrays
+      // become undefined so the wire payload stays compact.
+      const wire = {
+        event: payload.event,
+        command: payload.command,
+        args: payload.args.length ? payload.args : undefined,
+        timeout_ms: payload.timeout_ms,
+        match: Object.keys(payload.match).length ? payload.match : undefined,
+        env: Object.keys(payload.env).length ? payload.env : undefined,
+        working_dir: payload.working_dir,
+      };
       const res = editingTarget
-        ? await hookApi.replace(editingTarget.event, editingTarget.idx, payload)
-        : await hookApi.append(payload);
+        ? await hookApi.replace(editingTarget.event, editingTarget.idx, wire)
+        : await hookApi.append(wire);
       setEditable(res);
       setAuditDraft(res.audit_log_path ?? '');
       try {
@@ -506,114 +376,15 @@ export function HooksTab(_props: HooksTabProps = {}) {
   );
 
   const modal = (
-    <EditorModal
+    <HookFormModal
       open={editorOpen}
+      editingTarget={editingTarget}
+      initialRow={editingRow}
+      saving={saving}
+      error={error}
       onClose={() => setEditorOpen(false)}
-      title={editingTarget ? `Edit ${editingTarget.event}#${editingTarget.idx}` : 'Add hook'}
-        saving={saving}
-        footer={
-          <>
-            <ActionButton onClick={() => setEditorOpen(false)} disabled={saving}>
-              Cancel
-            </ActionButton>
-            <ActionButton
-              variant="primary"
-              onClick={submitForm}
-              disabled={saving || !form.command.trim()}
-            >
-              {saving ? 'Saving…' : editingTarget ? 'Save' : 'Create'}
-            </ActionButton>
-          </>
-        }
-      >
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Event</Label>
-            <Select
-              value={form.event}
-              onValueChange={(v) => setForm({ ...form, event: v as HookEvent })}
-              disabled={!!editingTarget}
-            >
-              <SelectTrigger title={editingTarget ? 'Change event by deleting and re-adding' : ''}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {HOOK_EVENTS.map((ev) => (
-                  <SelectItem key={ev} value={ev}>{ev}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="hook-cmd">Command <span className="opacity-60">(single executable path)</span></Label>
-            <Input
-              id="hook-cmd"
-              value={form.command}
-              onChange={(e) => setForm({ ...form, command: e.target.value })}
-              placeholder="/usr/local/bin/audit-hook"
-              className="font-mono"
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="hook-args">Args <span className="opacity-60">(one per line; no shell interpolation)</span></Label>
-            <Textarea
-              id="hook-args"
-              value={form.argsText}
-              onChange={(e) => setForm({ ...form, argsText: e.target.value })}
-              placeholder={'--session\n${session_id}'}
-              className="font-mono text-[0.75rem]"
-              rows={3}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="hook-timeout">Timeout <span className="opacity-60">(ms)</span></Label>
-              <Input
-                id="hook-timeout"
-                value={form.timeout_ms}
-                onChange={(e) => setForm({ ...form, timeout_ms: e.target.value })}
-                placeholder="5000"
-                inputMode="numeric"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="hook-wd">Working dir <span className="opacity-60">(optional)</span></Label>
-              <Input
-                id="hook-wd"
-                value={form.working_dir}
-                onChange={(e) => setForm({ ...form, working_dir: e.target.value })}
-                placeholder="/tmp"
-                className="font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label>Match <span className="opacity-60">(empty = match every event of this kind; today only the &quot;tool&quot; key is honored)</span></Label>
-            <KvEditor
-              rows={form.match}
-              onChange={(rows) => setForm({ ...form, match: rows })}
-              keyPlaceholder="tool"
-              valuePlaceholder="Bash"
-              emptyHint='No match filter — fires for every event. Add e.g. tool=Bash to limit.'
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label>Env <span className="opacity-60">(extra environment variables for the subprocess)</span></Label>
-            <KvEditor
-              rows={form.env}
-              onChange={(rows) => setForm({ ...form, env: rows })}
-              keyPlaceholder="DEBUG"
-              valuePlaceholder="1"
-              emptyHint="No extra env. Parent env is inherited."
-            />
-          </div>
-        </div>
-      </EditorModal>
+      onSubmit={handleSubmit}
+    />
   );
 
   return (
