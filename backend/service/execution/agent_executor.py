@@ -376,28 +376,46 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         #   1. The Sub-Worker's own assistant text (rare but useful when
         #      it actually narrates).
         #   2. A worker.md-shaped payload synthesised from the per-turn
-        #      tool log (cycle 20260430_1 P0-2). Covers the common
-        #      tool-only finish path that previously degraded to the
-        #      canned "Task finished with no output." line.
+        #      tool log (cycle 20260430_1 P0-2).
         #   3. A failure with a real error message.
-        #   4. Last-ditch — actually nothing happened. We still notify
-        #      so the VTuber can close the loop, but P0-3 narrows this
-        #      branch further by skipping the notification entirely.
+        #   4. Genuine "nothing happened" — no text, no tools, no
+        #      explicit report. Cycle 20260430_1 P0-3: skip the
+        #      notification entirely instead of forwarding a
+        #      meaningless "Task finished with no output." line that
+        #      makes the VTuber narrate confusion to the user.
+        content: Optional[str] = None
         if result.success and result.output and result.output.strip():
             summary = result.output[:2000]
             content = f"[SUB_WORKER_RESULT] Task completed successfully.\n\n{summary}"
         elif result.success:
-            synthesised = _compose_subworker_payload_from_tools(result)
-            if synthesised is not None:
-                content = synthesised
-            elif result.error:
-                content = f"[SUB_WORKER_RESULT] Task failed: {result.error[:500]}"
-            else:
-                content = "[SUB_WORKER_RESULT] Task finished with no output."
+            content = _compose_subworker_payload_from_tools(result)
         elif result.error:
             content = f"[SUB_WORKER_RESULT] Task failed: {result.error[:500]}"
-        else:
-            content = "[SUB_WORKER_RESULT] Task finished with no output."
+
+        if content is None:
+            # Nothing meaningful to forward — log the decision so the
+            # timeline still shows the close-of-loop, but don't fire.
+            try:
+                sender_logger = _get_session_logger(session_id, create_if_missing=False)
+                if sender_logger is not None:
+                    sender_logger.log(
+                        level=LogLevel.INFO,
+                        message=(
+                            "Skipping auto SUB_WORKER_RESULT — no text, no tools, "
+                            "no explicit report"
+                        ),
+                        metadata={
+                            "event": "delegation.suppressed_empty_turn",
+                            "to_session_id": linked_id,
+                        },
+                    )
+            except Exception:
+                logger.debug(
+                    "empty-turn suppress log emit failed for %s",
+                    session_id,
+                    exc_info=True,
+                )
+            return
 
         # Emit delegation.sent on the Sub-Worker's log so the flow is
         # visible from the sender side. The receiver side will emit
