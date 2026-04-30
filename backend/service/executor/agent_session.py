@@ -1409,12 +1409,18 @@ class AgentSession:
             except Exception:
                 pass
 
-        # ── Memory model routing (cycle 20260421_4) ──
+        # ── Memory model routing (cycle 20260421_4 / 20260501_1 A1) ──
         #
-        # Push APIConfig.memory_model down onto s02 (context) and s15
+        # Push APIConfig.memory_model down onto s02 (context) and s18
         # (memory) so executor-native paths honour the per-stage override.
         # Empty memory_model falls back to the main model so no surprise
         # LLM calls spin up.
+        #
+        # Cycle 20260501_1 A1 — the second target was *15* historically
+        # (when the pipeline had 18 stages and memory lived at order 15).
+        # The pipeline expanded to 21 stages; ``s18_memory.stage.order``
+        # is *18*, ``s15_hitl.stage.order`` is *15*. This call now
+        # correctly targets the memory stage.
         mem_model_name = (api_cfg.memory_model or "").strip() or api_cfg.anthropic_model
         memory_cfg = ModelConfig(
             model=mem_model_name,
@@ -1427,7 +1433,7 @@ class AgentSession:
         except Exception as exc:
             mutator = None
             logger.warning(
-                f"[{self._session_id}] cycle-4: PipelineMutator init failed — "
+                f"[{self._session_id}] memory wiring: PipelineMutator init failed — "
                 f"continuing without stage-level overrides: {exc}"
             )
         if mutator is not None:
@@ -1435,14 +1441,14 @@ class AgentSession:
                 mutator.set_stage_model(2, memory_cfg)
             except MutationError:
                 logger.warning(
-                    f"[{self._session_id}] cycle-4: s02 context stage absent — "
+                    f"[{self._session_id}] memory wiring: s02 context stage absent — "
                     f"skipping memory model override"
                 )
             try:
-                mutator.set_stage_model(15, memory_cfg)
+                mutator.set_stage_model(18, memory_cfg)
             except MutationError:
                 logger.warning(
-                    f"[{self._session_id}] cycle-4: s15 memory stage absent — "
+                    f"[{self._session_id}] memory wiring: s18 memory stage absent — "
                     f"skipping memory model override"
                 )
 
@@ -1493,16 +1499,20 @@ class AgentSession:
         # ── Native reflection resolver ──
         #
         # Consumed by GenyMemoryStrategy when llm_reflect is None. Closes
-        # over the s15 stage handle so the resolver reads the live model
+        # over the s18 stage handle so the resolver reads the live model
         # override at reflect time (not pipeline-build time).
-        s15_stage = next(
-            (st for st in self._prebuilt_pipeline.stages if getattr(st, "order", None) == 15),
+        #
+        # Cycle 20260501_1 A1 — was looking up order=15 (HITL), which
+        # gave the resolver the wrong stage's model_override. The
+        # memory stage's actual order is 18; the lookup now matches.
+        s18_stage = next(
+            (st for st in self._prebuilt_pipeline.stages if getattr(st, "order", None) == 18),
             None,
         )
-        if s15_stage is not None:
+        if s18_stage is not None:
             reflection_resolver = ReflectionResolver(
-                resolve_cfg=lambda state, _stage=s15_stage: _stage.resolve_model_config(state),
-                has_override=lambda _stage=s15_stage: getattr(_stage, "_model_override", None) is not None,
+                resolve_cfg=lambda state, _stage=s18_stage: _stage.resolve_model_config(state),
+                has_override=lambda _stage=s18_stage: getattr(_stage, "_model_override", None) is not None,
                 client_getter=lambda state: getattr(state, "llm_client", None),
             )
         else:
