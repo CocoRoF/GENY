@@ -1,19 +1,31 @@
 """Regression tests for STM role-classified message recording.
 
-Cycle 20260420_8 / plan/03 Bug 2b-α: ``_invoke_pipeline`` /
-``_astream_pipeline`` used to record every input as ``role="user"``
-and never recorded the assistant's reply. Two downstream consequences:
+History:
 
-1. Internal triggers (``[THINKING_TRIGGER:*]``) and inter-agent DMs
-   (``[SUB_WORKER_RESULT]``) got stored as user turns, so later
-   retrieval saw them as real user messages.
-2. The assistant's reply was absent from STM, so
-   ``session_summary`` / keyword retrieval / vector retrieval had no
-   record of what the assistant just said — breaking trigger-driven
-   continuity ("아직 답이 없다" regression).
+* Cycle 20260420_8 / plan/03 Bug 2b-α — added ``record_message``
+  calls inside ``_invoke_pipeline`` / ``_astream_pipeline`` so the
+  assistant reply landed in STM and ``_classify_input_role``
+  routed triggers / DMs to non-``user`` roles.
+* Cycle 20260501_1 C — moved the *actual record_message call*
+  out of ``_invoke_pipeline`` and onto ``s18_memory`` via
+  :class:`GenyDedupeStrategy`. ``_invoke_pipeline`` now resolves
+  the InteractionEvent metadata for the upcoming user / assistant
+  turn and stamps it on
+  ``state.metadata['_pending_message_metadata']``; s18 reads the
+  hint and records each message exactly once with full metadata.
 
-These tests pin the new ``_classify_input_role`` helper and the two
-``record_message`` call sites in both pipeline paths.
+These tests pin the post-cycle-20260501_1_C contract:
+
+* ``_classify_input_role`` keeps the same role mapping (drives
+  retrieval downstream).
+* ``_invoke_pipeline`` / ``_astream_pipeline`` no longer call
+  ``record_message`` directly — pinned by the absence of writes
+  on the fake memory manager.
+* The pending metadata dict is stamped on state.metadata with
+  the right shape per case.
+
+The actual STM record path is exercised in
+``tests/service/memory/test_dedupe_strategy.py`` (s18 side).
 """
 
 from __future__ import annotations
@@ -102,7 +114,7 @@ class _FakeMemoryManager:
         self.messages: List[Tuple[str, str]] = []
         self.executions: List[Dict[str, Any]] = []
 
-    def record_message(self, role: str, content: str) -> None:
+    def record_message(self, role: str, content: str, metadata=None, **extra) -> None:
         self.messages.append((role, content))
 
     async def record_execution(self, **kwargs: Any) -> None:
@@ -116,12 +128,19 @@ class _FakeEvent:
 
 
 class _FakePipeline:
-    """Yields a scripted sequence of PipelineEvents from run_stream."""
+    """Yields a scripted sequence of PipelineEvents from run_stream.
+
+    Cycle 20260501_1 C — captures the PipelineState received by
+    run_stream so tests can assert on `state.metadata` after the
+    invoke completes (this is where pending_message_metadata
+    lands; the real s18 stage would read it on terminal state)."""
 
     def __init__(self, events: List[_FakeEvent]) -> None:
         self._events = events
+        self.last_state: Any = None
 
     async def run_stream(self, input_text: str, state: Any):
+        self.last_state = state
         for evt in self._events:
             yield evt
 
@@ -148,138 +167,163 @@ def _success_events(output: str = "hello back") -> List[_FakeEvent]:
     ]
 
 
+# ─────────────────────────────────────────────────────────────────
+# Invoke no longer writes STM directly — pending metadata only
+# ─────────────────────────────────────────────────────────────────
+
+
 @pytest.mark.asyncio
-async def test_invoke_records_user_and_assistant_to_stm() -> None:
+async def test_invoke_does_not_call_record_message() -> None:
+    """Cycle 20260501_1 C — `_invoke_pipeline` resolves metadata but
+    does not record_message. STM write happens at s18 via
+    GenyDedupeStrategy. The fake memory manager here observes zero
+    record calls because nothing in this fake path drives s18."""
     session, mem = _make_session(_success_events("와! 안녕"))
     await session._invoke_pipeline("hi there", start_time=0.0, session_logger=None)
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["user", "assistant"]
-    assert mem.messages[0][1] == "hi there"
-    assert mem.messages[1][1] == "와! 안녕"
+    assert mem.messages == [], (
+        "_invoke_pipeline must not call record_message anymore; "
+        "the dedupe strategy at s18 owns that single write site"
+    )
 
 
 @pytest.mark.asyncio
-async def test_thinking_trigger_classified_as_internal_trigger() -> None:
-    session, mem = _make_session(_success_events("음 조용하네"))
+async def test_invoke_user_chat_stamps_pending_metadata_for_both_roles() -> None:
+    """A plain user_chat input populates `_pending_message_metadata`
+    with both `user` (USER_CHAT/IN) and `assistant` (USER_CHAT/OUT)
+    so s18 can record either side with full metadata."""
+    session, _mem = _make_session(_success_events("와! 안녕"))
+    await session._invoke_pipeline("hi there", start_time=0.0, session_logger=None)
+
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata")
+    assert pending is not None
+    assert "user" in pending and "assistant" in pending
+    assert pending["user"]["kind"] == "user_chat"
+    assert pending["user"]["direction"] == "in"
+    assert pending["assistant"]["kind"] == "user_chat"
+    assert pending["assistant"]["direction"] == "out"
+    assert pending["user"]["counterpart_id"] == pending["assistant"]["counterpart_id"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_thinking_trigger_skips_pending_metadata() -> None:
+    """Internal triggers (`[THINKING_TRIGGER:*]`) are filled with
+    explicit source_metadata by ThinkingTriggerService; without that
+    explicit hint, the parser deliberately returns None and the
+    invoke leaves `_pending_message_metadata` unset."""
+    session, _mem = _make_session(_success_events("음 조용하네"))
     await session._invoke_pipeline(
         "[THINKING_TRIGGER:first_idle] user has been quiet",
         start_time=0.0,
         session_logger=None,
     )
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["internal_trigger", "assistant"]
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    assert "_pending_message_metadata" not in state.metadata
 
 
 @pytest.mark.asyncio
-async def test_sub_worker_result_classified_as_assistant_dm() -> None:
-    session, mem = _make_session(_success_events("완료됐네!"))
+async def test_invoke_sub_worker_result_stamps_user_meta_only() -> None:
+    """`[SUB_WORKER_RESULT]` is an assistant_dm input — the parser
+    returns a TASK_RESULT/IN metadata for the user side; assistant
+    side is *not* user_chat, so the assistant slot stays unset
+    (the receiving turn's "narration" doesn't have a clean
+    counterpart yet — see cycle 20260430_2 A6)."""
+    session, _mem = _make_session(_success_events("완료됐네!"))
     await session._invoke_pipeline(
         "[SUB_WORKER_RESULT] test.txt created",
         start_time=0.0,
         session_logger=None,
     )
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["assistant_dm", "assistant"]
-
-
-@pytest.mark.asyncio
-async def test_empty_output_does_not_record_assistant() -> None:
-    session, mem = _make_session([
-        _FakeEvent(
-            "pipeline.complete",
-            {"result": "", "total_cost_usd": 0.0, "iterations": 0},
-        ),
-    ])
-    await session._invoke_pipeline("hi", start_time=0.0, session_logger=None)
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["user"], "assistant record must be skipped on empty output"
-
-
-@pytest.mark.asyncio
-async def test_failed_execution_does_not_record_assistant() -> None:
-    session, mem = _make_session([
-        _FakeEvent("text.delta", {"text": "partial"}),
-        _FakeEvent(
-            "pipeline.error",
-            {"error": "boom", "total_cost_usd": 0.0},
-        ),
-    ])
-    await session._invoke_pipeline("hi", start_time=0.0, session_logger=None)
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["user"], (
-        "on failure the STM should not persist a possibly-truncated "
-        "assistant reply as a successful turn"
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata") or {}
+    # parser may or may not resolve the sender — we only require
+    # that 'assistant' is NOT auto-stamped (this is the contract).
+    assert "assistant" not in pending, (
+        "USER_CHAT/OUT metadata must not be invented for non-user inputs"
     )
 
 
 @pytest.mark.asyncio
-async def test_assistant_record_is_non_critical() -> None:
-    """Exception inside record_message must not propagate and break
-    the invoke path — LTM recording and the return value should still
-    succeed."""
+async def test_invoke_explicit_source_metadata_threads_through() -> None:
+    """When a caller (e.g. `_trigger_dm_response`) passes explicit
+    `source_metadata=...`, the invoke uses that verbatim for the
+    user side and skips the parser fallback."""
     session, _mem = _make_session(_success_events("ok"))
-    calls: List[Tuple[str, str]] = []
+    explicit = {
+        "event_id": "EVT-EXPLICIT",
+        "kind": "task_result",
+        "direction": "in",
+        "counterpart_id": "sub-1",
+        "counterpart_role": "paired_subworker",
+    }
+    await session._invoke_pipeline(
+        "irrelevant prompt body",
+        start_time=0.0,
+        session_logger=None,
+        source_metadata=explicit,
+    )
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata") or {}
+    assert pending.get("user") == explicit
 
-    class _ExplodingMemory:
-        def __init__(self) -> None:
-            self.executions: List[Dict[str, Any]] = []
 
-        def record_message(self, role: str, content: str) -> None:
-            calls.append((role, content))
-            raise RuntimeError("stm down")
+@pytest.mark.asyncio
+async def test_invoke_metadata_resolution_failure_does_not_break_invoke() -> None:
+    """Exceptions during metadata resolution must be swallowed —
+    the invoke must continue without a pending hint so s18 records
+    legacy-style (metadata=None)."""
+    session, _mem = _make_session(_success_events("ok"))
 
-        async def record_execution(self, **kwargs: Any) -> None:
-            self.executions.append(kwargs)
+    # Make _classify_input_role raise via monkeypatch on the import target
+    import service.executor.agent_session as mod
 
-    exploding = _ExplodingMemory()
-    session._memory_manager = exploding  # type: ignore[assignment]
+    def _boom(_text: str) -> str:
+        raise RuntimeError("classifier exploded")
 
-    result = await session._invoke_pipeline("hi", start_time=0.0, session_logger=None)
+    original = mod._classify_input_role
+    mod._classify_input_role = _boom  # type: ignore[assignment]
+    try:
+        result = await session._invoke_pipeline(
+            "hi", start_time=0.0, session_logger=None,
+        )
+    finally:
+        mod._classify_input_role = original
 
     assert result["output"] == "ok"
-    # Both the user and assistant attempts happened before being swallowed
-    assert [r for r, _ in calls] == ["user", "assistant"]
-    # LTM write still happened
-    assert len(exploding.executions) == 1
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    assert "_pending_message_metadata" not in state.metadata
 
 
 # ─────────────────────────────────────────────────────────────────
-# _astream_pipeline mirrors the same wiring
+# _astream_pipeline mirrors the same contract
 # ─────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_stream_classifies_input_role_the_same_way() -> None:
+async def test_stream_does_not_call_record_message() -> None:
     session, mem = _make_session(_success_events("yup"))
     async for _ in session._astream_pipeline(
-        "[SUB_WORKER_RESULT] done",
+        "hello",
         start_time=0.0,
         session_logger=None,
     ):
         pass
-
-    roles = [r for r, _ in mem.messages]
-    assert roles == ["assistant_dm", "assistant"]
+    assert mem.messages == [], (
+        "_astream_pipeline must not call record_message anymore"
+    )
 
 
 @pytest.mark.asyncio
-async def test_stream_empty_output_does_not_record_assistant() -> None:
-    session, mem = _make_session([
-        _FakeEvent(
-            "pipeline.complete",
-            {"result": "", "total_cost_usd": 0.0, "iterations": 0},
-        ),
-    ])
+async def test_stream_user_chat_stamps_pending_metadata() -> None:
+    session, _mem = _make_session(_success_events("yup"))
     async for _ in session._astream_pipeline(
-        "plain user input",
+        "hello",
         start_time=0.0,
         session_logger=None,
     ):
         pass
-
-    assert [r for r, _ in mem.messages] == ["user"]
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata")
+    assert pending is not None
+    assert pending["user"]["direction"] == "in"
+    assert pending["assistant"]["direction"] == "out"
