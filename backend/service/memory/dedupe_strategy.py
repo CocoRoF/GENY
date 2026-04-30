@@ -66,8 +66,15 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
         record this batch;
       * apply the ``assistant`` hint to the *first* assistant
         message;
-      * fall back to ``metadata=None`` for any subsequent / tool
-        messages — those get the legacy s18 line shape.
+      * for any *subsequent* same-role message in the same batch,
+        derive a *fresh* metadata dict from the same template —
+        new ``event_id``, identical kind / direction /
+        counterpart_id / counterpart_role / linked_event_id /
+        payload (cycle 20260501_2 F1). A single VTuber turn that
+        produces multiple assistant messages must not have half
+        of them recorded with ``metadata=None``.
+      * fall back to ``metadata=None`` only when no hint exists
+        for the role at all.
 
     The hint is *not* popped — kept on state for the duration of
     the turn so a hypothetical second walk (re-entrant strategy
@@ -107,10 +114,13 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
                 continue
 
             metadata: Dict[str, Any] | None = None
-            if role in applied and not applied[role]:
+            if role in applied:
                 hint = pending.get(role)
                 if isinstance(hint, dict) and hint:
-                    metadata = hint
+                    if not applied[role]:
+                        metadata = hint
+                    else:
+                        metadata = _fresh_from_template(hint)
                 applied[role] = True
 
             try:
@@ -123,3 +133,42 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
                 )
 
         state.metadata["_stm_recorded_count"] = len(state.messages)
+
+
+def _fresh_from_template(hint: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Build a new InteractionEvent metadata dict using *hint* as a
+    template for kind / direction / counterpart_* and a fresh
+    ``event_id`` (cycle 20260501_2 F1).
+
+    Returns ``None`` if the import or coercion fails — caller treats
+    that as "no metadata" and records the line plainly. We deliberately
+    do not partially copy — either the new event has all five
+    canonical dimensions or it has none.
+    """
+    try:
+        from service.memory.interaction_event import (
+            CounterpartRole,
+            Direction,
+            Kind,
+            make_event_metadata,
+        )
+
+        kind_v = hint.get("kind")
+        dir_v = hint.get("direction")
+        cp_id = hint.get("counterpart_id")
+        cp_role = hint.get("counterpart_role")
+        if not (kind_v and dir_v and cp_id and cp_role):
+            return None
+        return make_event_metadata(
+            kind=Kind(kind_v),
+            direction=Direction(dir_v),
+            counterpart_id=cp_id,
+            counterpart_role=CounterpartRole(cp_role),
+            linked_event_id=hint.get("linked_event_id"),
+            payload=hint.get("payload") if isinstance(hint.get("payload"), dict) else None,
+        )
+    except Exception:
+        logger.debug(
+            "GenyDedupeStrategy: _fresh_from_template failed", exc_info=True,
+        )
+        return None
