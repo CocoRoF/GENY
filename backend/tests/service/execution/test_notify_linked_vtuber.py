@@ -22,9 +22,9 @@ from service.execution import agent_executor
 from service.execution.agent_executor import (
     AlreadyExecutingError,
     ExecutionResult,
+    _build_subworker_run_event_metadata,
     _categorize_tool_calls,
     _compose_subworker_payload_from_tools,
-    _record_subworker_run_on_vtuber,
     _save_subworker_reply_to_chat_room,
     _strip_only_loop_signals,
 )
@@ -228,7 +228,14 @@ def test_categorize_empty_is_safe() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────
-# Cycle 20260430_2 A4 — _record_subworker_run_on_vtuber
+# Cycle 20260501_1 D — _build_subworker_run_event_metadata
+#
+# Replaces the cycle 20260430_2 A4 _record_subworker_run_on_vtuber
+# helper. The old helper wrote directly into the VTuber's STM as a
+# cross-session side-channel; D keeps the same metadata shape but
+# returns it for downstream threading through `source_metadata` so
+# the actual STM write happens at the VTuber's invoke s18 path
+# (single STM write site invariant — cycle 20260501_1 C/D).
 # ─────────────────────────────────────────────────────────────────
 
 
@@ -242,29 +249,26 @@ def _make_vtuber_with_memory() -> _FakeAgent:
     )
 
 
-def test_record_subworker_run_writes_tool_run_summary_metadata() -> None:
-    vtuber = _make_vtuber_with_memory()
+def test_build_run_metadata_carries_categorised_payload() -> None:
+    """Categorised SubWorkerRun (files_written / status / etc.) is
+    threaded as the InteractionEvent's payload — same shape as the
+    old direct-write helper produced, just *returned* for the
+    caller to thread through source_metadata."""
     result = ExecutionResult(
         success=True,
         session_id="sub-1",
         output="",
         duration_ms=120,
         tool_calls=[
-            {"name": "Write", "input": {"file_path": "notes.md"}, "is_error": False, "duration_ms": 30},
+            {"name": "Write", "input": {"file_path": "notes.md"},
+             "is_error": False, "duration_ms": 30},
         ],
     )
-    _record_subworker_run_on_vtuber(
-        vtuber_agent=vtuber,
+    meta = _build_subworker_run_event_metadata(
         sub_session_id="sub-1",
         result=result,
+        vtuber_memory=_FakeMemoryManager(),
     )
-
-    mem = vtuber._memory_manager
-    assert len(mem.records) == 1
-    rec = mem.records[0]
-    assert rec["role"] == "assistant_dm"
-    assert "Sub-Worker run" in rec["content"]
-    meta = rec["metadata"]
     assert meta is not None
     assert meta["kind"] == "tool_run_summary"
     assert meta["direction"] == "in"
@@ -276,10 +280,13 @@ def test_record_subworker_run_writes_tool_run_summary_metadata() -> None:
     assert payload["duration_ms"] == 120
 
 
-def test_record_subworker_run_links_back_to_recent_task_request() -> None:
-    vtuber = _make_vtuber_with_memory()
-    # Seed a prior task_request from this vtuber to sub-1
-    vtuber._memory_manager.seed_recent([
+def test_build_run_metadata_links_back_to_recent_task_request() -> None:
+    """`linked_event_id` is best-effort filled by walking the
+    VTuber's STM tail for the most recent matching task_request —
+    same as the old helper. Drained metadata from inbox restores
+    this link for the eventual s18 write."""
+    vtuber_mem = _FakeMemoryManager()
+    vtuber_mem.seed_recent([
         {
             "role": "assistant_dm",
             "content": "[DM to Sub-Worker (internal)]: please write notes.md",
@@ -295,54 +302,59 @@ def test_record_subworker_run_links_back_to_recent_task_request() -> None:
     result = ExecutionResult(
         success=True, session_id="sub-1", output="", duration_ms=50,
         tool_calls=[
-            {"name": "Write", "input": {"file_path": "notes.md"}, "is_error": False, "duration_ms": 30},
+            {"name": "Write", "input": {"file_path": "notes.md"},
+             "is_error": False, "duration_ms": 30},
         ],
     )
-    _record_subworker_run_on_vtuber(
-        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    meta = _build_subworker_run_event_metadata(
+        sub_session_id="sub-1", result=result, vtuber_memory=vtuber_mem,
     )
-    rec = vtuber._memory_manager.records[0]
-    assert rec["metadata"]["linked_event_id"] == "REQ-1"
+    assert meta is not None
+    assert meta["linked_event_id"] == "REQ-1"
 
 
-def test_record_subworker_run_skips_truly_empty_turn() -> None:
-    """No tool calls + no narration + no error → nothing to remember."""
-    vtuber = _make_vtuber_with_memory()
+def test_build_run_metadata_returns_none_for_empty_turn() -> None:
+    """No tool calls + no narration + no error → nothing to thread
+    through. Caller falls back to its own default path."""
     result = ExecutionResult(
-        success=True, session_id="sub-1", output="", duration_ms=10, tool_calls=[],
+        success=True, session_id="sub-1", output="", duration_ms=10,
+        tool_calls=[],
     )
-    _record_subworker_run_on_vtuber(
-        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    meta = _build_subworker_run_event_metadata(
+        sub_session_id="sub-1", result=result,
+        vtuber_memory=_FakeMemoryManager(),
     )
-    assert vtuber._memory_manager.records == []
+    assert meta is None
 
 
-def test_record_subworker_run_records_failure_with_error_message() -> None:
-    vtuber = _make_vtuber_with_memory()
+def test_build_run_metadata_marks_failure_with_status_failed() -> None:
     result = ExecutionResult(
         success=False, session_id="sub-1", error="Timeout after 60s",
         duration_ms=60_000, tool_calls=[],
     )
-    _record_subworker_run_on_vtuber(
-        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    meta = _build_subworker_run_event_metadata(
+        sub_session_id="sub-1", result=result, vtuber_memory=None,
     )
-    rec = vtuber._memory_manager.records[0]
-    assert "failed" in rec["content"]
-    assert rec["metadata"]["payload"]["status"] == "failed"
+    assert meta is not None
+    assert meta["payload"]["status"] == "failed"
+    assert "Timeout" in meta["payload"]["error"]
 
 
-def test_record_subworker_run_no_memory_manager_is_silent() -> None:
-    """A vtuber without a memory manager (early-init / test) must not
-    crash the recorder — best-effort path."""
-    vtuber = _FakeAgent("vtuber-1", session_type="vtuber", linked_id="sub-1")
+def test_build_run_metadata_handles_missing_vtuber_memory() -> None:
+    """vtuber_memory=None → linked_event_id=None (no STM to scan).
+    The helper returns valid metadata without crashing."""
     result = ExecutionResult(
         success=True, session_id="sub-1", output="ok",
-        tool_calls=[{"name": "Write", "input": {"file_path": "x"}, "is_error": False, "duration_ms": 1}],
+        tool_calls=[{"name": "Write", "input": {"file_path": "x"},
+                     "is_error": False, "duration_ms": 1}],
     )
-    # Should not raise.
-    _record_subworker_run_on_vtuber(
-        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    meta = _build_subworker_run_event_metadata(
+        sub_session_id="sub-1", result=result, vtuber_memory=None,
     )
+    assert meta is not None
+    # linked_event_id is omitted from the dict when None — so just
+    # assert it's not present rather than expecting an explicit None.
+    assert meta.get("linked_event_id") is None or "linked_event_id" not in meta
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -813,6 +825,60 @@ async def test_notify_linked_vtuber_skips_when_explicit_report_sent(
 
 
 @pytest.mark.asyncio
+async def test_notify_threads_run_metadata_via_source_metadata(
+    monkeypatch, patched_world,
+):
+    """Cycle 20260501_1 D — `_notify_linked_vtuber` must thread the
+    canonical TASK_RESULT InteractionEvent metadata through
+    `execute_command(... source_metadata=...)`. The VTuber's
+    invoke s18 then records the same metadata at the *single* STM
+    write site (Stage C), with the categorised SubWorkerRun
+    payload preserved."""
+    captured: List[Dict[str, Any]] = []
+
+    async def _capture_execute(target: str, content: str, **kwargs):
+        captured.append({"target": target, "content": content,
+                         "source_metadata": kwargs.get("source_metadata")})
+        return ExecutionResult(success=True, session_id=target, output="ok")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _capture_execute)
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: None
+    )
+
+    created_tasks: List[asyncio.Task] = []
+    original_create_task = asyncio.create_task
+
+    def _capturing_create_task(coro, *args, **kwargs):
+        task = original_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
+
+    sub_result = ExecutionResult(
+        success=True, session_id="sub-1", output="",
+        duration_ms=120,
+        tool_calls=[
+            {"name": "Write", "input": {"file_path": "notes.md"},
+             "is_error": False, "duration_ms": 30},
+        ],
+    )
+    await agent_executor._notify_linked_vtuber("sub-1", sub_result)
+    for task in created_tasks:
+        await task
+
+    assert len(captured) == 1
+    meta = captured[0]["source_metadata"]
+    assert meta is not None
+    assert meta["kind"] == "tool_run_summary"
+    assert meta["counterpart_id"] == "sub-1"
+    payload = meta["payload"]
+    assert payload["files_written"] == ["notes.md"]
+    assert payload["status"] == "ok"
+
+
+@pytest.mark.asyncio
 async def test_notify_linked_vtuber_already_executing_falls_back_to_inbox(
     monkeypatch, patched_world
 ):
@@ -853,6 +919,10 @@ async def test_notify_linked_vtuber_already_executing_falls_back_to_inbox(
 
     sub_result = ExecutionResult(
         success=True, session_id="sub-1", output="done", duration_ms=1,
+        tool_calls=[
+            {"name": "Write", "input": {"file_path": "out.md"},
+             "is_error": False, "duration_ms": 5},
+        ],
     )
     await agent_executor._notify_linked_vtuber("sub-1", sub_result)
 
@@ -865,3 +935,13 @@ async def test_notify_linked_vtuber_already_executing_falls_back_to_inbox(
         "Chat room must not receive a message when the VTuber was busy — "
         "the pending reply will surface via the inbox drain path"
     )
+
+    # Cycle 20260501_1 D — inbox metadata must carry the canonical
+    # InteractionEvent so `_drain_inbox` can restore it as
+    # source_metadata when the recipient finally invokes.
+    inbox_meta = inbox_calls[0].get("metadata") or {}
+    assert inbox_meta.get("tag") == "[SUB_WORKER_RESULT]"
+    event = inbox_meta.get("interaction_event")
+    assert event is not None
+    assert event["kind"] == "tool_run_summary"
+    assert event["payload"]["files_written"] == ["out.md"]
