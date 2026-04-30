@@ -17,6 +17,7 @@ import type {
   MemoryFileInfo, MemoryFileDetail, MemoryStats,
   MemoryIndex, MemorySearchResult,
 } from '@/types';
+import StreamTab from './memory/StreamTab';
 
 // ==================== Helpers ====================
 
@@ -575,6 +576,9 @@ export default function MemoryTab() {
 
   // State
   const [scope, setScope] = useState<'session' | 'global'>('session');
+  // Cycle 20260430_3 D — sub-tab toggle. "notes" is the legacy LTM
+  // markdown view; "stream" renders the InteractionEvent timeline.
+  const [view, setView] = useState<'notes' | 'stream'>('notes');
   const [loading, setLoading] = useState(false);
   const [index, setIndex] = useState<MemoryIndex | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -597,6 +601,9 @@ export default function MemoryTab() {
     setFileDetail(null);
     setSearchResults(null);
     setSearchQuery('');
+    // Stream view is session-only — fall back to LTM Notes when the
+    // user flips to global scope.
+    if (scope === 'global') setView('notes');
   }, [scope]);
 
   // Load index + stats + tags
@@ -808,6 +815,35 @@ export default function MemoryTab() {
               Global
             </button>
           </div>
+          {/* Sub-tab toggle (cycle 20260430_3 D) — only meaningful in
+              session scope; Global memory has no InteractionEvent
+              stream of its own. */}
+          {!isGlobal && (
+            <div className="flex items-center rounded-[var(--border-radius)] border border-[var(--border-color)] overflow-hidden">
+              <button
+                onClick={() => setView('notes')}
+                className={cn(
+                  'px-3 py-1 text-[11px] font-medium transition-colors',
+                  view === 'notes'
+                    ? 'bg-[var(--primary-color)] text-white'
+                    : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
+                )}
+              >
+                LTM Notes
+              </button>
+              <button
+                onClick={() => setView('stream')}
+                className={cn(
+                  'px-3 py-1 text-[11px] font-medium transition-colors border-l border-[var(--border-color)]',
+                  view === 'stream'
+                    ? 'bg-[var(--primary-color)] text-white'
+                    : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
+                )}
+              >
+                Stream
+              </button>
+            </div>
+          )}
           {/* Stats inline */}
           {stats && (
             <div className="hidden md:flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
@@ -848,33 +884,40 @@ export default function MemoryTab() {
         </div>
       </div>
 
-      {/* Search + tags row */}
-      <div className="flex items-center gap-3 shrink-0">
-        <form
-          className="flex-1 flex items-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] px-3 py-1.5"
-          onSubmit={e => { e.preventDefault(); handleSearch(searchQuery); }}
-        >
-          <Search size={14} className="text-[var(--text-muted)] shrink-0" />
-          <input
-            className="flex-1 bg-transparent text-[13px] outline-none text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            placeholder="Search memory..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => { setSearchQuery(''); setSearchResults(null); }}
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0"
-            >
-              <X size={14} />
-            </button>
-          )}
-        </form>
-        {/* Tag pills removed — Obsidian page provides full tag interface */}
-      </div>
+      {/* Search + tags row — only in LTM Notes view */}
+      {view === 'notes' && (
+        <div className="flex items-center gap-3 shrink-0">
+          <form
+            className="flex-1 flex items-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] px-3 py-1.5"
+            onSubmit={e => { e.preventDefault(); handleSearch(searchQuery); }}
+          >
+            <Search size={14} className="text-[var(--text-muted)] shrink-0" />
+            <input
+              className="flex-1 bg-transparent text-[13px] outline-none text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              placeholder="Search memory..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(''); setSearchResults(null); }}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </form>
+          {/* Tag pills removed — Obsidian page provides full tag interface */}
+        </div>
+      )}
 
-      {/* Main content — matches StorageTab layout */}
+      {/* Stream sub-tab body (cycle 20260430_3 D) */}
+      {view === 'stream' && !isGlobal && sessionId ? (
+        <StreamTab sessionId={sessionId} />
+      ) : (
+
+      /* Main content — matches StorageTab layout */
       <div className="flex flex-col md:flex-row gap-3 md:gap-4 flex-1 min-h-0">
         {/* File tree — left panel */}
         <div className="md:w-[280px] shrink-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-y-auto max-h-[200px] md:max-h-none">
@@ -905,6 +948,7 @@ export default function MemoryTab() {
           />
         )}
       </div>
+      )}
 
       {/* Modals */}
       {showCreateModal && (
