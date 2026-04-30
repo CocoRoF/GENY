@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 from logging import getLogger
+from typing import Optional
 
 from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
@@ -94,26 +95,76 @@ def _resolve_session(name_or_id: str):
     return None, None
 
 
+def _classify_outgoing_dm(
+    *,
+    sender_agent,
+    target_agent,
+    target_session_id: str,
+    body: str,
+):
+    """Resolve (kind, counterpart_role) for an outgoing DM.
+
+    Cycle 20260430_2 A2 — the recorder side of every InteractionEvent
+    needs both fields determined deterministically. The mapping is
+    intentionally narrow so test/audit can read it at a glance:
+
+      * sender = VTuber, target = bound Sub-Worker → TASK_REQUEST
+      * sender = Sub-Worker, target = bound VTuber, body opens with
+        "[SUB_WORKER_RESULT]" → TASK_RESULT
+      * sender = Sub-Worker, target = bound VTuber, plain body → DM
+        (rare; conversational chatter on the paired channel)
+      * any other shape → DM with counterpart_role=PEER
+
+    The function is pure (only reads getattr) and never raises — a
+    missing ``_session_type`` simply collapses the case to PEER + DM.
+    """
+    from service.memory.interaction_event import (
+        CounterpartRole,
+        Kind,
+    )
+
+    sender_type = getattr(sender_agent, "_session_type", None)
+    target_type = getattr(target_agent, "_session_type", None)
+    linked_id = getattr(sender_agent, "_linked_session_id", None)
+    is_paired = bool(linked_id) and (linked_id == target_session_id)
+
+    if is_paired and sender_type == "vtuber" and target_type == "sub":
+        return Kind.TASK_REQUEST, CounterpartRole.PAIRED_SUBWORKER
+    if is_paired and sender_type == "sub" and target_type == "vtuber":
+        if body.lstrip().startswith("[SUB_WORKER_RESULT]"):
+            return Kind.TASK_RESULT, CounterpartRole.PAIRED_VTUBER
+        return Kind.DM, CounterpartRole.PAIRED_VTUBER
+    return Kind.DM, CounterpartRole.PEER
+
+
 def _record_dm_on_sender_stm(
     session_id: str,
     content: str,
     target_label: str,
     channel: str,
+    *,
+    target_session_id: Optional[str] = None,
 ) -> None:
     """Write the outgoing DM body to the sender's short-term memory.
 
-    Classified as ``assistant_dm`` — mirrors how incoming DMs are
-    recorded on the recipient side (via ``_trigger_dm_response``'s
-    ``[SYSTEM] You received a direct message ...`` prompt, which
-    ``_classify_input_role`` already routes to ``assistant_dm``).
-    Without this record, the outgoing DM body lives only in the tool
-    event log, so next turn's retrieval (L0 recent turns / session
-    summary / keyword / vector) cannot see what the sender actually
-    asked — the sub-worker reply lands with no request visible.
+    Cycle 20260430_2 A2 — the body is recorded as before, but the
+    metadata dict is now an
+    :func:`~service.memory.interaction_event.make_event_metadata`
+    output: ``kind`` (``task_request`` / ``task_result`` / ``dm``),
+    ``direction=out``, ``counterpart_id``, ``counterpart_role``, and
+    a fresh ``event_id``. Retrieval and the new memory_* progressive
+    tools both read this dimension. The body is unchanged (legacy
+    retrieval / display still works).
+
+    Backwards-compat: callers that don't pass ``target_session_id``
+    get the old behavior (no structured metadata). Production call
+    sites (``SendDirectMessageInternalTool`` /
+    ``SendDirectMessageExternalTool``) all pass it.
 
     Non-critical: any failure (missing agent, missing memory manager,
     record_message exception) is swallowed so tool execution keeps
-    working. See ``dev_docs/20260421_1/analysis/01`` § 3.
+    working. See ``dev_docs/20260421_1/analysis/01`` § 3 for the
+    backstory.
 
     Args:
         session_id: Caller's own session id.
@@ -122,16 +173,44 @@ def _record_dm_on_sender_stm(
             — used to make the STM line self-describing.
         channel: ``"internal"`` for counterpart DMs,
             ``"external"`` for addressed DMs.
+        target_session_id: Canonical session id of the recipient. When
+            provided, structured InteractionEvent metadata is emitted.
     """
     try:
-        agent = _get_agent_manager().get_agent(session_id)
+        manager = _get_agent_manager()
+        agent = manager.get_agent(session_id)
         if agent is None:
             return
         memory = getattr(agent, "_memory_manager", None)
         if memory is None:
             return
+
         body = f"[DM to {target_label} ({channel})]: {content}"
-        memory.record_message("assistant_dm", body[:10000])
+
+        metadata = None
+        if target_session_id:
+            target_agent = (
+                manager.get_agent(target_session_id)
+                or manager.resolve_session(target_session_id)
+            )
+            from service.memory.interaction_event import (
+                Direction,
+                make_event_metadata,
+            )
+            kind, counterpart_role = _classify_outgoing_dm(
+                sender_agent=agent,
+                target_agent=target_agent,
+                target_session_id=target_session_id,
+                body=content,
+            )
+            metadata = make_event_metadata(
+                kind=kind,
+                direction=Direction.OUT,
+                counterpart_id=target_session_id,
+                counterpart_role=counterpart_role,
+            )
+
+        memory.record_message("assistant_dm", body[:10000], metadata=metadata)
     except Exception:
         logger.debug(
             "Failed to record outgoing DM on sender STM — non-critical",
@@ -879,6 +958,7 @@ class SendDirectMessageExternalTool(BaseTool):
                 content=content.strip(),
                 target_label=target.session_name or resolved_id,
                 channel="external",
+                target_session_id=resolved_id,
             )
 
         return json.dumps({
@@ -1005,6 +1085,7 @@ class SendDirectMessageInternalTool(BaseTool):
             content=body,
             target_label=target.session_name or resolved_id,
             channel="internal",
+            target_session_id=resolved_id,
         )
 
         return json.dumps(

@@ -201,23 +201,41 @@ class SessionMemoryManager:
         self,
         role: str,
         content: str,
-        **metadata: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+        **extra: Any,
     ) -> None:
         """Record a conversation message to short-term memory.
 
+        Cycle 20260430_2 added the canonical *InteractionEvent* schema
+        (``service.memory.interaction_event.make_event_metadata``).
+        Callers pass the helper's output as ``metadata=...``; the legacy
+        variadic ``**extra`` form is kept as a backwards-compat tail
+        for the very small number of pre-cycle call sites that pass
+        bare kwargs (none in current code, but the door stays open).
+        Both forms merge into a single dict; ``extra`` losers ties on
+        key collisions so explicit ``metadata`` always wins.
+
         Args:
-            role: "user" | "assistant" | "system"
+            role: "user" | "assistant" | "system" | "internal_trigger"
+                | "assistant_dm" — see ``_classify_input_role``.
             content: Message content.
-            **metadata: Extra metadata fields.
+            metadata: Optional structured metadata dict (e.g. the output
+                of ``make_event_metadata``).
+            **extra: Legacy variadic metadata kwargs.
         """
-        meta = metadata if metadata else None
+        meta: Dict[str, Any] = {}
+        if extra:
+            meta.update(extra)
+        if metadata:
+            meta.update(metadata)
+        out_meta: Optional[Dict[str, Any]] = meta if meta else None
         try:
             from service.memory_provider.adapters.stm_adapter import try_record_message
-            if try_record_message(self._session_id, role, content, meta):
+            if try_record_message(self._session_id, role, content, out_meta):
                 return
         except Exception as exc:
             logger.warning(f"STM provider adapter failed, using legacy path: {exc}")
-        self._stm.add_message(role, content, metadata=meta)
+        self._stm.add_message(role, content, metadata=out_meta)
 
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""

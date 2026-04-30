@@ -37,13 +37,22 @@ from tools.built_in.geny_tools import (
 class _FakeMemoryManager:
     def __init__(self) -> None:
         self.messages: List[Tuple[str, str]] = []
+        self.metadata_log: List[Any] = []
 
-    def record_message(self, role: str, content: str) -> None:
+    def record_message(
+        self, role: str, content: str, metadata=None, **extra
+    ) -> None:
+        meta: Dict[str, Any] = dict(extra) if extra else {}
+        if metadata:
+            meta.update(metadata)
         self.messages.append((role, content))
+        self.metadata_log.append(meta or None)
 
 
 class _ExplodingMemoryManager:
-    def record_message(self, role: str, content: str) -> None:
+    def record_message(
+        self, role: str, content: str, metadata=None, **extra
+    ) -> None:
         raise RuntimeError("stm down")
 
 
@@ -54,11 +63,13 @@ class _FakeAgent:
         *,
         session_name: str = "Agent",
         linked_session_id: str = "",
+        session_type: str = "",
         memory: Any = None,
     ) -> None:
         self.session_id = session_id
         self.session_name = session_name
         self._linked_session_id = linked_session_id
+        self._session_type = session_type
         self._memory_manager = memory
 
 
@@ -115,12 +126,14 @@ def patched_world(monkeypatch):
         "vtuber-1",
         session_name="testsa",
         linked_session_id="sub-1",
+        session_type="vtuber",
         memory=vtuber_mem,
     )
     sub = _FakeAgent(
         "sub-1",
         session_name="Sub-Worker",
         linked_session_id="vtuber-1",
+        session_type="sub",
         memory=sub_mem,
     )
     colleague = _FakeAgent(
@@ -321,3 +334,115 @@ def test_external_tool_unknown_target_no_record(patched_world) -> None:
     assert '"error"' in out
     assert patched_world["vtuber_mem"].messages == []
     assert patched_world["inbox"].delivered == []
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cycle 20260430_2 A2 — InteractionEvent metadata on outgoing DM
+# ─────────────────────────────────────────────────────────────────
+
+
+def _meta_at(mem: _FakeMemoryManager, idx: int) -> Dict[str, Any]:
+    """Convenience accessor — metadata recorded for the *idx*-th
+    record_message call."""
+    assert idx < len(mem.metadata_log), (
+        f"no record at idx {idx} (recorded={len(mem.metadata_log)})"
+    )
+    meta = mem.metadata_log[idx]
+    assert isinstance(meta, dict), (
+        "Cycle 20260430_2 invariant — outgoing DM metadata must always be "
+        f"populated, got {meta!r}"
+    )
+    return meta
+
+
+def test_internal_tool_metadata_paired_vtuber_to_sub_is_task_request(
+    patched_world,
+) -> None:
+    """VTuber → bound Sub-Worker counterpart-DM with a plain task body
+    must record ``kind=task_request`` + ``counterpart_role=paired_subworker``
+    so retrieval / progressive memory tools can slice the stream."""
+    tool = SendDirectMessageInternalTool()
+    tool.run(session_id="vtuber-1", content="please write notes.md")
+
+    meta = _meta_at(patched_world["vtuber_mem"], 0)
+    assert meta["kind"] == "task_request"
+    assert meta["direction"] == "out"
+    assert meta["counterpart_id"] == "sub-1"
+    assert meta["counterpart_role"] == "paired_subworker"
+    assert isinstance(meta["event_id"], str) and meta["event_id"]
+
+
+def test_internal_tool_metadata_paired_sub_to_vtuber_subworker_result_is_task_result(
+    patched_world,
+) -> None:
+    """Sub-Worker → bound VTuber with ``[SUB_WORKER_RESULT]`` body
+    flips to ``kind=task_result`` + ``counterpart_role=paired_vtuber``."""
+    tool = SendDirectMessageInternalTool()
+    tool.run(
+        session_id="sub-1",
+        content="[SUB_WORKER_RESULT]\nstatus: ok\nsummary: wrote notes.md",
+    )
+
+    meta = _meta_at(patched_world["sub_mem"], 0)
+    assert meta["kind"] == "task_result"
+    assert meta["direction"] == "out"
+    assert meta["counterpart_id"] == "vtuber-1"
+    assert meta["counterpart_role"] == "paired_vtuber"
+
+
+def test_internal_tool_metadata_paired_sub_to_vtuber_plain_is_dm(
+    patched_world,
+) -> None:
+    """Sub-Worker → bound VTuber with a plain (non-SUB_WORKER_RESULT)
+    body stays as ``kind=dm`` but keeps ``counterpart_role=paired_vtuber``
+    so the relationship dimension is preserved."""
+    tool = SendDirectMessageInternalTool()
+    tool.run(session_id="sub-1", content="hello — quick question")
+
+    meta = _meta_at(patched_world["sub_mem"], 0)
+    assert meta["kind"] == "dm"
+    assert meta["counterpart_role"] == "paired_vtuber"
+
+
+def test_external_tool_metadata_unrelated_target_is_peer_dm(
+    patched_world,
+) -> None:
+    """Addressed DM to an unrelated session collapses to
+    ``kind=dm`` + ``counterpart_role=peer`` regardless of session type."""
+    tool = SendDirectMessageExternalTool()
+    tool.run(
+        target_session_id="coll-1",
+        content="quick question",
+        sender_session_id="vtuber-1",
+        sender_name="testsa",
+    )
+
+    meta = _meta_at(patched_world["vtuber_mem"], 0)
+    assert meta["kind"] == "dm"
+    assert meta["direction"] == "out"
+    assert meta["counterpart_id"] == "coll-1"
+    assert meta["counterpart_role"] == "peer"
+
+
+def test_record_helper_legacy_signature_keeps_working(patched_world) -> None:
+    """Backwards-compat — callers that don't pass ``target_session_id``
+    still record the body as before, just without InteractionEvent
+    metadata. This protects unit tests / scripts that called the
+    helper with the pre-cycle signature."""
+    from tools.built_in.geny_tools import _record_dm_on_sender_stm
+
+    _record_dm_on_sender_stm(
+        session_id="vtuber-1",
+        content="legacy",
+        target_label="Sub-Worker",
+        channel="internal",
+        # NOTE: no target_session_id
+    )
+    assert patched_world["vtuber_mem"].messages == [
+        ("assistant_dm", "[DM to Sub-Worker (internal)]: legacy"),
+    ]
+    # Metadata must be None (legacy fallback path) — this is the only
+    # branch where invariant 2 (metadata always populated) is relaxed,
+    # and only for legacy-shape callers. Production call sites all
+    # pass target_session_id.
+    assert patched_world["vtuber_mem"].metadata_log == [None]
