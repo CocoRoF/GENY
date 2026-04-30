@@ -15,6 +15,13 @@ All four are optional. When none exist, the loader returns an empty
 list — every tool stays allowed by default and the executor's matrix
 becomes a no-op. This matches the executor's convention: the rule
 file's *absence* is a signal, not an error.
+
+Phase 9.9.2 — :func:`install_permission_rules` accepts an optional
+``host_selection`` parameter (the env manifest's
+``host_selections.permissions`` list). When given, rules whose id is
+not in the selection are filtered out before they reach the executor.
+The id format matches the frontend's :func:`permissionId` helper:
+``f"{tool_name}::{pattern or '*'}::{behavior}"``.
 """
 
 from __future__ import annotations
@@ -25,6 +32,66 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def rule_id(tool_name: str, pattern: Optional[str], behavior: str) -> str:
+    """Stable id for a permission rule. Mirrors the frontend's
+    ``permissionId()`` so manifest selections written from the UI map
+    1:1 to backend filtering.
+    """
+    return f"{tool_name}::{pattern or '*'}::{behavior}"
+
+
+def _rule_id_from_obj(rule) -> str:
+    """Extract a stable id from a parsed ``PermissionRule``. Behavior is
+    stored as an Enum on the executor object — coerce to its string
+    value so the id matches the frontend's ``permissionId()``."""
+    behavior = getattr(rule, "behavior", None)
+    behavior_str = (
+        behavior.value
+        if hasattr(behavior, "value")
+        else str(behavior or "ask").lower()
+    )
+    return rule_id(
+        getattr(rule, "tool_name", "*"),
+        getattr(rule, "pattern", None),
+        behavior_str,
+    )
+
+
+def _apply_host_selection(rules: List, selection: Optional[List[str]]) -> List:
+    """Filter ``rules`` by the manifest's ``host_selections.permissions``.
+
+    Mirrors :meth:`HostSelections.resolve` semantics:
+        ``None`` or ``["*"]`` → keep all rules (wildcard / forward-compat).
+        ``[]``               → empty list (explicit opt-out).
+        literal list         → keep rules whose id is in the list.
+
+    Names listed in the selection but not present in the host registry
+    are dropped silently — the manifest may outlive a host registration
+    and the runtime should keep working.
+    """
+    if selection is None:
+        return rules
+    if selection == ["*"]:
+        return rules
+    if not selection:
+        return []
+    wanted = set(selection)
+    kept: List = []
+    dropped = 0
+    for r in rules:
+        if _rule_id_from_obj(r) in wanted:
+            kept.append(r)
+        else:
+            dropped += 1
+    if dropped:
+        logger.info(
+            "install_permission_rules: host_selection filtered %d rule(s) "
+            "(kept %d, dropped %d)",
+            len(rules), len(kept), dropped,
+        )
+    return kept
 
 PERMISSION_MODES = ("advisory", "enforce")
 _DEFAULT_MODE = "advisory"
@@ -203,7 +270,9 @@ def _load_from_settings_section() -> Optional[List]:
     return out
 
 
-def install_permission_rules() -> Tuple[List, str]:
+def install_permission_rules(
+    host_selection: Optional[List[str]] = None,
+) -> Tuple[List, str]:
     """Resolve and load every permission rule source into a flat list.
 
     PR-D.2.1 — dual-read priority:
@@ -214,6 +283,11 @@ def install_permission_rules() -> Tuple[List, str]:
     to delete the yaml after migration) the yaml is logged with a
     deprecation hint but its rules are NOT merged — settings.json is
     the single source of truth.
+
+    Phase 9.9.2 — when ``host_selection`` is provided (the manifest's
+    ``host_selections.permissions``), rules whose id is not in the
+    selection are filtered out. ``None`` and ``["*"]`` are treated as
+    wildcard (keep all). An empty list opts out of every rule.
 
     Failures degrade to an empty list with a warning; ``GENY_PERMISSIONS_STRICT=1``
     re-raises instead.
@@ -231,12 +305,13 @@ def install_permission_rules() -> Tuple[List, str]:
                 "legacy yaml files still present (consider deleting after "
                 "verifying the migration)",
             )
-        if settings_rules:
+        filtered = _apply_host_selection(settings_rules, host_selection)
+        if filtered:
             logger.info(
                 "install_permission_rules: %d rule(s) total from settings.json, mode=%s",
-                len(settings_rules), mode,
+                len(filtered), mode,
             )
-        return settings_rules, mode
+        return filtered, mode
 
     # Legacy yaml flow.
     try:
@@ -275,6 +350,7 @@ def install_permission_rules() -> Tuple[List, str]:
             )
             rules.extend(loaded)
 
+    rules = _apply_host_selection(rules, host_selection)
     if rules:
         logger.info(
             "install_permission_rules: %d rule(s) total, mode=%s",
@@ -283,7 +359,7 @@ def install_permission_rules() -> Tuple[List, str]:
     return rules, mode
 
 
-def attach_kwargs() -> dict:
+def attach_kwargs(host_selection: Optional[List[str]] = None) -> dict:
     """Convenience for ``agent_session._build_pipeline``.
 
     Returns the ``{permission_rules, permission_mode}`` kwargs subset,
@@ -295,8 +371,11 @@ def attach_kwargs() -> dict:
     env_sync). The kwarg name matches what the executor's
     Pipeline.attach_runtime accepts after 1.2.0; older executors that
     don't recognise it still work because the runner accepts **kwargs.
+
+    Phase 9.9.2 — ``host_selection`` is forwarded so per-env manifest
+    narrowing actually shrinks the rule set passed to the executor.
     """
-    rules, mode = install_permission_rules()
+    rules, mode = install_permission_rules(host_selection=host_selection)
     if not rules:
         return {}
     out = {"permission_rules": rules, "permission_mode": mode}
@@ -386,6 +465,7 @@ __all__ = [
     "attach_kwargs",
     "install_permission_rules",
     "permissions_yaml_path",
+    "rule_id",
 ]
 
 

@@ -17,11 +17,12 @@
  *     4. Geny Built-in        → GenyToolsExplorer     (manifest.tools.external)
  *     5. MCP                  → MCPServerEditor       (manifest.tools.mcp_servers)
  *     6. 훅                   → HookEnvPicker         (manifest.host_selections.hooks)
- *     7. 권한 (preview)       → PermissionEnvPicker   (manifest.host_selections.permissions)
+ *     7. 권한                 → PermissionEnvPicker   (manifest.host_selections.permissions)
  *     8. 스킬                 → SkillEnvPicker        (manifest.host_selections.skills)
  *
- * Permission narrowing is recorded in the manifest but not yet
- * enforced runtime-side; the picker is disabled and labelled.
+ * Phase 9.9 — permission narrowing is now wired through the backend
+ * (`install_permission_rules(host_selection=...)`); the picker fetches
+ * real host rules + persists to the manifest.
  *
  * The new-draft seeder (`seedDefaultToolLists` in the draft store)
  * pre-populates `host_selections.{hooks,skills,permissions}` from

@@ -11,14 +11,15 @@
  * registry; these pickers only choose which subset is active in the
  * current environment.
  *
- * Permissions picker is intentionally a placeholder — the runtime
- * does not yet enforce env-level permission narrowing. The UI ships
- * so manifests written today are forward-compatible; the picker is
- * disabled and labelled as such.
+ * Phase 9.9.1 — the permissions picker, previously a disabled
+ * mockup, now fetches real rules from `/api/permissions/list` and
+ * persists selections that the backend honours via
+ * `service.permission.install_permission_rules(host_selection=...)`.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { agentApi } from '@/lib/api';
+import { permissionId } from '@/lib/envDefaultsApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import HostEnvSelectionPicker, {
   type HostItem,
@@ -163,69 +164,85 @@ export function SkillEnvPicker() {
   );
 }
 
-// ── Permissions (mockup) ──────────────────────────────────────
+// ── Permissions ───────────────────────────────────────────────
 
 /**
- * Permissions picker is not yet wired to runtime enforcement — the
- * field exists in `manifest.host_selections.permissions` so manifests
- * written today are forward-compatible, but the executor does not
- * intersect host permission rules with the env selection. The picker
- * renders disabled with mock items so the UX shape is visible.
+ * PermissionEnvPicker — fetches the cascade-merged permission rules
+ * (host settings.json + project + local) and lets the operator pick
+ * a per-env subset. Selection is persisted to
+ * `manifest.host_selections.permissions` and the backend
+ * `install_permission_rules()` honours it at session boot.
  *
- * When real enforcement lands, drop the mock data + flip `disabled`
- * to false and wire to `/api/permissions/list`.
+ * Each rule's id is computed via `permissionId()` (matches the host
+ * tab's EnvDefaultStarToggle ids — same `tool::pattern::behavior`
+ * shape the backend filter uses).
  */
 export function PermissionEnvPicker() {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patch = useEnvironmentDraftStore((s) => s.patchHostSelections);
+
+  const [items, setItems] = useState<HostItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setErrorText(null);
+    try {
+      const res = await agentApi.permissionsList();
+      const next: HostItem[] = (res.rules ?? []).map((r) => {
+        const id = permissionId({
+          tool_name: r.tool_name,
+          pattern: r.pattern,
+          behavior: r.behavior,
+        });
+        const headline = r.pattern
+          ? `${r.tool_name} · ${r.pattern}`
+          : `${r.tool_name} · *`;
+        const tone =
+          r.behavior === 'allow'
+            ? ('good' as const)
+            : r.behavior === 'deny'
+              ? ('warn' as const)
+              : ('neutral' as const);
+        return {
+          id,
+          label: headline,
+          description: r.reason ?? undefined,
+          badges: [
+            { text: r.behavior, tone },
+            ...(r.source
+              ? [{ text: r.source, tone: 'neutral' as const }]
+              : []),
+          ],
+        };
+      });
+      setItems(next);
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : String(err));
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const value = useMemo(
     () => draft?.host_selections?.permissions ?? ['*'],
     [draft],
   );
 
-  // Mock items — shape mirrors what /api/permissions/list returns
-  // (rule per row), so the UI doesn't have to change when the real
-  // fetch lands.
-  const items: HostItem[] = [
-    {
-      id: 'rule:Read:*',
-      label: 'Read: *',
-      description: '모든 경로의 Read 도구 허용',
-      badges: [{ text: 'allow', tone: 'good' }],
-    },
-    {
-      id: 'rule:Bash:rm',
-      label: 'Bash: rm',
-      description: 'rm 시작 명령 차단',
-      badges: [{ text: 'deny', tone: 'warn' }],
-    },
-    {
-      id: 'rule:Write:./',
-      label: 'Write: ./',
-      description: '워크스페이스 내부 Write만 허용',
-      badges: [{ text: 'allow', tone: 'good' }],
-    },
-  ];
-
   return (
-    <div className="flex flex-col gap-2">
-      <div className="px-3 py-2 rounded-md border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
-        <span className="font-semibold uppercase tracking-wider mr-2">
-          Preview
-        </span>
-        권한 영역의 env-level subset 선택은 매니페스트에 저장되지만 현재
-        executor가 강제하지 않습니다. UI는 향후 enforcement가 들어올 때
-        manifest 호환성이 유지되도록 미리 노출 — 실제 동작은 호스트의
-        settings.json이 그대로 적용됩니다.
-      </div>
-      <HostEnvSelectionPicker
-        items={items}
-        value={value}
-        onChange={(next) => patch({ permissions: next })}
-        itemNoun="권한 룰"
-        disabled
-      />
-    </div>
+    <HostEnvSelectionPicker
+      items={items}
+      value={value}
+      onChange={(next) => patch({ permissions: next })}
+      itemNoun="권한 룰"
+      loading={loading}
+      errorText={errorText}
+    />
   );
 }

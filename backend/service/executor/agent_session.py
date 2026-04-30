@@ -1000,7 +1000,13 @@ class AgentSession:
             try:
                 from service.permission.install import install_permission_rules
 
-                rules, mode = install_permission_rules()
+                # Phase 9.9.2 — re-apply manifest narrowing on every
+                # runtime refresh so settings.json edits + manifest
+                # selection both flow into the live session.
+                host_perm_selection = self._load_permission_host_selection()
+                rules, mode = install_permission_rules(
+                    host_selection=host_perm_selection,
+                )
                 setter = getattr(pipeline, "_set_tool_stage_permission_matrix", None)
                 if setter is not None:
                     setter(permission_rules=rules, permission_mode=mode)
@@ -1139,6 +1145,49 @@ class AgentSession:
                 "[%s] runtime refresh: no AffectTagEmitter on chain — skipped",
                 self._session_id,
             )
+
+    def _load_permission_host_selection(self) -> Optional[List[str]]:
+        """Read the env manifest's ``host_selections.permissions`` list.
+
+        Phase 9.9.2 — used by ``_build_pipeline`` and the runtime
+        refresh path so per-env narrowing of the host's permission
+        rules takes effect. Returns:
+
+            ``None`` — no manifest available (legacy / pre-1.3.3 envs);
+                       the caller treats this as wildcard (keep all).
+            ``["*"]`` — explicit wildcard (forward-compat; keep all
+                        plus future host additions).
+            ``[]`` — opt out of every rule.
+            literal list — only rules whose id is in the list survive.
+
+        Failures degrade silently to ``None`` — the runtime should
+        never fail to boot because the manifest read hiccupped.
+        """
+        if not self._env_id:
+            return None
+        try:
+            from service.environment.service import get_environment_service
+
+            svc = get_environment_service()
+            manifest = svc.load_manifest(self._env_id) if svc else None
+        except Exception:
+            logger.debug(
+                "_load_permission_host_selection: manifest read failed "
+                "for env_id=%s; treating as wildcard",
+                self._env_id,
+                exc_info=True,
+            )
+            return None
+        if manifest is None:
+            return None
+        sel = getattr(
+            getattr(manifest, "host_selections", None),
+            "permissions",
+            None,
+        )
+        if sel is None:
+            return None
+        return list(sel)
 
     def _apply_session_limits_to_pipeline(self) -> None:
         """B.1 (cycle 20260426_1) — bridge UI session limits into the
@@ -1520,9 +1569,17 @@ class AgentSession:
         # working. Mode defaults to "advisory" — G6.4 flips
         # worker_adaptive to "enforce" once the timeline UI shows the
         # permission.* events.
+        #
+        # Phase 9.9.2 — load the manifest's
+        # ``host_selections.permissions`` so per-env narrowing actually
+        # shrinks the rule set. ``None`` here means "no manifest
+        # available" → wildcard / keep all.
         try:
             from service.permission import install as _perm_install
-            attach_kwargs.update(_perm_install.attach_kwargs())
+            host_perm_selection = self._load_permission_host_selection()
+            attach_kwargs.update(
+                _perm_install.attach_kwargs(host_selection=host_perm_selection)
+            )
         except Exception:
             logger.debug(
                 "_build_pipeline: permission install failed; continuing without rules",
