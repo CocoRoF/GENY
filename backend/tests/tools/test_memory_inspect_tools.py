@@ -25,6 +25,7 @@ import pytest
 from tools.built_in import memory_inspect_tools
 from tools.built_in.memory_inspect_tools import (
     MemoryStatusTool,
+    MemoryWithTool,
     _resolve_counterpart_id,
 )
 
@@ -300,4 +301,110 @@ def test_status_unknown_session_returns_error(world) -> None:
 def test_status_caller_without_memory_manager_returns_error(world) -> None:
     world["vtuber"]._memory_manager = None
     out = _run_status(MemoryStatusTool())
+    assert "error" in out
+
+
+# ─────────────────────────────────────────────────────────────────
+# memory_with — L1
+# ─────────────────────────────────────────────────────────────────
+
+
+def _run_with(tool: MemoryWithTool, **kw) -> Dict[str, Any]:
+    out = tool.run(session_id=kw.pop("session_id", "vtuber-1"), **kw)
+    return json.loads(out)
+
+
+def test_with_returns_paired_subworker_events_newest_first(world) -> None:
+    out = _run_with(MemoryWithTool(), counterpart="paired_subworker")
+    assert out["counterpart_id"] == "sub-1"
+    ids = [e["event_id"] for e in out["events"]]
+    # Seeded order: REQ-1 (older), RUN-1 (newer). Expect newest first.
+    assert ids == ["EVT-RUN-1", "EVT-REQ-1"]
+
+
+def test_with_filters_by_kind(world) -> None:
+    out = _run_with(
+        MemoryWithTool(),
+        counterpart="paired_subworker",
+        kinds=["tool_run_summary"],
+    )
+    assert [e["kind"] for e in out["events"]] == ["tool_run_summary"]
+
+
+def test_with_filters_by_user(world) -> None:
+    out = _run_with(MemoryWithTool(), counterpart="user")
+    assert out["counterpart_id"] == "owner:alice"
+    ids = [e["event_id"] for e in out["events"]]
+    assert ids == ["EVT-USER-1"]
+
+
+def test_with_returns_empty_for_unpaired_alias(world) -> None:
+    world["vtuber"]._linked_session_id = ""
+    out = _run_with(MemoryWithTool(), counterpart="paired_subworker")
+    assert out["counterpart_id"] is None
+    assert out["events"] == []
+
+
+def test_with_clamps_limit(world) -> None:
+    """Out-of-range limits clamp to [1, _MAX_WITH_LIMIT] without raising."""
+    out = _run_with(MemoryWithTool(), counterpart="paired_subworker", limit=999)
+    # We only seeded 2 events for sub-1; clamp doesn't add events out of thin air.
+    assert len(out["events"]) == 2
+    out2 = _run_with(MemoryWithTool(), counterpart="paired_subworker", limit=0)
+    # 0 → clamps to 1
+    assert len(out2["events"]) == 1
+
+
+def test_with_since_event_id_excludes_anchor_and_older(world) -> None:
+    """`since=<event_id>` returns only events strictly *after* that
+    anchor's timestamp. Need timestamps for that — seed them."""
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc)
+    sub_entries = world["vtuber"]._memory_manager._stm._entries
+    sub_entries[0]["timestamp"] = base
+    sub_entries[1]["timestamp"] = base + timedelta(seconds=10)
+    sub_entries[2]["timestamp"] = base + timedelta(seconds=20)
+    out = _run_with(
+        MemoryWithTool(),
+        counterpart="paired_subworker",
+        since="EVT-REQ-1",
+    )
+    ids = [e["event_id"] for e in out["events"]]
+    assert ids == ["EVT-RUN-1"]
+
+
+def test_with_since_iso_timestamp_supported(world) -> None:
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc)
+    sub_entries = world["vtuber"]._memory_manager._stm._entries
+    sub_entries[0]["timestamp"] = base
+    sub_entries[1]["timestamp"] = base + timedelta(seconds=10)
+    sub_entries[2]["timestamp"] = base + timedelta(seconds=20)
+    cutoff = (base + timedelta(seconds=15)).isoformat()
+    out = _run_with(
+        MemoryWithTool(),
+        counterpart="paired_subworker",
+        since=cutoff,
+    )
+    ids = [e["event_id"] for e in out["events"]]
+    assert ids == ["EVT-RUN-1"]
+
+
+def test_with_skips_legacy_entries(world) -> None:
+    """Pre-cycle STM lines (no event_id) must not show up — we have
+    nothing to drill into."""
+    sub_entries = world["vtuber"]._memory_manager._stm._entries
+    sub_entries.append({
+        "content": "[user] legacy",
+        "metadata": {"role": "user"},  # no event_id
+    })
+    out = _run_with(MemoryWithTool(), counterpart="user")
+    ids = [e["event_id"] for e in out["events"]]
+    assert "EVT-USER-1" in ids
+    # legacy entry has no event_id so it doesn't appear
+    assert all(eid for eid in ids)
+
+
+def test_with_unknown_session_returns_error(world) -> None:
+    out = _run_with(MemoryWithTool(), session_id="ghost", counterpart="user")
     assert "error" in out
