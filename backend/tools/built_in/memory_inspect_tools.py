@@ -456,8 +456,113 @@ def _resolve_since_cutoff(entries: List[Any], since: str):
         return None
 
 
+# ─── B3 — memory_event ──────────────────────────────────────────────
+
+
+class MemoryEventTool(BaseTool):
+    """Full payload for one InteractionEvent.
+
+    The L2 step of the progressive ladder — call after
+    ``memory_status`` / ``memory_with`` give you an ``event_id``.
+    Returns the event's structured metadata + payload + any linked
+    parent (e.g. the ``task_request`` that a ``tool_run_summary``
+    points back to).
+    """
+
+    name = "memory_event"
+    description = (
+        "Drill into a single interaction event by its event_id. "
+        "Returns full metadata, structured payload (e.g. for "
+        "tool_run_summary: tools_used, files_written, "
+        "bash_commands, errors, duration_ms), and the linked "
+        "parent event when present (e.g. the originating "
+        "task_request for a tool_run_summary). Use after "
+        "memory_status / memory_with when the user wants the "
+        "details of a specific interaction."
+    )
+    CAPABILITIES = _LOOKUP
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": (
+                        "Event id from memory_status.last_event.event_id "
+                        "or memory_with.events[].event_id."
+                    ),
+                },
+            },
+            "required": ["event_id"],
+        }
+
+    def run(self, session_id: str, event_id: str) -> str:
+        caller = _get_caller(session_id)
+        if caller is None:
+            return _error(f"caller session not found: {session_id}")
+        memory = getattr(caller, "_memory_manager", None)
+        if memory is None:
+            return _error("caller has no memory manager")
+        if not event_id or not isinstance(event_id, str):
+            return _error("event_id required")
+
+        entries = _stm_load_all(memory)
+        match_entry, match_meta = _find_event_by_id(entries, event_id)
+        if match_entry is None:
+            return _error(f"event not found: {event_id}")
+
+        event_block = _detailed_event(match_entry, match_meta)
+
+        linked: Dict[str, Any] = {}
+        parent_id = match_meta.get("linked_event_id")
+        if parent_id:
+            parent_entry, parent_meta = _find_event_by_id(entries, parent_id)
+            if parent_entry is not None:
+                linked["parent"] = _summarise_event(parent_entry, parent_meta)
+            else:
+                linked["parent"] = {"event_id": parent_id, "missing": True}
+
+        return _ok({"event": event_block, "linked": linked})
+
+
+def _find_event_by_id(
+    entries: List[Any], event_id: str,
+) -> Tuple[Optional[Any], Dict[str, Any]]:
+    """Linear scan of STM for a specific event_id. Returns
+    (entry, metadata) or (None, {})."""
+    for entry in entries:
+        meta = _entry_meta(entry)
+        if meta.get("event_id") == event_id:
+            return entry, meta
+    return None, {}
+
+
+def _detailed_event(entry, meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Full-fat representation used by ``memory_event``.
+
+    Includes everything that's safe to surface to the LLM —
+    metadata + payload + content + ts. Caller is the only one
+    reading its own STM, so no scrubbing is needed.
+    """
+    payload = meta.get("payload") if isinstance(meta.get("payload"), dict) else {}
+    return {
+        "event_id": meta.get("event_id"),
+        "ts": _ts_iso(entry),
+        "kind": meta.get("kind"),
+        "direction": meta.get("direction"),
+        "counterpart_id": meta.get("counterpart_id"),
+        "counterpart_role": meta.get("counterpart_role"),
+        "linked_event_id": meta.get("linked_event_id"),
+        "content": getattr(entry, "content", "") or "",
+        "payload": payload,
+    }
+
+
 # Module-level export consumed by ToolLoader (Stage D wires this up).
 TOOLS = [
     MemoryStatusTool(),
     MemoryWithTool(),
+    MemoryEventTool(),
 ]
