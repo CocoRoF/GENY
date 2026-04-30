@@ -41,6 +41,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Copy,
   Cpu,
   Eye,
   EyeOff,
@@ -66,6 +67,7 @@ import {
 } from '@/components/ui/select';
 import { skillsApi, type SkillDetail, type SkillTestResponse } from '@/lib/api';
 import RegistryFormShell from '@/components/env_management/registry/RegistryFormShell';
+import ToolPickerField from './ToolPickerField';
 
 // ─────────────────────────────────────────────────────────────
 // Form state model
@@ -212,23 +214,48 @@ function detailToForm(d: SkillDetail): FormState {
 // Public API
 // ─────────────────────────────────────────────────────────────
 
+/** Phase X — three modes:
+ *
+ *  • `create` — empty form for a brand-new user skill.
+ *  • `edit`   — populated form for an existing user skill (the
+ *               operator owns it, all fields editable).
+ *  • `view`   — read-only inspection of any skill (executor /
+ *               geny / mcp / user). All inputs disabled, save
+ *               button hidden, "복사하기" button visible to fork
+ *               the skill into a new user-editable copy.
+ */
+export type SkillFormMode = 'create' | 'edit' | 'view';
+
 export interface SkillFormModalProps {
-  editingExisting: boolean;
-  /** Initial detail (edit mode). */
+  /** New tri-state mode (preferred). When omitted, the legacy
+   *  `editingExisting` boolean is used for backward-compat. */
+  mode?: SkillFormMode;
+  /** Deprecated — use `mode` instead. Retained so callers that
+   *  pre-date the View/Copy work keep building. `true` →
+   *  `mode: 'edit'`, `false` → `mode: 'create'`. */
+  editingExisting?: boolean;
+  /** Initial detail (edit + view + copy-prefill). */
   initialDetail?: SkillDetail | null;
   saving: boolean;
   error?: string | null;
   onClose: () => void;
   onSubmit: (payload: SkillFormSubmit) => void;
+  /** Fired when the operator clicks "복사하기" in view mode. The
+   *  parent receives the source detail so it can re-open the modal
+   *  in `create` mode with pre-populated state. Optional — when
+   *  omitted, the copy button is hidden. */
+  onCopy?: (source: SkillDetail) => void;
 }
 
 export default function SkillFormModal({
+  mode: modeProp,
   editingExisting,
   initialDetail,
   saving,
   error: externalError,
   onClose,
   onSubmit,
+  onCopy,
 }: SkillFormModalProps) {
   const { t } = useI18n();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -238,8 +265,15 @@ export default function SkillFormModal({
   const [testResult, setTestResult] = useState<SkillTestResponse | null>(null);
   const [compiledOpen, setCompiledOpen] = useState(false);
 
+  // Derive the active mode. New code passes `mode`; legacy callers
+  // still pass `editingExisting`. View is opt-in via `mode` only.
+  const mode: SkillFormMode =
+    modeProp ?? (editingExisting ? 'edit' : 'create');
+  const readOnly = mode === 'view';
+  const showCopy = readOnly && !!onCopy && !!initialDetail;
+
   useEffect(() => {
-    if (editingExisting && initialDetail) {
+    if (initialDetail && (mode === 'edit' || mode === 'view')) {
       setForm(detailToForm(initialDetail));
     } else {
       setForm(EMPTY_FORM);
@@ -248,7 +282,7 @@ export default function SkillFormModal({
     setAdvancedOpen(false);
     setTestResult(null);
     setCompiledOpen(false);
-  }, [editingExisting, initialDetail]);
+  }, [mode, initialDetail]);
 
   const error = innerError ?? externalError ?? null;
 
@@ -299,11 +333,38 @@ export default function SkillFormModal({
   };
 
   const slashPreview = form.id.trim() || 'your-skill';
-  const title = editingExisting
-    ? t('envManagement.registry.skills.form.editTitle', { id: slashPreview })
-    : t('envManagement.registry.skills.form.createTitle');
+  const title =
+    mode === 'create'
+      ? t('envManagement.registry.skills.form.createTitle')
+      : mode === 'edit'
+        ? t('envManagement.registry.skills.form.editTitle', { id: slashPreview })
+        : t('envManagement.registry.skills.form.viewTitle', {
+            id: slashPreview,
+          });
 
-  const footer = (
+  const footer = readOnly ? (
+    <>
+      <div className="flex-1" />
+      {showCopy && (
+        <button
+          type="button"
+          onClick={() => initialDetail && onCopy?.(initialDetail)}
+          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md border border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300 text-[0.8125rem] font-medium hover:bg-violet-500/15"
+          title={t('envManagement.registry.skills.form.copyHint')}
+        >
+          <Copy className="w-4 h-4" />
+          {t('envManagement.registry.skills.form.copyBtn')}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onClose}
+        className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]"
+      >
+        {t('envManagement.registry.backToList')}
+      </button>
+    </>
+  ) : (
     <>
       <button
         type="button"
@@ -340,7 +401,7 @@ export default function SkillFormModal({
         ) : (
           <>
             <Save className="w-4 h-4" />
-            {editingExisting
+            {mode === 'edit'
               ? t('envManagement.registry.skills.form.editBtn')
               : t('envManagement.registry.skills.form.createBtn')}
           </>
@@ -362,17 +423,24 @@ export default function SkillFormModal({
       <IdentitySection
         form={form}
         setForm={setForm}
-        editingExisting={editingExisting}
+        readOnly={readOnly}
+        idLocked={mode === 'edit' || mode === 'view'}
       />
-      <MetaSection form={form} setForm={setForm} />
-      <ExecutionSection form={form} setForm={setForm} />
-      <ExamplesSection form={form} setForm={setForm} />
-      <BodySection form={form} setForm={setForm} />
+      <MetaSection form={form} setForm={setForm} readOnly={readOnly} />
+      <ExecutionSection form={form} setForm={setForm} readOnly={readOnly} />
+      <ExamplesSection form={form} setForm={setForm} readOnly={readOnly} />
+      <BodySection
+        form={form}
+        setForm={setForm}
+        readOnly={readOnly}
+        previewByDefault={readOnly}
+      />
       <AdvancedSection
         form={form}
         setForm={setForm}
         open={advancedOpen}
         onToggle={() => setAdvancedOpen((v) => !v)}
+        readOnly={readOnly}
       />
 
       {testResult && (
@@ -580,11 +648,13 @@ function Label({
 function IdentitySection({
   form,
   setForm,
-  editingExisting,
+  readOnly,
+  idLocked,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
-  editingExisting: boolean;
+  readOnly: boolean;
+  idLocked: boolean;
 }) {
   const { t } = useI18n();
   const slashId = form.id.trim() || 'your-skill';
@@ -598,7 +668,7 @@ function IdentitySection({
           <Label
             htmlFor="skill-id"
             label={t('envManagement.registry.skills.form.idLabel')}
-            required
+            required={!readOnly}
             hint={t('envManagement.registry.skills.form.idHint', {
               id: slashId,
             })}
@@ -611,7 +681,8 @@ function IdentitySection({
               id="skill-id"
               value={form.id}
               onChange={(e) => setForm({ ...form, id: e.target.value })}
-              disabled={editingExisting}
+              disabled={idLocked}
+              readOnly={readOnly}
               placeholder={t('envManagement.registry.skills.form.idPlaceholder')}
               className="font-mono"
             />
@@ -621,13 +692,15 @@ function IdentitySection({
           <Label
             htmlFor="skill-name"
             label={t('envManagement.registry.skills.form.nameLabel')}
-            required
+            required={!readOnly}
             hint={t('envManagement.registry.skills.form.nameHint')}
           />
           <Input
             id="skill-name"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
+            readOnly={readOnly}
+            disabled={readOnly}
             placeholder={t('envManagement.registry.skills.form.namePlaceholder')}
           />
         </div>
@@ -635,13 +708,15 @@ function IdentitySection({
           <Label
             htmlFor="skill-desc"
             label={t('envManagement.registry.skills.form.descriptionLabel')}
-            required
+            required={!readOnly}
             hint={t('envManagement.registry.skills.form.descriptionHint')}
           />
           <Textarea
             id="skill-desc"
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
+            readOnly={readOnly}
+            disabled={readOnly}
             placeholder={t(
               'envManagement.registry.skills.form.descriptionPlaceholder',
             )}
@@ -661,9 +736,11 @@ function IdentitySection({
 function MetaSection({
   form,
   setForm,
+  readOnly = false,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -682,6 +759,8 @@ function MetaSection({
             id="skill-cat"
             value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
+            readOnly={readOnly}
+            disabled={readOnly}
             placeholder={t('envManagement.registry.skills.form.categoryPlaceholder')}
           />
         </div>
@@ -696,6 +775,7 @@ function MetaSection({
             onValueChange={(v) =>
               setForm({ ...form, effort: v === '__none__' ? '' : v })
             }
+            disabled={readOnly}
           >
             <SelectTrigger id="skill-eff">
               <SelectValue
@@ -720,6 +800,8 @@ function MetaSection({
             id="skill-ver"
             value={form.version}
             onChange={(e) => setForm({ ...form, version: e.target.value })}
+            readOnly={readOnly}
+            disabled={readOnly}
             placeholder={t('envManagement.registry.skills.form.versionPlaceholder')}
             className="font-mono text-[0.75rem]"
           />
@@ -736,9 +818,11 @@ function MetaSection({
 function ExecutionSection({
   form,
   setForm,
+  readOnly = false,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -760,6 +844,8 @@ function ExecutionSection({
               onChange={(e) =>
                 setForm({ ...form, modelOverride: e.target.value })
               }
+              readOnly={readOnly}
+              disabled={readOnly}
               placeholder={t(
                 'envManagement.registry.skills.form.modelOverridePlaceholder',
               )}
@@ -780,6 +866,7 @@ function ExecutionSection({
                   executionMode: v === '__inline__' ? '' : v,
                 })
               }
+              disabled={readOnly}
             >
               <SelectTrigger id="skill-exec">
                 <SelectValue />
@@ -801,14 +888,10 @@ function ExecutionSection({
             label={t('envManagement.registry.skills.form.allowedToolsLabel')}
             hint={t('envManagement.registry.skills.form.allowedToolsHint')}
           />
-          <Input
-            id="skill-tools"
+          <ToolPickerField
             value={form.allowedTools}
-            onChange={(e) => setForm({ ...form, allowedTools: e.target.value })}
-            placeholder={t(
-              'envManagement.registry.skills.form.allowedToolsPlaceholder',
-            )}
-            className="font-mono"
+            onChange={(allowedTools) => setForm({ ...form, allowedTools })}
+            disabled={readOnly}
           />
         </div>
       </div>
@@ -823,9 +906,11 @@ function ExecutionSection({
 function ExamplesSection({
   form,
   setForm,
+  readOnly = false,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -838,6 +923,8 @@ function ExamplesSection({
         id="skill-ex"
         value={form.examples}
         onChange={(e) => setForm({ ...form, examples: e.target.value })}
+        readOnly={readOnly}
+        disabled={readOnly}
         rows={4}
         placeholder={t('envManagement.registry.skills.form.examplesPlaceholder')}
         className="leading-relaxed"
@@ -853,12 +940,16 @@ function ExamplesSection({
 function BodySection({
   form,
   setForm,
+  readOnly = false,
+  previewByDefault = false,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
+  readOnly?: boolean;
+  previewByDefault?: boolean;
 }) {
   const { t } = useI18n();
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(previewByDefault);
 
   const previewToggle = (
     <button
@@ -887,6 +978,8 @@ function BodySection({
       id="skill-body"
       value={form.body}
       onChange={(e) => setForm({ ...form, body: e.target.value })}
+      readOnly={readOnly}
+      disabled={readOnly}
       rows={12}
       placeholder={t('envManagement.registry.skills.form.bodyPlaceholder')}
       className="font-mono text-[0.75rem] leading-relaxed h-full min-h-[18rem]"
@@ -948,11 +1041,13 @@ function AdvancedSection({
   setForm,
   open,
   onToggle,
+  readOnly = false,
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
   open: boolean;
   onToggle: () => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -987,6 +1082,8 @@ function AdvancedSection({
               onChange={(e) =>
                 setForm({ ...form, extrasText: e.target.value })
               }
+              readOnly={readOnly}
+              disabled={readOnly}
               rows={3}
               spellCheck={false}
               placeholder={t('envManagement.registry.skills.form.extrasPlaceholder')}
