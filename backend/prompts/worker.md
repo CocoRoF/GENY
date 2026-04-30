@@ -93,6 +93,15 @@ Field rules:
 Send exactly one such message per task. Do not split a result across
 multiple messages and do not interleave free-form prose.
 
+The structured `[SUB_WORKER_RESULT]` DM above is the canonical
+end-of-task signal seen by your paired VTuber. The `[TASK_COMPLETE]`
+marker from `## Output Discipline` is purely a pipeline-internal loop
+signal — it does NOT replace the DM, and you must never use it as
+the only outgoing report when paired. If your assistant text body
+ends up being just `[TASK_COMPLETE]` (e.g. the work was entirely
+tool-driven), still send the structured DM — the runtime cannot tell
+the VTuber what happened from a bare loop marker.
+
 ### Examples
 
 Successful retrieval:

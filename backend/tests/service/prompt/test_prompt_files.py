@@ -62,6 +62,20 @@ def test_worker_md_forbids_persona_language_in_reply(worker_md: str) -> None:
     assert "no greetings, no persona" in worker_md.lower()
 
 
+def test_worker_md_marks_task_complete_as_loop_internal(
+    worker_md: str,
+) -> None:
+    """Cycle 20260430_1 P1-3 — paired Sub-Worker must be told that
+    ``[TASK_COMPLETE]`` is a pipeline-internal loop signal and does
+    NOT replace the structured DM. Without this clarification a
+    tool-only turn that ends with the bare marker leaves the VTuber
+    with nothing to paraphrase, so the auto-summariser has to step in.
+    """
+    text = worker_md.lower()
+    assert "pipeline-internal loop signal" in text
+    assert "does not replace the dm" in text
+
+
 # ── PR5 vtuber.md — trigger uses structured fields ──────────────────
 
 
@@ -87,6 +101,21 @@ def test_vtuber_md_warns_against_dumping_details(vtuber_md: str) -> None:
     persona doesn't paste raw tool output to the user."""
     snippet = vtuber_md.lower()
     assert "do not dump" in snippet or "do not dump it" in snippet
+
+
+def test_vtuber_md_silent_close_on_unstructured_payload(
+    vtuber_md: str,
+) -> None:
+    """Cycle 20260430_1 P1-3 — VTuber must be told NOT to narrate
+    confusion ("워커가 결과를 돌려줬는데 출력이 없네요" / "no output
+    received") when the SUB_WORKER_RESULT body is plain text or empty.
+    Treating it as a silent close-of-loop preserves character.
+    """
+    text = vtuber_md.lower()
+    assert "silent close-of-loop" in text or "silent close of loop" in text
+    # The famous failure mode the user reported should be explicitly
+    # called out as something to avoid.
+    assert "출력이" in vtuber_md and "없네요" in vtuber_md
 
 
 # ── PR2 vtuber.md — acclimation + naming guidance ───────────────────

@@ -21,6 +21,7 @@ Both ``agent_controller`` (command tab) and ``chat_controller``
 """
 
 import asyncio
+import re
 import time
 import uuid
 from dataclasses import dataclass, asdict, field
@@ -206,6 +207,34 @@ _ARTIFACT_TOOL_KEYS: Dict[str, tuple] = {
 }
 
 
+# Cycle 20260430_1 P1-3 — pipeline-internal loop signals that are
+# meaningful to the executor's stop / continue logic (see
+# ``service/prompt/protocols.py``) but useless to the VTuber. A worker
+# that ends a tool-only turn with nothing but `[TASK_COMPLETE]` should
+# be treated as if it left no narration at all, so the synthesis path
+# in ``_notify_linked_vtuber`` can do its job. The pattern is
+# anchored to first/last so it only strips signals when they are the
+# *only* content (we never alter intentional narration that happens
+# to mention the marker word).
+_LOOP_SIGNAL_PATTERN = re.compile(
+    r"^\s*"
+    r"(?:\[TASK_COMPLETE\]|\[BLOCKED(?::[^\]]*)?\]|\[CONTINUE(?::[^\]]*)?\])"
+    r"\s*$",
+)
+
+
+def _strip_only_loop_signals(text: Optional[str]) -> Optional[str]:
+    """Return ``text`` unchanged unless its entire content reduces to
+    pipeline loop signals — in which case return ``None`` so callers
+    can treat the turn as "no narration".
+    """
+    if not text:
+        return text
+    if _LOOP_SIGNAL_PATTERN.match(text.strip()):
+        return None
+    return text
+
+
 def _extract_artifacts(tool_calls: List[Dict[str, Any]]) -> List[str]:
     """Pull file-path artifacts out of completed tool calls.
 
@@ -383,9 +412,17 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         #      notification entirely instead of forwarding a
         #      meaningless "Task finished with no output." line that
         #      makes the VTuber narrate confusion to the user.
+        # Cycle 20260430_1 P1-3 — pipeline loop signals (`[TASK_COMPLETE]`
+        # / `[CONTINUE: …]` / `[BLOCKED: …]`) sometimes show up as the
+        # entire `result.output` for tool-only turns. They're meaningful
+        # to the executor's stop/continue logic but carry no
+        # user-facing narration; treat them as empty so the synthesis
+        # path can still kick in.
+        meaningful_text = _strip_only_loop_signals(result.output)
+
         content: Optional[str] = None
-        if result.success and result.output and result.output.strip():
-            summary = result.output[:2000]
+        if result.success and meaningful_text and meaningful_text.strip():
+            summary = meaningful_text[:2000]
             content = f"[SUB_WORKER_RESULT] Task completed successfully.\n\n{summary}"
         elif result.success:
             content = _compose_subworker_payload_from_tools(result)
