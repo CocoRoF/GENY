@@ -336,6 +336,70 @@ async def test_notify_linked_vtuber_broadcasts_reply(monkeypatch, patched_world)
 
 
 @pytest.mark.asyncio
+async def test_notify_linked_vtuber_skips_when_nothing_happened(
+    monkeypatch, patched_world
+):
+    """Cycle 20260430_1 P0-3 — a turn that produced no LLM text,
+    no tool calls, and no explicit report has nothing meaningful to
+    forward. The notify path must skip dispatch entirely (and log the
+    decision) instead of leaking the canned "Task finished with no
+    output." line into the chat room."""
+    execute_calls: List[Dict[str, Any]] = []
+
+    async def _track_execute(target: str, content: str, **_kwargs):
+        execute_calls.append({"target": target, "content": content})
+        return ExecutionResult(success=True, session_id=target, output="hi")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _track_execute)
+
+    log_events: List[Dict[str, Any]] = []
+
+    class _StubLogger:
+        def log(self, **kwargs):
+            log_events.append(kwargs)
+
+        def log_delegation_event(self, *_a, **_kw):
+            pass
+
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: _StubLogger()
+    )
+
+    created_tasks: List[asyncio.Task] = []
+    original_create_task = asyncio.create_task
+
+    def _capturing_create_task(coro, *args, **kwargs):
+        task = original_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
+
+    sub_result = ExecutionResult(
+        success=True,
+        session_id="sub-1",
+        output="",
+        duration_ms=10,
+        tool_calls=[],
+    )
+    await agent_executor._notify_linked_vtuber("sub-1", sub_result)
+
+    for task in created_tasks:
+        await task
+
+    assert execute_calls == [], (
+        "_notify_linked_vtuber must NOT dispatch a notification when "
+        "the Sub-Worker turn produced no text, no tools, and no "
+        "explicit report"
+    )
+    assert any(
+        evt.get("metadata", {}).get("event")
+        == "delegation.suppressed_empty_turn"
+        for evt in log_events
+    ), f"Expected empty-turn suppress log, got: {log_events}"
+
+
+@pytest.mark.asyncio
 async def test_notify_linked_vtuber_synthesises_payload_from_tool_calls(
     monkeypatch, patched_world
 ):
