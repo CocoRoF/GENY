@@ -114,29 +114,74 @@ def test_records_without_metadata_when_pending_absent() -> None:
     assert len(mgr.calls) == 2
 
 
-def test_pending_metadata_applies_to_first_user_only() -> None:
-    """If state.messages somehow carries multiple user messages
-    in a single batch (e.g. multi-turn replay), the pending hint
-    should attach to the first only — subsequent users record
-    without metadata so we never invent fake metadata."""
+def test_pending_metadata_threads_through_repeated_role() -> None:
+    """Cycle 20260501_2 F1 — when state.messages carries multiple
+    same-role messages in a single batch (e.g. a VTuber turn that
+    emits two assistant texts), every same-role line is recorded
+    with InteractionEvent metadata. The first reuses the pending
+    hint verbatim; subsequent ones get a *fresh* event_id with the
+    same kind / direction / counterpart_* / linked_event_id /
+    payload — so downstream filters see the line as a same-stream
+    sibling event, not as a metadata-less ghost."""
     mgr = _FakeMemoryManager()
     strategy = _make_strategy(mgr)
 
-    user_meta = {"event_id": "evt-u", "kind": "user_chat", "direction": "in",
-                 "counterpart_id": "owner:alice", "counterpart_role": "user"}
+    assistant_meta = {
+        "event_id": "evt-a-1",
+        "kind": "user_chat",
+        "direction": "out",
+        "counterpart_id": "owner:alice",
+        "counterpart_role": "user",
+        "linked_event_id": "evt-u-1",
+        "payload": {"trigger": "user"},
+    }
     state = _FakeState(
         messages=[
-            {"role": "user", "content": "first"},
-            {"role": "user", "content": "second"},
-            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "first reply"},
+            {"role": "assistant", "content": "second reply"},
         ],
-        metadata={"_pending_message_metadata": {"user": user_meta}},
+        metadata={"_pending_message_metadata": {"assistant": assistant_meta}},
     )
     strategy._record_transcript(state)
 
-    user_records = [c for c in mgr.calls if c["role"] == "user"]
-    assert user_records[0]["metadata"] == user_meta
-    assert user_records[1]["metadata"] is None
+    assistant_records = [c for c in mgr.calls if c["role"] == "assistant"]
+    assert len(assistant_records) == 2
+
+    first = assistant_records[0]["metadata"]
+    second = assistant_records[1]["metadata"]
+    assert first == assistant_meta  # pending hint reused verbatim
+    assert second is not None
+    # Same canonical 5 dimensions threaded from the template
+    assert second["kind"] == "user_chat"
+    assert second["direction"] == "out"
+    assert second["counterpart_id"] == "owner:alice"
+    assert second["counterpart_role"] == "user"
+    assert second.get("linked_event_id") == "evt-u-1"
+    assert second.get("payload") == {"trigger": "user"}
+    # But event_id is fresh
+    assert second["event_id"] != assistant_meta["event_id"]
+
+
+def test_repeated_role_with_no_hint_records_plainly() -> None:
+    """If no pending hint exists for a role, repeated messages of
+    that role still record (no metadata invented). This preserves
+    the legacy fallback for cycles where the metadata resolver
+    couldn't classify the input."""
+    mgr = _FakeMemoryManager()
+    strategy = _make_strategy(mgr)
+
+    state = _FakeState(
+        messages=[
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+        ],
+        metadata={},
+    )
+    strategy._record_transcript(state)
+
+    assert all(c["metadata"] is None for c in mgr.calls)
+    assert len(mgr.calls) == 2
 
 
 def test_skips_already_recorded_prefix() -> None:
