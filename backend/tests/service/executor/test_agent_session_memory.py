@@ -222,13 +222,13 @@ async def test_invoke_thinking_trigger_skips_pending_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invoke_sub_worker_result_stamps_user_meta_only() -> None:
-    """`[SUB_WORKER_RESULT]` is an assistant_dm input — the parser
-    returns a TASK_RESULT/IN metadata for the user side; assistant
-    side is *not* user_chat, so the assistant slot stays unset
-    (the receiving turn's "narration" doesn't have a clean
-    counterpart yet — see cycle 20260430_2 A6)."""
+async def test_invoke_sub_worker_result_in_worker_session_stamps_user_meta_only() -> None:
+    """For *Worker* / *Sub-Worker* sessions, `[SUB_WORKER_RESULT]`
+    inputs leave the assistant slot empty: the response is a tool /
+    task result, not user-facing chat. (Cycle 20260501_2 F2 narrows
+    the auto-USER_CHAT/OUT default to VTuber sessions only.)"""
     session, _mem = _make_session(_success_events("완료됐네!"))
+    # _make_session leaves self._role at its WORKER default — no override needed
     await session._invoke_pipeline(
         "[SUB_WORKER_RESULT] test.txt created",
         start_time=0.0,
@@ -236,11 +236,66 @@ async def test_invoke_sub_worker_result_stamps_user_meta_only() -> None:
     )
     state = session._pipeline.last_state  # type: ignore[attr-defined]
     pending = state.metadata.get("_pending_message_metadata") or {}
-    # parser may or may not resolve the sender — we only require
-    # that 'assistant' is NOT auto-stamped (this is the contract).
     assert "assistant" not in pending, (
-        "USER_CHAT/OUT metadata must not be invented for non-user inputs"
+        "USER_CHAT/OUT metadata must not be invented for non-VTuber sessions"
     )
+
+
+@pytest.mark.asyncio
+async def test_invoke_vtuber_session_defaults_assistant_to_user_chat_for_subworker_input() -> None:
+    """Cycle 20260501_2 F2 — for *VTuber* sessions, every assistant
+    response is broadcast back to the chat room (or routed via
+    `_save_subworker_reply_to_chat_room` after a SUB_WORKER_RESULT
+    drain). So even when stm_role is `assistant_dm`, the assistant
+    slot must default to USER_CHAT/OUT to the owner — without this,
+    session.jsonl line 6 (a VTuber narrating after a SUB_WORKER_RESULT)
+    records with metadata=None and disappears from the InteractionEvent
+    stream / Memory tab."""
+    from service.executor.agent_session import SessionRole
+
+    session, _mem = _make_session(_success_events("워커가 끝냈대!"))
+    session._role = SessionRole.VTUBER  # type: ignore[assignment]
+    session._owner_username = "alice"  # type: ignore[assignment]
+
+    await session._invoke_pipeline(
+        "[SUB_WORKER_RESULT] test.txt created",
+        start_time=0.0,
+        session_logger=None,
+    )
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata") or {}
+    assert "assistant" in pending, (
+        "VTuber assistant turns must always carry pending USER_CHAT/OUT "
+        "metadata regardless of what triggered the turn"
+    )
+    assert pending["assistant"]["kind"] == "user_chat"
+    assert pending["assistant"]["direction"] == "out"
+    assert pending["assistant"]["counterpart_role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_invoke_vtuber_session_defaults_assistant_to_user_chat_for_thinking_trigger() -> None:
+    """Cycle 20260501_2 F2 — same VTuber default applies to
+    `[THINKING_TRIGGER:*]` invocations: the VTuber's reflection-style
+    narration is still broadcast as chat. The user slot may be empty
+    (parser returns None without an explicit source_metadata) but
+    the assistant slot must still default."""
+    from service.executor.agent_session import SessionRole
+
+    session, _mem = _make_session(_success_events("음 조용하구만"))
+    session._role = SessionRole.VTUBER  # type: ignore[assignment]
+    session._owner_username = "alice"  # type: ignore[assignment]
+
+    await session._invoke_pipeline(
+        "[THINKING_TRIGGER:first_idle] user has been quiet",
+        start_time=0.0,
+        session_logger=None,
+    )
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata") or {}
+    assert "assistant" in pending
+    assert pending["assistant"]["kind"] == "user_chat"
+    assert pending["assistant"]["direction"] == "out"
 
 
 @pytest.mark.asyncio
@@ -326,4 +381,27 @@ async def test_stream_user_chat_stamps_pending_metadata() -> None:
     pending = state.metadata.get("_pending_message_metadata")
     assert pending is not None
     assert pending["user"]["direction"] == "in"
+    assert pending["assistant"]["direction"] == "out"
+
+
+@pytest.mark.asyncio
+async def test_stream_vtuber_session_defaults_assistant_to_user_chat_for_subworker_input() -> None:
+    """Cycle 20260501_2 F2 mirror — `_astream_pipeline` applies the
+    same VTuber-only USER_CHAT/OUT default."""
+    from service.executor.agent_session import SessionRole
+
+    session, _mem = _make_session(_success_events("워커가 끝냈대!"))
+    session._role = SessionRole.VTUBER  # type: ignore[assignment]
+    session._owner_username = "alice"  # type: ignore[assignment]
+
+    async for _ in session._astream_pipeline(
+        "[SUB_WORKER_RESULT] test.txt created",
+        start_time=0.0,
+        session_logger=None,
+    ):
+        pass
+    state = session._pipeline.last_state  # type: ignore[attr-defined]
+    pending = state.metadata.get("_pending_message_metadata") or {}
+    assert "assistant" in pending
+    assert pending["assistant"]["kind"] == "user_chat"
     assert pending["assistant"]["direction"] == "out"
