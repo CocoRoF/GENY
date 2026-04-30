@@ -34,10 +34,14 @@
  */
 
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   ChevronDown,
   ChevronRight,
   Cpu,
+  Eye,
+  EyeOff,
   HelpCircle,
   Info,
   ListChecks,
@@ -705,21 +709,83 @@ function BodySection({
   setForm: (f: FormState) => void;
 }) {
   const { t } = useI18n();
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const previewToggle = (
+    <button
+      type="button"
+      onClick={() => setPreviewOpen((v) => !v)}
+      className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[0.65rem] font-medium border transition-colors ${
+        previewOpen
+          ? 'border-violet-500/50 bg-violet-500/10 text-violet-700 dark:text-violet-300 hover:bg-violet-500/15'
+          : 'border-[hsl(var(--border))] bg-transparent text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
+      }`}
+      title={
+        previewOpen
+          ? t('envManagement.registry.skills.form.bodyPreviewToggleOn')
+          : t('envManagement.registry.skills.form.bodyPreviewToggleOff')
+      }
+    >
+      {previewOpen ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+      {previewOpen
+        ? t('envManagement.registry.skills.form.bodyPreviewToggleOn')
+        : t('envManagement.registry.skills.form.bodyPreviewToggleOff')}
+    </button>
+  );
+
+  const editor = (
+    <Textarea
+      id="skill-body"
+      value={form.body}
+      onChange={(e) => setForm({ ...form, body: e.target.value })}
+      rows={12}
+      placeholder={t('envManagement.registry.skills.form.bodyPlaceholder')}
+      className="font-mono text-[0.75rem] leading-relaxed h-full min-h-[18rem]"
+      spellCheck={false}
+    />
+  );
+
+  // Split editor + preview when toggle is on. Preview pane mirrors the
+  // chat / wiki markdown surface so what the operator sees here is what
+  // the LLM will see when the skill body is injected — including GFM
+  // tables, fenced code, and inline code.
   return (
     <Section
       icon={Cpu}
       title={t('envManagement.registry.skills.form.sectionBody')}
       hint={t('envManagement.registry.skills.form.bodyHint')}
+      rightSlot={previewToggle}
     >
-      <Textarea
-        id="skill-body"
-        value={form.body}
-        onChange={(e) => setForm({ ...form, body: e.target.value })}
-        rows={12}
-        placeholder={t('envManagement.registry.skills.form.bodyPlaceholder')}
-        className="font-mono text-[0.75rem] leading-relaxed"
-        spellCheck={false}
-      />
+      {previewOpen ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-[0.65rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold">
+              {t('envManagement.registry.skills.form.bodyEditLabel')}
+            </span>
+            {editor}
+          </div>
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-[0.65rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold">
+              {t('envManagement.registry.skills.form.bodyPreviewLabel')}
+            </span>
+            <div className="flex-1 min-h-[18rem] rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] overflow-y-auto px-3 py-2">
+              {form.body.trim() ? (
+                <article className="wiki-markdown text-[0.8125rem] leading-relaxed">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {form.body}
+                  </ReactMarkdown>
+                </article>
+              ) : (
+                <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] italic">
+                  {t('envManagement.registry.skills.form.bodyPreviewEmpty')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        editor
+      )}
     </Section>
   );
 }

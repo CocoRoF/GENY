@@ -861,6 +861,11 @@ const ko: Translations = {
           bodyLabel: '스킬 본문 (markdown)',
           bodyHint:
             'LLM이 스킬을 호출하면 이 본문이 컨텍스트에 주입됩니다. 무엇을, 어떻게, 어떤 도구로 — 단계적으로 작성하세요.',
+          bodyPreviewToggleOn: '미리보기 ON',
+          bodyPreviewToggleOff: '미리보기 OFF',
+          bodyPreviewEmpty: '본문이 비어 있습니다 — 왼쪽에 markdown을 입력하면 여기에 렌더링됩니다.',
+          bodyPreviewLabel: '미리보기',
+          bodyEditLabel: '편집',
           bodyPlaceholder:
             '## 무엇\n현재 작업 트리의 git diff를 검토해 GitHub에 올릴 PR 제목 + body 초안을 만든다.\n\n## 어떻게\n1. `git diff origin/main...HEAD` 결과를 Read로 가져온다\n2. 변경 의도를 한 줄로 요약 (제목)\n3. 영향 범위, 테스트 방법, 후속 작업을 body에 정리\n\n## 출력\n```\nTitle: <title>\nBody:\n<body>\n```',
           // 고급
