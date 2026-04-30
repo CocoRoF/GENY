@@ -24,6 +24,7 @@ import pytest
 
 from tools.built_in import memory_inspect_tools
 from tools.built_in.memory_inspect_tools import (
+    MemoryEventTool,
     MemoryStatusTool,
     MemoryWithTool,
     _resolve_counterpart_id,
@@ -407,4 +408,92 @@ def test_with_skips_legacy_entries(world) -> None:
 
 def test_with_unknown_session_returns_error(world) -> None:
     out = _run_with(MemoryWithTool(), session_id="ghost", counterpart="user")
+    assert "error" in out
+
+
+# ─────────────────────────────────────────────────────────────────
+# memory_event — L2
+# ─────────────────────────────────────────────────────────────────
+
+
+def _run_event(tool: MemoryEventTool, **kw) -> Dict[str, Any]:
+    out = tool.run(session_id=kw.pop("session_id", "vtuber-1"), **kw)
+    return json.loads(out)
+
+
+def test_event_returns_full_payload_and_parent_link(world) -> None:
+    out = _run_event(MemoryEventTool(), event_id="EVT-RUN-1")
+    ev = out["event"]
+    assert ev["event_id"] == "EVT-RUN-1"
+    assert ev["kind"] == "tool_run_summary"
+    assert ev["direction"] == "in"
+    assert ev["counterpart_id"] == "sub-1"
+    assert ev["payload"]["files_written"] == ["notes.md"]
+    assert ev["payload"]["status"] == "ok"
+    assert ev["linked_event_id"] == "EVT-REQ-1"
+
+    parent = out["linked"]["parent"]
+    assert parent["event_id"] == "EVT-REQ-1"
+    assert parent["kind"] == "task_request"
+
+
+def test_event_returns_event_without_parent_when_no_linked(world) -> None:
+    out = _run_event(MemoryEventTool(), event_id="EVT-USER-1")
+    assert out["event"]["event_id"] == "EVT-USER-1"
+    assert out["linked"] == {}
+
+
+def test_event_marks_parent_missing_when_linked_id_absent_from_stm(world) -> None:
+    """If a linked_event_id was recorded but its event isn't on this
+    STM (rare — e.g. trimmed beyond MAX_TRANSCRIPT_ENTRIES), surface
+    `missing: true` rather than a confusing empty linked block."""
+    sub_entries = world["vtuber"]._memory_manager._stm._entries
+    sub_entries.append({
+        "content": "[assistant_dm] [Sub-Worker run]",
+        "metadata": {
+            "event_id": "EVT-RUN-2",
+            "kind": "tool_run_summary",
+            "direction": "in",
+            "counterpart_id": "sub-1",
+            "counterpart_role": "paired_subworker",
+            "linked_event_id": "EVT-MISSING",
+            "payload": {"status": "ok"},
+        },
+    })
+    out = _run_event(MemoryEventTool(), event_id="EVT-RUN-2")
+    assert out["linked"]["parent"] == {"event_id": "EVT-MISSING", "missing": True}
+
+
+def test_event_unknown_event_id_returns_error(world) -> None:
+    out = _run_event(MemoryEventTool(), event_id="EVT-NOPE")
+    assert "error" in out
+
+
+def test_event_empty_event_id_returns_error(world) -> None:
+    out = _run_event(MemoryEventTool(), event_id="")
+    assert "error" in out
+
+
+def test_event_unknown_session_returns_error(world) -> None:
+    out = _run_event(MemoryEventTool(), session_id="ghost", event_id="EVT-USER-1")
+    assert "error" in out
+
+
+def test_event_caller_only_sees_own_stm(world) -> None:
+    """An event_id that lives on a *different* session's STM must not
+    leak — invariant 3 (caller's own memory only). The fake manager
+    only ever returns the caller's own STM, so the lookup must miss."""
+    sub_entries = world["sub"]._memory_manager._stm._entries
+    sub_entries.append({
+        "content": "[assistant] private",
+        "metadata": {
+            "event_id": "EVT-SECRET",
+            "kind": "user_chat",
+            "direction": "out",
+            "counterpart_id": "owner:bob",
+            "counterpart_role": "user",
+        },
+    })
+    # Caller is vtuber-1; should NOT find sub-1's event
+    out = _run_event(MemoryEventTool(), event_id="EVT-SECRET")
     assert "error" in out
