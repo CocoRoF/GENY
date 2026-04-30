@@ -234,3 +234,102 @@ def test_attach_kwargs_empty_selection_yields_no_kwargs(tmp_path: Path):
     from service.permission.install import attach_kwargs
     out = attach_kwargs(host_selection=[])
     assert out == {}
+
+
+# ── Phase 9.9.3: runner_mode enforcement gate ────────────────────────
+
+
+def test_attach_kwargs_passes_executor_mode_not_runner_mode(tmp_path: Path):
+    """Bug fix: the executor's `permission_mode` kwarg consumes the
+    PermissionMode enum value (default / plan / etc.), not the
+    runner_mode ("advisory" / "enforce"). Pre-9.9.3 Geny was passing
+    runner_mode here, which the executor silently coerced to DEFAULT —
+    so executor_mode settings (the host PermissionsTab "Exec" dropdown)
+    were also dropped on the floor.
+    """
+    _seed_three_rules(tmp_path)
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs()
+    assert out["permission_mode"] in (
+        "default", "plan", "auto", "bypass", "acceptEdits", "dontAsk",
+    )
+    assert out["permission_mode"] != "advisory"
+    assert out["permission_mode"] != "enforce"
+
+
+def test_executor_mode_passthrough_in_advisory(tmp_path: Path):
+    """In advisory mode (default), the user's executor_mode is passed
+    through unchanged — including permissive modes like BYPASS."""
+    _write_settings(tmp_path, {
+        "permissions": {
+            "rules": [{"tool_name": "Read", "behavior": "allow"}],
+            "mode": "advisory",
+            "executor_mode": "bypass",
+        },
+    })
+    _bind_loader(tmp_path / "settings.json")
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs()
+    assert out["permission_mode"] == "bypass"
+
+
+def test_executor_mode_downgraded_in_enforce(tmp_path: Path, caplog):
+    """In enforce mode, permissive executor modes (bypass / auto /
+    dontAsk / acceptEdits) are coerced to default — operators flipping
+    the runner mode to enforce are saying "don't let executor_mode
+    silently disable my rules"."""
+    _write_settings(tmp_path, {
+        "permissions": {
+            "rules": [{"tool_name": "Bash", "behavior": "deny"}],
+            "mode": "enforce",
+            "executor_mode": "bypass",
+        },
+    })
+    _bind_loader(tmp_path / "settings.json")
+    caplog.set_level("WARNING")
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs()
+    assert out["permission_mode"] == "default"
+    assert any(
+        "runner_mode=enforce overrides" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_enforce_keeps_default_executor_mode(tmp_path: Path):
+    """Non-permissive executor modes (default / plan) survive enforce."""
+    _write_settings(tmp_path, {
+        "permissions": {
+            "rules": [{"tool_name": "Bash", "behavior": "deny"}],
+            "mode": "enforce",
+            "executor_mode": "plan",
+        },
+    })
+    _bind_loader(tmp_path / "settings.json")
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs()
+    assert out["permission_mode"] == "plan"
+
+
+def test_enforce_with_default_executor_mode_passes_through(tmp_path: Path):
+    _write_settings(tmp_path, {
+        "permissions": {
+            "rules": [{"tool_name": "Bash", "behavior": "deny"}],
+            "mode": "enforce",
+        },
+    })
+    _bind_loader(tmp_path / "settings.json")
+    from service.permission.install import attach_kwargs
+    out = attach_kwargs()
+    assert out["permission_mode"] == "default"
+
+
+def test_resolve_effective_executor_mode_helper(tmp_path: Path, monkeypatch):
+    """Direct test of the helper used by both attach_kwargs and the
+    runtime-refresh path so they stay aligned."""
+    monkeypatch.setenv("GENY_PERMISSION_EXEC_MODE", "auto")
+    from service.permission.install import _resolve_effective_executor_mode
+    # advisory passes through
+    assert _resolve_effective_executor_mode("advisory") == "auto"
+    # enforce coerces permissive
+    assert _resolve_effective_executor_mode("enforce") == "default"

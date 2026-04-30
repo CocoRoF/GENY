@@ -359,6 +359,55 @@ def install_permission_rules(
     return rules, mode
 
 
+# Phase 9.9.3 — runner_mode semantics.
+#
+# ``permissions.mode`` ("advisory" | "enforce") and ``permissions.
+# executor_mode`` ("default" | "plan" | "auto" | "bypass" |
+# "acceptEdits" | "dontAsk") are orthogonal:
+#
+#   * ``executor_mode`` is the executor's :class:`PermissionMode` enum
+#     — this is what the matrix actually consumes.
+#   * ``mode`` ("advisory" / "enforce") is a Geny-level *meta-policy*
+#     that gates how strict the executor mode itself is allowed to be.
+#
+# ``advisory`` (default) = open: any executor_mode goes (BYPASS / AUTO
+#   / DONT_ASK / ACCEPT_EDITS still work).
+# ``enforce``            = strict: BYPASS / AUTO / DONT_ASK / ACCEPT_EDITS
+#   are downgraded to DEFAULT on session boot. Operators who flip the
+#   host-level "Mode" toggle to ``enforce`` are saying "I don't want my
+#   permission rules to be silently disabled by an executor_mode
+#   change." A warning logs the downgrade so the override is visible.
+
+_PERMISSIVE_EXECUTOR_MODES: Tuple[str, ...] = (
+    "bypass",
+    "auto",
+    "dontAsk",
+    "acceptEdits",
+)
+
+
+def _resolve_effective_executor_mode(runner_mode: str) -> str:
+    """Combine ``runner_mode`` (advisory / enforce) with the configured
+    ``executor_mode`` to return the value the executor will actually
+    use. In ``enforce`` mode permissive executor modes get coerced to
+    ``default``; in ``advisory`` mode the executor_mode is passed
+    through unchanged.
+
+    The downgrade is logged at WARNING so the override is observable
+    in audit logs — silent coercion would surprise operators.
+    """
+    raw = _resolve_executor_mode()
+    if runner_mode == "enforce" and raw in _PERMISSIVE_EXECUTOR_MODES:
+        logger.warning(
+            "install_permission_rules: runner_mode=enforce overrides "
+            "executor_mode=%r → 'default' (permissive modes are blocked "
+            "in enforce mode so DENY rules cannot be bypassed)",
+            raw,
+        )
+        return _DEFAULT_EXECUTOR_MODE
+    return raw
+
+
 def attach_kwargs(host_selection: Optional[List[str]] = None) -> dict:
     """Convenience for ``agent_session._build_pipeline``.
 
@@ -366,23 +415,36 @@ def attach_kwargs(host_selection: Optional[List[str]] = None) -> dict:
     skipping the entry entirely when no rules are loaded so older
     executor builds without the kwarg keep working.
 
-    PR-D.3.4 — also includes ``executor_permission_mode`` resolved from
-    GENY_PERMISSION_EXEC_MODE (or PermissionsConfig.executor_mode via
-    env_sync). The kwarg name matches what the executor's
-    Pipeline.attach_runtime accepts after 1.2.0; older executors that
-    don't recognise it still work because the runner accepts **kwargs.
+    Phase 9.9.3 — fixes a long-standing bug where this helper was
+    passing the *runner mode* ("advisory" / "enforce") in the
+    ``permission_mode`` kwarg, which the executor expects to be one
+    of ``default | plan | auto | bypass | acceptEdits | dontAsk``.
+    The executor silently coerced the unknown value to ``DEFAULT``,
+    so ``executor_mode`` settings (set via the host PermissionsTab's
+    "Exec" dropdown) were also dropped. The kwarg now carries the
+    resolved executor mode.
+
+    Runner-mode enforcement: when ``permissions.mode`` is
+    ``"enforce"``, permissive executor modes (``bypass`` / ``auto`` /
+    ``dontAsk`` / ``acceptEdits``) are downgraded to ``default``
+    before being passed to the executor. The downgrade is logged so
+    operators can see the override.
 
     Phase 9.9.2 — ``host_selection`` is forwarded so per-env manifest
     narrowing actually shrinks the rule set passed to the executor.
     """
-    rules, mode = install_permission_rules(host_selection=host_selection)
+    rules, runner_mode = install_permission_rules(host_selection=host_selection)
     if not rules:
         return {}
-    out = {"permission_rules": rules, "permission_mode": mode}
-    executor_mode = _resolve_executor_mode()
-    if executor_mode != _DEFAULT_EXECUTOR_MODE:
-        out["executor_permission_mode"] = executor_mode
-    return out
+    effective_executor_mode = _resolve_effective_executor_mode(runner_mode)
+    return {
+        "permission_rules": rules,
+        # The executor's `permission_mode` kwarg consumes the
+        # PermissionMode enum value (default / plan / auto / bypass /
+        # acceptEdits / dontAsk). The runner_mode is *not* sent — it
+        # only shapes which executor mode is allowed.
+        "permission_mode": effective_executor_mode,
+    }
 
 
 # G6.4 — Stage 4 guard chain population
