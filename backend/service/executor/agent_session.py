@@ -998,22 +998,31 @@ class AgentSession:
 
         if scope in ("permissions", "all"):
             try:
-                from service.permission.install import install_permission_rules
+                from service.permission.install import (
+                    _resolve_effective_executor_mode,
+                    install_permission_rules,
+                )
 
                 # Phase 9.9.2 — re-apply manifest narrowing on every
                 # runtime refresh so settings.json edits + manifest
                 # selection both flow into the live session.
                 host_perm_selection = self._load_permission_host_selection()
-                rules, mode = install_permission_rules(
+                rules, runner_mode = install_permission_rules(
                     host_selection=host_perm_selection,
                 )
+                # Phase 9.9.3 — the executor's permission_mode kwarg
+                # consumes the PermissionMode enum value, not the
+                # runner mode (advisory / enforce). Pass the executor
+                # mode resolved through the enforcement gate so
+                # runtime refresh applies the same coercion as boot.
+                effective_mode = _resolve_effective_executor_mode(runner_mode)
                 setter = getattr(pipeline, "_set_tool_stage_permission_matrix", None)
                 if setter is not None:
-                    setter(permission_rules=rules, permission_mode=mode)
+                    setter(permission_rules=rules, permission_mode=effective_mode)
                     logger.info(
                         "[%s] runtime refresh applied: permissions reloaded "
-                        "(%d rule(s), mode=%s)",
-                        self._session_id, len(rules), mode,
+                        "(%d rule(s), runner=%s, executor=%s)",
+                        self._session_id, len(rules), runner_mode, effective_mode,
                     )
             except Exception:
                 logger.exception(

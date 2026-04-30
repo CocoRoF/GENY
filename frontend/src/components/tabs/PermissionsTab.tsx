@@ -206,46 +206,91 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
     </>
   );
 
+  // Phase 9.9.4 — surface what each mode actually does. The two
+  // selectors are orthogonal: `mode` is Geny's runner-level meta-policy
+  // (advisory = open, enforce = strict), `executor_mode` is the
+  // executor's PermissionMode enum value the matrix consumes.
+  const RUNNER_MODE_HINT: Record<string, string> = {
+    advisory:
+      '느슨함 — 사용자가 고른 executor 모드(default / plan / bypass …)가 그대로 적용. 권한 룰은 평소대로 평가됩니다.',
+    enforce:
+      '엄격함 — bypass / auto / dontAsk / acceptEdits 같은 권한 무력화 모드를 default로 강제 다운그레이드. 룰이 절대 우회되지 않게 합니다.',
+  };
+  const EXECUTOR_MODE_HINT: Record<string, string> = {
+    default: '기본 — 룰이 결정. 매칭 룰이 없으면 도구 자체의 check_permissions 폴백.',
+    plan: '계획 모드 — 파괴적 도구는 명시적 ALLOW 룰이 없으면 자동 ASK.',
+    auto: '자동 — 룰이 없는 호출도 모두 허용 (CI 등 비대화형). DENY 룰은 여전히 차단.',
+    bypass: '우회 — 모든 권한 게이트 무시 (DENY까지). 개발 전용.',
+    acceptEdits: 'Edit-친화 — 편집 도구의 ASK 룰을 자동 ALLOW로 승격.',
+    dontAsk: '묻지 않음 — 모든 ASK 룰을 자동 ALLOW로 승격. DENY는 그대로.',
+  };
+  const runnerMode = editable?.mode ?? inspect?.mode ?? 'advisory';
+  const execMode = editable?.executor_mode ?? 'default';
   const modeSelectors = (
     <div className="hidden md:flex items-center gap-1.5">
-      <span className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider">
+      <span
+        className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider"
+        title="Geny 러너 모드 — advisory(기본)는 열려 있고 enforce는 권한 무력화 모드를 차단합니다."
+      >
         Mode
       </span>
       <Select
-        value={editable?.mode ?? inspect?.mode ?? 'advisory'}
+        value={runnerMode}
         onValueChange={(v) => handleModeChange('mode', v)}
         disabled={savingMode}
       >
-        <SelectTrigger className="h-7 w-[110px] text-[0.75rem]">
+        <SelectTrigger
+          className="h-7 w-[110px] text-[0.75rem]"
+          title={RUNNER_MODE_HINT[runnerMode] ?? ''}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {PERMISSION_MODES.map((m) => (
-            <SelectItem key={m} value={m}>
+            <SelectItem key={m} value={m} title={RUNNER_MODE_HINT[m] ?? ''}>
               {m}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <span className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider ml-2">
+      <span
+        className="text-[0.6875rem] uppercase text-[hsl(var(--muted-foreground))] font-semibold tracking-wider ml-2"
+        title="Executor 모드 — 매트릭스가 ALLOW/DENY/ASK를 결정할 때 쓰는 PermissionMode 값."
+      >
         Exec
       </span>
       <Select
-        value={editable?.executor_mode ?? 'default'}
+        value={execMode}
         onValueChange={(v) => handleModeChange('executor_mode', v)}
         disabled={savingMode}
       >
-        <SelectTrigger className="h-7 w-[120px] text-[0.75rem]">
+        <SelectTrigger
+          className="h-7 w-[120px] text-[0.75rem]"
+          title={EXECUTOR_MODE_HINT[execMode] ?? ''}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {EXECUTOR_PERMISSION_MODES.map((m) => (
-            <SelectItem key={m} value={m}>
+            <SelectItem key={m} value={m} title={EXECUTOR_MODE_HINT[m] ?? ''}>
               {m}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {runnerMode === 'enforce' &&
+        (
+          ['bypass', 'auto', 'dontAsk', 'acceptEdits'] as const
+        ).includes(
+          execMode as 'bypass' | 'auto' | 'dontAsk' | 'acceptEdits',
+        ) && (
+          <span
+            className="ml-1 inline-flex items-center h-7 px-2 rounded-md text-[0.65rem] font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+            title="enforce 모드에서 권한 무력화 executor 모드는 세션 시작 시 default로 다운그레이드됩니다."
+          >
+            ⚠ → default
+          </span>
+        )}
     </div>
   );
 

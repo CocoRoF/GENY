@@ -103,7 +103,12 @@ def test_attach_kwargs_passthrough_when_rules_present(isolated_env: Path) -> Non
     kwargs = perm_install.attach_kwargs()
     assert "permission_rules" in kwargs
     assert "permission_mode" in kwargs
-    assert kwargs["permission_mode"] == "advisory"
+    # Phase 9.9.3 — `permission_mode` carries the executor PermissionMode
+    # enum value (default / plan / auto / bypass / acceptEdits / dontAsk),
+    # NOT the runner_mode ("advisory" / "enforce"). The runner_mode is a
+    # Geny-level meta-policy that gates which executor modes are allowed
+    # but is not itself sent to the executor.
+    assert kwargs["permission_mode"] == "default"
     assert len(kwargs["permission_rules"]) == 1
     assert kwargs["permission_rules"][0].tool_name == "bash"
 
