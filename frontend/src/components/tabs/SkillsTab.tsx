@@ -21,7 +21,7 @@ import {
   frameworkSettingsApi,
   type SkillDetail,
 } from '@/lib/api';
-import { Copy, Eye, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
@@ -483,28 +483,22 @@ function SkillCard({
           itemId={skillId(skill)}
         />
       }
-      // Make the card itself click-to-view (when a view handler is
-      // wired). Read-only inspection is the most common reason a
-      // user clicks anything that isn't an explicit action button —
-      // the screenshot in the user's report shows them doing exactly
-      // that on built-ins.
+      // The card itself is click-to-view, so we don't ship a
+      // dedicated Eye button — it would just hide on hover and
+      // require a precise mouse move to discover. Edit / Copy /
+      // Delete stay as explicit actions and are pinned visible
+      // (`alwaysVisible`) so a one-handed user / touch device can
+      // hit them without first hovering.
       onClick={onView}
       actions={
         <>
-          {onView && (
-            <RegistryActionButton
-              icon={Eye}
-              onClick={onView}
-              title={t('envManagement.registry.skills.viewTip')}
-              variant="primary"
-            />
-          )}
           {isUser && onEdit && (
             <RegistryActionButton
               icon={Pencil}
               onClick={onEdit}
               title={t('envManagement.registry.editTip')}
               variant="primary"
+              alwaysVisible
             />
           )}
           {onCopy && (
@@ -513,6 +507,7 @@ function SkillCard({
               onClick={onCopy}
               title={t('envManagement.registry.skills.copyTip')}
               variant="primary"
+              alwaysVisible
             />
           )}
           {isUser && onDelete && (
@@ -521,6 +516,7 @@ function SkillCard({
               onClick={onDelete}
               title={t('envManagement.registry.deleteTip')}
               variant="danger"
+              alwaysVisible
             />
           )}
         </>
