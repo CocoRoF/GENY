@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from logging import getLogger
-from typing import Optional
+from typing import List, Optional
 
 from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
@@ -249,7 +249,14 @@ class MemorySearchTool(BaseTool):
     description = (
         "Search your memory for relevant notes. Uses both text matching "
         "and semantic vector search to find the most relevant results. "
-        "Great for recalling past decisions, knowledge, or context."
+        "Great for recalling past decisions, knowledge, or context. "
+        "Optional InteractionEvent filters (cycle 20260430_2): pass "
+        "`counterpart` to narrow to events with a specific other "
+        "party (e.g. 'paired_subworker', 'user', or a session id), "
+        "and `kinds` to narrow by event kind (e.g. ['tool_run_summary',"
+        " 'task_result']). Filters apply only to InteractionEvent "
+        "lines — non-event memories (long-term notes, knowledge) "
+        "are returned regardless."
     )
     CAPABILITIES = ToolCapabilities(
         concurrency_safe=True, read_only=True, idempotent=True,
@@ -261,6 +268,8 @@ class MemorySearchTool(BaseTool):
         session_id: str,
         query: str,
         max_results: int = 10,
+        counterpart: Optional[str] = None,
+        kinds: Optional[List[str]] = None,
     ) -> str:
         """Search memory notes.
 
@@ -268,16 +277,72 @@ class MemorySearchTool(BaseTool):
             session_id: Your session ID.
             query: Search query — can be a keyword, phrase, or question.
             max_results: Maximum number of results to return (default: 10).
+            counterpart: Optional InteractionEvent filter — alias
+                ('paired_subworker' / 'user' / 'self') or canonical id.
+                Resolves against the caller's own session
+                (`_linked_session_id`, `_owner_username`).
+            kinds: Optional InteractionEvent filter — list of kinds
+                to allow (e.g. ['tool_run_summary']).
         """
         mem = _get_memory_manager(session_id)
         if mem is None:
             return _error(f"Session not found: {session_id}")
 
+        # Cycle 20260430_2 B5 — InteractionEvent filters. Resolution
+        # mirrors `memory_status` / `memory_with` so any tool in the
+        # progressive ladder accepts the same alias vocabulary.
+        canonical_counterpart: Optional[str] = None
+        if counterpart:
+            try:
+                from tools.built_in.memory_inspect_tools import (
+                    _get_caller as _get_inspect_caller,
+                    _resolve_counterpart_id,
+                )
+                caller_agent = _get_inspect_caller(session_id)
+                canonical_counterpart = _resolve_counterpart_id(
+                    caller_agent, counterpart,
+                )
+            except Exception:
+                logger.debug(
+                    "memory_search: counterpart resolution failed",
+                    exc_info=True,
+                )
+                canonical_counterpart = None
+            # Alias resolved to None (e.g. unpaired) → still set the
+            # marker so we can short-circuit InteractionEvent lines
+            # that have a specific counterpart_id, while leaving
+            # non-event entries (LTM notes / knowledge) untouched.
+
+        kind_filter = (
+            {str(k) for k in kinds if isinstance(k, str)}
+            if kinds else None
+        )
+
         results = mem.search(query, max_results=max_results)
         items = []
         for r in results:
             entry = r.entry
-            items.append({
+            entry_meta = getattr(entry, "metadata", None) or {}
+            event_id = entry_meta.get("event_id")
+            entry_kind = entry_meta.get("kind")
+            entry_counterpart = entry_meta.get("counterpart_id")
+
+            # Filtering only narrows InteractionEvent lines (those
+            # with an event_id). Non-event memories (LTM notes /
+            # knowledge / curated) pass through so callers asking
+            # "find me everything about X with my Sub-Worker" don't
+            # accidentally lose the durable knowledge layer.
+            if event_id:
+                if counterpart and canonical_counterpart and entry_counterpart != canonical_counterpart:
+                    continue
+                if counterpart and canonical_counterpart is None and entry_counterpart:
+                    # Caller asked for an alias that didn't resolve
+                    # (unpaired) — drop event-tagged hits.
+                    continue
+                if kind_filter is not None and entry_kind not in kind_filter:
+                    continue
+
+            item = {
                 "filename": entry.filename,
                 "source": entry.source.value if hasattr(entry.source, "value") else str(entry.source),
                 "snippet": r.snippet[:500],
@@ -285,8 +350,24 @@ class MemorySearchTool(BaseTool):
                 "title": getattr(entry, "title", None),
                 "category": getattr(entry, "category", None),
                 "tags": getattr(entry, "tags", None),
-            })
-        return _ok({"query": query, "total": len(items), "results": items})
+            }
+            if event_id:
+                item.update({
+                    "event_id": event_id,
+                    "kind": entry_kind,
+                    "counterpart_id": entry_counterpart,
+                })
+            items.append(item)
+        return _ok({
+            "query": query,
+            "total": len(items),
+            "results": items,
+            "filters": {
+                "counterpart": counterpart,
+                "counterpart_resolved": canonical_counterpart,
+                "kinds": list(kind_filter) if kind_filter else None,
+            },
+        })
 
 
 # ============================================================================
