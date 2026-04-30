@@ -771,10 +771,20 @@ class ThinkingTriggerService:
             is_activity = prompt.startswith("[ACTIVITY_TRIGGER]")
             trigger_timeout = 600.0 if is_activity else 180.0
 
+            # Cycle 20260430_2 A5 — reflection turns are *self-prompted*.
+            # We know the trigger family (THINKING_TRIGGER:<category> or
+            # ACTIVITY_TRIGGER:<category>) right here, so build the
+            # InteractionEvent metadata explicitly and forward it via
+            # source_metadata. No prompt-side data inject — same fact
+            # would be discoverable later by introspecting the prompt,
+            # but we save the recipient that work.
+            source_metadata = self._build_reflection_metadata(prompt)
+
             result = await execute_command(
                 session_id, prompt,
                 is_trigger=True,
                 timeout=trigger_timeout,
+                source_metadata=source_metadata,
             )
 
             # Increment consecutive count (drives adaptive backoff)
@@ -821,6 +831,49 @@ class ThinkingTriggerService:
             self._consecutive_triggers[session_id] = (
                 self._consecutive_triggers.get(session_id, 0) + 1
             )
+
+    @staticmethod
+    def _build_reflection_metadata(prompt: str):
+        """Cycle 20260430_2 A5 — InteractionEvent metadata for a
+        reflection turn. The prompt always begins with one of:
+
+          [THINKING_TRIGGER:<category>] ...
+          [ACTIVITY_TRIGGER] ...
+          [ACTIVITY_TRIGGER:<category>] ...   (future)
+
+        We extract that tag once and stamp the metadata
+        ``payload.trigger_category`` accordingly. Direction is
+        ``internal`` (the VTuber prompted itself);
+        ``counterpart_id`` / ``counterpart_role`` are ``self`` /
+        ``self``. Returns ``None`` if the prompt doesn't match a
+        recognised trigger shape — the parser fallback in
+        ``_invoke_pipeline`` will then noop (role==internal_trigger
+        with no parser path) which is fine.
+        """
+        import re as _re
+
+        from service.memory.interaction_event import (
+            CounterpartRole,
+            Direction,
+            Kind,
+            make_event_metadata,
+        )
+
+        m = _re.match(r"^\[(THINKING_TRIGGER|ACTIVITY_TRIGGER)(?::(\w+))?\]", prompt)
+        if not m:
+            return None
+        family = m.group(1).lower()  # "thinking_trigger" / "activity_trigger"
+        category = m.group(2) or family  # e.g. "first_idle" / "activity_trigger"
+        return make_event_metadata(
+            kind=Kind.REFLECTION,
+            direction=Direction.INTERNAL,
+            counterpart_id="self",
+            counterpart_role=CounterpartRole.SELF,
+            payload={
+                "trigger_family": family,
+                "trigger_category": category,
+            },
+        )
 
     def _save_to_chat_room(self, session_id: str, result) -> None:
         """Persist the trigger response to the session's chat room.
