@@ -741,6 +741,14 @@ export interface CounterpartListResponse {
   counterparts: CounterpartCard[];
 }
 
+export interface ArtifactReadResponse {
+  event_id: string;
+  path: string;
+  size_bytes: number;
+  truncated: boolean;
+  content: string;
+}
+
 // ==================== VTuber / Live2D Types ====================
 
 export interface Live2dModelInfo {
