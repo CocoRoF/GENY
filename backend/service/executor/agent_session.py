@@ -1680,7 +1680,14 @@ class AgentSession:
                 curated_knowledge_manager=curated_km,
                 recent_turns=_tuning["recent_turns"],
             )
-            attach_kwargs["memory_strategy"] = GenyMemoryStrategy(
+            # Cycle 20260501_1 C — single STM write site at s18 via the
+            # dedupe-aware subclass. _invoke_pipeline / _astream_pipeline
+            # no longer call record_message themselves; they push the
+            # InteractionEvent metadata for the upcoming user / assistant
+            # turn onto state.metadata['_pending_message_metadata'] and
+            # this strategy applies the hint when it walks state.messages.
+            from service.memory.dedupe_strategy import GenyDedupeStrategy
+            attach_kwargs["memory_strategy"] = GenyDedupeStrategy(
                 self._memory_manager,
                 enable_reflection=_tuning["enable_reflection"],
                 llm_reflect=llm_reflect,
@@ -2059,18 +2066,28 @@ class AgentSession:
         # thinking-trigger path will in A5; the chat path in A6). When
         # absent, `infer_input_metadata` parses the well-known prompt
         # prefixes (``[SYSTEM] You received...`` / ``[INBOX from X]``)
-        # to fill the gap. Either way, `record_message` ends up with
-        # the canonical metadata dict so retrieval / progressive memory
-        # tools see the unified stream.
+        # to fill the gap. The metadata is then applied at the
+        # *single* STM write site (s18 via GenyDedupeStrategy) — see
+        # cycle 20260501_1 C.
         source_metadata = kwargs.pop("source_metadata", None)
 
-        # Record input to short-term memory with proper role classification.
-        # Internal triggers and inter-agent DMs are not "user" — see
-        # _classify_input_role for the full rationale.
+        # Cycle 20260501_1 C — resolve the metadata for the upcoming
+        # user / assistant turn here, but DO NOT call record_message.
+        # The pending metadata gets stamped on state.metadata below
+        # and s18 (GenyDedupeStrategy) records both messages with
+        # their full InteractionEvent metadata exactly once.
         stm_role: Optional[str] = None
+        pending_metadata: Dict[str, Any] = {}
         if self._memory_manager:
             try:
-                from service.memory.interaction_event import infer_input_metadata
+                from service.memory.interaction_event import (
+                    CounterpartRole,
+                    Direction,
+                    Kind,
+                    canonical_user_id,
+                    infer_input_metadata,
+                    make_event_metadata,
+                )
                 stm_role = _classify_input_role(input_text)
                 event_meta = source_metadata
                 if event_meta is None:
@@ -2079,12 +2096,29 @@ class AgentSession:
                         recorder_agent=self,
                         role=stm_role,
                     )
-                self._memory_manager.record_message(
-                    stm_role, input_text, metadata=event_meta,
-                )
+                if event_meta:
+                    pending_metadata["user"] = event_meta
+                # Cycle 20260430_2 A6 — assistant USER_CHAT/OUT
+                # metadata can be resolved up front because it
+                # mirrors the user's owner_username and is
+                # direction-flipped. Only applies to user_chat
+                # turns; DM / reflection / inbox-drain assistant
+                # responses leave assistant metadata None.
+                if stm_role == "user":
+                    pending_metadata["assistant"] = make_event_metadata(
+                        kind=Kind.USER_CHAT,
+                        direction=Direction.OUT,
+                        counterpart_id=canonical_user_id(self._owner_username),
+                        counterpart_role=CounterpartRole.USER,
+                    )
             except Exception:
-                logger.debug("Failed to record input message — non-critical", exc_info=True)
+                logger.debug(
+                    "Failed to resolve InteractionEvent metadata for the "
+                    "upcoming turn — strategy will record without metadata",
+                    exc_info=True,
+                )
                 stm_role = None
+                pending_metadata = {}
 
         # Stream pipeline and log events in real time
         accumulated_output = ""
@@ -2130,6 +2164,13 @@ class AgentSession:
             )
         else:
             _state = _PipelineState(session_id=self._session_id)
+
+        # Cycle 20260501_1 C — stamp the pending metadata onto state
+        # so GenyDedupeStrategy (s18) applies it when it walks
+        # state.messages. We only set the key when we actually
+        # resolved metadata for at least one role.
+        if pending_metadata:
+            _state.metadata["_pending_message_metadata"] = pending_metadata
 
         # Creature state hydrate (PR-X3-5). Skipped when no state_provider
         # is wired — classic session mode. A failed hydrate leaves
@@ -2514,46 +2555,15 @@ class AgentSession:
                 stop_reason="pipeline_complete" if success else (error_msg or "error"),
             )
 
-        # Record the assistant's reply into STM before the LTM write.
-        # Without this the transcript only contains user-side messages,
-        # so retrieval layers (session_summary, keyword, vector) cannot
-        # see what the assistant just said — which is exactly what broke
-        # trigger-driven continuity in cycle 20260420_8 Bug 2b.
-        if self._memory_manager and success and accumulated_output.strip():
-            try:
-                # Cycle 20260430_2 A6 — when the input was a user_chat
-                # message (role=="user"), the assistant reply is the
-                # outbound side of the same conversation event. Stamp
-                # USER_CHAT/OUT metadata so retrieval can pair the two.
-                # For non-user inputs (DM-trigger / thinking-trigger /
-                # inbox-drain) the assistant text is "narration" with
-                # no clean counterpart, so we leave metadata=None and
-                # let later cycles refine if needed.
-                out_meta = None
-                if stm_role == "user":
-                    from service.memory.interaction_event import (
-                        CounterpartRole,
-                        Direction,
-                        Kind,
-                        canonical_user_id,
-                        make_event_metadata,
-                    )
-                    out_meta = make_event_metadata(
-                        kind=Kind.USER_CHAT,
-                        direction=Direction.OUT,
-                        counterpart_id=canonical_user_id(self._owner_username),
-                        counterpart_role=CounterpartRole.USER,
-                    )
-                self._memory_manager.record_message(
-                    "assistant",
-                    accumulated_output[:10000],
-                    metadata=out_meta,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to record assistant message — non-critical",
-                    exc_info=True,
-                )
+        # Cycle 20260501_1 C — assistant STM record is now the
+        # responsibility of GenyDedupeStrategy (s18). Pre-cycle this
+        # site recorded the assistant message directly with metadata;
+        # s18 always re-recorded the same content from state.messages
+        # *without* metadata. Result: every turn ended up in STM
+        # twice. The dedupe strategy reads
+        # state.metadata['_pending_message_metadata'] (stamped at the
+        # top of this method) and records the assistant message
+        # exactly once, with the correct metadata.
 
         # Record to long-term memory
         self._execution_count += 1
@@ -2615,13 +2625,23 @@ class AgentSession:
         # on the source_metadata / infer_input_metadata pair.
         source_metadata = kwargs.pop("source_metadata", None)
 
-        # Record input to short-term memory with proper role classification.
-        # See _classify_input_role for why triggers / inter-agent DMs are
-        # not "user".
+        # Cycle 20260501_1 C — same path as `_invoke_pipeline`: resolve
+        # the InteractionEvent metadata for the upcoming user / assistant
+        # turn but defer the actual record_message call to s18
+        # (GenyDedupeStrategy). The pending dict is stamped on
+        # state.metadata below.
         stm_role: Optional[str] = None
+        pending_metadata: Dict[str, Any] = {}
         if self._memory_manager:
             try:
-                from service.memory.interaction_event import infer_input_metadata
+                from service.memory.interaction_event import (
+                    CounterpartRole,
+                    Direction,
+                    Kind,
+                    canonical_user_id,
+                    infer_input_metadata,
+                    make_event_metadata,
+                )
                 stm_role = _classify_input_role(input_text)
                 event_meta = source_metadata
                 if event_meta is None:
@@ -2630,11 +2650,23 @@ class AgentSession:
                         recorder_agent=self,
                         role=stm_role,
                     )
-                self._memory_manager.record_message(
-                    stm_role, input_text, metadata=event_meta,
-                )
+                if event_meta:
+                    pending_metadata["user"] = event_meta
+                if stm_role == "user":
+                    pending_metadata["assistant"] = make_event_metadata(
+                        kind=Kind.USER_CHAT,
+                        direction=Direction.OUT,
+                        counterpart_id=canonical_user_id(self._owner_username),
+                        counterpart_role=CounterpartRole.USER,
+                    )
             except Exception:
-                logger.debug("Failed to record input message — non-critical", exc_info=True)
+                logger.debug(
+                    "Failed to resolve InteractionEvent metadata — strategy "
+                    "will record without metadata",
+                    exc_info=True,
+                )
+                stm_role = None
+                pending_metadata = {}
 
         accumulated_output = ""
         total_cost = 0.0
@@ -2671,6 +2703,10 @@ class AgentSession:
             )
         else:
             _state = _PipelineState(session_id=self._session_id)
+
+        # Cycle 20260501_1 C — stamp the pending metadata for s18.
+        if pending_metadata:
+            _state.metadata["_pending_message_metadata"] = pending_metadata
 
         # Creature state hydrate (PR-X3-5, mirrors _invoke_pipeline).
         _state_registry = self._build_state_registry()
@@ -2871,39 +2907,9 @@ class AgentSession:
                 stop_reason="pipeline_stream_complete",
             )
 
-        # Record the assistant's streamed reply into STM before the LTM
-        # write — see _invoke_pipeline for the full rationale.
-        if self._memory_manager and success and accumulated_output.strip():
-            try:
-                # Cycle 20260430_2 A6 — mirror of `_invoke_pipeline`'s
-                # OUT-side metadata. user_chat is the only kind that
-                # gets explicit metadata here; other kinds leave it as
-                # None for now.
-                out_meta = None
-                if stm_role == "user":
-                    from service.memory.interaction_event import (
-                        CounterpartRole,
-                        Direction,
-                        Kind,
-                        canonical_user_id,
-                        make_event_metadata,
-                    )
-                    out_meta = make_event_metadata(
-                        kind=Kind.USER_CHAT,
-                        direction=Direction.OUT,
-                        counterpart_id=canonical_user_id(self._owner_username),
-                        counterpart_role=CounterpartRole.USER,
-                    )
-                self._memory_manager.record_message(
-                    "assistant",
-                    accumulated_output[:10000],
-                    metadata=out_meta,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to record assistant message — non-critical",
-                    exc_info=True,
-                )
+        # Cycle 20260501_1 C — assistant STM record is owned by s18
+        # (GenyDedupeStrategy). See `_invoke_pipeline` for the full
+        # rationale.
 
         self._execution_count += 1
         if self._memory_manager:
