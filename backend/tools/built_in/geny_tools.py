@@ -139,6 +139,67 @@ def _record_dm_on_sender_stm(
         )
 
 
+def _maybe_save_paired_dm_reply(
+    *,
+    sender_session_id: str,
+    target_session_id: str,
+    result,
+) -> None:
+    """Cycle 20260430_1 P1-1 — broadcast a Sub-Worker → VTuber DM
+    reply to the user-visible chat room.
+
+    The DM trigger path (see :func:`_trigger_dm_response`) wakes the
+    target session via ``execute_command`` but historically did
+    nothing with the resulting reply — it died inside the
+    fire-and-forget task. That was fine in the dual-dispatch era
+    because ``_notify_linked_vtuber`` always fired its own
+    notification immediately afterward and that notification's reply
+    *was* persisted via ``_save_subworker_reply_to_chat_room``.
+
+    Cycle 20260430_1 P0-1 broke that implicit duplication: when the
+    Sub-Worker explicitly delivers a ``[SUB_WORKER_RESULT]`` payload
+    via ``send_direct_message_internal``, the auto fallback is now
+    suppressed. So this DM path becomes the *only* surface for the
+    VTuber's paraphrased reply.
+
+    Scope: only fires when sender is a paired Sub-Worker and target
+    is its bound VTuber. Other DM topologies (general session→session
+    via ``send_direct_message_external``, peer Worker chatter, etc.)
+    keep the previous behaviour — no chat-room broadcast.
+
+    Best-effort: any failure (missing agents, missing chat_room,
+    broken broadcast helper) is swallowed.
+    """
+    try:
+        manager = _get_agent_manager()
+        sender = manager.get_agent(sender_session_id)
+        target = manager.get_agent(target_session_id)
+        if sender is None or target is None:
+            return
+        if getattr(sender, "_session_type", None) != "sub":
+            return
+        if getattr(target, "_session_type", None) != "vtuber":
+            return
+        # Confirm the pair is the bound counterpart relationship —
+        # otherwise an external DM from one sub-worker to a different
+        # VTuber should not leak into that VTuber's room.
+        if getattr(sender, "_linked_session_id", None) != target_session_id:
+            return
+
+        from service.execution.agent_executor import (
+            _save_subworker_reply_to_chat_room,
+        )
+
+        _save_subworker_reply_to_chat_room(target_session_id, result)
+    except Exception:
+        logger.debug(
+            "P1-1 paired DM reply broadcast failed (sender=%s target=%s)",
+            sender_session_id,
+            target_session_id,
+            exc_info=True,
+        )
+
+
 def _trigger_dm_response(
     target_session_id: str,
     sender_name: str,
@@ -192,6 +253,21 @@ def _trigger_dm_response(
                     target_session_id,
                     result.duration_ms or 0,
                     result.output[:100],
+                )
+                # Cycle 20260430_1 P1-1 — surface the VTuber's reply to
+                # the user's chat room when the incoming DM came from
+                # the paired Sub-Worker. Before this, a sub-worker that
+                # delivered an explicit `[SUB_WORKER_RESULT]` payload
+                # made the VTuber generate a perfectly good summary
+                # that died in the fire-and-forget task — never seen
+                # by the user. P0-1 already prevents `_notify_linked_vtuber`
+                # from emitting a duplicate notification, so this
+                # broadcast is the *only* surface for the paraphrased
+                # reply.
+                _maybe_save_paired_dm_reply(
+                    sender_session_id=sender_session_id,
+                    target_session_id=target_session_id,
+                    result=result,
                 )
             else:
                 logger.warning(
