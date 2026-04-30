@@ -459,6 +459,14 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
                         content=content,
                         sender_session_id=session_id,
                         sender_name="Sub-Worker",
+                        # Cycle 20260430_1 P1-2 — tag the queued
+                        # auto-notification so `_drain_inbox` can dedupe
+                        # repeated SUB_WORKER_RESULT auto-fallbacks
+                        # within a single drain pass.
+                        metadata={
+                            "tag": "[SUB_WORKER_RESULT]",
+                            "source": "auto_notify_busy",
+                        },
                     )
                     logger.info(
                         "VTuber %s busy — SUB_WORKER_RESULT stored in inbox", linked_id
@@ -1148,7 +1156,15 @@ async def _drain_inbox(session_id: str) -> None:
     sl = _get_session_logger(session_id, create_if_missing=False)
     n_ok = 0
     n_err = 0
+    n_dedup = 0
     started = False
+    # Cycle 20260430_1 P1-2 — per-drain dedupe set. Captures
+    # (sender_session_id, tag) pairs already processed in this drain so
+    # repeated auto-fallback notifications (each carrying
+    # tag="[SUB_WORKER_RESULT]") do not feed the VTuber the same empty
+    # narration twice. The set is local to this drain pass, so
+    # genuinely-fresh delegation cycles in later drains start clean.
+    seen_tag_keys: Set[tuple] = set()
     try:
         while True:
             try:
@@ -1171,10 +1187,36 @@ async def _drain_inbox(session_id: str) -> None:
                 started = True
 
             sender = msg.get("sender_name") or "Unknown"
+            metadata = msg.get("metadata") or {}
+            tag = metadata.get("tag") if isinstance(metadata, dict) else None
+            if tag:
+                key = (msg.get("sender_session_id") or "", tag)
+                if key in seen_tag_keys:
+                    n_dedup += 1
+                    if sl is not None:
+                        sl.log(
+                            level=LogLevel.INFO,
+                            message=(
+                                f"Inbox drain skipped duplicate "
+                                f"{tag} from {sender}"
+                            ),
+                            metadata={
+                                "event": "inbox.drain.deduped",
+                                "sender": sender,
+                                "tag": tag,
+                            },
+                        )
+                    logger.info(
+                        "Drain dedupe %s: skipped %s from %s (msg=%s)",
+                        session_id, tag, sender, msg.get("id"),
+                    )
+                    continue
+                seen_tag_keys.add(key)
+
             prompt = f"[INBOX from {sender}]\n{msg['content']}"
             logger.info(
-                "Draining inbox msg %s for %s (sender=%s)",
-                msg.get("id"), session_id, sender,
+                "Draining inbox msg %s for %s (sender=%s, tag=%s)",
+                msg.get("id"), session_id, sender, tag,
             )
 
             try:
@@ -1224,11 +1266,15 @@ async def _drain_inbox(session_id: str) -> None:
         if started and sl is not None:
             sl.log(
                 level=LogLevel.INFO,
-                message=f"Drain complete: {n_ok} ok, {n_err} failed",
+                message=(
+                    f"Drain complete: {n_ok} ok, {n_err} failed, "
+                    f"{n_dedup} deduped"
+                ),
                 metadata={
                     "event": "inbox.drain.complete",
                     "n_ok": n_ok,
                     "n_err": n_err,
+                    "n_dedup": n_dedup,
                 },
             )
 
