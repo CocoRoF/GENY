@@ -302,19 +302,105 @@ def list_skills() -> List[dict]:
     return out
 
 
-def attach_provider(registry: Any) -> Optional[Any]:
+def attach_provider(
+    registry: Any,
+    *,
+    fork_runner: Any = ...,
+) -> Optional[Any]:
     """Build a :class:`SkillToolProvider` for the given registry.
 
     Returns ``None`` when the registry is empty or the executor isn't
     importable — callers treat ``None`` as "no provider to register".
+
+    Phase 10 follow-up — when ``fork_runner`` is left at its default
+    sentinel, we auto-wire :func:`make_default_fork_runner` so any
+    skill declared with ``execution_mode: fork`` Just Works as long
+    as ``ANTHROPIC_API_KEY`` is exported. Hosts that want a custom
+    sub-pipeline runner pass it explicitly; passing ``None`` opts
+    out entirely (fork-mode skills then return the "no runner
+    wired" error from the executor).
     """
     if registry is None:
         return None
     try:
-        from geny_executor.skills import SkillToolProvider
+        from geny_executor.skills import SkillToolProvider, make_default_fork_runner
     except ImportError:
         return None
-    return SkillToolProvider(registry)
+
+    # Use the sentinel so callers can distinguish "no kwarg given"
+    # (auto-wire) from "explicitly None" (opt out).
+    if fork_runner is ...:
+        try:
+            fork_runner = make_default_fork_runner()
+        except Exception as exc:  # noqa: BLE001 — never block install on a runner build
+            logger.warning(
+                "attach_provider: make_default_fork_runner() raised: %s "
+                "— fork-mode skills will surface a 'no runner wired' "
+                "error until you pass a custom runner",
+                exc,
+            )
+            fork_runner = None
+
+    if fork_runner is None:
+        logger.debug(
+            "attach_provider: no fork runner wired (ANTHROPIC_API_KEY "
+            "unset or runner build skipped) — fork-mode skills will "
+            "report 'no runner wired'"
+        )
+    return SkillToolProvider(registry, fork_runner=fork_runner)
+
+
+def install_skill_watcher(
+    registry: Any,
+    *,
+    poll_interval_s: float = 2.0,
+    on_change: Optional[Any] = None,
+) -> Optional[Any]:
+    """Build a :class:`SkillRegistryWatcher` rooted at the operator's
+    user-skill directory.
+
+    Phase 10 follow-up — Geny session manager calls this once per
+    session, holds the returned watcher for the session lifetime,
+    and stops it on session teardown. The watcher itself runs a
+    daemon thread; ``stop()`` is idempotent so cleanup is safe to
+    fire from multiple paths.
+
+    Args:
+        registry: Live registry the watcher mutates in place.
+        poll_interval_s: Seconds between scans. The default 2s is a
+            good fit for a "save-and-see-it" feedback loop without
+            burning CPU.
+        on_change: Optional callback invoked after every successful
+            reload with the resulting :class:`SkillLoadReport`.
+            Hosts typically use this to log + refresh any UI panel
+            that caches the catalog.
+
+    Returns:
+        The watcher (not yet started — caller decides when to fire
+        ``start()`` so the observer slot can be bound first), or
+        ``None`` when the executor doesn't expose
+        :class:`SkillRegistryWatcher` (pre-1.8.0).
+    """
+    if registry is None:
+        return None
+    try:
+        from geny_executor.skills import SkillRegistryWatcher
+    except ImportError:
+        logger.debug(
+            "install_skill_watcher: executor lacks SkillRegistryWatcher "
+            "(pre-1.8.0); hot-reload skipped"
+        )
+        return None
+    user_dir = user_skills_dir()
+    # We watch only the user-skill tree. Bundled trees (executor +
+    # Geny) are read-only on disk in production and shouldn't change
+    # mid-session; watching them would just be wasted stat() calls.
+    return SkillRegistryWatcher(
+        registry,
+        roots=[user_dir],
+        poll_interval_s=poll_interval_s,
+        on_change=on_change,
+    )
 
 
 async def bridge_mcp_prompts(registry: Any, mcp_manager: Any) -> int:
@@ -364,6 +450,7 @@ __all__ = [
     "attach_provider",
     "bundled_skills_dir",
     "install_skill_registry",
+    "install_skill_watcher",
     "list_skills",
     "skill_source_kind",
     "user_skills_dir",

@@ -254,3 +254,138 @@ def test_install_breakdown_includes_executor_skills() -> None:
         f"expected executor catalog in list_skills() output, "
         f"got executor-source-kind ids = {actual_executor_ids}"
     )
+
+
+# ── attach_provider auto-wires fork runner ─────────────────────────
+
+
+def test_attach_provider_auto_wires_fork_runner_when_key_present(
+    monkeypatch,
+) -> None:
+    """When ANTHROPIC_API_KEY is set, attach_provider() builds a
+    default fork runner so fork-mode skills work out of the box."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key-fake")
+
+    from geny_executor.skills import SkillRegistry
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    registry = SkillRegistry()
+    registry.register(
+        Skill(
+            id="dummy",
+            metadata=SkillMetadata(name="d", description="d"),
+            body="b",
+        )
+    )
+    provider = skill_install.attach_provider(registry)
+    assert provider is not None
+    # The runner is private state on the provider — accessing via
+    # name-mangled attr because the executor doesn't expose a
+    # public getter. Falls back to None when no runner was wired,
+    # so this assertion catches the bug if auto-wiring breaks.
+    assert provider._fork_runner is not None  # type: ignore[attr-defined]
+
+
+def test_attach_provider_no_runner_when_key_absent(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from geny_executor.skills import SkillRegistry
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    registry = SkillRegistry()
+    registry.register(
+        Skill(
+            id="dummy",
+            metadata=SkillMetadata(name="d", description="d"),
+            body="b",
+        )
+    )
+    provider = skill_install.attach_provider(registry)
+    assert provider is not None
+    assert provider._fork_runner is None  # type: ignore[attr-defined]
+
+
+def test_attach_provider_explicit_none_opts_out(monkeypatch) -> None:
+    """Caller can pass ``fork_runner=None`` explicitly to opt out
+    even when an API key is in the env."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    from geny_executor.skills import SkillRegistry
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    registry = SkillRegistry()
+    registry.register(
+        Skill(
+            id="dummy",
+            metadata=SkillMetadata(name="d", description="d"),
+            body="b",
+        )
+    )
+    provider = skill_install.attach_provider(registry, fork_runner=None)
+    assert provider is not None
+    assert provider._fork_runner is None  # type: ignore[attr-defined]
+
+
+def test_attach_provider_accepts_custom_runner() -> None:
+    """A host-supplied runner survives intact."""
+
+    async def custom_runner(**_kwargs):
+        from geny_executor.skills import ForkResult
+
+        return ForkResult(content="from custom")
+
+    from geny_executor.skills import SkillRegistry
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    registry = SkillRegistry()
+    registry.register(
+        Skill(
+            id="d",
+            metadata=SkillMetadata(name="d", description="d"),
+            body="b",
+        )
+    )
+    provider = skill_install.attach_provider(
+        registry, fork_runner=custom_runner
+    )
+    assert provider is not None
+    assert provider._fork_runner is custom_runner  # type: ignore[attr-defined]
+
+
+# ── install_skill_watcher ──────────────────────────────────────────
+
+
+def test_install_skill_watcher_returns_none_for_empty_registry() -> None:
+    assert skill_install.install_skill_watcher(None) is None
+
+
+def test_install_skill_watcher_builds_when_registry_present() -> None:
+    from geny_executor.skills import SkillRegistry, SkillRegistryWatcher
+
+    registry = SkillRegistry()
+    watcher = skill_install.install_skill_watcher(registry)
+    assert isinstance(watcher, SkillRegistryWatcher)
+    # Not started by default — caller decides when to fire start().
+    assert watcher.is_running is False
+
+
+def test_install_skill_watcher_picks_up_user_skill_change(
+    isolated_user_dir, monkeypatch
+) -> None:
+    """End-to-end: drop a new SKILL.md under ~/.geny/skills/ → the
+    watcher's reload_now() picks it up + the registry mutates."""
+    monkeypatch.setenv(skill_install.SKILLS_OPT_IN_ENV, "1")
+    user_dir = skill_install.user_skills_dir()
+
+    # Initial registry has no user skills.
+    registry, _ = skill_install.install_skill_registry()
+    assert registry is not None
+    assert "fresh_skill" not in registry
+
+    watcher = skill_install.install_skill_watcher(registry)
+    assert watcher is not None
+
+    # Add a new user skill on disk.
+    _write_skill(user_dir, "fresh_skill")
+
+    report = watcher.reload_now()
+    assert report is not None
+    assert "fresh_skill" in registry

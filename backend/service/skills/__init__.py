@@ -22,9 +22,12 @@ from service.skills.install import (
     BUNDLED_SKILLS_DIR,
     SKILLS_OPT_IN_ENV,
     USER_SKILLS_DIR_NAME,
+    attach_provider,
     bundled_skills_dir,
     install_skill_registry,
+    install_skill_watcher,
     list_skills,
+    skill_source_kind,
     user_skills_dir,
 )
 
@@ -32,8 +35,11 @@ __all__ = [
     "BUNDLED_SKILLS_DIR",
     "SKILLS_OPT_IN_ENV",
     "USER_SKILLS_DIR_NAME",
+    "attach_provider",
     "bundled_skills_dir",
     "install_skill_registry",
+    "install_skill_watcher",
     "list_skills",
+    "skill_source_kind",
     "user_skills_dir",
 ]

@@ -666,14 +666,37 @@ class AgentSessionManager:
         # without opt-in); only register the SkillToolProvider when at
         # least one skill resolved. Hold the registry on the manager so
         # G14's MCP auto-bridge can re-register prompts post-connect.
+        # Phase 10 follow-up — `attach_provider` now auto-wires
+        # `make_default_fork_runner()`, so fork-mode skills work out
+        # of the box when ANTHROPIC_API_KEY is set. Also builds a
+        # SkillRegistryWatcher so operator edits under
+        # ~/.geny/skills/ land in the next pipeline scan without a
+        # process restart.
         skill_registry = None
+        skill_watcher = None
         try:
-            from service.skills import attach_provider, install_skill_registry
+            from service.skills import (
+                attach_provider,
+                install_skill_registry,
+                install_skill_watcher,
+            )
 
             skill_registry, _skill_list = install_skill_registry()
             skill_provider = attach_provider(skill_registry)
             if skill_provider is not None:
                 adhoc_providers.append(skill_provider)
+            # Hot-reload watcher — only meaningful when we actually
+            # have a registry to mutate.
+            if skill_registry is not None:
+                skill_watcher = install_skill_watcher(
+                    skill_registry,
+                    on_change=lambda report: logger.info(
+                        "skills hot-reload: %d skill(s), %d error(s)",
+                        len(report.loaded), len(report.errors),
+                    ),
+                )
+                if skill_watcher is not None:
+                    skill_watcher.start()
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"  skill registry install skipped: {exc}", exc_info=True)
 
