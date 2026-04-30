@@ -760,3 +760,126 @@ def test_distill_unknown_session_returns_error(world) -> None:
         counterpart="user",
     )
     assert "error" in out
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cycle 20260430_3 F — narrative LLM option
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_distill_narrative_default_off_matches_baseline(world) -> None:
+    """Backwards-compat — without `narrative=true` the response shape
+    extends with `narrative: null` but every existing field is the
+    same value as cycle 20260430_2 produced."""
+    out = _run_distill(MemoryDistillTool(), counterpart="paired_subworker")
+    assert out["narrative"] is None
+    assert out["narrative_error"] is None
+    # Existing fields preserved
+    assert out["events_seen"] == 2
+    assert out["kind_counts"] == {"task_request": 1, "tool_run_summary": 1}
+
+
+def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
+    """narrative=true triggers `_run_distill_llm`; result threads into
+    response and (when update_note=true) into the entity note body."""
+    captured: list = []
+
+    def _fake_run(**kwargs):
+        captured.append(kwargs)
+        return "이 워커와는 짧은 협업이지만 파일 작성에서 안정적인 모습을 보였다."
+
+    monkeypatch.setattr(
+        "tools.built_in.memory_inspect_tools._run_distill_llm",
+        _fake_run,
+    )
+
+    class _CapturingWriter:
+        def __init__(self): self.calls = []
+        def write_note(self, **kw):
+            self.calls.append(kw)
+            return f"entities/{kw['filename_override'].split('/')[-1]}"
+
+    writer = _CapturingWriter()
+    world["vtuber"]._memory_manager._structured_writer = writer
+
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        update_note=True,
+        narrative=True,
+    )
+    assert out["narrative"] is not None
+    assert "안정적인 모습" in out["narrative"]
+    assert out["narrative_error"] is None
+    # LLM was called once with the resolved counterpart_id
+    assert len(captured) == 1
+    assert captured[0]["counterpart_id"] == "sub-1"
+    # Entity note body has narrative ABOVE stats
+    body = writer.calls[0]["content"]
+    narrative_idx = body.find("안정적인 모습")
+    stats_idx = body.find("Stats")
+    assert narrative_idx >= 0 and stats_idx >= 0 and narrative_idx < stats_idx
+
+
+def test_distill_narrative_skipped_when_no_events(world) -> None:
+    """Empty stream → don't call the LLM (no signal to summarise)."""
+    world["vtuber"]._linked_session_id = ""  # paired alias resolves None
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        narrative=True,
+    )
+    # counterpart unresolved → events_seen=0 path; narrative untouched
+    assert out["narrative"] is None
+
+
+def test_distill_narrative_swallows_llm_failure(monkeypatch, world) -> None:
+    """LLM call failures must not break the tool — we surface
+    `narrative_error` and still return the stats-only payload."""
+    def _boom(**kwargs):
+        raise RuntimeError("upstream timeout")
+
+    monkeypatch.setattr(
+        "tools.built_in.memory_inspect_tools._run_distill_llm",
+        _boom,
+    )
+
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        narrative=True,
+    )
+    assert out["narrative"] is None
+    assert out["narrative_error"] is not None
+    assert "timeout" in out["narrative_error"]
+    # Stats unaffected
+    assert out["events_seen"] == 2
+
+
+def test_distill_user_prompt_includes_recent_events(world) -> None:
+    """The prompt builder feeds the LLM the actual stats payload —
+    not a free-form summary. Pin the prompt structure so prompt
+    drift is caught here, not in production behaviour."""
+    from tools.built_in.memory_inspect_tools import _build_distill_user_prompt
+
+    stats = {
+        "events_seen": 3,
+        "kind_counts": {"task_request": 2, "tool_run_summary": 1},
+        "files_written": ["a.md", "b.md"],
+        "bash_commands_total": 0,
+        "web_fetches_total": 1,
+        "errors_total": 0,
+        "duration_ms_total": 1234,
+        "recent": [
+            {"ts": "2026-04-30T12:00:00", "kind": "tool_run_summary",
+             "summary": "wrote a.md"},
+        ],
+    }
+    prompt = _build_distill_user_prompt(
+        counterpart_id="sub-1", counterpart_role="paired_subworker",
+        stats=stats,
+    )
+    assert "sub-1" in prompt
+    assert "paired_subworker" in prompt
+    assert "tool_run_summary=1" in prompt
+    assert "wrote a.md" in prompt

@@ -725,6 +725,8 @@ class MemoryArtifactTool(BaseTool):
 
 _DEFAULT_DISTILL_EVENTS = 50
 _MAX_DISTILL_EVENTS = 200
+_DISTILL_NARRATIVE_MAX_CHARS = 2_000
+_DISTILL_LLM_TIMEOUT_S = 60.0
 
 
 def _sanitize_counterpart_for_filename(counterpart_id: str) -> str:
@@ -801,14 +803,30 @@ def _summarise_counterpart_events(
     }
 
 
-def _render_entity_markdown(stats: Dict[str, Any], counterpart_role: Optional[str]) -> str:
+def _render_entity_markdown(
+    stats: Dict[str, Any],
+    counterpart_role: Optional[str],
+    *,
+    narrative: Optional[str] = None,
+) -> str:
     """Build a small, human-readable markdown body for the entity
-    note. Intentionally light — the LLM-driven richer distillation
-    is a future cycle; the static stats are already enough to lift
-    the entity into vector / keyword retrieval surfaces."""
+    note.
+
+    Cycle 20260430_3 F — when *narrative* is set, the LLM-summarised
+    paragraph leads the body; the static stats drop below a horizontal
+    rule as a verifiable evidence layer. Without *narrative*, the
+    layout matches the cycle 20260430_2 stats-only baseline.
+    """
     lines: List[str] = []
     lines.append(f"# Counterpart: {stats['counterpart_id']}")
     lines.append("")
+    if narrative:
+        lines.append(narrative.strip())
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("## Stats")
+        lines.append("")
     lines.append(
         f"- Events observed: **{stats['events_seen']}**"
     )
@@ -870,11 +888,11 @@ class MemoryDistillTool(BaseTool):
         "(your paired Sub-Worker, the user, etc.). Returns aggregate "
         "stats: event counts by kind, files produced, totals for "
         "bash / web / errors / duration / cost, plus the most recent "
-        "5 events as a quick recap. Optional `update_note=true` "
-        "writes the same as a structured note at "
-        "`memory/entities/<sanitized>.md` so future memory_search "
-        "picks it up. Read-mostly: the note write is the only side "
-        "effect, and it's gated behind `update_note`."
+        "5 events as a quick recap. Set `narrative=true` to ALSO "
+        "run a one-shot LLM summary (uses memory_model from APIConfig); "
+        "the result lands at the top of the entity note's body when "
+        "`update_note=true`. Read-mostly: the note write is the only "
+        "side effect, and it's gated behind `update_note`."
     )
     CAPABILITIES = ToolCapabilities(
         concurrency_safe=True, read_only=True, idempotent=True,
@@ -907,6 +925,16 @@ class MemoryDistillTool(BaseTool):
                         "vector / keyword retrieval."
                     ),
                 },
+                "narrative": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "When true, run a one-shot LLM summary using "
+                        "memory_model. The narrative is returned in "
+                        "the response and written above the stats "
+                        "in the entity note (if update_note=true)."
+                    ),
+                },
             },
             "required": ["counterpart"],
         }
@@ -917,6 +945,7 @@ class MemoryDistillTool(BaseTool):
         counterpart: str,
         max_events: int = _DEFAULT_DISTILL_EVENTS,
         update_note: bool = False,
+        narrative: bool = False,
     ) -> str:
         caller = _get_caller(session_id)
         if caller is None:
@@ -953,9 +982,26 @@ class MemoryDistillTool(BaseTool):
                 cp_role = meta.get("counterpart_role") or None
                 break
 
+        narrative_text: Optional[str] = None
+        narrative_error: Optional[str] = None
+        if narrative and stats["events_seen"] > 0:
+            try:
+                narrative_text = _run_distill_llm(
+                    counterpart_id=canonical,
+                    counterpart_role=cp_role,
+                    stats=stats,
+                )
+            except Exception as exc:
+                narrative_error = str(exc)[:200]
+                logger.debug(
+                    "memory_distill: narrative LLM call failed", exc_info=True,
+                )
+
         note_path: Optional[str] = None
         if update_note:
-            note_path = _write_entity_note(memory, stats, cp_role)
+            note_path = _write_entity_note(
+                memory, stats, cp_role, narrative=narrative_text,
+            )
 
         return _ok({
             "counterpart": counterpart,
@@ -970,6 +1016,8 @@ class MemoryDistillTool(BaseTool):
             "duration_ms_total": stats["duration_ms_total"],
             "cost_usd_total": stats["cost_usd_total"],
             "recent": stats["recent"],
+            "narrative": narrative_text,
+            "narrative_error": narrative_error,
             "note_written": note_path,
         })
 
@@ -978,12 +1026,18 @@ def _write_entity_note(
     memory_manager,
     stats: Dict[str, Any],
     counterpart_role: Optional[str],
+    *,
+    narrative: Optional[str] = None,
 ) -> Optional[str]:
     """Persist the distilled summary as an ``entities/<sanitized>.md``
     structured note. Best-effort: returns the relative path on
     success, ``None`` when the structured writer is unavailable
     (e.g. minimal SessionMemoryManager / unit tests) or on
     persistence errors.
+
+    When *narrative* is provided (Stage F), it is written above the
+    stats block as the human-readable opener of the entity note.
+    Stats stay underneath as a verifiable evidence layer.
     """
     writer = getattr(memory_manager, "_structured_writer", None)
     if writer is None:
@@ -991,11 +1045,13 @@ def _write_entity_note(
     try:
         sanitized = _sanitize_counterpart_for_filename(stats["counterpart_id"])
         rel_path = f"entities/{sanitized}.md"
-        body = _render_entity_markdown(stats, counterpart_role)
+        body = _render_entity_markdown(stats, counterpart_role, narrative=narrative)
         title = f"Counterpart {stats['counterpart_id']}"
         tags = ["entity", "distillation"]
         if counterpart_role:
             tags.append(counterpart_role)
+        if narrative:
+            tags.append("narrative")
         # `filename_override` keeps repeated runs writing to the
         # same file rather than ``entities/<x>-1.md`` etc.
         return writer.write_note(
@@ -1010,6 +1066,185 @@ def _write_entity_note(
     except Exception:
         logger.debug("memory_distill: write_note failed", exc_info=True)
         return None
+
+
+# Cycle 20260430_3 F — LLM-driven narrative distillation
+# ─────────────────────────────────────────────────────────────────
+
+
+_DISTILL_SYSTEM_PROMPT = (
+    "당신은 VTuber 의 long-term memory 분석 어시스턴트입니다. "
+    "주어진 카운터파트와의 누적 상호작용 통계와 최근 이벤트를 보고 "
+    "관계의 character 를 자연어 단락 (한국어, 2~4문장) 으로 요약합니다.\n\n"
+    "규칙:\n"
+    "- 협업 패턴 / 강점 / 약점 / 인상적인 순간 / 다음 단계 추천 중 "
+    "데이터에 가장 잘 드러나는 것을 골라 자연스럽게 풀어쓰세요.\n"
+    "- bullet 없이 평문 단락. 불필요한 도구 이름 / 절대경로 / 명령어 노출 금지.\n"
+    "- 데이터에 없는 내용은 절대 추측해서 적지 말 것.\n"
+    "- 사용자 / 워커 / VTuber 자신을 부르는 호칭은 자연스럽게."
+)
+
+
+def _run_distill_llm(
+    *,
+    counterpart_id: str,
+    counterpart_role: Optional[str],
+    stats: Dict[str, Any],
+) -> Optional[str]:
+    """Call the configured memory_model to produce a narrative summary.
+
+    Synchronous shim around the executor's async client. Mirrors the
+    thread-pool pattern already used by ``SessionCreateTool`` for
+    crossing the sync/async boundary. Returns trimmed narrative text
+    or ``None`` when the configuration is incomplete (no API key,
+    etc.). Raises on actual call errors so the caller can surface
+    `narrative_error`.
+    """
+    user_prompt = _build_distill_user_prompt(
+        counterpart_id=counterpart_id,
+        counterpart_role=counterpart_role,
+        stats=stats,
+    )
+
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.general.api_config import APIConfig
+        from geny_executor.core.config import ModelConfig
+        from geny_executor.llm_client import ClientRegistry
+    except Exception:
+        return None
+
+    api_cfg = get_config_manager().load_config(APIConfig)
+    api_key = (
+        getattr(api_cfg, "anthropic_api_key", None) or ""
+    )
+    if not api_key:
+        # No credentials wired — caller will see narrative=None.
+        return None
+
+    provider = (getattr(api_cfg, "provider", "") or "anthropic").strip()
+    base_url = (getattr(api_cfg, "base_url", "") or "").strip() or None
+    model_name = (
+        (getattr(api_cfg, "memory_model", "") or "").strip()
+        or getattr(api_cfg, "anthropic_model", "")
+    )
+
+    model_cfg = ModelConfig(
+        model=model_name,
+        max_tokens=512,
+        temperature=0.2,
+        thinking_enabled=False,
+    )
+    client_cls = ClientRegistry.get(provider)
+    client = client_cls(api_key=api_key, base_url=base_url)
+
+    async def _call():
+        response = await client.create_message(
+            model_config=model_cfg,
+            messages=[{"role": "user", "content": user_prompt}],
+            system=_DISTILL_SYSTEM_PROMPT,
+            purpose="memory_distill_narrative",
+        )
+        return response
+
+    response = _bridge_async(_call())
+    text = _extract_text_from_response(response)
+    if not text:
+        return None
+    return text.strip()[:_DISTILL_NARRATIVE_MAX_CHARS]
+
+
+def _build_distill_user_prompt(
+    *,
+    counterpart_id: str,
+    counterpart_role: Optional[str],
+    stats: Dict[str, Any],
+) -> str:
+    """User-side prompt for the memory_distill narrative call."""
+    lines: List[str] = []
+    lines.append(f"## 카운터파트 정보")
+    lines.append(f"- id: {counterpart_id}")
+    if counterpart_role:
+        lines.append(f"- role: {counterpart_role}")
+    lines.append("")
+    lines.append("## 통계")
+    lines.append(f"- 누적 이벤트: {stats.get('events_seen', 0)}건")
+    if stats.get("kind_counts"):
+        kc = ", ".join(
+            f"{k}={v}" for k, v in sorted((stats.get("kind_counts") or {}).items())
+        )
+        lines.append(f"- 종류 분포: {kc}")
+    if stats.get("files_written"):
+        lines.append(f"- 작성한 파일: {len(stats['files_written'])}개 ({', '.join(stats['files_written'][:5])}{'…' if len(stats['files_written']) > 5 else ''})")
+    if stats.get("bash_commands_total"):
+        lines.append(f"- bash 호출: {stats['bash_commands_total']}회")
+    if stats.get("web_fetches_total"):
+        lines.append(f"- web 호출: {stats['web_fetches_total']}회")
+    if stats.get("errors_total"):
+        lines.append(f"- 에러: {stats['errors_total']}건")
+    if stats.get("duration_ms_total"):
+        lines.append(f"- 누적 소요시간: {stats['duration_ms_total']/1000:.1f}s")
+
+    recent = stats.get("recent") or []
+    if recent:
+        lines.append("")
+        lines.append("## 최근 이벤트 (newest first)")
+        for ev in recent:
+            ts = ev.get("ts") or ""
+            kind = ev.get("kind") or "?"
+            summary = ev.get("summary") or ""
+            lines.append(f"- [{ts}] {kind}: {summary}")
+
+    lines.append("")
+    lines.append("위 데이터만 사용해 2~4문장 한국어 단락으로 요약해 주세요.")
+    return "\n".join(lines)
+
+
+def _extract_text_from_response(response) -> str:
+    """Pull text out of the executor's APIResponse without depending
+    on the concrete type. Tries ``.text`` then ``.content`` / parts.
+    Returns ``""`` on shape mismatches.
+    """
+    if response is None:
+        return ""
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text:
+        return text
+    content = getattr(response, "content", None)
+    if isinstance(content, list):
+        out: List[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    out.append(part["text"])
+            else:
+                t = getattr(part, "text", None)
+                if isinstance(t, str):
+                    out.append(t)
+        if out:
+            return "\n".join(out)
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+def _bridge_async(coro):
+    """Cross from sync tool context into async client. Mirrors the
+    pattern used by SessionCreateTool — thread-pool when an event
+    loop is already running, ``asyncio.run`` otherwise.
+    """
+    import asyncio
+    import concurrent.futures
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=_DISTILL_LLM_TIMEOUT_S)
+    return asyncio.run(coro)
 
 
 # Module-level export consumed by ToolLoader (Stage D wires this up).
