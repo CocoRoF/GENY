@@ -77,9 +77,20 @@ def test_user_skills_loaded_when_env_on(isolated_user_dir: Path, monkeypatch) ->
 def test_install_returns_none_registry_when_empty(
     isolated_user_dir: Path, monkeypatch
 ) -> None:
-    """No bundled skills + no user skills → registry is None (so the
-    caller can skip the SkillToolProvider registration entirely)."""
+    """No bundled skills + no user skills + no executor catalog →
+    registry is None (so the caller can skip the SkillToolProvider
+    registration entirely)."""
     monkeypatch.setattr(skill_install, "BUNDLED_SKILLS_DIR", isolated_user_dir / "no-such-bundled")
+    # Phase 10.4 (executor 1.6.x) — executor ships a bundled catalog.
+    # For this "everything empty" test we point its dir at a non-
+    # existent path too so the registry comes back genuinely empty.
+    import geny_executor.skills.bundled_skills as exec_bundled
+
+    monkeypatch.setattr(
+        exec_bundled,
+        "bundled_skills_dir",
+        lambda: isolated_user_dir / "no-such-executor-bundled",
+    )
     # Don't set the opt-in env — user skills also skipped.
     registry, skills = skill_install.install_skill_registry()
     assert registry is None

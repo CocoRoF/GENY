@@ -78,6 +78,19 @@ def _user_skills_opted_in() -> bool:
 def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
     """Build a populated :class:`SkillRegistry`.
 
+    Three skill sources, in priority order (first-wins on id collision):
+
+    1. **Executor bundled** — the catalog shipped with
+       ``geny-executor`` (Phase 10.4 + 10.6: verify / debug /
+       lorem-ipsum / stuck / batch / simplify / skillify / loop).
+       Always loaded; pinned to whatever version the requirements
+       file pulls in.
+    2. **Geny bundled** — first-party Geny-specific skills under
+       ``backend/skills/bundled/``. Always loaded.
+    3. **User** — operator-supplied skills under ``~/.geny/skills/``,
+       gated by ``settings.json:skills.user_skills_enabled`` (or the
+       legacy ``GENY_ALLOW_USER_SKILLS=1`` env var).
+
     Returns:
         ``(registry, skills)`` — registry is ``None`` when the executor
         isn't importable or no skills were found. ``skills`` is a list
@@ -92,24 +105,66 @@ def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
     registry = SkillRegistry()
     loaded: List[Any] = []
 
-    # Bundled — always.
+    # 1. Executor-bundled — always. New in geny-executor 1.6.x; the
+    # import is best-effort so older executors keep working without
+    # the catalog (they just don't ship it).
+    try:
+        from geny_executor.skills import load_bundled_skills
+
+        executor_report = load_bundled_skills(strict=False)
+        for skill in executor_report.loaded:
+            try:
+                registry.register(skill)
+                loaded.append(skill)
+            except ValueError as exc:
+                logger.warning(
+                    "install_skill_registry: executor-bundled %s collided: %s",
+                    skill.id, exc,
+                )
+        if executor_report.errors:
+            for path, err in executor_report.errors:
+                logger.warning(
+                    "install_skill_registry: executor-bundled error %s: %s",
+                    path, err,
+                )
+    except ImportError:
+        logger.debug(
+            "install_skill_registry: executor lacks load_bundled_skills "
+            "(pre-1.6.0); skipping executor catalog"
+        )
+
+    # 2. Geny-bundled — always.
     if BUNDLED_SKILLS_DIR.exists():
         report = load_skills_dir(BUNDLED_SKILLS_DIR, strict=False)
         for skill in report.loaded:
-            registry.register(skill)
-            loaded.append(skill)
+            try:
+                registry.register(skill)
+                loaded.append(skill)
+            except ValueError as exc:
+                logger.warning(
+                    "install_skill_registry: Geny-bundled %s collided "
+                    "with executor catalog: %s",
+                    skill.id, exc,
+                )
         if report.errors:
             for path, err in report.errors:
                 logger.warning("install_skill_registry: bundled skill error %s: %s", path, err)
 
-    # User — opt-in.
+    # 3. User — opt-in.
     if _user_skills_opted_in():
         user_dir = user_skills_dir()
         if user_dir.exists():
             report = load_skills_dir(user_dir, strict=False)
             for skill in report.loaded:
-                registry.register(skill)
-                loaded.append(skill)
+                try:
+                    registry.register(skill)
+                    loaded.append(skill)
+                except ValueError as exc:
+                    logger.warning(
+                        "install_skill_registry: user %s collided with "
+                        "an existing skill: %s",
+                        skill.id, exc,
+                    )
             if report.errors:
                 for path, err in report.errors:
                     logger.warning("install_skill_registry: user skill error %s: %s", path, err)
@@ -120,23 +175,22 @@ def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
         )
 
     if loaded:
-        # R3 (audit 20260425_3 §1.1): the previous bundled-vs-user
-        # breakdown used a placeholder that always returned [], so
-        # the log always read "(0 bundled, N user)" regardless of
-        # the actual mix. Use Skill.metadata.source (set by the
-        # executor's frontmatter parser) to derive the real bundled count.
-        bundled_count = sum(1 for s in loaded if _is_bundled_skill(s))
-        user_count = len(loaded) - bundled_count
+        # Three-way breakdown for visibility in the boot log.
+        executor_count = sum(1 for s in loaded if _is_executor_bundled_skill(s))
+        geny_count = sum(1 for s in loaded if _is_bundled_skill(s))
+        user_count = len(loaded) - executor_count - geny_count
         logger.info(
-            "install_skill_registry: %d skill(s) registered (%d bundled, %d user)",
-            len(loaded), bundled_count, user_count,
+            "install_skill_registry: %d skill(s) registered "
+            "(%d executor-bundled, %d Geny-bundled, %d user)",
+            len(loaded), executor_count, geny_count, user_count,
         )
 
     return (registry if loaded else None), loaded
 
 
 def _is_bundled_skill(skill: Any) -> bool:
-    """Return True when the skill was loaded from BUNDLED_SKILLS_DIR.
+    """Return True when the skill was loaded from BUNDLED_SKILLS_DIR
+    (Geny's first-party bundled tree).
 
     Skill objects across executor versions store their source path
     either at the top level (``source``) or under metadata
@@ -152,6 +206,24 @@ def _is_bundled_skill(skill: Any) -> bool:
         return False
     try:
         return BUNDLED_SKILLS_DIR in Path(source).parents
+    except Exception:
+        return False
+
+
+def _is_executor_bundled_skill(skill: Any) -> bool:
+    """Return True when the skill was loaded from the executor's own
+    bundled tree (``geny_executor/skills/bundled/``)."""
+    source = getattr(skill, "source", None)
+    if source is None:
+        return False
+    try:
+        from geny_executor.skills import bundled_skills_dir as exec_bundled_dir
+
+        exec_dir = exec_bundled_dir()
+    except Exception:
+        return False
+    try:
+        return exec_dir in Path(source).parents
     except Exception:
         return False
 
