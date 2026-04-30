@@ -32,9 +32,18 @@ from service.memory.entity_bootstrap import (
 
 
 class _FakeWriter:
-    def __init__(self, *, raises: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        raises: bool = False,
+        update_raises: bool = False,
+        update_returns: bool = True,
+    ) -> None:
         self.calls: List[Dict[str, Any]] = []
+        self.update_calls: List[Dict[str, Any]] = []
         self.raises = raises
+        self.update_raises = update_raises
+        self.update_returns = update_returns
         self.memory_dir = Path("/tmp/__entity_bootstrap_unused__")
 
     def write_note(self, **kwargs):
@@ -43,6 +52,27 @@ class _FakeWriter:
         self.calls.append(kwargs)
         return f"entities/{kwargs.get('filename_override', 'x').split('/')[-1]}"
 
+    def update_note(self, filename: str, *, content=None, **kwargs):
+        if self.update_raises:
+            raise RuntimeError("update_note exploded")
+        self.update_calls.append(
+            {"filename": filename, "content": content, **kwargs},
+        )
+        return self.update_returns
+
+
+class _FakeSTMEntry:
+    def __init__(self, metadata: Dict[str, Any]) -> None:
+        self.metadata = metadata
+
+
+class _FakeSTM:
+    def __init__(self, entries: List[_FakeSTMEntry]) -> None:
+        self._entries = entries
+
+    def load_all(self) -> List[_FakeSTMEntry]:
+        return list(self._entries)
+
 
 class _FakeMemoryManager:
     def __init__(
@@ -50,10 +80,12 @@ class _FakeMemoryManager:
         *,
         writer: Optional[_FakeWriter] = None,
         memory_dir: Optional[Path] = None,
+        stm_entries: Optional[List[_FakeSTMEntry]] = None,
     ) -> None:
         self._structured_writer = writer
         if memory_dir is not None and writer is not None:
             writer.memory_dir = memory_dir
+        self.short_term = _FakeSTM(stm_entries or [])
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -139,19 +171,114 @@ def test_no_writer_silent() -> None:
 # ─────────────────────────────────────────────────────────────────
 
 
-def test_existing_file_skipped(tmp_path: Path) -> None:
-    """File already at entities/<sanitized>.md → skip without writing."""
+def test_existing_file_refreshes_stats(tmp_path: Path) -> None:
+    """Cycle 20260501_2 F3 — when the entity file already exists,
+    the hook recomputes stats from the caller's STM and overwrites
+    the body via update_note. Without this, the bootstrap stub
+    body persists forever and the user sees the placeholder text
+    "memory_distill 을 호출하면 …" indefinitely."""
+    stm_entries = [
+        _FakeSTMEntry({
+            "event_id": "EVT-1",
+            "kind": "task_request",
+            "direction": "out",
+            "counterpart_id": "sub-1",
+            "counterpart_role": "paired_subworker",
+            "payload": {
+                "files_written": ["out.md", "log.txt"],
+                "bash_commands": ["ls -la"],
+                "duration_ms": 1234,
+                "cost_usd": 0.01,
+            },
+        }),
+        _FakeSTMEntry({
+            "event_id": "EVT-2",
+            "kind": "tool_run_summary",
+            "direction": "in",
+            "counterpart_id": "sub-1",
+            "counterpart_role": "paired_subworker",
+            "payload": {"files_written": ["out.md"], "errors": []},
+        }),
+        # Different counterpart — must NOT contribute to sub-1's stats
+        _FakeSTMEntry({
+            "event_id": "EVT-3",
+            "kind": "user_chat",
+            "direction": "in",
+            "counterpart_id": "owner:alice",
+            "counterpart_role": "user",
+        }),
+    ]
     writer = _FakeWriter()
-    mm = _FakeMemoryManager(writer=writer, memory_dir=tmp_path)
+    mm = _FakeMemoryManager(
+        writer=writer, memory_dir=tmp_path, stm_entries=stm_entries,
+    )
 
     entities_dir = tmp_path / "entities"
     entities_dir.mkdir(parents=True, exist_ok=True)
-    (entities_dir / "sub-1.md").write_text("preexisting", encoding="utf-8")
+    (entities_dir / "sub-1.md").write_text(
+        "_(legacy stub body)_", encoding="utf-8",
+    )
+
+    rel = maybe_bootstrap_entity(mm, _meta())
+    assert rel == "entities/sub-1.md"
+    # write_note must NOT have been called — refresh path uses update_note
+    assert writer.calls == []
+    assert len(writer.update_calls) == 1
+    body = writer.update_calls[0]["content"]
+    # Stats are present and reflect the matching events for sub-1 only
+    assert "Events observed: **2**" in body
+    assert "task_request=1" in body
+    assert "tool_run_summary=1" in body
+    assert "out.md" in body
+    assert "log.txt" in body
+    # owner:alice's user_chat is filtered out
+    assert "user_chat" not in body
+    # No more bootstrap stub language in the new body
+    assert "memory_distill 을 호출하면" not in body
+
+
+def test_refresh_returns_none_when_update_note_fails(tmp_path: Path) -> None:
+    """Best-effort: a raising update_note must not leak out of the
+    hook (record_message is on the hot path)."""
+    writer = _FakeWriter(update_raises=True)
+    mm = _FakeMemoryManager(
+        writer=writer, memory_dir=tmp_path,
+        stm_entries=[_FakeSTMEntry({
+            "event_id": "EVT-1",
+            "kind": "task_request",
+            "direction": "out",
+            "counterpart_id": "sub-1",
+            "counterpart_role": "paired_subworker",
+        })],
+    )
+    entities_dir = tmp_path / "entities"
+    entities_dir.mkdir(parents=True, exist_ok=True)
+    (entities_dir / "sub-1.md").write_text("legacy", encoding="utf-8")
+
+    out = maybe_bootstrap_entity(mm, _meta())
+    assert out is None
+    # write_note path also untouched
+    assert writer.calls == []
+
+
+def test_refresh_returns_none_when_no_matching_events(tmp_path: Path) -> None:
+    """If for some reason the STM has no matching counterpart_id
+    yet (e.g. the just-recorded line hasn't flushed), the refresh
+    returns None and leaves the existing body untouched. We do
+    NOT re-stub — the stub is for genuinely fresh files only."""
+    writer = _FakeWriter()
+    mm = _FakeMemoryManager(
+        writer=writer, memory_dir=tmp_path, stm_entries=[],
+    )
+    entities_dir = tmp_path / "entities"
+    entities_dir.mkdir(parents=True, exist_ok=True)
+    body_before = "preexisting body"
+    (entities_dir / "sub-1.md").write_text(body_before, encoding="utf-8")
 
     assert maybe_bootstrap_entity(mm, _meta()) is None
     assert writer.calls == []
-    # And the existing file's content stays untouched
-    assert (entities_dir / "sub-1.md").read_text(encoding="utf-8") == "preexisting"
+    assert writer.update_calls == []
+    assert (entities_dir / "sub-1.md").read_text(encoding="utf-8") == body_before
 
 
 # ─────────────────────────────────────────────────────────────────
