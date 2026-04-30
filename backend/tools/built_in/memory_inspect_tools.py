@@ -300,7 +300,164 @@ def _short_content_preview(content: str, meta: Dict[str, Any]) -> str:
     return first[:160]
 
 
+# ─── B2 — memory_with ──────────────────────────────────────────────
+
+
+_DEFAULT_WITH_LIMIT = 5
+_MAX_WITH_LIMIT = 50
+
+
+class MemoryWithTool(BaseTool):
+    """List recent InteractionEvents with a specific counterpart.
+
+    Each result includes the ``event_id`` so the persona can drill
+    deeper via ``memory_event`` / ``memory_artifact``. Use after
+    ``memory_status`` when the user wants more than the latest one.
+    """
+
+    name = "memory_with"
+    description = (
+        "List recent interactions with a specific counterpart (your "
+        "paired Sub-Worker, the user, etc.). Each entry includes an "
+        "`event_id` you can pass to `memory_event` for full details, "
+        "plus its kind/direction/summary so you can decide which "
+        "one to drill into. Use this after `memory_status` when "
+        "the user wants more than the latest one. Optional `kinds` "
+        "narrows to specific event kinds (e.g. ['tool_run_summary', "
+        "'task_result']); `since` (event_id) returns only events "
+        "after a known anchor."
+    )
+    CAPABILITIES = _LOOKUP
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "counterpart": {
+                    "type": "string",
+                    "description": (
+                        "Counterpart id or alias — same as memory_status."
+                    ),
+                },
+                "kinds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional kind filter. Useful values: "
+                        "'user_chat', 'dm', 'task_request', "
+                        "'task_result', 'tool_run_summary', "
+                        "'reflection'."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": _MAX_WITH_LIMIT,
+                    "default": _DEFAULT_WITH_LIMIT,
+                    "description": (
+                        f"Max events to return (1..{_MAX_WITH_LIMIT}, "
+                        f"default {_DEFAULT_WITH_LIMIT})."
+                    ),
+                },
+                "since": {
+                    "type": "string",
+                    "description": (
+                        "Optional anchor — pass an `event_id` from a "
+                        "prior call to get only events that happened "
+                        "after it."
+                    ),
+                },
+            },
+            "required": ["counterpart"],
+        }
+
+    def run(
+        self,
+        session_id: str,
+        counterpart: str,
+        kinds: Optional[List[str]] = None,
+        limit: int = _DEFAULT_WITH_LIMIT,
+        since: Optional[str] = None,
+    ) -> str:
+        caller = _get_caller(session_id)
+        if caller is None:
+            return _error(f"caller session not found: {session_id}")
+        memory = getattr(caller, "_memory_manager", None)
+        if memory is None:
+            return _error("caller has no memory manager")
+
+        canonical = _resolve_counterpart_id(caller, counterpart)
+        if canonical is None:
+            return _ok({
+                "counterpart": counterpart,
+                "counterpart_id": None,
+                "events": [],
+            })
+
+        try:
+            limit_clamped = max(1, min(int(limit), _MAX_WITH_LIMIT))
+        except (TypeError, ValueError):
+            limit_clamped = _DEFAULT_WITH_LIMIT
+
+        kind_filter: Optional[set] = None
+        if kinds:
+            kind_filter = {str(k) for k in kinds if isinstance(k, str)}
+
+        entries = _stm_load_all(memory)
+        cutoff = _resolve_since_cutoff(entries, since) if since else None
+
+        # Walk newest-first; collect up to limit_clamped matches.
+        results: List[Dict[str, Any]] = []
+        for entry in reversed(entries):
+            meta = _entry_meta(entry)
+            if not meta.get("event_id"):
+                continue
+            if meta.get("counterpart_id") != canonical:
+                continue
+            if kind_filter is not None and meta.get("kind") not in kind_filter:
+                continue
+            if cutoff is not None:
+                ts = getattr(entry, "timestamp", None)
+                if ts is None or ts <= cutoff:
+                    continue
+            results.append(_summarise_event(entry, meta))
+            if len(results) >= limit_clamped:
+                break
+
+        return _ok({
+            "counterpart": counterpart,
+            "counterpart_id": canonical,
+            "events": results,
+        })
+
+
+def _resolve_since_cutoff(entries: List[Any], since: str):
+    """Translate ``since`` into a comparable timestamp.
+
+    Strategy:
+      1. If *since* matches an event_id we have on hand, use that
+         event's timestamp.
+      2. Otherwise try parsing it as an ISO datetime.
+      3. Failing both, return ``None`` so we don't silently drop
+         everything.
+    """
+    if not since:
+        return None
+    target = since.strip()
+    for entry in entries:
+        meta = _entry_meta(entry)
+        if meta.get("event_id") == target:
+            return getattr(entry, "timestamp", None)
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(target)
+    except (TypeError, ValueError):
+        return None
+
+
 # Module-level export consumed by ToolLoader (Stage D wires this up).
 TOOLS = [
     MemoryStatusTool(),
+    MemoryWithTool(),
 ]
