@@ -802,9 +802,16 @@ const ko: Translations = {
         bannerNote: '스킬은 LLM이 사용할 수 있는 명세 + 코드 — 호스트 사용자별로 등록됩니다.',
         emptyTitle: '등록된 스킬이 없습니다.',
         countLabel: '{n}개 스킬',
-        sectionBundled: '번들',
+        sectionBundled: 'Geny 번들',
+        sectionExecutor: 'Executor 번들',
         sectionUser: '사용자',
+        sectionOther: '기타',
         toolsCount: '{n}개 도구',
+        // 출처 뱃지 (Phase 10 follow-up)
+        badgeExecutor: 'executor',
+        badgeGeny: 'geny',
+        badgeUser: 'user',
+        badgeMcp: 'mcp',
         // ── 새 모달용 (Phase 9.3) ──
         form: {
           createTitle: '새 스킬 만들기',

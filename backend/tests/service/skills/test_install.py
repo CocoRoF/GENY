@@ -158,3 +158,99 @@ def test_list_skills_summary_shape(isolated_user_dir: Path, monkeypatch) -> None
     assert "description" in summary
     assert "allowed_tools" in summary
     assert isinstance(summary["allowed_tools"], list)
+    # Phase 10 follow-up — every summary carries source_kind.
+    assert summary["source_kind"] == "user"
+
+
+# ── source_kind classification ──────────────────────────────────────
+
+
+def test_source_kind_user(isolated_user_dir: Path, monkeypatch) -> None:
+    user_dir = skill_install.user_skills_dir()
+    _write_skill(user_dir, "from_user")
+    monkeypatch.setenv(skill_install.SKILLS_OPT_IN_ENV, "1")
+
+    _, skills = skill_install.install_skill_registry()
+    target = next(s for s in skills if getattr(s, "id", None) == "from_user")
+    assert skill_install.skill_source_kind(target) == "user"
+
+
+def test_source_kind_executor_for_bundled_executor_skill() -> None:
+    """The executor ships its own bundled catalog (verify / debug /
+    lorem-ipsum / etc.). Each one should classify as ``executor``."""
+    from geny_executor.skills import load_bundled_skills
+
+    report = load_bundled_skills(strict=True)
+    assert report.loaded, "expected executor to ship bundled skills"
+    for skill in report.loaded:
+        assert skill_install.skill_source_kind(skill) == "executor"
+
+
+def test_source_kind_geny_for_geny_bundled_skill() -> None:
+    """Geny's own bundled tree (backend/skills/bundled/) should classify
+    as ``geny`` — not executor, not user."""
+    from geny_executor.skills import load_skills_dir
+
+    if not skill_install.BUNDLED_SKILLS_DIR.exists():
+        pytest.skip("no Geny bundled tree on this checkout")
+    report = load_skills_dir(skill_install.BUNDLED_SKILLS_DIR)
+    if not report.loaded:
+        pytest.skip("Geny bundled tree is empty")
+    for skill in report.loaded:
+        assert skill_install.skill_source_kind(skill) == "geny"
+
+
+def test_source_kind_mcp_when_extras_marked() -> None:
+    """MCP-bridged skills carry ``extras['source_kind']=='mcp'`` per
+    executor 1.6.0 — make sure the classifier honours the marker."""
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    skill = Skill(
+        id="mcp__remote__demo",
+        metadata=SkillMetadata(
+            name="demo",
+            description="from a remote MCP server",
+            extras={"source_kind": "mcp"},
+        ),
+        body="placeholder",
+    )
+    assert skill_install.skill_source_kind(skill) == "mcp"
+
+
+def test_source_kind_unknown_for_in_code_skill_with_no_marker() -> None:
+    """A skill registered in code (no source path, no extras hint) has
+    no way to be classified — falls back to ``unknown`` so the UI can
+    show it as such instead of misclassifying."""
+    from geny_executor.skills.types import Skill, SkillMetadata
+
+    skill = Skill(
+        id="custom_inline",
+        metadata=SkillMetadata(name="x", description="x"),
+        body="",
+    )
+    assert skill_install.skill_source_kind(skill) == "unknown"
+
+
+def test_install_breakdown_includes_executor_skills() -> None:
+    """Boot integration check — the standard install path now picks
+    up the executor's bundled catalog alongside any Geny-bundled
+    skills. ``list_skills()`` shows executor-classified entries."""
+    out = skill_install.list_skills()
+    # At least the 8 executor-bundled skills should be present (10.4
+    # + 10.6).
+    executor_kinds = [s for s in out if s.get("source_kind") == "executor"]
+    expected_executor_ids = {
+        "verify",
+        "debug",
+        "lorem-ipsum",
+        "stuck",
+        "batch",
+        "simplify",
+        "skillify",
+        "loop",
+    }
+    actual_executor_ids = {s["id"] for s in executor_kinds}
+    assert expected_executor_ids.issubset(actual_executor_ids), (
+        f"expected executor catalog in list_skills() output, "
+        f"got executor-source-kind ids = {actual_executor_ids}"
+    )

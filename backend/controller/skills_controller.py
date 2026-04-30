@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from controller.auth_controller import require_auth
 from service.skills import list_skills, user_skills_dir
+from service.skills.install import skill_source_kind
 
 logger = getLogger(__name__)
 
@@ -43,6 +44,17 @@ class SkillSummary(BaseModel):
     category: Optional[str] = Field(None, description="Discovery category")
     effort: Optional[str] = Field(None, description="Token+time hint: low|medium|high")
     examples: List[str] = Field(default_factory=list, description="Example invocations")
+    # Phase 10 follow-up — origin classification used by the SkillsTab
+    # UI to badge executor-bundled / Geny-bundled / user / MCP /
+    # unknown skills distinctly. Old executors / hosts may emit
+    # ``"unknown"`` for skills they can't classify.
+    source_kind: str = Field(
+        "unknown",
+        description=(
+            "executor | geny | user | mcp | unknown — where the skill "
+            "originated. Drives the SkillsTab badge."
+        ),
+    )
 
 
 class SkillListResponse(BaseModel):
@@ -84,6 +96,13 @@ class SkillDetailResponse(BaseModel):
     is_user_skill: bool = Field(
         False,
         description="True when the skill lives under ~/.geny/skills/ (editable).",
+    )
+    source_kind: str = Field(
+        "unknown",
+        description=(
+            "executor | geny | user | mcp | unknown — origin classification. "
+            "Mirrors the field on SkillSummary."
+        ),
     )
 
 
@@ -135,6 +154,7 @@ async def get_skill(skill_id: str, _auth: dict = Depends(require_auth)):
         body=getattr(skill, "body", "") or "",
         source=src_path,
         is_user_skill=is_user,
+        source_kind=skill_source_kind(skill),
     )
 
 
@@ -468,4 +488,5 @@ def _to_summary(skill_dict: dict) -> SkillSummary:
         category=skill_dict.get("category"),
         effort=skill_dict.get("effort"),
         examples=examples,
+        source_kind=skill_dict.get("source_kind") or "unknown",
     )
