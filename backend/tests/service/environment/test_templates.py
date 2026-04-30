@@ -196,6 +196,48 @@ def test_vtuber_env_legacy_call_site_still_works() -> None:
     assert external == ["web_search", "news_search", "web_fetch"]
 
 
+def test_vtuber_env_includes_memory_inspect_tools() -> None:
+    """Cycle 20260430_2 D2 — the progressive memory inspection
+    family (memory_status / memory_with / memory_event /
+    memory_artifact / memory_distill) lives under the
+    ``memory_inspect_tools`` source stem and is allowlisted by
+    :data:`_PLATFORM_TOOL_SOURCES`. The VTuber roster must surface
+    every member so the persona has the full ladder available
+    without any prompt-side data injection."""
+    from service.environment.templates import create_vtuber_env
+
+    inspect_names = [
+        "memory_status",
+        "memory_with",
+        "memory_event",
+        "memory_artifact",
+        "memory_distill",
+    ]
+    other_platform = [
+        "send_direct_message_internal",
+        "read_inbox",
+        "memory_read",
+        "memory_search",
+    ]
+    all_names = list(inspect_names) + list(other_platform) + ["web_search"]
+
+    source_map = {name: "memory_inspect_tools" for name in inspect_names}
+    source_map.update({name: "geny_tools" for name in other_platform[:2]})
+    source_map.update({name: "memory_tools" for name in other_platform[2:]})
+    loader = _FakeToolLoader(source_map)
+
+    manifest = create_vtuber_env(
+        all_tool_names=all_names, tool_loader=loader,
+    )
+    external = list(manifest.tools.external)
+
+    for name in inspect_names:
+        assert name in external, (
+            f"VTuber roster missing inspect tool: {name}; "
+            f"got {sorted(external)}"
+        )
+
+
 def test_install_templates_propagates_to_vtuber(tmp_path) -> None:
     """``install_environment_templates`` must pipe *external_tool_names*
     into the VTuber factory as well. Before PR #2 the VTuber got

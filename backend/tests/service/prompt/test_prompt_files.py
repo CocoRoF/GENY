@@ -103,6 +103,24 @@ def test_vtuber_md_warns_against_dumping_details(vtuber_md: str) -> None:
     assert "do not dump" in snippet or "do not dump it" in snippet
 
 
+def test_vtuber_md_includes_memory_ladder_guide(vtuber_md: str) -> None:
+    """Cycle 20260430_2 D1 — the persona file must announce the
+    progressive-memory tool ladder so the LLM picks the right
+    starting tool without any prompt-side data injection. We grep
+    for each tool name to lock the catalog reference."""
+    text = vtuber_md
+    assert "## Recalling Your Memory" in text
+    for tool in (
+        "memory_status",
+        "memory_with",
+        "memory_event",
+        "memory_artifact",
+        "memory_search",
+        "memory_distill",
+    ):
+        assert tool in text, f"vtuber.md missing reference to {tool!r}"
+
+
 def test_vtuber_md_silent_close_on_unstructured_payload(
     vtuber_md: str,
 ) -> None:
