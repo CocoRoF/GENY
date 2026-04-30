@@ -39,7 +39,11 @@ dependencies = [
     # provider-aware model picker recommended default. Pricing
     # tables retain the legacy id for historical billing rows.
     # cron extra pulls croniter for the scheduling daemon.
-    "geny-executor[web,cron]>=1.3.3,<1.4.0",
+    # Skills uplift (1.4.0 — 1.8.0): arg substitution + invocation
+    # flags, allowed_tools enforcement + paths conditional, shell-
+    # block execution + bundled assets, 8-skill bundled catalog,
+    # fork execution mode, hot-reload watcher.
+    "geny-executor[web,cron]>=1.8.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
