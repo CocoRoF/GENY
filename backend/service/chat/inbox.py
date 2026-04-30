@@ -101,8 +101,16 @@ class InboxManager:
         content: str,
         sender_session_id: str = "",
         sender_name: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Deliver a direct message to a session's inbox.
+
+        ``metadata`` is an optional structured envelope persisted
+        alongside the message body. Cycle 20260430_1 P1-2 uses it to
+        carry the routing tag (e.g. ``"[SUB_WORKER_RESULT]"``) so the
+        drain path can dedupe duplicate auto-notifications without
+        having to parse the body. Older callers that pass nothing get
+        an empty metadata dict — backward-compatible on disk.
 
         Returns the created message dict.
         """
@@ -113,6 +121,7 @@ class InboxManager:
             "content": content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "read": False,
+            "metadata": dict(metadata) if metadata else {},
         }
 
         with self._lock:
@@ -121,8 +130,11 @@ class InboxManager:
             self._save_inbox(target_session_id, messages)
 
         logger.info(
-            "Inbox: delivered message %s → %s (from %s)",
-            msg["id"], target_session_id, sender_session_id or "unknown",
+            "Inbox: delivered message %s → %s (from %s, tag=%s)",
+            msg["id"],
+            target_session_id,
+            sender_session_id or "unknown",
+            (msg.get("metadata") or {}).get("tag"),
         )
         return msg
 
