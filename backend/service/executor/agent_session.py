@@ -2016,6 +2016,13 @@ class AgentSession:
         iterations = 0
         success = True
         error_msg = None
+        # Cycle 20260430_1 P0-2 — capture per-turn tool execution log so
+        # downstream (`_notify_linked_vtuber`) can synthesise a meaningful
+        # `[SUB_WORKER_RESULT]` payload for tool-only turns where the LLM
+        # produced no final text. Keyed by `tool_use_id` while in flight,
+        # appended to the ordered completion list on `tool.call_complete`.
+        tool_calls_in_progress: Dict[str, Dict[str, Any]] = {}
+        tool_calls_completed: List[Dict[str, Any]] = []
 
         # Create PipelineState with session context.
         #
@@ -2085,6 +2092,16 @@ class AgentSession:
                         tool_input=event_data.get("input") or {},
                         tool_id=event_data.get("tool_use_id"),
                     )
+                    # Cycle 20260430_1 P0-2 — remember start args so the
+                    # paired `tool.call_complete` can fold them into
+                    # the per-turn tool_calls log without re-asking the
+                    # pipeline.
+                    _start_tid = event_data.get("tool_use_id")
+                    if _start_tid:
+                        tool_calls_in_progress[_start_tid] = {
+                            "name": event_data.get("name", "unknown"),
+                            "input": event_data.get("input") or {},
+                        }
                     # PR-E.4.1 — process-wide tool event ring for the
                     # AdminPanel "Recent Activity" panel.
                     try:
@@ -2099,6 +2116,22 @@ class AgentSession:
                     except Exception:  # noqa: BLE001 — telemetry must never break execution
                         pass
                 elif event_type == "tool.call_complete":
+                    # Cycle 20260430_1 P0-2 — close the per-turn entry
+                    # before the existing logging branch runs. Order of
+                    # appends matches the order of completion events,
+                    # which matches the worker's actual call order.
+                    _done_tid = event_data.get("tool_use_id")
+                    _started = tool_calls_in_progress.pop(_done_tid, {}) if _done_tid else {}
+                    tool_calls_completed.append({
+                        "name": (
+                            event_data.get("name")
+                            or _started.get("name")
+                            or "unknown"
+                        ),
+                        "input": _started.get("input") or {},
+                        "is_error": bool(event_data.get("is_error", False)),
+                        "duration_ms": int(event_data.get("duration_ms") or 0),
+                    })
                     if event_data.get("is_error"):
                         name = event_data.get("name", "unknown")
                         duration_ms = event_data.get("duration_ms", 0)
@@ -2453,9 +2486,17 @@ class AgentSession:
 
         if not success:
             self._error_message = error_msg
-            return {"output": f"Error: {error_msg}", "total_cost": total_cost}
+            return {
+                "output": f"Error: {error_msg}",
+                "total_cost": total_cost,
+                "tool_calls": tool_calls_completed,
+            }
 
-        return {"output": accumulated_output, "total_cost": total_cost}
+        return {
+            "output": accumulated_output,
+            "total_cost": total_cost,
+            "tool_calls": tool_calls_completed,
+        }
 
     async def _astream_pipeline(
         self,

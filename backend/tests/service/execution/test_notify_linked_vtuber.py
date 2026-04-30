@@ -22,6 +22,7 @@ from service.execution import agent_executor
 from service.execution.agent_executor import (
     AlreadyExecutingError,
     ExecutionResult,
+    _compose_subworker_payload_from_tools,
     _save_subworker_reply_to_chat_room,
 )
 
@@ -109,6 +110,84 @@ def patched_world(monkeypatch):
         "vtuber": vtuber,
         "sub": sub,
     }
+
+
+# ─────────────────────────────────────────────────────────────────
+# Helper — _compose_subworker_payload_from_tools (cycle 20260430_1 P0-2)
+# ─────────────────────────────────────────────────────────────────
+
+
+def _result_with_tools(tool_calls):
+    return ExecutionResult(
+        success=True,
+        session_id="sub-1",
+        output="",
+        duration_ms=10,
+        tool_calls=tool_calls,
+    )
+
+
+def test_compose_payload_returns_none_when_no_tools() -> None:
+    assert _compose_subworker_payload_from_tools(_result_with_tools([])) is None
+
+
+def test_compose_payload_single_write_is_ok_with_artifact() -> None:
+    payload = _compose_subworker_payload_from_tools(
+        _result_with_tools([
+            {
+                "name": "Write",
+                "input": {"file_path": "self_introduction.md"},
+                "is_error": False,
+                "duration_ms": 50,
+            },
+        ])
+    )
+    assert payload is not None
+    assert payload.startswith("[SUB_WORKER_RESULT]")
+    assert "status: ok" in payload
+    assert "summary:" in payload
+    assert "Tools used: Write" in payload
+    assert "Total calls: 1 (1 ok, 0 failed)" in payload
+    assert "artifacts:" in payload
+    assert "- self_introduction.md" in payload
+
+
+def test_compose_payload_partial_when_some_fail() -> None:
+    payload = _compose_subworker_payload_from_tools(
+        _result_with_tools([
+            {"name": "Write", "input": {"file_path": "a.md"}, "is_error": False, "duration_ms": 5},
+            {"name": "Bash", "input": {"command": "rm /etc/secret"}, "is_error": True, "duration_ms": 5},
+        ])
+    )
+    assert payload is not None
+    assert "status: partial" in payload
+    assert "Tools used: Write, Bash" in payload
+    assert "Total calls: 2 (1 ok, 1 failed)" in payload
+    # Errored Bash must not show as an artifact
+    assert "/etc/secret" not in payload
+
+
+def test_compose_payload_failed_when_all_error() -> None:
+    payload = _compose_subworker_payload_from_tools(
+        _result_with_tools([
+            {"name": "Write", "input": {"file_path": "x"}, "is_error": True, "duration_ms": 5},
+            {"name": "Bash", "input": {}, "is_error": True, "duration_ms": 5},
+        ])
+    )
+    assert payload is not None
+    assert "status: failed" in payload
+    assert "artifacts: []" in payload
+
+
+def test_compose_payload_dedupes_artifacts() -> None:
+    payload = _compose_subworker_payload_from_tools(
+        _result_with_tools([
+            {"name": "Write", "input": {"file_path": "a.md"}, "is_error": False, "duration_ms": 5},
+            {"name": "Edit", "input": {"file_path": "a.md"}, "is_error": False, "duration_ms": 5},
+        ])
+    )
+    assert payload is not None
+    assert payload.count("- a.md") == 1
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -254,6 +333,64 @@ async def test_notify_linked_vtuber_broadcasts_reply(monkeypatch, patched_world)
     assert store.messages[0]["content"] == "와! 완료됐네!"
     assert store.messages[0]["source"] == "sub_worker_reply"
     assert patched_world["notify_calls"] == ["room-1"]
+
+
+@pytest.mark.asyncio
+async def test_notify_linked_vtuber_synthesises_payload_from_tool_calls(
+    monkeypatch, patched_world
+):
+    """Cycle 20260430_1 P0-2 — when the worker finishes a tool-only
+    turn (no LLM final text) and did NOT send an explicit
+    ``send_direct_message_internal`` payload, ``_notify_linked_vtuber``
+    must build a worker.md-shaped payload from
+    ``ExecutionResult.tool_calls`` instead of falling back to the
+    canned "Task finished with no output." line."""
+    captured: List[Dict[str, Any]] = []
+
+    async def _capture_execute(target: str, content: str, **_kwargs):
+        captured.append({"target": target, "content": content})
+        return ExecutionResult(success=True, session_id=target, output="okay")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _capture_execute)
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: None
+    )
+
+    created_tasks: List[asyncio.Task] = []
+    original_create_task = asyncio.create_task
+
+    def _capturing_create_task(coro, *args, **kwargs):
+        task = original_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
+
+    sub_result = ExecutionResult(
+        success=True,
+        session_id="sub-1",
+        output="",
+        duration_ms=10,
+        tool_calls=[
+            {
+                "name": "Write",
+                "input": {"file_path": "self_introduction.md"},
+                "is_error": False,
+                "duration_ms": 50,
+            },
+        ],
+    )
+    await agent_executor._notify_linked_vtuber("sub-1", sub_result)
+
+    for task in created_tasks:
+        await task
+
+    assert len(captured) == 1
+    payload = captured[0]["content"]
+    assert payload.startswith("[SUB_WORKER_RESULT]")
+    assert "status: ok" in payload
+    assert "Task finished with no output." not in payload
+    assert "self_introduction.md" in payload
 
 
 @pytest.mark.asyncio
