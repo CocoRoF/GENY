@@ -720,10 +720,303 @@ class MemoryArtifactTool(BaseTool):
         })
 
 
+# ─── C — memory_distill ────────────────────────────────────────────
+
+
+_DEFAULT_DISTILL_EVENTS = 50
+_MAX_DISTILL_EVENTS = 200
+
+
+def _sanitize_counterpart_for_filename(counterpart_id: str) -> str:
+    """Map an arbitrary counterpart id to a safe filename stem.
+
+    Replaces every char outside ``[A-Za-z0-9_-]`` with ``_``. Caps
+    length at 80 chars so even pathologically long ids stay sane.
+    """
+    import re as _re
+    cleaned = _re.sub(r"[^A-Za-z0-9_-]", "_", counterpart_id or "unknown")
+    return cleaned[:80] or "unknown"
+
+
+def _summarise_counterpart_events(
+    entries: List[Any], counterpart_id: str, max_events: int,
+) -> Dict[str, Any]:
+    """Walk the caller's STM tail-first and pick up to *max_events*
+    InteractionEvent entries with this counterpart. Returns a stats
+    bundle suitable for either the tool's response or a markdown
+    rendering of the same.
+    """
+    kept: List[Tuple[Any, Dict[str, Any]]] = []
+    for entry in reversed(entries):
+        meta = _entry_meta(entry)
+        if not meta.get("event_id"):
+            continue
+        if meta.get("counterpart_id") != counterpart_id:
+            continue
+        kept.append((entry, meta))
+        if len(kept) >= max_events:
+            break
+
+    total = len(kept)
+    kind_counts: Dict[str, int] = {}
+    files_written: List[str] = []
+    files_seen: set = set()
+    bash_total = 0
+    web_total = 0
+    error_total = 0
+    duration_total = 0
+    cost_total = 0.0
+    cost_observed = False
+
+    for _entry, meta in kept:
+        kind = meta.get("kind") or "unknown"
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        payload = meta.get("payload") if isinstance(meta.get("payload"), dict) else {}
+        for f in payload.get("files_written", []) or []:
+            if f and f not in files_seen:
+                files_seen.add(f)
+                files_written.append(f)
+        bash_total += len(payload.get("bash_commands") or [])
+        web_total += len(payload.get("web_fetches") or [])
+        error_total += len(payload.get("errors") or [])
+        duration_total += int(payload.get("duration_ms") or 0)
+        c = payload.get("cost_usd")
+        if isinstance(c, (int, float)):
+            cost_total += float(c)
+            cost_observed = True
+
+    recent = [_summarise_event(entry, meta) for entry, meta in kept[:5]]
+
+    return {
+        "counterpart_id": counterpart_id,
+        "events_seen": total,
+        "kind_counts": kind_counts,
+        "files_written": files_written,
+        "bash_commands_total": bash_total,
+        "web_fetches_total": web_total,
+        "errors_total": error_total,
+        "duration_ms_total": duration_total,
+        "cost_usd_total": cost_total if cost_observed else None,
+        "recent": recent,
+    }
+
+
+def _render_entity_markdown(stats: Dict[str, Any], counterpart_role: Optional[str]) -> str:
+    """Build a small, human-readable markdown body for the entity
+    note. Intentionally light — the LLM-driven richer distillation
+    is a future cycle; the static stats are already enough to lift
+    the entity into vector / keyword retrieval surfaces."""
+    lines: List[str] = []
+    lines.append(f"# Counterpart: {stats['counterpart_id']}")
+    lines.append("")
+    lines.append(
+        f"- Events observed: **{stats['events_seen']}**"
+    )
+    if counterpart_role:
+        lines.append(f"- Role: `{counterpart_role}`")
+    if stats["kind_counts"]:
+        kc = ", ".join(
+            f"{k}={v}" for k, v in sorted(stats["kind_counts"].items())
+        )
+        lines.append(f"- Kinds: {kc}")
+    if stats["files_written"]:
+        lines.append(f"- Files written: {len(stats['files_written'])}")
+        for f in stats["files_written"][:10]:
+            lines.append(f"    - `{f}`")
+    if stats["bash_commands_total"]:
+        lines.append(f"- Bash commands: {stats['bash_commands_total']}")
+    if stats["web_fetches_total"]:
+        lines.append(f"- Web fetches: {stats['web_fetches_total']}")
+    if stats["errors_total"]:
+        lines.append(f"- Errors: {stats['errors_total']}")
+    if stats["duration_ms_total"]:
+        lines.append(f"- Total duration: {stats['duration_ms_total']/1000:.1f}s")
+    if stats["cost_usd_total"] is not None:
+        lines.append(f"- Total cost: ${stats['cost_usd_total']:.4f}")
+
+    if stats["recent"]:
+        lines.append("")
+        lines.append("## Recent events")
+        for ev in stats["recent"]:
+            ts = ev.get("ts") or ""
+            kind = ev.get("kind") or "?"
+            summary = ev.get("summary") or ""
+            ev_id = ev.get("event_id") or ""
+            lines.append(f"- `{ts}` **{kind}** — {summary} (`{ev_id}`)")
+
+    lines.append("")
+    lines.append(
+        "_Auto-distilled by `memory_distill`. "
+        "Re-run any time to refresh._"
+    )
+    return "\n".join(lines)
+
+
+class MemoryDistillTool(BaseTool):
+    """Summarise everything you remember about a specific counterpart.
+
+    L4 (long-term recall) of the progressive ladder. Walks the
+    caller's STM tail and produces a compact stats bundle —
+    event counts by kind, files the counterpart produced, total
+    bash / web / errors / duration / cost. Optionally writes the
+    same as a markdown note under ``entities/<counterpart>.md``
+    so vector / keyword retrieval picks it up on subsequent
+    turns.
+    """
+
+    name = "memory_distill"
+    description = (
+        "Summarise everything you remember about a counterpart "
+        "(your paired Sub-Worker, the user, etc.). Returns aggregate "
+        "stats: event counts by kind, files produced, totals for "
+        "bash / web / errors / duration / cost, plus the most recent "
+        "5 events as a quick recap. Optional `update_note=true` "
+        "writes the same as a structured note at "
+        "`memory/entities/<sanitized>.md` so future memory_search "
+        "picks it up. Read-mostly: the note write is the only side "
+        "effect, and it's gated behind `update_note`."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        max_result_chars=20_000,
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "counterpart": {
+                    "type": "string",
+                    "description": (
+                        "Counterpart id or alias — same as memory_status."
+                    ),
+                },
+                "max_events": {
+                    "type": "integer",
+                    "default": _DEFAULT_DISTILL_EVENTS,
+                    "minimum": 1,
+                    "maximum": _MAX_DISTILL_EVENTS,
+                },
+                "update_note": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "When true, persist the distilled summary as "
+                        "memory/entities/<sanitized>.md so it joins "
+                        "vector / keyword retrieval."
+                    ),
+                },
+            },
+            "required": ["counterpart"],
+        }
+
+    def run(
+        self,
+        session_id: str,
+        counterpart: str,
+        max_events: int = _DEFAULT_DISTILL_EVENTS,
+        update_note: bool = False,
+    ) -> str:
+        caller = _get_caller(session_id)
+        if caller is None:
+            return _error(f"caller session not found: {session_id}")
+        memory = getattr(caller, "_memory_manager", None)
+        if memory is None:
+            return _error("caller has no memory manager")
+
+        canonical = _resolve_counterpart_id(caller, counterpart)
+        if canonical is None:
+            return _ok({
+                "counterpart": counterpart,
+                "counterpart_id": None,
+                "events_seen": 0,
+                "kind_counts": {},
+                "recent": [],
+                "note_written": None,
+            })
+
+        try:
+            cap = max(1, min(int(max_events), _MAX_DISTILL_EVENTS))
+        except (TypeError, ValueError):
+            cap = _DEFAULT_DISTILL_EVENTS
+
+        entries = _stm_load_all(memory)
+        stats = _summarise_counterpart_events(entries, canonical, cap)
+
+        # Try to enrich with the counterpart_role from the most recent
+        # matching event so the note frontmatter / body show it.
+        cp_role: Optional[str] = None
+        for entry in reversed(entries):
+            meta = _entry_meta(entry)
+            if meta.get("counterpart_id") == canonical:
+                cp_role = meta.get("counterpart_role") or None
+                break
+
+        note_path: Optional[str] = None
+        if update_note:
+            note_path = _write_entity_note(memory, stats, cp_role)
+
+        return _ok({
+            "counterpart": counterpart,
+            "counterpart_id": canonical,
+            "counterpart_role": cp_role,
+            "events_seen": stats["events_seen"],
+            "kind_counts": stats["kind_counts"],
+            "files_written": stats["files_written"],
+            "bash_commands_total": stats["bash_commands_total"],
+            "web_fetches_total": stats["web_fetches_total"],
+            "errors_total": stats["errors_total"],
+            "duration_ms_total": stats["duration_ms_total"],
+            "cost_usd_total": stats["cost_usd_total"],
+            "recent": stats["recent"],
+            "note_written": note_path,
+        })
+
+
+def _write_entity_note(
+    memory_manager,
+    stats: Dict[str, Any],
+    counterpart_role: Optional[str],
+) -> Optional[str]:
+    """Persist the distilled summary as an ``entities/<sanitized>.md``
+    structured note. Best-effort: returns the relative path on
+    success, ``None`` when the structured writer is unavailable
+    (e.g. minimal SessionMemoryManager / unit tests) or on
+    persistence errors.
+    """
+    writer = getattr(memory_manager, "_structured_writer", None)
+    if writer is None:
+        return None
+    try:
+        sanitized = _sanitize_counterpart_for_filename(stats["counterpart_id"])
+        rel_path = f"entities/{sanitized}.md"
+        body = _render_entity_markdown(stats, counterpart_role)
+        title = f"Counterpart {stats['counterpart_id']}"
+        tags = ["entity", "distillation"]
+        if counterpart_role:
+            tags.append(counterpart_role)
+        # `filename_override` keeps repeated runs writing to the
+        # same file rather than ``entities/<x>-1.md`` etc.
+        return writer.write_note(
+            title=title,
+            content=body,
+            category="entities",
+            tags=tags,
+            importance="medium",
+            source="distillation",
+            filename_override=rel_path,
+        )
+    except Exception:
+        logger.debug("memory_distill: write_note failed", exc_info=True)
+        return None
+
+
 # Module-level export consumed by ToolLoader (Stage D wires this up).
 TOOLS = [
     MemoryStatusTool(),
     MemoryWithTool(),
     MemoryEventTool(),
     MemoryArtifactTool(),
+    MemoryDistillTool(),
 ]

@@ -25,10 +25,12 @@ import pytest
 from tools.built_in import memory_inspect_tools
 from tools.built_in.memory_inspect_tools import (
     MemoryArtifactTool,
+    MemoryDistillTool,
     MemoryEventTool,
     MemoryStatusTool,
     MemoryWithTool,
     _resolve_counterpart_id,
+    _sanitize_counterpart_for_filename,
 )
 
 
@@ -639,3 +641,122 @@ def test_artifact_max_bytes_clamped_to_hard_cap(artifact_world) -> None:
     # Content capped to at most _MAX_ARTIFACT_BYTES (256 KB)
     assert len(out["content"]) <= 262_144
     assert out["truncated"] is True
+
+
+# ─────────────────────────────────────────────────────────────────
+# memory_distill — long-term recall
+# ─────────────────────────────────────────────────────────────────
+
+
+def _run_distill(tool: MemoryDistillTool, **kw) -> Dict[str, Any]:
+    out = tool.run(session_id=kw.pop("session_id", "vtuber-1"), **kw)
+    return json.loads(out)
+
+
+def test_sanitize_counterpart_for_filename() -> None:
+    assert _sanitize_counterpart_for_filename("owner:alice") == "owner_alice"
+    assert _sanitize_counterpart_for_filename("sub-1") == "sub-1"
+    assert _sanitize_counterpart_for_filename("self") == "self"
+    assert _sanitize_counterpart_for_filename("") == "unknown"
+    # Long ids are capped at 80 chars
+    long_id = "x" * 200
+    assert len(_sanitize_counterpart_for_filename(long_id)) == 80
+
+
+def test_distill_paired_subworker_returns_stats(world) -> None:
+    out = _run_distill(MemoryDistillTool(), counterpart="paired_subworker")
+    assert out["counterpart_id"] == "sub-1"
+    assert out["events_seen"] == 2  # task_request + tool_run_summary
+    assert out["kind_counts"] == {"task_request": 1, "tool_run_summary": 1}
+    assert out["files_written"] == ["notes.md"]
+    assert out["counterpart_role"] == "paired_subworker"
+    # First recent event is the most recent (tool_run_summary)
+    assert out["recent"][0]["event_id"] == "EVT-RUN-1"
+    # update_note was not requested
+    assert out["note_written"] is None
+
+
+def test_distill_user_returns_user_chat_stats(world) -> None:
+    out = _run_distill(MemoryDistillTool(), counterpart="user")
+    assert out["counterpart_id"] == "owner:alice"
+    assert out["events_seen"] == 1
+    assert out["kind_counts"] == {"user_chat": 1}
+
+
+def test_distill_unpaired_alias_returns_empty(world) -> None:
+    world["vtuber"]._linked_session_id = ""
+    out = _run_distill(MemoryDistillTool(), counterpart="paired_subworker")
+    assert out["counterpart_id"] is None
+    assert out["events_seen"] == 0
+
+
+def test_distill_max_events_clamps(world) -> None:
+    """Out-of-range max_events clamps to [1, _MAX_DISTILL_EVENTS]."""
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        max_events=999_999,
+    )
+    # Only 2 sub-1 events seeded; clamp doesn't fabricate more.
+    assert out["events_seen"] == 2
+    out2 = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        max_events=0,
+    )
+    # 0 → 1 (min clamp); only the most recent event seen.
+    assert out2["events_seen"] == 1
+
+
+def test_distill_update_note_writes_when_writer_available(world) -> None:
+    """When the memory manager has a structured writer, update_note=true
+    persists the distilled summary as entities/<sanitized>.md."""
+    captured = []
+
+    class _FakeWriter:
+        def write_note(self, **kwargs):
+            captured.append(kwargs)
+            return f"entities/{kwargs.get('filename_override','x').split('/')[-1]}"
+
+    # Attach the writer onto our fake memory manager
+    world["vtuber"]._memory_manager._structured_writer = _FakeWriter()
+
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        update_note=True,
+    )
+    assert out["note_written"] is not None
+    assert len(captured) == 1
+    args = captured[0]
+    assert args["category"] == "entities"
+    assert args["source"] == "distillation"
+    # filename uses sanitized counterpart id
+    assert args["filename_override"] == "entities/sub-1.md"
+    # body mentions stats
+    assert "Events observed" in args["content"]
+    assert "notes.md" in args["content"]
+
+
+def test_distill_update_note_silent_when_no_writer(world) -> None:
+    """When the memory manager has no structured writer (minimal
+    test setup, early init), update_note=true returns
+    note_written=None instead of crashing."""
+    # No _structured_writer attribute
+    out = _run_distill(
+        MemoryDistillTool(),
+        counterpart="paired_subworker",
+        update_note=True,
+    )
+    assert out["note_written"] is None
+    # Stats still returned
+    assert out["events_seen"] == 2
+
+
+def test_distill_unknown_session_returns_error(world) -> None:
+    out = _run_distill(
+        MemoryDistillTool(),
+        session_id="ghost",
+        counterpart="user",
+    )
+    assert "error" in out
