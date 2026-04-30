@@ -987,6 +987,7 @@ class MemoryDistillTool(BaseTool):
         if narrative and stats["events_seen"] > 0:
             try:
                 narrative_text = _run_distill_llm(
+                    caller_agent=caller,
                     counterpart_id=canonical,
                     counterpart_role=cp_role,
                     stats=stats,
@@ -1087,71 +1088,89 @@ _DISTILL_SYSTEM_PROMPT = (
 
 def _run_distill_llm(
     *,
+    caller_agent: Any,
     counterpart_id: str,
     counterpart_role: Optional[str],
     stats: Dict[str, Any],
 ) -> Optional[str]:
     """Call the configured memory_model to produce a narrative summary.
 
-    Synchronous shim around the executor's async client. Mirrors the
-    thread-pool pattern already used by ``SessionCreateTool`` for
-    crossing the sync/async boundary. Returns trimmed narrative text
-    or ``None`` when the configuration is incomplete (no API key,
-    etc.). Raises on actual call errors so the caller can surface
-    `narrative_error`.
+    Cycle 20260501_1 B — uses the *caller AgentSession's* shared LLM
+    client and memory_model_cfg (the same handles s18's
+    ReflectionResolver uses). No more private ``ClientRegistry``
+    instantiation per call; no credential / base_url / provider
+    drift between this tool and the in-pipeline reflection.
+
+    Returns trimmed narrative text on success, ``None`` when the
+    caller has not yet wired its client / cfg (early init, missing
+    API key — same silent fallback as cycle 20260430_3 F). Raises
+    on actual call failures so the caller can surface
+    ``narrative_error``.
     """
+    client = getattr(caller_agent, "llm_client", None)
+    cfg = getattr(caller_agent, "memory_model_cfg", None)
+    if client is None or cfg is None:
+        return None
+
+    # The reflection cfg is built by agent_session with max_tokens=2048
+    # and temperature=0.0 for deterministic JSON. Distillation wants
+    # short, slightly more flexible prose — we shadow the cfg with
+    # narrative-specific knobs while keeping the *model name* identical
+    # to s18 reflection.
+    try:
+        narrative_cfg = _shadow_cfg(cfg, max_tokens=512, temperature=0.2)
+    except Exception:
+        narrative_cfg = cfg
+
     user_prompt = _build_distill_user_prompt(
         counterpart_id=counterpart_id,
         counterpart_role=counterpart_role,
         stats=stats,
     )
 
-    try:
-        from service.config.manager import get_config_manager
-        from service.config.sub_config.general.api_config import APIConfig
-        from geny_executor.core.config import ModelConfig
-        from geny_executor.llm_client import ClientRegistry
-    except Exception:
-        return None
-
-    api_cfg = get_config_manager().load_config(APIConfig)
-    api_key = (
-        getattr(api_cfg, "anthropic_api_key", None) or ""
-    )
-    if not api_key:
-        # No credentials wired — caller will see narrative=None.
-        return None
-
-    provider = (getattr(api_cfg, "provider", "") or "anthropic").strip()
-    base_url = (getattr(api_cfg, "base_url", "") or "").strip() or None
-    model_name = (
-        (getattr(api_cfg, "memory_model", "") or "").strip()
-        or getattr(api_cfg, "anthropic_model", "")
-    )
-
-    model_cfg = ModelConfig(
-        model=model_name,
-        max_tokens=512,
-        temperature=0.2,
-        thinking_enabled=False,
-    )
-    client_cls = ClientRegistry.get(provider)
-    client = client_cls(api_key=api_key, base_url=base_url)
-
     async def _call():
-        response = await client.create_message(
-            model_config=model_cfg,
+        return await client.create_message(
+            model_config=narrative_cfg,
             messages=[{"role": "user", "content": user_prompt}],
             system=_DISTILL_SYSTEM_PROMPT,
-            purpose="memory_distill_narrative",
+            purpose="memory.distill_narrative",
         )
-        return response
 
     response = _bridge_async(_call())
     text = _extract_text_from_response(response)
     if not text:
         return None
     return text.strip()[:_DISTILL_NARRATIVE_MAX_CHARS]
+
+
+def _shadow_cfg(cfg: Any, *, max_tokens: int, temperature: float) -> Any:
+    """Return a copy of ``cfg`` with knobs tuned for narrative output.
+
+    Tries ``ModelConfig.replace`` (executor's preferred copy method)
+    first; falls back to ``dataclasses.replace`` and finally to
+    rebuilding via constructor — handles the small surface differences
+    between executor versions without losing the caller's model name.
+    """
+    if hasattr(cfg, "replace"):
+        try:
+            return cfg.replace(max_tokens=max_tokens, temperature=temperature)
+        except Exception:
+            pass
+    try:
+        from dataclasses import replace as _dc_replace
+        return _dc_replace(cfg, max_tokens=max_tokens, temperature=temperature)
+    except Exception:
+        pass
+    try:
+        from geny_executor.core.config import ModelConfig
+        return ModelConfig(
+            model=getattr(cfg, "model", ""),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            thinking_enabled=getattr(cfg, "thinking_enabled", False),
+        )
+    except Exception:
+        return cfg
 
 
 def _build_distill_user_prompt(
