@@ -678,6 +678,69 @@ export interface MemoryFileListResponse {
   total: number;
 }
 
+// ==================== InteractionEvent / Transcripts (cycle 20260430_3) ====================
+//
+// Wire shapes returned by /api/agents/{sid}/transcripts*. Mirror the
+// backend's TranscriptListResponse / TranscriptDetailResponse /
+// CounterpartListResponse exactly — drift is caught by the controller's
+// schema-parity test (cycle 20260430_3 A).
+
+/** Summary shape used by the list endpoint and by the detail endpoint's
+ *  `linked.parent`. Same key set as the LLM tool memory_event uses. */
+export interface InteractionEventSummary {
+  event_id: string;
+  ts: string | null;
+  kind: string | null;
+  direction: string | null;
+  counterpart_id: string | null;
+  counterpart_role: string | null;
+  summary: string | null;
+  linked_event_id?: string | null;
+  status?: string;
+  files_written_count?: number;
+  tools_used_count?: number;
+}
+
+/** Full payload returned by GET /transcripts/{event_id}. */
+export interface InteractionEventDetail {
+  event_id: string;
+  ts: string | null;
+  kind: string | null;
+  direction: string | null;
+  counterpart_id: string | null;
+  counterpart_role: string | null;
+  linked_event_id: string | null;
+  content: string;
+  payload: Record<string, unknown>;
+}
+
+export interface TranscriptListResponse {
+  events: InteractionEventSummary[];
+  next_cursor: string | null;
+  has_more: boolean;
+  total_estimate: number;
+}
+
+export interface TranscriptDetailLinked {
+  parent?: InteractionEventSummary | { event_id: string; missing: true };
+}
+
+export interface TranscriptDetailResponse {
+  event: InteractionEventDetail;
+  linked: TranscriptDetailLinked;
+}
+
+export interface CounterpartCard {
+  id: string;
+  role: string | null;
+  events: number;
+  last_ts: string | null;
+}
+
+export interface CounterpartListResponse {
+  counterparts: CounterpartCard[];
+}
+
 // ==================== VTuber / Live2D Types ====================
 
 export interface Live2dModelInfo {

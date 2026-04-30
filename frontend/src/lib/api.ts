@@ -1853,6 +1853,55 @@ export const memoryApi = {
     }),
 };
 
+// ==================== Transcripts API (cycle 20260430_3) ====================
+//
+// Read-only view over the InteractionEvent stream stored in STM.
+// Backed by `controller/transcripts_controller.py`. Renders to the
+// MemoryTab Stream sub-tab (Stage D).
+
+export const transcriptsApi = {
+  /** GET /api/agents/{sid}/transcripts — list with cursor + filters */
+  list: (
+    sessionId: string,
+    params?: {
+      limit?: number;
+      cursor?: string;
+      counterpart?: string;
+      /** Comma-joined or array of kind names. */
+      kinds?: string | string[];
+      direction?: 'in' | 'out' | 'internal';
+      since?: string;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params?.cursor) qs.set('cursor', params.cursor);
+    if (params?.counterpart) qs.set('counterpart', params.counterpart);
+    if (params?.kinds) {
+      const csv = Array.isArray(params.kinds) ? params.kinds.join(',') : params.kinds;
+      if (csv) qs.set('kinds', csv);
+    }
+    if (params?.direction) qs.set('direction', params.direction);
+    if (params?.since) qs.set('since', params.since);
+    const q = qs.toString();
+    return apiCall<import('@/types').TranscriptListResponse>(
+      `/api/agents/${sessionId}/transcripts${q ? `?${q}` : ''}`,
+    );
+  },
+
+  /** GET /api/agents/{sid}/transcripts/{event_id} */
+  get: (sessionId: string, eventId: string) =>
+    apiCall<import('@/types').TranscriptDetailResponse>(
+      `/api/agents/${sessionId}/transcripts/${encodeURIComponent(eventId)}`,
+    ),
+
+  /** GET /api/agents/{sid}/transcripts/counterparts */
+  counterparts: (sessionId: string) =>
+    apiCall<import('@/types').CounterpartListResponse>(
+      `/api/agents/${sessionId}/transcripts/counterparts`,
+    ),
+};
+
 // ==================== Global Memory API ====================
 
 export const globalMemoryApi = {
