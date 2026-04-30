@@ -77,9 +77,17 @@ class CounterpartRole(str, Enum):
     """Role of the *other* party in this event from the recorder's
     perspective. The string values are stable and are persisted on
     disk — never rename them.
+
+    ``PAIRED_SUBWORKER`` and ``PAIRED_VTUBER`` are mirror values: the
+    bound counterpart's role flips depending on which side is doing
+    the recording. A VTuber recording its bound Sub-Worker uses
+    ``PAIRED_SUBWORKER``; the same DM recorded on the Sub-Worker's
+    own STM uses ``PAIRED_VTUBER``. Together they preserve the "I am
+    talking to my paired counterpart" relationship from both ends.
     """
     USER             = "user"               # human user
-    PAIRED_SUBWORKER = "paired_subworker"   # the recorder's bound Sub-Worker
+    PAIRED_SUBWORKER = "paired_subworker"   # recorder is VTuber, target is bound Sub-Worker
+    PAIRED_VTUBER    = "paired_vtuber"      # recorder is Sub-Worker, target is bound VTuber
     PEER             = "peer"               # any other live session
     SELF             = "self"               # reflection / system_note
     SYSTEM           = "system"             # the runtime itself
