@@ -332,13 +332,39 @@ def parser_world(monkeypatch):
     return {"manager": manager, "sub": sub, "vtuber": vtuber}
 
 
-def test_infer_skips_non_dm_role(parser_world) -> None:
-    """Only assistant_dm goes through the parser. user / assistant /
-    internal_trigger return None so A5 / A6 fill them with explicit
-    source_metadata."""
-    assert infer_input_metadata(
+def test_infer_user_role_returns_user_chat_in_meta(parser_world) -> None:
+    """Cycle 20260430_2 A6 — role=user is the human chat path; the
+    helper synthesises USER_CHAT/IN metadata using the recorder's
+    `_owner_username` so retrieval can group the conversation by
+    counterpart."""
+    parser_world["vtuber"]._owner_username = "alice"
+    meta = infer_input_metadata(
+        input_text="hello",
+        recorder_agent=parser_world["vtuber"],
+        role="user",
+    )
+    assert meta is not None
+    assert meta["kind"] == "user_chat"
+    assert meta["direction"] == "in"
+    assert meta["counterpart_id"] == "owner:alice"
+    assert meta["counterpart_role"] == "user"
+
+
+def test_infer_user_role_falls_back_to_unknown_owner(parser_world) -> None:
+    """Sessions without an owner_username (early init / tests) still
+    get a stable counterpart_id."""
+    # _FakeAgent has no _owner_username; getattr default kicks in.
+    meta = infer_input_metadata(
         input_text="hello", recorder_agent=parser_world["vtuber"], role="user",
-    ) is None
+    )
+    assert meta is not None
+    assert meta["counterpart_id"] == "owner:unknown"
+
+
+def test_infer_skips_internal_trigger_role(parser_world) -> None:
+    """internal_trigger is filled by A5's explicit source_metadata
+    (ThinkingTriggerService._build_reflection_metadata). Parser noops
+    so we don't double-stamp."""
     assert infer_input_metadata(
         input_text="[THINKING_TRIGGER:first_idle] something",
         recorder_agent=parser_world["vtuber"], role="internal_trigger",

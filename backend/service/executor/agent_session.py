@@ -2013,6 +2013,7 @@ class AgentSession:
         # Record input to short-term memory with proper role classification.
         # Internal triggers and inter-agent DMs are not "user" — see
         # _classify_input_role for the full rationale.
+        stm_role: Optional[str] = None
         if self._memory_manager:
             try:
                 from service.memory.interaction_event import infer_input_metadata
@@ -2029,6 +2030,7 @@ class AgentSession:
                 )
             except Exception:
                 logger.debug("Failed to record input message — non-critical", exc_info=True)
+                stm_role = None
 
         # Stream pipeline and log events in real time
         accumulated_output = ""
@@ -2465,9 +2467,33 @@ class AgentSession:
         # trigger-driven continuity in cycle 20260420_8 Bug 2b.
         if self._memory_manager and success and accumulated_output.strip():
             try:
+                # Cycle 20260430_2 A6 — when the input was a user_chat
+                # message (role=="user"), the assistant reply is the
+                # outbound side of the same conversation event. Stamp
+                # USER_CHAT/OUT metadata so retrieval can pair the two.
+                # For non-user inputs (DM-trigger / thinking-trigger /
+                # inbox-drain) the assistant text is "narration" with
+                # no clean counterpart, so we leave metadata=None and
+                # let later cycles refine if needed.
+                out_meta = None
+                if stm_role == "user":
+                    from service.memory.interaction_event import (
+                        CounterpartRole,
+                        Direction,
+                        Kind,
+                        canonical_user_id,
+                        make_event_metadata,
+                    )
+                    out_meta = make_event_metadata(
+                        kind=Kind.USER_CHAT,
+                        direction=Direction.OUT,
+                        counterpart_id=canonical_user_id(self._owner_username),
+                        counterpart_role=CounterpartRole.USER,
+                    )
                 self._memory_manager.record_message(
                     "assistant",
                     accumulated_output[:10000],
+                    metadata=out_meta,
                 )
             except Exception:
                 logger.debug(
@@ -2538,6 +2564,7 @@ class AgentSession:
         # Record input to short-term memory with proper role classification.
         # See _classify_input_role for why triggers / inter-agent DMs are
         # not "user".
+        stm_role: Optional[str] = None
         if self._memory_manager:
             try:
                 from service.memory.interaction_event import infer_input_metadata
@@ -2794,9 +2821,29 @@ class AgentSession:
         # write — see _invoke_pipeline for the full rationale.
         if self._memory_manager and success and accumulated_output.strip():
             try:
+                # Cycle 20260430_2 A6 — mirror of `_invoke_pipeline`'s
+                # OUT-side metadata. user_chat is the only kind that
+                # gets explicit metadata here; other kinds leave it as
+                # None for now.
+                out_meta = None
+                if stm_role == "user":
+                    from service.memory.interaction_event import (
+                        CounterpartRole,
+                        Direction,
+                        Kind,
+                        canonical_user_id,
+                        make_event_metadata,
+                    )
+                    out_meta = make_event_metadata(
+                        kind=Kind.USER_CHAT,
+                        direction=Direction.OUT,
+                        counterpart_id=canonical_user_id(self._owner_username),
+                        counterpart_role=CounterpartRole.USER,
+                    )
                 self._memory_manager.record_message(
                     "assistant",
                     accumulated_output[:10000],
+                    metadata=out_meta,
                 )
             except Exception:
                 logger.debug(
