@@ -41,6 +41,16 @@ _FUN_PROMPT_PROBABILITY = 0.15         # 15% — fun reflection (no tools)
 _TIME_PROMPT_PROBABILITY = 0.15        # 15% — time-of-day color
 # remaining ~55% → idle-stage prompts
 
+# Cycle 20260430_1 P1-4 — minimum spacing between two
+# `[THINKING_TRIGGER:sub_worker_working]` fires for the same VTuber.
+# Without this, a long-running sub-worker turn (~minutes) makes the
+# VTuber repeat "the Worker is processing" every tick cadence, which
+# is dull and amplifies the contract leak risk if the Sub-Worker
+# finishes mid-narration. After the cooldown elapses we let the
+# trigger ladder fall through to the regular categories — the
+# "Worker still busy" idea is already conveyed once.
+_SUB_WORKER_WORKING_COOLDOWN_SECONDS = 90.0
+
 # ---------------------------------------------------------------------------
 # Trigger Prompt Catalog
 # ---------------------------------------------------------------------------
@@ -519,6 +529,10 @@ class ThinkingTriggerService:
         self._disabled_sessions: Set[str] = set()
         # session_id → consecutive trigger count (resets on user activity)
         self._consecutive_triggers: Dict[str, int] = {}
+        # Cycle 20260430_1 P1-4 — session_id → last epoch second that a
+        # sub_worker_working trigger fired. Used to dampen repeated
+        # "still busy" narration during long sub-worker tasks.
+        self._last_sub_worker_working_at: Dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -576,6 +590,7 @@ class ThinkingTriggerService:
         self._activity.pop(session_id, None)
         self._disabled_sessions.discard(session_id)
         self._consecutive_triggers.pop(session_id, None)
+        self._last_sub_worker_working_at.pop(session_id, None)
 
     def enable(self, session_id: str) -> None:
         """Enable thinking trigger for a session."""
@@ -894,7 +909,23 @@ class ThinkingTriggerService:
             if agent:
                 linked_id = getattr(agent, 'linked_session_id', None)
                 if linked_id and is_executing_fn(linked_id):
-                    return self._pick("sub_worker_working", locale)
+                    # Cycle 20260430_1 P1-4 — only narrate "Sub-Worker
+                    # is busy" once per cooldown window. Fall through
+                    # to the regular ladder afterwards so the VTuber
+                    # has more variety mid-task instead of looping
+                    # the same "still working" line every tick.
+                    import time as _time
+                    last_fired = self._last_sub_worker_working_at.get(session_id, 0.0)
+                    if (_time.time() - last_fired) >= _SUB_WORKER_WORKING_COOLDOWN_SECONDS:
+                        self._last_sub_worker_working_at[session_id] = _time.time()
+                        return self._pick("sub_worker_working", locale)
+                    logger.debug(
+                        "sub_worker_working trigger throttled for %s "
+                        "(elapsed=%.1fs < cooldown=%.1fs)",
+                        session_id,
+                        _time.time() - last_fired,
+                        _SUB_WORKER_WORKING_COOLDOWN_SECONDS,
+                    )
         except Exception:
             pass
 
