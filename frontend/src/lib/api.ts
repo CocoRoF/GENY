@@ -1815,12 +1815,31 @@ export const memoryApi = {
       { method: 'DELETE' },
     ),
 
-  /** GET /api/agents/{sid}/memory/search?q=... */
-  search: (sessionId: string, query: string, params?: { max_results?: number; category?: string; tag?: string }) => {
+  /** GET /api/agents/{sid}/memory/search?q=...
+   *
+   * Cycle 20260430_3 E — `counterpart` / `kinds` narrow only
+   * InteractionEvent hits server-side. Non-event memories (LTM
+   * notes, curated knowledge) pass through unchanged. */
+  search: (
+    sessionId: string,
+    query: string,
+    params?: {
+      max_results?: number;
+      category?: string;
+      tag?: string;
+      counterpart?: string;
+      kinds?: string | string[];
+    },
+  ) => {
     const qs = new URLSearchParams({ q: query });
     if (params?.max_results) qs.set('max_results', String(params.max_results));
     if (params?.category) qs.set('category', params.category);
     if (params?.tag) qs.set('tag', params.tag);
+    if (params?.counterpart) qs.set('counterpart', params.counterpart);
+    if (params?.kinds) {
+      const csv = Array.isArray(params.kinds) ? params.kinds.join(',') : params.kinds;
+      if (csv) qs.set('kinds', csv);
+    }
     return apiCall<import('@/types').MemorySearchResponse>(
       `/api/agents/${sessionId}/memory/search?${qs.toString()}`
     );
