@@ -781,11 +781,14 @@ def test_distill_narrative_default_off_matches_baseline(world) -> None:
 
 def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
     """narrative=true triggers `_run_distill_llm`; result threads into
-    response and (when update_note=true) into the entity note body."""
+    response and (when update_note=true) into the entity note body.
+
+    Cycle 20260501_1 B — the helper now receives the caller_agent
+    handle so we assert on it (rather than reach inside the helper)."""
     captured: list = []
 
-    def _fake_run(**kwargs):
-        captured.append(kwargs)
+    def _fake_run(*, caller_agent, **kwargs):
+        captured.append({"caller_agent": caller_agent, **kwargs})
         return "이 워커와는 짧은 협업이지만 파일 작성에서 안정적인 모습을 보였다."
 
     monkeypatch.setattr(
@@ -811,9 +814,11 @@ def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
     assert out["narrative"] is not None
     assert "안정적인 모습" in out["narrative"]
     assert out["narrative_error"] is None
-    # LLM was called once with the resolved counterpart_id
+    # LLM was called once with the resolved counterpart_id AND the
+    # caller agent handle (cycle 20260501_1 B — single client thread).
     assert len(captured) == 1
     assert captured[0]["counterpart_id"] == "sub-1"
+    assert captured[0]["caller_agent"] is world["vtuber"]
     # Entity note body has narrative ABOVE stats
     body = writer.calls[0]["content"]
     narrative_idx = body.find("안정적인 모습")
@@ -836,7 +841,7 @@ def test_distill_narrative_skipped_when_no_events(world) -> None:
 def test_distill_narrative_swallows_llm_failure(monkeypatch, world) -> None:
     """LLM call failures must not break the tool — we surface
     `narrative_error` and still return the stats-only payload."""
-    def _boom(**kwargs):
+    def _boom(*, caller_agent, **kwargs):
         raise RuntimeError("upstream timeout")
 
     monkeypatch.setattr(
@@ -854,6 +859,67 @@ def test_distill_narrative_swallows_llm_failure(monkeypatch, world) -> None:
     assert "timeout" in out["narrative_error"]
     # Stats unaffected
     assert out["events_seen"] == 2
+
+
+def test_distill_llm_uses_caller_shared_client(monkeypatch) -> None:
+    """Cycle 20260501_1 B2 — `_run_distill_llm` MUST consume the
+    caller AgentSession's `llm_client` + `memory_model_cfg` rather
+    than building its own ClientRegistry instance. Pin both:
+      - returns None when caller has no client / cfg (silent fallback)
+      - calls `client.create_message` once when both are present
+      - threads `caller_agent.memory_model_cfg.model` through to the
+        request so APIConfig.memory_model edits propagate."""
+    from types import SimpleNamespace
+    from tools.built_in.memory_inspect_tools import _run_distill_llm
+
+    # Empty case — caller without llm_client / cfg returns None.
+    bare_caller = SimpleNamespace()
+    assert _run_distill_llm(
+        caller_agent=bare_caller,
+        counterpart_id="sub-1",
+        counterpart_role="paired_subworker",
+        stats={"events_seen": 1, "kind_counts": {}, "files_written": [],
+               "bash_commands_total": 0, "web_fetches_total": 0,
+               "errors_total": 0, "duration_ms_total": 0,
+               "cost_usd_total": None, "recent": []},
+    ) is None
+
+    # Happy case — caller carries both handles. The shared client is
+    # invoked exactly once with the caller's cfg.
+    captured = {}
+
+    class _FakeResponse:
+        text = "이 워커와의 협업은 안정적이었다."
+
+    class _FakeClient:
+        async def create_message(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return _FakeResponse()
+
+    fake_cfg = SimpleNamespace(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2048, temperature=0.0, thinking_enabled=False,
+    )
+    caller = SimpleNamespace(llm_client=_FakeClient(), memory_model_cfg=fake_cfg)
+
+    out = _run_distill_llm(
+        caller_agent=caller,
+        counterpart_id="sub-1",
+        counterpart_role="paired_subworker",
+        stats={"events_seen": 1, "kind_counts": {"task_request": 1},
+               "files_written": ["a.md"], "bash_commands_total": 0,
+               "web_fetches_total": 0, "errors_total": 0,
+               "duration_ms_total": 100, "cost_usd_total": None,
+               "recent": [{"ts": "...", "kind": "task_request",
+                           "summary": "wrote a.md"}]},
+    )
+    assert out == "이 워커와의 협업은 안정적이었다."
+    assert "kwargs" in captured
+    # Model name from the caller's memory_cfg threads through
+    assert captured["kwargs"]["model_config"].model == "claude-haiku-4-5-20251001"
+    # Narrative-specific knobs (cycle 20260501_1 B's `_shadow_cfg`)
+    assert captured["kwargs"]["model_config"].max_tokens == 512
+    assert captured["kwargs"]["model_config"].temperature == 0.2
 
 
 def test_distill_user_prompt_includes_recent_events(world) -> None:

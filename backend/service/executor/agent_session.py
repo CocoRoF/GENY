@@ -388,6 +388,18 @@ class AgentSession:
         # entry so the flag never leaks across turns.
         self._explicit_subworker_report_sent: bool = False
 
+        # Cycle 20260501_1 B — share the LLM client + memory model cfg
+        # built during ``_build_pipeline`` so out-of-pipeline tool
+        # calls (memory_distill, future memory tools, etc.) can reuse
+        # the SAME client and the SAME memory_cfg the s18 ReflectionResolver
+        # uses. This preserves cycle 20260421_4's "single client, no
+        # credential drift" promise across stage and tool surfaces.
+        # Both fields are populated by `_build_pipeline` and remain
+        # stable for the session's lifetime; consumers must treat them
+        # as read-only.
+        self._llm_client_handle: Optional[Any] = None
+        self._memory_cfg_handle: Optional[Any] = None
+
         # Creature state wiring (PR-X3-5). Registry is turn-scoped — a
         # fresh one is built inside ``_invoke_pipeline`` / ``_astream_pipeline``
         # so the snapshot and mutation buffer don't leak across turns. When
@@ -556,6 +568,30 @@ class AgentSession:
     def memory_manager(self) -> Optional["SessionMemoryManager"]:
         """Session memory manager (available after initialization)."""
         return self._memory_manager
+
+    @property
+    def llm_client(self) -> Optional[Any]:
+        """Shared LLM client built by ``_build_pipeline`` (cycle 20260421_4).
+
+        The same client is injected as ``state.llm_client`` for every
+        stage; out-of-pipeline tool calls (cycle 20260501_1 B —
+        ``memory_distill`` narrative, future memory tools) reuse this
+        handle so credentials / base_url / provider stay consistent.
+        Returns ``None`` before ``_build_pipeline`` runs.
+        """
+        return self._llm_client_handle
+
+    @property
+    def memory_model_cfg(self) -> Optional[Any]:
+        """Live ``ModelConfig`` used by s18_memory's reflection LLM call.
+
+        Mirrors ``APIConfig.memory_model || anthropic_model`` resolved
+        at session-build time. Out-of-pipeline tool calls that want
+        to use the *memory* model (rather than the main model) read
+        this property — guarantees same cfg as the in-pipeline
+        reflection.
+        """
+        return self._memory_cfg_handle
 
     @property
     def linked_session_id(self) -> Optional[str]:
@@ -1472,6 +1508,14 @@ class AgentSession:
                 f"for provider={provider_name!r}: {exc}"
             )
             raise
+
+        # Cycle 20260501_1 B — publish the shared client + memory cfg
+        # to AgentSession's public properties so out-of-pipeline tool
+        # calls (memory_distill, etc.) can reuse them. The handles are
+        # set *before* attach_runtime so a tool that races a fast
+        # session-init still sees them in the right order.
+        self._llm_client_handle = llm_client
+        self._memory_cfg_handle = memory_cfg
 
         # Sync s06_api's own config so its fallback client (used only if
         # state.llm_client ever becomes None at run time) stays consistent.
