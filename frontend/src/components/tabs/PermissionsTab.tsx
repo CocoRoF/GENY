@@ -268,56 +268,9 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
   const isEmpty = (inspect?.rules ?? []).length === 0 && !loading;
   const addLabel = t('envManagement.registry.permissions.addLabel');
 
-  return (
-    <>
-      <RegistryPageShell
-        icon={Shield}
-        title={t('envManagement.registry.permissions.title')}
-        subtitle={subtitle}
-        countLabel={t('envManagement.registry.permissions.countLabel', {
-          n: String(inspectCount),
-        })}
-        bannerNote={t('envManagement.registry.permissions.bannerNote')}
-        addLabel={addLabel}
-        onAdd={openCreate}
-        onRefresh={refresh}
-        loading={loading}
-        error={error}
-        onDismissError={() => setError(null)}
-        headerExtras={modeSelectors}
-      >
-        {isEmpty ? (
-          <RegistryEmptyState
-            icon={Shield}
-            title={t('envManagement.registry.permissions.emptyTitle')}
-            hint={t('envManagement.registry.emptyHint', { addLabel })}
-            addLabel={addLabel}
-            onAdd={openCreate}
-          />
-        ) : (
-          <RegistryGrid>
-            {(inspect?.rules ?? []).map((r, viewIdx) => {
-              const key = `${r.tool_name}::${r.pattern ?? ''}::${r.behavior}::${r.source}`;
-              const editIdx = editableIdxByKey.get(key);
-              const editableRow = editIdx !== undefined;
-              return (
-                <PermissionCard
-                  key={`${key}-${viewIdx}`}
-                  rule={r}
-                  editable={editableRow}
-                  onEdit={editableRow ? () => openEdit(editIdx!) : undefined}
-                  onDelete={editableRow ? () => deleteRule(editIdx!) : undefined}
-                />
-              );
-            })}
-          </RegistryGrid>
-        )}
-
-        {sourcesFooter}
-      </RegistryPageShell>
-
+  if (editorOpen) {
+    return (
       <PermissionFormModal
-        open={editorOpen}
         editingIdx={editingIdx}
         initialRule={editingRule}
         saving={saving}
@@ -325,7 +278,55 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
         onClose={() => setEditorOpen(false)}
         onSubmit={handleSubmit}
       />
-    </>
+    );
+  }
+
+  return (
+    <RegistryPageShell
+      icon={Shield}
+      title={t('envManagement.registry.permissions.title')}
+      subtitle={subtitle}
+      countLabel={t('envManagement.registry.permissions.countLabel', {
+        n: String(inspectCount),
+      })}
+      bannerNote={t('envManagement.registry.permissions.bannerNote')}
+      addLabel={addLabel}
+      onAdd={openCreate}
+      onRefresh={refresh}
+      loading={loading}
+      error={error}
+      onDismissError={() => setError(null)}
+      headerExtras={modeSelectors}
+    >
+      {isEmpty ? (
+        <RegistryEmptyState
+          icon={Shield}
+          title={t('envManagement.registry.permissions.emptyTitle')}
+          hint={t('envManagement.registry.emptyHint', { addLabel })}
+          addLabel={addLabel}
+          onAdd={openCreate}
+        />
+      ) : (
+        <RegistryGrid>
+          {(inspect?.rules ?? []).map((r, viewIdx) => {
+            const key = `${r.tool_name}::${r.pattern ?? ''}::${r.behavior}::${r.source}`;
+            const editIdx = editableIdxByKey.get(key);
+            const editableRow = editIdx !== undefined;
+            return (
+              <PermissionCard
+                key={`${key}-${viewIdx}`}
+                rule={r}
+                editable={editableRow}
+                onEdit={editableRow ? () => openEdit(editIdx!) : undefined}
+                onDelete={editableRow ? () => deleteRule(editIdx!) : undefined}
+              />
+            );
+          })}
+        </RegistryGrid>
+      )}
+
+      {sourcesFooter}
+    </RegistryPageShell>
   );
 }
 

@@ -17,6 +17,9 @@
 export { default as RegistryPageShell } from './RegistryPageShell';
 export type { RegistryPageShellProps } from './RegistryPageShell';
 
+export { default as RegistryFormShell } from './RegistryFormShell';
+export type { RegistryFormShellProps } from './RegistryFormShell';
+
 export { default as RegistryCard } from './RegistryCard';
 export type {
   RegistryCardProps,

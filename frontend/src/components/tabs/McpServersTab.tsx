@@ -136,47 +136,9 @@ export function McpServersTab() {
   const isEmpty = !loading && servers.length === 0;
   const addLabel = t('envManagement.registry.mcp.addLabel');
 
-  return (
-    <>
-      <RegistryPageShell
-        icon={Network}
-        title={t('envManagement.registry.mcp.title')}
-        subtitle={t('envManagement.registry.mcp.subtitle')}
-        countLabel={t('envManagement.registry.mcp.countLabel', {
-          n: String(servers.length),
-        })}
-        bannerNote={t('envManagement.registry.mcp.bannerNote')}
-        addLabel={addLabel}
-        onAdd={openCreate}
-        onRefresh={refresh}
-        loading={loading}
-        error={error}
-        onDismissError={() => setError(null)}
-      >
-        {isEmpty ? (
-          <RegistryEmptyState
-            icon={Network}
-            title={t('envManagement.registry.mcp.emptyTitle')}
-            hint={t('envManagement.registry.emptyHint', { addLabel })}
-            addLabel={addLabel}
-            onAdd={openCreate}
-          />
-        ) : (
-          <RegistryGrid>
-            {servers.map((s) => (
-              <McpServerCard
-                key={s.name}
-                summary={s}
-                onEdit={() => openEdit(s.name)}
-                onDelete={() => onDelete(s.name)}
-              />
-            ))}
-          </RegistryGrid>
-        )}
-      </RegistryPageShell>
-
+  if (editorOpen) {
+    return (
       <McpServerFormModal
-        open={editorOpen}
         editingExisting={editingExisting}
         initialName={editingName}
         initialConfig={editingConfig}
@@ -186,7 +148,46 @@ export function McpServersTab() {
         onClose={() => setEditorOpen(false)}
         onSubmit={handleSubmit}
       />
-    </>
+    );
+  }
+
+  return (
+    <RegistryPageShell
+      icon={Network}
+      title={t('envManagement.registry.mcp.title')}
+      subtitle={t('envManagement.registry.mcp.subtitle')}
+      countLabel={t('envManagement.registry.mcp.countLabel', {
+        n: String(servers.length),
+      })}
+      bannerNote={t('envManagement.registry.mcp.bannerNote')}
+      addLabel={addLabel}
+      onAdd={openCreate}
+      onRefresh={refresh}
+      loading={loading}
+      error={error}
+      onDismissError={() => setError(null)}
+    >
+      {isEmpty ? (
+        <RegistryEmptyState
+          icon={Network}
+          title={t('envManagement.registry.mcp.emptyTitle')}
+          hint={t('envManagement.registry.emptyHint', { addLabel })}
+          addLabel={addLabel}
+          onAdd={openCreate}
+        />
+      ) : (
+        <RegistryGrid>
+          {servers.map((s) => (
+            <McpServerCard
+              key={s.name}
+              summary={s}
+              onEdit={() => openEdit(s.name)}
+              onDelete={() => onDelete(s.name)}
+            />
+          ))}
+        </RegistryGrid>
+      )}
+    </RegistryPageShell>
   );
 }
 

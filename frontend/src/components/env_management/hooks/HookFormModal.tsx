@@ -32,7 +32,6 @@
 
 import { useEffect, useState } from 'react';
 import {
-  AlertTriangle,
   Box,
   Filter,
   Info,
@@ -55,6 +54,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { HOOK_EVENTS, type HookEvent, type HookEntryRow } from '@/lib/api';
+import RegistryFormShell from '@/components/env_management/registry/RegistryFormShell';
 
 // ─────────────────────────────────────────────────────────────
 // Form state model
@@ -158,7 +158,6 @@ function rowToForm(row: HookEntryRow): FormState {
 // ─────────────────────────────────────────────────────────────
 
 export interface HookFormModalProps {
-  open: boolean;
   editingTarget: { event: string; idx: number } | null;
   initialRow?: HookEntryRow | null;
   saving: boolean;
@@ -168,7 +167,6 @@ export interface HookFormModalProps {
 }
 
 export default function HookFormModal({
-  open,
   editingTarget,
   initialRow,
   saving,
@@ -181,16 +179,13 @@ export default function HookFormModal({
   const [innerError, setInnerError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
     if (editingTarget && initialRow) {
       setForm(rowToForm(initialRow));
     } else {
       setForm(EMPTY_FORM);
     }
     setInnerError(null);
-  }, [open, editingTarget, initialRow]);
-
-  if (!open) return null;
+  }, [editingTarget, initialRow]);
 
   const error = innerError ?? externalError ?? null;
 
@@ -215,95 +210,67 @@ export default function HookFormModal({
       })
     : t('envManagement.registry.hooks.form.createTitle');
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px] p-4"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+  const footer = (
+    <>
+      <div className="flex-1" />
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={saving}
+        className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
       >
-        {/* Header */}
-        <header className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[hsl(var(--border))] shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-[hsl(var(--primary)/0.1)] shrink-0">
-              <Plug className="w-5 h-5 text-[hsl(var(--primary))]" strokeWidth={2} />
-            </div>
-            <h3 className="text-[1rem] font-semibold text-[hsl(var(--foreground))] truncate">
-              {title}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 inline-flex items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]"
-            aria-label="close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </header>
+        {t('envManagement.registry.cancel')}
+      </button>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={saving}
+        className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
+      >
+        {saving ? (
+          <>
+            <Save className="w-4 h-4 animate-pulse" />
+            {t('envManagement.registry.saving')}
+          </>
+        ) : (
+          <>
+            <Save className="w-4 h-4" />
+            {editingTarget
+              ? t('envManagement.registry.hooks.form.editBtn')
+              : t('envManagement.registry.hooks.form.createBtn')}
+          </>
+        )}
+      </button>
+    </>
+  );
 
-        {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-5">
-          <TriggerSection
-            form={form}
-            setForm={setForm}
-            disableEventSwitch={!!editingTarget}
-          />
-          <ExecutionSection form={form} setForm={setForm} />
-          <KvSection
-            icon={Filter}
-            title={t('envManagement.registry.hooks.form.sectionMatch')}
-            hint={t('envManagement.registry.hooks.form.matchHint')}
-            rows={form.match}
-            onChange={(match) => setForm({ ...form, match })}
-            keyPlaceholder="tool"
-            valuePlaceholder="Bash"
-          />
-          <RuntimeSection form={form} setForm={setForm} />
-
-          {error && (
-            <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-[0.75rem] text-red-700 dark:text-red-300">
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div className="flex-1">{error}</div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
-          >
-            {t('envManagement.registry.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
-          >
-            {saving ? (
-              <>
-                <Save className="w-4 h-4 animate-pulse" />
-                {t('envManagement.registry.saving')}
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                {editingTarget
-                  ? t('envManagement.registry.hooks.form.editBtn')
-                  : t('envManagement.registry.hooks.form.createBtn')}
-              </>
-            )}
-          </button>
-        </footer>
-      </div>
-    </div>
+  return (
+    <RegistryFormShell
+      icon={Plug}
+      title={title}
+      backLabel={t('envManagement.registry.backToList')}
+      onBack={onClose}
+      error={error}
+      onDismissError={() => setInnerError(null)}
+      footer={footer}
+    >
+      <TriggerSection
+        form={form}
+        setForm={setForm}
+        disableEventSwitch={!!editingTarget}
+      />
+      <ExecutionSection form={form} setForm={setForm} />
+      <KvSection
+        icon={Filter}
+        title={t('envManagement.registry.hooks.form.sectionMatch')}
+        hint={t('envManagement.registry.hooks.form.matchHint')}
+        rows={form.match}
+        onChange={(match) => setForm({ ...form, match })}
+        keyPlaceholder="tool"
+        valuePlaceholder="Bash"
+      />
+      <RuntimeSection form={form} setForm={setForm} />
+    </RegistryFormShell>
   );
 }
 

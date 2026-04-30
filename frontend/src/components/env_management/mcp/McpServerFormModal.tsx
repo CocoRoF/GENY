@@ -2,40 +2,13 @@
 
 /**
  * McpServerFormModal — beginner-friendly form for creating + editing
- * a custom MCP server. Replaces the original modal (cycle 20260426_2)
- * which jammed every field into one undifferentiated grid.
+ * a custom MCP server.
  *
- * Goals (operator brief, Phase 9.1):
- *
- *   1. Localised — Korean labels render correctly when locale=ko.
- *   2. Beginner-friendly — section breaks, per-field help text,
- *      visual transport selector with descriptions, smart defaults.
- *   3. Structured ↔ JSON harmony — the structured form is primary;
- *      a "JSON 미리보기" panel lives below it and updates as the
- *      operator types, so power users can verify the wire shape
- *      without leaving the form.
- *   4. JSON mode still available — the top toggle flips the editor
- *      to a single textarea for ad-hoc fields the structured form
- *      doesn't model.
- *
- * Layout:
- *
- *   ┌─ Header ────────────────────────────────────────────────┐
- *   │ {createTitle | editTitle}        [Structured | JSON]  ✕ │
- *   ├─ Body (sections) ───────────────────────────────────────┤
- *   │ ▶ 식별 정보       (name, description)                  │
- *   │ ▶ 연결 방식       (radio cards: stdio / HTTP / SSE)    │
- *   │ ▶ 실행 설정       (command/args OR url, transport-aware)│
- *   │ ▶ 환경 변수       (KV editor)                          │
- *   │ ▶ HTTP 헤더        (KV editor, http/sse only)           │
- *   │ ▶ JSON 미리보기   (collapsible, read-only)             │
- *   ├─ Footer ────────────────────────────────────────────────┤
- *   │                              [Cancel]    [Create/Save] │
- *   └─────────────────────────────────────────────────────────┘
- *
- * Each section is a borderless block with its own heading + hint.
- * Visual rhythm matches `OverviewView`'s welcome card (rounded
- * tinted icon, generous spacing, muted descriptions).
+ * Cycle 20260430 Phase 9.8 — converted from a modal overlay to an
+ * inline panel rendered via `RegistryFormShell`. Parents now decide
+ * whether to render the list view or the form view (no `open` prop);
+ * the legacy `*FormModal` filename is preserved for less churn but
+ * the component is now a panel, not a popup.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -46,7 +19,6 @@ import {
   ChevronRight,
   Globe,
   HelpCircle,
-  Info,
   Plus,
   Radio,
   RefreshCw,
@@ -62,6 +34,7 @@ import { useI18n } from '@/lib/i18n';
 import { customMcpApi, type MCPTestConnectionResponse } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import RegistryFormShell from '@/components/env_management/registry/RegistryFormShell';
 
 // ─────────────────────────────────────────────────────────────
 // Form state model
@@ -172,7 +145,6 @@ export interface McpServerFormSubmit {
 }
 
 export interface McpServerFormModalProps {
-  open: boolean;
   /** When true, the form is editing an existing entry — name disabled. */
   editingExisting: boolean;
   /** Initial name (edit only). */
@@ -184,12 +156,12 @@ export interface McpServerFormModalProps {
   saving: boolean;
   /** External error to surface above the footer. */
   error?: string | null;
+  /** Click handler for the back-to-list button (and Cancel). */
   onClose: () => void;
   onSubmit: (payload: McpServerFormSubmit) => void;
 }
 
 export default function McpServerFormModal({
-  open,
   editingExisting,
   initialName = '',
   initialConfig,
@@ -208,9 +180,9 @@ export default function McpServerFormModal({
     MCPTestConnectionResponse | null
   >(null);
 
-  // Reset form when the modal opens or initial values change.
+  // Reset form when initial values change. Parent mounts/unmounts this
+  // component, so a separate `open` flag is no longer needed.
   useEffect(() => {
-    if (!open) return;
     if (editingExisting && initialConfig) {
       const structured = jsonToStructured(initialConfig);
       setForm({
@@ -225,7 +197,7 @@ export default function McpServerFormModal({
     }
     setInnerError(null);
     setTestResult(null);
-  }, [open, editingExisting, initialName, initialDescription, initialConfig]);
+  }, [editingExisting, initialName, initialDescription, initialConfig]);
 
   // Stale the test result whenever the form changes — yesterday's
   // "connected" tells the operator nothing about the config they
@@ -246,14 +218,6 @@ export default function McpServerFormModal({
   // Live JSON of the structured form. In structured mode, this is
   // the preview; in JSON mode, the textarea owns the source of
   // truth and this still shows the parsed result for symmetry.
-  //
-  // IMPORTANT: this hook MUST sit above the `if (!open) return null`
-  // bail. Hooks have to fire in the same order on every render, and
-  // since the parent renders this component on every state change
-  // (just toggling `open`), the early return changing the hook count
-  // triggers React #310. Computing the JSON on a closed modal is
-  // cheap (the form state is still EMPTY_FORM or the last-saved
-  // shape), so there's no win in gating it.
   const liveJson = useMemo(() => {
     if (form.mode === 'json') {
       try {
@@ -265,8 +229,6 @@ export default function McpServerFormModal({
     }
     return JSON.stringify(structuredToJson(form), null, 2);
   }, [form]);
-
-  if (!open) return null;
 
   const error = innerError ?? externalError ?? null;
 
@@ -390,156 +352,129 @@ export default function McpServerFormModal({
     });
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px] p-4"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+  const title = editingExisting
+    ? t('envManagement.registry.mcp.form.editTitle')
+    : t('envManagement.registry.mcp.form.createTitle');
+
+  const headerExtras = <ModeToggle mode={form.mode} onChange={switchMode} t={t} />;
+
+  const footer = (
+    <>
+      <button
+        type="button"
+        onClick={handleTest}
+        disabled={testing || saving}
+        title={t('envManagement.registry.mcp.form.testHint')}
+        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {/* ── Header ── */}
-        <header className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[hsl(var(--border))] shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-[hsl(var(--primary)/0.1)] shrink-0">
-              <Server className="w-5 h-5 text-[hsl(var(--primary))]" strokeWidth={2} />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-[1rem] font-semibold text-[hsl(var(--foreground))] truncate">
-                {editingExisting
-                  ? t('envManagement.registry.mcp.form.editTitle')
-                  : t('envManagement.registry.mcp.form.createTitle')}
-              </h3>
-              <ModeToggle mode={form.mode} onChange={switchMode} t={t} />
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 inline-flex items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]"
-            aria-label="close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </header>
+        {testing ? (
+          <>
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            {t('envManagement.registry.mcp.form.testRunning')}
+          </>
+        ) : (
+          <>
+            <Zap className="w-3.5 h-3.5" />
+            {t('envManagement.registry.mcp.form.testButton')}
+          </>
+        )}
+      </button>
+      <div className="flex-1" />
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={saving}
+        className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+      >
+        {t('envManagement.registry.cancel')}
+      </button>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={saving}
+        className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
+      >
+        {saving ? (
+          <>
+            <Save className="w-4 h-4 animate-pulse" />
+            {t('envManagement.registry.saving')}
+          </>
+        ) : (
+          <>
+            <Save className="w-4 h-4" />
+            {editingExisting
+              ? t('envManagement.registry.mcp.form.editBtn')
+              : t('envManagement.registry.mcp.form.createBtn')}
+          </>
+        )}
+      </button>
+    </>
+  );
 
-        {/* ── Body (scrollable) ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-5">
-          {form.mode === 'structured' ? (
-            <>
-              <IdentitySection form={form} setForm={setForm} editingExisting={editingExisting} />
-              <TransportSection form={form} setForm={setForm} />
-              <ConnectionSection form={form} setForm={setForm} />
-              <KvSection
-                title={t('envManagement.registry.mcp.form.sectionEnv')}
-                hint={t('envManagement.registry.mcp.form.envHint')}
-                rows={form.envRows}
-                onChange={(envRows) => setForm({ ...form, envRows })}
-                keyPlaceholder="GITHUB_TOKEN"
-                valuePlaceholder="ghp_…"
-                icon={Box}
-              />
-              {form.transport !== 'stdio' && (
-                <KvSection
-                  title={t('envManagement.registry.mcp.form.sectionHeaders')}
-                  hint={t('envManagement.registry.mcp.form.headersHint')}
-                  rows={form.headerRows}
-                  onChange={(headerRows) => setForm({ ...form, headerRows })}
-                  keyPlaceholder="Authorization"
-                  valuePlaceholder="Bearer …"
-                  icon={Globe}
-                />
-              )}
-              <JsonPreviewSection
-                json={liveJson}
-                open={previewOpen}
-                onToggle={() => setPreviewOpen((v) => !v)}
-                t={t}
-              />
-            </>
-          ) : (
-            <>
-              <IdentitySection form={form} setForm={setForm} editingExisting={editingExisting} />
-              <Section
-                icon={Box}
-                title="JSON config"
-                hint={t('envManagement.registry.mcp.form.previewReadonlyHint')}
-              >
-                <Textarea
-                  value={form.configJson}
-                  onChange={(e) => setForm({ ...form, configJson: e.target.value })}
-                  rows={16}
-                  spellCheck={false}
-                  className="font-mono text-[0.75rem]"
-                />
-              </Section>
-            </>
+  return (
+    <RegistryFormShell
+      icon={Server}
+      title={title}
+      backLabel={t('envManagement.registry.backToList')}
+      onBack={onClose}
+      headerExtras={headerExtras}
+      error={error}
+      onDismissError={() => setInnerError(null)}
+      footer={footer}
+    >
+      {form.mode === 'structured' ? (
+        <>
+          <IdentitySection form={form} setForm={setForm} editingExisting={editingExisting} />
+          <TransportSection form={form} setForm={setForm} />
+          <ConnectionSection form={form} setForm={setForm} />
+          <KvSection
+            title={t('envManagement.registry.mcp.form.sectionEnv')}
+            hint={t('envManagement.registry.mcp.form.envHint')}
+            rows={form.envRows}
+            onChange={(envRows) => setForm({ ...form, envRows })}
+            keyPlaceholder="GITHUB_TOKEN"
+            valuePlaceholder="ghp_…"
+            icon={Box}
+          />
+          {form.transport !== 'stdio' && (
+            <KvSection
+              title={t('envManagement.registry.mcp.form.sectionHeaders')}
+              hint={t('envManagement.registry.mcp.form.headersHint')}
+              rows={form.headerRows}
+              onChange={(headerRows) => setForm({ ...form, headerRows })}
+              keyPlaceholder="Authorization"
+              valuePlaceholder="Bearer …"
+              icon={Globe}
+            />
           )}
-
-          {error && (
-            <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-[0.75rem] text-red-700 dark:text-red-300">
-              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div className="flex-1">{error}</div>
-            </div>
-          )}
-
-          {testResult && <TestResultChip result={testResult} t={t} />}
-        </div>
-
-        {/* ── Footer ── */}
-        <footer className="flex items-center gap-2 px-5 py-4 border-t border-[hsl(var(--border))] shrink-0">
-          <button
-            type="button"
-            onClick={handleTest}
-            disabled={testing || saving}
-            title={t('envManagement.registry.mcp.form.testHint')}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50 disabled:cursor-not-allowed"
+          <JsonPreviewSection
+            json={liveJson}
+            open={previewOpen}
+            onToggle={() => setPreviewOpen((v) => !v)}
+            t={t}
+          />
+        </>
+      ) : (
+        <>
+          <IdentitySection form={form} setForm={setForm} editingExisting={editingExisting} />
+          <Section
+            icon={Box}
+            title="JSON config"
+            hint={t('envManagement.registry.mcp.form.previewReadonlyHint')}
           >
-            {testing ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                {t('envManagement.registry.mcp.form.testRunning')}
-              </>
-            ) : (
-              <>
-                <Zap className="w-3.5 h-3.5" />
-                {t('envManagement.registry.mcp.form.testButton')}
-              </>
-            )}
-          </button>
-          <div className="flex-1" />
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="h-9 px-4 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
-          >
-            {t('envManagement.registry.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-violet-500 text-white text-[0.8125rem] font-medium hover:bg-violet-600 disabled:opacity-50 shadow-sm"
-          >
-            {saving ? (
-              <>
-                <Save className="w-4 h-4 animate-pulse" />
-                {t('envManagement.registry.saving')}
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                {editingExisting
-                  ? t('envManagement.registry.mcp.form.editBtn')
-                  : t('envManagement.registry.mcp.form.createBtn')}
-              </>
-            )}
-          </button>
-        </footer>
-      </div>
-    </div>
+            <Textarea
+              value={form.configJson}
+              onChange={(e) => setForm({ ...form, configJson: e.target.value })}
+              rows={16}
+              spellCheck={false}
+              className="font-mono text-[0.75rem]"
+            />
+          </Section>
+        </>
+      )}
+
+      {testResult && <TestResultChip result={testResult} t={t} />}
+    </RegistryFormShell>
   );
 }
 
