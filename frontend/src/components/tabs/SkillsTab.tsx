@@ -21,12 +21,13 @@ import {
   frameworkSettingsApi,
   type SkillDetail,
 } from '@/lib/api';
-import { Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { Copy, Eye, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { skillId } from '@/lib/envDefaultsApi';
 import SkillFormModal, {
+  type SkillFormMode,
   type SkillFormSubmit,
 } from '@/components/env_management/skills/SkillFormModal';
 import {
@@ -68,7 +69,11 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
   }, [loadEnvDefaultsOnce]);
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingExisting, setEditingExisting] = useState(false);
+  // Phase X — tri-state mode replaces the old `editingExisting`
+  // boolean. View mode shows a read-only inspector; create/edit
+  // unchanged. The boolean is computed for the legacy form-modal
+  // prop so callers that still expect it keep working.
+  const [editorMode, setEditorMode] = useState<SkillFormMode>('create');
   const [editingDetail, setEditingDetail] = useState<SkillDetail | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -143,7 +148,7 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
   }, [skills, userIds]);
 
   const openCreate = () => {
-    setEditingExisting(false);
+    setEditorMode('create');
     setEditingDetail(null);
     setError(null);
     setEditorOpen(true);
@@ -153,9 +158,66 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
     setError(null);
     try {
       const detail = await skillsApi.get(id);
-      setEditingExisting(true);
+      setEditorMode('edit');
       setEditingDetail(detail);
       setEditorOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** Open the read-only inspector for any skill (executor / geny /
+   *  user / mcp). User-owned skills also have an "Edit" affordance
+   *  in the card actions; this path is for everything else. */
+  const openView = async (id: string) => {
+    setError(null);
+    try {
+      const detail = await skillsApi.get(id);
+      setEditorMode('view');
+      setEditingDetail(detail);
+      setEditorOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** Fork an existing skill into a brand-new user skill. Pre-
+   *  populates the form with the source's metadata + body, drops
+   *  the user into a fresh ID input (suffixed ``-copy``) so they
+   *  can rename and save. */
+  const openCopyFromDetail = (source: SkillDetail) => {
+    setError(null);
+    const proposedId = nextCopyId(source.id, skills.map((s) => s.id ?? ''));
+    setEditorMode('create');
+    setEditingDetail({
+      ...source,
+      id: proposedId,
+      // Leave is_user_skill / source_kind alone — the form only
+      // reads metadata fields. The new id signals "this is a copy".
+    });
+    setEditorOpen(true);
+  };
+
+  /** Resolve a unique id starting from ``<base>-copy`` and falling
+   *  back to ``<base>-copy-2``, ``-3``, etc. when collisions exist
+   *  in the current catalog. */
+  const nextCopyId = (sourceId: string, existing: string[]): string => {
+    const taken = new Set(existing);
+    const stem = `${sourceId}-copy`;
+    if (!taken.has(stem)) return stem;
+    let i = 2;
+    while (taken.has(`${stem}-${i}`)) i += 1;
+    return `${stem}-${i}`;
+  };
+
+  /** Helper for the View card action: load the detail, then open
+   *  the form in copy mode. Skips the explicit View step so power
+   *  users can fork a built-in with one click. */
+  const openCopyById = async (id: string) => {
+    setError(null);
+    try {
+      const detail = await skillsApi.get(id);
+      openCopyFromDetail(detail);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -165,14 +227,15 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
     setSaving(true);
     setError(null);
     try {
-      if (editingExisting) {
+      // Create vs replace is decided by mode. View mode never
+      // submits.
+      if (editorMode === 'edit') {
         await skillsApi.replaceUserSkill(payload);
+        toast.success(`Updated /${payload.id}`);
       } else {
         await skillsApi.createUserSkill(payload);
+        toast.success(`Created /${payload.id}`);
       }
-      toast.success(
-        editingExisting ? `Updated /${payload.id}` : `Created /${payload.id}`,
-      );
       setEditorOpen(false);
       await refresh();
     } catch (e) {
@@ -228,12 +291,13 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
   if (editorOpen) {
     return (
       <SkillFormModal
-        editingExisting={editingExisting}
+        mode={editorMode}
         initialDetail={editingDetail}
         saving={saving}
         error={error}
         onClose={() => setEditorOpen(false)}
         onSubmit={handleSubmit}
+        onCopy={openCopyFromDetail}
       />
     );
   }
@@ -275,6 +339,8 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
                   key={s.id ?? `executor-${i}`}
                   skill={s}
                   isUser={false}
+                  onView={() => s.id && openView(s.id)}
+                  onCopy={() => s.id && openCopyById(s.id)}
                 />
               ))}
             </RegistrySection>
@@ -289,6 +355,8 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
                   key={s.id ?? `geny-${i}`}
                   skill={s}
                   isUser={false}
+                  onView={() => s.id && openView(s.id)}
+                  onCopy={() => s.id && openCopyById(s.id)}
                 />
               ))}
             </RegistrySection>
@@ -303,7 +371,9 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
                   key={s.id ?? `user-${i}`}
                   skill={s}
                   isUser={true}
+                  onView={() => s.id && openView(s.id)}
                   onEdit={() => s.id && openEdit(s.id)}
+                  onCopy={() => s.id && openCopyById(s.id)}
                   onDelete={() => s.id && onDelete(s.id)}
                 />
               ))}
@@ -319,6 +389,8 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
                   key={s.id ?? `other-${i}`}
                   skill={s}
                   isUser={false}
+                  onView={() => s.id && openView(s.id)}
+                  onCopy={() => s.id && openCopyById(s.id)}
                 />
               ))}
             </RegistrySection>
@@ -336,12 +408,16 @@ export default SkillsTab;
 function SkillCard({
   skill,
   isUser,
+  onView,
   onEdit,
+  onCopy,
   onDelete,
 }: {
   skill: SkillRow;
   isUser: boolean;
+  onView?: () => void;
   onEdit?: () => void;
+  onCopy?: () => void;
   onDelete?: () => void;
 }) {
   const { t } = useI18n();
@@ -407,27 +483,47 @@ function SkillCard({
           itemId={skillId(skill)}
         />
       }
+      // Make the card itself click-to-view (when a view handler is
+      // wired). Read-only inspection is the most common reason a
+      // user clicks anything that isn't an explicit action button —
+      // the screenshot in the user's report shows them doing exactly
+      // that on built-ins.
+      onClick={onView}
       actions={
-        isUser ? (
-          <>
-            {onEdit && (
-              <RegistryActionButton
-                icon={Pencil}
-                onClick={onEdit}
-                title={t('envManagement.registry.editTip')}
-                variant="primary"
-              />
-            )}
-            {onDelete && (
-              <RegistryActionButton
-                icon={Trash2}
-                onClick={onDelete}
-                title={t('envManagement.registry.deleteTip')}
-                variant="danger"
-              />
-            )}
-          </>
-        ) : null
+        <>
+          {onView && (
+            <RegistryActionButton
+              icon={Eye}
+              onClick={onView}
+              title={t('envManagement.registry.skills.viewTip')}
+              variant="primary"
+            />
+          )}
+          {isUser && onEdit && (
+            <RegistryActionButton
+              icon={Pencil}
+              onClick={onEdit}
+              title={t('envManagement.registry.editTip')}
+              variant="primary"
+            />
+          )}
+          {onCopy && (
+            <RegistryActionButton
+              icon={Copy}
+              onClick={onCopy}
+              title={t('envManagement.registry.skills.copyTip')}
+              variant="primary"
+            />
+          )}
+          {isUser && onDelete && (
+            <RegistryActionButton
+              icon={Trash2}
+              onClick={onDelete}
+              title={t('envManagement.registry.deleteTip')}
+              variant="danger"
+            />
+          )}
+        </>
       }
     />
   );

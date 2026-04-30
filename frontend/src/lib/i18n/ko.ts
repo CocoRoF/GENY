@@ -812,12 +812,33 @@ const ko: Translations = {
         badgeGeny: 'geny',
         badgeUser: 'user',
         badgeMcp: 'mcp',
+        // 카드 액션 툴팁
+        viewTip: '상세 보기',
+        copyTip: '복사하여 새 스킬 만들기',
+        // 도구 선택기 (Phase X)
+        toolPickerEmpty: '아직 선택된 도구가 없습니다 — 부모 환경의 도구 셋을 그대로 상속.',
+        toolPickerAdd: '도구 추가',
+        toolPickerAddTip: '카탈로그에서 도구 선택',
+        toolPickerOpenCatalog: '카탈로그 열기',
+        toolPickerSearchPlaceholder: '도구 검색…',
+        toolPickerLoading: '카탈로그 로드 중…',
+        toolPickerLoadError: '카탈로그 로드 실패: {error}',
+        toolPickerNoMatch: '검색 결과 없음',
+        toolPickerEmptyCatalog: '사용 가능한 도구가 없습니다.',
+        toolPickerAddCustom: '"{name}" 직접 추가',
+        toolPickerCustomTag: '커스텀',
+        toolPickerCustomHint: '카탈로그에 없는 이름 (수동 입력 또는 와일드카드).',
+        toolPickerGroupExecutor: 'Executor 빌트인',
+        toolPickerGroupGeny: 'Geny 커스텀',
         // ── 새 모달용 (Phase 9.3) ──
         form: {
           createTitle: '새 스킬 만들기',
           editTitle: '스킬 편집 — /{id}',
+          viewTitle: '스킬 보기 — /{id}',
           createBtn: '만들기',
           editBtn: '저장',
+          copyBtn: '복사하기',
+          copyHint: '이 스킬을 복사해 새 사용자 스킬로 시작합니다.',
           // 섹션
           sectionIdentity: '식별 정보',
           sectionMeta: '분류 & 메타',
