@@ -24,6 +24,7 @@ import pytest
 
 from tools.built_in import memory_inspect_tools
 from tools.built_in.memory_inspect_tools import (
+    MemoryArtifactTool,
     MemoryEventTool,
     MemoryStatusTool,
     MemoryWithTool,
@@ -497,3 +498,144 @@ def test_event_caller_only_sees_own_stm(world) -> None:
     # Caller is vtuber-1; should NOT find sub-1's event
     out = _run_event(MemoryEventTool(), event_id="EVT-SECRET")
     assert "error" in out
+
+
+# ─────────────────────────────────────────────────────────────────
+# memory_artifact — L3
+# ─────────────────────────────────────────────────────────────────
+
+
+def _run_artifact(tool: MemoryArtifactTool, **kw) -> Dict[str, Any]:
+    out = tool.run(session_id=kw.pop("session_id", "vtuber-1"), **kw)
+    return json.loads(out)
+
+
+@pytest.fixture
+def artifact_world(world, tmp_path):
+    """Wire the seeded `EVT-RUN-1` event to a real working_dir on
+    disk so the tool can read the artifact body."""
+    workspace = tmp_path / "sub-1-ws"
+    workspace.mkdir()
+    (workspace / "notes.md").write_text("hello world\n", encoding="utf-8")
+
+    # Point the sub-worker fake at the real workspace.
+    world["sub"]._working_dir = str(workspace)
+    return {**world, "workspace": workspace}
+
+
+def test_artifact_reads_listed_file(artifact_world) -> None:
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="notes.md",
+    )
+    assert out["path"] == "notes.md"
+    assert out["content"] == "hello world\n"
+    assert out["truncated"] is False
+    assert out["size_bytes"] == len("hello world\n")
+
+
+def test_artifact_rejects_path_not_in_files_written(artifact_world) -> None:
+    """Hard guardrail — the path must appear in the event's
+    payload.files_written. Otherwise this becomes a generic file
+    reader, defeating the principle that this tool only exposes
+    artifacts the persona can already discover via memory_event."""
+    (artifact_world["workspace"] / "secret.txt").write_text("nope", encoding="utf-8")
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="secret.txt",
+    )
+    assert "error" in out
+
+
+def test_artifact_rejects_absolute_path(artifact_world) -> None:
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="/etc/passwd",
+    )
+    assert "error" in out
+
+
+def test_artifact_rejects_traversal(artifact_world) -> None:
+    """A `..` segment is rejected even when the candidate would have
+    resolved into the workspace. The check is conservative on
+    purpose."""
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="../sub-1-ws/notes.md",
+    )
+    assert "error" in out
+
+
+def test_artifact_rejects_path_resolving_outside_workspace(
+    artifact_world, tmp_path
+) -> None:
+    """Even when files_written contains a "tricky" path that escapes
+    the workspace via symlink-free resolution, the relative_to()
+    check must still reject it."""
+    # Manually inject a malicious files_written entry so we can
+    # exercise the workspace-bound check (the categoriser would never
+    # produce such a path; this is defence in depth).
+    sub_entries = artifact_world["vtuber"]._memory_manager._stm._entries
+    sub_entries[2]["metadata"]["payload"]["files_written"] = ["../../etc/passwd"]
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="../../etc/passwd",
+    )
+    assert "error" in out
+
+
+def test_artifact_truncates_when_file_exceeds_cap(artifact_world) -> None:
+    big = "x" * 4096
+    (artifact_world["workspace"] / "big.md").write_text(big, encoding="utf-8")
+    sub_entries = artifact_world["vtuber"]._memory_manager._stm._entries
+    sub_entries[2]["metadata"]["payload"]["files_written"] = [
+        "notes.md", "big.md",
+    ]
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="big.md",
+        max_bytes=128,
+    )
+    assert out["truncated"] is True
+    assert len(out["content"]) <= 128
+    assert out["size_bytes"] == 4096
+
+
+def test_artifact_unknown_event_returns_error(artifact_world) -> None:
+    out = _run_artifact(
+        MemoryArtifactTool(), event_id="EVT-NOPE", path="x",
+    )
+    assert "error" in out
+
+
+def test_artifact_missing_file_returns_error(artifact_world) -> None:
+    sub_entries = artifact_world["vtuber"]._memory_manager._stm._entries
+    sub_entries[2]["metadata"]["payload"]["files_written"] = ["gone.md"]
+    out = _run_artifact(
+        MemoryArtifactTool(), event_id="EVT-RUN-1", path="gone.md",
+    )
+    assert "error" in out
+
+
+def test_artifact_max_bytes_clamped_to_hard_cap(artifact_world) -> None:
+    """User-supplied max_bytes above the hard cap silently clamps —
+    no error, just clipped output."""
+    big = "y" * 1_000_000
+    (artifact_world["workspace"] / "huge.md").write_text(big, encoding="utf-8")
+    sub_entries = artifact_world["vtuber"]._memory_manager._stm._entries
+    sub_entries[2]["metadata"]["payload"]["files_written"] = ["huge.md"]
+    out = _run_artifact(
+        MemoryArtifactTool(),
+        event_id="EVT-RUN-1",
+        path="huge.md",
+        max_bytes=10_000_000,  # way above cap
+    )
+    # Content capped to at most _MAX_ARTIFACT_BYTES (256 KB)
+    assert len(out["content"]) <= 262_144
+    assert out["truncated"] is True

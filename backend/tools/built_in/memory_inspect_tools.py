@@ -560,9 +560,170 @@ def _detailed_event(entry, meta: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ─── B4 — memory_artifact ──────────────────────────────────────────
+
+
+_DEFAULT_ARTIFACT_BYTES = 65_536    # 64 KB
+_MAX_ARTIFACT_BYTES = 262_144       # 256 KB
+
+
+class MemoryArtifactTool(BaseTool):
+    """Read a file the paired Sub-Worker wrote during a remembered run.
+
+    The L3 step of the progressive ladder. Only opens files that are
+    *both* listed in the event's ``payload.files_written`` *and*
+    resolve safely under the counterpart session's working directory.
+    Read-only — never writes.
+    """
+
+    name = "memory_artifact"
+    description = (
+        "Read the actual content of a file your paired Sub-Worker "
+        "wrote in a specific run, by event_id + relative path. "
+        "Use after memory_event tells you what files the run "
+        "produced. The path must appear in that event's "
+        "payload.files_written; absolute paths and `..` are "
+        "rejected. Read-only; size is capped (default 64KB, max "
+        "256KB). Returns {path, size_bytes, truncated, content}."
+    )
+    CAPABILITIES = _LOOKUP
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": (
+                        "Event id whose payload listed the file. "
+                        "Get this from memory_event / memory_with."
+                    ),
+                },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative path from the counterpart's "
+                        "working directory (must match an entry in "
+                        "the event's payload.files_written)."
+                    ),
+                },
+                "max_bytes": {
+                    "type": "integer",
+                    "default": _DEFAULT_ARTIFACT_BYTES,
+                    "minimum": 1,
+                    "maximum": _MAX_ARTIFACT_BYTES,
+                    "description": (
+                        f"Maximum bytes to return (default "
+                        f"{_DEFAULT_ARTIFACT_BYTES}, hard cap "
+                        f"{_MAX_ARTIFACT_BYTES}). Larger files "
+                        f"return truncated=true."
+                    ),
+                },
+            },
+            "required": ["event_id", "path"],
+        }
+
+    def run(
+        self,
+        session_id: str,
+        event_id: str,
+        path: str,
+        max_bytes: int = _DEFAULT_ARTIFACT_BYTES,
+    ) -> str:
+        caller = _get_caller(session_id)
+        if caller is None:
+            return _error(f"caller session not found: {session_id}")
+        memory = getattr(caller, "_memory_manager", None)
+        if memory is None:
+            return _error("caller has no memory manager")
+        if not event_id or not isinstance(event_id, str):
+            return _error("event_id required")
+        if not path or not isinstance(path, str):
+            return _error("path required")
+
+        try:
+            cap = max(1, min(int(max_bytes), _MAX_ARTIFACT_BYTES))
+        except (TypeError, ValueError):
+            cap = _DEFAULT_ARTIFACT_BYTES
+
+        entries = _stm_load_all(memory)
+        entry, meta = _find_event_by_id(entries, event_id)
+        if entry is None:
+            return _error(f"event not found: {event_id}")
+
+        payload = meta.get("payload") if isinstance(meta.get("payload"), dict) else {}
+        listed = list(payload.get("files_written") or [])
+        if path not in listed:
+            return _error(
+                "path is not declared in this event's "
+                "payload.files_written"
+            )
+
+        # Path safety: relative, no traversal, no absolute paths.
+        from pathlib import Path
+        rel = Path(path)
+        if rel.is_absolute() or any(part in ("..",) for part in rel.parts):
+            return _error("path is not a safe relative path")
+
+        # Resolve the source: the counterpart session whose run this
+        # event records.
+        counterpart_id = meta.get("counterpart_id")
+        if not counterpart_id:
+            return _error("event has no counterpart_id; cannot resolve workspace")
+
+        manager = _get_agent_manager()
+        target = (
+            manager.get_agent(counterpart_id)
+            or manager.resolve_session(counterpart_id)
+        )
+        if target is None:
+            return _error(f"counterpart session not available: {counterpart_id}")
+
+        working_dir = (
+            getattr(target, "_working_dir", None)
+            or getattr(target, "storage_path", None)
+            or ""
+        )
+        if not working_dir:
+            return _error("counterpart session has no working directory")
+
+        try:
+            base = Path(working_dir).resolve(strict=False)
+            full = (base / rel).resolve(strict=False)
+            full.relative_to(base)
+        except (OSError, ValueError):
+            return _error("path resolves outside the workspace")
+
+        if not full.exists() or not full.is_file():
+            return _error(f"file not found at workspace: {path}")
+
+        try:
+            size = full.stat().st_size
+            with open(full, "rb") as f:
+                blob = f.read(cap)
+        except OSError as exc:
+            return _error(f"file read failed: {exc}")
+
+        truncated = size > cap
+        try:
+            text = blob.decode("utf-8")
+        except UnicodeDecodeError:
+            text = blob.decode("utf-8", errors="replace")
+
+        return _ok({
+            "event_id": event_id,
+            "path": path,
+            "size_bytes": size,
+            "truncated": truncated,
+            "content": text,
+        })
+
+
 # Module-level export consumed by ToolLoader (Stage D wires this up).
 TOOLS = [
     MemoryStatusTool(),
     MemoryWithTool(),
     MemoryEventTool(),
+    MemoryArtifactTool(),
 ]
