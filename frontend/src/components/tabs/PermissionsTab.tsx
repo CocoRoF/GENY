@@ -4,10 +4,11 @@
  * PermissionsTab — view & edit the executor's permission rules
  * (PR-E.2.2). Lives behind the dev-only "Permissions" global tab.
  *
- * Layout:
- *   [Header: mode + sources consulted]
- *   [Rules table: tool / behavior / pattern / source / reason / actions]
- *   [Add modal: same fields, behavior+source dropdown]
+ * Cycle 20260429 Phase 9.5 — split the form into a dedicated
+ * `PermissionFormModal` (sectioned, localised, with visual radio
+ * cards for the allow/deny/ask choice + per-field hints); this file
+ * is now the list view + CRUD orchestration. Mirrors what 9.1-9.4
+ * did for MCP / Skill / Hook.
  *
  * Read state comes from /api/permissions/list (cascade-merged) so the
  * operator sees what the matrix actually loaded — including yaml-only
@@ -21,18 +22,12 @@ import { toast } from 'sonner';
 import {
   permissionApi,
   PermissionRulePayload,
-  PermissionBehavior,
-  PermissionSource,
   PermissionListResponse,
   PermissionRulesResponse,
   PERMISSION_MODES,
   EXECUTOR_PERMISSION_MODES,
 } from '@/lib/api';
 import { Pencil, Shield, Trash2 } from 'lucide-react';
-import { EditorModal, ActionButton } from '@/components/layout';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -44,6 +39,7 @@ import { useI18n } from '@/lib/i18n';
 import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
 import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 import { permissionId } from '@/lib/envDefaultsApi';
+import PermissionFormModal from '@/components/env_management/permissions/PermissionFormModal';
 import {
   RegistryPageShell,
   RegistryGrid,
@@ -51,35 +47,6 @@ import {
   RegistryEmptyState,
   RegistryActionButton,
 } from '@/components/env_management/registry';
-
-const BEHAVIOR_OPTIONS: PermissionBehavior[] = ['allow', 'deny', 'ask'];
-const SOURCE_OPTIONS: PermissionSource[] = ['user', 'project', 'local', 'cli', 'preset'];
-
-interface RuleFormState {
-  tool_name: string;
-  behavior: PermissionBehavior;
-  pattern: string;
-  source: PermissionSource;
-  reason: string;
-}
-
-const EMPTY_FORM: RuleFormState = {
-  tool_name: '',
-  behavior: 'ask',
-  pattern: '',
-  source: 'user',
-  reason: '',
-};
-
-function formToPayload(f: RuleFormState): PermissionRulePayload {
-  return {
-    tool_name: f.tool_name.trim(),
-    behavior: f.behavior,
-    pattern: f.pattern.trim() ? f.pattern.trim() : null,
-    source: f.source,
-    reason: f.reason.trim() ? f.reason.trim() : null,
-  };
-}
 
 export interface PermissionsTabProps {
   /** Deprecated — embedded mode is no longer used after Phase 5. */
@@ -100,7 +67,7 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [form, setForm] = useState<RuleFormState>(EMPTY_FORM);
+  const [editingRule, setEditingRule] = useState<PermissionRulePayload | null>(null);
   const [saving, setSaving] = useState(false);
 
   // R.1 (cycle 20260426_2) — mode pickers reflect settings.json values
@@ -145,7 +112,8 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
 
   const openCreate = () => {
     setEditingIdx(null);
-    setForm(EMPTY_FORM);
+    setEditingRule(null);
+    setError(null);
     setEditorOpen(true);
   };
 
@@ -153,28 +121,19 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
     const r = editable?.rules[idx];
     if (!r) return;
     setEditingIdx(idx);
-    setForm({
-      tool_name: r.tool_name,
-      behavior: r.behavior,
-      pattern: r.pattern ?? '',
-      source: r.source ?? 'user',
-      reason: r.reason ?? '',
-    });
+    setEditingRule(r);
+    setError(null);
     setEditorOpen(true);
   };
 
-  const submitForm = async () => {
-    if (!form.tool_name.trim()) {
-      setError('tool_name is required');
-      return;
-    }
+  const handleSubmit = async (payload: PermissionRulePayload) => {
     setSaving(true);
     setError(null);
     try {
-      const payload = formToPayload(form);
-      const res = editingIdx === null
-        ? await permissionApi.append(payload)
-        : await permissionApi.replace(editingIdx, payload);
+      const res =
+        editingIdx === null
+          ? await permissionApi.append(payload)
+          : await permissionApi.replace(editingIdx, payload);
       setEditable(res);
       // Inspect view will go stale until next refresh; trigger one.
       try {
@@ -307,94 +266,6 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
     );
 
   const isEmpty = (inspect?.rules ?? []).length === 0 && !loading;
-
-  const modal = (
-    <EditorModal
-      open={editorOpen}
-      onClose={() => setEditorOpen(false)}
-      title={editingIdx === null ? 'Add rule' : `Edit rule #${editingIdx}`}
-        saving={saving}
-        footer={
-          <>
-            <ActionButton onClick={() => setEditorOpen(false)} disabled={saving}>
-              Cancel
-            </ActionButton>
-            <ActionButton
-              variant="primary"
-              onClick={submitForm}
-              disabled={saving || !form.tool_name.trim()}
-            >
-              {saving ? 'Saving…' : editingIdx === null ? 'Create' : 'Save'}
-            </ActionButton>
-          </>
-        }
-      >
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="perm-tool">Tool name *</Label>
-            <Input
-              id="perm-tool"
-              value={form.tool_name}
-              onChange={(e) => setForm({ ...form, tool_name: e.target.value })}
-              placeholder="Bash, Read, * (any), ..."
-              className="font-mono"
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Behavior</Label>
-            <Select
-              value={form.behavior}
-              onValueChange={(v) => setForm({ ...form, behavior: v as PermissionBehavior })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BEHAVIOR_OPTIONS.map((b) => (
-                  <SelectItem key={b} value={b}>{b}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="perm-pattern">Pattern <span className="opacity-60">(optional, glob/regex per executor)</span></Label>
-            <Input
-              id="perm-pattern"
-              value={form.pattern}
-              onChange={(e) => setForm({ ...form, pattern: e.target.value })}
-              placeholder="git push *"
-              className="font-mono"
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Source</Label>
-            <Select
-              value={form.source}
-              onValueChange={(v) => setForm({ ...form, source: v as PermissionSource })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SOURCE_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="perm-reason">Reason <span className="opacity-60">(optional, surfaced in UI)</span></Label>
-            <Textarea
-              id="perm-reason"
-              value={form.reason}
-              onChange={(e) => setForm({ ...form, reason: e.target.value })}
-              rows={2}
-            />
-          </div>
-        </div>
-      </EditorModal>
-  );
-
   const addLabel = t('envManagement.registry.permissions.addLabel');
 
   return (
@@ -445,7 +316,15 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
         {sourcesFooter}
       </RegistryPageShell>
 
-      {modal}
+      <PermissionFormModal
+        open={editorOpen}
+        editingIdx={editingIdx}
+        initialRule={editingRule}
+        saving={saving}
+        error={error}
+        onClose={() => setEditorOpen(false)}
+        onSubmit={handleSubmit}
+      />
     </>
   );
 }
