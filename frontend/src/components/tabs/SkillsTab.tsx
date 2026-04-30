@@ -45,6 +45,9 @@ interface SkillRow {
   category?: string | null;
   effort?: string | null;
   examples?: string[];
+  /** Phase 10 follow-up — origin classification. Drives the badge
+   *  + which section the skill lives in. */
+  source_kind?: 'executor' | 'geny' | 'user' | 'mcp' | 'unknown';
 }
 
 export interface SkillsTabProps {
@@ -104,18 +107,39 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
     refresh();
   }, []);
 
-  /** Group by `bundled` vs `user` for the section header. The
-   *  registered category field is informational and rendered as a
-   *  badge on each card; we keep grouping coarse so the operator
-   *  scans bundled-then-user, not 6 small clusters. */
+  /** Group by origin (Phase 10 follow-up).
+   *  - executor: skills shipped with geny-executor (verify, debug,
+   *    lorem-ipsum, stuck, batch, simplify, skillify, loop)
+   *  - geny: first-party Geny-specific skills under
+   *    backend/skills/bundled/
+   *  - user: operator-supplied under ~/.geny/skills/, editable here
+   *  - mcp / unknown: bucketed under "other"
+   *
+   *  Pre-source_kind payloads fall back to the userIds-from-detail
+   *  classifier so older backends keep working unchanged. */
   const grouped = useMemo(() => {
-    const bundled: SkillRow[] = [];
+    const executor: SkillRow[] = [];
+    const geny: SkillRow[] = [];
     const user: SkillRow[] = [];
+    const other: SkillRow[] = [];
     skills.forEach((s) => {
-      if (s.id && userIds.has(s.id)) user.push(s);
-      else bundled.push(s);
+      const kind = s.source_kind;
+      if (kind === 'executor') {
+        executor.push(s);
+      } else if (kind === 'geny') {
+        geny.push(s);
+      } else if (kind === 'user') {
+        user.push(s);
+      } else if (kind === 'mcp' || kind === 'unknown') {
+        other.push(s);
+      } else {
+        // No source_kind on the payload (old backend) — fall back to
+        // the per-skill detail roundtrip that populated userIds.
+        if (s.id && userIds.has(s.id)) user.push(s);
+        else geny.push(s);
+      }
     });
-    return { bundled, user };
+    return { executor, geny, user, other };
   }, [skills, userIds]);
 
   const openCreate = () => {
@@ -241,14 +265,28 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
         />
       ) : (
         <>
-          {grouped.bundled.length > 0 && (
+          {grouped.executor.length > 0 && (
+            <RegistrySection
+              label={t('envManagement.registry.skills.sectionExecutor')}
+              count={grouped.executor.length}
+            >
+              {grouped.executor.map((s, i) => (
+                <SkillCard
+                  key={s.id ?? `executor-${i}`}
+                  skill={s}
+                  isUser={false}
+                />
+              ))}
+            </RegistrySection>
+          )}
+          {grouped.geny.length > 0 && (
             <RegistrySection
               label={t('envManagement.registry.skills.sectionBundled')}
-              count={grouped.bundled.length}
+              count={grouped.geny.length}
             >
-              {grouped.bundled.map((s, i) => (
+              {grouped.geny.map((s, i) => (
                 <SkillCard
-                  key={s.id ?? `bundled-${i}`}
+                  key={s.id ?? `geny-${i}`}
                   skill={s}
                   isUser={false}
                 />
@@ -267,6 +305,20 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
                   isUser={true}
                   onEdit={() => s.id && openEdit(s.id)}
                   onDelete={() => s.id && onDelete(s.id)}
+                />
+              ))}
+            </RegistrySection>
+          )}
+          {grouped.other.length > 0 && (
+            <RegistrySection
+              label={t('envManagement.registry.skills.sectionOther')}
+              count={grouped.other.length}
+            >
+              {grouped.other.map((s, i) => (
+                <SkillCard
+                  key={s.id ?? `other-${i}`}
+                  skill={s}
+                  isUser={false}
                 />
               ))}
             </RegistrySection>
@@ -294,7 +346,39 @@ function SkillCard({
 }) {
   const { t } = useI18n();
   const id = skill.id ?? '(unnamed)';
+
+  // Phase 10 follow-up — a tone-coded source badge so the catalog
+  // immediately shows where each skill came from. Same tones as
+  // PermissionsTab's behavior badge: good/info/warn/neutral.
+  const sourceBadge = (() => {
+    switch (skill.source_kind) {
+      case 'executor':
+        return {
+          label: t('envManagement.registry.skills.badgeExecutor'),
+          tone: 'info' as const,
+        };
+      case 'geny':
+        return {
+          label: t('envManagement.registry.skills.badgeGeny'),
+          tone: 'good' as const,
+        };
+      case 'user':
+        return {
+          label: t('envManagement.registry.skills.badgeUser'),
+          tone: 'neutral' as const,
+        };
+      case 'mcp':
+        return {
+          label: t('envManagement.registry.skills.badgeMcp'),
+          tone: 'warn' as const,
+        };
+      default:
+        return null;
+    }
+  })();
+
   const badges = [
+    ...(sourceBadge ? [sourceBadge] : []),
     ...(skill.category
       ? [{ label: skill.category, tone: 'info' as const }]
       : []),

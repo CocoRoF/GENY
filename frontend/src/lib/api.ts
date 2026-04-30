@@ -323,7 +323,13 @@ export const agentApi = {
       { method: 'POST', body: JSON.stringify({ checkpoint_id: checkpointId }) },
     ),
 
-  /** GET /api/skills/list — registered SKILL.md inventory (G7.4). */
+  /** GET /api/skills/list — registered SKILL.md inventory (G7.4).
+   *  ``source_kind`` (Phase 10 follow-up) is one of:
+   *  ``executor`` — shipped with geny-executor;
+   *  ``geny``     — first-party Geny bundled tree;
+   *  ``user``     — operator-supplied under ~/.geny/skills/;
+   *  ``mcp``      — bridged from an MCP server's prompts;
+   *  ``unknown``  — couldn't classify (very old shape / in-code register). */
   skillsList: () =>
     apiCall<{
       skills: Array<{
@@ -332,6 +338,10 @@ export const agentApi = {
         description: string | null;
         model: string | null;
         allowed_tools: string[];
+        category?: string | null;
+        effort?: string | null;
+        examples?: string[];
+        source_kind?: SkillSourceKind;
       }>;
     }>(`/api/skills/list`),
 
@@ -1041,6 +1051,15 @@ export interface FrameworkSectionResponse {
 
 // ==================== Skills CRUD (PR-F.2.x) =====================
 
+/** Origin classification for a loaded skill. Drives the SkillsTab
+ *  badge and the SkillPanel chip styling. Phase 10 follow-up. */
+export type SkillSourceKind =
+  | 'executor'
+  | 'geny'
+  | 'user'
+  | 'mcp'
+  | 'unknown';
+
 export interface SkillDetail {
   id: string;
   name: string | null;
@@ -1053,6 +1072,7 @@ export interface SkillDetail {
   body: string;
   source: string | null;
   is_user_skill: boolean;
+  source_kind?: SkillSourceKind;
   // K.1 (cycle 20260426_2) — additional executor SkillMetadata fields.
   version?: string | null;
   execution_mode?: string | null;

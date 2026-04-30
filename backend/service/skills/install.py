@@ -228,6 +228,40 @@ def _is_executor_bundled_skill(skill: Any) -> bool:
         return False
 
 
+def skill_source_kind(skill: Any) -> str:
+    """Classify where a skill came from.
+
+    Returns one of:
+      * ``"executor"`` — shipped inside ``geny-executor`` itself
+        (the 8-skill bundled catalog).
+      * ``"geny"`` — first-party Geny-specific skill under
+        ``backend/skills/bundled/``.
+      * ``"user"`` — operator-supplied skill under
+        ``~/.geny/skills/``.
+      * ``"mcp"`` — bridged from an MCP server's prompts (Phase
+        10.3 tagged these via ``metadata.extras['source_kind']``).
+      * ``"unknown"`` — couldn't classify (very old shape, in-code
+        registration via a host plugin, etc.).
+    """
+    # MCP-bridged skills carry the marker in extras (executor 1.6.0).
+    metadata = getattr(skill, "metadata", None)
+    extras = getattr(metadata, "extras", None) if metadata is not None else None
+    if isinstance(extras, dict) and extras.get("source_kind") == "mcp":
+        return "mcp"
+    if _is_executor_bundled_skill(skill):
+        return "executor"
+    if _is_bundled_skill(skill):
+        return "geny"
+    source = getattr(skill, "source", None)
+    if source is not None:
+        try:
+            if user_skills_dir() in Path(source).parents:
+                return "user"
+        except Exception:
+            pass
+    return "unknown"
+
+
 def list_skills() -> List[dict]:
     """Return a JSON-serialisable summary of every loaded skill.
 
@@ -238,6 +272,10 @@ def list_skills() -> List[dict]:
     (category / effort / examples). Reads ``skill.metadata`` when
     present so older executors that don't have these fields still
     serialise cleanly (every new field defaults to None / []).
+
+    Phase 10 follow-up — adds ``source_kind`` so the SkillsTab UI can
+    badge executor-bundled vs Geny-bundled vs user-supplied vs MCP-
+    bridged skills distinctly.
     """
     _, skills = install_skill_registry()
     out: List[dict] = []
@@ -259,6 +297,7 @@ def list_skills() -> List[dict]:
             "category": _get("category"),
             "effort": _get("effort"),
             "examples": list(_get("examples", []) or []),
+            "source_kind": skill_source_kind(skill),
         })
     return out
 
@@ -326,5 +365,6 @@ __all__ = [
     "bundled_skills_dir",
     "install_skill_registry",
     "list_skills",
+    "skill_source_kind",
     "user_skills_dir",
 ]
