@@ -175,6 +175,72 @@ async def test_drain_does_not_dedupe_different_senders(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_drain_restores_interaction_event_as_source_metadata(monkeypatch):
+    """Cycle 20260501_1 D — when an inbox entry was queued by the
+    `_notify_linked_vtuber` busy-fallback, its `metadata` carries an
+    `interaction_event` dict (the canonical TASK_RESULT). On drain
+    we must thread that dict through to `execute_command(...
+    source_metadata=...)` so the recipient's invoke s18 records the
+    same event with the categorised payload."""
+    pulls: List[Dict[str, Any]] = [
+        {
+            "id": "m1",
+            "sender_session_id": "sub-1",
+            "sender_name": "Sub",
+            "content": "[SUB_WORKER_RESULT] …",
+            "metadata": {
+                "tag": "[SUB_WORKER_RESULT]",
+                "interaction_event": {
+                    "event_id": "EVT-RUN-X",
+                    "kind": "tool_run_summary",
+                    "direction": "in",
+                    "counterpart_id": "sub-1",
+                    "counterpart_role": "paired_subworker",
+                    "payload": {
+                        "status": "ok", "tools_used": ["Write"],
+                        "files_written": ["out.md"],
+                    },
+                },
+            },
+        },
+    ]
+
+    class _StubInbox:
+        def __init__(self, msgs):
+            self._msgs = list(msgs)
+
+        def pull_unread(self, session_id, limit=None):
+            return [self._msgs.pop(0)] if self._msgs else []
+
+    monkeypatch.setattr(
+        "service.chat.inbox.get_inbox_manager",
+        lambda: _StubInbox(pulls),
+        raising=False,
+    )
+
+    captured: List[Dict[str, Any]] = []
+
+    async def _track_execute(target, prompt, **kw):
+        captured.append({"target": target, "prompt": prompt,
+                         "source_metadata": kw.get("source_metadata")})
+        return ExecutionResult(success=True, session_id=target, output="ok")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _track_execute)
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: None
+    )
+
+    agent_executor._draining_sessions.discard("vtuber-1")
+    await _drain_inbox("vtuber-1")
+
+    assert len(captured) == 1
+    src = captured[0]["source_metadata"]
+    assert src is not None
+    assert src["kind"] == "tool_run_summary"
+    assert src["payload"]["files_written"] == ["out.md"]
+
+
+@pytest.mark.asyncio
 async def test_drain_does_not_dedupe_messages_without_tag(monkeypatch):
     """Messages without a ``metadata.tag`` are ordinary user / DM
     content — they must not be deduped or the drain would silently

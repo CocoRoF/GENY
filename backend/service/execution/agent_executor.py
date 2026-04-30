@@ -507,38 +507,36 @@ def _find_linked_task_request_event_id(
     return None
 
 
-def _record_subworker_run_on_vtuber(
+def _build_subworker_run_event_metadata(
     *,
-    vtuber_agent,
     sub_session_id: str,
     result: 'ExecutionResult',
-) -> None:
-    """Cycle 20260430_2 A4 — record the Sub-Worker's just-completed
-    turn as an InteractionEvent on the VTuber's STM, regardless of
-    whether the dispatch path (P0-1 / P0-3) decides to wake the
-    VTuber.
+    vtuber_memory: Any,
+) -> Optional[Dict[str, Any]]:
+    """Cycle 20260501_1 D — assemble the canonical InteractionEvent
+    metadata for the upcoming TASK_RESULT entry on the VTuber's STM.
 
-    The recording is the *environment* observation that the VTuber
-    can later inspect via the progressive memory tools (B1..B5);
-    it is independent of whether the VTuber is also notified to
-    speak about the run.
+    This used to be the body of ``_record_subworker_run_on_vtuber``,
+    which wrote *directly* into VTuber STM as a side-channel — the
+    audit (`dev_docs/20260501_1/analysis/01_memory_circuit_audit.md`
+    §6) flagged that as a cross-session direct write. Cycle 20260501_1
+    consolidates the write site to s18 via ``GenyDedupeStrategy``
+    (Stage C), so this helper now just *prepares the metadata*. The
+    actual record_message call happens when the VTuber's invoke
+    triggered by ``_notify_linked_vtuber`` reaches s18.
 
-    Genuine empty turns (no tool calls AND no meaningful output AND
-    no error) are skipped — there is nothing to remember. P0-3's
-    suppression policy applies here too.
+    Returns ``None`` when the run is genuinely empty (no tool calls,
+    no meaningful text, no error) — caller treats that as "no
+    metadata to thread through" and falls through to the parser.
     """
     try:
-        memory = getattr(vtuber_agent, "_memory_manager", None)
-        if memory is None:
-            return
-
         tool_calls = list(getattr(result, "tool_calls", None) or [])
         meaningful_text = _strip_only_loop_signals(result.output) if result.success else None
         has_meaningful_text = bool(meaningful_text and meaningful_text.strip())
         has_error = bool(result.error)
 
         if not tool_calls and not has_meaningful_text and not has_error:
-            return
+            return None
 
         categorised = _categorize_tool_calls(tool_calls) if tool_calls else {
             "status": "failed" if has_error else ("ok" if has_meaningful_text else "ok"),
@@ -553,35 +551,8 @@ def _record_subworker_run_on_vtuber(
             "failed_calls": 0,
         }
         if has_error and tool_calls:
-            # error wins over per-tool status when the whole turn errored
             categorised = dict(categorised)
             categorised["status"] = "failed"
-
-        # Short natural-language summary written into the STM `content`
-        # field. The structured data lives in the metadata `payload`;
-        # this string is just what shows up to the LLM via
-        # recent_turns / search snippets.
-        if has_meaningful_text:
-            preview = meaningful_text.strip().splitlines()[0][:160] if meaningful_text else ""
-            content_repr = (
-                f"[Sub-Worker run] {categorised['ok_calls']}/{categorised['total_calls']} "
-                f"tool calls — {preview}"
-            )
-        elif categorised["total_calls"] > 0:
-            files = categorised["files_written"]
-            file_part = (
-                f", wrote {len(files)} file(s)"
-                if files else ""
-            )
-            content_repr = (
-                f"[Sub-Worker run] {categorised['ok_calls']}/"
-                f"{categorised['total_calls']} tool calls"
-                f"{file_part}."
-            )
-        else:
-            content_repr = (
-                f"[Sub-Worker run] failed: {(result.error or '')[:160]}"
-            )
 
         payload = {
             **categorised,
@@ -598,8 +569,10 @@ def _record_subworker_run_on_vtuber(
             Kind,
             make_event_metadata,
         )
-        linked = _find_linked_task_request_event_id(memory, sub_session_id)
-        meta = make_event_metadata(
+        linked: Optional[str] = None
+        if vtuber_memory is not None:
+            linked = _find_linked_task_request_event_id(vtuber_memory, sub_session_id)
+        return make_event_metadata(
             kind=Kind.TOOL_RUN_SUMMARY,
             direction=Direction.IN,
             counterpart_id=sub_session_id,
@@ -607,16 +580,12 @@ def _record_subworker_run_on_vtuber(
             linked_event_id=linked,
             payload=payload,
         )
-        # Reuse the "assistant_dm" role for the recorded line — content
-        # is a short natural sentence, so retrieval / display is
-        # consistent with the rest of the DM stream. The metadata.kind
-        # disambiguates this from a plain DM.
-        memory.record_message("assistant_dm", content_repr[:10000], metadata=meta)
     except Exception:
         logger.debug(
-            "Failed to record subworker_run on VTuber STM (sub=%s)",
+            "Failed to build subworker_run InteractionEvent metadata for %s",
             sub_session_id, exc_info=True,
         )
+        return None
 
 
 async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> None:
@@ -645,16 +614,17 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         if not vtuber_agent:
             return
 
-        # Cycle 20260430_2 A4 — *always* record the run as an
-        # InteractionEvent on the VTuber's STM, independent of the
-        # dispatch decision below. Suppressed dispatch only means the
-        # VTuber doesn't speak about the run *right now*; the
-        # observation is still part of the VTuber's life history and
-        # must remain inspectable via memory_with / memory_event.
-        _record_subworker_run_on_vtuber(
-            vtuber_agent=vtuber_agent,
+        # Cycle 20260501_1 D — Build the canonical InteractionEvent
+        # metadata for the upcoming TASK_RESULT line on the VTuber's
+        # STM. This metadata is threaded through *every* downstream
+        # path (dispatch, inbox fallback, DLQ recovery), so the
+        # VTuber's invoke → s18 chain records the same `kind=
+        # tool_run_summary` event in every case — single STM write
+        # site (cycle 20260501_1 invariant).
+        run_event_metadata = _build_subworker_run_event_metadata(
             sub_session_id=session_id,
             result=result,
+            vtuber_memory=getattr(vtuber_agent, "_memory_manager", None),
         )
 
         # Cycle 20260430_1 P0-1 — if the Sub-Worker already delivered a
@@ -769,25 +739,37 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         # Fire-and-forget: trigger VTuber to process the result
         async def _trigger_vtuber() -> None:
             try:
-                vtuber_result = await execute_command(linked_id, content)
+                # Cycle 20260501_1 D — explicit source_metadata threads
+                # the categorised SubWorkerRun payload into the VTuber's
+                # invoke. s18 / GenyDedupeStrategy will then record the
+                # TASK_RESULT InteractionEvent with the full payload as
+                # the *single* STM write for this sub-worker run.
+                vtuber_result = await execute_command(
+                    linked_id, content, source_metadata=run_event_metadata,
+                )
             except AlreadyExecutingError:
                 # VTuber is busy — store in inbox for later pickup
                 try:
                     from service.chat.inbox import get_inbox_manager
                     inbox = get_inbox_manager()
+                    # Cycle 20260501_1 D — preserve the InteractionEvent
+                    # metadata in the inbox entry so `_drain_inbox` can
+                    # restore it as `source_metadata` when the recipient
+                    # finally invokes. Without this the drained invoke
+                    # would land at s18 with no metadata and the run
+                    # would lose its categorised payload.
+                    inbox_metadata: Dict[str, Any] = {
+                        "tag": "[SUB_WORKER_RESULT]",
+                        "source": "auto_notify_busy",
+                    }
+                    if run_event_metadata is not None:
+                        inbox_metadata["interaction_event"] = run_event_metadata
                     inbox.deliver(
                         target_session_id=linked_id,
                         content=content,
                         sender_session_id=session_id,
                         sender_name="Sub-Worker",
-                        # Cycle 20260430_1 P1-2 — tag the queued
-                        # auto-notification so `_drain_inbox` can dedupe
-                        # repeated SUB_WORKER_RESULT auto-fallbacks
-                        # within a single drain pass.
-                        metadata={
-                            "tag": "[SUB_WORKER_RESULT]",
-                            "source": "auto_notify_busy",
-                        },
+                        metadata=inbox_metadata,
                     )
                     logger.info(
                         "VTuber %s busy — SUB_WORKER_RESULT stored in inbox", linked_id
@@ -1540,8 +1522,23 @@ async def _drain_inbox(session_id: str) -> None:
                 msg.get("id"), session_id, sender, tag,
             )
 
+            # Cycle 20260501_1 D — restore the InteractionEvent metadata
+            # the inbox kept on this entry so the drained invoke's s18
+            # records the same TASK_RESULT (with full payload) it
+            # would have produced if the recipient hadn't been busy.
+            preserved_metadata: Optional[Dict[str, Any]] = None
+            if isinstance(metadata, dict):
+                cand = metadata.get("interaction_event")
+                if isinstance(cand, dict):
+                    preserved_metadata = cand
+
             try:
-                result = await execute_command(session_id, prompt)
+                if preserved_metadata is not None:
+                    result = await execute_command(
+                        session_id, prompt, source_metadata=preserved_metadata,
+                    )
+                else:
+                    result = await execute_command(session_id, prompt)
             except AlreadyExecutingError:
                 # A concurrent execution took the slot. Its finally
                 # block will re-trigger drain; bail to avoid racing.
