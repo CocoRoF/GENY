@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { memoryApi, globalMemoryApi } from '@/lib/api';
+import { memoryApi, globalMemoryApi, transcriptsApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import {
   Search, Plus, RefreshCw, X, ChevronDown, ChevronRight,
@@ -18,6 +18,8 @@ import type {
   MemoryIndex, MemorySearchResult,
 } from '@/types';
 import StreamTab from './memory/StreamTab';
+import StreamEventModal from './memory/StreamEventModal';
+import type { CounterpartCard } from '@/types';
 
 // ==================== Helpers ====================
 
@@ -313,12 +315,34 @@ function MemoryViewer({
 }
 
 /** Search results panel */
+/** Cycle 20260430_3 E — search result row marker for InteractionEvent
+ *  hits. Non-event hits keep the legacy file-row look. */
+function _eventIdOf(r: MemorySearchResult): string | null {
+  const meta = r.entry.metadata as Record<string, unknown> | undefined;
+  const id = meta?.event_id;
+  return typeof id === 'string' ? id : null;
+}
+
+function _eventKindOf(r: MemorySearchResult): string | null {
+  const meta = r.entry.metadata as Record<string, unknown> | undefined;
+  const k = meta?.kind;
+  return typeof k === 'string' ? k : null;
+}
+
+function _eventCounterpartOf(r: MemorySearchResult): string | null {
+  const meta = r.entry.metadata as Record<string, unknown> | undefined;
+  const c = meta?.counterpart_id;
+  return typeof c === 'string' ? c : null;
+}
+
 function MemorySearchResults({
   results,
   onSelect,
+  onSelectEvent,
 }: {
   results: MemorySearchResult[];
   onSelect: (filename: string) => void;
+  onSelectEvent?: (eventId: string) => void;
 }) {
   if (results.length === 0) {
     return (
@@ -339,37 +363,64 @@ function MemorySearchResults({
         </span>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {results.map((r, i) => (
-          <div
-            key={i}
-            onClick={() => r.entry.filename && onSelect(r.entry.filename)}
-            className="px-4 py-3 border-b border-[var(--border-color)] cursor-pointer hover:bg-[var(--bg-hover)] transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[13px] font-medium text-[var(--text-primary)]">
-                {r.entry.title || r.entry.filename || 'Untitled'}
-              </span>
-              <span className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(100,116,139,0.15)] text-[var(--text-muted)]">
-                {r.score.toFixed(1)}
-              </span>
-              {r.entry.category && (
-                <span className="text-[10px] text-[var(--text-muted)]">{r.entry.category}</span>
+        {results.map((r, i) => {
+          const eventId = _eventIdOf(r);
+          const isEvent = eventId !== null;
+          const kind = _eventKindOf(r);
+          const counterpart = _eventCounterpartOf(r);
+          return (
+            <div
+              key={i}
+              onClick={() => {
+                if (isEvent && onSelectEvent && eventId) {
+                  onSelectEvent(eventId);
+                  return;
+                }
+                if (r.entry.filename) onSelect(r.entry.filename);
+              }}
+              className="px-4 py-3 border-b border-[var(--border-color)] cursor-pointer hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="text-[13px] font-medium text-[var(--text-primary)]">
+                  {r.entry.title || r.entry.filename || (isEvent ? 'Interaction event' : 'Untitled')}
+                </span>
+                <span className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(100,116,139,0.15)] text-[var(--text-muted)]">
+                  {r.score.toFixed(1)}
+                </span>
+                {isEvent && (
+                  <span className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(96,165,250,0.15)] text-[#60a5fa]">
+                    stream
+                  </span>
+                )}
+                {kind && (
+                  <span className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(167,139,250,0.15)] text-[#a78bfa]">
+                    {kind}
+                  </span>
+                )}
+                {counterpart && (
+                  <span className="text-[10px] text-[var(--text-muted)] truncate">
+                    ↔ {counterpart}
+                  </span>
+                )}
+                {!isEvent && r.entry.category && (
+                  <span className="text-[10px] text-[var(--text-muted)]">{r.entry.category}</span>
+                )}
+              </div>
+              {r.snippet && (
+                <p className="text-[12px] text-[var(--text-muted)] line-clamp-2 leading-relaxed">{r.snippet}</p>
+              )}
+              {r.entry.tags && r.entry.tags.length > 0 && (
+                <div className="flex gap-1 mt-1.5">
+                  {r.entry.tags.map(t => (
+                    <span key={t} className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(100,116,139,0.1)] text-[var(--text-muted)]">
+                      #{t}
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
-            {r.snippet && (
-              <p className="text-[12px] text-[var(--text-muted)] line-clamp-2 leading-relaxed">{r.snippet}</p>
-            )}
-            {r.entry.tags && r.entry.tags.length > 0 && (
-              <div className="flex gap-1 mt-1.5">
-                {r.entry.tags.map(t => (
-                  <span key={t} className="text-[10px] px-1.5 py-[1px] rounded bg-[rgba(100,116,139,0.1)] text-[var(--text-muted)]">
-                    #{t}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -591,6 +642,12 @@ export default function MemoryTab() {
   const [, setSearching] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  // Cycle 20260430_3 E — counterpart / kind filters for the search
+  // box. Only meaningful in session scope (Stream is session-only).
+  const [counterparts, setCounterparts] = useState<CounterpartCard[]>([]);
+  const [searchCounterpart, setSearchCounterpart] = useState<string>('');
+  const [searchKinds, setSearchKinds] = useState<Set<string>>(new Set());
+  const [openEventId, setOpenEventId] = useState<string | null>(null);
 
   const sessionId = selectedSessionId;
   const isGlobal = scope === 'global';
@@ -640,6 +697,20 @@ export default function MemoryTab() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Cycle 20260430_3 E — refresh counterpart list when session changes
+  // so the search dropdown stays accurate.
+  useEffect(() => {
+    if (!sessionId || isGlobal) {
+      setCounterparts([]);
+      return;
+    }
+    let cancelled = false;
+    transcriptsApi.counterparts(sessionId)
+      .then(res => { if (!cancelled) setCounterparts(res.counterparts); })
+      .catch(() => { /* no counterparts yet — empty stream */ });
+    return () => { cancelled = true; };
+  }, [sessionId, isGlobal]);
+
   // Load file detail
   const loadFile = useCallback(async (filename: string) => {
     if (!isGlobal && !sessionId) return;
@@ -667,6 +738,8 @@ export default function MemoryTab() {
       } else {
         const res = await memoryApi.search(sessionId!, query, {
           tag: selectedTag || undefined,
+          counterpart: searchCounterpart || undefined,
+          kinds: searchKinds.size ? Array.from(searchKinds) : undefined,
         });
         setSearchResults(res.results);
       }
@@ -677,7 +750,7 @@ export default function MemoryTab() {
     } finally {
       setSearching(false);
     }
-  }, [sessionId, isGlobal, selectedTag]);
+  }, [sessionId, isGlobal, selectedTag, searchCounterpart, searchKinds]);
 
   // Create note
   const handleCreate = useCallback(async (data: {
@@ -886,9 +959,9 @@ export default function MemoryTab() {
 
       {/* Search + tags row — only in LTM Notes view */}
       {view === 'notes' && (
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-col gap-2 shrink-0">
           <form
-            className="flex-1 flex items-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] px-3 py-1.5"
+            className="flex items-center gap-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] px-3 py-1.5"
             onSubmit={e => { e.preventDefault(); handleSearch(searchQuery); }}
           >
             <Search size={14} className="text-[var(--text-muted)] shrink-0" />
@@ -908,7 +981,68 @@ export default function MemoryTab() {
               </button>
             )}
           </form>
-          {/* Tag pills removed — Obsidian page provides full tag interface */}
+
+          {/* Cycle 20260430_3 E — InteractionEvent filters for search.
+              Only meaningful in session scope (Stream is session-only). */}
+          {!isGlobal && (counterparts.length > 0 || searchCounterpart || searchKinds.size > 0) && (
+            <div className="flex flex-wrap items-center gap-2 px-1 text-[11px]">
+              <span className="text-[var(--text-muted)]">Stream filter:</span>
+              <select
+                value={searchCounterpart}
+                onChange={e => {
+                  setSearchCounterpart(e.target.value);
+                  if (searchQuery) handleSearch(searchQuery);
+                }}
+                className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded px-2 py-0.5 text-[11px] outline-none"
+              >
+                <option value="">모든 카운터파트</option>
+                {counterparts.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.id} {c.role ? `(${c.role})` : ''}
+                  </option>
+                ))}
+              </select>
+              {(['user_chat','task_request','task_result','tool_run_summary','dm','reflection'] as const).map(k => {
+                const active = searchKinds.has(k);
+                return (
+                  <button
+                    key={k}
+                    onClick={() => {
+                      setSearchKinds(prev => {
+                        const next = new Set(prev);
+                        if (active) next.delete(k); else next.add(k);
+                        return next;
+                      });
+                      if (searchQuery) {
+                        // run search on next render after state settles
+                        setTimeout(() => handleSearch(searchQuery), 0);
+                      }
+                    }}
+                    className={cn(
+                      'px-1.5 py-0.5 rounded border transition-colors',
+                      active
+                        ? 'bg-[rgba(167,139,250,0.15)] border-[rgba(167,139,250,0.4)] text-[#a78bfa]'
+                        : 'border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                    )}
+                  >
+                    {k}
+                  </button>
+                );
+              })}
+              {(searchCounterpart || searchKinds.size > 0) && (
+                <button
+                  onClick={() => {
+                    setSearchCounterpart('');
+                    setSearchKinds(new Set());
+                    if (searchQuery) setTimeout(() => handleSearch(searchQuery), 0);
+                  }}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] underline"
+                >
+                  reset
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -936,7 +1070,11 @@ export default function MemoryTab() {
 
         {/* Right — viewer or search results */}
         {searchResults ? (
-          <MemorySearchResults results={searchResults} onSelect={loadFile} />
+          <MemorySearchResults
+            results={searchResults}
+            onSelect={loadFile}
+            onSelectEvent={!isGlobal && sessionId ? setOpenEventId : undefined}
+          />
         ) : (
           <MemoryViewer
             detail={fileDetail}
@@ -956,6 +1094,17 @@ export default function MemoryTab() {
       )}
       {showEditModal && fileDetail && (
         <MemoryEditModal detail={fileDetail} onClose={() => setShowEditModal(false)} onSave={handleUpdate} />
+      )}
+      {/* Cycle 20260430_3 E — Stream event modal can also pop from
+          search results, so it lives at the MemoryTab level rather
+          than inside StreamTab. */}
+      {openEventId && sessionId && (
+        <StreamEventModal
+          sessionId={sessionId}
+          eventId={openEventId}
+          onClose={() => setOpenEventId(null)}
+          onOpenLinked={(eid) => setOpenEventId(eid)}
+        />
       )}
     </div>
     </TabShell>

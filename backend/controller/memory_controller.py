@@ -262,18 +262,71 @@ async def search_memory(
     max_results: int = Query(10, ge=1, le=50),
     category: Optional[str] = Query(None),
     tag: Optional[str] = Query(None),
+    counterpart: Optional[str] = Query(
+        None,
+        description=(
+            "Cycle 20260430_3 E — narrow InteractionEvent hits to a "
+            "specific counterpart_id (canonical). Non-event memories "
+            "(LTM notes / curated knowledge) are unaffected."
+        ),
+    ),
+    kinds: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated InteractionEvent kinds — e.g. "
+            "'tool_run_summary,task_result'. Non-event memories "
+            "are unaffected."
+        ),
+    ),
 ):
     """Search memory with keyword matching."""
     _route_log(session_id, "search_memory", request)
     mm = _get_memory_manager(session_id)
     results = mm.search(q, max_results=max_results)
 
-    # Convert to serializable format
+    kind_set = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
+    filtered = _apply_interaction_event_filters(
+        results, counterpart=counterpart, kinds=kind_set,
+    )
+
     return {
         "query": q,
-        "results": [r.to_dict() for r in results],
-        "total": len(results),
+        "results": [r.to_dict() for r in filtered],
+        "total": len(filtered),
+        "filters": {
+            "counterpart": counterpart,
+            "kinds": sorted(kind_set) if kind_set else None,
+        },
     }
+
+
+def _apply_interaction_event_filters(
+    results,
+    *,
+    counterpart: Optional[str],
+    kinds: Optional[set],
+):
+    """Cycle 20260430_3 E — narrow only InteractionEvent hits.
+
+    A search result is treated as an InteractionEvent hit when its
+    entry metadata carries an ``event_id``. Non-event hits (LTM
+    notes / curated knowledge / vector hits without an event_id)
+    pass through every filter so the durable knowledge layer never
+    disappears just because the user added an event filter.
+    """
+    if not counterpart and not kinds:
+        return list(results)
+    out = []
+    for r in results:
+        meta = getattr(r.entry, "metadata", None) or {}
+        event_id = meta.get("event_id")
+        if event_id:
+            if counterpart and meta.get("counterpart_id") != counterpart:
+                continue
+            if kinds is not None and meta.get("kind") not in kinds:
+                continue
+        out.append(r)
+    return out
 
 
 @router.post("/{session_id}/memory/search")
