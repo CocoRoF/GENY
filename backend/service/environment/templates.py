@@ -76,6 +76,11 @@ _PLATFORM_TOOL_SOURCES = frozenset({
     "geny_tools",
     "memory_tools",
     "knowledge_tools",
+    # Cycle 20260430_2 Stage B/C — progressive memory inspection tools
+    # (memory_status / memory_with / memory_event / memory_artifact /
+    # memory_distill). Live alongside the existing memory_* family;
+    # share the same paired-only / read-only / caller-scoped invariants.
+    "memory_inspect_tools",
 })
 
 
