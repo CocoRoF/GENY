@@ -2101,10 +2101,20 @@ class AgentSession:
                 # Cycle 20260430_2 A6 — assistant USER_CHAT/OUT
                 # metadata can be resolved up front because it
                 # mirrors the user's owner_username and is
-                # direction-flipped. Only applies to user_chat
-                # turns; DM / reflection / inbox-drain assistant
-                # responses leave assistant metadata None.
-                if stm_role == "user":
+                # direction-flipped.
+                #
+                # Cycle 20260501_2 F2 — for *VTuber* sessions, every
+                # assistant response is broadcast back to the chat
+                # room (or routed via _save_subworker_reply_to_chat_room),
+                # so the canonical kind is always USER_CHAT/OUT —
+                # regardless of what triggered the turn (user input,
+                # internal_trigger, SUB_WORKER_RESULT/assistant_dm).
+                # Without this default, session.jsonl line 6 (response
+                # to a SUB_WORKER_RESULT) records with metadata=None.
+                # Worker / Sub-Worker sessions retain the original
+                # narrow trigger because their assistant responses
+                # are tool/task results, not chat traffic.
+                if stm_role == "user" or self._role == SessionRole.VTUBER:
                     pending_metadata["assistant"] = make_event_metadata(
                         kind=Kind.USER_CHAT,
                         direction=Direction.OUT,
@@ -2652,7 +2662,10 @@ class AgentSession:
                     )
                 if event_meta:
                     pending_metadata["user"] = event_meta
-                if stm_role == "user":
+                # Cycle 20260501_2 F2 — VTuber session always defaults
+                # the assistant turn to USER_CHAT/OUT (mirror of
+                # `_invoke_pipeline`).
+                if stm_role == "user" or self._role == SessionRole.VTUBER:
                     pending_metadata["assistant"] = make_event_metadata(
                         kind=Kind.USER_CHAT,
                         direction=Direction.OUT,
