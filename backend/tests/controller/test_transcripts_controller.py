@@ -325,6 +325,127 @@ def test_counterparts_unknown_session_404(monkeypatch):
 # ─────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────
+# get_transcript_artifact (D1)
+# ─────────────────────────────────────────────────────────────────
+
+
+class _FakeAgentWithWorkspace(_FakeAgent):
+    def __init__(self, session_id: str, *, working_dir: str, entries=None) -> None:
+        super().__init__(session_id, entries=entries)
+        self._working_dir = working_dir
+
+
+def _make_artifact_world(monkeypatch, tmp_path):
+    """vtuber holds the event referencing the file; sub-1's workspace
+    holds the actual artifact."""
+    sub_workspace = tmp_path / "sub-ws"
+    sub_workspace.mkdir()
+    (sub_workspace / "notes.md").write_text("hello world\n", encoding="utf-8")
+
+    seed = _seed_events()
+    # EVT-RUN-1's payload.files_written already lists "notes.md"
+
+    vtuber = _FakeAgent("vtuber-1", entries=seed)
+    sub = _FakeAgentWithWorkspace("sub-1", working_dir=str(sub_workspace))
+    monkeypatch.setattr(
+        tc, "get_agent_session_manager",
+        lambda: _FakeAgentManager({"vtuber-1": vtuber, "sub-1": sub}),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app), sub_workspace, sub, vtuber
+
+
+def test_artifact_reads_listed_file(monkeypatch, tmp_path):
+    client, _ws, _sub, _vt = _make_artifact_world(monkeypatch, tmp_path)
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=notes.md",
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["path"] == "notes.md"
+    assert body["content"] == "hello world\n"
+    assert body["truncated"] is False
+    assert body["size_bytes"] == len("hello world\n")
+
+
+def test_artifact_rejects_path_not_in_files_written(monkeypatch, tmp_path):
+    client, ws, _sub, _vt = _make_artifact_world(monkeypatch, tmp_path)
+    (ws / "secret.txt").write_text("nope", encoding="utf-8")
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=secret.txt",
+    )
+    assert res.status_code == 400
+
+
+def test_artifact_rejects_absolute_path(monkeypatch, tmp_path):
+    client, *_ = _make_artifact_world(monkeypatch, tmp_path)
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=/etc/passwd",
+    )
+    assert res.status_code == 400
+
+
+def test_artifact_rejects_traversal(monkeypatch, tmp_path):
+    client, *_ = _make_artifact_world(monkeypatch, tmp_path)
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=../etc/notes.md",
+    )
+    assert res.status_code == 400
+
+
+def test_artifact_truncates_large_file(monkeypatch, tmp_path):
+    client, ws, _sub, vt = _make_artifact_world(monkeypatch, tmp_path)
+    (ws / "big.md").write_text("x" * 4096, encoding="utf-8")
+    # extend EVT-RUN-1 payload.files_written to include big.md
+    for entry in vt._memory_manager._stm._entries:
+        meta = entry.get("metadata") or {}
+        if meta.get("event_id") == "EVT-RUN-1":
+            meta["payload"]["files_written"] = ["notes.md", "big.md"]
+            break
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=big.md&max_bytes=128",
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["truncated"] is True
+    assert body["size_bytes"] == 4096
+    assert len(body["content"]) <= 128
+
+
+def test_artifact_unknown_event_returns_404(monkeypatch, tmp_path):
+    client, *_ = _make_artifact_world(monkeypatch, tmp_path)
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-NOPE/artifact?path=notes.md",
+    )
+    assert res.status_code == 404
+
+
+def test_artifact_missing_file_returns_404(monkeypatch, tmp_path):
+    client, ws, _sub, vt = _make_artifact_world(monkeypatch, tmp_path)
+    # event lists a path that doesn't exist on disk
+    for entry in vt._memory_manager._stm._entries:
+        meta = entry.get("metadata") or {}
+        if meta.get("event_id") == "EVT-RUN-1":
+            meta["payload"]["files_written"] = ["gone.md"]
+            break
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=gone.md",
+    )
+    assert res.status_code == 404
+
+
+def test_artifact_max_bytes_clamped_by_query_bound(monkeypatch, tmp_path):
+    client, *_ = _make_artifact_world(monkeypatch, tmp_path)
+    res = client.get(
+        "/api/agents/vtuber-1/transcripts/EVT-RUN-1/artifact?path=notes.md&max_bytes=999999",
+    )
+    # FastAPI Query(le=_MAX_ARTIFACT_BYTES) returns 422 — that's the
+    # signal to the caller "lower your ask"; we don't silently clamp.
+    assert res.status_code == 422
+
+
 def test_summary_schema_matches_memory_inspect_tools(monkeypatch):
     """Both surfaces must render the same summary fields so the
     operator UI and the VTuber's own tools agree on event shape."""

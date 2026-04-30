@@ -1900,6 +1900,20 @@ export const transcriptsApi = {
     apiCall<import('@/types').CounterpartListResponse>(
       `/api/agents/${sessionId}/transcripts/counterparts`,
     ),
+
+  /** GET /api/agents/{sid}/transcripts/{event_id}/artifact?path=... */
+  artifact: (
+    sessionId: string,
+    eventId: string,
+    path: string,
+    maxBytes?: number,
+  ) => {
+    const qs = new URLSearchParams({ path });
+    if (maxBytes !== undefined) qs.set('max_bytes', String(maxBytes));
+    return apiCall<import('@/types').ArtifactReadResponse>(
+      `/api/agents/${sessionId}/transcripts/${encodeURIComponent(eventId)}/artifact?${qs.toString()}`,
+    );
+  },
 };
 
 // ==================== Global Memory API ====================

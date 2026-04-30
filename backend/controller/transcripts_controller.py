@@ -95,6 +95,14 @@ class CounterpartListResponse(BaseModel):
     counterparts: List[CounterpartCard]
 
 
+class ArtifactReadResponse(BaseModel):
+    event_id: str
+    path: str
+    size_bytes: int
+    truncated: bool
+    content: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -385,6 +393,122 @@ async def list_counterparts(
         reverse=True,
     )
     return {"counterparts": cards}
+
+
+_DEFAULT_ARTIFACT_BYTES = 65_536       # 64 KB
+_MAX_ARTIFACT_BYTES = 262_144          # 256 KB
+
+
+@router.get(
+    "/{session_id}/transcripts/{event_id}/artifact",
+    response_model=ArtifactReadResponse,
+)
+async def get_transcript_artifact(
+    session_id: str = Path(..., description="Recording session id"),
+    event_id: str = Path(..., description="Event whose payload listed the file"),
+    path: str = Query(
+        ...,
+        description=(
+            "Relative path under the counterpart session's working "
+            "directory. Must appear in the event's payload.files_written."
+        ),
+    ),
+    max_bytes: int = Query(
+        _DEFAULT_ARTIFACT_BYTES, ge=1, le=_MAX_ARTIFACT_BYTES,
+    ),
+):
+    """Read a file the paired counterpart wrote during a remembered run.
+
+    Same guardrails as the LLM-facing ``memory_artifact`` tool —
+    declared-in-payload, no absolute paths, no ``..`` segments,
+    workspace-bound resolve, byte cap. Operator view: the caller
+    is the *recording* session (whose STM holds the event), and the
+    file lives under the *counterpart* session's working dir.
+    """
+    _agent, memory = _resolve_session_or_404(session_id)
+    entries = _stm_load_all(memory)
+
+    target_meta: Dict[str, Any] = {}
+    for entry in entries:
+        meta = _entry_meta(entry)
+        if meta.get("event_id") == event_id:
+            target_meta = meta
+            break
+    if not target_meta:
+        raise HTTPException(status_code=404, detail=f"Event not found: {event_id}")
+
+    payload = target_meta.get("payload") if isinstance(target_meta.get("payload"), dict) else {}
+    listed = list(payload.get("files_written") or [])
+    if path not in listed:
+        raise HTTPException(
+            status_code=400,
+            detail="path is not declared in this event's payload.files_written",
+        )
+
+    from pathlib import Path as _Path
+    rel = _Path(path)
+    if rel.is_absolute() or any(part == ".." for part in rel.parts):
+        raise HTTPException(status_code=400, detail="path is not a safe relative path")
+
+    counterpart_id = target_meta.get("counterpart_id")
+    if not counterpart_id:
+        raise HTTPException(
+            status_code=400,
+            detail="event has no counterpart_id; cannot resolve workspace",
+        )
+
+    manager = get_agent_session_manager()
+    target_session = manager.get_agent(counterpart_id)
+    if target_session is None and hasattr(manager, "resolve_session"):
+        target_session = manager.resolve_session(counterpart_id)
+    if target_session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"counterpart session not available: {counterpart_id}",
+        )
+    working_dir = (
+        getattr(target_session, "_working_dir", None)
+        or getattr(target_session, "storage_path", None)
+        or ""
+    )
+    if not working_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="counterpart session has no working directory",
+        )
+
+    try:
+        base = _Path(working_dir).resolve(strict=False)
+        full = (base / rel).resolve(strict=False)
+        full.relative_to(base)
+    except (OSError, ValueError):
+        raise HTTPException(
+            status_code=400, detail="path resolves outside the workspace",
+        )
+
+    if not full.exists() or not full.is_file():
+        raise HTTPException(status_code=404, detail=f"file not found: {path}")
+
+    try:
+        size = full.stat().st_size
+        with open(full, "rb") as f:
+            blob = f.read(max_bytes)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"file read failed: {exc}")
+
+    truncated = size > max_bytes
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError:
+        text = blob.decode("utf-8", errors="replace")
+
+    return {
+        "event_id": event_id,
+        "path": path,
+        "size_bytes": size,
+        "truncated": truncated,
+        "content": text,
+    }
 
 
 @router.get(
