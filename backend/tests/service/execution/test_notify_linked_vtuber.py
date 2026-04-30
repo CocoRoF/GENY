@@ -257,6 +257,72 @@ async def test_notify_linked_vtuber_broadcasts_reply(monkeypatch, patched_world)
 
 
 @pytest.mark.asyncio
+async def test_notify_linked_vtuber_skips_when_explicit_report_sent(
+    monkeypatch, patched_world
+):
+    """Cycle 20260430_1 P0-1 — when the Sub-Worker already delivered a
+    structured ``[SUB_WORKER_RESULT]`` payload via
+    ``send_direct_message_internal`` during this turn, the auto fallback
+    must NOT fire a second notification. Otherwise the VTuber would see
+    the canned "Task finished with no output." message right after it
+    already processed the rich payload via Path A."""
+    # Mark the sub session as having sent the explicit report this turn.
+    patched_world["sub"]._explicit_subworker_report_sent = True
+
+    execute_calls: List[Dict[str, Any]] = []
+
+    async def _track_execute(target: str, content: str, **_kwargs):
+        execute_calls.append({"target": target, "content": content})
+        return ExecutionResult(success=True, session_id=target, output="hi")
+
+    monkeypatch.setattr(agent_executor, "execute_command", _track_execute)
+
+    # Capture session_logger calls so we can assert the suppression log.
+    log_events: List[Dict[str, Any]] = []
+
+    class _StubLogger:
+        def log(self, **kwargs):
+            log_events.append(kwargs)
+
+        def log_delegation_event(self, *_a, **_kw):
+            pass
+
+    monkeypatch.setattr(
+        agent_executor, "_get_session_logger", lambda *_a, **_kw: _StubLogger()
+    )
+
+    created_tasks: List[asyncio.Task] = []
+    original_create_task = asyncio.create_task
+
+    def _capturing_create_task(coro, *args, **kwargs):
+        task = original_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
+
+    sub_result = ExecutionResult(
+        success=True, session_id="sub-1", output="", duration_ms=10,
+    )
+    await agent_executor._notify_linked_vtuber("sub-1", sub_result)
+
+    for task in created_tasks:
+        await task
+
+    assert execute_calls == [], (
+        "_notify_linked_vtuber must not invoke the VTuber when the "
+        "Sub-Worker already sent the structured payload via Path A"
+    )
+    assert patched_world["store"].messages == []
+    # The suppression event was logged.
+    assert any(
+        evt.get("metadata", {}).get("event")
+        == "delegation.suppressed_explicit_report"
+        for evt in log_events
+    ), f"Expected suppression log, got: {log_events}"
+
+
+@pytest.mark.asyncio
 async def test_notify_linked_vtuber_already_executing_falls_back_to_inbox(
     monkeypatch, patched_world
 ):

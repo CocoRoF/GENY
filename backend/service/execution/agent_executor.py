@@ -206,6 +206,32 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         if not vtuber_agent:
             return
 
+        # Cycle 20260430_1 P0-1 — if the Sub-Worker already delivered a
+        # ``[SUB_WORKER_RESULT]`` payload to the VTuber via
+        # ``send_direct_message_internal`` during this turn, skip the
+        # auto-fallback. Otherwise the VTuber would receive a *second*
+        # notification — typically the canned "Task finished with no
+        # output." line, which clobbers the structured payload it already
+        # processed via Path A. See
+        # ``dev_docs/20260430_1/analysis/01_subworker_dm_dual_dispatch.md``.
+        if getattr(agent, "_explicit_subworker_report_sent", False):
+            try:
+                sender_logger = _get_session_logger(session_id, create_if_missing=False)
+                if sender_logger is not None:
+                    sender_logger.log(
+                        level=LogLevel.INFO,
+                        message="Skipping auto SUB_WORKER_RESULT — explicit payload already sent",
+                        metadata={
+                            "event": "delegation.suppressed_explicit_report",
+                            "to_session_id": linked_id,
+                        },
+                    )
+            except Exception:
+                logger.debug(
+                    "suppress-log emit failed for %s", session_id, exc_info=True,
+                )
+            return
+
         # Build a concise summary for the VTuber
         if result.success and result.output:
             summary = result.output[:2000]
