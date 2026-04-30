@@ -705,6 +705,8 @@ const ko: Translations = {
       starDisabledTip: 'env-defaults 저장 실패',
       editTip: '편집',
       deleteTip: '삭제',
+      // 폼 뷰 (Phase 9.8)
+      backToList: '목록으로',
       // 빈 상태
       emptyTitle: '아직 등록된 항목이 없습니다.',
       emptyHint: '"{addLabel}" 버튼으로 첫 항목을 등록하세요.',

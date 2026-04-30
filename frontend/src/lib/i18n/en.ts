@@ -700,6 +700,7 @@ const en = {
       starDisabledTip: 'env-defaults persistence offline',
       editTip: 'Edit',
       deleteTip: 'Delete',
+      backToList: 'Back to list',
       emptyTitle: 'No entries yet.',
       emptyHint: 'Use "{addLabel}" to register the first one.',
       countSuffix: '',

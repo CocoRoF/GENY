@@ -375,66 +375,63 @@ export function HooksTab(_props: HooksTabProps = {}) {
     </section>
   );
 
-  const modal = (
-    <HookFormModal
-      open={editorOpen}
-      editingTarget={editingTarget}
-      initialRow={editingRow}
-      saving={saving}
-      error={error}
-      onClose={() => setEditorOpen(false)}
-      onSubmit={handleSubmit}
-    />
-  );
+  if (editorOpen) {
+    return (
+      <HookFormModal
+        editingTarget={editingTarget}
+        initialRow={editingRow}
+        saving={saving}
+        error={error}
+        onClose={() => setEditorOpen(false)}
+        onSubmit={handleSubmit}
+      />
+    );
+  }
 
   return (
-    <>
-      <RegistryPageShell
-        icon={Plug}
-        title={t('envManagement.registry.hooks.title')}
-        subtitle={subtitle}
-        countLabel={t('envManagement.registry.hooks.countLabel', {
-          n: String(totalEditable),
-        })}
-        bannerNote={t('envManagement.registry.hooks.bannerNote')}
-        addLabel={addLabel}
-        onAdd={openCreate}
-        onRefresh={refresh}
-        loading={loading}
-        error={error}
-        onDismissError={() => setError(null)}
-        headerExtras={liveBadge}
-      >
-        {auditLogSection}
+    <RegistryPageShell
+      icon={Plug}
+      title={t('envManagement.registry.hooks.title')}
+      subtitle={subtitle}
+      countLabel={t('envManagement.registry.hooks.countLabel', {
+        n: String(totalEditable),
+      })}
+      bannerNote={t('envManagement.registry.hooks.bannerNote')}
+      addLabel={addLabel}
+      onAdd={openCreate}
+      onRefresh={refresh}
+      loading={loading}
+      error={error}
+      onDismissError={() => setError(null)}
+      headerExtras={liveBadge}
+    >
+      {auditLogSection}
 
-        {isEmpty ? (
-          <RegistryEmptyState
-            icon={Plug}
-            title={t('envManagement.registry.hooks.emptyTitle')}
-            hint={t('envManagement.registry.emptyHint', { addLabel })}
-            addLabel={addLabel}
-            onAdd={openCreate}
-          />
-        ) : (
-          Array.from(grouped.entries()).map(([event, rows]) => (
-            <RegistrySection key={event} label={event} count={rows.length}>
-              {rows.map((row) => (
-                <HookCard
-                  key={`${row.event}-${row.idx}`}
-                  row={row}
-                  onEdit={() => openEdit(row)}
-                  onDelete={() => deleteEntry(row)}
-                />
-              ))}
-            </RegistrySection>
-          ))
-        )}
+      {isEmpty ? (
+        <RegistryEmptyState
+          icon={Plug}
+          title={t('envManagement.registry.hooks.emptyTitle')}
+          hint={t('envManagement.registry.emptyHint', { addLabel })}
+          addLabel={addLabel}
+          onAdd={openCreate}
+        />
+      ) : (
+        Array.from(grouped.entries()).map(([event, rows]) => (
+          <RegistrySection key={event} label={event} count={rows.length}>
+            {rows.map((row) => (
+              <HookCard
+                key={`${row.event}-${row.idx}`}
+                row={row}
+                onEdit={() => openEdit(row)}
+                onDelete={() => deleteEntry(row)}
+              />
+            ))}
+          </RegistrySection>
+        ))
+      )}
 
-        {recentFiresSection}
-      </RegistryPageShell>
-
-      {modal}
-    </>
+      {recentFiresSection}
+    </RegistryPageShell>
   );
 }
 

@@ -201,70 +201,9 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
   const isEmpty = !loading && skills.length === 0;
   const addLabel = t('envManagement.registry.skills.addLabel');
 
-  return (
-    <>
-      <RegistryPageShell
-        icon={Sparkles}
-        title={t('envManagement.registry.skills.title')}
-        subtitle={t('envManagement.registry.skills.subtitle')}
-        countLabel={t('envManagement.registry.skills.countLabel', {
-          n: String(skills.length),
-        })}
-        bannerNote={t('envManagement.registry.skills.bannerNote')}
-        addLabel={addLabel}
-        onAdd={openCreate}
-        onRefresh={refresh}
-        loading={loading}
-        error={error}
-        onDismissError={() => setError(null)}
-        headerExtras={enabledBadge}
-      >
-        {isEmpty ? (
-          <RegistryEmptyState
-            icon={Sparkles}
-            title={t('envManagement.registry.skills.emptyTitle')}
-            hint={t('envManagement.registry.emptyHint', { addLabel })}
-            addLabel={addLabel}
-            onAdd={openCreate}
-          />
-        ) : (
-          <>
-            {grouped.bundled.length > 0 && (
-              <RegistrySection
-                label={t('envManagement.registry.skills.sectionBundled')}
-                count={grouped.bundled.length}
-              >
-                {grouped.bundled.map((s, i) => (
-                  <SkillCard
-                    key={s.id ?? `bundled-${i}`}
-                    skill={s}
-                    isUser={false}
-                  />
-                ))}
-              </RegistrySection>
-            )}
-            {grouped.user.length > 0 && (
-              <RegistrySection
-                label={t('envManagement.registry.skills.sectionUser')}
-                count={grouped.user.length}
-              >
-                {grouped.user.map((s, i) => (
-                  <SkillCard
-                    key={s.id ?? `user-${i}`}
-                    skill={s}
-                    isUser={true}
-                    onEdit={() => s.id && openEdit(s.id)}
-                    onDelete={() => s.id && onDelete(s.id)}
-                  />
-                ))}
-              </RegistrySection>
-            )}
-          </>
-        )}
-      </RegistryPageShell>
-
+  if (editorOpen) {
+    return (
       <SkillFormModal
-        open={editorOpen}
         editingExisting={editingExisting}
         initialDetail={editingDetail}
         saving={saving}
@@ -272,7 +211,69 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
         onClose={() => setEditorOpen(false)}
         onSubmit={handleSubmit}
       />
-    </>
+    );
+  }
+
+  return (
+    <RegistryPageShell
+      icon={Sparkles}
+      title={t('envManagement.registry.skills.title')}
+      subtitle={t('envManagement.registry.skills.subtitle')}
+      countLabel={t('envManagement.registry.skills.countLabel', {
+        n: String(skills.length),
+      })}
+      bannerNote={t('envManagement.registry.skills.bannerNote')}
+      addLabel={addLabel}
+      onAdd={openCreate}
+      onRefresh={refresh}
+      loading={loading}
+      error={error}
+      onDismissError={() => setError(null)}
+      headerExtras={enabledBadge}
+    >
+      {isEmpty ? (
+        <RegistryEmptyState
+          icon={Sparkles}
+          title={t('envManagement.registry.skills.emptyTitle')}
+          hint={t('envManagement.registry.emptyHint', { addLabel })}
+          addLabel={addLabel}
+          onAdd={openCreate}
+        />
+      ) : (
+        <>
+          {grouped.bundled.length > 0 && (
+            <RegistrySection
+              label={t('envManagement.registry.skills.sectionBundled')}
+              count={grouped.bundled.length}
+            >
+              {grouped.bundled.map((s, i) => (
+                <SkillCard
+                  key={s.id ?? `bundled-${i}`}
+                  skill={s}
+                  isUser={false}
+                />
+              ))}
+            </RegistrySection>
+          )}
+          {grouped.user.length > 0 && (
+            <RegistrySection
+              label={t('envManagement.registry.skills.sectionUser')}
+              count={grouped.user.length}
+            >
+              {grouped.user.map((s, i) => (
+                <SkillCard
+                  key={s.id ?? `user-${i}`}
+                  skill={s}
+                  isUser={true}
+                  onEdit={() => s.id && openEdit(s.id)}
+                  onDelete={() => s.id && onDelete(s.id)}
+                />
+              ))}
+            </RegistrySection>
+          )}
+        </>
+      )}
+    </RegistryPageShell>
   );
 }
 
