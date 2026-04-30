@@ -279,6 +279,48 @@ def _maybe_save_paired_dm_reply(
         )
 
 
+def _build_recipient_dm_metadata(
+    *,
+    target_session_id: str,
+    sender_session_id: str,
+    content: str,
+):
+    """Cycle 20260430_2 A3 — pre-compute the recipient's
+    InteractionEvent metadata so the DM-trigger path doesn't have to
+    rely on prompt parsing. Returns ``None`` on any lookup failure
+    so the caller falls through to the parser fallback inside
+    ``_invoke_pipeline``.
+    """
+    try:
+        from service.memory.interaction_event import (
+            Direction,
+            dm_kind_for_recipient,
+            make_event_metadata,
+        )
+        manager = _get_agent_manager()
+        recorder = manager.get_agent(target_session_id) or manager.resolve_session(target_session_id)
+        sender = manager.get_agent(sender_session_id) or manager.resolve_session(sender_session_id)
+        if recorder is None or sender is None:
+            return None
+        kind, role = dm_kind_for_recipient(
+            sender_agent=sender,
+            recorder_agent=recorder,
+            body=content,
+        )
+        return make_event_metadata(
+            kind=kind,
+            direction=Direction.IN,
+            counterpart_id=sender_session_id,
+            counterpart_role=role,
+        )
+    except Exception:
+        logger.debug(
+            "Could not build recipient DM metadata for %s ← %s",
+            target_session_id, sender_session_id, exc_info=True,
+        )
+        return None
+
+
 def _trigger_dm_response(
     target_session_id: str,
     sender_name: str,
@@ -312,9 +354,26 @@ def _trigger_dm_response(
                 f"[DM from {sender_name}]: {content}"
             )
 
+            # Cycle 20260430_2 A3 — explicit InteractionEvent metadata for
+            # the recipient. We know who sent the DM here (sender_session_id)
+            # and what its body looks like (content), so we can resolve
+            # kind / counterpart_role deterministically without making the
+            # recipient parse its prompt. The metadata is forwarded as
+            # `source_metadata` through execute_command → agent.invoke →
+            # _invoke_pipeline; the recipient's STM receives it on
+            # record_message. If anything in the lookup fails we fall
+            # back to None so the parser path inside _invoke_pipeline
+            # still has a shot.
+            source_metadata = _build_recipient_dm_metadata(
+                target_session_id=target_session_id,
+                sender_session_id=sender_session_id,
+                content=content,
+            )
+
             result = await execute_command(
                 session_id=target_session_id,
                 prompt=prompt,
+                source_metadata=source_metadata,
             )
 
             # Mark inbox message read — execution already handled the

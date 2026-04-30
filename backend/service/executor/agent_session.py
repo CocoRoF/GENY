@@ -1999,13 +1999,33 @@ class AgentSession:
 
         Maintains the same return contract: {"output": str, "total_cost": float}
         """
+        # Cycle 20260430_2 A3 — callers that already know what kind of
+        # InteractionEvent this invoke represents can pass an explicit
+        # `source_metadata=...` (the DM-trigger path does this; the
+        # thinking-trigger path will in A5; the chat path in A6). When
+        # absent, `infer_input_metadata` parses the well-known prompt
+        # prefixes (``[SYSTEM] You received...`` / ``[INBOX from X]``)
+        # to fill the gap. Either way, `record_message` ends up with
+        # the canonical metadata dict so retrieval / progressive memory
+        # tools see the unified stream.
+        source_metadata = kwargs.pop("source_metadata", None)
+
         # Record input to short-term memory with proper role classification.
         # Internal triggers and inter-agent DMs are not "user" — see
         # _classify_input_role for the full rationale.
         if self._memory_manager:
             try:
+                from service.memory.interaction_event import infer_input_metadata
+                stm_role = _classify_input_role(input_text)
+                event_meta = source_metadata
+                if event_meta is None:
+                    event_meta = infer_input_metadata(
+                        input_text=input_text,
+                        recorder_agent=self,
+                        role=stm_role,
+                    )
                 self._memory_manager.record_message(
-                    _classify_input_role(input_text), input_text,
+                    stm_role, input_text, metadata=event_meta,
                 )
             except Exception:
                 logger.debug("Failed to record input message — non-critical", exc_info=True)
@@ -2511,13 +2531,26 @@ class AgentSession:
         agent_executor.py and the frontend expect, while also logging
         events to session_logger for WebSocket/SSE streaming.
         """
+        # Cycle 20260430_2 A3 — see ``_invoke_pipeline`` for the rationale
+        # on the source_metadata / infer_input_metadata pair.
+        source_metadata = kwargs.pop("source_metadata", None)
+
         # Record input to short-term memory with proper role classification.
         # See _classify_input_role for why triggers / inter-agent DMs are
         # not "user".
         if self._memory_manager:
             try:
+                from service.memory.interaction_event import infer_input_metadata
+                stm_role = _classify_input_role(input_text)
+                event_meta = source_metadata
+                if event_meta is None:
+                    event_meta = infer_input_metadata(
+                        input_text=input_text,
+                        recorder_agent=self,
+                        role=stm_role,
+                    )
                 self._memory_manager.record_message(
-                    _classify_input_role(input_text), input_text,
+                    stm_role, input_text, metadata=event_meta,
                 )
             except Exception:
                 logger.debug("Failed to record input message — non-critical", exc_info=True)
