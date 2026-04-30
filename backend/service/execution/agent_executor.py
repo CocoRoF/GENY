@@ -235,6 +235,132 @@ def _strip_only_loop_signals(text: Optional[str]) -> Optional[str]:
     return text
 
 
+# Cycle 20260430_2 A4 — categorisation buckets for SubWorkerRun payload.
+# Same source data as the yaml-payload synthesis (P0-2), but materialised
+# once into a structured dict so both the SUB_WORKER_RESULT compose path
+# *and* the VTuber-side STM recorder (this PR) can read it without
+# re-parsing tool_calls.
+
+_FILES_READ_TOOLS = frozenset({"Read", "Glob", "Grep"})
+_BASH_TOOLS = frozenset({"Bash"})
+_WEB_TOOLS = frozenset({"WebFetch", "web_fetch", "web_search", "news_search"})
+_BASH_PREVIEW_CHARS = 200
+_WEB_PREVIEW_CHARS = 200
+_ERROR_PREVIEW_CHARS = 200
+
+
+def _categorize_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Bucket the per-turn tool log into user-meaningful categories.
+
+    Returns a JSON-serialisable dict — the same one used as the
+    ``payload`` field of the ``tool_run_summary`` InteractionEvent
+    recorded on the VTuber's STM (cycle 20260430_2 A4) and as the
+    structured source for ``_compose_subworker_payload_from_tools``
+    (cycle 20260430_1 P0-2).
+
+    The categorisation is intentionally narrow — only the buckets the
+    VTuber persona can actually paraphrase to a non-technical user.
+    Anything else lives in ``raw_tool_calls`` for debugging and
+    detailed inspection.
+    """
+    files_written = _extract_artifacts(tool_calls)
+    files_read: List[str] = []
+    bash_commands: List[Dict[str, Any]] = []
+    web_fetches: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    seen_files_read: set = set()
+
+    for entry in tool_calls:
+        name = entry.get("name") or "unknown"
+        params = entry.get("input") or {}
+        is_err = bool(entry.get("is_error"))
+        duration = int(entry.get("duration_ms") or 0)
+
+        if is_err:
+            errors.append({
+                "name": name,
+                "duration_ms": duration,
+                "input_preview": _stringify_input(params)[:_ERROR_PREVIEW_CHARS],
+            })
+
+        if name in _FILES_READ_TOOLS:
+            path = (
+                params.get("file_path")
+                or params.get("path")
+                or params.get("pattern")
+                or ""
+            )
+            if isinstance(path, str) and path.strip():
+                key = path.strip()
+                if key not in seen_files_read:
+                    seen_files_read.add(key)
+                    files_read.append(key)
+        elif name in _BASH_TOOLS:
+            cmd = params.get("command", "")
+            bash_commands.append({
+                "command": (cmd[:_BASH_PREVIEW_CHARS] if isinstance(cmd, str) else ""),
+                "ok": not is_err,
+                "duration_ms": duration,
+            })
+        elif name in _WEB_TOOLS:
+            target = (
+                params.get("url")
+                or params.get("query")
+                or ""
+            )
+            web_fetches.append({
+                "tool": name,
+                "target": (target[:_WEB_PREVIEW_CHARS] if isinstance(target, str) else ""),
+                "ok": not is_err,
+                "duration_ms": duration,
+            })
+
+    total = len(tool_calls)
+    n_errors = len(errors)
+    if total == 0:
+        status = "ok"  # vacuous; caller checks total before using
+    elif n_errors == 0:
+        status = "ok"
+    elif n_errors == total:
+        status = "failed"
+    else:
+        status = "partial"
+
+    # Distinct tool names in encounter order — handy for one-line
+    # summaries downstream.
+    seen_names: set = set()
+    tools_used: List[str] = []
+    for entry in tool_calls:
+        name = entry.get("name") or "unknown"
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        tools_used.append(name)
+
+    return {
+        "status": status,
+        "tools_used": tools_used,
+        "files_written": files_written,
+        "files_read": files_read,
+        "bash_commands": bash_commands,
+        "web_fetches": web_fetches,
+        "errors": errors,
+        "total_calls": total,
+        "ok_calls": total - n_errors,
+        "failed_calls": n_errors,
+    }
+
+
+def _stringify_input(params: Dict[str, Any]) -> str:
+    """Best-effort short stringification for input previews."""
+    try:
+        import json as _json
+        return _json.dumps(params, ensure_ascii=False)[:400]
+    except Exception:
+        return str(params)[:400]
+
+
 def _extract_artifacts(tool_calls: List[Dict[str, Any]]) -> List[str]:
     """Pull file-path artifacts out of completed tool calls.
 
@@ -347,6 +473,152 @@ def _compose_subworker_payload_from_tools(
     return "\n".join(payload_lines)
 
 
+def _find_linked_task_request_event_id(
+    vtuber_memory_manager,
+    sub_session_id: str,
+) -> Optional[str]:
+    """Cycle 20260430_2 A4 — best-effort linkage from a fresh
+    ``tool_run_summary`` back to its originating ``task_request`` on
+    the VTuber side. Scans the VTuber's recent STM tail (last 20
+    entries) for the most recent task_request whose counterpart_id
+    matches the Sub-Worker's session_id.
+
+    Returns ``None`` when no link is found — that's fine; the
+    InteractionEvent without ``linked_event_id`` is still a valid
+    record, just without the parent pointer.
+    """
+    try:
+        stm = getattr(vtuber_memory_manager, "short_term", None)
+        if stm is None:
+            return None
+        entries = stm.get_recent(20) or []
+    except Exception:
+        return None
+
+    for entry in reversed(entries):
+        meta = getattr(entry, "metadata", None) or {}
+        if (
+            meta.get("kind") == "task_request"
+            and meta.get("counterpart_id") == sub_session_id
+        ):
+            event_id = meta.get("event_id")
+            if event_id:
+                return str(event_id)
+    return None
+
+
+def _record_subworker_run_on_vtuber(
+    *,
+    vtuber_agent,
+    sub_session_id: str,
+    result: 'ExecutionResult',
+) -> None:
+    """Cycle 20260430_2 A4 — record the Sub-Worker's just-completed
+    turn as an InteractionEvent on the VTuber's STM, regardless of
+    whether the dispatch path (P0-1 / P0-3) decides to wake the
+    VTuber.
+
+    The recording is the *environment* observation that the VTuber
+    can later inspect via the progressive memory tools (B1..B5);
+    it is independent of whether the VTuber is also notified to
+    speak about the run.
+
+    Genuine empty turns (no tool calls AND no meaningful output AND
+    no error) are skipped — there is nothing to remember. P0-3's
+    suppression policy applies here too.
+    """
+    try:
+        memory = getattr(vtuber_agent, "_memory_manager", None)
+        if memory is None:
+            return
+
+        tool_calls = list(getattr(result, "tool_calls", None) or [])
+        meaningful_text = _strip_only_loop_signals(result.output) if result.success else None
+        has_meaningful_text = bool(meaningful_text and meaningful_text.strip())
+        has_error = bool(result.error)
+
+        if not tool_calls and not has_meaningful_text and not has_error:
+            return
+
+        categorised = _categorize_tool_calls(tool_calls) if tool_calls else {
+            "status": "failed" if has_error else ("ok" if has_meaningful_text else "ok"),
+            "tools_used": [],
+            "files_written": [],
+            "files_read": [],
+            "bash_commands": [],
+            "web_fetches": [],
+            "errors": [],
+            "total_calls": 0,
+            "ok_calls": 0,
+            "failed_calls": 0,
+        }
+        if has_error and tool_calls:
+            # error wins over per-tool status when the whole turn errored
+            categorised = dict(categorised)
+            categorised["status"] = "failed"
+
+        # Short natural-language summary written into the STM `content`
+        # field. The structured data lives in the metadata `payload`;
+        # this string is just what shows up to the LLM via
+        # recent_turns / search snippets.
+        if has_meaningful_text:
+            preview = meaningful_text.strip().splitlines()[0][:160] if meaningful_text else ""
+            content_repr = (
+                f"[Sub-Worker run] {categorised['ok_calls']}/{categorised['total_calls']} "
+                f"tool calls — {preview}"
+            )
+        elif categorised["total_calls"] > 0:
+            files = categorised["files_written"]
+            file_part = (
+                f", wrote {len(files)} file(s)"
+                if files else ""
+            )
+            content_repr = (
+                f"[Sub-Worker run] {categorised['ok_calls']}/"
+                f"{categorised['total_calls']} tool calls"
+                f"{file_part}."
+            )
+        else:
+            content_repr = (
+                f"[Sub-Worker run] failed: {(result.error or '')[:160]}"
+            )
+
+        payload = {
+            **categorised,
+            "duration_ms": int(result.duration_ms or 0),
+            "cost_usd": result.cost_usd,
+            "raw_tool_calls": tool_calls,
+        }
+        if has_error:
+            payload["error"] = (result.error or "")[: _ERROR_PREVIEW_CHARS * 2]
+
+        from service.memory.interaction_event import (
+            CounterpartRole,
+            Direction,
+            Kind,
+            make_event_metadata,
+        )
+        linked = _find_linked_task_request_event_id(memory, sub_session_id)
+        meta = make_event_metadata(
+            kind=Kind.TOOL_RUN_SUMMARY,
+            direction=Direction.IN,
+            counterpart_id=sub_session_id,
+            counterpart_role=CounterpartRole.PAIRED_SUBWORKER,
+            linked_event_id=linked,
+            payload=payload,
+        )
+        # Reuse the "assistant_dm" role for the recorded line — content
+        # is a short natural sentence, so retrieval / display is
+        # consistent with the rest of the DM stream. The metadata.kind
+        # disambiguates this from a plain DM.
+        memory.record_message("assistant_dm", content_repr[:10000], metadata=meta)
+    except Exception:
+        logger.debug(
+            "Failed to record subworker_run on VTuber STM (sub=%s)",
+            sub_session_id, exc_info=True,
+        )
+
+
 async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> None:
     """
     If this session is a Sub-Worker linked to a VTuber, fire-and-forget
@@ -372,6 +644,18 @@ async def _notify_linked_vtuber(session_id: str, result: 'ExecutionResult') -> N
         vtuber_agent = manager.get_agent(linked_id)
         if not vtuber_agent:
             return
+
+        # Cycle 20260430_2 A4 — *always* record the run as an
+        # InteractionEvent on the VTuber's STM, independent of the
+        # dispatch decision below. Suppressed dispatch only means the
+        # VTuber doesn't speak about the run *right now*; the
+        # observation is still part of the VTuber's life history and
+        # must remain inspectable via memory_with / memory_event.
+        _record_subworker_run_on_vtuber(
+            vtuber_agent=vtuber_agent,
+            sub_session_id=session_id,
+            result=result,
+        )
 
         # Cycle 20260430_1 P0-1 — if the Sub-Worker already delivered a
         # ``[SUB_WORKER_RESULT]`` payload to the VTuber via

@@ -22,10 +22,51 @@ from service.execution import agent_executor
 from service.execution.agent_executor import (
     AlreadyExecutingError,
     ExecutionResult,
+    _categorize_tool_calls,
     _compose_subworker_payload_from_tools,
+    _record_subworker_run_on_vtuber,
     _save_subworker_reply_to_chat_room,
     _strip_only_loop_signals,
 )
+
+
+class _FakeShortTerm:
+    """STM stand-in capturing add_message-style records via record_message."""
+
+    def __init__(self, recent: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._recent = list(recent or [])
+
+    def get_recent(self, n: int = 20) -> List[Any]:
+        from types import SimpleNamespace
+        return [
+            SimpleNamespace(
+                content=f"[{r.get('role','?')}] {r.get('content','')}",
+                metadata={"role": r.get("role", "?"), **(r.get("metadata") or {})},
+            )
+            for r in self._recent[-n:]
+        ]
+
+
+class _FakeMemoryManager:
+    def __init__(self) -> None:
+        self.records: List[Dict[str, Any]] = []
+        self._stm = _FakeShortTerm()
+
+    @property
+    def short_term(self):
+        return self._stm
+
+    def record_message(
+        self, role: str, content: str, metadata=None, **extra
+    ) -> None:
+        meta: Dict[str, Any] = dict(extra) if extra else {}
+        if metadata:
+            meta.update(metadata)
+        self.records.append({"role": role, "content": content, "metadata": meta or None})
+
+    def seed_recent(self, recent: List[Dict[str, Any]]) -> None:
+        """Pre-populate the STM tail used by `_find_linked_task_request_event_id`."""
+        self._stm = _FakeShortTerm(recent)
 
 
 class _FakeAgent:
@@ -41,6 +82,7 @@ class _FakeAgent:
         chat_room_id: Optional[str] = None,
         session_name: str = "Test",
         role: str = "vtuber",
+        memory: Optional[_FakeMemoryManager] = None,
     ) -> None:
         self.session_id = session_id
         self._session_type = session_type
@@ -49,6 +91,7 @@ class _FakeAgent:
         self._session_name = session_name
         self._role = role
         self.role = MagicMock(value=role)
+        self._memory_manager = memory
 
 
 class _FakeAgentManager:
@@ -136,6 +179,170 @@ def test_strip_signals_preserves_real_narration() -> None:
 def test_strip_signals_passthrough_for_empty_or_none() -> None:
     assert _strip_only_loop_signals("") == ""
     assert _strip_only_loop_signals(None) is None
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cycle 20260430_2 A4 — _categorize_tool_calls
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_categorize_buckets_known_tool_families() -> None:
+    cats = _categorize_tool_calls([
+        {"name": "Write", "input": {"file_path": "a.md"}, "is_error": False, "duration_ms": 10},
+        {"name": "Read", "input": {"file_path": "b.md"}, "is_error": False, "duration_ms": 5},
+        {"name": "Bash", "input": {"command": "ls"}, "is_error": False, "duration_ms": 15},
+        {"name": "web_search", "input": {"query": "OAuth2"}, "is_error": False, "duration_ms": 100},
+        {"name": "Bash", "input": {"command": "rm /x"}, "is_error": True, "duration_ms": 20},
+    ])
+    assert cats["files_written"] == ["a.md"]
+    assert cats["files_read"] == ["b.md"]
+    assert len(cats["bash_commands"]) == 2
+    assert cats["web_fetches"][0]["target"] == "OAuth2"
+    assert len(cats["errors"]) == 1
+    assert cats["errors"][0]["name"] == "Bash"
+    assert cats["status"] == "partial"
+    assert cats["total_calls"] == 5
+    assert cats["ok_calls"] == 4
+    assert cats["failed_calls"] == 1
+    assert cats["tools_used"] == ["Write", "Read", "Bash", "web_search"]
+
+
+def test_categorize_all_ok_yields_status_ok() -> None:
+    cats = _categorize_tool_calls([
+        {"name": "Write", "input": {"file_path": "a.md"}, "is_error": False, "duration_ms": 1},
+    ])
+    assert cats["status"] == "ok"
+
+
+def test_categorize_all_error_yields_status_failed() -> None:
+    cats = _categorize_tool_calls([
+        {"name": "Bash", "input": {"command": "x"}, "is_error": True, "duration_ms": 1},
+    ])
+    assert cats["status"] == "failed"
+
+
+def test_categorize_empty_is_safe() -> None:
+    cats = _categorize_tool_calls([])
+    assert cats["files_written"] == []
+    assert cats["bash_commands"] == []
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cycle 20260430_2 A4 — _record_subworker_run_on_vtuber
+# ─────────────────────────────────────────────────────────────────
+
+
+def _make_vtuber_with_memory() -> _FakeAgent:
+    return _FakeAgent(
+        "vtuber-1",
+        session_type="vtuber",
+        linked_id="sub-1",
+        chat_room_id="room-1",
+        memory=_FakeMemoryManager(),
+    )
+
+
+def test_record_subworker_run_writes_tool_run_summary_metadata() -> None:
+    vtuber = _make_vtuber_with_memory()
+    result = ExecutionResult(
+        success=True,
+        session_id="sub-1",
+        output="",
+        duration_ms=120,
+        tool_calls=[
+            {"name": "Write", "input": {"file_path": "notes.md"}, "is_error": False, "duration_ms": 30},
+        ],
+    )
+    _record_subworker_run_on_vtuber(
+        vtuber_agent=vtuber,
+        sub_session_id="sub-1",
+        result=result,
+    )
+
+    mem = vtuber._memory_manager
+    assert len(mem.records) == 1
+    rec = mem.records[0]
+    assert rec["role"] == "assistant_dm"
+    assert "Sub-Worker run" in rec["content"]
+    meta = rec["metadata"]
+    assert meta is not None
+    assert meta["kind"] == "tool_run_summary"
+    assert meta["direction"] == "in"
+    assert meta["counterpart_id"] == "sub-1"
+    assert meta["counterpart_role"] == "paired_subworker"
+    payload = meta["payload"]
+    assert payload["files_written"] == ["notes.md"]
+    assert payload["status"] == "ok"
+    assert payload["duration_ms"] == 120
+
+
+def test_record_subworker_run_links_back_to_recent_task_request() -> None:
+    vtuber = _make_vtuber_with_memory()
+    # Seed a prior task_request from this vtuber to sub-1
+    vtuber._memory_manager.seed_recent([
+        {
+            "role": "assistant_dm",
+            "content": "[DM to Sub-Worker (internal)]: please write notes.md",
+            "metadata": {
+                "event_id": "REQ-1",
+                "kind": "task_request",
+                "direction": "out",
+                "counterpart_id": "sub-1",
+                "counterpart_role": "paired_subworker",
+            },
+        }
+    ])
+    result = ExecutionResult(
+        success=True, session_id="sub-1", output="", duration_ms=50,
+        tool_calls=[
+            {"name": "Write", "input": {"file_path": "notes.md"}, "is_error": False, "duration_ms": 30},
+        ],
+    )
+    _record_subworker_run_on_vtuber(
+        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    )
+    rec = vtuber._memory_manager.records[0]
+    assert rec["metadata"]["linked_event_id"] == "REQ-1"
+
+
+def test_record_subworker_run_skips_truly_empty_turn() -> None:
+    """No tool calls + no narration + no error → nothing to remember."""
+    vtuber = _make_vtuber_with_memory()
+    result = ExecutionResult(
+        success=True, session_id="sub-1", output="", duration_ms=10, tool_calls=[],
+    )
+    _record_subworker_run_on_vtuber(
+        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    )
+    assert vtuber._memory_manager.records == []
+
+
+def test_record_subworker_run_records_failure_with_error_message() -> None:
+    vtuber = _make_vtuber_with_memory()
+    result = ExecutionResult(
+        success=False, session_id="sub-1", error="Timeout after 60s",
+        duration_ms=60_000, tool_calls=[],
+    )
+    _record_subworker_run_on_vtuber(
+        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    )
+    rec = vtuber._memory_manager.records[0]
+    assert "failed" in rec["content"]
+    assert rec["metadata"]["payload"]["status"] == "failed"
+
+
+def test_record_subworker_run_no_memory_manager_is_silent() -> None:
+    """A vtuber without a memory manager (early-init / test) must not
+    crash the recorder — best-effort path."""
+    vtuber = _FakeAgent("vtuber-1", session_type="vtuber", linked_id="sub-1")
+    result = ExecutionResult(
+        success=True, session_id="sub-1", output="ok",
+        tool_calls=[{"name": "Write", "input": {"file_path": "x"}, "is_error": False, "duration_ms": 1}],
+    )
+    # Should not raise.
+    _record_subworker_run_on_vtuber(
+        vtuber_agent=vtuber, sub_session_id="sub-1", result=result,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────
