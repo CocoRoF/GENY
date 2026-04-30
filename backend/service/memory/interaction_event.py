@@ -272,3 +272,152 @@ def parse_event_metadata(
     if not all(k in meta and meta[k] is not None for k in required):
         return None
     return InteractionEventView(meta)
+
+
+# ---------------------------------------------------------------------------
+# Incoming DM classification (cycle 20260430_2 A3)
+# ---------------------------------------------------------------------------
+
+# Header that ``_trigger_dm_response`` puts on top of every recipient
+# invoke prompt. Parsing it gives us the sender's session id without
+# any new wiring; the rest of the prompt body is the DM content.
+import re as _re
+
+_INCOMING_DM_HEADER = _re.compile(
+    r"^\[SYSTEM\] You received a direct message from "
+    r"(?P<name>[^(]+)\(session:\s*(?P<sid>[^)]+)\)",
+    _re.IGNORECASE,
+)
+_INBOX_HEADER = _re.compile(r"^\[INBOX from (?P<name>[^\]]+)\]")
+_SUBWORKER_RESULT_PREFIX = "[SUB_WORKER_RESULT]"
+
+
+def dm_kind_for_recipient(
+    *,
+    sender_agent,
+    recorder_agent,
+    body: str,
+):
+    """Resolve (kind, counterpart_role) for a DM seen on the recipient side.
+
+    Mirror of ``_classify_outgoing_dm`` (cycle 20260430_2 A2) — same
+    relationship, viewed from the receiving end:
+
+      * recorder = Sub-Worker, sender = bound VTuber → either a
+        ``TASK_REQUEST`` (the sender's perspective is "I'm asking
+        you to do this") or a plain ``DM`` for chatter, mirroring
+        the sender-side mapping. The asymmetric ``TASK_REQUEST``
+        always travels VTuber → Sub-Worker direction.
+      * recorder = VTuber, sender = bound Sub-Worker, body opens
+        ``[SUB_WORKER_RESULT]`` → ``TASK_RESULT``. The named kind
+        is direction-agnostic (mirrors the sender-side classifier
+        from A2).
+      * recorder = VTuber, sender = bound Sub-Worker, plain body
+        → ``DM`` (paired channel chatter; rare).
+      * any other shape → ``DM`` + ``PEER``.
+
+    Pure / never raises — missing ``_session_type`` collapses the
+    case to ``DM`` + ``PEER``.
+    """
+    sender_type = getattr(sender_agent, "_session_type", None)
+    recorder_type = getattr(recorder_agent, "_session_type", None)
+    sender_linked = getattr(sender_agent, "_linked_session_id", None)
+    recorder_id = getattr(recorder_agent, "_session_id", None)
+    is_paired = bool(sender_linked) and (sender_linked == recorder_id)
+
+    if is_paired and sender_type == "vtuber" and recorder_type == "sub":
+        # VTuber asked us to do something. Same TASK_REQUEST kind as
+        # the sender-side mapping in A2.
+        return Kind.TASK_REQUEST, CounterpartRole.PAIRED_VTUBER
+    if is_paired and sender_type == "sub" and recorder_type == "vtuber":
+        if body.lstrip().startswith(_SUBWORKER_RESULT_PREFIX):
+            return Kind.TASK_RESULT, CounterpartRole.PAIRED_SUBWORKER
+        return Kind.DM, CounterpartRole.PAIRED_SUBWORKER
+    return Kind.DM, CounterpartRole.PEER
+
+
+def infer_input_metadata(
+    *,
+    input_text: str,
+    recorder_agent,
+    role: str,
+) -> Optional[Dict[str, Any]]:
+    """Best-effort metadata for a record_message call when the caller
+    didn't pass an explicit ``source_metadata``.
+
+    Parses well-known prompt prefixes (``[SYSTEM] You received...``
+    from the DM trigger; ``[INBOX from X]`` from the drain path)
+    and looks up the sender via the agent manager. Returns ``None``
+    when the role / shape isn't one A3 handles — A5 (reflection),
+    A6 (user_chat) fill the gaps with explicit source_metadata.
+
+    The helper imports the agent manager lazily to keep
+    ``service.memory.interaction_event`` free of circular deps.
+    """
+    if role != "assistant_dm":
+        return None
+
+    head = input_text.lstrip()
+
+    sender_id: Optional[str] = None
+    body = input_text
+
+    m_dm = _INCOMING_DM_HEADER.match(head)
+    m_inbox = _INBOX_HEADER.match(head)
+    if m_dm:
+        sender_id = m_dm.group("sid").strip()
+        # Strip both the [SYSTEM]... block and the [DM from ...]: prefix
+        # so `body` begins at the actual DM content. This matters because
+        # `dm_kind_for_recipient` peeks at the leading [SUB_WORKER_RESULT]
+        # token to flip kind=task_result.
+        dm_marker = "[DM from"
+        idx = head.find(dm_marker)
+        if idx >= 0:
+            colon = head.find("]:", idx)
+            body = head[colon + 2:].lstrip() if colon >= 0 else head[idx:]
+    elif m_inbox:
+        # Inbox-drain wrappers don't carry a session id; fall back
+        # to the sender_name. We can still set kind=DM, but the
+        # counterpart_id won't resolve to a session — we use the
+        # sender_name as a soft id.
+        name = m_inbox.group("name").strip()
+        sender_id = name
+        nl = head.find("\n")
+        body = head[nl + 1:] if nl >= 0 else head
+    else:
+        return None
+
+    try:
+        from service.executor import get_agent_session_manager
+        manager = get_agent_session_manager()
+    except Exception:
+        manager = None
+
+    sender_agent = None
+    if manager is not None and sender_id:
+        try:
+            sender_agent = manager.get_agent(sender_id) or manager.resolve_session(sender_id)
+        except Exception:
+            sender_agent = None
+
+    if sender_agent is None:
+        # Couldn't resolve — emit a minimal PEER + DM record so at
+        # least the dimension is present.
+        return make_event_metadata(
+            kind=Kind.DM,
+            direction=Direction.IN,
+            counterpart_id=sender_id or "unknown",
+            counterpart_role=CounterpartRole.PEER,
+        )
+
+    kind, role_enum = dm_kind_for_recipient(
+        sender_agent=sender_agent,
+        recorder_agent=recorder_agent,
+        body=body,
+    )
+    return make_event_metadata(
+        kind=kind,
+        direction=Direction.IN,
+        counterpart_id=sender_id,
+        counterpart_role=role_enum,
+    )
