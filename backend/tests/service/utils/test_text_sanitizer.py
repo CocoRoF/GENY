@@ -203,6 +203,121 @@ def test_sanitize_for_display_keeps_emoji() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────
+# Markdown stripping for TTS — agents reply with headings,
+# emphasis, wikilinks, etc.; TTS must voice prose, not punctuation.
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_sanitize_for_tts_strips_headings_and_emphasis() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("**bold**") == "bold"
+    assert sanitize_for_tts("*italic*") == "italic"
+    assert sanitize_for_tts("***both***") == "both"
+    assert sanitize_for_tts("# Heading\nbody") == "Heading body"
+    assert sanitize_for_tts("## subheading\ntext") == "subheading text"
+    # Emphasis on Korean text
+    assert sanitize_for_tts("**굵은 글씨**") == "굵은 글씨"
+    assert sanitize_for_tts("*기울임*") == "기울임"
+
+
+def test_sanitize_for_tts_strips_lists_and_blockquotes() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("- item one\n- item two") == "item one item two"
+    assert sanitize_for_tts("* a\n* b\n* c") == "a b c"
+    assert sanitize_for_tts("1. first\n2. second") == "first second"
+    assert sanitize_for_tts("> quoted text") == "quoted text"
+
+
+def test_sanitize_for_tts_strips_horizontal_rules() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("text\n---\nmore") == "text more"
+    assert sanitize_for_tts("text\n***\nmore") == "text more"
+    assert sanitize_for_tts("text\n___\nmore") == "text more"
+
+
+def test_sanitize_for_tts_unwraps_links_and_wikilinks() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("[link text](https://example.com)") == "link text"
+    # Image syntax is dropped wholesale (alt rarely worth speaking).
+    assert sanitize_for_tts("![alt](image.png) hello") == "hello"
+    # Wikilinks — keep target or alias.
+    assert sanitize_for_tts("[[wikilink]]") == "wikilink"
+    assert sanitize_for_tts("[[target|alias label]]") == "alias label"
+    # Conversation note pointer (the agent's typical wikilink shape).
+    assert sanitize_for_tts(
+        "본문은 [[conversations/2026-05-01/01-22-12__user__abcd1234|→ 본문]]"
+    ) == "본문은 → 본문"
+
+
+def test_sanitize_for_tts_unwraps_inline_and_fenced_code() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("`code`") == "code"
+    out = sanitize_for_tts("text before\n```python\nprint('hi')\n```\nafter")
+    assert "print" in out and "```" not in out
+
+
+def test_sanitize_for_tts_strips_html_tags() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("<br>hello<b>world</b>") == "helloworld"
+
+
+def test_sanitize_for_tts_preserves_underscore_in_words() -> None:
+    """``test_file`` and ``python_3`` are common identifiers — the
+    underscore-emphasis matcher must not strip the underscores when
+    they're inside a word.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("test_file.py") == "test_file.py"
+    assert sanitize_for_tts("python_3 is fast") == "python_3 is fast"
+
+
+def test_sanitize_for_tts_user_reported_markdown_case() -> None:
+    """The exact wording the user reported — agent replied with a
+    full markdown-formatted block (headings, emphasis, lists,
+    horizontal rule, blockquote, emoji) and TTS read the
+    punctuation literally.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    inp = (
+        "파일 내용 가져왔어요! 워커가 이렇게 써뒀네요 😊\n\n"
+        "---\n\n"
+        "# 안녕하세요! 저는 엘렌의 워커입니다 👋\n\n"
+        "## 자기소개\n\n"
+        "저는 Geny 플랫폼에서 엘렌과 함께 일하는 Sub-Worker 에이전트예요.\n\n"
+        "## 제가 잘하는 것들 🛠️\n"
+        "- **파일 작업**: 파일 생성, 수정, 읽기\n"
+        "- *코드 실행*: 쉘 명령어 처리\n\n"
+        "> 인용문 하나\n"
+    )
+    out = sanitize_for_tts(inp)
+    # No markdown markers survive
+    assert "#" not in out
+    assert "**" not in out
+    assert "---" not in out
+    assert ">" not in out
+    # Visible prose still there
+    assert "안녕하세요" in out
+    assert "엘렌의 워커입니다" in out
+    assert "자기소개" in out
+    assert "파일 작업" in out
+    assert "코드 실행" in out
+    assert "인용문 하나" in out
+    # Emoji still gone (existing invariant)
+    assert "😊" not in out
+    assert "👋" not in out
+
+
+def test_sanitize_for_tts_routing_still_stripped_after_markdown_unwrap() -> None:
+    """The routing-tag pass runs *after* markdown unwrap so that
+    constructs like ``[link](url)`` aren't gobbled by the unknown-
+    bracket catch-all. The routing tag itself must still be removed.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("[SUB_WORKER_RESULT] result body") == "result body"
+    assert sanitize_for_tts("[joy] hello") == "hello"
+
+
+# ─────────────────────────────────────────────────────────────────
 # X7 (cycle 20260422_5): expanded taxonomy + unknown-tag catch-all
 # ─────────────────────────────────────────────────────────────────
 
