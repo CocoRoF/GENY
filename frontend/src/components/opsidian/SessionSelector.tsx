@@ -1,6 +1,6 @@
 'use client';
 
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import {
   Brain,
   Clock,
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 export default function SessionSelector() {
-  const { sessions, loadingSessions, setSelectedSessionId } = useObsidianStore();
+  const { sessions, loadingSessions, setSelectedSessionId } = useOpsidianStore();
 
   const activeSessions = sessions.filter((s) => !s.is_deleted);
 
@@ -26,7 +26,7 @@ export default function SessionSelector() {
           <div className="ss-logo">
             <Brain size={32} strokeWidth={1.5} />
           </div>
-          <h1 className="ss-title">GenY Obsidian</h1>
+          <h1 className="ss-title">GenY Opsidian</h1>
           <p className="ss-subtitle">
             Select a session to explore its memory vault
           </p>

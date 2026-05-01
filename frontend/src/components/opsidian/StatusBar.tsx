@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useCuratedKnowledgeStore } from '@/store/useCuratedKnowledgeStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
@@ -39,7 +39,7 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
   }, []);
 
   // Always read all three stores — pick data based on hub mode
-  const obsidian = useObsidianStore();
+  const opsidian = useOpsidianStore();
   const userStore = useUserOpsidianStore();
   const curatedStore = useCuratedKnowledgeStore();
 
@@ -51,47 +51,47 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
     ? (curatedStore.stats?.total_files ?? 0)
     : isUserMode
       ? (userStore.stats?.total_files ?? 0)
-      : (obsidian.memoryStats?.total_files ?? 0);
+      : (opsidian.memoryStats?.total_files ?? 0);
   const totalChars = isCuratorMode
     ? (curatedStore.stats?.total_chars ?? 0)
     : isUserMode
       ? (userStore.stats?.total_chars ?? 0)
-      : (obsidian.memoryIndex?.total_chars ?? 0);
+      : (opsidian.memoryIndex?.total_chars ?? 0);
   const totalTags = isCuratorMode
     ? (curatedStore.stats?.total_tags ?? 0)
     : isUserMode
       ? (userStore.stats?.total_tags ?? 0)
-      : (obsidian.memoryStats?.total_tags ?? 0);
-  const totalLinks = (isUserMode || isCuratorMode) ? 0 : (obsidian.memoryStats?.total_links ?? 0);
+      : (opsidian.memoryStats?.total_tags ?? 0);
+  const totalLinks = (isUserMode || isCuratorMode) ? 0 : (opsidian.memoryStats?.total_links ?? 0);
   const loading = isCuratorMode
     ? curatedStore.loading
-    : isUserMode ? userStore.loading : obsidian.loading;
+    : isUserMode ? userStore.loading : opsidian.loading;
   const selectedFile = isCuratorMode
     ? curatedStore.selectedFile
-    : isUserMode ? userStore.selectedFile : obsidian.selectedFile;
+    : isUserMode ? userStore.selectedFile : opsidian.selectedFile;
   const viewMode = isCuratorMode
     ? curatedStore.viewMode
-    : isUserMode ? userStore.viewMode : obsidian.viewMode;
+    : isUserMode ? userStore.viewMode : opsidian.viewMode;
   const rightPanelOpen = isCuratorMode
     ? curatedStore.rightPanelOpen
-    : isUserMode ? userStore.rightPanelOpen : obsidian.rightPanelOpen;
+    : isUserMode ? userStore.rightPanelOpen : opsidian.rightPanelOpen;
   const togglePanel = isCuratorMode
     ? () => curatedStore.setRightPanelOpen(!curatedStore.rightPanelOpen)
     : isUserMode
       ? () => userStore.setRightPanelOpen(!userStore.rightPanelOpen)
-      : () => obsidian.setRightPanelOpen(!obsidian.rightPanelOpen);
-  const showViewMode = isUserMode || isCuratorMode || !!obsidian.selectedSessionId;
+      : () => opsidian.setRightPanelOpen(!opsidian.rightPanelOpen);
+  const showViewMode = isUserMode || isCuratorMode || !!opsidian.selectedSessionId;
 
   // Session info for sessions mode
-  const selectedSession = !isUserMode && !isCuratorMode && obsidian.selectedSessionId
-    ? obsidian.sessions.find(s => s.session_id === obsidian.selectedSessionId)
+  const selectedSession = !isUserMode && !isCuratorMode && opsidian.selectedSessionId
+    ? opsidian.sessions.find(s => s.session_id === opsidian.selectedSessionId)
     : null;
   const sessionLabel = selectedSession
     ? (selectedSession.session_name || selectedSession.session_id.slice(0, 8))
     : null;
 
   // Without hub context (standalone session page), hide when no session
-  if (!hub && !obsidian.selectedSessionId) return null;
+  if (!hub && !opsidian.selectedSessionId) return null;
 
   return (
     <div className="obs-statusbar">
@@ -122,13 +122,13 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
         )}
         <span className="obs-sb-item obs-sb-brand-item">
           <Brain size={12} />
-          GenY Obsidian
+          GenY Opsidian
         </span>
         {/* Session indicator in sessions mode */}
         {!isUserMode && !isCuratorMode && sessionLabel && (
           <button
             className="obs-sb-item obs-sb-session-btn"
-            onClick={() => obsidian.setSelectedSessionId(null)}
+            onClick={() => opsidian.setSelectedSessionId(null)}
             title={t('opsidian.changeSession')}
           >
             <ArrowLeftRight size={11} />

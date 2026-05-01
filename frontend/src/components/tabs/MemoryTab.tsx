@@ -930,14 +930,17 @@ export default function MemoryTab() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
+              // Canonical route is /opsidian (our service name).
+              // /geny-obsidian survives as a redirect alias for any
+              // URL pinned in older docs / bookmarks.
               const url = sessionId
-                ? `/geny-obsidian?sessionId=${encodeURIComponent(sessionId)}`
-                : '/geny-obsidian';
+                ? `/opsidian?sessionId=${encodeURIComponent(sessionId)}`
+                : '/opsidian';
               window.open(url, '_blank');
             }}
             className="py-1.5 px-3 bg-transparent hover:bg-[rgba(139,92,246,0.1)] text-[#8b5cf6] text-[0.75rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all border border-[rgba(139,92,246,0.3)] inline-flex items-center gap-1.5"
           >
-            <ExternalLink size={12} /> Obsidian
+            <ExternalLink size={12} /> Opsidian
           </button>
           <button
             onClick={() => setShowCreateModal(true)}

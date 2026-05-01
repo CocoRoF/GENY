@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useCuratedKnowledgeStore } from '@/store/useCuratedKnowledgeStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
@@ -30,24 +30,24 @@ export default function RightPanel() {
   const isUserMode = hub?.mode === 'user';
   const isCuratorMode = hub?.mode === 'curator';
 
-  const obsidian = useObsidianStore();
+  const opsidian = useOpsidianStore();
   const userStore = useUserOpsidianStore();
   const curatedStore = useCuratedKnowledgeStore();
 
   // Pick data source based on mode
   const selectedFile = isCuratorMode
     ? curatedStore.selectedFile
-    : isUserMode ? userStore.selectedFile : obsidian.selectedFile;
+    : isUserMode ? userStore.selectedFile : opsidian.selectedFile;
   const fileDetail = isCuratorMode
     ? curatedStore.fileDetail
-    : isUserMode ? userStore.fileDetail : obsidian.fileDetail;
+    : isUserMode ? userStore.fileDetail : opsidian.fileDetail;
   const files = isCuratorMode
     ? curatedStore.files
-    : isUserMode ? userStore.files : obsidian.files;
-  const memoryStats = (isUserMode || isCuratorMode) ? null : obsidian.memoryStats;
+    : isUserMode ? userStore.files : opsidian.files;
+  const memoryStats = (isUserMode || isCuratorMode) ? null : opsidian.memoryStats;
   const memoryIndex = isCuratorMode
     ? curatedStore.memoryIndex
-    : isUserMode ? userStore.memoryIndex : obsidian.memoryIndex;
+    : isUserMode ? userStore.memoryIndex : opsidian.memoryIndex;
   const userStats = isUserMode ? userStore.stats : isCuratorMode ? curatedStore.stats : null;
 
   const fileInfo = selectedFile ? files[selectedFile] : null;
@@ -77,12 +77,12 @@ export default function RightPanel() {
         console.error(e);
       }
     } else {
-      obsidian.openFile(filename);
-      if (obsidian.selectedSessionId) {
+      opsidian.openFile(filename);
+      if (opsidian.selectedSessionId) {
         try {
-          const detail = await memoryApi.readFile(obsidian.selectedSessionId, filename);
-          obsidian.setFileDetail(detail);
-          obsidian.setViewMode('editor');
+          const detail = await memoryApi.readFile(opsidian.selectedSessionId, filename);
+          opsidian.setFileDetail(detail);
+          opsidian.setViewMode('editor');
         } catch (e) {
           console.error(e);
         }
@@ -245,7 +245,7 @@ export default function RightPanel() {
                   className="obs-rp-prop"
                   style={{ cursor: 'pointer' }}
                   title="Open Conversation view"
-                  onClick={() => obsidian.setViewMode('conversation')}
+                  onClick={() => opsidian.setViewMode('conversation')}
                 >
                   <span className="obs-rp-prop-key" style={{ textDecoration: 'underline dotted' }}>
                     STM Entries

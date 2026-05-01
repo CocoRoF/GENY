@@ -1,10 +1,10 @@
 'use client';
 
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
 import { X, FileText } from 'lucide-react';
 
-export default function ObsidianTabs() {
+export default function OpsidianTabs() {
   const {
     openFiles,
     selectedFile,
@@ -14,7 +14,7 @@ export default function ObsidianTabs() {
     closeFile,
     setFileDetail,
     setViewMode,
-  } = useObsidianStore();
+  } = useOpsidianStore();
 
   const handleTabClick = async (fn: string) => {
     openFile(fn);

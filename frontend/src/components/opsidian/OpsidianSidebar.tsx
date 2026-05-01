@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useObsidianStore, type SidebarPanel } from '@/store/useObsidianStore';
+import { useOpsidianStore, type SidebarPanel } from '@/store/useOpsidianStore';
 import { useI18n } from '@/lib/i18n';
 import { memoryApi } from '@/lib/api';
 import {
@@ -58,7 +58,7 @@ const IMPORTANCE_DOT: Record<string, string> = {
   low: '#64748b',
 };
 
-export default function ObsidianSidebar() {
+export default function OpsidianSidebar() {
   const {
     files,
     selectedFile,
@@ -77,7 +77,7 @@ export default function ObsidianSidebar() {
     setMemoryStats,
     setGraphData,
     setLoading,
-  } = useObsidianStore();
+  } = useOpsidianStore();
   const { t } = useI18n();
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
@@ -199,6 +199,13 @@ export default function ObsidianSidebar() {
             <GitGraph size={16} />
           </button>
           <button
+            className={`obs-sb-icon-btn ${viewMode === 'conversation' ? 'active' : ''}`}
+            onClick={() => setViewMode(viewMode === 'conversation' ? 'editor' : 'conversation')}
+            title="Conversation"
+          >
+            <MessageSquare size={16} />
+          </button>
+          <button
             className={`obs-sb-icon-btn ${viewMode === 'search' ? 'active' : ''}`}
             onClick={() => setViewMode(viewMode === 'search' ? 'editor' : 'search')}
             title={t('opsidian.search')}
@@ -220,6 +227,21 @@ export default function ObsidianSidebar() {
         </Link>
         <span className="obs-sb-brand">{t('opsidian.title')}</span>
         <div className="obs-sb-header-actions">
+          {/* Search — icon only, sits to the left of refresh.
+              Toggles ``viewMode='search'`` (re-clicking returns
+              to ``editor``) so the existing SearchPanel route is
+              reused. Plan note — keep this in the header rather
+              than the view-mode switcher so the switcher reads as
+              the three primary surfaces (editor / graph /
+              conversation) only. */}
+          <button
+            className={`obs-sb-icon-btn ${viewMode === 'search' ? 'active' : ''}`}
+            onClick={() => setViewMode(viewMode === 'search' ? 'editor' : 'search')}
+            title={t('opsidian.search')}
+            aria-label={t('opsidian.search')}
+          >
+            <Search size={13} />
+          </button>
           <button className="obs-sb-icon-btn" onClick={handleRefresh} title={t('opsidian.refresh')}>
             <RefreshCw size={13} />
           </button>
@@ -247,7 +269,10 @@ export default function ObsidianSidebar() {
         ))}
       </div>
 
-      {/* View mode switcher */}
+      {/* View mode switcher — three primary surfaces. Search is
+          a transient affordance and lives in the header bar
+          (icon-only) so the switcher stays balanced once
+          Conversation joined. */}
       <div className="obs-sb-view-modes">
         <button
           className={`obs-sb-view-btn ${viewMode === 'editor' ? 'active' : ''}`}
@@ -261,13 +286,6 @@ export default function ObsidianSidebar() {
         >
           <GitGraph size={13} /> {t('opsidian.graph')}
         </button>
-        <button
-          className={`obs-sb-view-btn ${viewMode === 'search' ? 'active' : ''}`}
-          onClick={() => setViewMode('search')}
-        >
-          <Search size={13} /> {t('opsidian.search')}
-        </button>
-        {/* Memory v2 PR 5 — Conversation view toggle */}
         <button
           className={`obs-sb-view-btn ${viewMode === 'conversation' ? 'active' : ''}`}
           onClick={() => setViewMode('conversation')}

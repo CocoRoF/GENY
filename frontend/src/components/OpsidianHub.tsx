@@ -3,10 +3,10 @@
 import { useState, useMemo, useRef } from 'react';
 import { HubContext, type HubMode } from './OpsidianHubContext';
 import UserOpsidianView from './user-opsidian/UserOpsidianView';
-import ObsidianView from './obsidian/ObsidianView';
+import OpsidianView from './opsidian/OpsidianView';
 import CuratedKnowledgeView from './curated-knowledge/CuratedKnowledgeView';
-import StatusBar from './obsidian/StatusBar';
-import './obsidian/obsidian.css';
+import StatusBar from './opsidian/StatusBar';
+import './opsidian/opsidian.css';
 
 export default function OpsidianHub() {
   const [mode, setMode] = useState<HubMode>('user');
@@ -22,7 +22,7 @@ export default function OpsidianHub() {
         return <CuratedKnowledgeView />;
       case 'sessions':
       default:
-        return <ObsidianView />;
+        return <OpsidianView />;
     }
   };
 
