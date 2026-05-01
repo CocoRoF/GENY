@@ -15,11 +15,7 @@ import {
   Search,
   GitGraph,
   FileText,
-  Calendar,
-  Lightbulb,
-  Users,
-  FolderKanban,
-  Bookmark,
+  FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
@@ -27,20 +23,12 @@ import {
   MessageSquare,
 } from 'lucide-react';
 
-const CATEGORY_ICONS: Record<string, typeof File> = {
-  daily: Calendar,
-  topics: Bookmark,
-  entities: Users,
-  projects: FolderKanban,
-  insights: Lightbulb,
-  // Memory v2 — new categories carry their own icon so the sidebar
-  // tree reads at a glance (plan §1.5).
-  conversations: MessageSquare,
-  dms: MessageSquare,
-  'daily-journal': Calendar,
-  compactions: GitGraph,
-  root: FileText,
-};
+// CATEGORY_ICONS now lives in `@/lib/memoryCategories` — single
+// source of truth shared with MemoryTab / QuickSwitcher /
+// WikilinkPicker / NoteViewer. Re-export for the existing call
+// sites in this file (which use the local name).
+import { CATEGORY_ICONS as SHARED_CATEGORY_ICONS } from '@/lib/memoryCategories';
+const CATEGORY_ICONS = SHARED_CATEGORY_ICONS;
 
 const CATEGORY_COLORS: Record<string, string> = {
   daily: '#f59e0b',

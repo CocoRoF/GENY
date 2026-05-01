@@ -10,28 +10,17 @@ import {
   Link2,
   Clock,
   AlertCircle,
-  Calendar,
-  Bookmark,
-  Users,
-  FolderKanban,
-  Lightbulb,
   FileText,
   ExternalLink,
 } from 'lucide-react';
+// Memory v2 — single source of truth at `@/lib/memoryCategories`.
+import { CATEGORY_ICONS } from '@/lib/memoryCategories';
 
 const IMPORTANCE_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   critical: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444', label: 'Critical' },
   high: { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: 'High' },
   medium: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'Medium' },
   low: { bg: 'rgba(100,116,139,0.1)', color: '#64748b', label: 'Low' },
-};
-
-const CATEGORY_ICONS: Record<string, typeof FileText> = {
-  daily: Calendar,
-  topics: Bookmark,
-  entities: Users,
-  projects: FolderKanban,
-  insights: Lightbulb,
 };
 
 export default function NoteViewer() {
