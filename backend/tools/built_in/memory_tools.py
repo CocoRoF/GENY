@@ -342,14 +342,28 @@ class MemorySearchTool(BaseTool):
                 if kind_filter is not None and entry_kind not in kind_filter:
                     continue
 
+            # Memory v2 PR 14 — progressive disclosure friendly
+            # snippet (plan §5.5). Only the first non-empty line of
+            # the snippet, capped at 200 chars, so callers see a
+            # *hint* not a body. Full body via memory_read(filename).
+            snippet_first_line = ""
+            raw_snippet = r.snippet or ""
+            for _line in raw_snippet.splitlines():
+                _line = _line.strip()
+                if _line:
+                    snippet_first_line = _line[:200]
+                    if len(_line) > 200:
+                        snippet_first_line = snippet_first_line.rstrip() + "…"
+                    break
             item = {
                 "filename": entry.filename,
                 "source": entry.source.value if hasattr(entry.source, "value") else str(entry.source),
-                "snippet": r.snippet[:500],
+                "snippet_first_line": snippet_first_line,
                 "score": round(r.score, 4),
                 "title": getattr(entry, "title", None),
                 "category": getattr(entry, "category", None),
                 "tags": getattr(entry, "tags", None),
+                "char_count": getattr(entry, "char_count", None),
             }
             if event_id:
                 item.update({

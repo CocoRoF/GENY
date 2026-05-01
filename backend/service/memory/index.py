@@ -28,15 +28,36 @@ logger = getLogger(__name__)
 # Use configured timezone from GENY_TIMEZONE env var
 from service.utils.utils import _configured_tz as _get_tz
 _INDEX_FILE = "_index.json"
+# Memory v2 PR 9 — vault map cache (~500 chars rendered) that the
+# Static Layer of the system prompt injects in lieu of MEMORY.md
+# body. Lives next to ``_index.json`` and is regenerated whenever
+# the index rebuilds / updates.
+_VAULT_MAP_FILE = "_vault_map.json"
 _MD_PATTERN = re.compile(r"\.md$", re.IGNORECASE)
 
 # Directories that are not user-facing categories.
 _SKIP_DIRS = {"__pycache__", ".git", "_attachments"}
 
+# Vault Map render limits (plan §3.3) — the rendered markdown that
+# gets injected into the system prompt's Static Layer must stay tight.
+_VAULT_MAP_RECENT_LIMIT = 5
+_VAULT_MAP_TOP_TAGS = 10
+_VAULT_MAP_MEMORY_PREVIEW_CHARS = 200
+
 
 @dataclass
 class MemoryFileInfo:
-    """Metadata for a single memory file."""
+    """Metadata for a single memory file.
+
+    Memory v2 PR 6 extends the historical 11 fields with the
+    InteractionEvent dimensions a conversations/ note carries.
+    They surface here so ``memory_search`` and the Opsidian
+    Conversation view can filter by ``counterpart`` / ``kind`` /
+    ``direction`` / ``event_id`` without re-parsing every
+    frontmatter on every call. Notes outside conversations/ leave
+    these as empty strings — the search tools just bypass the
+    filter when the field is empty.
+    """
     filename: str = ""            # relative path inside memory/ (e.g. "topics/python-async.md")
     title: str = ""
     category: str = "topics"
@@ -49,6 +70,14 @@ class MemoryFileInfo:
     links_to: List[str] = field(default_factory=list)
     linked_from: List[str] = field(default_factory=list)
     summary: Optional[str] = None
+    # PR 6 — InteractionEvent dimensions (only populated for
+    # ``conversations/`` notes; empty string elsewhere).
+    event_id: str = ""
+    kind: str = ""
+    direction: str = ""
+    counterpart: str = ""
+    counterpart_role: str = ""
+    linked_event_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -116,6 +145,7 @@ class MemoryIndexManager:
     def __init__(self, memory_dir: str):
         self._memory_dir = Path(memory_dir)
         self._index_path = self._memory_dir / _INDEX_FILE
+        self._vault_map_path = self._memory_dir / _VAULT_MAP_FILE
         self._index: Optional[MemoryIndex] = None
         self._lock = threading.RLock()
 
@@ -322,6 +352,16 @@ class MemoryIndexManager:
                 links_to=wikilinks,
                 linked_from=[],   # populated by _rebuild_link_graph
                 summary=summary,
+                # PR 6 — InteractionEvent dimensions surfaced from
+                # the frontmatter when the note is from
+                # conversations/. Other categories return "" here
+                # which downstream filters treat as "no opinion".
+                event_id=str(metadata.get("event_id") or ""),
+                kind=str(metadata.get("kind") or ""),
+                direction=str(metadata.get("direction") or ""),
+                counterpart=str(metadata.get("counterpart") or ""),
+                counterpart_role=str(metadata.get("counterpart_role") or ""),
+                linked_event_id=str(metadata.get("linked_event_id") or ""),
             )
         except (OSError, UnicodeDecodeError) as exc:
             logger.debug("_scan_file(%s): %s", filepath, exc)
@@ -434,7 +474,14 @@ class MemoryIndexManager:
             return None
 
     def _save_to_disk(self) -> None:
-        """Save index to _index.json."""
+        """Save index to _index.json AND refresh _vault_map.json.
+
+        Memory v2 PR 9 — the vault map is a ~500-char "table of
+        contents" the system prompt's Static Layer injects in place
+        of MEMORY.md body (plan §1.2). It is purely derived from
+        the index — recomputed from scratch on every save so a
+        stale value cannot survive a rebuild.
+        """
         if self._index is None:
             return
         try:
@@ -443,3 +490,126 @@ class MemoryIndexManager:
             self._index_path.write_text(data, encoding="utf-8")
         except OSError as exc:
             logger.warning("MemoryIndex: failed to save _index.json: %s", exc)
+        # Best-effort vault map refresh — never blocks the index
+        # save from being acknowledged.
+        try:
+            vmap = self.build_vault_map()
+            self._vault_map_path.write_text(
+                json.dumps(vmap, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.debug(
+                "MemoryIndex: vault_map refresh failed — non-critical",
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
+    # PR 9 — Vault Map (plan §1.2 / §3.3)
+    # ------------------------------------------------------------------
+
+    def build_vault_map(self) -> Dict[str, Any]:
+        """Compute the vault-map snapshot the Static Layer injects.
+
+        Schema::
+
+            {
+              "categories": {<cat>: {"files": int, "last_modified": iso}},
+              "top_tags": [[tag, count], ...],          # length ≤ 10
+              "recently_modified": [
+                {"filename": ..., "title": ..., "category": ...,
+                 "modified": iso}, ...                  # length ≤ 5
+              ],
+              "memory_md_preview": "<first 200 chars or empty>",
+              "total_files": int,
+              "generated_at": iso,
+            }
+
+        The shape is dictated by ``MemoryContextBlock`` /
+        ``Vault Map`` rendering — keep additions backwards-compatible.
+        """
+        idx = self.index
+
+        # Per-category aggregate
+        categories: Dict[str, Dict[str, Any]] = {}
+        for info in idx.files.values():
+            cat = info.category or "root"
+            slot = categories.setdefault(cat, {"files": 0, "last_modified": ""})
+            slot["files"] += 1
+            if info.modified > slot["last_modified"]:
+                slot["last_modified"] = info.modified
+
+        # Top tags
+        tag_counts = sorted(
+            ((t, len(files)) for t, files in idx.tag_map.items()),
+            key=lambda x: -x[1],
+        )[:_VAULT_MAP_TOP_TAGS]
+
+        # Recently modified
+        recent_sorted = sorted(
+            idx.files.values(), key=lambda f: f.modified or "", reverse=True,
+        )[:_VAULT_MAP_RECENT_LIMIT]
+        recent = [
+            {
+                "filename": f.filename,
+                "title": f.title or f.filename,
+                "category": f.category or "root",
+                "modified": f.modified,
+            }
+            for f in recent_sorted
+        ]
+
+        # MEMORY.md preview (first N chars of body, frontmatter
+        # stripped). Empty when the file is absent.
+        preview = ""
+        memory_md = self._memory_dir / "MEMORY.md"
+        if memory_md.exists():
+            try:
+                text = memory_md.read_text(encoding="utf-8")
+                # Crude frontmatter strip — body starts after the
+                # second ``---``.
+                if text.startswith("---"):
+                    end = text.find("\n---", 3)
+                    if end > 0:
+                        text = text[end + 4:]
+                preview = text.strip()[:_VAULT_MAP_MEMORY_PREVIEW_CHARS]
+            except OSError:
+                preview = ""
+
+        return {
+            "categories": categories,
+            "top_tags": tag_counts,
+            "recently_modified": recent,
+            "memory_md_preview": preview,
+            "total_files": idx.total_files,
+            "generated_at": datetime.now(_get_tz()).isoformat(),
+        }
+
+    def render_vault_map(self) -> str:
+        """Render the vault map as a ~500-char markdown block ready
+        for the Static Layer of the system prompt.
+        """
+        vmap = self.build_vault_map()
+        lines: List[str] = ["## Vault Map"]
+        cats = vmap.get("categories") or {}
+        if cats:
+            cat_summary = ", ".join(
+                f"{c}({d['files']})" for c, d in sorted(cats.items())
+            )
+            lines.append(f"- Categories: {cat_summary}")
+        top_tags = vmap.get("top_tags") or []
+        if top_tags:
+            tag_summary = ", ".join(f"{t}({n})" for t, n in top_tags[:5])
+            lines.append(f"- Top tags: {tag_summary}")
+        recent = vmap.get("recently_modified") or []
+        if recent:
+            lines.append("- Recently modified:")
+            for r in recent:
+                lines.append(f"  - `{r['filename']}` — {r.get('title') or ''}")
+        preview = vmap.get("memory_md_preview") or ""
+        if preview:
+            # Single-line preview for budget — full body via
+            # ``memory_read("MEMORY.md")`` (plan §5.3 ladder).
+            single = preview.replace("\n", " ").strip()[:200]
+            lines.append(f"- MEMORY.md preview: {single}")
+        return "\n".join(lines)

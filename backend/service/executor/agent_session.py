@@ -1402,6 +1402,10 @@ class AgentSession:
                 "recent_turns": 6,
                 "enable_vector_search": True,
                 "enable_reflection": True,
+                # Memory v2 PR 10 — slim retriever (recent + summary +
+                # vault map only; rest via tools). Flipped here
+                # post-PR-13 once Memory Ladder doc reaches every role.
+                "slim_mode": False,
             }
 
         # Q.1 (cycle 20260426_3) — per-session memory tuning override.
@@ -1424,6 +1428,7 @@ class AgentSession:
                 ("recent_turns", lambda v: isinstance(v, int) and v >= 0),
                 ("enable_vector_search", lambda v: isinstance(v, bool)),
                 ("enable_reflection", lambda v: isinstance(v, bool)),
+                ("slim_mode", lambda v: isinstance(v, bool)),
             ):
                 if key in per_session_tuning:
                     candidate = per_session_tuning[key]
@@ -1553,6 +1558,54 @@ class AgentSession:
             (st for st in self._prebuilt_pipeline.stages if getattr(st, "order", None) == 18),
             None,
         )
+
+        # ── Memory v2 PR 7 — LLMSummaryCompactor wiring ──
+        #
+        # Plan §2.1 — once context_window_budget * 0.8 is reached the
+        # s02 ContextStage triggers its compactor. The historical
+        # default is the placeholder ``SummaryCompactor`` that emits a
+        # canned "[summary]" sentence — useful as a no-cost shim but
+        # not actually compaction. Wire the real LLM-backed compactor
+        # here so the per-stage memory model (already pushed onto s02
+        # at line 1477) drives the summarisation prompt. Falls back to
+        # the placeholder when no per-stage override is set.
+        s02_stage = next(
+            (st for st in self._prebuilt_pipeline.stages if getattr(st, "order", None) == 2),
+            None,
+        )
+        if s02_stage is not None:
+            try:
+                # PR 8 — use the persisting subclass so each compaction
+                # also lands in ``memory/compactions/`` + the audit log.
+                # When ``self._memory_manager`` is None (rare; tests),
+                # the wrapper is harmless — record_compaction inside
+                # the wrapper guards on the manager being None.
+                from service.memory.persisting_compactor import (
+                    PersistingLLMSummaryCompactor,
+                )
+                compactor = PersistingLLMSummaryCompactor(
+                    keep_recent=10,
+                    resolve_cfg=lambda state, _stage=s02_stage: _stage.resolve_model_config(state),
+                    has_override=lambda _stage=s02_stage: getattr(_stage, "_model_override", None) is not None,
+                    client_getter=lambda state: getattr(state, "llm_client", None),
+                    memory_manager=self._memory_manager,
+                )
+                # Direct slot mutation — the LLMSummaryCompactor
+                # carries bound callbacks that can't be expressed via
+                # the registry-based ``set_strategy(impl_name, config)``
+                # path. The slot lives on the stage instance; we own
+                # it for the lifetime of this AgentSession.
+                if hasattr(s02_stage, "_slots") and "compactor" in s02_stage._slots:
+                    s02_stage._slots["compactor"].strategy = compactor
+                    logger.debug(
+                        f"[{self._session_id}] s02 compactor → LLMSummaryCompactor (PR 7)"
+                    )
+            except Exception:
+                logger.debug(
+                    f"[{self._session_id}] LLMSummaryCompactor wire failed — "
+                    "falling back to placeholder",
+                    exc_info=True,
+                )
         if s18_stage is not None:
             reflection_resolver = ReflectionResolver(
                 resolve_cfg=lambda state, _stage=s18_stage: _stage.resolve_model_config(state),
@@ -1673,12 +1726,26 @@ class AgentSession:
             )
 
         if self._memory_manager is not None:
-            attach_kwargs["memory_retriever"] = GenyMemoryRetriever(
-                self._memory_manager,
+            # Memory v2 PR 10 — slim_mode reads the optional tuning
+            # flag. Default False (legacy 6-layer behaviour) so callers
+            # opt in deliberately. When PR 12 lands the ladder doc,
+            # the role-default tuning will flip slim_mode=True for
+            # all roles automatically (plan §5.2).
+            #
+            # Backwards-compat guard: only pass ``slim_mode`` when it
+            # is True. Older installed ``geny-executor`` releases (pre
+            # PR 10) reject unknown kwargs; defaulting through the
+            # standard 6-layer path works against any executor pin.
+            retriever_kwargs: Dict[str, Any] = dict(
                 max_inject_chars=max_inject_chars,
                 enable_vector_search=_tuning["enable_vector_search"],
                 curated_knowledge_manager=curated_km,
                 recent_turns=_tuning["recent_turns"],
+            )
+            if _tuning.get("slim_mode"):
+                retriever_kwargs["slim_mode"] = True
+            attach_kwargs["memory_retriever"] = GenyMemoryRetriever(
+                self._memory_manager, **retriever_kwargs,
             )
             # Cycle 20260501_1 C — single STM write site at s18 via the
             # dedupe-aware subclass. _invoke_pipeline / _astream_pipeline

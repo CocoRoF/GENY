@@ -84,6 +84,27 @@ class ShortTermMemory:
         # Write counter for periodic file truncation
         self._write_count: int = 0
 
+        # Memory v2 PR 3 — concurrency lock.
+        #
+        # Multiple writers can land here in production:
+        #
+        #   * normal user/assistant ``record_message`` from the
+        #     async pipeline,
+        #   * ``record_event`` calls from synchronous tool runs,
+        #   * background ActivityTrigger / IdleTrigger reflections
+        #     that fire from a separate task,
+        #   * the periodic ``_maybe_truncate_file`` rewrite that
+        #     replaces the whole file.
+        #
+        # Without a lock, two writers can interleave inside
+        # ``_append_jsonl`` and produce a half-baked jsonl line
+        # (`{"role":"user","cont` + `"role":"assistant",…`) — the
+        # next read silently drops both lines. We use ``RLock`` so
+        # ``_maybe_truncate_file`` can call ``_read_jsonl`` while
+        # already holding the lock.
+        import threading  # local import — keeps the module lean
+        self._lock = threading.RLock()
+
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for this memory store.
 
@@ -494,62 +515,83 @@ class ShortTermMemory:
     # ------------------------------------------------------------------
 
     def _append_jsonl(self, record: Dict[str, Any]) -> None:
-        """Append a JSON record to the transcript file."""
-        try:
-            with open(self._main_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-        except OSError as exc:
-            logger.warning("ShortTermMemory: write failed: %s", exc)
+        """Append a JSON record to the transcript file.
 
-        # Periodic truncation to prevent unbounded file growth
-        self._write_count += 1
-        if self._write_count % _TRUNCATE_CHECK_INTERVAL == 0:
-            self._maybe_truncate_file()
+        Lock-protected (PR 3). The whole append + counter bump +
+        possible truncation happens atomically so a concurrent
+        writer cannot interleave its bytes between the
+        ``json.dumps`` and the trailing newline.
+        """
+        with self._lock:
+            try:
+                with open(self._main_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            except OSError as exc:
+                logger.warning("ShortTermMemory: write failed: %s", exc)
+
+            # Periodic truncation to prevent unbounded file growth
+            self._write_count += 1
+            if self._write_count % _TRUNCATE_CHECK_INTERVAL == 0:
+                self._maybe_truncate_file()
 
     def _read_jsonl(self) -> List[Dict[str, Any]]:
-        """Read all records from the transcript file."""
-        if not self._main_file.exists():
-            return []
+        """Read all records from the transcript file.
 
-        records: list[Dict[str, Any]] = []
-        try:
-            with open(self._main_file, "r", encoding="utf-8") as f:
-                for line_no, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "ShortTermMemory: bad JSON at line %d", line_no
-                        )
-        except OSError as exc:
-            logger.warning("ShortTermMemory: read failed: %s", exc)
+        Lock-protected so a concurrent ``_append_jsonl`` doesn't
+        return a partially-flushed view to the reader. RLock means
+        ``_maybe_truncate_file`` can hold the outer lock and still
+        call this without deadlock.
+        """
+        with self._lock:
+            if not self._main_file.exists():
+                return []
 
-        return records
+            records: list[Dict[str, Any]] = []
+            try:
+                with open(self._main_file, "r", encoding="utf-8") as f:
+                    for line_no, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            records.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            logger.debug(
+                                "ShortTermMemory: bad JSON at line %d", line_no
+                            )
+            except OSError as exc:
+                logger.warning("ShortTermMemory: read failed: %s", exc)
+
+            return records
 
     def _maybe_truncate_file(self) -> None:
         """Truncate JSONL file to MAX_TRANSCRIPT_ENTRIES if oversized.
 
         DB retains full history; this only trims the file to prevent
         unbounded growth.  Keeps the most recent entries.
+
+        Lock-protected (RLock) so the read-modify-write happens
+        atomically. Memory v2 deliberately keeps this cap intact —
+        the leaf source of truth lives in
+        ``memory/conversations/``, not the STM jsonl, so trimming
+        old jsonl lines no longer loses information.
         """
-        if not self._main_file.exists():
-            return
-        try:
-            records = self._read_jsonl()
-            if len(records) <= MAX_TRANSCRIPT_ENTRIES:
+        with self._lock:
+            if not self._main_file.exists():
                 return
+            try:
+                records = self._read_jsonl()
+                if len(records) <= MAX_TRANSCRIPT_ENTRIES:
+                    return
 
-            keep = records[-MAX_TRANSCRIPT_ENTRIES:]
-            with open(self._main_file, "w", encoding="utf-8") as f:
-                for rec in keep:
-                    f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+                keep = records[-MAX_TRANSCRIPT_ENTRIES:]
+                with open(self._main_file, "w", encoding="utf-8") as f:
+                    for rec in keep:
+                        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
-            logger.info(
-                "ShortTermMemory: truncated %d → %d entries (DB retains full history)",
-                len(records), len(keep),
-            )
-        except Exception as exc:
-            logger.debug("ShortTermMemory: truncation failed (non-critical): %s", exc)
+                logger.info(
+                    "ShortTermMemory: truncated %d → %d entries (DB retains full history)",
+                    len(records), len(keep),
+                )
+            except Exception as exc:
+                logger.debug("ShortTermMemory: truncation failed (non-critical): %s", exc)

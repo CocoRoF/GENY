@@ -22,6 +22,7 @@ from service.memory.frontmatter import (
     extract_wikilinks,
     parse_frontmatter,
     render_frontmatter,
+    resolve_wikilink,
 )
 from service.memory.index import MemoryIndexManager, MemoryFileInfo
 
@@ -31,7 +32,30 @@ logger = getLogger(__name__)
 from service.utils.utils import _configured_tz as _get_tz
 
 # Valid categories that map to subdirectories.
-VALID_CATEGORIES = {"daily", "topics", "entities", "projects", "insights", "root"}
+#
+# Memory v2 (cf. /Geny/plan.md §1.5) categorises memory into five
+# semantic groups:
+#
+#   * LEAF (source of truth)  — ``conversations`` (1 turn = 1 file,
+#     written by ``ConversationArchiver`` not StructuredMemoryWriter).
+#   * INDEX                    — ``dms`` (per-counterpart-per-day
+#     bundles), and the daily journal at root level.
+#   * DERIVED                  — ``insights`` (LLM-distilled).
+#   * CURATED                  — ``topics``, ``projects``, ``daily``
+#     (free-form notes), and the root-level ``MEMORY.md``.
+#   * ARTIFACT                 — ``compactions`` (s02 compactor
+#     snapshots, written by ``MemoryProvider.record_compaction``).
+#
+# Membership in this set is the registration token: any category here
+# is recognised by the index, search tools, and Obsidian sidebar.
+# StructuredMemoryWriter still only knows how to produce the 11-key
+# frontmatter; extended categories (``conversations``, ``compactions``)
+# carry richer frontmatter via their own dedicated writers.
+VALID_CATEGORIES = {
+    "daily", "topics", "entities", "projects", "insights",
+    "dms", "conversations", "compactions",
+    "root",
+}
 
 # Maximum slug length for filenames.
 _MAX_SLUG = 80
@@ -164,6 +188,19 @@ class StructuredMemoryWriter:
         # Update index
         self._index.update_file(relative_path)
 
+        # Memory v2 PR 15 — propagate linked_from to wikilink targets.
+        # The new note declares ``links_to: [a, b, c]`` so each of
+        # those targets gains ``self`` as a back-reference. No
+        # wikilink? No-op. Failure here mustn't block the write so
+        # the call is best-effort.
+        try:
+            _propagate_linked_from(self._memory_dir, relative_path, all_links)
+        except Exception:
+            logger.debug(
+                "StructuredMemoryWriter: linked_from propagation failed",
+                exc_info=True,
+            )
+
         # Dual-write to DB
         self._db_write(relative_path, full_content, metadata)
 
@@ -239,6 +276,17 @@ class StructuredMemoryWriter:
 
             # Update index
             self._index.update_file(filename)
+
+            # PR 15 — propagate linked_from to wikilink targets.
+            try:
+                _propagate_linked_from(
+                    self._memory_dir, filename, metadata["links_to"],
+                )
+            except Exception:
+                logger.debug(
+                    "StructuredMemoryWriter: linked_from propagation failed",
+                    exc_info=True,
+                )
 
             logger.debug("update_note: updated %s", filename)
             return True
@@ -452,3 +500,59 @@ class StructuredMemoryWriter:
             mgr.execute_insert(query, params)
         except Exception as exc:
             logger.debug("StructuredMemoryWriter: DB write failed (non-critical): %s", exc)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Module-level helpers (Memory v2 PR 15)
+# ─────────────────────────────────────────────────────────────────
+
+
+def _propagate_linked_from(
+    memory_dir: Path,
+    source_filename: str,
+    target_wikilinks: list,
+) -> None:
+    """For each wikilink target the source declares, append the source
+    filename (sans extension) to the target's frontmatter
+    ``linked_from`` list.
+
+    Memory v2 PR 15 — closes review.md P11 (frontmatter linked_from
+    out of sync with _index.json). The propagation is *immediate*
+    so Obsidian's Properties pane and external readers see backlinks
+    without waiting for a reindex.
+
+    Resolution rules (mirror ``frontmatter.resolve_wikilink``):
+      * exact stem match in any subdir of ``memory_dir``
+      * partial stem match if uniquely resolvable (>=3 chars, ≥50% coverage)
+
+    No-op when the source has no wikilinks. Best-effort: if a single
+    target rewrite fails, the others still go through.
+    """
+    if not target_wikilinks:
+        return
+    source_stem = Path(source_filename).stem
+    for target_link in target_wikilinks:
+        try:
+            resolved = resolve_wikilink(target_link, str(memory_dir))
+            if not resolved:
+                continue
+            target_path = memory_dir / resolved
+            if not target_path.exists():
+                continue
+            text = target_path.read_text(encoding="utf-8")
+            meta, body = parse_frontmatter(text)
+            if not meta:
+                continue
+            existing = list(meta.get("linked_from") or [])
+            if source_stem in existing or source_filename in existing:
+                continue  # already recorded
+            existing.append(source_stem)
+            meta["linked_from"] = existing
+            target_path.write_text(
+                render_frontmatter(meta, body), encoding="utf-8",
+            )
+        except (OSError, UnicodeDecodeError):
+            logger.debug(
+                "_propagate_linked_from: rewrite failed for %s", target_link,
+                exc_info=True,
+            )

@@ -91,6 +91,24 @@ class SessionMemoryManager:
         self._index_manager: Optional[MemoryIndexManager] = None
         self._structured_writer: Optional[StructuredMemoryWriter] = None
 
+        # Memory v2 — leaf source-of-truth writer (plan §1.5).
+        # Auto-archives every record_message into
+        # ``memory/conversations/<date>/<id>.md``. Lazy-built in
+        # ``initialize()`` so callers that only construct the manager
+        # without initialising it (rare; old tests) don't hit disk.
+        from service.memory.conversation_archiver import ConversationArchiver  # local
+        from service.memory.dm_archiver import DmArchiver
+        from service.memory.daily_journal_writer import DailyJournalWriter
+        from service.memory.compaction_archiver import CompactionArchiver
+        self._ConversationArchiver = ConversationArchiver
+        self._DmArchiver = DmArchiver
+        self._DailyJournalWriter = DailyJournalWriter
+        self._CompactionArchiver = CompactionArchiver
+        self._conversation_archiver: Optional[ConversationArchiver] = None
+        self._dm_archiver: Optional[DmArchiver] = None
+        self._daily_journal: Optional[DailyJournalWriter] = None
+        self._compaction_archiver: Optional[CompactionArchiver] = None
+
         self._initialized = False
         self._db_manager = None
         self._session_id: Optional[str] = None
@@ -149,6 +167,36 @@ class SessionMemoryManager:
         self._index_manager = MemoryIndexManager(str(memory_dir))
         self._structured_writer = StructuredMemoryWriter(
             str(memory_dir), self._index_manager,
+            session_id=self._session_id or "",
+        )
+        # Memory v2 — leaf SoT archiver + index writers (plan §1.5).
+        # Constructed once per session; reused for every
+        # record_message call so the per-call overhead is just the
+        # disk write, not the path/tz/session_id bookkeeping.
+        # ``index_manager`` is wired in so each turn auto-refreshes
+        # ``_index.json`` + ``_vault_map.json`` without forcing the
+        # caller to manually rebuild.
+        self._conversation_archiver = self._ConversationArchiver(
+            str(memory_dir),
+            session_id=self._session_id or "",
+            index_manager=self._index_manager,
+        )
+        self._dm_archiver = self._DmArchiver(
+            str(memory_dir),
+            session_id=self._session_id or "",
+            index_manager=self._index_manager,
+        )
+        self._daily_journal = self._DailyJournalWriter(
+            str(memory_dir),
+            session_id=self._session_id or "",
+            index_manager=self._index_manager,
+        )
+        # PR 8 — compaction archiver. Takes the session storage_path
+        # (not memory_dir) because it writes to two locations:
+        # ``transcripts/compactions/`` (audit) and
+        # ``memory/compactions/`` (vault).
+        self._compaction_archiver = self._CompactionArchiver(
+            self._storage_path,
             session_id=self._session_id or "",
         )
         # Propagate DB if already set
@@ -237,6 +285,25 @@ class SessionMemoryManager:
         if metadata:
             meta.update(metadata)
         out_meta: Optional[Dict[str, Any]] = meta if meta else None
+
+        # Memory v2 — archive to ``conversations/<date>/<id>.md`` BEFORE
+        # the STM write so the resulting ``payload.conversation_ref``
+        # can travel into the STM jsonl line. The hook is best-effort
+        # — a write failure is logged at debug and the STM path
+        # continues unchanged (so a flaky disk never silently drops
+        # the canonical user/assistant turn).
+        archived = self._maybe_archive_conversation(role, content, out_meta)
+        if archived is not None and out_meta is not None:
+            out_meta = _augment_meta_with_conversation_ref(out_meta, archived)
+
+        # PR 4 — index writers fire AFTER the leaf SoT exists so the
+        # bundle entries can include a wikilink to the just-written
+        # conversations/<id>.md. Both writers are best-effort and
+        # cannot block the STM write.
+        conv_ref = archived.relative_path if archived else None
+        self._maybe_archive_dm(role, content, out_meta, conv_ref)
+        self._maybe_append_daily_journal(role, content, out_meta, conv_ref)
+
         try:
             from service.memory_provider.adapters.stm_adapter import try_record_message
             if try_record_message(self._session_id, role, content, out_meta):
@@ -263,9 +330,116 @@ class SessionMemoryManager:
                 "entity bootstrap hook failed — non-critical", exc_info=True,
             )
 
+    def _maybe_archive_conversation(
+        self,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]],
+    ):
+        """Best-effort hand-off to ConversationArchiver.
+
+        Returns the ``ArchivedConversation`` result on success, or
+        ``None`` for any reason that means "skip" (legacy metadata,
+        archiver not built yet, transient write error). Never raises
+        — record_message is a hot path and must not fail because of
+        a leaf-archive side-effect.
+
+        See plan §4.2 (record_message hook chain).
+        """
+        if self._conversation_archiver is None:
+            return None
+        try:
+            return self._conversation_archiver.archive(role, content, metadata)
+        except Exception:
+            logger.debug(
+                "conversation archive hook failed — non-critical",
+                exc_info=True,
+            )
+            return None
+
+    def _maybe_archive_dm(
+        self,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]],
+        conversation_ref: Optional[str],
+    ):
+        """Best-effort hand-off to DmArchiver. PR 4.
+
+        DmArchiver itself filters by kind / counterpart so this
+        wrapper just guards initialisation + exception swallow.
+        """
+        if self._dm_archiver is None:
+            return None
+        try:
+            return self._dm_archiver.append(
+                role, content, metadata, conversation_ref=conversation_ref,
+            )
+        except Exception:
+            logger.debug(
+                "dm archive hook failed — non-critical", exc_info=True,
+            )
+            return None
+
+    def _maybe_append_daily_journal(
+        self,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]],
+        conversation_ref: Optional[str],
+    ):
+        """Best-effort hand-off to DailyJournalWriter. PR 4."""
+        if self._daily_journal is None:
+            return None
+        try:
+            return self._daily_journal.append(
+                role, content, metadata, conversation_ref=conversation_ref,
+            )
+        except Exception:
+            logger.debug(
+                "daily journal hook failed — non-critical", exc_info=True,
+            )
+            return None
+
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""
         self._stm.add_event(event, data)
+
+    def record_compaction(
+        self,
+        summary: str,
+        *,
+        replaced_count: int,
+        ts: Optional[Any] = None,
+        strategy: str = "",
+        saved_tokens: Optional[int] = None,
+    ) -> Optional[Any]:
+        """Persist a compaction snapshot to both the audit log
+        (``transcripts/compactions/<ts>.md``) and the vault
+        (``memory/compactions/<sid>__<ts>.md``).
+
+        Memory v2 PR 8 — closes plan §2.2 (compaction must survive
+        the process so the next session can ``memory_search`` it).
+
+        Best-effort. Returns the ``ArchivedCompaction`` dataclass on
+        success, ``None`` on any write failure (logged at debug).
+        """
+        if self._compaction_archiver is None:
+            return None
+        try:
+            return self._compaction_archiver.archive(
+                summary,
+                replaced_count=replaced_count,
+                ts=ts,
+                strategy=strategy,
+                saved_tokens=saved_tokens,
+            )
+        except Exception:
+            logger.debug(
+                "record_compaction failed — non-critical",
+                exc_info=True,
+            )
+            return None
 
     def remember(self, text: str, *, heading: Optional[str] = None) -> None:
         """Write durable knowledge to long-term memory.
@@ -881,7 +1055,15 @@ class SessionMemoryManager:
     ) -> Optional[str]:
         """Build a memory context block for system prompt injection.
 
-        This is called before each agent turn to inject relevant
+        .. deprecated:: Memory v2 PR 11
+            Path A is retired (plan §5.1). System prompts no longer
+            statically inject memory; the s02 ContextStage's
+            ``GenyMemoryRetriever`` (slim mode) handles per-turn
+            retrieval and the agent's ``memory_*`` tool ladder
+            handles deep-dive bodies. Kept here for callers in
+            transition; will be removed in a follow-up cycle.
+
+        This was called before each agent turn to inject relevant
         memory into the conversation context.
 
         Args:
@@ -956,6 +1138,12 @@ class SessionMemoryManager:
         max_chars: Optional[int] = None,
     ) -> Optional[str]:
         """Async version of ``build_memory_context`` with vector search.
+
+        .. deprecated:: Memory v2 PR 11
+            Same rationale as :meth:`build_memory_context` —
+            production never wired this method (review.md P10) and
+            v2 routes retrieval through ``GenyMemoryRetriever``
+            instead.
 
         Includes FAISS vector search results when the vector memory
         layer is enabled, in addition to keyword search and file-based
@@ -1260,3 +1448,32 @@ class SessionMemoryManager:
             total_tags=total_tags,
             total_links=total_links,
         )
+
+
+# ─────────────────────────────────────────────────────────────────
+# Module-level helpers
+# ─────────────────────────────────────────────────────────────────
+
+
+def _augment_meta_with_conversation_ref(
+    meta: Dict[str, Any], archived,
+) -> Dict[str, Any]:
+    """Return a *new* metadata dict with ``payload.conversation_ref``
+    pointing at the archiver-written file.
+
+    Defensive copy — the caller's dict is not mutated. Existing
+    ``payload`` keys (e.g. tool_run_summary's tools_used /
+    files_written) are preserved unchanged; only the new
+    ``conversation_ref`` is added (or overwritten if a stale value
+    happened to be there).
+
+    Used by :meth:`SessionMemoryManager.record_message` to thread
+    the conversations/<id>.md pointer into STM's jsonl line so the
+    Stream tab can hydrate the full body without scanning the
+    vault. See plan §2.1.1.
+    """
+    new_meta = dict(meta)
+    payload = dict(new_meta.get("payload") or {})
+    payload["conversation_ref"] = archived.relative_path
+    new_meta["payload"] = payload
+    return new_meta

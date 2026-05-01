@@ -49,6 +49,17 @@ _BOOTSTRAP_BODY = (
 _REFRESH_MAX_EVENTS = 256
 _REFRESH_MAX_FILES = 10
 
+#: Memory v2 PR 16 — boundary marker for the auto/manual region split
+#: in ``entities/<id>.md``. Defined at module scope so both the
+#: refresh helper (uses it via ``_split_existing_body``) and the
+#: renderer (uses it as a literal in the body) see the same value.
+AUTO_STATS_MARKER = "<!-- AUTO_STATS_END -->"
+
+#: Number of recent conversations/ wikilinks to surface on the entity
+#: stub (plan §3.2). Defined here so the function-default lookup in
+#: ``_recent_conversation_refs`` resolves at module-import time.
+RECENT_CONVERSATION_LIMIT = 5
+
 # counterpart_id values that don't represent an external party — we
 # never bootstrap an entity file for these.
 _SKIP_COUNTERPART_IDS = frozenset({"self", "system", "", "unknown"})
@@ -185,7 +196,46 @@ def _refresh_entity_stats(
         stats = _summarise_counterpart_stats(memory_manager, counterpart_id)
         if stats is None:
             return None
-        body = _render_entity_stats_body(stats, counterpart_role)
+        # PR 16 — preserve human-edited Notes section. Read the
+        # existing body, slice off everything below the marker as-is,
+        # and pass it back to the renderer so the rewriter only
+        # touches the auto region.
+        existing_notes = ""
+        recent_conv: List[str] = []
+        try:
+            ltm = getattr(memory_manager, "_ltm", None)
+            writer_for_path = getattr(memory_manager, "_structured_writer", None)
+            memory_dir = (
+                getattr(writer_for_path, "memory_dir", None)
+                or (getattr(ltm, "memory_dir", None) if ltm is not None else None)
+            )
+            if memory_dir is not None:
+                full_path = memory_dir / rel_path
+                if full_path.exists():
+                    try:
+                        from service.memory.frontmatter import parse_frontmatter
+                        text = full_path.read_text(encoding="utf-8")
+                        _, body = parse_frontmatter(text)
+                        existing_notes = _split_existing_body(body)
+                    except Exception:
+                        existing_notes = ""
+        except Exception:
+            existing_notes = ""
+        # Recent conversations wikilinks: walk the caller's STM tail
+        # for events with this counterpart that carry a
+        # ``conversation_ref`` payload pointer (PR 2 stamps it).
+        try:
+            recent_conv = _recent_conversation_refs(
+                memory_manager, counterpart_id,
+            )
+        except Exception:
+            recent_conv = []
+
+        body = _render_entity_stats_body(
+            stats, counterpart_role,
+            recent_conversations=recent_conv,
+            notes_section=existing_notes,
+        )
         writer = getattr(memory_manager, "_structured_writer", None)
         if writer is None:
             return None
@@ -207,6 +257,44 @@ def _refresh_entity_stats(
             counterpart_id, exc_info=True,
         )
         return None
+
+
+def _recent_conversation_refs(
+    memory_manager, counterpart_id: str, limit: int = RECENT_CONVERSATION_LIMIT,
+) -> List[str]:
+    """Walk the caller's STM tail-first and collect up to ``limit``
+    distinct ``conversation_ref`` strings for the given counterpart.
+
+    PR 2 stamps every record_message with
+    ``metadata.payload.conversation_ref``; this helper surfaces the
+    most-recent N onto the entity's auto-region (PR 16).
+    """
+    out: List[str] = []
+    seen: set = set()
+    stm = getattr(memory_manager, "short_term", None)
+    if stm is None:
+        return out
+    try:
+        entries = list(stm.load_all() or [])
+    except Exception:
+        return out
+    for entry in reversed(entries):
+        meta = getattr(entry, "metadata", None)
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("counterpart_id") != counterpart_id:
+            continue
+        payload = meta.get("payload") if isinstance(meta.get("payload"), dict) else {}
+        ref = payload.get("conversation_ref")
+        if not isinstance(ref, str) or not ref:
+            continue
+        if ref in seen:
+            continue
+        seen.add(ref)
+        out.append(ref)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _summarise_counterpart_stats(
@@ -293,13 +381,25 @@ def _summarise_counterpart_stats(
 
 
 def _render_entity_stats_body(
-    stats: Dict[str, Any], counterpart_role: Optional[str],
+    stats: Dict[str, Any],
+    counterpart_role: Optional[str],
+    recent_conversations: Optional[List[str]] = None,
+    notes_section: str = "",
 ) -> str:
     """Render the markdown body for an entity refresh.
 
-    Self-contained (no dependency on ``memory_inspect_tools``) —
-    keeps the entity_bootstrap module free of heavy imports
-    (BaseTool / ToolCapabilities) on the recorder's hot path.
+    Memory v2 PR 16 — body now has two regions divided by
+    ``AUTO_STATS_MARKER``:
+
+      1. Auto region (above marker): heading + intro + ``## Stats``
+         + ``## Recent conversations`` (wikilinks).
+      2. Human region (below marker): ``## Notes`` + whatever the
+         operator typed there.
+
+    The auto region is rebuilt on every refresh; the human region
+    (``notes_section``) is forwarded verbatim. When the caller
+    doesn't pass ``notes_section`` (first stub or absent marker)
+    we seed an empty ``## Notes`` placeholder below the marker.
     """
     lines: List[str] = []
     lines.append(f"# Counterpart: {stats['counterpart_id']}")
@@ -331,4 +431,37 @@ def _render_entity_stats_body(
     if stats["cost_usd_total"] is not None:
         lines.append(f"- Total cost: ${stats['cost_usd_total']:.4f}")
     lines.append("")
+    # Recent conversations section (auto region)
+    if recent_conversations:
+        lines.append("## Recent conversations")
+        lines.append("")
+        for ref in recent_conversations[:RECENT_CONVERSATION_LIMIT]:
+            target = ref[:-3] if ref.endswith(".md") else ref
+            lines.append(f"- [[{target}]]")
+        lines.append("")
+    # Boundary marker — rewriter never touches anything below this.
+    lines.append(AUTO_STATS_MARKER)
+    lines.append("")
+    # Human-editable region. When no existing notes were extracted,
+    # seed a placeholder so the user sees where to type.
+    if notes_section.strip():
+        lines.append(notes_section.rstrip())
+    else:
+        lines.append("## Notes")
+        lines.append("")
+        lines.append("_(여기에 사람이 자유롭게 메모하세요. 자동 갱신은 이 영역을 건드리지 않습니다.)_")
+    lines.append("")
     return "\n".join(lines)
+
+
+def _split_existing_body(body: str) -> str:
+    """Return the human-editable section (everything *below*
+    ``AUTO_STATS_MARKER``) of an existing entity body. Empty
+    string when the marker is absent (legacy stub) — the renderer
+    will then seed a fresh placeholder.
+    """
+    idx = body.find(AUTO_STATS_MARKER)
+    if idx < 0:
+        return ""
+    after = body[idx + len(AUTO_STATS_MARKER):]
+    return after.lstrip("\n")
