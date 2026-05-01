@@ -15,7 +15,6 @@ import {
   Search,
   GitGraph,
   FileText,
-  FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
