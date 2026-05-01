@@ -13,6 +13,7 @@ import NoteViewer from './NoteViewer';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import SearchPanel from './SearchPanel';
 import RightPanel from './RightPanel';
+import ConversationView from './ConversationView';
 
 export default function ObsidianView() {
   const searchParams = useSearchParams();
@@ -139,6 +140,8 @@ export default function ObsidianView() {
             />
           )}
           {viewMode === 'search' && <SearchPanel />}
+          {/* Memory v2 PR 5 — Conversation view */}
+          {viewMode === 'conversation' && <ConversationView />}
         </div>
       </div>
 

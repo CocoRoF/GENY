@@ -41,3 +41,6 @@ Your deliverables should be thorough enough that a developer can implement from 
 - Design for iteration — plans should support incremental delivery
 - Write for your audience — developers should be able to implement directly from your specs
 - Use the shared folder to publish plans so developer sessions can access them
+
+<!-- Memory v2 PR 13 — shared ladder template. -->
+{{include: templates/memory_ladder.md}}

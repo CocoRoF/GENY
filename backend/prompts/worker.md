@@ -129,3 +129,6 @@ details: |
   adjusting the working directory or asking the user to grant access.
 artifacts: []
 ```
+
+<!-- Memory v2 PR 13 — shared ladder template. -->
+{{include: templates/memory_ladder.md}}

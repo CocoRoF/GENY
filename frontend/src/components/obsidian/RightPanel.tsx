@@ -237,8 +237,19 @@ export default function RightPanel() {
                   <span className="obs-rp-prop-key">LTM Entries</span>
                   <span className="obs-rp-prop-val">{stats?.long_term_entries ?? 0}</span>
                 </div>
-                <div className="obs-rp-prop">
-                  <span className="obs-rp-prop-key">STM Entries</span>
+                {/* Memory v2 PR 5 — STM count is now a deep-link
+                    into the Conversation view (Stream tab). Hover
+                    underline + cursor: pointer signal the affordance.
+                    Plan §4.5 — review.md P1 closes here. */}
+                <div
+                  className="obs-rp-prop"
+                  style={{ cursor: 'pointer' }}
+                  title="Open Conversation view"
+                  onClick={() => obsidian.setViewMode('conversation')}
+                >
+                  <span className="obs-rp-prop-key" style={{ textDecoration: 'underline dotted' }}>
+                    STM Entries
+                  </span>
                   <span className="obs-rp-prop-val">{stats?.short_term_entries ?? 0}</span>
                 </div>
               </>
