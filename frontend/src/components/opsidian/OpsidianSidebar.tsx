@@ -32,7 +32,6 @@ const CATEGORY_ICONS = SHARED_CATEGORY_ICONS;
 const CATEGORY_COLORS: Record<string, string> = {
   daily: '#f59e0b',
   topics: '#3b82f6',
-  entities: '#10b981',
   projects: '#8b5cf6',
   insights: '#ec4899',
   root: '#64748b',
@@ -68,7 +67,7 @@ export default function OpsidianSidebar() {
   const { t } = useI18n();
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'entities', 'projects', 'insights', 'root'])
+    new Set(['daily', 'topics', 'projects', 'insights', 'root'])
   );
   const [filterText, setFilterText] = useState('');
 

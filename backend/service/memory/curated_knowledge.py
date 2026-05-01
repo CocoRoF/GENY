@@ -13,7 +13,6 @@ Storage layout::
         topics/
         decisions/
         insights/
-        entities/
         projects/
         reference/
         _index.json

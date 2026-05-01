@@ -7,7 +7,7 @@ Pins:
     counterpart / counterpart_role / linked_event_id.
   * Notes outside conversations/ leave those fields as empty
     string (back-compat: existing topics / projects / daily /
-    insights / entities / dms continue working unchanged).
+    insights / dms continue working unchanged).
   * ``_index.json`` round-trip preserves the new fields.
 
 Hand-written conversations/ note (no archiver) so the test
@@ -44,7 +44,7 @@ CONV_FRONTMATTER = {
     "content_chars": 287,
     "tags": ["conversation", "task_request", "paired_subworker"],
     "importance": "medium",
-    "links_to": ["dms/82b10c90/2026-05-01", "entities/82b10c90"],
+    "links_to": ["dms/82b10c90/2026-05-01"],
     "linked_from": [],
 }
 

@@ -11,7 +11,6 @@ import type { EdgeType } from './graphTypes';
 export const CATEGORY_COLORS: Record<string, string> = {
   daily: '#f59e0b',
   topics: '#3b82f6',
-  entities: '#10b981',
   projects: '#8b5cf6',
   insights: '#ec4899',
   reference: '#06b6d4',

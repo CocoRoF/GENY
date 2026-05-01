@@ -407,7 +407,7 @@ function CuratedSidebar({
 }) {
   const { t } = useI18n();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'entities', 'projects', 'insights', 'reference', 'root']),
+    new Set(['daily', 'topics', 'projects', 'insights', 'reference', 'root']),
   );
   const [filterText, setFilterText] = useState('');
 
@@ -819,7 +819,6 @@ function CuratedNoteEditor({
           >
             <option value="topics">Topics</option>
             <option value="daily">Daily</option>
-            <option value="entities">Entities</option>
             <option value="projects">Projects</option>
             <option value="insights">Insights</option>
             <option value="reference">Reference</option>
@@ -1179,7 +1178,6 @@ function CuratedDraftEditor({
         >
           <option value="topics">Topics</option>
           <option value="daily">Daily</option>
-          <option value="entities">Entities</option>
           <option value="projects">Projects</option>
           <option value="insights">Insights</option>
           <option value="reference">Reference</option>

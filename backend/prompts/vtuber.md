@@ -172,4 +172,4 @@ VTuber 한정 — 사용자가 지난 대화를 묻거나 ("what did the Worker 
 "have we discussed X") Sub-Worker 의 결과가 궁금하면 위 ladder 에서
 ``counterpart='paired_subworker'`` 또는 ``'user'`` 로 시작하세요.
 ``memory_distill(counterpart, update_note=true)`` 는 가끔만 — 그 결과는
-``memory/entities/<id>.md`` 에 영구화돼 다음 turn 의 vault map / search 가 보게 됩니다.
+``memory/insights/counterpart-<id>.md`` 에 영구화돼 다음 turn 의 vault map / search 가 보게 됩니다.

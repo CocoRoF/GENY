@@ -5,6 +5,8 @@
 > 분석 대상: `Geny/backend/service/memory/*`, `Geny/backend/tools/built_in/memory_*.py`, `Geny/backend/prompts/*`, `geny-executor/src/geny_executor/{memory,stages/s02_context,stages/s03_system}/*`.
 >
 > v1 대비 핵심 변화: **`memory/conversations/` 를 leaf source-of-truth 카테고리로 도입.** `insights/` 는 derived 영역으로 의미 순화. `dms/`, `YYYY-MM-DD.md` 는 본문 중복 없이 wikilink 인덱스로 가벼워짐.
+>
+> **Revision (2026-05-01, post-1.11 hotfix → 1.12.0): `entities/` 카테고리는 폐지되었다.** 카운터파트 stats 의 자동 stub (`entity_bootstrap`) 은 `dms/<cp>/<date>.md` frontmatter + StreamTab UI 와 데이터가 100% 중복되었기 때문에 record_message hook chain 에서 제거되었다. 카운터파트 distillation 이 필요하면 `memory_distill(counterpart, update_note=true)` 가 `insights/counterpart-<sanitized>.md` 로 작성한다 (Derived 카테고리). 본 plan 문서의 이전 §3.2 / 트리 다이어그램 / hook chain 그림에 남아 있는 `entities/` 항목은 historical context 로만 읽고, 현행 카테고리 매트릭스는 §1.5 를 보라.
 
 ---
 
@@ -119,10 +121,10 @@ LTM 명시적 쓰기 (memory_write 도구 등)
     ├── dms/<sanitized_counterpart>/<YYYY-MM-DD>.md
     │       (그 날 그 카운터파트의 turn 들 — 1-line headline + wikilink)
     ├── 2026-05-01.md              (daily journal — 그 날의 모든 turn)
-    ├── entities/<sanitized>.md    (카운터파트 Stats / Notes split)
     │
     │ ── DERIVED (curated/distilled) ─────────────────────────────
     ├── insights/<slug>.md         (LLM reflection 산출물)
+    ├── insights/counterpart-<sanitized>.md (memory_distill 결과 — 1.12.0+)
     ├── MEMORY.md                  (evergreen 누적, 사람·remember 도구가 작성)
     ├── topics/<slug>.md           (주제 페이지, 명시적 작성)
     ├── projects/<slug>.md         (진행 프로젝트)
@@ -149,8 +151,8 @@ LTM 명시적 쓰기 (memory_write 도구 등)
 | `conversations/<date>/<id>.md` | **Leaf SoT** — 1 turn 1 file 영구 보존 | ✅ 모든 record_message | ✅ 전체 본문 | (없음 — 다른 게 가리킴) |
 | `dms/<cp>/<date>.md` | **Index** — 카운터파트별 일일 묶음 | ✅ kind∈{dm,task_*,tool_run_summary} 시 | ❌ 1-line headline 만 | conversations/ |
 | `<YYYY-MM-DD>.md` (root) | **Index** — 일자별 모든 turn 시간순 | ✅ 매 turn | ❌ 1-line headline 만 | conversations/ |
-| `entities/<id>.md` | **Index + Notes** — 카운터파트 stats + 사람 메모 | ✅ counterpart 첫 등장 / stats 갱신 시 | △ Stats(자동) + Notes(수동) | conversations/, dms/ |
 | `insights/<slug>.md` | **Derived** — LLM distill 정제 지식 | ❌ 명시적 reflection 시 | ✅ 정제 본문 | conversations/ (소스 인용) |
+| `insights/counterpart-<id>.md` | **Derived (curated counterpart distillation)** — `memory_distill` 결과 | ❌ 명시적 distill 시 | ✅ stats + narrative | conversations/, dms/ |
 | `MEMORY.md` | **Curated** — evergreen 누적 narrative | ❌ remember() / 사람 | ✅ | (자유) |
 | `topics/<slug>.md` | **Curated** — 주제 페이지 | ❌ remember_topic / 사람 | ✅ | (자유) |
 | `projects/<slug>.md` | **Curated** — 진행 프로젝트 | ❌ 사람 / 도구 | ✅ | (자유) |
@@ -159,7 +161,7 @@ LTM 명시적 쓰기 (memory_write 도구 등)
 
 **핵심 의미 분리**:
 - **SoT (conversations)**: 변하지 않는 사실. "이 turn 에서 이 글자가 나왔다."
-- **Index (dms / daily / entities)**: SoT 의 다른 각도 보기. 본문 X. 변경 자유 (재생성 가능).
+- **Index (dms / daily journal)**: SoT 의 다른 각도 보기. 본문 X. 변경 자유 (재생성 가능). (구버전 `entities/` 카테고리는 Memory v2 1.12.0 에서 폐지됨 — 카운터파트 stats 는 `dms/<cp>/<date>.md` frontmatter + StreamTab UI 에서 관찰 가능하고, 추가 distill 이 필요하면 `memory_distill` 이 `insights/counterpart-<id>.md` 로 작성한다.)
 - **Derived (insights)**: LLM 이 재해석한 지식. SoT 가 변하지 않아도 derived 는 다시 만들 수 있음.
 - **Curated (MEMORY/topics/projects/daily)**: 사람 또는 명시적 도구가 의도적으로 쌓은 narrative. 자동 갱신 X.
 - **Artifact (compactions)**: 시스템 운영 산출물. 영구화는 되나 사람이 직접 편집할 일 없음.

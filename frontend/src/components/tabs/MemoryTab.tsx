@@ -491,8 +491,8 @@ function MemoryCreateModal({
                          text-[12px] text-[var(--text-secondary)] outline-none"
             >
               {/* Modal lists only writable categories — auto-managed
-                  ones (conversations / dms / daily-journal / entities
-                  / compactions) are populated by record_message hooks
+                  ones (conversations / dms / daily-journal /
+                  compactions) are populated by record_message hooks
                   and would otherwise let users hand-craft stub notes
                   that the auto-writers later overwrite or misindex. */}
               {WRITABLE_CATEGORIES.map(c => (

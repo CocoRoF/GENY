@@ -109,7 +109,7 @@ def resolve_wikilink(link: str, memory_dir: str, *, extensions: Tuple[str, ...] 
 
     Search order:
     1. Exact match in memory_dir
-    2. Match in subdirectories (topics/, entities/, etc.)
+    2. Match in subdirectories (topics/, projects/, etc.)
     3. Partial stem match
 
     Args:

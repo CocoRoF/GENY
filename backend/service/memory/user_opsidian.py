@@ -11,7 +11,6 @@ Storage layout::
     {STORAGE_ROOT}/_user_opsidian/{username}/
         daily/
         topics/
-        entities/
         projects/
         insights/
         _index.json

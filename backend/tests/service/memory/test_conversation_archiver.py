@@ -7,8 +7,8 @@ Pins the contract every downstream PR depends on:
     ``tags`` / ``importance`` / ``links_to`` / ``linked_from``)
   * importance heuristic (8 cases × 4 categories)
   * sub-second collision widening (eid8 → eid12 → … → eid32)
-  * legacy metadata short-circuits to ``None`` (parity with
-    entity_bootstrap behaviour)
+  * legacy metadata (no event_id) short-circuits to ``None`` so
+    callers without InteractionEvent context skip the archive
   * tool_run_summary body carries structured + raw payload blocks
   * round-trip stability — written frontmatter parses back to the
     same dict
@@ -260,16 +260,15 @@ class TestBuilders:
         assert len(t) < 200
 
     def test_build_links_to_user_chat_skips_dms(self):
-        # user_chat is not a DM-class kind → no dms wikilink, but
-        # entities/<sanitized> + day journal still present.
+        # user_chat is not a DM-class kind → only the daily journal
+        # link is emitted (the legacy entities/<sanitized> link was
+        # retired with the entities/ category itself).
         links = build_links_to(
             kind=Kind.USER_CHAT.value,
             counterpart_id="owner:scenario",
             date="2026-05-01",
         )
-        assert "2026-05-01" in links
-        assert "entities/owner_scenario" in links
-        assert not any(l.startswith("dms/") for l in links)
+        assert links == ["2026-05-01"]
 
     def test_build_links_to_task_request_includes_dms(self):
         links = build_links_to(
@@ -277,8 +276,10 @@ class TestBuilders:
             counterpart_id="82b10c90-4c95-4e4f-863d-0bef73801fde",
             date="2026-05-01",
         )
+        assert "2026-05-01" in links
         assert "dms/82b10c90-4c95-4e4f-863d-0bef73801fde/2026-05-01" in links
-        assert "entities/82b10c90-4c95-4e4f-863d-0bef73801fde" in links
+        # entities/ link is no longer emitted post-Memory-v2.
+        assert not any(l.startswith("entities/") for l in links)
 
     def test_build_links_to_self_counterpart_skips_entity_link(self):
         links = build_links_to(

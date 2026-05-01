@@ -18,7 +18,10 @@ class MemorySource(str, Enum):
 
 
 # Valid categories for structured memory notes.
-MEMORY_CATEGORIES = ("daily", "topics", "entities", "projects", "insights", "root")
+# Memory v2 retired ``entities`` — counterpart info lives in ``dms/``
+# now (per-counterpart-per-day index) and stats are derivable from
+# ``dms/<cp>/<date>.md`` frontmatter + the StreamTab UI. See plan §1.5.
+MEMORY_CATEGORIES = ("daily", "topics", "projects", "insights", "root")
 
 # Valid importance levels.
 IMPORTANCE_LEVELS = ("critical", "high", "medium", "low")
