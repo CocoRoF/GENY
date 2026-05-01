@@ -146,6 +146,92 @@ _EMOTICON_PATTERN = re.compile(
     r"(?!\w)",
 )
 
+# ──────────────────────────────────────────────────────────────────
+# Markdown stripping for TTS
+# ──────────────────────────────────────────────────────────────────
+#
+# Agents frequently format their replies with markdown — headings
+# (``#`` / ``##``), emphasis (``**bold**``, ``*italic*``), lists,
+# block quotes, fenced code, links, and Obsidian-style wikilinks
+# (``[[target]]``). When the unprocessed text reaches TTS, the
+# engine reads the punctuation literally ("hash hash hello",
+# "asterisk asterisk asterisk asterisk strong", etc.). The user's
+# captured failure mode included ``# 안녕하세요!`` and ``**굵은
+# 글씨**`` being voiced verbatim.
+#
+# These patterns operate on the post-display-sanitised text, so
+# routing tags / emotion tags / think blocks are already gone by
+# the time we run them. We strip the markup *but keep the visible
+# words*.
+#
+# Order of application matters:
+#   1. Fenced code blocks → unwrap to inner text (don't lose the
+#      content; agents sometimes put speakable explanations inside)
+#   2. Inline code (``...``) → strip backticks, keep contents
+#   3. Images ``![alt](url)`` → drop entirely (alt text is rarely
+#      worth speaking and ``alt`` text often duplicates surrounding
+#      prose)
+#   4. Links ``[text](url)`` → keep ``text``, drop URL
+#   5. Wikilinks ``[[target|alias]]`` → keep alias if present, else
+#      target — same convention as our memory writers
+#   6. Emphasis (``**``, ``__``, ``*``, ``_``) → strip markers,
+#      keep wrapped text
+#   7. Headings (``#`` at line start) → strip the ``#`` run + space
+#   8. Block quotes (``>`` at line start) → strip
+#   9. List markers (``-`` / ``*`` / ``+`` / ``1.`` at line start)
+#      → strip
+#  10. Horizontal rules (``---``, ``***``, ``___`` on their own
+#      line) → drop
+#  11. HTML tags (``<br>``, ``<b>foo</b>``) → strip tags, keep text
+#  12. Stray punctuation cleanup (multiple consecutive separators)
+
+_MD_FENCED_CODE = re.compile(r"```[a-zA-Z0-9_+-]*\n?(.*?)```", re.DOTALL)
+_MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_WIKILINK = re.compile(r"\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]")
+_MD_BOLD_ITALIC_STAR = re.compile(r"\*{1,3}([^*\n]+?)\*{1,3}")
+_MD_BOLD_ITALIC_UNDER = re.compile(r"(?<![A-Za-z0-9_])_{1,3}([^_\n]+?)_{1,3}(?![A-Za-z0-9_])")
+_MD_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+", re.MULTILINE)
+_MD_BLOCKQUOTE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.MULTILINE)
+_MD_LIST_MARKER = re.compile(r"^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+", re.MULTILINE)
+_MD_HRULE = re.compile(r"^[ \t]{0,3}(?:[-*_][ \t]?){3,}[ \t]*$", re.MULTILINE)
+_MD_HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+
+
+def _strip_markdown_for_tts(text: str) -> str:
+    """Strip markdown formatting from ``text`` while preserving the
+    spoken words. Order-sensitive — see the comment block above.
+    """
+    if not text:
+        return ""
+    # 1. Fenced code blocks → inner content
+    text = _MD_FENCED_CODE.sub(lambda m: m.group(1) or "", text)
+    # 2. Inline code → unwrap
+    text = _MD_INLINE_CODE.sub(r"\1", text)
+    # 3. Images → drop
+    text = _MD_IMAGE.sub("", text)
+    # 4. Links → keep visible text
+    text = _MD_LINK.sub(r"\1", text)
+    # 5. Wikilinks → alias if present, else target
+    text = _MD_WIKILINK.sub(lambda m: m.group(2) or m.group(1), text)
+    # 6. Emphasis — apply twice so triple stars (``***x***``) collapse
+    #    cleanly through the bold-then-italic passes.
+    for _ in range(2):
+        text = _MD_BOLD_ITALIC_STAR.sub(r"\1", text)
+        text = _MD_BOLD_ITALIC_UNDER.sub(r"\1", text)
+    # 7. Headings — strip leading ``#`` runs
+    text = _MD_HEADING.sub("", text)
+    # 8. Block quotes — strip leading ``>``
+    text = _MD_BLOCKQUOTE.sub("", text)
+    # 9. List markers — strip leading bullet / number
+    text = _MD_LIST_MARKER.sub("", text)
+    # 10. Horizontal rules — drop the whole line
+    text = _MD_HRULE.sub("", text)
+    # 11. HTML tags
+    text = _MD_HTML_TAG.sub("", text)
+    return text
+
 
 def sanitize_for_display(text: str | None) -> str:
     """Strip routing / emotion / think markers; collapse whitespace.
@@ -173,22 +259,59 @@ def sanitize_for_display(text: str | None) -> str:
 
 
 def sanitize_for_tts(text: str | None) -> str:
-    """Display-sanitised + emoji / emoticon stripped.
+    """Display-sanitised + emoji / emoticon / markdown stripped.
 
-    TTS engines mispronounce emoji by transliterating them with their
-    Unicode-name word forms (😊 → "smiling-face-with-smiling-eyes")
-    in whatever the engine's primary locale is — wrecking
-    Korean/Japanese audio with mid-sentence English fragments. This
-    pass strips the SMP emoji blocks + the BMP symbol/dingbat/keycap
-    ranges and the common textual emoticons.
+    TTS engines fail in three distinct ways on raw agent output:
 
-    Display surfaces (chat UI) should keep using
+      * emoji are transliterated to their Unicode-name word forms
+        (😊 → "smiling-face-with-smiling-eyes") in whatever the
+        engine's primary locale is, wrecking Korean / Japanese audio
+        with mid-sentence English fragments;
+      * common textual emoticons (``:)`` ``ㅋㅋ`` ``^_^``) are voiced
+        as character sequences;
+      * **markdown formatting is read literally** — agents that
+        reply with headings (``# 안녕하세요!``), emphasis
+        (``**굵은 글씨**``), wikilinks (``[[target]]``), or fenced
+        code make the TTS engine speak the punctuation ("hash hash
+        hello", "asterisk asterisk strong asterisk asterisk").
+
+    This pass handles all three. Output is plain prose ready for the
+    audio engine. Display surfaces (chat UI) should keep using
     :func:`sanitize_for_display` so the visible transcript still
-    shows the emoji the agent wrote.
+    shows the emoji and markdown the agent wrote.
+
+    Order is load-bearing: ``sanitize_for_display`` collapses
+    newlines into spaces (good for chat bubbles) which would defeat
+    the line-anchored markdown patterns (headings, blockquotes,
+    list markers, horizontal rules). We therefore run the
+    routing/think/emotion strips manually here while keeping line
+    structure intact, then apply the markdown stripper, *then*
+    collapse whitespace at the end.
     """
     if not text:
         return ""
-    text = sanitize_for_display(text)
+    # Reasoning blocks first — ``<think>``/``</think>`` payloads are
+    # never speakable and can contain anything (including markdown
+    # we'd otherwise unwrap).
+    text = THINK_BLOCK_PATTERN.sub("", text)
+    text = THINK_OPEN_PATTERN.sub("", text)
+    # Markdown next — runs *before* the bracket-tag strippers so
+    # constructs like ``[[wikilink]]``, ``[link text](url)``, and
+    # ``![alt](url)`` get unwrapped without
+    # ``UNKNOWN_EMOTION_TAG_PATTERN`` clobbering the inner
+    # ``[wikilink]`` / ``[alt]`` and leaving an orphan ``[]`` /
+    # ``!(image.png)`` behind.
+    text = _strip_markdown_for_tts(text)
+    # Routing prefixes + emotion tags + unknown bracketed tags —
+    # whatever brackets remain after markdown unwrap are real
+    # routing/emotion noise and get cleaned up here.
+    text = SYSTEM_TAG_PATTERN.sub("", text)
+    text = EMOTION_TAG_PATTERN.sub("", text)
+    text = UNKNOWN_EMOTION_TAG_PATTERN.sub("", text)
+    # Emoji + textual emoticons — pure character-level passes.
     text = _EMOJI_PATTERN.sub("", text)
     text = _EMOTICON_PATTERN.sub("", text)
-    return _WHITESPACE_COLLAPSE.sub(" ", text).strip()
+    # Final whitespace collapse — newlines and runs of spaces
+    # become single spaces so the TTS engine reads continuously.
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
