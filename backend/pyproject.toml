@@ -46,7 +46,11 @@ dependencies = [
     # ``GenyMemoryRetriever.slim_mode`` + ``conversations`` /
     # ``dms`` / ``compactions`` ``NOTE_CATEGORIES`` for the
     # Memory v2 leaf source-of-truth design (cf. /Geny/plan.md).
-    "geny-executor[web,cron]>=1.9.0,<2.0.0",
+    # 1.10.0 adds ``GenyMemoryStrategy.min_insight_importance`` —
+    # gates reflections by importance so ``insights/`` only
+    # accumulates genuine factual learnings, not behavioural
+    # patterns or per-turn tactics.
+    "geny-executor[web,cron]>=1.10.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
