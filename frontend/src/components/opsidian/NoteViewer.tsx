@@ -3,7 +3,7 @@
 import { useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
 import {
   Tag,
@@ -42,7 +42,7 @@ export default function NoteViewer() {
     selectedSessionId,
     openFile,
     setFileDetail,
-  } = useObsidianStore();
+  } = useOpsidianStore();
 
   // Navigate to a file via wikilink
   const navigateToFile = useCallback(

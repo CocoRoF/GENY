@@ -17,7 +17,7 @@ import type {
 export type ViewMode = 'editor' | 'graph' | 'search' | 'conversation';
 export type SidebarPanel = 'files' | 'tags' | 'backlinks';
 
-export interface ObsidianState {
+export interface OpsidianState {
   // Sessions
   sessions: SessionInfo[];
   selectedSessionId: string | null;
@@ -94,7 +94,7 @@ const initialState = {
   rightPanelOpen: true,
 };
 
-export const useObsidianStore = create<ObsidianState>((set) => ({
+export const useOpsidianStore = create<OpsidianState>((set) => ({
   ...initialState,
 
   setSessions: (sessions) => set({ sessions }),

@@ -27,7 +27,7 @@
  */
 
 import { useMemo, useState, useCallback } from 'react';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
 import { MessageSquare, FileText, ExternalLink } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
@@ -49,7 +49,7 @@ export default function ConversationView() {
     selectedFile,
     openFile,
     setFileDetail,
-  } = useObsidianStore();
+  } = useOpsidianStore();
   const [sub, setSub] = useState<SubView>('stream');
 
   // Filter the existing vault tree down to the conversation-related

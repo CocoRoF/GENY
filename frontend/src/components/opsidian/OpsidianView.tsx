@@ -2,20 +2,20 @@
 
 import { useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import { agentApi, memoryApi } from '@/lib/api';
-import './obsidian.css';
+import './opsidian.css';
 import SessionSelector from './SessionSelector';
-import ObsidianSidebar from './ObsidianSidebar';
-import ObsidianTabs from './ObsidianTabs';
+import OpsidianSidebar from './OpsidianSidebar';
+import OpsidianTabs from './OpsidianTabs';
 import NoteViewer from './NoteViewer';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import SearchPanel from './SearchPanel';
 import RightPanel from './RightPanel';
 import ConversationView from './ConversationView';
 
-export default function ObsidianView() {
+export default function OpsidianView() {
   const searchParams = useSearchParams();
   const {
     selectedSessionId,
@@ -35,7 +35,7 @@ export default function ObsidianView() {
     openFile,
     setFileDetail,
     setViewMode,
-  } = useObsidianStore();
+  } = useOpsidianStore();
   const hub = useHubMode();
 
   // Load sessions on mount
@@ -117,20 +117,20 @@ export default function ObsidianView() {
   }
 
   return (
-    <div className="obsidian-root">
+    <div className="opsidian-root">
       {/* Left sidebar: file tree / tags / backlinks */}
-      <ObsidianSidebar />
+      <OpsidianSidebar />
 
       {/* Main content area */}
       <div
-        className="obsidian-main"
+        className="opsidian-main"
         style={{
           marginLeft: sidebarCollapsed ? 40 : 260,
           marginRight: rightPanelOpen ? 280 : 0,
         }}
       >
-        <ObsidianTabs />
-        <div className="obsidian-content">
+        <OpsidianTabs />
+        <div className="opsidian-content">
           {viewMode === 'editor' && <NoteViewer />}
           {viewMode === 'graph' && (
             <UnifiedGraphView

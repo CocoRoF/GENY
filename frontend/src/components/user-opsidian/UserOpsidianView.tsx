@@ -8,7 +8,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { userOpsidianApi, curatedKnowledgeApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useHubMode } from '@/components/OpsidianHubContext';
-import RightPanel from '../obsidian/RightPanel';
+import RightPanel from '../opsidian/RightPanel';
 import Link from 'next/link';
 import {
   Brain,
@@ -43,14 +43,14 @@ import {
 } from 'lucide-react';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import CurationSettingsPanel from './CurationSettingsPanel';
-import { useOpsidianShortcuts } from '../obsidian/useOpsidianShortcuts';
-import MarkdownToolbar, { useMarkdownEditorKeys } from '../obsidian/MarkdownToolbar';
-import QuickSwitcher from '../obsidian/QuickSwitcher';
-import TagInput from '../obsidian/TagInput';
-import WikilinkPicker from '../obsidian/WikilinkPicker';
-import ShortcutHelp from '../obsidian/ShortcutHelp';
-import ContextMenu from '../obsidian/ContextMenu';
-import '../obsidian/obsidian.css';
+import { useOpsidianShortcuts } from '../opsidian/useOpsidianShortcuts';
+import MarkdownToolbar, { useMarkdownEditorKeys } from '../opsidian/MarkdownToolbar';
+import QuickSwitcher from '../opsidian/QuickSwitcher';
+import TagInput from '../opsidian/TagInput';
+import WikilinkPicker from '../opsidian/WikilinkPicker';
+import ShortcutHelp from '../opsidian/ShortcutHelp';
+import ContextMenu from '../opsidian/ContextMenu';
+import '../opsidian/opsidian.css';
 
 // ─── Constants ────────────────────────────────────────────────
 const CATEGORY_ICONS: Record<string, typeof File> = {
@@ -254,7 +254,7 @@ export default function UserOpsidianView() {
   // ─── Auth guard ──
   if (isLoading || !initialized) {
     return (
-      <div className="obsidian-root" style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="opsidian-root" style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: 'var(--obs-text-muted)' }}>
           <Loader2 size={32} className="animate-spin" style={{ marginBottom: 12, color: 'var(--obs-purple)' }} />
           <p style={{ fontSize: 14 }}>{t('common.loading')}</p>
@@ -265,7 +265,7 @@ export default function UserOpsidianView() {
 
   if (!isAuthenticated) {
     return (
-      <div className="obsidian-root" style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <div className="opsidian-root" style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: 'var(--obs-text-muted)' }}>
           <Brain size={48} strokeWidth={1.2} style={{ marginBottom: 16, color: 'var(--obs-purple)' }} />
           <h2 style={{ margin: '0 0 8px', color: 'var(--obs-text)', fontSize: 20 }}>{t('opsidian.title')}</h2>
@@ -286,7 +286,7 @@ export default function UserOpsidianView() {
   }
 
   return (
-    <div className="obsidian-root">
+    <div className="opsidian-root">
       {/* Modals & Overlays */}
       {showCurationSettings && (
         <CurationSettingsPanel onClose={() => setShowCurationSettings(false)} />
@@ -347,7 +347,7 @@ export default function UserOpsidianView() {
 
       {/* Main content */}
       <div
-        className="obsidian-main"
+        className="opsidian-main"
         style={{
           marginLeft: sidebarCollapsed ? 40 : 260,
           marginRight: rightPanelOpen ? 280 : 0,
@@ -363,7 +363,7 @@ export default function UserOpsidianView() {
         />
 
         {/* Content */}
-        <div className="obsidian-content">
+        <div className="opsidian-content">
           {viewMode === 'editor' && (
             draftNote
               ? <DraftEditor

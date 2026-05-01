@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { useObsidianStore } from '@/store/useObsidianStore';
+import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
 import {
   Search,
@@ -32,7 +32,7 @@ export default function SearchPanel() {
     openFile,
     setFileDetail,
     setViewMode,
-  } = useObsidianStore();
+  } = useOpsidianStore();
 
   const [localQuery, setLocalQuery] = useState(searchQuery);
   const inputRef = useRef<HTMLInputElement>(null);
