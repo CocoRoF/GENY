@@ -20,11 +20,6 @@ import {
   Search,
   GitGraph,
   FileText,
-  Calendar,
-  Lightbulb,
-  Users,
-  FolderKanban,
-  Bookmark,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -49,24 +44,18 @@ import ContextMenu from '../opsidian/ContextMenu';
 import '../opsidian/opsidian.css';
 
 // ─── Constants ────────────────────────────────────────────────
-const CATEGORY_ICONS: Record<string, typeof File> = {
-  daily: Calendar,
-  topics: Bookmark,
-  entities: Users,
-  projects: FolderKanban,
-  insights: Lightbulb,
-  reference: FileText,
-  root: FileText,
-};
-
+// Memory v2 — single source of truth at `@/lib/memoryCategories`.
+// Curated keeps a `reference` color override (cyan) for the
+// curated-knowledge-only category that doesn't exist in the main
+// LTM vault.
+import {
+  CATEGORY_ICONS as SHARED_CATEGORY_ICONS,
+  CATEGORY_COLORS as SHARED_CATEGORY_COLORS,
+} from '@/lib/memoryCategories';
+const CATEGORY_ICONS = SHARED_CATEGORY_ICONS;
 const CATEGORY_COLORS: Record<string, string> = {
-  daily: '#f59e0b',
-  topics: '#3b82f6',
-  entities: '#10b981',
-  projects: '#8b5cf6',
-  insights: '#ec4899',
-  reference: '#06b6d4',
-  root: '#64748b',
+  ...SHARED_CATEGORY_COLORS,
+  reference: '#06b6d4',  // curated-only: cyan
 };
 
 const IMPORTANCE_DOT: Record<string, string> = {

@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useI18n } from '@/lib/i18n';
-import { Search, FileText, Calendar, Bookmark, Users, FolderKanban, Lightbulb, Plus } from 'lucide-react';
+import { Search, FileText, Plus } from 'lucide-react';
 import type { MemoryFileInfo } from '@/types';
+// Memory v2 — single source of truth at `@/lib/memoryCategories`.
+import { CATEGORY_ICONS, CATEGORY_COLORS } from '@/lib/memoryCategories';
 
 interface QuickSwitcherProps {
   files: Record<string, MemoryFileInfo>;
@@ -11,15 +13,6 @@ interface QuickSwitcherProps {
   onClose: () => void;
   onCreateNote?: () => void;
 }
-
-const CATEGORY_ICONS: Record<string, typeof FileText> = {
-  daily: Calendar, topics: Bookmark, entities: Users,
-  projects: FolderKanban, insights: Lightbulb, root: FileText,
-};
-const CATEGORY_COLORS: Record<string, string> = {
-  daily: '#f59e0b', topics: '#3b82f6', entities: '#10b981',
-  projects: '#8b5cf6', insights: '#ec4899', root: '#64748b',
-};
 
 function fuzzyMatch(query: string, text: string): number {
   const q = query.toLowerCase();

@@ -50,7 +50,11 @@ dependencies = [
     # gates reflections by importance so ``insights/`` only
     # accumulates genuine factual learnings, not behavioural
     # patterns or per-turn tactics.
-    "geny-executor[web,cron]>=1.10.0,<2.0.0",
+    # 1.11.0 isolates ``entities`` / ``conversations`` / ``dms`` /
+    # ``daily-journal`` / ``compactions`` from the reflection's
+    # category enum + adds host-side coercion to ``insights`` so
+    # auto-managed categories never receive free-form notes.
+    "geny-executor[web,cron]>=1.11.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

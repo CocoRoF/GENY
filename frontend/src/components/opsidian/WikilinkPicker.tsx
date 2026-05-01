@@ -2,23 +2,16 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useI18n } from '@/lib/i18n';
-import { Link2, FileText, Calendar, Bookmark, Users, FolderKanban, Lightbulb } from 'lucide-react';
+import { Link2, FileText } from 'lucide-react';
 import type { MemoryFileInfo } from '@/types';
+// Memory v2 — single source of truth at `@/lib/memoryCategories`.
+import { CATEGORY_ICONS, CATEGORY_COLORS } from '@/lib/memoryCategories';
 
 interface WikilinkPickerProps {
   files: Record<string, MemoryFileInfo>;
   onSelect: (filename: string, alias?: string) => void;
   onClose: () => void;
 }
-
-const CATEGORY_ICONS: Record<string, typeof FileText> = {
-  daily: Calendar, topics: Bookmark, entities: Users,
-  projects: FolderKanban, insights: Lightbulb, root: FileText,
-};
-const CATEGORY_COLORS: Record<string, string> = {
-  daily: '#f59e0b', topics: '#3b82f6', entities: '#10b981',
-  projects: '#8b5cf6', insights: '#ec4899', root: '#64748b',
-};
 
 export default function WikilinkPicker({ files, onSelect, onClose }: WikilinkPickerProps) {
   const { t } = useI18n();

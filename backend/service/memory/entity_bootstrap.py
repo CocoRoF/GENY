@@ -55,11 +55,6 @@ _REFRESH_MAX_FILES = 10
 #: renderer (uses it as a literal in the body) see the same value.
 AUTO_STATS_MARKER = "<!-- AUTO_STATS_END -->"
 
-#: Number of recent conversations/ wikilinks to surface on the entity
-#: stub (plan §3.2). Defined here so the function-default lookup in
-#: ``_recent_conversation_refs`` resolves at module-import time.
-RECENT_CONVERSATION_LIMIT = 5
-
 # counterpart_id values that don't represent an external party — we
 # never bootstrap an entity file for these.
 _SKIP_COUNTERPART_IDS = frozenset({"self", "system", "", "unknown"})
@@ -201,7 +196,6 @@ def _refresh_entity_stats(
         # and pass it back to the renderer so the rewriter only
         # touches the auto region.
         existing_notes = ""
-        recent_conv: List[str] = []
         try:
             ltm = getattr(memory_manager, "_ltm", None)
             writer_for_path = getattr(memory_manager, "_structured_writer", None)
@@ -221,19 +215,10 @@ def _refresh_entity_stats(
                         existing_notes = ""
         except Exception:
             existing_notes = ""
-        # Recent conversations wikilinks: walk the caller's STM tail
-        # for events with this counterpart that carry a
-        # ``conversation_ref`` payload pointer (PR 2 stamps it).
-        try:
-            recent_conv = _recent_conversation_refs(
-                memory_manager, counterpart_id,
-            )
-        except Exception:
-            recent_conv = []
 
         body = _render_entity_stats_body(
             stats, counterpart_role,
-            recent_conversations=recent_conv,
+            counterpart_id=counterpart_id,
             notes_section=existing_notes,
         )
         writer = getattr(memory_manager, "_structured_writer", None)
@@ -257,44 +242,6 @@ def _refresh_entity_stats(
             counterpart_id, exc_info=True,
         )
         return None
-
-
-def _recent_conversation_refs(
-    memory_manager, counterpart_id: str, limit: int = RECENT_CONVERSATION_LIMIT,
-) -> List[str]:
-    """Walk the caller's STM tail-first and collect up to ``limit``
-    distinct ``conversation_ref`` strings for the given counterpart.
-
-    PR 2 stamps every record_message with
-    ``metadata.payload.conversation_ref``; this helper surfaces the
-    most-recent N onto the entity's auto-region (PR 16).
-    """
-    out: List[str] = []
-    seen: set = set()
-    stm = getattr(memory_manager, "short_term", None)
-    if stm is None:
-        return out
-    try:
-        entries = list(stm.load_all() or [])
-    except Exception:
-        return out
-    for entry in reversed(entries):
-        meta = getattr(entry, "metadata", None)
-        if not isinstance(meta, dict):
-            continue
-        if meta.get("counterpart_id") != counterpart_id:
-            continue
-        payload = meta.get("payload") if isinstance(meta.get("payload"), dict) else {}
-        ref = payload.get("conversation_ref")
-        if not isinstance(ref, str) or not ref:
-            continue
-        if ref in seen:
-            continue
-        seen.add(ref)
-        out.append(ref)
-        if len(out) >= limit:
-            break
-    return out
 
 
 def _summarise_counterpart_stats(
@@ -383,16 +330,29 @@ def _summarise_counterpart_stats(
 def _render_entity_stats_body(
     stats: Dict[str, Any],
     counterpart_role: Optional[str],
-    recent_conversations: Optional[List[str]] = None,
+    counterpart_id: Optional[str] = None,
     notes_section: str = "",
 ) -> str:
     """Render the markdown body for an entity refresh.
 
-    Memory v2 PR 16 — body now has two regions divided by
-    ``AUTO_STATS_MARKER``:
+    Plan §1.5 splits the LTM matrix into LEAF / INDEX / DERIVED /
+    CURATED / ARTIFACT. ``entities/`` is in the **INDEX** group and
+    its scope is "**counterpart profile** — Stats + human Notes".
+    The conversation index is owned by ``dms/<cp>/<date>.md`` (per-
+    counterpart-per-day) — a separate INDEX category.
+
+    Earlier revisions of this renderer also surfaced the most-recent
+    five ``conversations/`` wikilinks under a ``## Recent conversations``
+    section. That bled the conversation domain into the entity
+    profile and duplicated the per-day index ``dms/`` already
+    provides. We removed it. The auto region now contains *one*
+    pointer to the dms folder for navigation, and otherwise stays
+    out of conversation territory.
+
+    Body layout (divided by ``AUTO_STATS_MARKER``):
 
       1. Auto region (above marker): heading + intro + ``## Stats``
-         + ``## Recent conversations`` (wikilinks).
+         + a single ``## DM bundles`` pointer.
       2. Human region (below marker): ``## Notes`` + whatever the
          operator typed there.
 
@@ -401,6 +361,7 @@ def _render_entity_stats_body(
     doesn't pass ``notes_section`` (first stub or absent marker)
     we seed an empty ``## Notes`` placeholder below the marker.
     """
+    cp_id = counterpart_id or stats.get("counterpart_id") or ""
     lines: List[str] = []
     lines.append(f"# Counterpart: {stats['counterpart_id']}")
     lines.append("")
@@ -431,13 +392,14 @@ def _render_entity_stats_body(
     if stats["cost_usd_total"] is not None:
         lines.append(f"- Total cost: ${stats['cost_usd_total']:.4f}")
     lines.append("")
-    # Recent conversations section (auto region)
-    if recent_conversations:
-        lines.append("## Recent conversations")
+    # DM bundles pointer (auto region) — single navigation breadcrumb
+    # to the per-counterpart-per-day index. The actual conversation
+    # listing lives in dms/, not here.
+    if cp_id and cp_id not in {"self", "system", "", "unknown"}:
+        cp_safe = _sanitize_counterpart_for_filename(cp_id)
+        lines.append("## DM bundles")
         lines.append("")
-        for ref in recent_conversations[:RECENT_CONVERSATION_LIMIT]:
-            target = ref[:-3] if ref.endswith(".md") else ref
-            lines.append(f"- [[{target}]]")
+        lines.append(f"- See [[dms/{cp_safe}/]] for chronological conversation history.")
         lines.append("")
     # Boundary marker — rewriter never touches anything below this.
     lines.append(AUTO_STATS_MARKER)

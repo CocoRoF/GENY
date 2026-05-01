@@ -50,7 +50,17 @@ const IMPORTANCE_DOT: Record<string, string> = {
   low: 'bg-gray-500',
 };
 
-const CATEGORIES = ['daily', 'topics', 'entities', 'projects', 'insights', 'root'] as const;
+// Memory v2 — full category set lives in a single source of truth
+// at ``@/lib/memoryCategories``; this module re-exports for the
+// existing call sites to keep the diff focused. ``CATEGORIES`` is
+// the tree filter; ``WRITABLE_CATEGORIES`` is the New-note modal
+// allowlist (auto-managed categories are excluded so users don't
+// accidentally create misshapen stubs that the auto-writers will
+// overwrite).
+import {
+  VISIBLE_CATEGORIES as CATEGORIES,
+  WRITABLE_CATEGORIES,
+} from '@/lib/memoryCategories';
 
 // ==================== Sub-components ====================
 
@@ -480,7 +490,12 @@ function MemoryCreateModal({
               className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] px-2 py-1.5
                          text-[12px] text-[var(--text-secondary)] outline-none"
             >
-              {CATEGORIES.filter(c => c !== 'root').map(c => (
+              {/* Modal lists only writable categories — auto-managed
+                  ones (conversations / dms / daily-journal / entities
+                  / compactions) are populated by record_message hooks
+                  and would otherwise let users hand-craft stub notes
+                  that the auto-writers later overwrite or misindex. */}
+              {WRITABLE_CATEGORIES.map(c => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
