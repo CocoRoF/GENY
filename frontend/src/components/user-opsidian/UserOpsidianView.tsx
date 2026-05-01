@@ -23,7 +23,6 @@ import {
   FileText,
   Calendar,
   Lightbulb,
-  Users,
   FolderKanban,
   Bookmark,
   PanelLeftClose,
@@ -56,7 +55,6 @@ import '../opsidian/opsidian.css';
 const CATEGORY_ICONS: Record<string, typeof File> = {
   daily: Calendar,
   topics: Bookmark,
-  entities: Users,
   projects: FolderKanban,
   insights: Lightbulb,
   root: FileText,
@@ -65,7 +63,6 @@ const CATEGORY_ICONS: Record<string, typeof File> = {
 const CATEGORY_COLORS: Record<string, string> = {
   daily: '#f59e0b',
   topics: '#3b82f6',
-  entities: '#10b981',
   projects: '#8b5cf6',
   insights: '#ec4899',
   root: '#64748b',
@@ -430,7 +427,7 @@ function Sidebar({
 }) {
   const { t } = useI18n();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'entities', 'projects', 'insights', 'root']),
+    new Set(['daily', 'topics', 'projects', 'insights', 'root']),
   );
   const [filterText, setFilterText] = useState('');
 
@@ -877,7 +874,6 @@ function NoteEditor({
           >
             <option value="topics">Topics</option>
             <option value="daily">Daily</option>
-            <option value="entities">Entities</option>
             <option value="projects">Projects</option>
             <option value="insights">Insights</option>
           </select>
@@ -1255,7 +1251,6 @@ function DraftEditor({
         >
           <option value="topics">Topics</option>
           <option value="daily">Daily</option>
-          <option value="entities">Entities</option>
           <option value="projects">Projects</option>
           <option value="insights">Insights</option>
         </select>

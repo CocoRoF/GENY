@@ -877,9 +877,10 @@ class MemoryDistillTool(BaseTool):
     caller's STM tail and produces a compact stats bundle —
     event counts by kind, files the counterpart produced, total
     bash / web / errors / duration / cost. Optionally writes the
-    same as a markdown note under ``entities/<counterpart>.md``
-    so vector / keyword retrieval picks it up on subsequent
-    turns.
+    distilled summary as a markdown note under
+    ``insights/counterpart-<sanitized>.md`` so vector / keyword
+    retrieval picks it up on subsequent turns. (The legacy
+    ``entities/`` location was retired in Memory v2.)
     """
 
     name = "memory_distill"
@@ -890,7 +891,7 @@ class MemoryDistillTool(BaseTool):
         "bash / web / errors / duration / cost, plus the most recent "
         "5 events as a quick recap. Set `narrative=true` to ALSO "
         "run a one-shot LLM summary (uses memory_model from APIConfig); "
-        "the result lands at the top of the entity note's body when "
+        "the result lands at the top of the insights note's body when "
         "`update_note=true`. Read-mostly: the note write is the only "
         "side effect, and it's gated behind `update_note`."
     )
@@ -921,8 +922,8 @@ class MemoryDistillTool(BaseTool):
                     "default": False,
                     "description": (
                         "When true, persist the distilled summary as "
-                        "memory/entities/<sanitized>.md so it joins "
-                        "vector / keyword retrieval."
+                        "memory/insights/counterpart-<sanitized>.md so "
+                        "it joins vector / keyword retrieval."
                     ),
                 },
                 "narrative": {
@@ -932,7 +933,7 @@ class MemoryDistillTool(BaseTool):
                         "When true, run a one-shot LLM summary using "
                         "memory_model. The narrative is returned in "
                         "the response and written above the stats "
-                        "in the entity note (if update_note=true)."
+                        "in the insights note (if update_note=true)."
                     ),
                 },
             },
@@ -1030,35 +1031,41 @@ def _write_entity_note(
     *,
     narrative: Optional[str] = None,
 ) -> Optional[str]:
-    """Persist the distilled summary as an ``entities/<sanitized>.md``
-    structured note. Best-effort: returns the relative path on
-    success, ``None`` when the structured writer is unavailable
-    (e.g. minimal SessionMemoryManager / unit tests) or on
-    persistence errors.
+    """Persist the distilled counterpart summary as an
+    ``insights/counterpart-<sanitized>.md`` structured note.
 
-    When *narrative* is provided (Stage F), it is written above the
-    stats block as the human-readable opener of the entity note.
-    Stats stay underneath as a verifiable evidence layer.
+    Memory v2 retired the ``entities/`` category — counterpart auto-
+    stubs are no longer maintained because their stats duplicated
+    what ``dms/<cp>/<date>.md`` and the StreamTab UI already
+    surface. ``memory_distill`` is the *only* counterpart-keyed
+    write that survived; its output is a curated LLM summary, so
+    ``insights/`` (the Derived category in plan §1.5) is the right
+    home. The filename keeps a ``counterpart-`` prefix so an agent
+    grepping for a specific counterpart's distillation finds it.
+
+    When *narrative* is provided, it is written above the stats
+    block as the human-readable opener. Stats stay underneath as
+    a verifiable evidence layer.
     """
     writer = getattr(memory_manager, "_structured_writer", None)
     if writer is None:
         return None
     try:
         sanitized = _sanitize_counterpart_for_filename(stats["counterpart_id"])
-        rel_path = f"entities/{sanitized}.md"
+        rel_path = f"insights/counterpart-{sanitized}.md"
         body = _render_entity_markdown(stats, counterpart_role, narrative=narrative)
-        title = f"Counterpart {stats['counterpart_id']}"
-        tags = ["entity", "distillation"]
+        title = f"Counterpart distillation — {stats['counterpart_id']}"
+        tags = ["counterpart", "distillation"]
         if counterpart_role:
             tags.append(counterpart_role)
         if narrative:
             tags.append("narrative")
         # `filename_override` keeps repeated runs writing to the
-        # same file rather than ``entities/<x>-1.md`` etc.
+        # same file rather than ``insights/counterpart-<x>-1.md`` etc.
         return writer.write_note(
             title=title,
             content=body,
-            category="entities",
+            category="insights",
             tags=tags,
             importance="medium",
             source="distillation",

@@ -13,8 +13,9 @@ Pins the contract:
   * payload pre-existing keys (tools_used / files_written / cost)
     are preserved on a tool_run_summary turn — only conversation_ref
     is *added*.
-  * The hook fires *before* entity_bootstrap so the recent-conversations
-    section in entities/<id>.md (PR 16) sees the file.
+  * The conversations/ archive fires before the dms/ index writer
+    so the dms bundle's wikilink targets always point at an
+    on-disk leaf turn.
 
 Pure-Python tests; no SDK / real LLM. Uses ``tmp_path`` so the
 manager touches disk under pytest's per-test sandbox.
@@ -299,41 +300,40 @@ class TestRecordMessageArchives:
         refs = {l["metadata"]["payload"]["conversation_ref"] for l in lines}
         assert len(refs) == 5
 
-    def test_archive_runs_before_entity_bootstrap(self, tmp_path: Path, monkeypatch):
-        """Plan §4.1 — record_message hook chain order:
-        STM write → conversations/ → daily index → dms index →
-        entity_bootstrap. The archive must fire *before*
-        entity_bootstrap because Phase 6 PR 16 will have entity
-        Stats reference the just-written conversation file.
+    def test_archive_runs_before_dm_index(self, tmp_path: Path, monkeypatch):
+        """Plan §4.1 (revised, post-entities-retirement) — the
+        record_message hook chain order is:
 
-        We assert the order via a call log monkeypatch.
+            STM write → conversations/ → daily journal → dms/ index
+
+        The conversations archive must fire *before* the dms/ index
+        writer so the dms bundle's wikilink target always resolves
+        to a real leaf turn on disk.
         """
         mgr = SessionMemoryManager(str(tmp_path))
         mgr.initialize()
 
         call_log = []
         original_archive = mgr._conversation_archiver.archive
+        original_dm_append = mgr._dm_archiver.append
 
         def archive_log(*a, **k):
             call_log.append("archive")
             return original_archive(*a, **k)
 
-        def bootstrap_log(_mgr, _meta):
-            call_log.append("bootstrap")
+        def dm_log(*a, **k):
+            call_log.append("dm")
+            return original_dm_append(*a, **k)
 
         monkeypatch.setattr(mgr._conversation_archiver, "archive", archive_log)
-        monkeypatch.setattr(
-            "service.memory.entity_bootstrap.maybe_bootstrap_entity",
-            bootstrap_log,
-        )
+        monkeypatch.setattr(mgr._dm_archiver, "append", dm_log)
 
         meta = make_event_metadata(
-            kind=Kind.USER_CHAT,
+            kind=Kind.DM,
             direction=Direction.IN,
-            counterpart_id=canonical_user_id("alice"),
-            counterpart_role=CounterpartRole.USER,
+            counterpart_id="paired_subworker",
+            counterpart_role=CounterpartRole.SUB_WORKER,
         )
         mgr.record_message("user", "hello with enough body to go medium", metadata=meta)
 
-        # Archive call must precede bootstrap call.
-        assert call_log == ["archive", "bootstrap"], call_log
+        assert call_log == ["archive", "dm"], call_log

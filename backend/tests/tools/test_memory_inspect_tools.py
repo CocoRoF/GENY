@@ -710,13 +710,17 @@ def test_distill_max_events_clamps(world) -> None:
 
 def test_distill_update_note_writes_when_writer_available(world) -> None:
     """When the memory manager has a structured writer, update_note=true
-    persists the distilled summary as entities/<sanitized>.md."""
+    persists the distilled summary as insights/counterpart-<sanitized>.md.
+
+    Memory v2 retired the entities/ category; counterpart distillations
+    now land under insights/ with a ``counterpart-`` filename prefix.
+    """
     captured = []
 
     class _FakeWriter:
         def write_note(self, **kwargs):
             captured.append(kwargs)
-            return f"entities/{kwargs.get('filename_override','x').split('/')[-1]}"
+            return f"insights/{kwargs.get('filename_override','x').split('/')[-1]}"
 
     # Attach the writer onto our fake memory manager
     world["vtuber"]._memory_manager._structured_writer = _FakeWriter()
@@ -729,10 +733,10 @@ def test_distill_update_note_writes_when_writer_available(world) -> None:
     assert out["note_written"] is not None
     assert len(captured) == 1
     args = captured[0]
-    assert args["category"] == "entities"
+    assert args["category"] == "insights"
     assert args["source"] == "distillation"
-    # filename uses sanitized counterpart id
-    assert args["filename_override"] == "entities/sub-1.md"
+    # filename uses sanitized counterpart id with the counterpart- prefix
+    assert args["filename_override"] == "insights/counterpart-sub-1.md"
     # body mentions stats
     assert "Events observed" in args["content"]
     assert "notes.md" in args["content"]
@@ -800,7 +804,7 @@ def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
         def __init__(self): self.calls = []
         def write_note(self, **kw):
             self.calls.append(kw)
-            return f"entities/{kw['filename_override'].split('/')[-1]}"
+            return f"insights/{kw['filename_override'].split('/')[-1]}"
 
     writer = _CapturingWriter()
     world["vtuber"]._memory_manager._structured_writer = writer

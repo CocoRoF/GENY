@@ -3,9 +3,9 @@
 Memory v2 (cf. ``/Geny/plan.md`` §1.6) makes ``memory/conversations/``
 the **leaf source of truth** for every turn the agent records: one
 file per turn, full body verbatim, canonical 13-key frontmatter.
-Other categories (``dms/``, the daily journal at root,
-``entities/``) are *index bundles* that point into ``conversations/``
-via wikilinks rather than carrying body content of their own.
+Other categories (``dms/``, the daily journal at root) are *index
+bundles* that point into ``conversations/`` via wikilinks rather
+than carrying body content of their own.
 
 This module owns the writer for that single category. It does **not**:
 
@@ -80,7 +80,7 @@ EID_WIDTH_DEFAULT = 8
 EID_WIDTH_MAX = 32  # full uuid hex
 
 #: Counterpart ids that don't represent an external party — wikilinks
-#: to ``entities/<x>`` and ``dms/<x>`` are not generated for these.
+#: to ``dms/<x>`` are not generated for these.
 _SELF_LIKE_COUNTERPARTS = frozenset({"self", "system", "", "unknown"})
 
 #: Kinds that warrant a ``dms/<cp>/<date>`` wikilink in
@@ -94,8 +94,9 @@ _DM_KINDS = frozenset({
 })
 
 #: Sanitiser for counterpart ids when used as path / filename
-#: components. Mirrors the helper inside ``entity_bootstrap`` so the
-#: two writers reach identical disk paths for the same counterpart.
+#: components. Same regex previously shared with the retired
+#: ``entity_bootstrap`` helper so paths under ``dms/<cp_safe>/``
+#: stay stable across the v2 transition.
 _PATH_SAFE_RE = re.compile(r"[^A-Za-z0-9_\-]")
 
 #: Heuristic thresholds for :func:`compute_importance`. Plan
@@ -286,16 +287,18 @@ def build_links_to(
 ) -> List[str]:
     """Compute the standard wikilink targets for a conversations note.
 
-    Plan §1.6.2 — every conversations/ note links *up* to the day
-    journal, the counterpart entity, and (for DM-class kinds) the
-    dms/ daily bundle. tool_run_summary's ``linked_event_id``
-    pointer is rendered separately in the body.
+    Plan §1.6.2 (revised post-entities-retirement) — every
+    conversations/ note links *up* to the day journal and (for
+    DM-class kinds) the dms/ daily bundle. tool_run_summary's
+    ``linked_event_id`` pointer is rendered separately in the body.
+    The legacy per-counterpart ``entities/<id>`` wikilink was
+    retired with the entities/ category itself; counterpart context
+    now lives entirely under ``dms/<id>/<date>.md``.
     """
     out: List[str] = [date]  # always link to the daily journal
     cp_id = (counterpart_id or "").strip()
     if cp_id and cp_id not in _SELF_LIKE_COUNTERPARTS:
         cp_safe = sanitize_counterpart(cp_id)
-        out.append(f"entities/{cp_safe}")
         if kind in _DM_KINDS:
             out.append(f"dms/{cp_safe}/{date}")
     return out

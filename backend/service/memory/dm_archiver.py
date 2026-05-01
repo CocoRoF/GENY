@@ -16,10 +16,11 @@ turn block, and rewrites the file. The lock on
 
 Why not a single bundle file per day across counterparts: the
 existing Stream tab already groups events by counterpart, the
-``memory_with`` tool filters by counterpart, and the entity_bootstrap
-note for each counterpart wants to ``[[wikilink]]`` to the
-matching dms bundle. A counterpart-keyed layout makes those three
-consumers' lookup O(1).
+``memory_with`` tool filters by counterpart, and the per-counterpart
+``insights/counterpart-<id>.md`` distillation (when the agent
+chooses to write one) wants to ``[[wikilink]]`` to the matching
+dms bundle. A counterpart-keyed layout makes those three consumers'
+lookup O(1).
 """
 
 from __future__ import annotations

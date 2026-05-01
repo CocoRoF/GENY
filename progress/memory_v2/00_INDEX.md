@@ -2,7 +2,7 @@
 
 > Plan: [`/Geny/plan.md`](../../plan.md)
 > Review (선행 분석): [`/Geny/review.md`](../../review.md)
-> Status: ✅ **18/18 PR 완성** (sandbox standalone smoke 모두 PASS · 사용자 dev env pytest 검증 대기)
+> Status: ✅ **18/18 PR 완성** (+ post-launch hotfix PR 19 — entities/ 카테고리 폐지, executor 1.12.0 와 lockstep)
 
 ## 진행 현황
 
@@ -26,6 +26,7 @@
 | 15 | 6 linked_from 영속화 | ✅ | (인라인) | _propagate_linked_from helper (즉시 반영) |
 | 16 | 6 entities Stats/Notes | ✅ | (인라인) | AUTO_STATS_MARKER + Recent conversations 섹션 |
 | 17/18 | 7 Sub-Worker 정책 | ✅ | [pr17_18_subworker_inheritance.md](pr17_18_subworker_inheritance.md) | 옵션 (b) read-only inheritance 결정 + spec |
+| 19 | 후속 — entities/ 카테고리 폐지 | ✅ | [pr19_entities_retirement.md](pr19_entities_retirement.md) | entity_bootstrap 모듈 삭제 + memory_distill → insights/counterpart-* + 프론트/플랜 문서 정리 (executor 1.12.0 lockstep) |
 
 ## 검증된 invariants (final integration)
 

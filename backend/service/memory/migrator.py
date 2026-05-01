@@ -99,7 +99,7 @@ class MemoryMigrator:
         """Run the migration.
 
         Steps:
-        1. Create subdirectories (daily/, topics/, entities/, etc.)
+        1. Create subdirectories (daily/, topics/, projects/, etc.)
         2. Scan all .md files in memory/
         3. For files without frontmatter, add frontmatter
         4. Move dated files to daily/ subdirectory
@@ -114,7 +114,7 @@ class MemoryMigrator:
             return report
 
         # Ensure subdirectories exist
-        for subdir in ("daily", "topics", "entities", "projects", "insights"):
+        for subdir in ("daily", "topics", "projects", "insights"):
             (self._memory_dir / subdir).mkdir(exist_ok=True)
 
         # Collect all .md files (snapshot before we start moving)
@@ -191,8 +191,6 @@ class MemoryMigrator:
             category = "daily"
         elif parent == "topics":
             category = "topics"
-        elif parent == "entities":
-            category = "entities"
         elif parent == "projects":
             category = "projects"
         elif parent == "insights":

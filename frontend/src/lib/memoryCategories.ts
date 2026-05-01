@@ -11,10 +11,15 @@
  * Plan §1.5 — five semantic groups:
  *
  *   - LEAF (source of truth):   `conversations`
- *   - INDEX:                    `dms`, `daily-journal`, `entities`
+ *   - INDEX:                    `dms`, `daily-journal`
  *   - DERIVED:                  `insights`
  *   - CURATED:                  `topics`, `projects`, `daily`
  *   - ARTIFACT:                 `compactions`
+ *
+ * The legacy `entities` category was retired in 1.12.0: counterpart
+ * stats already live under `dms/<cp>/<date>.md` and the StreamTab UI,
+ * and `memory_distill` writes its summaries to `insights/counterpart-
+ * <id>.md` instead.
  *
  * Plus `root` for files directly under `memory/` (MEMORY.md and
  * the daily-journal `<YYYY-MM-DD>.md` files when the index manager
@@ -34,7 +39,6 @@ import {
   GitGraph,
   Lightbulb,
   MessageSquare,
-  Users,
 } from 'lucide-react';
 
 /** All categories the backend can write to. Order matters — the
@@ -44,7 +48,6 @@ export const MEMORY_CATEGORIES = [
   'conversations',
   'dms',
   'daily-journal',
-  'entities',
   'insights',
   'topics',
   'projects',
@@ -62,11 +65,10 @@ export const VISIBLE_CATEGORIES = MEMORY_CATEGORIES;
 
 /** Categories that legitimately accept human / agent-driven writes
  * via the MemoryTab "New note" modal. The auto-managed categories
- * (conversations, dms, daily-journal, entities, compactions) are
- * filtered out — they're written by record_message / s02 hooks
- * only and the modal would otherwise let users create misshapen
- * stub notes that the auto-writers would later overwrite or
- * misindex.
+ * (conversations, dms, daily-journal, compactions) are filtered out
+ * — they're written by record_message / s02 hooks only and the
+ * modal would otherwise let users create misshapen stub notes that
+ * the auto-writers would later overwrite or misindex.
  */
 export const WRITABLE_CATEGORIES: readonly MemoryCategory[] = [
   'topics',
@@ -82,7 +84,6 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   conversations: MessageSquare,
   dms: MessageSquare,
   'daily-journal': Calendar,
-  entities: Users,
   insights: Lightbulb,
   topics: Bookmark,
   projects: FolderKanban,
@@ -99,7 +100,6 @@ export const CATEGORY_COLORS: Record<string, string> = {
   conversations: '#60a5fa', // blue — the leaf source of truth
   dms: '#a78bfa',           // violet — counterpart channel
   'daily-journal': '#f97316', // orange — chronological index
-  entities: '#10b981',      // emerald — counterpart profile
   insights: '#ec4899',      // pink — distilled knowledge
   topics: '#3b82f6',        // blue — curated subject pages
   projects: '#8b5cf6',      // violet — curated initiative pages
@@ -118,7 +118,6 @@ export const CATEGORY_FALLBACK_LABELS: Record<string, string> = {
   conversations: 'Conversations',
   dms: 'DMs',
   'daily-journal': 'Daily Journal',
-  entities: 'Entities',
   insights: 'Insights',
   topics: 'Topics',
   projects: 'Projects',
@@ -134,6 +133,5 @@ export function isAutoManagedCategory(cat: string): boolean {
   return cat === 'conversations'
     || cat === 'dms'
     || cat === 'daily-journal'
-    || cat === 'entities'
     || cat === 'compactions';
 }

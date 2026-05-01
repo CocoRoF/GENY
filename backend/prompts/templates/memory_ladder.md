@@ -26,11 +26,11 @@
    `topics` / `projects` / `insights`. **`conversations` / `dms` / `compactions` / `daily-journal` 는 자동 카테고리이므로 직접 쓰지 마세요.**
 8. `memory_link(source, target)` — wikilink 추가.
 9. `memory_distill(counterpart, update_note?)` — 카운터파트의 conversations/ 를 LLM 으로
-   요약 → entities/<id>.md 갱신 (옵션) 또는 insights/<slug>.md 작성.
+   요약 → `insights/counterpart-<id>.md` 갱신 (옵션) 또는 `insights/<slug>.md` 작성.
 
 ### 원칙
 - 본문이 필요하다 싶을 때만 `read` 하세요. 그 전엔 `status`/`search` 로 지도만.
 - `conversations/` 는 leaf source-of-truth 입니다 — 어떤 turn 의 정확한 글자가 필요하면 거기를 보세요.
-- `dms/`, `daily-journal`, `entities/` 는 인덱스이고 본문은 conversations/ 에 있어요.
+- `dms/`, `daily-journal/` 는 인덱스이고 본문은 conversations/ 에 있어요.
 - `insights/` 는 distill 된 결론입니다 — 정확한 사실은 conversations/ 가 정답.
 - 시스템 프롬프트의 `## Vault Map` 섹션이 카테고리·태그·최근 갱신을 요약합니다 — 매 턴 자동 갱신되니 거기서 시작하세요.

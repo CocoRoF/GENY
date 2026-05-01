@@ -5,8 +5,8 @@ Memory v2 (`/home/geny-workspace/Geny/plan.md`) introduces a new
 auto-write hooks (conversation_archiver, dm_archiver,
 daily_journal_writer). Each Phase / PR makes a localised change to
 the chain. The risk is that a downstream PR silently regresses an
-upstream invariant — e.g. an entity_bootstrap refactor in PR 16
-that breaks the InteractionEvent metadata pinned by PR 2.
+upstream invariant — e.g. a hook-chain refactor that breaks the
+InteractionEvent metadata pinned by PR 2.
 
 This module provides the *deterministic driver* every parity test
 runs against. It is **synthetic** — no real LLM, no SDK, no

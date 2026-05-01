@@ -33,8 +33,9 @@ from service.utils.utils import _configured_tz as _get_tz
 
 # Valid categories that map to subdirectories.
 #
-# Memory v2 (cf. /Geny/plan.md §1.5) categorises memory into five
-# semantic groups:
+# Memory v2 (cf. /Geny/plan.md §1.5) categorises memory into four
+# semantic groups (entities/ category was retired — counterpart info
+# lives in dms/ and is derivable from conversations/ frontmatter):
 #
 #   * LEAF (source of truth)  — ``conversations`` (1 turn = 1 file,
 #     written by ``ConversationArchiver`` not StructuredMemoryWriter).
@@ -47,12 +48,18 @@ from service.utils.utils import _configured_tz as _get_tz
 #     snapshots, written by ``MemoryProvider.record_compaction``).
 #
 # Membership in this set is the registration token: any category here
-# is recognised by the index, search tools, and Obsidian sidebar.
+# is recognised by the index, search tools, and Opsidian sidebar.
 # StructuredMemoryWriter still only knows how to produce the 11-key
 # frontmatter; extended categories (``conversations``, ``compactions``)
 # carry richer frontmatter via their own dedicated writers.
+#
+# ``entities`` was removed — see Geny PR for the rationale. The
+# auto-generated counterpart stub (formerly ``entities/<id>.md``)
+# duplicated stats already in ``dms/<cp>/<date>.md`` frontmatter and
+# the StreamTab UI counterpart cards. Counterpart-specific knowledge
+# the user wants to curate goes to ``topics/<name>.md`` instead.
 VALID_CATEGORIES = {
-    "daily", "topics", "entities", "projects", "insights",
+    "daily", "topics", "projects", "insights",
     "dms", "conversations", "compactions",
     "root",
 }
@@ -133,7 +140,7 @@ class StructuredMemoryWriter:
         Args:
             title: Note title.
             content: Markdown body content.
-            category: Category (daily/topics/entities/projects/insights).
+            category: Category (daily/topics/projects/insights).
             tags: List of tag strings.
             importance: low/medium/high/critical.
             source: Creation source (execution/user/agent/system/import).

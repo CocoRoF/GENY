@@ -30,8 +30,9 @@ inside s18, with full metadata.
 Invariants this class enforces:
 
   * STM record_message has a single call site (s18) for every
-    user / assistant message; entity_bootstrap (cycle 20260430_3 B)
-    fires exactly once per turn.
+    user / assistant message. (The cycle-20260430_3 entity_bootstrap
+    side-effect was retired in Memory v2 — counterpart context now
+    rides solely on the dms/ index path.)
   * InteractionEvent metadata threaded through unchanged from the
     Geny-side resolver to the LTM line.
   * Empty / non-text content blocks are dropped silently (parent
