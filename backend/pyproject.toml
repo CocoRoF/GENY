@@ -42,8 +42,11 @@ dependencies = [
     # Skills uplift (1.4.0 — 1.8.0): arg substitution + invocation
     # flags, allowed_tools enforcement + paths conditional, shell-
     # block execution + bundled assets, 8-skill bundled catalog,
-    # fork execution mode, hot-reload watcher.
-    "geny-executor[web,cron]>=1.8.0,<2.0.0",
+    # fork execution mode, hot-reload watcher. 1.9.0 unlocks
+    # ``GenyMemoryRetriever.slim_mode`` + ``conversations`` /
+    # ``dms`` / ``compactions`` ``NOTE_CATEGORIES`` for the
+    # Memory v2 leaf source-of-truth design (cf. /Geny/plan.md).
+    "geny-executor[web,cron]>=1.9.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
