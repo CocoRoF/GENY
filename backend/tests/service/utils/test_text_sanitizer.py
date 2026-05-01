@@ -133,11 +133,73 @@ def test_partial_think_open_drops_everything_after() -> None:
 # ─────────────────────────────────────────────────────────────────
 
 
-def test_tts_shim_matches_sanitize_for_display() -> None:
+def test_tts_shim_strips_routing_and_emotion_tags() -> None:
+    # The shim now delegates to ``sanitize_for_tts`` which is
+    # ``sanitize_for_display`` + emoji/emoticon strip. For inputs
+    # without emoji the two functions still agree.
     from controller.tts_controller import sanitize_tts_text
     sample = "[SUB_WORKER_RESULT] hi [joy] there"
-    assert sanitize_tts_text(sample) == sanitize_for_display(sample)
     assert sanitize_tts_text(sample) == "hi there"
+    assert sanitize_tts_text(sample) == sanitize_for_display(sample)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Memory v2 followup — TTS emoji / emoticon strip
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_sanitize_for_tts_strips_basic_emoji() -> None:
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert "😊" not in sanitize_for_tts("hi 😊")
+    assert "✨" not in sanitize_for_tts("✨ wow ✨")
+    assert "⭐" not in sanitize_for_tts("⭐ star ⭐")
+    # Bare emoticons
+    assert ":)" not in sanitize_for_tts("ok :)")
+    assert "ㅋㅋ" not in sanitize_for_tts("hi ㅋㅋ there")
+
+
+def test_sanitize_for_tts_preserves_plain_text() -> None:
+    """Korean text, ASCII letters, and plain directional arrows
+    must survive — only emoji-presentation glyphs are removed.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("안녕하세요") == "안녕하세요"
+    assert sanitize_for_tts("hello world") == "hello world"
+    # Plain arrows (U+2190 / U+2192) — used in legitimate Korean
+    # text, must NOT be stripped (they pronounce sensibly).
+    assert "→" in sanitize_for_tts("a → b")
+    assert "←" in sanitize_for_tts("a ← b")
+
+
+def test_sanitize_for_tts_user_reported_case() -> None:
+    """The exact wording the user complained about — VTuber emitted
+    a 😊 mid-sentence and TTS spoke it as English ``smiling-face``.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    inp = (
+        "안녕하세요! 처음 뵙네요. 저는 아직 이름이 정해지지 않았는데... "
+        "뭐라고 불러드릴까요? 😊"
+    )
+    out = sanitize_for_tts(inp)
+    assert "😊" not in out
+    assert "안녕하세요" in out
+    assert "불러드릴까요" in out
+
+
+def test_sanitize_for_tts_strips_zwj_sequences() -> None:
+    """Multi-codepoint emoji joined by ZWJ (family / profession
+    sequences) must be stripped wholesale, not leave dangling
+    base characters.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    assert sanitize_for_tts("hi 👨‍👩‍👧 family") == "hi family"
+    assert sanitize_for_tts("👍🏼 thumbs") == "thumbs"
+
+
+def test_sanitize_for_display_keeps_emoji() -> None:
+    """Display surfaces (chat UI) DO render emoji. Only TTS strips."""
+    assert "😊" in sanitize_for_display("hi 😊")
+    assert "⭐" in sanitize_for_display("⭐ star")
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from service.auth.auth_middleware import require_auth
-from service.utils.text_sanitizer import sanitize_for_display
+from service.utils.text_sanitizer import sanitize_for_display, sanitize_for_tts
 
 logger = getLogger(__name__)
 
@@ -38,14 +38,16 @@ router = APIRouter(prefix="/api/tts", tags=["tts"])
 
 
 def sanitize_tts_text(text: str) -> str:
-    """Back-compat shim — delegates to the shared display sanitizer.
+    """Back-compat shim — delegates to the TTS-specific sanitizer.
 
     Kept under this name so any external caller / stable import path
-    continues to work. The underlying behaviour (strip routing tags +
-    emotion tags + ``<think>`` blocks, collapse whitespace) is
-    identical to ``sanitize_for_display``.
+    continues to work. Delegates to :func:`sanitize_for_tts` which
+    strips the same display markers as ``sanitize_for_display`` and
+    additionally removes emoji / textual emoticons that TTS engines
+    would otherwise transliterate to wrong-language word forms
+    mid-sentence (e.g. 😊 spoken as "smiling-face-with-smiling-eyes").
     """
-    return sanitize_for_display(text)
+    return sanitize_for_tts(text)
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:

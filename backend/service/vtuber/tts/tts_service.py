@@ -16,6 +16,7 @@ from service.vtuber.tts.base import (
     TTSSentenceChunk,
     VoiceInfo,
 )
+from service.utils.text_sanitizer import sanitize_for_tts
 
 logger = getLogger(__name__)
 
@@ -122,7 +123,7 @@ class TTSService:
                 language = general.default_language
 
         request = TTSRequest(
-            text=text,
+            text=sanitize_for_tts(text),
             emotion=emotion,
             language=language or "ko",
             audio_format=audio_format,
@@ -237,7 +238,7 @@ class TTSService:
                 language = general.default_language
 
         request = TTSRequest(
-            text=text,
+            text=sanitize_for_tts(text),
             emotion=emotion,
             language=language or "ko",
             audio_format=audio_format,
@@ -319,7 +320,7 @@ class TTSService:
                 language = general.default_language
 
         request = TTSRequest(
-            text=text,
+            text=sanitize_for_tts(text),
             emotion=emotion,
             language=language or "ko",
             audio_format=audio_format,

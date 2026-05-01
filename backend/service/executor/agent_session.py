@@ -1406,6 +1406,12 @@ class AgentSession:
                 # vault map only; rest via tools). Flipped here
                 # post-PR-13 once Memory Ladder doc reaches every role.
                 "slim_mode": False,
+                # Memory v2 followup — insights/ category was filling
+                # up with behavioural patterns and per-turn tactics
+                # ("greet warmly", "delegate file content tasks").
+                # Gate at ``high`` so only genuine factual learnings
+                # land. ``low`` restores legacy permissive behaviour.
+                "min_insight_importance": "high",
             }
 
         # Q.1 (cycle 20260426_3) — per-session memory tuning override.
@@ -1429,6 +1435,7 @@ class AgentSession:
                 ("enable_vector_search", lambda v: isinstance(v, bool)),
                 ("enable_reflection", lambda v: isinstance(v, bool)),
                 ("slim_mode", lambda v: isinstance(v, bool)),
+                ("min_insight_importance", lambda v: isinstance(v, str) and v.lower() in ("low","medium","high","critical")),
             ):
                 if key in per_session_tuning:
                     candidate = per_session_tuning[key]
@@ -1754,12 +1761,32 @@ class AgentSession:
             # turn onto state.metadata['_pending_message_metadata'] and
             # this strategy applies the hint when it walks state.messages.
             from service.memory.dedupe_strategy import GenyDedupeStrategy
-            attach_kwargs["memory_strategy"] = GenyDedupeStrategy(
-                self._memory_manager,
+            # Memory v2 followup — insight quality gate. The
+            # ``min_insight_importance`` kwarg landed in
+            # geny-executor 1.10. We pass it conditionally so this
+            # code still imports against 1.9.x (kwarg becomes a
+            # TypeError on older releases). Default ``high`` —
+            # insights/ should hold *insights*, not behavioural
+            # patterns or per-turn tactics.
+            strategy_kwargs: Dict[str, Any] = dict(
                 enable_reflection=_tuning["enable_reflection"],
                 llm_reflect=llm_reflect,
                 curated_knowledge_manager=curated_km,
                 resolver=reflection_resolver,
+            )
+            if "min_insight_importance" in _tuning:
+                try:
+                    import inspect as _inspect
+                    if "min_insight_importance" in _inspect.signature(
+                        GenyDedupeStrategy.__init__
+                    ).parameters:
+                        strategy_kwargs["min_insight_importance"] = (
+                            _tuning["min_insight_importance"]
+                        )
+                except Exception:
+                    pass
+            attach_kwargs["memory_strategy"] = GenyDedupeStrategy(
+                self._memory_manager, **strategy_kwargs,
             )
             attach_kwargs["memory_persistence"] = GenyPersistence(
                 self._memory_manager
