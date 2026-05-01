@@ -24,6 +24,7 @@ import {
   PanelLeftOpen,
   ArrowLeft,
   RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 
 const CATEGORY_ICONS: Record<string, typeof File> = {
@@ -32,6 +33,12 @@ const CATEGORY_ICONS: Record<string, typeof File> = {
   entities: Users,
   projects: FolderKanban,
   insights: Lightbulb,
+  // Memory v2 — new categories carry their own icon so the sidebar
+  // tree reads at a glance (plan §1.5).
+  conversations: MessageSquare,
+  dms: MessageSquare,
+  'daily-journal': Calendar,
+  compactions: GitGraph,
   root: FileText,
 };
 
@@ -259,6 +266,14 @@ export default function ObsidianSidebar() {
           onClick={() => setViewMode('search')}
         >
           <Search size={13} /> {t('opsidian.search')}
+        </button>
+        {/* Memory v2 PR 5 — Conversation view toggle */}
+        <button
+          className={`obs-sb-view-btn ${viewMode === 'conversation' ? 'active' : ''}`}
+          onClick={() => setViewMode('conversation')}
+          title="Conversation (Stream / Notes)"
+        >
+          <MessageSquare size={13} /> Conversation
         </button>
       </div>
 

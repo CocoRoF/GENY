@@ -418,19 +418,26 @@ class AgentSessionManager:
             except Exception as e:
                 logger.warning(f"  ContextLoader failed: {e}")
 
-        # Load persisted memory if storage_path exists
-        memory_context = ""
-        storage_path = request.working_dir
-        if storage_path:
-            try:
-                from service.memory.manager import SessionMemoryManager
-                mgr = SessionMemoryManager(storage_path)
-                mgr.initialize()
-                memory_context = mgr.build_memory_context(max_chars=4000)
-                if memory_context:
-                    logger.info(f"  Injected {len(memory_context)} chars of memory context")
-            except Exception:
-                pass  # Memory not available yet — fine
+        # Memory v2 PR 11 — Path A 폐기.
+        #
+        # Historically this block called
+        # ``mgr.build_memory_context(max_chars=4000)`` and appended
+        # the result to the system prompt at session-start time.
+        # Plan §5.1 / review.md P4-P5 — this caused two issues:
+        #
+        #   1. The MEMORY.md body was forced into the prompt at
+        #      session-start regardless of relevance, contradicting
+        #      the progressive-disclosure philosophy (plan §5).
+        #   2. The 4 KB cap was tighter than s02's per-turn 8-10 KB
+        #      budget, so the same MEMORY.md sometimes appeared once
+        #      truncated (path A) and once full (path B) inside the
+        #      same prompt.
+        #
+        # Retrieval now flows entirely through s02 ContextStage's
+        # GenyMemoryRetriever which (with PR 10 slim mode flipped on
+        # by per-session tuning) injects only recent turns + session
+        # summary + vault map. The agent reaches for bodies via the
+        # ``memory_search`` / ``memory_read`` ladder (plan §5.3).
 
         # Determine prompt mode
         mode = PromptMode.FULL
@@ -456,9 +463,8 @@ class AgentSessionManager:
             shared_folder_path=shared_folder_path,
         )
 
-        # Append memory context if available
-        if memory_context:
-            prompt = prompt + "\n\n" + memory_context
+        # Memory v2 PR 11 — memory_context append removed (see comment
+        # above; retrieval flows through s02 + tools).
 
         # Cycle 20260422_6 PR4 — single-source delegation notices.
         #

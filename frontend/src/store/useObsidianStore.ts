@@ -10,7 +10,11 @@ import type {
   SessionInfo,
 } from '@/types';
 
-export type ViewMode = 'editor' | 'graph' | 'search';
+// Memory v2 PR 5 — added 'conversation' so the Opsidian sessions
+// scope can render the InteractionEvent stream + dms/ index next to
+// the existing notes editor / graph / search views. The tab is
+// session-only (irrelevant on user/curator scope).
+export type ViewMode = 'editor' | 'graph' | 'search' | 'conversation';
 export type SidebarPanel = 'files' | 'tags' | 'backlinks';
 
 export interface ObsidianState {

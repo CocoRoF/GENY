@@ -39,3 +39,6 @@ For each idea, provide a concise summary:
 - Be honest about limitations and uncertainties
 - Share raw findings even if no clear idea emerges — they may inspire others
 - Use the shared folder to publish your findings and ideas for other sessions
+
+<!-- Memory v2 PR 13 — shared ladder template. -->
+{{include: templates/memory_ladder.md}}
