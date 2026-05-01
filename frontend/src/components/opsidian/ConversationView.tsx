@@ -29,6 +29,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { MessageSquare, FileText, ExternalLink } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import StreamTab from '../tabs/memory/StreamTab';
@@ -50,6 +51,7 @@ export default function ConversationView() {
     openFile,
     setFileDetail,
   } = useOpsidianStore();
+  const { t } = useI18n();
   const [sub, setSub] = useState<SubView>('stream');
 
   // Filter the existing vault tree down to the conversation-related
@@ -94,7 +96,7 @@ export default function ConversationView() {
   if (!selectedSessionId) {
     return (
       <div className="flex items-center justify-center w-full h-full text-[12px] text-[var(--text-muted)]">
-        세션을 선택해 주세요.
+        {t('opsidian.conversationSelectSession')}
       </div>
     );
   }
@@ -113,7 +115,7 @@ export default function ConversationView() {
                 : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
             )}
           >
-            <MessageSquare size={11} /> Stream
+            <MessageSquare size={11} /> {t('opsidian.conversationStream')}
           </button>
           <button
             onClick={() => setSub('notes')}
@@ -124,15 +126,15 @@ export default function ConversationView() {
                 : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
             )}
           >
-            <FileText size={11} /> Notes
+            <FileText size={11} /> {t('opsidian.conversationNotes')}
           </button>
         </div>
         <span className="text-[10.5px] text-[var(--text-muted)] ml-1">
           {sub === 'stream'
-            ? 'STM jsonl 의 InteractionEvent 타임라인'
-            : `memory/conversations/, dms/, daily-journal 노트 (${
-                Object.keys(conversationFiles).length
-              } files)`}
+            ? t('opsidian.conversationStreamHint')
+            : t('opsidian.conversationNotesHint', {
+                count: Object.keys(conversationFiles).length,
+              })}
         </span>
       </div>
 
@@ -164,6 +166,7 @@ function NotesBrowser({
   selectedFile: string | null;
   onSelect: (filename: string) => void;
 }) {
+  const { t } = useI18n();
   const categories = Object.keys(tree).sort();
   const total = Object.values(tree).reduce((acc, list) => acc + list.length, 0);
 
@@ -171,7 +174,7 @@ function NotesBrowser({
     return (
       <div className="flex flex-col items-center justify-center w-full h-full gap-2 text-[12px] text-[var(--text-muted)]">
         <FileText size={28} className="opacity-40" />
-        <span>아직 conversations / dms 노트가 없어요. 대화가 시작되면 자동으로 채워집니다.</span>
+        <span>{t('opsidian.conversationEmpty')}</span>
       </div>
     );
   }
@@ -217,7 +220,7 @@ function NotesBrowser({
           <NoteViewer />
         ) : (
           <div className="flex items-center justify-center w-full h-full text-[12px] text-[var(--text-muted)]">
-            노트를 선택하면 본문이 표시됩니다.
+            {t('opsidian.conversationSelectNote')}
             <ExternalLink size={12} className="ml-2 opacity-60" />
           </div>
         )}

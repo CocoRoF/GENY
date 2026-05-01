@@ -33,8 +33,26 @@ const locales: Record<Locale, Translations> = { en, ko };
 // app/layout.tsx (keep them in sync).
 export const LOCALE_STORAGE_KEY = 'geny-locale';
 
+// Read localStorage synchronously at module load so the Zustand
+// store's *initial* state already matches the persisted locale.
+// Without this, components render once with English defaults
+// (the store's initial state) before LocaleHydrator's useEffect
+// flips it to Korean — a visible "flash of English" on every
+// route change. The inline <head> script handles ``<html lang>``
+// but not React state, so this seed is the React-side equivalent.
+function readPersistedLocale(): Locale {
+  if (typeof window === 'undefined') return 'en';
+  try {
+    const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (raw === 'ko' || raw === 'en') return raw;
+  } catch {
+    /* private mode / quota — fall through */
+  }
+  return 'en';
+}
+
 // Module-level current locale (kept in sync by the Zustand store's setLocale)
-let currentLocale: Locale = 'en';
+let currentLocale: Locale = readPersistedLocale();
 
 // ─── Deep-get by dot-path ───
 function getByPath(obj: unknown, path: string): unknown {
@@ -113,7 +131,13 @@ interface I18nState {
 }
 
 export const useI18n = create<I18nState>((set, get) => ({
-  locale: 'en',
+  // Seed from localStorage at store-creation time so the very first
+  // render of every route — including new tabs opened from the main
+  // page — already reflects the user's locale choice. LocaleHydrator
+  // still runs after mount to reconcile with the backend
+  // LanguageConfig (cross-device sync), but the in-tab UX no longer
+  // flashes English on initial paint.
+  locale: currentLocale,
 
   setLocale: (locale) => {
     currentLocale = locale;
@@ -136,8 +160,8 @@ export const useI18n = create<I18nState>((set, get) => ({
     });
   },
 
-  t: (key, vars) => translate('en', key, vars),
-  tRaw: <T = unknown>(key: string) => translateRaw<T>('en', key),
+  t: (key, vars) => translate(currentLocale, key, vars),
+  tRaw: <T = unknown>(key: string) => translateRaw<T>(currentLocale, key),
 }));
 
 // Re-export types and translations for convenience

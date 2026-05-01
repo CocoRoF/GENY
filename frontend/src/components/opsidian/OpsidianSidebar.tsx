@@ -201,7 +201,7 @@ export default function OpsidianSidebar() {
           <button
             className={`obs-sb-icon-btn ${viewMode === 'conversation' ? 'active' : ''}`}
             onClick={() => setViewMode(viewMode === 'conversation' ? 'editor' : 'conversation')}
-            title="Conversation"
+            title={t('opsidian.conversation')}
           >
             <MessageSquare size={16} />
           </button>
@@ -289,9 +289,9 @@ export default function OpsidianSidebar() {
         <button
           className={`obs-sb-view-btn ${viewMode === 'conversation' ? 'active' : ''}`}
           onClick={() => setViewMode('conversation')}
-          title="Conversation (Stream / Notes)"
+          title={t('opsidian.conversationHint')}
         >
-          <MessageSquare size={13} /> Conversation
+          <MessageSquare size={13} /> {t('opsidian.conversation')}
         </button>
       </div>
 
