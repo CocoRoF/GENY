@@ -3,7 +3,7 @@
 /**
  * SessionEnvironmentTab — per-session read-only view of the
  * EnvironmentManifest the session is bound to, rendered as the
- * 16-stage pipeline canvas (visually mirrors geny-executor-web's
+ * 21-stage pipeline canvas (visually mirrors geny-executor-web's
  * pipeline page). Execution state is intentionally absent — this
  * tab answers "which environment is applied to this session?",
  * not "is it running right now?".

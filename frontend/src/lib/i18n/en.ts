@@ -2096,7 +2096,7 @@ const en = {
   // ─── Environment Builder Tab ───
   builderTab: {
     title: 'Environment Builder',
-    subtitle: 'Edit the 16-stage pipeline artifact/config/active for one environment. Changes are saved per stage and take effect on the next session turn.',
+    subtitle: 'Edit the 21-stage pipeline artifact/config/active for one environment. Changes are saved per stage and take effect on the next session turn.',
     emptyTitle: 'No environment opened',
     emptyHint: 'Pick one from the Environments tab — each card has an "Open in Builder" action, or click a card to preview it and open it here.',
     openEnvironments: 'Open Environments tab',
@@ -2179,7 +2179,7 @@ const en = {
     preset: 'Preset',
     presetMinimal: 'Minimal — input + parse + yield only',
     presetChat: 'Chat — lightweight single-turn',
-    presetAgent: 'Agent — full 16-stage pipeline',
+    presetAgent: 'Agent — full 21-stage pipeline',
     presetEvaluator: 'Evaluator — post-run evaluation',
     presetVTuber: 'Geny VTuber — persona + Sub-Worker split',
     create: 'Create',

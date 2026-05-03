@@ -31,11 +31,10 @@ from geny_executor.core.pipeline import Pipeline  # noqa: E402
 from service.executor.default_manifest import build_default_manifest  # noqa: E402
 
 
-@pytest.mark.parametrize("preset", ("worker_adaptive", "worker_easy"))
-def test_worker_presets_use_partition_executor(preset: str) -> None:
+def test_worker_adaptive_uses_partition_executor() -> None:
     """The manifest emits the partition slot id and the configured
-    max_concurrency for both worker presets."""
-    manifest = build_default_manifest(preset)
+    max_concurrency for the worker_adaptive preset."""
+    manifest = build_default_manifest("worker_adaptive")
     tool_entry = next(e for e in manifest.stages if e["order"] == 10)
     assert tool_entry["strategies"]["executor"] == "partition"
     assert tool_entry["config"]["max_concurrency"] == 8

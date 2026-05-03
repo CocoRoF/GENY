@@ -466,7 +466,7 @@ const STAGES_EN: StageMetaLocalized[] = [
       },
     ],
     architectureNotes:
-      'Geny activates this stage on worker_adaptive only — VTuber and worker_easy keep it off by default. Hosts can swap the chain registry per-environment for domain-specific reviewers.',
+      'Geny activates this stage on worker_adaptive only — VTuber keeps it off by default. Hosts can swap the chain registry per-environment for domain-specific reviewers.',
   },
   {
     order: 12,
@@ -1202,7 +1202,7 @@ const STAGES_KO: Record<number, StageKo> = {
       },
     ],
     architectureNotes:
-      'Geny는 worker_adaptive에서만 이 스테이지를 활성화 — VTuber와 worker_easy는 기본 비활성. 호스트는 도메인별 Reviewer로 체인 레지스트리를 환경별로 교체할 수 있습니다.',
+      'Geny는 worker_adaptive에서만 이 스테이지를 활성화 — VTuber는 기본 비활성. 호스트는 도메인별 Reviewer로 체인 레지스트리를 환경별로 교체할 수 있습니다.',
     bypassCondition: '대기 중인 도구 호출 + 도구 결과가 모두 없음',
   },
   12: {

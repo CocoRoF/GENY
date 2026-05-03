@@ -33,13 +33,6 @@ def test_worker_adaptive_declares_permission_guard() -> None:
     ]
 
 
-def test_worker_easy_declares_permission_guard() -> None:
-    """worker_easy inherits the worker_adaptive chain via _build_stage_entries."""
-    manifest = build_default_manifest("worker_easy")
-    guard_entry = next(e for e in manifest.stages if e["order"] == 4)
-    assert "permission" in guard_entry["chain_order"]["guards"]
-
-
 def test_vtuber_stays_on_default_guard_chain() -> None:
     """VTuber turns don't run general-purpose tools — no permission
     matrix evaluation needed. Stays on the executor's silent default

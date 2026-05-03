@@ -51,11 +51,11 @@ _PRESET_FACTORIES = {
 
 # Stage orders that are structurally required for any pipeline. Mirrors
 # ``geny_executor.core.introspection._STAGE_REQUIRED`` (s01_input, s06_api,
-# s09_parse, s16_yield). Enforced on every write so a client that sends
+# s09_parse, s21_yield). Enforced on every write so a client that sends
 # ``active=False`` — whether by accident, via a stale payload, or by
 # editing the JSON directly — cannot persist a pipeline that the runtime
 # would refuse to build.
-_REQUIRED_ORDERS: frozenset[int] = frozenset({1, 6, 9, 16})
+_REQUIRED_ORDERS: frozenset[int] = frozenset({1, 6, 9, 21})
 
 
 def _iso_now() -> str:

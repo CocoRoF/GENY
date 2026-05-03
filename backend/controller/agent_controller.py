@@ -1052,7 +1052,7 @@ async def get_session_graph(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     wid = getattr(agent, '_workflow_id', '') or ''
-    preset = 'vtuber' if 'vtuber' in wid else 'worker_easy' if 'simple' in wid else 'worker_adaptive'
+    preset = 'vtuber' if 'vtuber' in wid else 'worker_adaptive'
 
     return {
         "session_id": session_id,
@@ -1073,7 +1073,7 @@ async def get_session_workflow(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     wid = getattr(agent, '_workflow_id', '') or ''
-    preset = 'vtuber' if 'vtuber' in wid else 'worker_easy' if 'simple' in wid else 'worker_adaptive'
+    preset = 'vtuber' if 'vtuber' in wid else 'worker_adaptive'
 
     return {
         "id": wid or f"preset-{preset}",
@@ -1270,7 +1270,7 @@ async def list_checkpoints_endpoint(
     """Enumerate the checkpoints Stage 20 has written for *session_id*.
 
     Returns ``[]`` when the session has never written a checkpoint
-    (worker_easy / vtuber presets keep persist off, so this is the
+    (the vtuber preset keeps persist off by default, so this is the
     expected response there).
     """
     storage_path = _resolve_storage_path(session_id)

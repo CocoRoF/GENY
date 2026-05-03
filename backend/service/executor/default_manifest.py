@@ -1,8 +1,8 @@
 """Preset → :class:`EnvironmentManifest` factory.
 
-Turns a preset *name* (``"worker_adaptive"`` / ``"vtuber"`` /
-``"worker_easy"``) into the :class:`EnvironmentManifest` that
-:meth:`Pipeline.from_manifest_async` expects.
+Turns a preset *name* (``"worker_adaptive"`` / ``"vtuber"``) into the
+:class:`EnvironmentManifest` that :meth:`Pipeline.from_manifest_async`
+expects.
 
 The returned manifest carries **only declarative shape**: the stage
 list, per-stage artifact names, slot strategy choices, and static
@@ -44,11 +44,10 @@ from typing import Any, Dict, List, Optional
 # :class:`AgentSession` for the adaptive worker path.
 _VTUBER = "vtuber"
 _WORKER_ADAPTIVE = "worker_adaptive"
-_WORKER_EASY = "worker_easy"
 _DEFAULT_ALIAS = "default"  # maps to worker_adaptive at session level
 
 _KNOWN_PRESETS = frozenset(
-    {_VTUBER, _WORKER_ADAPTIVE, _WORKER_EASY, _DEFAULT_ALIAS}
+    {_VTUBER, _WORKER_ADAPTIVE, _DEFAULT_ALIAS}
 )
 
 
@@ -179,11 +178,6 @@ _PRESET_SCAFFOLD_OVERRIDES: Dict[str, Dict[str, Dict[str, Any]]] = {
             },
         },
     },
-    _WORKER_EASY: {
-        # worker_easy is single-turn — summarising a single answer adds
-        # little value, so leave it off. Future task: a one-shot
-        # summarizer mode that emits only on terminal turns.
-    },
     _VTUBER: {
         # VTuber turns are conversational — summary defers to host-side
         # mood/bond accumulation rather than a structured turn record.
@@ -268,10 +262,6 @@ def _build_stage_entries(preset: str) -> List["object"]:
     if preset == _VTUBER:
         base = _vtuber_stage_entries(StageManifestEntry)
     else:
-        # worker_adaptive and worker_easy both inherit the adaptive
-        # layout for now. worker_easy's single-turn behaviour is
-        # expressed by the session layer setting ``max_turns=1`` at
-        # attach time, not by a separate manifest variant.
         base = _worker_adaptive_stage_entries(StageManifestEntry)
 
     overrides = _PRESET_SCAFFOLD_OVERRIDES.get(preset, {})
@@ -553,9 +543,9 @@ def build_default_manifest(
 
     Args:
         preset: One of ``"vtuber"`` / ``"worker_adaptive"`` /
-            ``"worker_easy"`` / ``"default"``. Anything else raises
-            :class:`ValueError` — we deliberately do not fall back to
-            a hard-coded default, so a typo fails loudly.
+            ``"default"``. Anything else raises :class:`ValueError`
+            — we deliberately do not fall back to a hard-coded
+            default, so a typo fails loudly.
         model: Override for the LLM model id. When omitted, the
             manifest carries an empty ``model`` block and the caller
             is expected to set it via ``PipelineConfig`` at session

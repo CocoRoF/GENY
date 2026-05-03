@@ -46,7 +46,7 @@ def _service(request: Request) -> ArtifactService:
 async def list_stages(
     request: Request, auth: dict = Depends(require_auth)
 ) -> StageListResponse:
-    """Return the 16-stage summary list with per-stage artifact counts."""
+    """Return the 21-stage summary list with per-stage artifact counts."""
     service = _service(request)
     insps = service.full_introspection()
     stages = []

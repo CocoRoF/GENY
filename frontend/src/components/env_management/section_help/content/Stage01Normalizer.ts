@@ -49,7 +49,7 @@ const en: SectionHelpContent = {
 
 **Dict path with attachments:** auto-delegate to \`MultimodalNormalizer\` (see below).
 
-This is what every default-manifest preset (vtuber / worker_adaptive / worker_easy) ships with — and it covers ~95% of real agents.`,
+This is what every default-manifest preset (vtuber / worker_adaptive) ships with — and it covers ~95% of real agents.`,
       bestFor: [
         'Pure text chat agents — the trim + NFC behaviour matches user expectations',
         'Agents that may receive attachments occasionally — auto-delegation means no per-turn switching',
@@ -151,7 +151,7 @@ const ko: SectionHelpContent = {
 
 **첨부 있는 dict 경로:** \`MultimodalNormalizer\` 에 자동 위임 (아래 참조).
 
-모든 default-manifest preset (vtuber / worker_adaptive / worker_easy) 이 이 옵션과 함께 출하되며 — 실제 에이전트의 ~95% 를 커버합니다.`,
+모든 default-manifest preset (vtuber / worker_adaptive) 이 이 옵션과 함께 출하되며 — 실제 에이전트의 ~95% 를 커버합니다.`,
       bestFor: [
         '순수 텍스트 채팅 에이전트 — trim + NFC 동작이 사용자 기대와 일치',
         '가끔 첨부를 받을 수 있는 에이전트 — 자동 위임 덕에 매 턴 normalizer 를 전환할 필요 없음',

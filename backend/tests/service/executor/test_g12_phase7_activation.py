@@ -4,9 +4,8 @@ Each flip is documented in cycle 20260425_2 / G12. Strict-superset
 defaults mean behaviour is unchanged at default config; the
 activation just opens the strategy_configs path for runtime tuning.
 
-vtuber and worker_easy presets are negative controls — they stay
-on the conservative defaults (vtuber doesn't run worker tools, and
-worker_easy is single-turn so the chain wrappers add no value).
+The vtuber preset is the negative control — it stays on the
+conservative defaults because vtuber doesn't run worker tools.
 """
 
 from __future__ import annotations
@@ -28,12 +27,6 @@ def _entry(preset: str, order: int) -> dict:
 
 def test_worker_adaptive_uses_adaptive_router() -> None:
     api = _entry("worker_adaptive", 6)
-    assert api["strategies"]["router"] == "adaptive"
-
-
-def test_worker_easy_uses_adaptive_router() -> None:
-    """worker_easy inherits the worker_adaptive layout — same router."""
-    api = _entry("worker_easy", 6)
     assert api["strategies"]["router"] == "adaptive"
 
 
@@ -97,7 +90,7 @@ def test_vtuber_keeps_append_only_memory() -> None:
 # ── End-to-end: pipeline still materialises ────────────────────────
 
 
-@pytest.mark.parametrize("preset", ("worker_adaptive", "worker_easy", "vtuber"))
+@pytest.mark.parametrize("preset", ("worker_adaptive", "vtuber"))
 def test_pipeline_builds_with_new_strategies(preset: str) -> None:
     """Strict-superset defaults mean the new strategies must
     instantiate cleanly through Pipeline.from_manifest. If a strategy
