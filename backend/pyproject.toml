@@ -64,7 +64,12 @@ dependencies = [
     # host can push critical/high insights into a pinned surface.
     # Geny implements all three on its side (LongTermMemory.load_pinned,
     # service/memory/pin_policy.py, memory_pin tool).
-    "geny-executor[web,cron]>=1.13.0,<2.0.0",
+    # 1.14.0 (Memory v2 PR 14) rewrites the default ``Memory Usage``
+    # preset clause to teach the agent the progressive-disclosure
+    # ladder (memory_categories → memory_list → memory_read), aligned
+    # with Geny's hierarchical _index.json (root manifest + per-
+    # category shards) and the new ``memory_categories`` tool.
+    "geny-executor[web,cron]>=1.14.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
