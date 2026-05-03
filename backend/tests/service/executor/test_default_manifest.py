@@ -37,12 +37,13 @@ def test_manifest_declares_tool_stage(preset: str) -> None:
 
 # Per-preset opt-in for the 5 scaffold stages. Updated as each
 # G2.x sprint promotes a scaffold from "advisory" to "wired".
-#   G2.2 — summarize   (19) on worker_adaptive + vtuber
-#   G2.3 — persist     (20) on worker_adaptive + vtuber (FilePersister swapped at runtime)
-#   G2.4 — tool_review (11) on worker_adaptive (full chain) + vtuber (schema + sensitive only)
-#   G2.5 — hitl        (15) on worker_adaptive (PipelineResumeRequester swapped at runtime)
+#   G2.2 — summarize     (19) on worker_adaptive + vtuber
+#   G2.3 — persist       (20) on worker_adaptive + vtuber (FilePersister swapped at runtime)
+#   G2.4 — tool_review   (11) on worker_adaptive (full chain) + vtuber (schema + sensitive only)
+#   G2.5 — hitl          (15) on worker_adaptive (PipelineResumeRequester swapped at runtime)
+#   G2.6 — task_registry (13) on worker_adaptive (in_memory + fire_and_forget)
 _ACTIVE_SCAFFOLDS_BY_PRESET: dict[str, set[int]] = {
-    "worker_adaptive": {11, 15, 19, 20},
+    "worker_adaptive": {11, 13, 15, 19, 20},
     "vtuber": {11, 19, 20},
 }
 
@@ -146,6 +147,27 @@ def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> Non
 
     # vtuber keeps hitl off — VTuber sessions have no approval surface.
     s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 15)
+    assert s["active"] is False
+
+
+def test_worker_adaptive_activates_task_registry() -> None:
+    """G2.6: worker_adaptive opts the Stage 13 Task Registry scaffold
+    in with the in_memory registry + fire_and_forget policy. Sub-worker
+    delegations (send_direct_message_internal, spawn_subworker) get a
+    per-pipeline lifecycle handle alongside the host-scoped TaskRegistry
+    that ``main.py`` configures at ``app.state.task_registry`` for cron
+    and /tasks endpoints. vtuber stays off — single-agent persona has
+    no delegation surface."""
+    from service.executor.default_manifest import build_default_manifest
+
+    m = build_default_manifest("worker_adaptive")
+    registry = next(e for e in m.stages if e["order"] == 13)
+    assert registry["active"] is True
+    assert registry["strategies"]["registry"] == "in_memory"
+    assert registry["strategies"]["policy"] == "fire_and_forget"
+
+    # vtuber keeps task_registry off — no delegation surface.
+    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 13)
     assert s["active"] is False
 
 

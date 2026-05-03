@@ -177,6 +177,25 @@ _PRESET_SCAFFOLD_OVERRIDES: Dict[str, Dict[str, Dict[str, Any]]] = {
                 "frequency": "on_significant",
             },
         },
+        # G2.6: Task Registry on with the in-memory backend +
+        # fire_and_forget policy. Wires the executor-level task
+        # tracking so sub-worker delegations (send_direct_message_internal,
+        # spawn_subworker) acquire a per-pipeline lifecycle handle. Geny
+        # already runs a host-scoped TaskRegistry/BackgroundTaskRunner
+        # at app.state.task_registry (see main.py + agent_tasks_controller)
+        # for cron and explicit /tasks endpoints; the stage's in-memory
+        # registry is per-pipeline and complementary, not a replacement.
+        # fire_and_forget keeps the loop non-blocking — the policy
+        # records the task and lets the agent loop continue rather than
+        # awaiting completion in-line, matching the existing async
+        # delegation semantics.
+        "task_registry": {
+            "active": True,
+            "strategies": {
+                "registry": "in_memory",
+                "policy": "fire_and_forget",
+            },
+        },
     },
     _VTUBER: {
         # G2.4 (vtuber): light tool-review chain. The conversational
