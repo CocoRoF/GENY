@@ -37,13 +37,13 @@ def test_manifest_declares_tool_stage(preset: str) -> None:
 
 # Per-preset opt-in for the 5 scaffold stages. Updated as each
 # G2.x sprint promotes a scaffold from "advisory" to "wired".
-#   G2.2 — summarize   (19) on worker_adaptive
-#   G2.3 — persist     (20) on worker_adaptive (FilePersister swapped at runtime)
-#   G2.4 — tool_review (11) on worker_adaptive
+#   G2.2 — summarize   (19) on worker_adaptive + vtuber
+#   G2.3 — persist     (20) on worker_adaptive + vtuber (FilePersister swapped at runtime)
+#   G2.4 — tool_review (11) on worker_adaptive (full chain) + vtuber (schema + sensitive only)
 #   G2.5 — hitl        (15) on worker_adaptive (PipelineResumeRequester swapped at runtime)
 _ACTIVE_SCAFFOLDS_BY_PRESET: dict[str, set[int]] = {
     "worker_adaptive": {11, 15, 19, 20},
-    "vtuber": set(),
+    "vtuber": {11, 19, 20},
 }
 
 
@@ -79,30 +79,27 @@ def test_manifest_declares_21_stage_layout(preset: str) -> None:
         )
 
 
-def test_worker_adaptive_activates_summarize_with_real_strategies() -> None:
-    """G2.2: worker_adaptive opts the Stage 19 Summarize scaffold in
-    with the real RuleBasedSummarizer + HeuristicImportance picks.
-    Other presets keep summarize off."""
+def test_summarize_uses_real_strategies_on_both_presets() -> None:
+    """G2.2: worker_adaptive and vtuber both opt the Stage 19 Summarize
+    scaffold in with the real RuleBasedSummarizer + HeuristicImportance
+    picks. The structured turn record they publish to
+    state.shared['turn_summary'] feeds the GenyMemoryStrategy that
+    attach_runtime installs."""
     from service.executor.default_manifest import build_default_manifest
 
-    m = build_default_manifest("worker_adaptive")
-    summarize = next(e for e in m.stages if e["order"] == 19)
-    assert summarize["active"] is True
-    assert summarize["strategies"]["summarizer"] == "rule_based"
-    assert summarize["strategies"]["importance"] == "heuristic"
-
-    # vtuber keeps the no-op default.
-    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 19)
-    assert s["active"] is False
-    assert s["strategies"]["summarizer"] == "no_summary"
+    for preset in ("worker_adaptive", "vtuber"):
+        m = build_default_manifest(preset)
+        summarize = next(e for e in m.stages if e["order"] == 19)
+        assert summarize["active"] is True, f"{preset}: summarize must be active"
+        assert summarize["strategies"]["summarizer"] == "rule_based"
+        assert summarize["strategies"]["importance"] == "heuristic"
 
 
-def test_worker_adaptive_activates_tool_review_chain() -> None:
+def test_worker_adaptive_activates_full_tool_review_chain() -> None:
     """G2.4: worker_adaptive opts the Stage 11 Tool Review scaffold
-    in. The chain default (schema → sensitive → destructive →
-    network → size) carries through; flag events are forwarded
-    to the session_logger by the agent_session event loop.
-    Other presets keep tool_review off."""
+    in with the full chain default (schema → sensitive → destructive
+    → network → size); flag events are forwarded to the session_logger
+    by the agent_session event loop."""
     from service.executor.default_manifest import build_default_manifest
 
     m = build_default_manifest("worker_adaptive")
@@ -116,10 +113,19 @@ def test_worker_adaptive_activates_tool_review_chain() -> None:
         "size",
     ]
 
-    # vtuber keeps tool_review off — VTuber sessions don't run
-    # general-purpose tools.
-    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 11)
-    assert s["active"] is False
+
+def test_vtuber_activates_lightweight_tool_review_chain() -> None:
+    """G2.4 (vtuber variant): vtuber opts Stage 11 in with a trimmed
+    reviewer chain. The conversational tool surface is small, so only
+    schema (arg validation) + sensitive (PII / secret leak) reviewers
+    are kept. destructive / network / size add cost without value
+    on a web_search / news_search / web_fetch surface."""
+    from service.executor.default_manifest import build_default_manifest
+
+    m = build_default_manifest("vtuber")
+    review = next(e for e in m.stages if e["order"] == 11)
+    assert review["active"] is True
+    assert review["chain_order"]["reviewers"] == ["schema", "sensitive"]
 
 
 def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> None:
@@ -143,24 +149,22 @@ def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> Non
     assert s["active"] is False
 
 
-def test_worker_adaptive_activates_persist_with_on_significant_frequency() -> None:
-    """G2.3: worker_adaptive opts Stage 20 Persist in with the
-    on_significant frequency. The persister slot stays at
-    no_persist in the manifest — the real FilePersister is wired
-    by ``service.persist.install_file_persister`` at session-build
-    time once the storage_path is known."""
+def test_persist_active_on_both_presets_with_on_significant_frequency() -> None:
+    """G2.3: worker_adaptive and vtuber both opt Stage 20 Persist in
+    with the on_significant frequency. The persister slot stays at
+    no_persist in the manifest — the real FilePersister is wired by
+    ``service.persist.install_file_persister`` at session-build time
+    once the storage_path is known. The helper is preset-agnostic
+    so the same wiring applies to vtuber sessions."""
     from service.executor.default_manifest import build_default_manifest
 
-    m = build_default_manifest("worker_adaptive")
-    persist = next(e for e in m.stages if e["order"] == 20)
-    assert persist["active"] is True
-    # Real persister is runtime-wired; manifest carries the placeholder.
-    assert persist["strategies"]["persister"] == "no_persist"
-    assert persist["strategies"]["frequency"] == "on_significant"
-
-    # vtuber keeps the scaffold default (off).
-    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 20)
-    assert s["active"] is False
+    for preset in ("worker_adaptive", "vtuber"):
+        m = build_default_manifest(preset)
+        persist = next(e for e in m.stages if e["order"] == 20)
+        assert persist["active"] is True, f"{preset}: persist must be active"
+        # Real persister is runtime-wired; manifest carries the placeholder.
+        assert persist["strategies"]["persister"] == "no_persist"
+        assert persist["strategies"]["frequency"] == "on_significant"
 
 
 @pytest.mark.parametrize("preset", _known_preset_ids())
