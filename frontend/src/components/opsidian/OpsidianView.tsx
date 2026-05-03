@@ -131,17 +131,36 @@ export default function OpsidianView() {
       >
         <OpsidianTabs />
         <div className="opsidian-content">
-          {viewMode === 'editor' && <NoteViewer />}
-          {viewMode === 'graph' && (
-            <UnifiedGraphView
-              nodes={graphNodes}
-              edges={graphEdges}
-              onSelectFile={handleSelectFile}
-            />
+          {/* Each view owns its own scroll region inside the flex
+              column. Editor / search are content-driven so we wrap
+              them in an ``overflow-y-auto`` panel; graph and
+              conversation already fill via their own flex chains.
+              Cycle 20260503_8. */}
+          {viewMode === 'editor' && (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <NoteViewer />
+            </div>
           )}
-          {viewMode === 'search' && <SearchPanel />}
+          {viewMode === 'graph' && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <UnifiedGraphView
+                nodes={graphNodes}
+                edges={graphEdges}
+                onSelectFile={handleSelectFile}
+              />
+            </div>
+          )}
+          {viewMode === 'search' && (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <SearchPanel />
+            </div>
+          )}
           {/* Memory v2 PR 5 — Conversation view */}
-          {viewMode === 'conversation' && <ConversationView />}
+          {viewMode === 'conversation' && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <ConversationView />
+            </div>
+          )}
         </div>
       </div>
 

@@ -103,7 +103,10 @@ export default function ConversationView() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-2 p-3">
+    // ``h-full`` keeps the toggle bar pinned at the top and the
+    // body cell taking the remaining viewport height — flex chain
+    // continues into <NotesBrowser> / <StreamTab>. Cycle 20260503_8.
+    <div className="flex flex-col flex-1 min-h-0 h-full gap-2 p-3">
       {/* Sub-view toggle */}
       <div className="flex items-center gap-2 shrink-0">
         <div className="flex items-center rounded border border-[var(--border-color)] overflow-hidden">
@@ -181,12 +184,17 @@ function NotesBrowser({
   }
 
   return (
-    <div className="flex flex-1 min-h-0 gap-3">
-      {/* Left: per-category file list */}
-      <div className="w-[300px] shrink-0 overflow-y-auto bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded p-2">
+    // ``h-full`` ensures the row reaches viewport height; both
+    // panels then independently scroll without their parent
+    // collapsing to content size. Cycle 20260503_8.
+    <div className="flex flex-1 min-h-0 h-full gap-3">
+      {/* Left: per-category file list — fixed-width column,
+          self-scrolls. Sticky category headers keep the section
+          label visible while the operator scrolls a long list. */}
+      <div className="w-[300px] shrink-0 h-full min-h-0 overflow-y-auto bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded p-2">
         {categories.map((cat) => (
           <div key={cat} className="mb-3">
-            <div className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wide mb-1 px-1">
+            <div className="sticky top-0 z-10 -mx-2 -mt-2 px-3 py-1.5 mb-1 text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wide bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
               {cat} ({tree[cat].length})
             </div>
             {tree[cat].map((info) => {
@@ -214,9 +222,8 @@ function NotesBrowser({
         ))}
       </div>
 
-      {/* Right: NoteViewer (reused — renders frontmatter properties +
-          markdown body + Linked panel) */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      {/* Right: NoteViewer — flexible-width column, self-scrolls. */}
+      <div className="flex-1 min-w-0 h-full min-h-0 overflow-y-auto">
         {selectedFile ? (
           <NoteViewer />
         ) : (

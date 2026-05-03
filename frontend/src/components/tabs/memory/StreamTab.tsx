@@ -200,10 +200,17 @@ export default function StreamTab({ sessionId }: { sessionId: string }) {
   }, [distinctKindsInPage]);
 
   return (
-    <div className="flex flex-col md:flex-row gap-3 md:gap-4 flex-1 min-h-0">
-      {/* Counterpart sidebar */}
-      <div className="md:w-[280px] shrink-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-y-auto max-h-[200px] md:max-h-none p-2">
-        <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+    // ``h-full`` is the operator-facing fix from cycle 20260503_8:
+    // before, this row collapsed to its taller child's content
+    // height when used inside a non-flex parent (the legacy
+    // ``.opsidian-content`` block). Now both panels fill the
+    // viewport and scroll independently.
+    <div className="flex flex-col md:flex-row gap-3 md:gap-4 flex-1 min-h-0 h-full">
+      {/* Counterpart sidebar — fixed-width column on desktop, stacked
+          row on mobile. Self-scrolls; sticky header keeps the
+          ``COUNTERPARTS`` label + refresh button visible. */}
+      <div className="md:w-[280px] shrink-0 md:h-full md:min-h-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-y-auto max-h-[200px] md:max-h-none p-2">
+        <div className="sticky top-0 z-10 -mx-2 -mt-2 px-3 py-1.5 mb-1 flex items-center justify-between bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
           <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wide">
             Counterparts
           </span>
@@ -267,8 +274,10 @@ export default function StreamTab({ sessionId }: { sessionId: string }) {
         })}
       </div>
 
-      {/* Events panel */}
-      <div className="flex-1 min-w-0 flex flex-col bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden">
+      {/* Events panel — flexible width, self-scrolls. ``min-h-0``
+          chains down so the event list inside actually scrolls
+          instead of pushing the filter row off-screen. */}
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden">
         {/* Filters row */}
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[var(--border-color)] shrink-0">
           {/* Kind chips */}
