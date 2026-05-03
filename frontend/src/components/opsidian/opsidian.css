@@ -67,11 +67,24 @@ html.light .opsidian-root {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   transition: margin 200ms ease;
 }
 .opsidian-content {
+  /* Cycle 20260503_8 — was ``flex:1; overflow:auto; position:relative``,
+     a plain block scrollbox. That broke every child view that
+     wanted its own internal panel to fill the viewport: the child's
+     ``flex-1 min-h-0`` chain had no height to inherit, so panels
+     collapsed to their content height (sidebar shorter than body,
+     etc). Now a flex column container with ``min-height: 0``: the
+     child becomes a flex item that can stretch, and individual
+     panels manage their own scroll regions instead of one outer
+     ``overflow:auto`` swallowing every layout cue. */
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   position: relative;
 }
 
