@@ -45,6 +45,32 @@ _VAULT_MAP_TOP_TAGS = 10
 _VAULT_MAP_MEMORY_PREVIEW_CHARS = 200
 
 
+def _coerce_int_meta(value: Any) -> int:
+    """Frontmatter ints come back as int|str|None; normalise to int."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value.strip())
+        except ValueError:
+            return 0
+    return 0
+
+
+def _coerce_list_meta(value: Any) -> List[str]:
+    """Frontmatter lists come back as list|str|None; normalise to
+    ``List[str]`` (lower-casing happens at the caller for fields that
+    need it; these aggregates keep their original casing).
+    """
+    if isinstance(value, list):
+        return [str(v) for v in value if isinstance(v, (str, int, float)) and str(v) != ""]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
 @dataclass
 class MemoryFileInfo:
     """Metadata for a single memory file.
@@ -78,6 +104,20 @@ class MemoryFileInfo:
     counterpart: str = ""
     counterpart_role: str = ""
     linked_event_id: str = ""
+    # PR 14 (cycle 20260503_5) — session-rollup aggregates surfaced
+    # for ``conversations/`` files. Each rollup file carries N turns,
+    # so per-file ``event_id`` / ``kind`` / ``direction`` / etc. are
+    # ambiguous; we expose the deduped sets at file level instead.
+    # ``session_id`` is also surfaced so downstream filters can
+    # group rollups by session without re-reading frontmatter.
+    session_id: str = ""
+    turn_count: int = 0
+    event_ids: List[str] = field(default_factory=list)
+    kinds: List[str] = field(default_factory=list)
+    counterparts: List[str] = field(default_factory=list)
+    importance_max: str = ""
+    date_first: str = ""
+    date_last: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -321,8 +361,14 @@ class MemoryIndexManager:
             # Determine mtime
             mtime = datetime.fromtimestamp(stat.st_mtime, tz=_get_tz()).isoformat()
 
-            # Build summary (first 200 chars of body, stripping headings)
-            body_text = re.sub(r"^#+\s+.*$", "", body, flags=re.MULTILINE).strip()
+            # Build summary (first 200 chars of body) after stripping
+            # markdown headings and any HTML-comment block (PR 14
+            # session-rollup files carry per-turn ``<!--meta…-->``
+            # blocks that are noise inside a sidebar preview).
+            body_no_html = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+            body_text = re.sub(
+                r"^#+\s+.*$", "", body_no_html, flags=re.MULTILINE,
+            ).strip()
             summary = body_text[:200].strip() if body_text else None
 
             title = metadata.get("title", "")
@@ -339,6 +385,26 @@ class MemoryIndexManager:
                 tags = [t.strip() for t in tags.split(",") if t.strip()]
             tags = [t.lower() for t in tags]
 
+            # PR 14 — conversations/ files now ship session-level
+            # frontmatter (``turn_count`` / ``event_ids`` / ``kinds``
+            # / ``counterparts`` / ``importance_max`` / ``date_first``
+            # / ``date_last``). Surface those as the per-file index
+            # entry so downstream callers don't need to re-read
+            # frontmatter to filter by session/counterpart/kind.
+            #
+            # The legacy per-turn keys (``event_id`` / ``kind`` / …)
+            # don't exist on rollup files; we leave them empty there
+            # so existing filters that read those fields treat
+            # rollup notes as "no opinion" rather than crashing.
+            session_id_meta = str(metadata.get("session_id") or "")
+            turn_count = _coerce_int_meta(metadata.get("turn_count"))
+            event_ids = _coerce_list_meta(metadata.get("event_ids"))
+            kinds_meta = _coerce_list_meta(metadata.get("kinds"))
+            counterparts = _coerce_list_meta(metadata.get("counterparts"))
+            importance_max = str(metadata.get("importance_max") or "")
+            date_first = str(metadata.get("date_first") or "")
+            date_last = str(metadata.get("date_last") or "")
+
             return MemoryFileInfo(
                 filename=relative,
                 title=title,
@@ -352,16 +418,26 @@ class MemoryIndexManager:
                 links_to=wikilinks,
                 linked_from=[],   # populated by _rebuild_link_graph
                 summary=summary,
-                # PR 6 — InteractionEvent dimensions surfaced from
-                # the frontmatter when the note is from
-                # conversations/. Other categories return "" here
-                # which downstream filters treat as "no opinion".
+                # PR 6 per-turn dimensions — populated only for
+                # legacy single-turn conversations notes. The
+                # rollup files set these to "" because the dimensions
+                # vary per-anchor; use the session-level fields below
+                # for filtering instead.
                 event_id=str(metadata.get("event_id") or ""),
                 kind=str(metadata.get("kind") or ""),
                 direction=str(metadata.get("direction") or ""),
                 counterpart=str(metadata.get("counterpart") or ""),
                 counterpart_role=str(metadata.get("counterpart_role") or ""),
                 linked_event_id=str(metadata.get("linked_event_id") or ""),
+                # PR 14 session-rollup aggregates.
+                session_id=session_id_meta,
+                turn_count=turn_count,
+                event_ids=event_ids,
+                kinds=kinds_meta,
+                counterparts=counterparts,
+                importance_max=importance_max,
+                date_first=date_first,
+                date_last=date_last,
             )
         except (OSError, UnicodeDecodeError) as exc:
             logger.debug("_scan_file(%s): %s", filepath, exc)

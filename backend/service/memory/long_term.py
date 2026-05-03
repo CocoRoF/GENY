@@ -259,6 +259,10 @@ class LongTermMemory:
             except Exception as e:
                 logger.debug("LongTermMemory: DB append failed (non-critical): %s", e)
 
+    # Subdirectory used by ``write_execution`` so the execution-summary
+    # blocks live next to (but not inside) the daily-journal index.
+    EXECUTIONS_DIR = "executions"
+
     def write_dated(self, text: str, *, date: Optional[datetime] = None) -> Path:
         """Write text to a dated file (memory/YYYY-MM-DD.md).
 
@@ -297,6 +301,72 @@ class LongTermMemory:
                 )
             except Exception as e:
                 logger.debug("LongTermMemory: DB write_dated failed (non-critical): %s", e)
+
+        return filepath
+
+    def write_execution(
+        self, text: str, *, date: Optional[datetime] = None,
+    ) -> Path:
+        """Append an execution-summary block to ``memory/executions/<YYYY-MM-DD>.md``.
+
+        Cycle 20260503_5 — separates the execution-summary stream
+        (``record_execution`` / ``remember_dated`` / ``auto_flush``)
+        from the chronological *daily-journal* index that
+        ``DailyJournalWriter`` owns. Before this split, both writers
+        targeted the same root ``memory/<YYYY-MM-DD>.md`` file under
+        different locks, which produced a frontmatter+free-text
+        hybrid that was hard to read and race-prone.
+
+        File shape: simple append, ``---\\n_(HH:MM TZ)_\\n\\n<text>\\n``,
+        same shape ``write_dated`` historically used (so existing
+        readers / search tools that match on those markers keep
+        working when pointed at the new location).
+        """
+        self.ensure_directory()
+        date = date or datetime.now(_get_tz())
+        exec_dir = self._memory_dir / self.EXECUTIONS_DIR
+        exec_dir.mkdir(parents=True, exist_ok=True)
+        filepath = exec_dir / f"{date.strftime('%Y-%m-%d')}.md"
+
+        now_str = date.strftime("%H:%M %Z")
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(f"\n---\n_({now_str})_\n\n{text.rstrip()}\n")
+
+        logger.debug(
+            "LongTermMemory.write_execution: wrote %d chars to %s",
+            len(text), filepath,
+        )
+
+        # Dual-write to DB — reuse the dated-write helper so the
+        # storage row mirrors the on-disk content, just under a
+        # category that distinguishes execution rows from
+        # daily-journal rows. The helper accepts a ``category``
+        # kwarg from cycle 20260503_5 onward; if the deployed
+        # helper is older, fall through silently — file is
+        # authoritative.
+        if self._db_available:
+            try:
+                from service.database.memory_db_helper import db_ltm_write_dated
+                try:
+                    db_ltm_write_dated(
+                        self._db_manager,
+                        self._session_id,
+                        content=text,
+                        date_str=date.strftime("%Y-%m-%d"),
+                        category=self.EXECUTIONS_DIR,
+                    )
+                except TypeError:
+                    db_ltm_write_dated(
+                        self._db_manager,
+                        self._session_id,
+                        content=text,
+                        date_str=date.strftime("%Y-%m-%d"),
+                    )
+            except Exception as e:
+                logger.debug(
+                    "LongTermMemory: DB write_execution failed (non-critical): %s",
+                    e,
+                )
 
         return filepath
 

@@ -74,11 +74,22 @@ class SessionMemoryManager:
         self,
         storage_path: str,
         max_inject_chars: int = DEFAULT_MAX_INJECT_CHARS,
+        *,
+        session_id: str = "",
     ):
         """
         Args:
             storage_path: Session's root storage directory.
             max_inject_chars: Budget for memory injection into context.
+            session_id: Logical session id used in archiver filenames
+                (``conversations/<sid>__<bucket>.md``) and DB rows.
+                Optional for back-compat — when omitted the archivers
+                fall back to ``"unknown"`` slugs and the DB writes
+                stay disabled until ``set_database`` provides one.
+                Cycle 20260503_5 — this used to be ``None`` and only
+                set later by ``set_database``, which meant non-DB
+                sessions produced ``conversations/unknown__*.md``
+                forever.
         """
         self._storage_path = storage_path
         self._max_inject_chars = max_inject_chars
@@ -111,7 +122,10 @@ class SessionMemoryManager:
 
         self._initialized = False
         self._db_manager = None
-        self._session_id: Optional[str] = None
+        # Stored as Optional[str] for back-compat with code paths that
+        # checked ``is None``. New construction defaults to "" via the
+        # constructor kwarg so archiver filenames carry a real id.
+        self._session_id: Optional[str] = session_id or None
 
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for LTM and STM.
@@ -124,9 +138,28 @@ class SessionMemoryManager:
         self._session_id = session_id
         self._ltm.set_database(db_manager, session_id)
         self._stm.set_database(db_manager, session_id)
-        # Propagate DB to structured writer if already initialized
+        # Propagate DB + session_id to anything we built in
+        # ``initialize()``. Cycle 20260503_5 — archivers used to be
+        # bound with whatever ``self._session_id`` was at init time
+        # (typically ``None``) and never re-bound, so files landed
+        # under ``conversations/unknown__*.md``. Now a late
+        # ``set_database`` call refreshes them.
         if self._structured_writer is not None:
             self._structured_writer.set_database(db_manager, session_id)
+        for archiver_attr in (
+            "_conversation_archiver",
+            "_dm_archiver",
+            "_daily_journal",
+            "_compaction_archiver",
+        ):
+            archiver = getattr(self, archiver_attr, None)
+            if archiver is None:
+                continue
+            try:
+                archiver.set_session_id(session_id)
+            except AttributeError:
+                # Older archiver build without setter — leave it alone.
+                pass
         logger.info("SessionMemoryManager: DB backend enabled for session %s", session_id)
 
     @property
@@ -439,14 +472,22 @@ class SessionMemoryManager:
         self._ltm.append(text, heading=heading)
 
     def remember_dated(self, text: str) -> None:
-        """Write knowledge to a dated long-term memory file."""
+        """Write an execution-summary block to today's executions file.
+
+        Cycle 20260503_5 — the call surface stays the same (every
+        existing strategy still calls ``mgr.remember_dated(...)``)
+        but the on-disk target changed from
+        ``memory/<YYYY-MM-DD>.md`` (which was being shared with
+        ``DailyJournalWriter``) to ``memory/executions/<YYYY-MM-DD>.md``
+        so the two streams no longer collide on one file.
+        """
         try:
             from service.memory_provider.adapters.ltm_adapter import try_write_dated
             if try_write_dated(self._session_id, text):
                 return
         except Exception as exc:
             logger.warning(f"LTM provider adapter failed, using legacy path: {exc}")
-        self._ltm.write_dated(text)
+        self._ltm.write_execution(text)
 
     def remember_topic(self, topic: str, text: str) -> None:
         """Write knowledge to a topic-specific long-term memory file."""
@@ -733,9 +774,14 @@ class SessionMemoryManager:
                 execution_number=execution_number,
                 success=success,
             )
-            self._ltm.write_dated(entry)
+            # Cycle 20260503_5 — execution summaries land in
+            # ``memory/executions/<YYYY-MM-DD>.md`` instead of the
+            # daily-journal root file. The structured-note dual
+            # write below still goes to ``memory/daily/`` so the
+            # human-friendly card surface keeps working.
+            self._ltm.write_execution(entry)
             logger.info(
-                "record_execution: #%d (%d chars) → long-term memory",
+                "record_execution: #%d (%d chars) → executions/",
                 execution_number, len(entry),
             )
 
@@ -1452,8 +1498,10 @@ class SessionMemoryManager:
         if len(summary_text) < 50:
             return None  # Too short to bother
 
-        # Save to dated file
-        self._ltm.write_dated(summary_text)
+        # Save to today's executions file (was the daily-journal
+        # root file pre-cycle-20260503_5 — same content shape, new
+        # location to keep daily-journal index pure).
+        self._ltm.write_execution(summary_text)
 
         # Persist session summary for future context injection on restore
         self._stm.write_summary(summary_text)

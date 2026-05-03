@@ -67,6 +67,7 @@ VALID_CATEGORIES = {
     "critical",
     "daily", "topics", "projects", "insights",
     "dms", "conversations", "compactions",
+    "executions",
     "root",
 }
 

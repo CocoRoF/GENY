@@ -920,7 +920,15 @@ class AgentSession:
             return
         try:
             from service.memory.manager import SessionMemoryManager
-            self._memory_manager = SessionMemoryManager(sp)
+            # Cycle 20260503_5 — pass ``session_id`` at construction
+            # so the conversation/dm/daily archivers built inside
+            # ``initialize()`` get a real id in their slugs. Without
+            # it they fell back to "unknown" and every file landed
+            # at ``conversations/unknown__*.md`` until (and unless)
+            # ``set_database`` was called.
+            self._memory_manager = SessionMemoryManager(
+                sp, session_id=self._session_id or "",
+            )
             self._memory_manager.initialize()
             logger.info(f"[{self._session_id}] SessionMemoryManager initialized at {sp}")
         except Exception as e:
