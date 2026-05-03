@@ -247,14 +247,18 @@ class MemorySearchTool(BaseTool):
 
     name = "memory_search"
     description = (
-        "Search your memory for relevant notes. Uses both text matching "
-        "and semantic vector search to find the most relevant results. "
-        "Great for recalling past decisions, knowledge, or context. "
-        "Optional InteractionEvent filters (cycle 20260430_2): pass "
-        "`counterpart` to narrow to events with a specific other "
-        "party (e.g. 'paired_subworker', 'user', or a session id), "
-        "and `kinds` to narrow by event kind (e.g. ['tool_run_summary',"
-        " 'task_result']). Filters apply only to InteractionEvent "
+        "Search your memory for relevant notes by text + vector. "
+        "Use this when you have a *query* but don't know which "
+        "specific file holds the answer. "
+        "If you instead want to *browse* a folder, prefer "
+        "`memory_categories` (vault overview) → `memory_list("
+        "category=...)` (folder contents) — that ladder is cheaper "
+        "and more deterministic than search. "
+        "Optional InteractionEvent filters: `counterpart` narrows "
+        "to events with a specific other party (e.g. "
+        "'paired_subworker', 'user', or a session id), `kinds` "
+        "narrows by event kind (e.g. ['tool_run_summary', "
+        "'task_result']). Filters apply only to InteractionEvent "
         "lines — non-event memories (long-term notes, knowledge) "
         "are returned regardless."
     )
@@ -479,14 +483,90 @@ class MemorySearchTool(BaseTool):
 # ============================================================================
 
 
+class MemoryCategoriesTool(BaseTool):
+    """Tier-1 of progressive disclosure — return the vault's category map.
+
+    The agent should call this *first* to discover what kinds of
+    things are remembered before reaching for ``memory_list`` /
+    ``memory_search`` / ``memory_read``. The response is the same
+    aggregate the system-prompt vault map renders, but in
+    structured form so the agent can branch on counts /
+    descriptions programmatically.
+    """
+
+    name = "memory_categories"
+    description = (
+        "Return the memory vault's category map. Use this FIRST when "
+        "you need to find something but don't know which folder. "
+        "Each entry has: file_count, total_chars, last_modified, and "
+        "a one-line description of what that category holds. After "
+        "picking a category, call memory_list(category=...) to see "
+        "the files inside it, then memory_read(filename=...) for "
+        "the body."
+    )
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        max_result_chars=4_000,
+    )
+
+    def run(self, session_id: str) -> str:
+        """Return the root memory manifest (categories + totals).
+
+        Args:
+            session_id: Your session ID.
+        """
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        idx_mgr = getattr(mem, "index_manager", None) or getattr(mem, "_index_manager", None)
+        if idx_mgr is None:
+            return _error("Memory index not initialised")
+        try:
+            vmap = idx_mgr.build_vault_map()
+        except Exception as exc:
+            return _error(f"Failed to build vault map: {exc}")
+
+        # Sort categories by file_count desc so the most useful ones
+        # surface first when the agent skims the response.
+        categories = vmap.get("categories") or {}
+        ranked = sorted(
+            (
+                {
+                    "category": cat,
+                    "file_count": int(d.get("files") or 0),
+                    "last_modified": d.get("last_modified") or "",
+                    "description": d.get("description") or "",
+                }
+                for cat, d in categories.items()
+            ),
+            key=lambda x: (-x["file_count"], x["category"]),
+        )
+        return _ok({
+            "categories": ranked,
+            "total_files": int(vmap.get("total_files") or 0),
+            "memory_md_preview": vmap.get("memory_md_preview") or "",
+            "next_steps": [
+                "memory_list(category=<name>) — list files in a folder",
+                "memory_search(query=<text>, category=<name>) — narrow search",
+                "memory_read(filename=<path>) — open a specific note",
+            ],
+        })
+
+
 class MemoryListTool(BaseTool):
-    """List all memory notes, optionally filtered by category or tag."""
+    """List memory notes in a single category (Tier 2 — folder browse)."""
 
     name = "memory_list"
     description = (
-        "List all your memory notes. You can filter by category "
-        "(topics, decisions, insights, people, projects, reference) "
-        "or by tag to narrow down results."
+        "List memory notes in a single category. Pass `category` "
+        "(e.g. 'conversations', 'critical', 'topics', 'projects', "
+        "'insights', 'daily', 'executions', 'dms'). Optional `tag` "
+        "narrows further. Use `memory_categories` first if you "
+        "don't know which category to pick. Returns lightweight "
+        "metadata (filename, title, summary, importance, modified, "
+        "session_id, turn_count for rollups) — call "
+        "`memory_read(filename)` for the full body."
     )
     CAPABILITIES = ToolCapabilities(concurrency_safe=True, read_only=True, idempotent=True)
 
@@ -669,4 +749,5 @@ TOOLS = [
     MemoryListTool(),
     MemoryLinkTool(),
     MemoryPinTool(),
+    MemoryCategoriesTool(),
 ]
