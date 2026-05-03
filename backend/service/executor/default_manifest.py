@@ -179,8 +179,48 @@ _PRESET_SCAFFOLD_OVERRIDES: Dict[str, Dict[str, Dict[str, Any]]] = {
         },
     },
     _VTUBER: {
-        # VTuber turns are conversational — summary defers to host-side
-        # mood/bond accumulation rather than a structured turn record.
+        # G2.4 (vtuber): light tool-review chain. The conversational
+        # persona's tool surface is small (web_search / news_search /
+        # web_fetch + memory_*), so a heavyweight reviewer chain is
+        # over-cost. Keep schema (arg validation) + sensitive (PII /
+        # secret leak detection) — drop destructive / network / size
+        # which are noise for this surface.
+        "tool_review": {
+            "active": True,
+            "chain_order": {"reviewers": ["schema", "sensitive"]},
+        },
+        # G2.2 (vtuber): turn-summary writer + heuristic importance.
+        # Distinct from the host-side affect summary (mood/bond) — this
+        # publishes the structured turn record to
+        # state.shared['turn_summary'] which the executor's S19 stage
+        # forwards to ``state.session_runtime.memory_provider.record_summary``
+        # (the GenyMemoryStrategy installed by attach_runtime). Keeps
+        # long-conversation context coherent without enabling the full
+        # binary_classify evaluator.
+        "summarize": {
+            "active": True,
+            "strategies": {
+                "summarizer": "rule_based",
+                "importance": "heuristic",
+            },
+        },
+        # G2.3 (vtuber): on_significant checkpointing. Manifest carries
+        # the no_persist placeholder; ``service.persist.install_file_persister``
+        # swaps in the real FilePersister at attach_runtime — the helper
+        # is preset-agnostic, only the active flag here gates whether
+        # the persister hooks the stage. ``on_significant`` keeps IO
+        # bounded — checkpoints land only on noteworthy events
+        # (high-importance summaries, terminal turns).
+        "persist": {
+            "active": True,
+            "strategies": {
+                "persister": "no_persist",  # swapped at runtime
+                "frequency": "on_significant",
+            },
+        },
+        # task_registry / hitl stay off — VTuber is a single-agent
+        # autonomous persona. No delegation registry to track and no
+        # human-approval surface to gate.
     },
 }
 
