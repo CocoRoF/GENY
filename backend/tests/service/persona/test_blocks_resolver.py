@@ -26,10 +26,13 @@ def stub_section(monkeypatch):
 
 
 def test_default_when_section_absent(stub_section) -> None:
-    """No settings → historical [datetime, memory_context]."""
+    """No settings → cycle 20260503_7 default
+    [datetime, memory_context, host_memory_tools]."""
     stub_section["value"] = {}
     blocks = resolver.resolve_tail_blocks("worker")
-    assert len(blocks) == 2
+    assert len(blocks) == 3
+    names = [b.name for b in blocks]
+    assert names == ["datetime", "memory_context", "host_memory_tools"]
 
 
 def test_role_specific_override(stub_section) -> None:
@@ -40,7 +43,7 @@ def test_role_specific_override(stub_section) -> None:
     vtuber_blocks = resolver.resolve_tail_blocks("vtuber")
     worker_blocks = resolver.resolve_tail_blocks("worker")
     assert len(vtuber_blocks) == 1  # datetime only
-    assert len(worker_blocks) == 2  # falls back to default
+    assert len(worker_blocks) == 3  # falls back to default (3 blocks now)
 
 
 def test_default_key_overrides_historical(stub_section) -> None:
@@ -80,4 +83,26 @@ def test_garbage_section_falls_back(stub_section) -> None:
     """Section with non-dict value → defaults applied."""
     stub_section["value"] = {"tail_blocks_by_role": "not-a-dict"}
     blocks = resolver.resolve_tail_blocks("worker")
-    assert len(blocks) == 2
+    assert len(blocks) == 3
+
+
+def test_host_memory_tools_block_renders_catalogue(stub_section) -> None:
+    """Cycle 20260503_7 — the host's HostMemoryToolsBlock surfaces
+    Geny's concrete tool ladder text in the system prompt tail.
+    """
+    stub_section["value"] = {}
+    blocks = resolver.resolve_tail_blocks("worker")
+    last = blocks[-1]
+    assert last.name == "host_memory_tools"
+    rendered = last.render(state=None)
+    # Concrete tool names live HERE — in the host module — and not
+    # in the executor's preset.
+    assert "memory_categories" in rendered
+    assert "memory_list" in rendered
+    assert "memory_read" in rendered
+    assert "memory_search" in rendered
+    assert "memory_pin" in rendered
+    # Policy is also present (executor's role) so the agent
+    # gets policy + tools in one coherent block.
+    assert "Pinned Facts" in rendered
+    assert "before asking a clarification" in rendered

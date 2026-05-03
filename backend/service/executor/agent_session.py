@@ -1643,7 +1643,17 @@ class AgentSession:
         # J.1 (cycle 20260426_3) — settings-driven tail-block composition.
         # Falls back to the historical [DateTimeBlock, MemoryContextBlock]
         # chain when settings.json:persona.tail_blocks_by_role is silent.
+        # Cycle 20260503_7 — append :class:`HostMemoryToolsBlock` after
+        # MemoryContextBlock so the agent sees Geny's *concrete* tool
+        # catalogue (memory_categories / memory_list / memory_read /
+        # memory_search / memory_pin / memory_write / memory_update)
+        # right after the Pinned Facts + Relevant Knowledge data
+        # blocks. The executor's generic Memory Usage policy lives
+        # inside the host block so the agent gets policy + tools in
+        # one coherent section without requiring executor-level
+        # tool-name knowledge.
         from service.persona.blocks_resolver import resolve_tail_blocks
+        from service.memory.host_memory_tools_block import HostMemoryToolsBlock
         _role_key = (
             self._role.value if self._role and hasattr(self._role, "value")
             else "worker"
@@ -1652,6 +1662,13 @@ class AgentSession:
             DateTimeBlock(),
             MemoryContextBlock(),
         ]
+        # Idempotent append — settings-driven configurations that
+        # already declared the host_memory_tools block keep theirs
+        # without duplication.
+        if not any(
+            getattr(b, "name", "") == "host_memory_tools" for b in _tail_blocks
+        ):
+            _tail_blocks = list(_tail_blocks) + [HostMemoryToolsBlock()]
 
         if self._persona_provider is not None:
             from service.persona import DynamicPersonaSystemBuilder
