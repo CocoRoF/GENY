@@ -19,7 +19,7 @@ import pytest
 
 
 def _known_preset_ids():
-    return ("worker_adaptive", "vtuber", "worker_easy")
+    return ("worker_adaptive", "vtuber")
 
 
 @pytest.mark.parametrize("preset", _known_preset_ids())
@@ -43,7 +43,6 @@ def test_manifest_declares_tool_stage(preset: str) -> None:
 #   G2.5 — hitl        (15) on worker_adaptive (PipelineResumeRequester swapped at runtime)
 _ACTIVE_SCAFFOLDS_BY_PRESET: dict[str, set[int]] = {
     "worker_adaptive": {11, 15, 19, 20},
-    "worker_easy": set(),
     "vtuber": set(),
 }
 
@@ -92,11 +91,10 @@ def test_worker_adaptive_activates_summarize_with_real_strategies() -> None:
     assert summarize["strategies"]["summarizer"] == "rule_based"
     assert summarize["strategies"]["importance"] == "heuristic"
 
-    # vtuber + worker_easy keep the no-op default.
-    for preset in ("vtuber", "worker_easy"):
-        s = next(e for e in build_default_manifest(preset).stages if e["order"] == 19)
-        assert s["active"] is False
-        assert s["strategies"]["summarizer"] == "no_summary"
+    # vtuber keeps the no-op default.
+    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 19)
+    assert s["active"] is False
+    assert s["strategies"]["summarizer"] == "no_summary"
 
 
 def test_worker_adaptive_activates_tool_review_chain() -> None:
@@ -118,12 +116,10 @@ def test_worker_adaptive_activates_tool_review_chain() -> None:
         "size",
     ]
 
-    # vtuber + worker_easy keep tool_review off — VTuber sessions
-    # don't run general-purpose tools and worker_easy is a single-
-    # turn Q&A path.
-    for preset in ("vtuber", "worker_easy"):
-        s = next(e for e in build_default_manifest(preset).stages if e["order"] == 11)
-        assert s["active"] is False
+    # vtuber keeps tool_review off — VTuber sessions don't run
+    # general-purpose tools.
+    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 11)
+    assert s["active"] is False
 
 
 def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> None:
@@ -142,11 +138,9 @@ def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> Non
     assert hitl["strategies"]["requester"] == "null"
     assert hitl["strategies"]["timeout"] == "indefinite"
 
-    # vtuber + worker_easy keep hitl off — VTuber sessions have no
-    # approval surface and worker_easy is single-turn.
-    for preset in ("vtuber", "worker_easy"):
-        s = next(e for e in build_default_manifest(preset).stages if e["order"] == 15)
-        assert s["active"] is False
+    # vtuber keeps hitl off — VTuber sessions have no approval surface.
+    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 15)
+    assert s["active"] is False
 
 
 def test_worker_adaptive_activates_persist_with_on_significant_frequency() -> None:
@@ -164,17 +158,16 @@ def test_worker_adaptive_activates_persist_with_on_significant_frequency() -> No
     assert persist["strategies"]["persister"] == "no_persist"
     assert persist["strategies"]["frequency"] == "on_significant"
 
-    # vtuber + worker_easy keep the scaffold default (off).
-    for preset in ("vtuber", "worker_easy"):
-        s = next(e for e in build_default_manifest(preset).stages if e["order"] == 20)
-        assert s["active"] is False
+    # vtuber keeps the scaffold default (off).
+    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 20)
+    assert s["active"] is False
 
 
 @pytest.mark.parametrize("preset", _known_preset_ids())
 def test_tool_stage_has_default_strategies(preset: str) -> None:
-    """G6.2: worker presets (worker_adaptive + worker_easy) flip to
-    capability-aware ``partition`` execution; vtuber stays sequential
-    because it doesn't run general-purpose tools."""
+    """G6.2: worker_adaptive flips to capability-aware ``partition``
+    execution; vtuber stays sequential because it doesn't run
+    general-purpose tools."""
     from service.executor.default_manifest import build_default_manifest
 
     manifest = build_default_manifest(preset)

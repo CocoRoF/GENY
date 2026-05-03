@@ -232,7 +232,7 @@ class AgentSession:
     """geny-executor Pipeline-based agent session.
 
     Key architecture:
-        - geny-executor Pipeline: 16-stage execution engine, built
+        - geny-executor Pipeline: 21-stage execution engine, built
           from an EnvironmentManifest by the session manager and
           handed in via ``prebuilt_pipeline``.
         - ``Pipeline.attach_runtime``: the sole injection point for

@@ -40,11 +40,11 @@ bounded (plan/05 §4.4 "Manifest drift"):
   double digits for MVP with no behavioural reward.
 
 Coexistence. ``build_default_manifest(preset)`` continues to serve
-deployment presets (``"vtuber"`` / ``"worker_adaptive"`` / ``"worker_easy"``
-/ ``"default"``). ``build_stage_manifest(manifest_id)`` serves the
-selector's growth ids. PR-X4-5 picks between the two at session-start:
-selector-nominated ids route here; falling back to the legacy path
-routes to :func:`build_default_manifest`.
+deployment presets (``"vtuber"`` / ``"worker_adaptive"`` / ``"default"``).
+``build_stage_manifest(manifest_id)`` serves the selector's growth ids.
+PR-X4-5 picks between the two at session-start: selector-nominated ids
+route here; falling back to the legacy path routes to
+:func:`build_default_manifest`.
 """
 
 from __future__ import annotations

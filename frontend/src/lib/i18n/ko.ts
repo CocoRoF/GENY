@@ -527,7 +527,7 @@ const ko: Translations = {
     // ─── Pipeline view (executor-web-style canvas) ───
     pipeline: {
       label: '파이프라인',
-      title: '16단계 아키텍처',
+      title: '21단계 아키텍처',
       sourceEnvironment: '환경',
       sourcePreset: '프리셋',
       activeRatio: '{active}/{total} 활성',
@@ -2143,7 +2143,7 @@ const ko: Translations = {
   // ─── Environment Builder Tab ───
   builderTab: {
     title: '환경 빌더',
-    subtitle: '하나의 환경에 대해 16-stage 파이프라인의 artifact/config/active 를 편집합니다. 저장은 stage 단위로 이루어지며, 다음 세션 턴부터 적용됩니다.',
+    subtitle: '하나의 환경에 대해 21-stage 파이프라인의 artifact/config/active 를 편집합니다. 저장은 stage 단위로 이루어지며, 다음 세션 턴부터 적용됩니다.',
     emptyTitle: '열려 있는 환경이 없습니다',
     emptyHint: 'Environments 탭에서 카드의 "Builder 에서 열기" 를 누르거나, 카드를 눌러 프리뷰한 뒤 여기로 여세요.',
     openEnvironments: 'Environments 탭 열기',
@@ -2226,7 +2226,7 @@ const ko: Translations = {
     preset: '프리셋',
     presetMinimal: 'Minimal — input + parse + yield 만',
     presetChat: 'Chat — 경량 단일 턴',
-    presetAgent: 'Agent — 16 스테이지 풀 파이프라인',
+    presetAgent: 'Agent — 21 스테이지 풀 파이프라인',
     presetEvaluator: 'Evaluator — 실행 후 평가',
     presetVTuber: 'Geny VTuber — persona + 서브 워커 분리',
     create: '만들기',
