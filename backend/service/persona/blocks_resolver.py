@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TAIL = ("datetime", "memory_context")
+_DEFAULT_TAIL = ("datetime", "memory_context", "host_memory_tools")
 
 
 def _builder_map() -> Dict[str, Any]:
@@ -29,10 +29,20 @@ def _builder_map() -> Dict[str, Any]:
         )
     except ImportError:
         return {}
-    return {
+    builders: Dict[str, Any] = {
         "datetime": DateTimeBlock,
         "memory_context": MemoryContextBlock,
     }
+    # Cycle 20260503_7 — Geny's host-side memory tool catalogue.
+    # Optional import so a settings.json that doesn't reference
+    # ``host_memory_tools`` continues to work even if the host module
+    # isn't installed.
+    try:
+        from service.memory.host_memory_tools_block import HostMemoryToolsBlock
+        builders["host_memory_tools"] = HostMemoryToolsBlock
+    except ImportError:
+        pass
+    return builders
 
 
 def _settings_section() -> Dict[str, Any]:
