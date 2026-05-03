@@ -552,6 +552,15 @@ const en = {
       artifact: 'Artifact',
       inUse: 'in use',
       notInManifest: 'Not in Manifest',
+      // Stage node hover hints — mounted on the .inactive circles so
+      // a user who sees a grey node knows *why* it's grey before
+      // clicking. Three kinds: missing from manifest entirely, opt-in
+      // optional stage (Sub-phase 9a), or simply turned off by the
+      // current preset.
+      hoverMissing: 'Not declared on this manifest',
+      hoverOptionalOff: 'Sub-phase 9a optional stage — off in this preset',
+      hoverInactive: 'Turned off by this preset',
+      hoverActive: 'Active',
     },
   },
 
@@ -2179,9 +2188,9 @@ const en = {
     preset: 'Preset',
     presetMinimal: 'Minimal — input + parse + yield only',
     presetChat: 'Chat — lightweight single-turn',
-    presetAgent: 'Agent — full 21-stage pipeline',
+    presetAgent: 'Agent — 21-stage adaptive (tool review · task registry · HITL · summary · checkpoint)',
     presetEvaluator: 'Evaluator — post-run evaluation',
-    presetVTuber: 'Geny VTuber — persona + Sub-Worker split',
+    presetVTuber: 'Geny VTuber — persona + Sub-Worker, with light tool review · summary · checkpoint',
     create: 'Create',
     creating: 'Creating…',
     failed: 'Failed to create environment',

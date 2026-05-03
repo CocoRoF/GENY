@@ -18,6 +18,13 @@ import type { StageManifestEntry } from '@/types/environment';
 import { getStageMetaByOrder } from './stageMetadata';
 import { useZoomPan } from './useZoomPan';
 
+/* Sub-phase 9a optional stage orders — opting any of these in is a
+ * preset-level decision (worker_adaptive turns 11/13/15/19/20 on,
+ * vtuber turns 11/19/20 on with a lighter chain). Used by the hover
+ * tooltip to disambiguate "off because optional" from "off because
+ * the preset disabled a base stage". */
+const SUB_PHASE_9A_ORDERS: ReadonlySet<number> = new Set([11, 13, 15, 19, 20]);
+
 /* ═══ Layout constants — sized for the 21-stage layout ═══ */
 const GAP = 110;
 const LM = 120;
@@ -72,6 +79,7 @@ interface StageNodeProps {
 
 function StageNode({ order, entry, isSelected, onSelect, isDirty = false }: StageNodeProps) {
   const locale = useI18n((s) => s.locale);
+  const t = useI18n((s) => s.t);
   const meta = getStageMetaByOrder(order, locale);
   const displayName = meta?.displayName ?? entry?.name ?? `Stage ${order}`;
 
@@ -83,10 +91,26 @@ function StageNode({ order, entry, isSelected, onSelect, isDirty = false }: Stag
   else cls += ' active';
   if (isSelected) cls += ' selected';
 
+  // Hover hint disambiguates the three "grey" states. Native title
+  // tooltip keeps the dependency surface zero — a richer popover can
+  // come later if the legend grows.
+  let hoverHint: string;
+  if (!isPresent) {
+    hoverHint = t('sessionEnvironmentTab.pipeline.hoverMissing');
+  } else if (!isActive) {
+    hoverHint = SUB_PHASE_9A_ORDERS.has(order)
+      ? t('sessionEnvironmentTab.pipeline.hoverOptionalOff')
+      : t('sessionEnvironmentTab.pipeline.hoverInactive');
+  } else {
+    hoverHint = t('sessionEnvironmentTab.pipeline.hoverActive');
+  }
+  const titleText = `${order}. ${displayName} — ${hoverHint}`;
+
   return (
     <div
       className="flex flex-col items-center relative"
       style={{ width: R * 2 + 20 }}
+      title={titleText}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(isSelected ? null : order);
