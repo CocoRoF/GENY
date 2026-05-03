@@ -8,22 +8,21 @@
  * WikilinkPicker, and the NoteViewer all show every category the
  * backend can write.
  *
- * Plan §1.5 — five semantic groups:
+ * Plan §1.5 — semantic groups:
  *
- *   - LEAF (source of truth):   `conversations`
- *   - INDEX:                    `dms`, `daily-journal`
+ *   - LEAF (source of truth):   `conversations` (per-session-per-bucket rollups)
+ *   - INDEX:                    `dms` (per-counterpart-per-day bundles)
  *   - DERIVED:                  `insights`
- *   - CURATED:                  `topics`, `projects`, `daily`
- *   - ARTIFACT:                 `compactions`
+ *   - CURATED:                  `topics`, `projects`, `daily`, `critical`
+ *   - ARTIFACT:                 `compactions`, `executions`
  *
- * The legacy `entities` category was retired in 1.12.0: counterpart
- * stats already live under `dms/<cp>/<date>.md` and the StreamTab UI,
- * and `memory_distill` writes its summaries to `insights/counterpart-
- * <id>.md` instead.
+ * The legacy `entities` category was retired in 1.12.0 and the
+ * standalone `daily-journal` category was retired in cycle 20260503_6
+ * (rollup files now carry every turn with date_first/date_last in
+ * frontmatter, so the standalone headline index was redundant).
  *
- * Plus `root` for files directly under `memory/` (MEMORY.md and
- * the daily-journal `<YYYY-MM-DD>.md` files when the index manager
- * couldn't infer a category).
+ * Plus `root` for files directly under `memory/` (MEMORY.md and any
+ * stragglers when the index manager couldn't infer a category).
  *
  * Adding a new category? Update both this file *and* the backend
  * `VALID_CATEGORIES` set in lockstep — they're meant to mirror.
@@ -47,7 +46,6 @@ import {
 export const MEMORY_CATEGORIES = [
   'conversations',
   'dms',
-  'daily-journal',
   'executions',
   'insights',
   'topics',
@@ -66,10 +64,11 @@ export const VISIBLE_CATEGORIES = MEMORY_CATEGORIES;
 
 /** Categories that legitimately accept human / agent-driven writes
  * via the MemoryTab "New note" modal. The auto-managed categories
- * (conversations, dms, daily-journal, compactions) are filtered out
- * — they're written by record_message / s02 hooks only and the
- * modal would otherwise let users create misshapen stub notes that
- * the auto-writers would later overwrite or misindex.
+ * (conversations, dms, executions, compactions) are filtered out
+ * — they're written by record_message / s02 hooks / record_execution
+ * only and the modal would otherwise let users create misshapen
+ * stub notes that the auto-writers would later overwrite or
+ * misindex.
  */
 export const WRITABLE_CATEGORIES: readonly MemoryCategory[] = [
   'topics',
@@ -84,10 +83,10 @@ export const WRITABLE_CATEGORIES: readonly MemoryCategory[] = [
 export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   conversations: MessageSquare,
   dms: MessageSquare,
-  'daily-journal': Calendar,
-  // Cycle 20260503_5 — execution-summary stream split out from
-  // ``daily-journal``. Visually distinct icon so operators don't
-  // confuse the chronological index with the per-execution log.
+  // Cycle 20260503_5 — execution-summary stream owns dated logs.
+  // Cycle 20260503_6 — ``daily-journal`` retired; conversation
+  // rollups carry every turn so the standalone headline index was
+  // redundant.
   executions: GitGraph,
   insights: Lightbulb,
   topics: Bookmark,
@@ -104,7 +103,6 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
 export const CATEGORY_COLORS: Record<string, string> = {
   conversations: '#60a5fa', // blue — the leaf source of truth
   dms: '#a78bfa',           // violet — counterpart channel
-  'daily-journal': '#f97316', // orange — chronological index
   executions: '#22c55e',    // green — execution-summary stream
   insights: '#ec4899',      // pink — distilled knowledge
   topics: '#3b82f6',        // blue — curated subject pages
@@ -123,7 +121,6 @@ export const CATEGORY_COLORS: Record<string, string> = {
 export const CATEGORY_FALLBACK_LABELS: Record<string, string> = {
   conversations: 'Conversations',
   dms: 'DMs',
-  'daily-journal': 'Daily Journal',
   executions: 'Executions',
   insights: 'Insights',
   topics: 'Topics',
@@ -139,6 +136,6 @@ export const CATEGORY_FALLBACK_LABELS: Record<string, string> = {
 export function isAutoManagedCategory(cat: string): boolean {
   return cat === 'conversations'
     || cat === 'dms'
-    || cat === 'daily-journal'
+    || cat === 'executions'
     || cat === 'compactions';
 }

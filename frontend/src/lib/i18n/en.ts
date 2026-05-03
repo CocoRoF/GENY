@@ -2661,7 +2661,7 @@ const en = {
     conversationStream: 'Stream',
     conversationNotes: 'Notes',
     conversationStreamHint: 'InteractionEvent timeline from STM jsonl',
-    conversationNotesHint: 'memory/conversations/, dms/, daily-journal notes ({count} files)',
+    conversationNotesHint: 'memory/conversations/ and memory/dms/ notes ({count} files)',
     conversationEmpty: 'No conversations / dms notes yet — they fill in automatically once a conversation starts.',
     conversationSelectNote: 'Select a note to view its body.',
     conversationSelectSession: 'Select a session.',

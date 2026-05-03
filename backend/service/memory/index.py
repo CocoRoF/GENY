@@ -45,6 +45,48 @@ _VAULT_MAP_TOP_TAGS = 10
 _VAULT_MAP_MEMORY_PREVIEW_CHARS = 200
 
 
+#: One-line description per category surfaced in the root
+#: ``_index.json`` and rendered into the system-prompt vault map.
+#: Helps the agent decide which folder to drill into when its
+#: ``memory_list(category)`` tool is the right next move.
+_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
+    "conversations": "Per-session conversation rollups, split by counterpart bucket (user / reflection / dm / system).",
+    "dms": "Per-counterpart-per-day DM index bundles.",
+    "critical": "Always-pinned facts about the user, persona, and binding decisions; injected into every prompt.",
+    "insights": "LLM-distilled facts curated from past conversations.",
+    "topics": "Curated subject pages (free-form notes the agent can read/write).",
+    "projects": "Curated initiative pages tracking ongoing work.",
+    "daily": "Per-execution result cards (one per agent run).",
+    "executions": "Append-only execution-summary stream organised by date.",
+    "compactions": "Compaction artefacts written by the s02 context compactor.",
+    "root": "Root-level files (MEMORY.md and any uncategorised .md).",
+}
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    """Write ``payload`` as JSON to ``path`` via tempfile + rename so
+    a crash mid-write never leaves a half-baked file.
+    """
+    import os, tempfile  # local — keeps the eager import set lean
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=path.stem + ".",
+        suffix=".json.tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _coerce_int_meta(value: Any) -> int:
     """Frontmatter ints come back as int|str|None; normalise to int."""
     if isinstance(value, bool):
@@ -258,8 +300,13 @@ class MemoryIndexManager:
         with self._lock:
             filepath = self._memory_dir / relative_path
             if not filepath.exists() or not filepath.is_file():
-                # File removed — delete from index
+                # File removed — delete from index AND persist so the
+                # category shard reflects the removal (cycle
+                # 20260503_6: hierarchical index needs the per-shard
+                # write to drop entries; the legacy monolithic save
+                # was implicitly handled by the next ``rebuild``).
                 self._remove_from_index(relative_path)
+                self._save_to_disk()
                 return None
 
             info = self._scan_file(filepath)
@@ -538,42 +585,246 @@ class MemoryIndexManager:
     # Persistence
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Disk persistence — hierarchical (cycle 20260503_6)
+    #
+    # Before: a single ``memory/_index.json`` carried every file's
+    # MemoryFileInfo for the whole vault — every per-file update
+    # rewrote the whole monolith, and the agent's "discover what's
+    # in memory" path had to read the entire payload.
+    #
+    # Now: progressive disclosure across two layers.
+    #
+    #   memory/_index.json
+    #       Root map. Tiny (1–2 KB regardless of vault size). Carries
+    #       per-category aggregates, ``link_graph`` (cross-folder),
+    #       and overall totals. This is what the vault-map renderer
+    #       reads to build the system-prompt categories block.
+    #
+    #   memory/<category>/_index.json
+    #       Per-folder shard. Carries the MemoryFileInfo entries and
+    #       the tag_map for files inside that folder. Touched only
+    #       when files in *that* category change.
+    #
+    # The in-memory ``MemoryIndex`` shape and every public API on
+    # ``MemoryIndexManager`` are unchanged — only the on-disk
+    # persistence layout changed.
+    # ------------------------------------------------------------------
+
+    def _category_dir(self, category: str) -> Path:
+        """Folder that owns the per-category shard for ``category``.
+
+        ``root`` files (no subdirectory) keep their shard at
+        ``memory/_root/_index.json`` so we never collide with the
+        actual root ``_index.json``.
+        """
+        if not category or category == "root":
+            return self._memory_dir / "_root"
+        return self._memory_dir / category
+
+    def _category_index_path(self, category: str) -> Path:
+        return self._category_dir(category) / _INDEX_FILE
+
+    def _all_category_dirs(self) -> List[Path]:
+        """Folders that *could* host a per-category shard. Returns
+        every immediate subdirectory of ``memory/`` plus the synthetic
+        ``_root/`` folder.
+        """
+        out: List[Path] = []
+        if not self._memory_dir.exists():
+            return out
+        for entry in self._memory_dir.iterdir():
+            if entry.is_dir() and not entry.name.startswith("_"):
+                out.append(entry)
+        # _root is hidden from the vault but still scanned for shards.
+        root_shard = self._memory_dir / "_root"
+        if root_shard.is_dir():
+            out.append(root_shard)
+        return out
+
+    def _files_in_category(
+        self, idx: MemoryIndex, category: str,
+    ) -> Dict[str, MemoryFileInfo]:
+        """Return the subset of ``idx.files`` whose category matches."""
+        return {
+            fn: info for fn, info in idx.files.items()
+            if (info.category or "root") == category
+        }
+
+    def _tag_map_for_category(
+        self, idx: MemoryIndex, files_subset: Dict[str, MemoryFileInfo],
+    ) -> Dict[str, List[str]]:
+        """Project ``idx.tag_map`` down to entries in ``files_subset``."""
+        if not files_subset:
+            return {}
+        keep = set(files_subset.keys())
+        out: Dict[str, List[str]] = {}
+        for tag, fns in idx.tag_map.items():
+            kept = [fn for fn in fns if fn in keep]
+            if kept:
+                out[tag] = kept
+        return out
+
     def _load_from_disk(self) -> Optional[MemoryIndex]:
-        """Load index from _index.json."""
-        if not self._index_path.exists():
+        """Load the hierarchical index back into memory.
+
+        Strategy:
+          1. Read root ``_index.json`` if present.
+          2. Walk every per-category shard and merge into one
+             ``MemoryIndex``.
+          3. If neither exists, return ``None`` so the caller falls
+             back to a full file-system rebuild.
+
+        ``link_graph`` is sourced from the root shard when available
+        (it's the canonical cross-folder view); otherwise it's
+        rebuilt from each file's ``links_to``.
+        """
+        root_data: Dict[str, Any] = {}
+        if self._index_path.exists():
+            try:
+                root_data = json.loads(
+                    self._index_path.read_text(encoding="utf-8"),
+                )
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.debug(
+                    "MemoryIndex: failed to load root _index.json: %s", exc,
+                )
+                root_data = {}
+
+        idx = MemoryIndex()
+        any_shard_seen = False
+
+        for cat_dir in self._all_category_dirs():
+            shard_path = cat_dir / _INDEX_FILE
+            if not shard_path.exists():
+                continue
+            any_shard_seen = True
+            try:
+                shard = json.loads(shard_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.debug(
+                    "MemoryIndex: failed to load shard %s: %s", shard_path, exc,
+                )
+                continue
+
+            for fn, raw in (shard.get("files") or {}).items():
+                try:
+                    info = MemoryFileInfo.from_dict(raw)
+                except Exception:
+                    continue
+                idx.files[fn] = info
+            for tag, fns in (shard.get("tag_map") or {}).items():
+                bucket = idx.tag_map.setdefault(tag, [])
+                for fn in fns:
+                    if fn not in bucket:
+                        bucket.append(fn)
+
+        # Root-only fields fill in when the shards have populated files.
+        if "link_graph" in root_data and isinstance(root_data["link_graph"], dict):
+            idx.link_graph = {
+                str(k): list(v) for k, v in root_data["link_graph"].items()
+                if isinstance(v, list)
+            }
+        idx.last_rebuilt = str(root_data.get("last_rebuilt") or "")
+
+        if not any_shard_seen and not idx.files:
             return None
-        try:
-            data = json.loads(self._index_path.read_text(encoding="utf-8"))
-            return MemoryIndex.from_dict(data)
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            logger.debug("MemoryIndex: failed to load _index.json: %s", exc)
-            return None
+
+        # Recompute totals so we don't trust drifted root counts.
+        self._compute_totals(idx)
+        if not idx.link_graph:
+            self._rebuild_link_graph(idx)
+        return idx
 
     def _save_to_disk(self) -> None:
-        """Save index to _index.json AND refresh _vault_map.json.
+        """Write the hierarchical index out and refresh the vault map.
 
-        Memory v2 PR 9 — the vault map is a ~500-char "table of
-        contents" the system prompt's Static Layer injects in place
-        of MEMORY.md body (plan §1.2). It is purely derived from
-        the index — recomputed from scratch on every save so a
-        stale value cannot survive a rebuild.
+        Two-phase write per (root, per-category):
+          1. Each ``memory/<category>/_index.json`` gets the entries
+             owned by that category plus a category-local tag_map.
+          2. Root ``memory/_index.json`` gets the category aggregates,
+             cross-folder ``link_graph``, and totals.
+
+        Each file is written via tempfile + atomic rename so a crash
+        mid-write never leaves a half-baked shard. Categories whose
+        in-memory file set is empty have their shard removed (so
+        deleted folders don't leave stale shards behind).
         """
         if self._index is None:
             return
+        idx = self._index
+
+        # Group files by category so we touch each shard exactly once.
+        by_category: Dict[str, Dict[str, MemoryFileInfo]] = {}
+        for info in idx.files.values():
+            cat = info.category or "root"
+            by_category.setdefault(cat, {})[info.filename] = info
+
+        # Per-category shards.
+        for category, files in by_category.items():
+            cat_tag_map = self._tag_map_for_category(idx, files)
+            shard = {
+                "version": "2",
+                "category": category,
+                "files": {fn: info.to_dict() for fn, info in files.items()},
+                "tag_map": cat_tag_map,
+                "last_rebuilt": idx.last_rebuilt,
+            }
+            shard_path = self._category_index_path(category)
+            try:
+                shard_path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write_json(shard_path, shard)
+            except OSError as exc:
+                logger.warning(
+                    "MemoryIndex: failed to save shard %s: %s", shard_path, exc,
+                )
+
+        # Garbage-collect shards whose category disappeared in memory
+        # (e.g. all files in ``daily-journal/`` were deleted).
+        for cat_dir in self._all_category_dirs():
+            cat_name = "root" if cat_dir.name == "_root" else cat_dir.name
+            if cat_name in by_category:
+                continue
+            shard_path = cat_dir / _INDEX_FILE
+            if shard_path.exists():
+                try:
+                    shard_path.unlink()
+                except OSError:
+                    pass
+
+        # Root summary.
+        categories_summary: Dict[str, Dict[str, Any]] = {}
+        for category, files in by_category.items():
+            total_chars = sum(int(info.char_count or 0) for info in files.values())
+            last_modified = max(
+                (info.modified or "" for info in files.values()),
+                default="",
+            )
+            categories_summary[category] = {
+                "file_count": len(files),
+                "total_chars": total_chars,
+                "last_modified": last_modified,
+                "description": _CATEGORY_DESCRIPTIONS.get(category, ""),
+            }
+
+        root_doc = {
+            "version": "2",
+            "categories": categories_summary,
+            "link_graph": idx.link_graph,
+            "total_files": idx.total_files,
+            "total_chars": idx.total_chars,
+            "last_rebuilt": idx.last_rebuilt,
+        }
         try:
             self._memory_dir.mkdir(parents=True, exist_ok=True)
-            data = json.dumps(self._index.to_dict(), ensure_ascii=False, indent=2)
-            self._index_path.write_text(data, encoding="utf-8")
+            _atomic_write_json(self._index_path, root_doc)
         except OSError as exc:
-            logger.warning("MemoryIndex: failed to save _index.json: %s", exc)
-        # Best-effort vault map refresh — never blocks the index
-        # save from being acknowledged.
+            logger.warning("MemoryIndex: failed to save root _index.json: %s", exc)
+
+        # Vault map — best-effort refresh, never blocks the index save.
         try:
             vmap = self.build_vault_map()
-            self._vault_map_path.write_text(
-                json.dumps(vmap, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            _atomic_write_json(self._vault_map_path, vmap)
         except Exception:
             logger.debug(
                 "MemoryIndex: vault_map refresh failed — non-critical",
@@ -606,11 +857,18 @@ class MemoryIndexManager:
         """
         idx = self.index
 
-        # Per-category aggregate
+        # Per-category aggregate. ``description`` lets the agent
+        # understand each folder's purpose from the system-prompt
+        # vault map alone (cycle 20260503_6 — progressive disclosure
+        # tier 1).
         categories: Dict[str, Dict[str, Any]] = {}
         for info in idx.files.values():
             cat = info.category or "root"
-            slot = categories.setdefault(cat, {"files": 0, "last_modified": ""})
+            slot = categories.setdefault(cat, {
+                "files": 0,
+                "last_modified": "",
+                "description": _CATEGORY_DESCRIPTIONS.get(cat, ""),
+            })
             slot["files"] += 1
             if info.modified > slot["last_modified"]:
                 slot["last_modified"] = info.modified
@@ -669,10 +927,22 @@ class MemoryIndexManager:
         lines: List[str] = ["## Vault Map"]
         cats = vmap.get("categories") or {}
         if cats:
-            cat_summary = ", ".join(
-                f"{c}({d['files']})" for c, d in sorted(cats.items())
+            # One line per category with file count + 1-line description
+            # so the agent can decide which folder to drill into next
+            # without an extra tool call. Cycle 20260503_6 — progressive
+            # disclosure tier 1.
+            lines.append("- Categories:")
+            for c, d in sorted(cats.items()):
+                file_count = int(d.get("files") or 0)
+                desc = (d.get("description") or "").strip()
+                if desc:
+                    lines.append(f"  - `{c}` ({file_count}) — {desc}")
+                else:
+                    lines.append(f"  - `{c}` ({file_count})")
+            lines.append(
+                "  Use `memory_list(category=…)` to browse a folder, "
+                "`memory_read(filename=…)` for full content."
             )
-            lines.append(f"- Categories: {cat_summary}")
         top_tags = vmap.get("top_tags") or []
         if top_tags:
             tag_summary = ", ".join(f"{t}({n})" for t, n in top_tags[:5])

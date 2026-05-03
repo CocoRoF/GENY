@@ -109,15 +109,17 @@ class SessionMemoryManager:
         # without initialising it (rare; old tests) don't hit disk.
         from service.memory.conversation_archiver import ConversationArchiver  # local
         from service.memory.dm_archiver import DmArchiver
-        from service.memory.daily_journal_writer import DailyJournalWriter
         from service.memory.compaction_archiver import CompactionArchiver
+        # Cycle 20260503_6 — DailyJournalWriter retired. ``conversations/``
+        # rollup files now carry every turn (with date_first/date_last
+        # in frontmatter for chronological filtering), and the
+        # standalone ``memory/<YYYY-MM-DD>.md`` headline index was
+        # 100% redundant with the conversations sidebar entries.
         self._ConversationArchiver = ConversationArchiver
         self._DmArchiver = DmArchiver
-        self._DailyJournalWriter = DailyJournalWriter
         self._CompactionArchiver = CompactionArchiver
         self._conversation_archiver: Optional[ConversationArchiver] = None
         self._dm_archiver: Optional[DmArchiver] = None
-        self._daily_journal: Optional[DailyJournalWriter] = None
         self._compaction_archiver: Optional[CompactionArchiver] = None
 
         self._initialized = False
@@ -149,7 +151,6 @@ class SessionMemoryManager:
         for archiver_attr in (
             "_conversation_archiver",
             "_dm_archiver",
-            "_daily_journal",
             "_compaction_archiver",
         ):
             archiver = getattr(self, archiver_attr, None)
@@ -215,11 +216,6 @@ class SessionMemoryManager:
             index_manager=self._index_manager,
         )
         self._dm_archiver = self._DmArchiver(
-            str(memory_dir),
-            session_id=self._session_id or "",
-            index_manager=self._index_manager,
-        )
-        self._daily_journal = self._DailyJournalWriter(
             str(memory_dir),
             session_id=self._session_id or "",
             index_manager=self._index_manager,
@@ -329,11 +325,14 @@ class SessionMemoryManager:
 
         # PR 4 — index writers fire AFTER the leaf SoT exists so the
         # bundle entries can include a wikilink to the just-written
-        # conversations/<id>.md. Both writers are best-effort and
-        # cannot block the STM write.
+        # conversations/ rollup. Best-effort and non-blocking on the
+        # STM write. Cycle 20260503_6 retired the daily-journal
+        # writer; the conversations rollup files carry every turn
+        # with date_first/date_last in frontmatter so the
+        # chronological lookup is now done by the index, not by a
+        # separate per-day file.
         conv_ref = archived.relative_path if archived else None
         self._maybe_archive_dm(role, content, out_meta, conv_ref)
-        self._maybe_append_daily_journal(role, content, out_meta, conv_ref)
 
         try:
             from service.memory_provider.adapters.stm_adapter import try_record_message
@@ -394,25 +393,6 @@ class SessionMemoryManager:
             )
             return None
 
-    def _maybe_append_daily_journal(
-        self,
-        role: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]],
-        conversation_ref: Optional[str],
-    ):
-        """Best-effort hand-off to DailyJournalWriter. PR 4."""
-        if self._daily_journal is None:
-            return None
-        try:
-            return self._daily_journal.append(
-                role, content, metadata, conversation_ref=conversation_ref,
-            )
-        except Exception:
-            logger.debug(
-                "daily journal hook failed — non-critical", exc_info=True,
-            )
-            return None
 
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""
