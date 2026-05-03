@@ -57,7 +57,14 @@ dependencies = [
     # 1.12.0 retires the ``entities`` category entirely — counterpart
     # info now lives under ``dms/<cp>/<date>.md`` + StreamTab UI, and
     # ``memory_distill`` writes to ``insights/counterpart-<id>.md``.
-    "geny-executor[web,cron]>=1.12.0,<2.0.0",
+    # 1.13.0 (Memory v2 PR 12) adds the pinned-facts tier:
+    # ``GenyMemoryRetriever`` calls ``mgr.load_pinned`` every turn,
+    # ``MemoryContextBlock`` renders ``# Pinned Facts``, and
+    # ``GenyMemoryStrategy`` accepts a ``promote_callback`` so the
+    # host can push critical/high insights into a pinned surface.
+    # Geny implements all three on its side (LongTermMemory.load_pinned,
+    # service/memory/pin_policy.py, memory_pin tool).
+    "geny-executor[web,cron]>=1.13.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

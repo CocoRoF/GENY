@@ -985,6 +985,40 @@ class SessionMemoryManager:
         return tags[:10]  # cap at 10
 
     # ------------------------------------------------------------------
+    # Pinned facts (Memory v2 PR 12 / T1 tier)
+    # ------------------------------------------------------------------
+
+    def load_pinned(self, *, max_chars: int = 3000):
+        """Return the always-inject pinned-facts surface.
+
+        Delegates to :meth:`LongTermMemory.load_pinned`, which reads
+        ``memory/critical/*.md`` plus ``MEMORY.md`` and packs the
+        bodies (frontmatter stripped) into one ``MemoryEntry``.
+
+        The ``geny-executor`` ``GenyMemoryRetriever`` discovers this
+        method by duck-typing on the memory manager and injects the
+        returned content into the system prompt's ``# Pinned Facts``
+        section every turn — independent of the user's query
+        wording. That behaviour is what makes "주요한 사실" (key
+        facts) survive across sessions even when the user's first
+        message has zero lexical overlap with the pinned content.
+        """
+        ltm = getattr(self, "_ltm", None)
+        if ltm is None:
+            return None
+        loader = getattr(ltm, "load_pinned", None)
+        if loader is None:
+            return None
+        try:
+            return loader(max_chars=max_chars)
+        except Exception:
+            logger.debug(
+                "SessionMemoryManager.load_pinned: delegation failed",
+                exc_info=True,
+            )
+            return None
+
+    # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
 
@@ -1020,6 +1054,101 @@ class SessionMemoryManager:
         # Sort by combined score, deduplicate if needed
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:max_results]
+
+    async def search_async(
+        self,
+        query: str,
+        *,
+        max_results: int = 10,
+        sources: Optional[List[MemorySource]] = None,
+    ) -> List[MemorySearchResult]:
+        """Async sibling of :meth:`search` that also blends vector results.
+
+        Memory v2 PR 12 — restores the vector fallback that was lost
+        when ``build_memory_context_async`` was deprecated. The
+        agent's ``memory_search`` tool routes here via its async
+        path (``MemorySearchTool.arun``) so a Korean query still
+        finds an English-titled note via embedding similarity even
+        when the keyword-density signal is zero.
+
+        Result merging:
+          1. Run :meth:`search` for the keyword + STM portion.
+          2. Run :meth:`VectorMemoryManager.search` if enabled.
+          3. Wrap vector hits as :class:`MemorySearchResult` carrying
+             ``match_type='vector'``.
+          4. Deduplicate by filename — keep the highest-scoring entry.
+          5. Sort by score desc and slice ``max_results``.
+        """
+        # 1) Sync keyword path. ``search`` is fast enough to call
+        #    inline; running it in a thread would be overkill for
+        #    typical session sizes.
+        keyword_results = self.search(
+            query, max_results=max_results, sources=sources,
+        )
+
+        # 2) Vector path — only when the host has wired the layer
+        #    AND when the caller did not narrow ``sources`` to
+        #    something that excludes long-term memory (vector hits
+        #    are by definition LTM-derived).
+        vector_results: list[MemorySearchResult] = []
+        if sources is None or MemorySource.LONG_TERM in sources:
+            vmm = getattr(self, "_vmm", None)
+            if vmm is not None and getattr(vmm, "enabled", False):
+                try:
+                    v_hits = await vmm.search(query, top_k=max_results)
+                except Exception:
+                    logger.debug(
+                        "search_async: vector search failed", exc_info=True,
+                    )
+                    v_hits = []
+                for vr in v_hits or []:
+                    text = getattr(vr, "text", "") or ""
+                    if not text.strip():
+                        continue
+                    source_file = getattr(vr, "source_file", "vector")
+                    score = float(getattr(vr, "score", 0.0))
+                    entry = MemoryEntry(
+                        source=MemorySource.LONG_TERM,
+                        content=text,
+                        filename=source_file,
+                        metadata={
+                            "match_type": "vector",
+                            "chunk_index": getattr(vr, "chunk_index", 0),
+                        },
+                    )
+                    vector_results.append(
+                        MemorySearchResult(
+                            entry=entry,
+                            score=score,
+                            snippet=text[:240],
+                            match_type="vector",
+                        )
+                    )
+
+        # 3) Merge with filename-level dedup. Vector hits boost an
+        #    existing keyword hit instead of duplicating it; pure
+        #    vector hits land at the bottom of their score band but
+        #    still surface when keyword density was zero.
+        by_filename: Dict[str, MemorySearchResult] = {}
+        for r in keyword_results:
+            fn = (r.entry.filename or "") if r.entry else ""
+            by_filename[fn or f"_kw_{id(r)}"] = r
+        for r in vector_results:
+            fn = (r.entry.filename or "") if r.entry else ""
+            key = fn or f"_vec_{id(r)}"
+            if key in by_filename:
+                # Combine: keep the higher-density score, mark
+                # ``match_type`` as a hybrid for downstream filters.
+                existing = by_filename[key]
+                if r.score > existing.score:
+                    existing.score = r.score
+                existing.match_type = "hybrid"
+            else:
+                by_filename[key] = r
+
+        merged = list(by_filename.values())
+        merged.sort(key=lambda r: r.score, reverse=True)
+        return merged[:max_results]
 
     # ------------------------------------------------------------------
     # Context injection

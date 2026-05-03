@@ -37,6 +37,11 @@ from service.utils.utils import _configured_tz as _get_tz
 # semantic groups (entities/ category was retired — counterpart info
 # lives in dms/ and is derivable from conversations/ frontmatter):
 #
+#   * PINNED (always-inject)   — ``critical`` (Memory v2 PR 12).
+#     Holds must-know facts (호칭, persona-defining preferences,
+#     binding decisions). The retriever's ``_load_pinned_facts``
+#     layer reads this directory every turn regardless of query
+#     so the agent never "forgets" stated user preferences.
 #   * LEAF (source of truth)  — ``conversations`` (1 turn = 1 file,
 #     written by ``ConversationArchiver`` not StructuredMemoryWriter).
 #   * INDEX                    — ``dms`` (per-counterpart-per-day
@@ -59,10 +64,17 @@ from service.utils.utils import _configured_tz as _get_tz
 # the StreamTab UI counterpart cards. Counterpart-specific knowledge
 # the user wants to curate goes to ``topics/<name>.md`` instead.
 VALID_CATEGORIES = {
+    "critical",
     "daily", "topics", "projects", "insights",
     "dms", "conversations", "compactions",
     "root",
 }
+
+# Pinned-facts category. Centralised here so the constant is the
+# single source of truth shared by ``LongTermMemory.load_pinned``,
+# the ``memory_pin`` tool, and the auto-promote callback wired into
+# ``GenyMemoryStrategy``.
+PINNED_CATEGORY = "critical"
 
 # Maximum slug length for filenames.
 _MAX_SLUG = 80

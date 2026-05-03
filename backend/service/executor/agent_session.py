@@ -1751,6 +1751,36 @@ class AgentSession:
             )
             if _tuning.get("slim_mode"):
                 retriever_kwargs["slim_mode"] = True
+            # Memory v2 PR 12 — host-side retrieval policy. Older
+            # executor pins (< 1.13) ignore unknown kwargs only
+            # because they raise ``TypeError`` from ``__init__``;
+            # we therefore filter against the actual signature so
+            # Geny still imports against a downgraded executor
+            # (e.g. during a hotfix rollback).
+            try:
+                import inspect as _inspect
+                _retriever_params = _inspect.signature(
+                    GenyMemoryRetriever.__init__
+                ).parameters
+            except Exception:
+                _retriever_params = {}
+            if "pin_budget_ratio" in _retriever_params:
+                retriever_kwargs["pin_budget_ratio"] = _tuning.get(
+                    "pin_budget_ratio", 0.30,
+                )
+            if "category_boosts" in _retriever_params:
+                # Bias keyword search toward distilled / decision-bearing
+                # surfaces. Tunable via ``settings.json:memory.tuning.
+                # category_boosts``; falls back to the conservative
+                # default when the operator hasn't customised it.
+                retriever_kwargs["category_boosts"] = _tuning.get(
+                    "category_boosts",
+                    {"insights": 1.2, "projects": 1.2, "critical": 1.5},
+                )
+            if "always_render_vault_map" in _retriever_params:
+                retriever_kwargs["always_render_vault_map"] = bool(
+                    _tuning.get("always_render_vault_map", True)
+                )
             attach_kwargs["memory_retriever"] = GenyMemoryRetriever(
                 self._memory_manager, **retriever_kwargs,
             )
@@ -1761,6 +1791,7 @@ class AgentSession:
             # turn onto state.metadata['_pending_message_metadata'] and
             # this strategy applies the hint when it walks state.messages.
             from service.memory.dedupe_strategy import GenyDedupeStrategy
+            from service.memory.pin_policy import make_promote_callback
             # Memory v2 followup — insight quality gate. The
             # ``min_insight_importance`` kwarg landed in
             # geny-executor 1.10. We pass it conditionally so this
@@ -1774,17 +1805,31 @@ class AgentSession:
                 curated_knowledge_manager=curated_km,
                 resolver=reflection_resolver,
             )
-            if "min_insight_importance" in _tuning:
-                try:
-                    import inspect as _inspect
-                    if "min_insight_importance" in _inspect.signature(
-                        GenyDedupeStrategy.__init__
-                    ).parameters:
-                        strategy_kwargs["min_insight_importance"] = (
-                            _tuning["min_insight_importance"]
-                        )
-                except Exception:
-                    pass
+            try:
+                import inspect as _inspect
+                strategy_init_params = _inspect.signature(
+                    GenyDedupeStrategy.__init__
+                ).parameters
+            except Exception:
+                strategy_init_params = {}
+            if (
+                "min_insight_importance" in _tuning
+                and "min_insight_importance" in strategy_init_params
+            ):
+                strategy_kwargs["min_insight_importance"] = (
+                    _tuning["min_insight_importance"]
+                )
+            # Memory v2 PR 12 — pin auto-promote callback. The
+            # ``promote_callback`` kwarg was added in geny-executor
+            # 1.13.0; older pins simply skip it. Whenever an
+            # insight clears the importance gate, the callback
+            # writes a copy into ``memory/critical/`` so the next
+            # turn's retriever lifts the fact into the prompt's
+            # ``# Pinned Facts`` section regardless of query
+            # wording. Failures inside the callback are non-fatal
+            # — the underlying insights/<slug>.md still lands.
+            if "promote_callback" in strategy_init_params:
+                strategy_kwargs["promote_callback"] = make_promote_callback()
             attach_kwargs["memory_strategy"] = GenyDedupeStrategy(
                 self._memory_manager, **strategy_kwargs,
             )

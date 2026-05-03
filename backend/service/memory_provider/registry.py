@@ -176,17 +176,6 @@ class MemorySessionRegistry:
             except AttributeError:
                 pass
 
-
-class _SimpleRuntimeContainer:
-    """Minimal duck-typed stand-in for ``state.session_runtime``.
-
-    Used only when the host hasn't attached a richer runtime
-    container. Carries the ``memory_provider`` attribute Stage 19
-    Summarize probes for; everything else is opt-in via setattr.
-    """
-
-    memory_provider: Any = None
-
     # ── introspection ───────────────────────────────────────────────
 
     def describe(self, session_id: str) -> Dict[str, Any]:
@@ -194,7 +183,9 @@ class _SimpleRuntimeContainer:
 
         Mirrors :class:`geny_executor.memory.provider.MemoryDescriptor`
         after enum-stringification. Backend ``location`` is omitted
-        on purpose (Postgres DSNs can contain credentials).
+        on purpose (Postgres DSNs can contain credentials), and
+        secret-bearing config keys (``dsn``, ``password``, ...) are
+        redacted before the dict is handed back to a caller.
         """
         provider = self.require(session_id)
         desc = provider.descriptor
@@ -210,7 +201,7 @@ class _SimpleRuntimeContainer:
                 for b in desc.backends
             ],
             "metadata": dict(desc.metadata),
-            "config": self.get_config(session_id),
+            "config": _redacted_config(self.get_config(session_id)),
         }
 
     def default_config(self) -> Optional[Dict[str, Any]]:
@@ -233,3 +224,34 @@ class _SimpleRuntimeContainer:
         if self._default_config is None:
             return None
         return dict(self._default_config)
+
+
+# Secret-bearing config keys redacted by ``MemorySessionRegistry.describe``
+# before any dict crosses an HTTP / introspection boundary. Empty
+# values pass through so callers can distinguish "redacted" from
+# "absent". Mirrors the executor-web equivalent so both deployments
+# share the same threat model.
+_REDACTED_KEYS = frozenset({"dsn", "password", "api_key", "secret", "token"})
+
+
+def _redacted_config(cfg: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if cfg is None:
+        return None
+    out: Dict[str, Any] = {}
+    for k, v in cfg.items():
+        if isinstance(k, str) and k.lower() in _REDACTED_KEYS and v:
+            out[k] = "***"
+        else:
+            out[k] = v
+    return out
+
+
+class _SimpleRuntimeContainer:
+    """Minimal duck-typed stand-in for ``state.session_runtime``.
+
+    Used only when the host hasn't attached a richer runtime
+    container. Carries the ``memory_provider`` attribute Stage 19
+    Summarize probes for; everything else is opt-in via setattr.
+    """
+
+    memory_provider: Any = None

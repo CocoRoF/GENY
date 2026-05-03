@@ -319,6 +319,95 @@ class MemorySearchTool(BaseTool):
         )
 
         results = mem.search(query, max_results=max_results)
+        return self._format(
+            query=query,
+            results=results,
+            counterpart=counterpart,
+            canonical_counterpart=canonical_counterpart,
+            kind_filter=kind_filter,
+        )
+
+    async def arun(
+        self,
+        session_id: str,
+        query: str,
+        max_results: int = 10,
+        counterpart: Optional[str] = None,
+        kinds: Optional[List[str]] = None,
+    ) -> str:
+        """Async sibling of :meth:`run`.
+
+        Memory v2 PR 12 — when invoked through the async tool path
+        (which the executor uses for ``memory_search``), this calls
+        :meth:`SessionMemoryManager.search_async` so the result set
+        also includes vector-similarity hits. That fixes the case
+        where a Korean query must match an English-titled note via
+        embedding similarity rather than keyword density. Falls
+        back to the sync path when ``search_async`` is unavailable
+        (e.g. older managers).
+        """
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        # Resolve counterpart alias the same way as ``run``.
+        canonical_counterpart: Optional[str] = None
+        if counterpart:
+            try:
+                from tools.built_in.memory_inspect_tools import (
+                    _get_caller as _get_inspect_caller,
+                    _resolve_counterpart_id,
+                )
+                caller_agent = _get_inspect_caller(session_id)
+                canonical_counterpart = _resolve_counterpart_id(
+                    caller_agent, counterpart,
+                )
+            except Exception:
+                logger.debug(
+                    "memory_search.arun: counterpart resolution failed",
+                    exc_info=True,
+                )
+                canonical_counterpart = None
+
+        kind_filter = (
+            {str(k) for k in kinds if isinstance(k, str)}
+            if kinds else None
+        )
+
+        search_async = getattr(mem, "search_async", None)
+        if callable(search_async):
+            try:
+                results = await search_async(query, max_results=max_results)
+            except Exception:
+                logger.debug(
+                    "memory_search.arun: search_async failed; falling back",
+                    exc_info=True,
+                )
+                results = mem.search(query, max_results=max_results)
+        else:
+            results = mem.search(query, max_results=max_results)
+        return self._format(
+            query=query,
+            results=results,
+            counterpart=counterpart,
+            canonical_counterpart=canonical_counterpart,
+            kind_filter=kind_filter,
+        )
+
+    @staticmethod
+    def _format(
+        *,
+        query: str,
+        results,
+        counterpart: Optional[str],
+        canonical_counterpart: Optional[str],
+        kind_filter,
+    ) -> str:
+        """Shared formatter for ``run`` / ``arun``. Applies the
+        InteractionEvent filters (counterpart/kind) to event-tagged
+        hits, builds the progressive-disclosure-friendly snippet,
+        and serialises to JSON.
+        """
         items = []
         for r in results:
             entry = r.entry
@@ -360,6 +449,7 @@ class MemorySearchTool(BaseTool):
                 "source": entry.source.value if hasattr(entry.source, "value") else str(entry.source),
                 "snippet_first_line": snippet_first_line,
                 "score": round(r.score, 4),
+                "match_type": getattr(r, "match_type", None),
                 "title": getattr(entry, "title", None),
                 "category": getattr(entry, "category", None),
                 "tags": getattr(entry, "tags", None),
@@ -476,6 +566,97 @@ class MemoryLinkTool(BaseTool):
 
 
 # ============================================================================
+# Memory Pin Tool (Memory v2 PR 12 — T1 always-inject surface)
+# ============================================================================
+
+
+class MemoryPinTool(BaseTool):
+    """Pin a fact into the always-inject ``memory/critical/`` category.
+
+    This is how an agent records a "must-always-be-known" fact about
+    the user, the persona, or the ongoing work — the next turn's
+    retriever lifts these into the system prompt's
+    ``# Pinned Facts`` section regardless of the user's query
+    wording. Use ``memory_write`` for everything else; reserve
+    ``memory_pin`` for facts the agent must never claim ignorance
+    of (호칭, persona-defining preferences, binding decisions).
+    """
+
+    name = "memory_pin"
+    description = (
+        "Pin a fact so it is always present in the system prompt's "
+        "Pinned Facts section, regardless of the user's query. Use "
+        "this for must-know facts (how the user wants to be "
+        "addressed, the agent's name, binding preferences, ongoing "
+        "project goals). Other notes go through ``memory_write`` "
+        "instead. Pinned facts should be short and durable; do not "
+        "pin per-turn observations or transient state."
+    )
+    # New file write — serialize to avoid filename collision.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False)
+
+    def run(
+        self,
+        session_id: str,
+        title: str,
+        content: str,
+        tags: str = "",
+        importance: str = "high",
+    ) -> str:
+        """Pin a fact to ``memory/critical/<slug>.md``.
+
+        Args:
+            session_id: Your session ID.
+            title: Short title for the pinned fact (3-10 words).
+            content: The fact itself (1-3 sentences).
+            tags: Comma-separated tags, e.g. "user,preference".
+            importance: ``high`` or ``critical`` — this tool always
+                pins regardless of the value, but the importance is
+                stored in frontmatter for downstream consumers.
+        """
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        if not isinstance(title, str) or not title.strip():
+            return _error("title must be a non-empty string")
+        if not isinstance(content, str) or not content.strip():
+            return _error("content must be a non-empty string")
+
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        for marker in ("pinned",):
+            if marker not in tag_list:
+                tag_list.append(marker)
+
+        normalized_importance = (importance or "high").strip().lower()
+        if normalized_importance not in {"low", "medium", "high", "critical"}:
+            normalized_importance = "high"
+
+        # Import locally so the constant is not a hard import-time
+        # dependency (keeps tool-module load order forgiving).
+        from service.memory.structured_writer import PINNED_CATEGORY
+
+        filename = mem.write_note(
+            title=title.strip(),
+            content=content.strip(),
+            category=PINNED_CATEGORY,
+            tags=tag_list,
+            importance=normalized_importance,
+            source="agent_pin",
+        )
+        if filename:
+            return _ok({
+                "status": "pinned",
+                "filename": filename,
+                "title": title.strip(),
+                "category": PINNED_CATEGORY,
+                "tags": tag_list,
+                "importance": normalized_importance,
+            })
+        return _error("Failed to pin memory note")
+
+
+# ============================================================================
 # Explicit TOOLS list for ToolLoader
 # ============================================================================
 
@@ -487,4 +668,5 @@ TOOLS = [
     MemorySearchTool(),
     MemoryListTool(),
     MemoryLinkTool(),
+    MemoryPinTool(),
 ]
