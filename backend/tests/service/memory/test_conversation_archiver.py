@@ -334,8 +334,10 @@ class TestArchiverSessionRollup:
         result = archiver.archive("user", body, _meta())
 
         assert isinstance(result, ArchivedConversation)
-        # Wikilink target: no .md, anchor included.
-        assert result.relative_path.startswith("conversations/sess-abc123")
+        # PR 14 — user_chat lands in the ``user`` bucket, so the
+        # filename starts with ``<sid>__user`` (the title slug
+        # appends after).
+        assert result.relative_path.startswith("conversations/sess-abc123__user")
         assert result.relative_path.endswith(f"#turn-{result.event_id[:8]}")
         # Absolute path is the .md file with no #anchor.
         assert result.absolute_path.endswith(".md")
@@ -537,8 +539,10 @@ class TestArchiverSessionRollup:
 
     def test_index_round_trips_session_rollup(self, tmp_path: Path):
         """MemoryIndexManager indexes the rollup as a single
-        ``conversations`` file with the session-level title/tags
-        carrying through.
+        ``conversations`` file. PR 14 — a single ``task_request``
+        archive call lands in the *dm* bucket (one file per
+        counterpart), and the session-level frontmatter aggregates
+        carry through to ``MemoryFileInfo``.
         """
         from service.memory.index import MemoryIndexManager
 
@@ -561,13 +565,116 @@ class TestArchiverSessionRollup:
         idx_mgr.rebuild()
         idx = idx_mgr.index
 
-        # Find the session rollup file (one entry under conversations/).
         rollup_files = [k for k in idx.files if k.startswith(f"{CATEGORY}/")]
         assert len(rollup_files) == 1
-        info = idx.files[rollup_files[0]]
+        rel = rollup_files[0]
+        # DM bucket → counterpart-specific filename.
+        assert "__dm__" in rel
+        info = idx.files[rel]
         assert info.category == "conversations"
-        # Session title is human-readable (first body line).
-        assert info.title.strip().startswith("[DM to worker]")
-        # 'conversation' tag carries through.
         assert "conversation" in info.tags
-        assert rollup_files[0] in idx.tag_map.get("conversation", [])
+        assert rel in idx.tag_map.get("conversation", [])
+        # PR 14 — session-rollup aggregates surface in MemoryFileInfo.
+        assert info.session_id == "sess-idx"
+        assert info.turn_count == 1
+        assert "task_request" in info.kinds
+        assert "82b10c90-4c95-4e4f-863d-0bef73801fde" in info.counterparts
+        assert info.importance_max in {"medium", "high"}
+        # Per-turn dimensions are intentionally empty on rollup files;
+        # callers should read aggregates instead.
+        assert info.event_id == ""
+        assert info.kind == ""
+        # Summary doesn't leak the ``<!--meta`` block.
+        assert info.summary is None or "<!--meta" not in info.summary
+
+
+class TestBucketSplit:
+    """PR 14 — kind/counterpart-aware file split.
+
+    user_chat / reflection / dm / system buckets each map to a
+    distinct rollup file inside the same session, so search /
+    Opsidian sidebar / wikilinks never confuse them.
+    """
+
+    def test_user_chat_and_reflection_split_into_two_files(self, tmp_path: Path):
+        archiver = _make_archiver(tmp_path, session_id="sess-split")
+        r_user = archiver.archive("user", "안녕 너 이름이 뭐니", _meta(
+            event_id_override="aaaaaaaa" + "0" * 24,
+        ))
+        r_reflect = archiver.archive("internal_trigger", "오늘 하루를 되돌아본다.", _meta(
+            kind=Kind.REFLECTION,
+            direction=Direction.INTERNAL,
+            counterpart_id="self",
+            counterpart_role=CounterpartRole.SELF,
+            event_id_override="bbbbbbbb" + "0" * 24,
+        ))
+        assert r_user is not None and r_reflect is not None
+        # Two distinct files.
+        assert r_user.absolute_path != r_reflect.absolute_path
+        # Suffix conventions: ``__user`` for user_chat, ``__reflection`` for reflection.
+        assert "__user" in r_user.relative_path
+        assert r_reflect.relative_path.endswith(
+            "__reflection#turn-bbbbbbbb",
+        ), r_reflect.relative_path
+
+        # Each file holds exactly its own bucket's turns.
+        user_text = Path(r_user.absolute_path).read_text(encoding="utf-8")
+        reflect_text = Path(r_reflect.absolute_path).read_text(encoding="utf-8")
+        assert "## turn-aaaaaaaa" in user_text
+        assert "## turn-bbbbbbbb" not in user_text
+        assert "## turn-bbbbbbbb" in reflect_text
+        assert "## turn-aaaaaaaa" not in reflect_text
+
+        # Reflection file's title is the fixed bucket label.
+        _, body = parse_frontmatter(reflect_text)
+        assert "Reflection" in reflect_text.split("---", 2)[1] or "Reflection" in reflect_text
+
+    def test_dm_with_two_counterparts_produces_two_files(self, tmp_path: Path):
+        archiver = _make_archiver(tmp_path, session_id="sess-dm")
+        worker_a = "82b10c90-4c95-4e4f-863d-0bef73801fde"
+        worker_b = "11112222-3333-4444-5555-666677778888"
+
+        r_a = archiver.archive("assistant_dm", "[DM to A]: please ping",
+                               _meta(
+                                   kind=Kind.TASK_REQUEST,
+                                   direction=Direction.OUT,
+                                   counterpart_id=worker_a,
+                                   counterpart_role=CounterpartRole.PAIRED_SUBWORKER,
+                                   event_id_override="aaaaaaaa" + "0" * 24,
+                               ))
+        r_b = archiver.archive("assistant_dm", "[DM to B]: please write",
+                               _meta(
+                                   kind=Kind.TASK_REQUEST,
+                                   direction=Direction.OUT,
+                                   counterpart_id=worker_b,
+                                   counterpart_role=CounterpartRole.PAIRED_SUBWORKER,
+                                   event_id_override="bbbbbbbb" + "0" * 24,
+                               ))
+        assert r_a is not None and r_b is not None
+        # Each counterpart gets its own DM file.
+        assert r_a.absolute_path != r_b.absolute_path
+        assert "__dm__" in r_a.relative_path
+        assert "__dm__" in r_b.relative_path
+        # Counterpart slug is part of the filename.
+        from service.memory.conversation_archiver import sanitize_counterpart
+        assert sanitize_counterpart(worker_a) in r_a.relative_path
+        assert sanitize_counterpart(worker_b) in r_b.relative_path
+
+    def test_set_session_id_clears_cache(self, tmp_path: Path):
+        """Late ``set_session_id`` (cycle 20260503_5) re-binds the
+        archiver so subsequent writes carry the right slug.
+        """
+        archiver = _make_archiver(tmp_path, session_id="")
+        first = archiver.archive("user", "with empty sid", _meta(
+            event_id_override="aaaaaaaa" + "0" * 24,
+        ))
+        assert first is not None
+        assert "unknown__user" in first.relative_path
+
+        archiver.set_session_id("real-sid-001")
+        second = archiver.archive("user", "with real sid", _meta(
+            event_id_override="bbbbbbbb" + "0" * 24,
+        ))
+        assert second is not None
+        assert "real-sid-001__user" in second.relative_path
+        assert second.absolute_path != first.absolute_path

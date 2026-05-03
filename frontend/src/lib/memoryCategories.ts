@@ -48,6 +48,7 @@ export const MEMORY_CATEGORIES = [
   'conversations',
   'dms',
   'daily-journal',
+  'executions',
   'insights',
   'topics',
   'projects',
@@ -84,6 +85,10 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   conversations: MessageSquare,
   dms: MessageSquare,
   'daily-journal': Calendar,
+  // Cycle 20260503_5 — execution-summary stream split out from
+  // ``daily-journal``. Visually distinct icon so operators don't
+  // confuse the chronological index with the per-execution log.
+  executions: GitGraph,
   insights: Lightbulb,
   topics: Bookmark,
   projects: FolderKanban,
@@ -100,6 +105,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   conversations: '#60a5fa', // blue — the leaf source of truth
   dms: '#a78bfa',           // violet — counterpart channel
   'daily-journal': '#f97316', // orange — chronological index
+  executions: '#22c55e',    // green — execution-summary stream
   insights: '#ec4899',      // pink — distilled knowledge
   topics: '#3b82f6',        // blue — curated subject pages
   projects: '#8b5cf6',      // violet — curated initiative pages
@@ -118,6 +124,7 @@ export const CATEGORY_FALLBACK_LABELS: Record<string, string> = {
   conversations: 'Conversations',
   dms: 'DMs',
   'daily-journal': 'Daily Journal',
+  executions: 'Executions',
   insights: 'Insights',
   topics: 'Topics',
   projects: 'Projects',

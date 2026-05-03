@@ -1,20 +1,26 @@
-"""Conversation archiver — Memory v2 session-rollup writer.
+"""Conversation archiver — counterpart-aware session-rollup writer.
 
-Memory v2 PR 13 (cycle 20260503_2). The archiver used to materialise
-**one file per turn** under
-``conversations/<YYYY-MM-DD>/<HH-MM-SS>__<role>__<eid8>.md``. That
-gave audit-grade granularity at the cost of file explosion (a single
-session quickly produced dozens of files; 100s of sessions blew past
-1k files in ``conversations/`` alone) and a noisy Obsidian sidebar
-that buried the actually-useful files (curated topics, pinned
-critical facts).
+Cycle 20260503_5 (Memory v2 PR 13 → PR 14 follow-up).
 
-This rewrite ships **session rollup**: each session gets exactly one
-file under
+The archiver originally wrote **one file per turn** which produced
+hundreds of files per session. PR 13 collapsed that to **one file
+per session**. That fixed the file count but mixed three different
+kinds of content — user_chat, agent reflection, and (eventually)
+sub-worker DMs — into a single rollup, which violated the
+operator's mental model ("conversations are split by who you talked
+to") and made search results confusingly mix the user's own words
+with the agent's internal monologue.
 
-    memory/conversations/<session_id_slug>__<title_slug>.md
+This revision ships **counterpart-aware rollup**: each session
+produces *one file per (kind-bucket × counterpart)* under
 
-and every recorded turn becomes an H2 anchor inside that file::
+    memory/conversations/<sid>__user__<title_slug>.md   ← user_chat
+    memory/conversations/<sid>__reflection.md           ← reflection / internal_trigger
+    memory/conversations/<sid>__dm__<cp_safe>.md        ← DM-class kinds, one per counterpart
+    memory/conversations/<sid>__system.md               ← system_note
+
+and every recorded turn becomes an H2 anchor inside the matching
+file::
 
     ---
     title: ...
@@ -311,16 +317,88 @@ def _slug_for_title(title: str) -> str:
     return raw[:SESSION_TITLE_SLUG_MAX]
 
 
-def session_filename_for(*, session_id: str, title_slug: str) -> str:
+def session_filename_for(
+    *,
+    session_id: str,
+    bucket_path: str,
+) -> str:
     """Return the relative path for a session rollup file.
 
-    Shape: ``conversations/<sid_slug>__<title_slug>.md`` with the
-    ``__<title_slug>`` part dropped when there's no usable title.
+    Shape: ``conversations/<sid_slug>__<bucket_path>.md``.
+
+    ``bucket_path`` is the bucket-specific suffix produced by
+    :func:`bucket_path_for`. Examples::
+
+        sid_abc__user__안녕               # user_chat with title slug
+        sid_abc__user                      # user_chat with no usable title
+        sid_abc__reflection                # reflection / internal_trigger
+        sid_abc__dm__owner_gkfua00         # DM with one counterpart
+        sid_abc__system                    # system_note
     """
     sid = _slug_for_session_id(session_id)
-    if title_slug:
-        return f"{CATEGORY}/{sid}__{title_slug}.md"
-    return f"{CATEGORY}/{sid}.md"
+    return f"{CATEGORY}/{sid}__{bucket_path}.md"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Bucket resolution (Memory v2 PR 14 — counterpart-aware split)
+# ─────────────────────────────────────────────────────────────────
+
+#: Bucket discriminator returned by :func:`resolve_bucket`. Used as
+#: a stable key for file caching and bucket-aware policy (titles,
+#: importance ladders, …).
+class Bucket:
+    USER = "user"
+    REFLECTION = "reflection"
+    DM = "dm"
+    SYSTEM = "system"
+
+
+def resolve_bucket(
+    *,
+    kind: str,
+    counterpart_id: Optional[str],
+) -> Tuple[str, str]:
+    """Map a turn's ``(kind, counterpart_id)`` to ``(bucket, base_slug)``.
+
+    ``base_slug`` is the bucket-specific portion of the filename
+    BEFORE any title slug is appended. The user bucket appends
+    ``__<title_slug>`` later (when one can be derived); the others
+    keep the base alone.
+    """
+    if kind in (Kind.REFLECTION.value, "internal_trigger"):
+        return Bucket.REFLECTION, "reflection"
+    if kind == Kind.SYSTEM_NOTE.value:
+        return Bucket.SYSTEM, "system"
+    if kind in _DM_KINDS:
+        cp = (counterpart_id or "").strip()
+        if not cp or cp in _SELF_LIKE_COUNTERPARTS:
+            # DM-shaped kind without an external counterpart — bucket
+            # it under "system" so it doesn't blow up "dm__unknown"
+            # files.
+            return Bucket.SYSTEM, "system"
+        return Bucket.DM, f"dm__{sanitize_counterpart(cp)}"
+    # Default: anything not explicitly bucketed is treated as user
+    # chat. This includes ``user_chat`` (the common case) and any
+    # future kind we forget to enumerate — better to land in the
+    # user bucket than to silently lose the turn.
+    return Bucket.USER, "user"
+
+
+def bucket_path_for(
+    *,
+    bucket: str,
+    base_slug: str,
+    title_slug: str,
+) -> str:
+    """Compose the final bucket-specific filename suffix.
+
+    Only the user bucket carries an optional title slug; the rest
+    use ``base_slug`` alone so their filenames stay stable across
+    the session lifetime.
+    """
+    if bucket == Bucket.USER and title_slug:
+        return f"{base_slug}__{title_slug}"
+    return base_slug
 
 
 # ── Legacy per-turn helpers (kept for migration + tests) ──────────
@@ -716,22 +794,34 @@ def _first_meaningful_line(content: str) -> str:
 
 def derive_session_title(
     *,
-    kind: str,
-    direction: str,
+    bucket: str,
+    counterpart_id: Optional[str],
+    counterpart_role: Optional[str],
     content: str,
 ) -> str:
-    """Pick the human-readable session title from the *first* turn
-    that lands.
+    """Pick the human-readable title for the bucket's rollup file.
 
-    Reflections and system notes don't seed a title — the writer
-    falls back to the session id slug for those sessions. For
-    everything else, the first non-empty, non-heading line of the
-    body wins (so a markdown body that starts with ``# header``
-    still picks the prose underneath).
+    Per-bucket policy:
+
+      - ``user``       — first non-heading line of the body. The
+        operator's first message is the most informative label.
+      - ``reflection`` — fixed empty (the writer uses the bare
+        ``__reflection`` filename). A trigger like
+        ``[THINKING_TRIGGER:time_evening]`` would slugify to noise.
+      - ``dm``         — counterpart role + short id. The role
+        ("paired_subworker") is more recognisable than the UUID.
+      - ``system``     — fixed empty.
     """
-    if kind in (Kind.REFLECTION.value, "internal_trigger", Kind.SYSTEM_NOTE.value):
-        return ""
-    return _first_meaningful_line(content)
+    if bucket == Bucket.USER:
+        return _first_meaningful_line(content)
+    if bucket == Bucket.DM:
+        cp = (counterpart_id or "").strip()
+        role = (counterpart_role or "").strip()
+        if role and cp:
+            return f"{role} {cp[:8]}"
+        return cp[:24] if cp else ""
+    # reflection / system / unknown
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -774,10 +864,23 @@ class ConversationArchiver:
         import threading  # local import — keeps the eager import set lean
         self._lock = threading.RLock()
         self._index_manager = index_manager
-        # Cached relative path once the file exists. Populated on
-        # first archive so subsequent appends skip the title
-        # derivation step (the title is fixed for the session).
-        self._cached_rel: Optional[str] = None
+        # Bucket → cached relative path. PR 14 split conversations by
+        # ``(kind, counterpart)`` so each session can own up to one
+        # ``user``, one ``reflection``, one ``system``, and N ``dm``
+        # files. The cache key is the bucket's *base_slug* (i.e.
+        # ``user`` / ``reflection`` / ``system`` / ``dm__<cp>``);
+        # within ``user`` the title slug is appended once on first
+        # archive so subsequent calls hit the cache directly.
+        self._cached_rel: Dict[str, str] = {}
+
+    def set_session_id(self, session_id: str) -> None:
+        """Late-binding setter — used by ``SessionMemoryManager.
+        set_database`` when a deployment surfaces the canonical
+        session_id only after construction. Drops the cached file
+        paths so the next archive picks the correct slug.
+        """
+        self._session_id = session_id or ""
+        self._cached_rel.clear()
 
     @property
     def memory_dir(self) -> Path:
@@ -857,10 +960,18 @@ class ConversationArchiver:
             body=body,
         )
 
-        # Title is derived only on the first archive call; subsequent
-        # calls reuse the existing on-disk title.
+        # Bucket routing — kind + counterpart pick the rollup file.
+        bucket, base_slug = resolve_bucket(
+            kind=view.kind, counterpart_id=view.counterpart_id,
+        )
+
+        # Title only seeds the user bucket's filename; other buckets
+        # use ``base_slug`` alone (see ``bucket_path_for``).
         derived_title = derive_session_title(
-            kind=view.kind, direction=view.direction, content=content,
+            bucket=bucket,
+            counterpart_id=view.counterpart_id,
+            counterpart_role=view.counterpart_role,
+            content=content,
         )
 
         rel_md = self._merge_to_disk(
@@ -870,6 +981,8 @@ class ConversationArchiver:
             links_for_turn=links_to_for_turn,
             importance=importance,
             eid8=eid8,
+            bucket=bucket,
+            base_slug=base_slug,
             derived_title_seed=derived_title,
             turn_block=turn_block,
         )
@@ -908,12 +1021,15 @@ class ConversationArchiver:
         links_for_turn: List[str],
         importance: str,
         eid8: str,
+        bucket: str,
+        base_slug: str,
         derived_title_seed: str,
         turn_block: str,
     ) -> Optional[str]:
-        """Read the existing rollup file (if any), append the new
-        block, recompute the session-level frontmatter, and write
-        atomically. Returns the relative ``.md`` path on success.
+        """Read the existing rollup file for this bucket (if any),
+        append the new turn block, recompute the session-level
+        frontmatter, and write atomically. Returns the relative
+        ``.md`` path on success.
         """
         try:
             self.conversations_dir.mkdir(parents=True, exist_ok=True)
@@ -926,6 +1042,8 @@ class ConversationArchiver:
 
         with self._lock:
             target_rel, target_abs, existing_text = self._locate_or_initialise(
+                bucket=bucket,
+                base_slug=base_slug,
                 derived_title_seed=derived_title_seed,
             )
             if target_rel is None:
@@ -946,6 +1064,7 @@ class ConversationArchiver:
 
             new_meta = self._merge_frontmatter(
                 existing_meta=existing_meta,
+                bucket=bucket,
                 derived_title_seed=derived_title_seed,
                 ts=ts,
                 view=view,
@@ -972,27 +1091,31 @@ class ConversationArchiver:
     def _locate_or_initialise(
         self,
         *,
+        bucket: str,
+        base_slug: str,
         derived_title_seed: str,
     ) -> Tuple[Optional[str], Optional[str], str]:
-        """Resolve the on-disk rollup file for this session.
+        """Resolve the on-disk rollup file for this ``(session, bucket)``.
 
         Returns ``(relative_path, absolute_path, existing_text)``.
-        ``existing_text`` is the empty string when the file is being
-        created. Returns ``(None, None, "")`` only on a hard error
-        (caller treats that as "skip this turn").
+        ``existing_text`` is empty when the file is being created.
+        Returns ``(None, None, "")`` only on a hard error.
 
-        Filename resolution:
+        Filename resolution per bucket:
 
-          1. If we cached one earlier in the session, reuse it.
-          2. Otherwise enumerate ``conversations/<sid_slug>*.md`` —
-             the first matching file is the session's rollup. (This
-             path triggers when a worker restarts mid-session.)
-          3. Otherwise create a new file with the title slug derived
-             from this turn (or the session id alone if no title can
-             be derived yet).
+          1. If the bucket already has a cached rel, reuse it.
+          2. Otherwise enumerate
+             ``conversations/<sid_slug>__<base_slug>*.md`` for the
+             current session — non-user buckets match exactly,
+             the user bucket matches the prefix (so a previously
+             chosen ``user__<title>`` is reused even when the
+             current call's title would slugify differently).
+          3. Otherwise create a new file using
+             :func:`bucket_path_for` to compose the suffix.
         """
-        if self._cached_rel:
-            abs_path = self._memory_dir / self._cached_rel
+        cached = self._cached_rel.get(base_slug)
+        if cached:
+            abs_path = self._memory_dir / cached
             try:
                 text = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
             except OSError as exc:
@@ -1001,15 +1124,21 @@ class ConversationArchiver:
                     abs_path, exc,
                 )
                 return None, None, ""
-            return self._cached_rel, str(abs_path), text
+            return cached, str(abs_path), text
 
         sid_slug = _slug_for_session_id(self._session_id)
-        prefix = f"{sid_slug}__"
+        # Exact-name candidate: ``<sid>__<base_slug>``.
+        # Prefix-name candidate: ``<sid>__<base_slug>__…``  (only the
+        # user bucket appends a title slug; others use the exact form).
+        exact_stem = f"{sid_slug}__{base_slug}"
+        prefix_stem = f"{exact_stem}__"
         for entry in sorted(self.conversations_dir.glob("*.md")):
             stem = entry.stem
-            if stem == sid_slug or stem.startswith(prefix):
+            if stem == exact_stem or (
+                bucket == Bucket.USER and stem.startswith(prefix_stem)
+            ):
                 rel = f"{CATEGORY}/{entry.name}"
-                self._cached_rel = rel
+                self._cached_rel[base_slug] = rel
                 try:
                     text = entry.read_text(encoding="utf-8")
                 except OSError as exc:
@@ -1020,17 +1149,21 @@ class ConversationArchiver:
                     return None, None, ""
                 return rel, str(entry), text
 
-        title_slug = _slug_for_title(derived_title_seed)
-        rel = session_filename_for(
-            session_id=self._session_id, title_slug=title_slug,
+        title_slug = _slug_for_title(derived_title_seed) if bucket == Bucket.USER else ""
+        bucket_path = bucket_path_for(
+            bucket=bucket, base_slug=base_slug, title_slug=title_slug,
         )
-        self._cached_rel = rel
+        rel = session_filename_for(
+            session_id=self._session_id, bucket_path=bucket_path,
+        )
+        self._cached_rel[base_slug] = rel
         return rel, str(self._memory_dir / rel), ""
 
     def _merge_frontmatter(
         self,
         *,
         existing_meta: Dict[str, Any],
+        bucket: str,
         derived_title_seed: str,
         ts: datetime,
         view: InteractionEventView,
@@ -1043,7 +1176,15 @@ class ConversationArchiver:
         contribution.
 
         Title is sticky: once a non-empty title lives in the
-        existing frontmatter, it survives unchanged.
+        existing frontmatter, it survives unchanged. Per-bucket
+        defaults when no title is yet set:
+
+          - ``user``       — derived title (first body line) or
+                              ``"Session <sid>"``.
+          - ``reflection`` — fixed ``"Reflection"``.
+          - ``dm``         — counterpart-derived seed (role + short
+                              id) or ``"DM <cp_short>"``.
+          - ``system``     — fixed ``"System"``.
         """
         date_iso = ts.date().isoformat()
         ts_iso = ts.isoformat()
@@ -1056,6 +1197,13 @@ class ConversationArchiver:
             title = existing_title
         elif derived_title_seed:
             title = derived_title_seed
+        elif bucket == Bucket.REFLECTION:
+            title = "Reflection"
+        elif bucket == Bucket.SYSTEM:
+            title = "System"
+        elif bucket == Bucket.DM:
+            cp = (view.counterpart_id or "").strip()
+            title = f"DM {cp[:8]}" if cp else "DM"
         else:
             sid_short = _slug_for_session_id(self._session_id)
             title = f"Session {sid_short}"
@@ -1228,6 +1376,7 @@ __all__ = [
     "SESSION_TITLE_SLUG_MAX",
     "SESSION_ID_SLUG_MAX",
     "ArchivedConversation",
+    "Bucket",
     "ConversationArchiver",
     "build_body",
     "build_frontmatter",       # legacy / migration only
@@ -1235,11 +1384,13 @@ __all__ = [
     "build_links_to",
     "build_tags",
     "build_title",
+    "bucket_path_for",
     "compute_importance",
     "derive_session_title",
     "filename_for",            # legacy / migration only
     "iter_turn_anchors",
     "render_turn_block",
+    "resolve_bucket",
     "sanitize_counterpart",
     "session_filename_for",
     "short_event_id",
