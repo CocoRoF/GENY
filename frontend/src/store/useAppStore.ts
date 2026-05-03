@@ -251,6 +251,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       return;
     }
+    // Cycle 20260503_3 — the in-app ``memory`` tab was retired in
+    // favour of opening the canonical Opsidian app in a new tab.
+    // ``TabNavigation`` uses an ``external`` shortcut so a fresh
+    // click never reaches here, but persisted-localStorage state
+    // from before the cutover (or a programmatic call from older
+    // code) lands on this branch — pop the new window AND fall
+    // back to the default session tab so the in-app view stays
+    // valid.
+    if (tab === 'memory') {
+      if (typeof window !== 'undefined') {
+        const sid = get().selectedSessionId;
+        const href = sid
+          ? `/opsidian?sessionId=${encodeURIComponent(sid)}`
+          : '/opsidian';
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+      set({ activeTab: 'command' });
+      return;
+    }
     set({ activeTab: tab });
   },
   setEnvSubTab: (id) => set({ envSubTab: id }),

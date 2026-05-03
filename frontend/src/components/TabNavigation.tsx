@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
 import { useIsMobile } from '@/lib/useIsMobile';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ExternalLink } from 'lucide-react';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));
@@ -35,17 +35,38 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 // component owns the entry point to /environments via its dedicated
 // link button, so nothing in this strip points to it anymore.
 const GLOBAL_TAB_IDS = ['main', 'sharedFolder', 'admin', 'settings'] as const;
+// SESSION_TAB_DEFS:
+//   - ``id`` — pairs with ``activeTab`` so the strip highlights the
+//     right entry.
+//   - ``accent`` (optional) — primary-coloured rendering for the
+//     command tab.
+//   - ``external`` (optional) — when set, the entry behaves like a
+//     "shortcut" instead of an in-app tab. Clicking it opens
+//     ``external(sessionId)`` in a new browser tab and *does not*
+//     change ``activeTab``. The current memory view is provided by
+//     the dedicated Opsidian app (``/opsidian``); there's no
+//     separate in-Geny memory tab any more — keeping it as a
+//     shortcut preserves the user's muscle memory while routing
+//     them straight to the canonical UI. Cycle 20260503_3.
 const SESSION_TAB_DEFS = [
   { id: 'command', accent: true },
   { id: 'vtuber' },
   { id: 'sessionEnvironment' },
-  { id: 'memory' },
+  {
+    id: 'memory',
+    external: (sessionId: string | null) =>
+      sessionId
+        ? `/opsidian?sessionId=${encodeURIComponent(sessionId)}`
+        : '/opsidian',
+  },
   { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
   { id: 'cron' },      // PR-D.3.1 — CronRunner viewer (runtime state, stays separate)
   { id: 'storage' },
   { id: 'dashboard' },
   { id: 'logs' },
 ] as const;
+
+type SessionTabDef = (typeof SESSION_TAB_DEFS)[number];
 
 // Tabs hidden in Normal mode
 const DEV_ONLY_GLOBAL = new Set(['admin', 'settings']);
@@ -55,7 +76,21 @@ const DEV_ONLY_SESSION = new Set(['sessionEnvironment']);
 const TAB_BASE =
   'relative py-1.5 px-3 text-[0.8125rem] font-medium bg-transparent border-none rounded-md cursor-pointer transition-colors duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]';
 
-function TabButton({ id, label, active, onClick, accent }: { id: string; label: string; active: boolean; onClick: () => void; accent?: boolean }) {
+function TabButton({
+  id,
+  label,
+  active,
+  onClick,
+  accent,
+  external,
+}: {
+  id: string;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  accent?: boolean;
+  external?: boolean;
+}) {
   if (accent) {
     return (
       <button
@@ -81,14 +116,18 @@ function TabButton({ id, label, active, onClick, accent }: { id: string; label: 
       key={id}
       className={cn(
         TAB_BASE,
-        active
-          ? 'text-[hsl(var(--foreground))] bg-[hsl(var(--accent))]'
-          : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]',
+        external
+          ? 'inline-flex items-center gap-1 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]'
+          : active
+            ? 'text-[hsl(var(--foreground))] bg-[hsl(var(--accent))]'
+            : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]',
       )}
       onClick={onClick}
+      title={external ? `${label} — opens in a new tab` : undefined}
     >
       {label}
-      {active && (
+      {external && <ExternalLink size={11} className="opacity-70" />}
+      {!external && active && (
         <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
       )}
     </button>
@@ -107,7 +146,14 @@ function MobileSessionTabDropdown({
   activeTab: string;
   sessionName: string;
   sessionStatus?: string;
-  sessionTabs: { id: string; accent?: boolean }[];
+  sessionTabs: {
+    id: string;
+    accent?: boolean;
+    /** Resolved URL — when present, the entry is a "shortcut"
+     * that opens in a new browser tab instead of switching the
+     * in-app activeTab. */
+    external?: string;
+  }[];
   t: (key: string) => string;
   onSelect: (id: string) => void;
 }) {
@@ -168,20 +214,36 @@ function MobileSessionTabDropdown({
         <div
           className="fixed z-50 min-w-[140px] py-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-lg"
           style={{ top: pos.top, left: pos.left }}
-        >          {sessionTabs.map(tab => (
-            <button
-              key={tab.id}
-              className={cn(
-                'w-full text-left px-3 py-2 text-[0.75rem] font-medium border-none cursor-pointer transition-colors',
-                activeTab === tab.id
-                  ? 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.1)]'
-                  : 'text-[var(--text-secondary)] bg-transparent hover:bg-[var(--bg-hover)]',
-              )}
-              onClick={() => { onSelect(tab.id); setOpen(false); }}
-            >
-              {t(`tabs.${tab.id}`)}
-            </button>
-          ))}
+        >          {sessionTabs.map(tab => {
+            const handleClick = () => {
+              if (tab.external) {
+                if (typeof window !== 'undefined') {
+                  window.open(tab.external, '_blank', 'noopener,noreferrer');
+                }
+                setOpen(false);
+                return;
+              }
+              onSelect(tab.id);
+              setOpen(false);
+            };
+            return (
+              <button
+                key={tab.id}
+                className={cn(
+                  'w-full text-left px-3 py-2 text-[0.75rem] font-medium border-none cursor-pointer transition-colors flex items-center justify-between gap-2',
+                  // External tabs never highlight as "active" — they
+                  // never become the in-app activeTab.
+                  !tab.external && activeTab === tab.id
+                    ? 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.1)]'
+                    : 'text-[var(--text-secondary)] bg-transparent hover:bg-[var(--bg-hover)]',
+                )}
+                onClick={handleClick}
+              >
+                <span>{t(`tabs.${tab.id}`)}</span>
+                {tab.external && <ExternalLink size={11} className="opacity-70" />}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -205,6 +267,24 @@ export default function TabNavigation() {
   const canShowDevTabs = devMode && (!hasUsers || isAuthenticated);
   const visibleGlobalTabs = GLOBAL_TAB_IDS.filter(id => canShowDevTabs || !DEV_ONLY_GLOBAL.has(id));
   const visibleSessionTabs = SESSION_TAB_DEFS.filter(tab => canShowDevTabs || !DEV_ONLY_SESSION.has(tab.id));
+
+  // Click handler for session tabs. Tabs with an ``external`` marker
+  // open the resolved URL in a new browser tab and *do not* toggle
+  // ``activeTab`` — keeps the user's current in-app view stable
+  // while routing them to the canonical Opsidian UI for memory.
+  const handleSessionTabClick = useCallback(
+    (tab: SessionTabDef) => {
+      if ('external' in tab && typeof tab.external === 'function') {
+        const href = tab.external(selectedSessionId ?? null);
+        if (typeof window !== 'undefined') {
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }
+        return;
+      }
+      setActiveTab(tab.id);
+    },
+    [selectedSessionId, setActiveTab],
+  );
 
   return (
     <div className="flex items-center gap-0.5 h-11 px-2 md:px-4 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] shrink-0 overflow-x-auto scrollbar-hide">
@@ -234,7 +314,13 @@ export default function TabNavigation() {
               sessionStatus={selectedSession?.status}
               sessionTabs={[
                 { id: 'info' },
-                ...visibleSessionTabs.map(t => ({ id: t.id, accent: 'accent' in t ? t.accent : undefined })),
+                ...visibleSessionTabs.map(tab => ({
+                  id: tab.id,
+                  accent: 'accent' in tab ? tab.accent : undefined,
+                  external: 'external' in tab && typeof tab.external === 'function'
+                    ? tab.external(selectedSessionId ?? null)
+                    : undefined,
+                })),
               ]}
               t={t}
               onSelect={setActiveTab}
@@ -264,16 +350,22 @@ export default function TabNavigation() {
               </button>
 
               <div className="flex items-center gap-0.5">
-              {visibleSessionTabs.map(tab => (
-                <TabButton
-                  key={tab.id}
-                  id={tab.id}
-                  label={t(`tabs.${tab.id}`)}
-                  active={activeTab === tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  accent={'accent' in tab && tab.accent}
-                />
-              ))}
+              {visibleSessionTabs.map(tab => {
+                const isExternal = 'external' in tab && typeof tab.external === 'function';
+                return (
+                  <TabButton
+                    key={tab.id}
+                    id={tab.id}
+                    label={t(`tabs.${tab.id}`)}
+                    // External tabs never report "active" — they
+                    // are shortcuts, not in-app views.
+                    active={!isExternal && activeTab === tab.id}
+                    onClick={() => handleSessionTabClick(tab)}
+                    accent={'accent' in tab && tab.accent}
+                    external={isExternal}
+                  />
+                );
+              })}
               </div>
             </>
           )}
