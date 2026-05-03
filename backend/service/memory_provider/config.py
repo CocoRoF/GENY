@@ -144,6 +144,40 @@ def load_memory_tuning(*, is_vtuber: bool) -> Dict[str, Any]:
     else:
         max_inject_chars = default_mic
 
+    # Memory v2 PR 12 — pinned-facts tier knobs. Operators may
+    # override each in settings.json:memory.tuning.<field>; the
+    # defaults below match what ``geny-executor`` 1.13.0's
+    # ``GenyMemoryRetriever`` expects when no explicit policy is
+    # supplied.
+    pin_budget_ratio_raw = tuning.get("pin_budget_ratio")
+    if isinstance(pin_budget_ratio_raw, (int, float)):
+        pin_budget_ratio = max(0.0, min(0.7, float(pin_budget_ratio_raw)))
+    else:
+        pin_budget_ratio = 0.30
+
+    category_boosts_raw = tuning.get("category_boosts")
+    if isinstance(category_boosts_raw, dict):
+        category_boosts = {
+            str(k): float(v)
+            for k, v in category_boosts_raw.items()
+            if isinstance(v, (int, float))
+        }
+    else:
+        category_boosts = {
+            "insights": 1.2,
+            "projects": 1.2,
+            "critical": 1.5,
+        }
+
+    always_render_vault_map_raw = tuning.get("always_render_vault_map")
+    if isinstance(always_render_vault_map_raw, bool):
+        always_render_vault_map = always_render_vault_map_raw
+    else:
+        always_render_vault_map = True
+
+    slim_mode_raw = tuning.get("slim_mode")
+    slim_mode = bool(slim_mode_raw) if isinstance(slim_mode_raw, bool) else False
+
     return {
         "max_inject_chars": max_inject_chars,
         "recent_turns": (
@@ -161,6 +195,10 @@ def load_memory_tuning(*, is_vtuber: bool) -> Dict[str, Any]:
             if isinstance(tuning.get("enable_reflection"), bool)
             else True
         ),
+        "pin_budget_ratio": pin_budget_ratio,
+        "category_boosts": category_boosts,
+        "always_render_vault_map": always_render_vault_map,
+        "slim_mode": slim_mode,
     }
 
 
