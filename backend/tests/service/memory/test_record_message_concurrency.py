@@ -1,30 +1,24 @@
-"""Memory v2 PR 3 — concurrency lock invariants.
+"""ConversationArchiver concurrency lock invariants (Memory v2 PR 13).
 
-Two structural correctness goals (plan §2.1.3 + §1.6.6):
+Two structural correctness goals:
 
   1. **STM jsonl integrity** — N concurrent writers produce N
      well-formed jsonl lines. No half-flushed line, no garbled
      interleave. Verified by parsing every line with ``json.loads``
      and asserting the parse never raises.
 
-  2. **conversations/ uniqueness** — N concurrent writers each
-     land their own ``conversations/<date>/<id>.md`` file. No
-     write loses its body to a colliding peer. The
-     collision-widening loop in ``ConversationArchiver._write_to_disk``
-     must be atomic-with-respect-to-disk under the new RLock.
+  2. **Session rollup integrity** — N concurrent writers each
+     append their own ``## turn-<eid8>`` anchor to the *single*
+     rollup file at ``conversations/<sid>__<title>.md``. No write
+     loses its body to a colliding peer; the rollup file's
+     frontmatter aggregates (``turn_count``, ``event_ids``)
+     reflect every write exactly once. The lock under test is the
+     per-archiver ``threading.RLock``.
 
 The fixture spawns ``threading.Thread`` workers (not asyncio
 tasks) because the lock under test is a ``threading.RLock``. The
 production code path mixes sync and async callers, but the
-threading test is the strictest stress: it actually runs in
-parallel through different OS threads, whereas asyncio tasks
-serialise on the event loop. If threading works, asyncio is
-trivially safe.
-
-Why ``threading.Barrier``: maximises the chance of true
-contention. Without the barrier the OS scheduler tends to run the
-threads sequentially. The barrier holds every thread at the start
-line and releases them simultaneously.
+threading test is the strictest stress.
 """
 
 from __future__ import annotations
@@ -114,7 +108,7 @@ class TestSTMConcurrency:
             f"expected {N_THREADS} jsonl lines, got {len(parsed)}"
         )
 
-    def test_distinct_conversation_files_per_turn(self, initialised_manager):
+    def test_session_rollup_holds_every_turn_as_distinct_anchor(self, initialised_manager):
         mgr, tmp_path = initialised_manager
         barrier = threading.Barrier(N_THREADS)
         threads = [
@@ -126,14 +120,25 @@ class TestSTMConcurrency:
         for t in threads:
             t.join(timeout=10)
 
-        # 100 distinct conversations/ files
-        conv_files = list((tmp_path / "memory" / "conversations").rglob("*.md"))
-        assert len(conv_files) == N_THREADS, (
-            f"expected {N_THREADS} conversations/ files, got {len(conv_files)}"
+        # Session rollup: a single .md file under conversations/
+        # (no per-date subdirs in the new layout).
+        conv_dir = tmp_path / "memory" / "conversations"
+        rollup_files = [p for p in conv_dir.glob("*.md") if p.is_file()]
+        assert len(rollup_files) == 1, (
+            f"expected 1 session rollup file, got {len(rollup_files)}: {rollup_files!r}"
         )
 
-        # Every STM jsonl line points to a unique, present
-        # conversations/ file.
+        # 100 distinct turn anchors inside that one file.
+        text = rollup_files[0].read_text(encoding="utf-8")
+        anchor_count = text.count("## turn-")
+        assert anchor_count == N_THREADS, (
+            f"expected {N_THREADS} turn anchors, got {anchor_count}"
+        )
+
+        # Every STM jsonl line points to a unique, anchor-bearing
+        # ``conversation_ref``. With session rollup the file
+        # portion is shared, so uniqueness comes from the
+        # ``#turn-<eid8>`` anchor.
         jsonl = tmp_path / "transcripts" / "session.jsonl"
         refs = set()
         for raw in jsonl.read_text(encoding="utf-8").splitlines():
@@ -142,6 +147,7 @@ class TestSTMConcurrency:
             rec = json.loads(raw)
             ref = (rec.get("metadata") or {}).get("payload", {}).get("conversation_ref")
             assert ref, f"line missing conversation_ref: {rec.get('metadata')}"
+            assert "#turn-" in ref, f"conversation_ref missing anchor: {ref!r}"
             refs.add(ref)
         assert len(refs) == N_THREADS, (
             f"expected {N_THREADS} distinct conversation_refs, got {len(refs)}"
