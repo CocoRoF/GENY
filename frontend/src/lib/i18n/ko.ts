@@ -552,6 +552,15 @@ const ko: Translations = {
       artifact: '아티팩트',
       inUse: '사용 중',
       notInManifest: '매니페스트에 없음',
+      // Stage node hover hints — mounted on the .inactive circles so
+      // a user who sees a grey node knows *why* it's grey before
+      // clicking. Three kinds: missing from manifest entirely, opt-in
+      // optional stage (Sub-phase 9a), or simply turned off by the
+      // current preset.
+      hoverMissing: '이 매니페스트에는 등록돼 있지 않습니다',
+      hoverOptionalOff: 'Sub-phase 9a 옵션 단계 — 이 프리셋에서 비활성',
+      hoverInactive: '이 프리셋에서 비활성으로 둔 단계',
+      hoverActive: '활성',
     },
   },
 
@@ -2226,9 +2235,9 @@ const ko: Translations = {
     preset: '프리셋',
     presetMinimal: 'Minimal — input + parse + yield 만',
     presetChat: 'Chat — 경량 단일 턴',
-    presetAgent: 'Agent — 21 스테이지 풀 파이프라인',
+    presetAgent: 'Agent — 21 스테이지 어댑티브 (도구 리뷰 · 태스크 레지스트리 · HITL · 요약 · 체크포인트 포함)',
     presetEvaluator: 'Evaluator — 실행 후 평가',
-    presetVTuber: 'Geny VTuber — persona + 서브 워커 분리',
+    presetVTuber: 'Geny VTuber — persona + 서브 워커, 경량 도구 리뷰 · 요약 · 체크포인트 포함',
     create: '만들기',
     creating: '만드는 중…',
     failed: '환경 생성 실패',
