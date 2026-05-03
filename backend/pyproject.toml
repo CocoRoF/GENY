@@ -29,53 +29,6 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # Bumped to 1.3.0 for new-executor-uplift Cycle D phase 5
-    # (Workspace value object + WorkspaceStack; Worktree/LSP tools
-    # workspace-aware; SubagentTypeOrchestrator threads workspace
-    # snapshot to sub-pipelines).
-    # 1.3.1 lands the default-model bump from claude-sonnet-4-20250514
-    # to claude-sonnet-4-6 across ModelConfig / PipelineState /
-    # PipelineBuilder / presets, matching the Geny frontend's
-    # provider-aware model picker recommended default. Pricing
-    # tables retain the legacy id for historical billing rows.
-    # cron extra pulls croniter for the scheduling daemon.
-    # Skills uplift (1.4.0 — 1.8.0): arg substitution + invocation
-    # flags, allowed_tools enforcement + paths conditional, shell-
-    # block execution + bundled assets, 8-skill bundled catalog,
-    # fork execution mode, hot-reload watcher. 1.9.0 unlocks
-    # ``GenyMemoryRetriever.slim_mode`` + ``conversations`` /
-    # ``dms`` / ``compactions`` ``NOTE_CATEGORIES`` for the
-    # Memory v2 leaf source-of-truth design (cf. /Geny/plan.md).
-    # 1.10.0 adds ``GenyMemoryStrategy.min_insight_importance`` —
-    # gates reflections by importance so ``insights/`` only
-    # accumulates genuine factual learnings, not behavioural
-    # patterns or per-turn tactics.
-    # 1.11.0 isolates ``entities`` / ``conversations`` / ``dms`` /
-    # ``daily-journal`` / ``compactions`` from the reflection's
-    # category enum + adds host-side coercion to ``insights`` so
-    # auto-managed categories never receive free-form notes.
-    # 1.12.0 retires the ``entities`` category entirely — counterpart
-    # info now lives under ``dms/<cp>/<date>.md`` + StreamTab UI, and
-    # ``memory_distill`` writes to ``insights/counterpart-<id>.md``.
-    # 1.13.0 (Memory v2 PR 12) adds the pinned-facts tier:
-    # ``GenyMemoryRetriever`` calls ``mgr.load_pinned`` every turn,
-    # ``MemoryContextBlock`` renders ``# Pinned Facts``, and
-    # ``GenyMemoryStrategy`` accepts a ``promote_callback`` so the
-    # host can push critical/high insights into a pinned surface.
-    # Geny implements all three on its side (LongTermMemory.load_pinned,
-    # service/memory/pin_policy.py, memory_pin tool).
-    # 1.14.0 (Memory v2 PR 14) rewrites the default ``Memory Usage``
-    # preset clause to teach the agent the progressive-disclosure
-    # ladder (memory_categories → memory_list → memory_read), aligned
-    # with Geny's hierarchical _index.json (root manifest + per-
-    # category shards) and the new ``memory_categories`` tool.
-    # 1.15.0 (Memory v2 PR 15) decouples host-specific tool names
-    # from the executor's preset clause: the clause now carries policy
-    # only, and hosts inject their concrete tool catalogue via the
-    # ``host_memory_clause`` preset kwarg or — as Geny does — via a
-    # custom ``HostMemoryToolsBlock`` appended to the system-prompt
-    # tail. Pin bumped so the abstract clause is what we get even
-    # when an operator overrides ``system_prompt`` to use a preset.
     "geny-executor[web,cron]>=1.15.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
