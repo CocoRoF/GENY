@@ -135,11 +135,23 @@ class TestIndexSurfacesConversationDimensions:
         assert info_b.kind == "task_request"
         assert info_b.counterpart == "82b10c90-4c95-4e4f-863d-0bef73801fde"
 
-        # Direct json round-trip (catches any to_dict() regression)
-        index_path = memory_dir / "_index.json"
-        data = json.loads(index_path.read_text(encoding="utf-8"))
-        assert "files" in data
-        file_data = data["files"][rel]
+        # Direct json round-trip (catches any to_dict() regression).
+        # Cycle 20260503_6 — the index moved from one monolithic
+        # ``memory/_index.json`` to ``memory/_index.json`` (root
+        # category map) + ``memory/<category>/_index.json`` shards.
+        # File entries live in the shards now; the root carries
+        # category-level aggregates and the cross-folder link graph.
+        root_path = memory_dir / "_index.json"
+        root_data = json.loads(root_path.read_text(encoding="utf-8"))
+        assert "categories" in root_data
+        assert "conversations" in root_data["categories"]
+        assert root_data["categories"]["conversations"]["file_count"] >= 1
+
+        shard_path = memory_dir / "conversations" / "_index.json"
+        shard_data = json.loads(shard_path.read_text(encoding="utf-8"))
+        assert "files" in shard_data
+        assert shard_data["category"] == "conversations"
+        file_data = shard_data["files"][rel]
         assert file_data["event_id"] == "25a3ca4544db4eebaf5048433533b610"
         assert file_data["kind"] == "task_request"
 
@@ -167,3 +179,118 @@ class TestIndexSurfacesConversationDimensions:
         assert info.title == "X"
         assert info.event_id == ""
         assert info.kind == ""
+
+
+class TestHierarchicalIndex:
+    """Cycle 20260503_6 — root + per-category shards.
+
+    The on-disk index split into:
+      - ``memory/_index.json`` (categories aggregate + link_graph + totals)
+      - ``memory/<category>/_index.json`` (file entries + tag_map)
+
+    The in-memory ``MemoryIndex`` shape is unchanged, so the
+    public manager API and ``MemoryFileInfo`` consumers don't see
+    any diff.
+    """
+
+    def test_rebuild_writes_root_and_per_category_shards(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        _write_conversation(memory_dir)
+        _write_topic(memory_dir)
+
+        idx_mgr = MemoryIndexManager(str(memory_dir))
+        idx_mgr.rebuild()
+
+        root_path = memory_dir / "_index.json"
+        assert root_path.exists()
+        root = json.loads(root_path.read_text(encoding="utf-8"))
+        assert root["version"] == "2"
+        assert {"conversations", "topics"} <= set(root["categories"])
+        # Per-category shards exist.
+        assert (memory_dir / "conversations" / "_index.json").exists()
+        assert (memory_dir / "topics" / "_index.json").exists()
+        # Root carries the link_graph (cross-folder concern).
+        assert "link_graph" in root
+        # Each category's description surfaces from the constants
+        # table so the system-prompt vault map can render a 1-line
+        # explanation per folder.
+        assert root["categories"]["conversations"]["description"]
+        assert root["categories"]["topics"]["description"]
+
+    def test_per_category_shard_carries_only_its_files(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        rel_conv = _write_conversation(memory_dir)
+        rel_topic = _write_topic(memory_dir)
+
+        MemoryIndexManager(str(memory_dir)).rebuild()
+
+        conv_shard = json.loads(
+            (memory_dir / "conversations" / "_index.json").read_text(encoding="utf-8"),
+        )
+        topic_shard = json.loads(
+            (memory_dir / "topics" / "_index.json").read_text(encoding="utf-8"),
+        )
+        assert rel_conv in conv_shard["files"]
+        assert rel_topic not in conv_shard["files"]
+        assert rel_topic in topic_shard["files"]
+        assert rel_conv not in topic_shard["files"]
+        assert conv_shard["category"] == "conversations"
+        assert topic_shard["category"] == "topics"
+
+    def test_load_from_disk_reassembles_full_index(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        rel_conv = _write_conversation(memory_dir)
+        rel_topic = _write_topic(memory_dir)
+
+        idx_mgr_a = MemoryIndexManager(str(memory_dir))
+        idx_mgr_a.rebuild()
+
+        # Fresh manager reads the hierarchical layout and produces
+        # the same in-memory shape.
+        idx_mgr_b = MemoryIndexManager(str(memory_dir))
+        idx_mgr_b.load_or_rebuild()
+        assert rel_conv in idx_mgr_b.index.files
+        assert rel_topic in idx_mgr_b.index.files
+        assert idx_mgr_b.index.files[rel_conv].kind == "task_request"
+
+    def test_remove_file_garbage_collects_empty_shard(self, tmp_path: Path):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        rel_conv = _write_conversation(memory_dir)
+        _write_topic(memory_dir)
+        idx_mgr = MemoryIndexManager(str(memory_dir))
+        idx_mgr.rebuild()
+        conv_shard_path = memory_dir / "conversations" / "_index.json"
+        assert conv_shard_path.exists()
+
+        # Delete the only conversations file → shard should disappear.
+        (memory_dir / rel_conv).unlink()
+        idx_mgr.update_file(rel_conv)
+
+        assert not conv_shard_path.exists(), \
+            "empty conversations shard should be GC'd"
+        # The other category's shard must survive untouched.
+        assert (memory_dir / "topics" / "_index.json").exists()
+
+    def test_render_vault_map_emits_per_category_descriptions(
+        self, tmp_path: Path,
+    ):
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        _write_conversation(memory_dir)
+        _write_topic(memory_dir)
+
+        idx_mgr = MemoryIndexManager(str(memory_dir))
+        idx_mgr.rebuild()
+        rendered = idx_mgr.render_vault_map()
+
+        # Each category line carries its 1-line description so the
+        # agent can pick the right ``memory_list(category=…)``
+        # argument without an extra read.
+        assert "Per-session conversation rollups" in rendered
+        assert "Curated subject pages" in rendered
+        # And the agent gets the explicit drill-down hint.
+        assert "memory_list(category" in rendered

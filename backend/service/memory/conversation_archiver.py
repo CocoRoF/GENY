@@ -62,13 +62,17 @@ file::
     ## turn-a8d9d03e
     ...
 
-The wikilink target consumers (``dm_archiver`` /
-``daily_journal_writer``) keep working unchanged: their ``.md``-strip
-is now a no-op because :attr:`ArchivedConversation.relative_path`
-already returns the wikilink-friendly form
-``conversations/<sid>__<title>#turn-<eid8>`` (no extension, anchor
-included). Operators clicking the link in Obsidian/Opsidian land
-exactly on the per-turn heading.
+The wikilink target consumer (``dm_archiver``) keeps working
+unchanged: its ``.md``-strip is now a no-op because
+:attr:`ArchivedConversation.relative_path` already returns the
+wikilink-friendly form ``conversations/<sid>__<bucket>#turn-<eid8>``
+(no extension, anchor included). Operators clicking the link in
+Obsidian/Opsidian land exactly on the per-turn heading.
+
+Cycle 20260503_6 — the legacy ``daily_journal_writer`` has been
+retired; the conversations rollup files carry every turn with
+``date_first/date_last`` in frontmatter, so the standalone
+``memory/<YYYY-MM-DD>.md`` headline index was redundant.
 
 Concrete invariants the rest of Memory v2 depends on:
 
@@ -480,12 +484,15 @@ def build_links_to(
 ) -> List[str]:
     """Compute the standard wikilink targets for a conversations note.
 
-    Identical to the per-turn era — the daily journal target plus
-    (for DM-class kinds) the per-counterpart bundle. The links live
-    on the *session-level* frontmatter now (deduped union across
-    all turns).
+    Cycle 20260503_6 — the daily-journal target was retired alongside
+    ``DailyJournalWriter`` (the per-day file was a redundant
+    headline index). DM-class kinds still link out to the
+    per-counterpart bundle so dm vault navigation keeps working.
+    Non-DM turns now have an empty ``links_to`` — the rollup file
+    is self-contained and the chronological lookup happens via the
+    index manager's ``date_first/date_last`` aggregates.
     """
-    out: List[str] = [date]
+    out: List[str] = []
     cp_id = (counterpart_id or "").strip()
     if cp_id and cp_id not in _SELF_LIKE_COUNTERPARTS:
         cp_safe = sanitize_counterpart(cp_id)

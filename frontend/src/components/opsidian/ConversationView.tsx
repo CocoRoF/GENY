@@ -41,7 +41,7 @@ function cn(...c: (string | boolean | undefined | null)[]) {
 
 type SubView = 'notes' | 'stream';
 
-const CONVERSATION_CATEGORIES = ['conversations', 'dms', 'daily-journal'] as const;
+const CONVERSATION_CATEGORIES = ['conversations', 'dms'] as const;
 
 export default function ConversationView() {
   const {
@@ -57,14 +57,15 @@ export default function ConversationView() {
   // Filter the existing vault tree down to the conversation-related
   // categories so the Notes sub-view stays focused. The full tree
   // remains accessible via the editor view.
+  // Cycle 20260503_6 — ``daily-journal`` retired; conversations
+  // rollup files (one per session-bucket) are the chronological
+  // surface now via their date_first/date_last frontmatter.
   const conversationFiles = useMemo(() => {
     const out: Record<string, typeof files[string]> = {};
     for (const [k, v] of Object.entries(files)) {
       if (CONVERSATION_CATEGORIES.includes(v?.category as never)) {
         out[k] = v;
       }
-      // Also include daily journal files (root-level YYYY-MM-DD.md).
-      // category=daily-journal lives at root; keep alongside.
     }
     return out;
   }, [files]);

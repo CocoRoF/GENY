@@ -2709,7 +2709,7 @@ const ko: Translations = {
     conversationStream: 'Stream',
     conversationNotes: 'Notes',
     conversationStreamHint: 'STM jsonl 의 InteractionEvent 타임라인',
-    conversationNotesHint: 'memory/conversations/, dms/, daily-journal 노트 ({count} files)',
+    conversationNotesHint: 'memory/conversations/ 와 memory/dms/ 노트 ({count} files)',
     conversationEmpty: '아직 conversations / dms 노트가 없어요. 대화가 시작되면 자동으로 채워집니다.',
     conversationSelectNote: '노트를 선택하면 본문이 표시됩니다.',
     conversationSelectSession: '세션을 선택해 주세요.',
