@@ -1,29 +1,29 @@
 """
-Short-term memory — JSONL transcript store.
+Short-term memory — thin adapter over `provider.stm()`.
 
-Inspired by OpenClaw's session JSONL transcript pattern.
+Geny path-A migration GENY-1: the JSONL transcript file is owned by
+the executor's `STMHandle` (`<storage>/transcripts/session.jsonl`),
+not Geny. This module preserves the legacy `ShortTermMemory` surface
+that the rest of Geny uses (manager, transcripts controller, memory
+inspect tools, agent executor) and routes every write through the
+provider so there's a single STM trail per session.
 
-Layout inside *storage_path*::
+Layout (executor-owned)::
 
     <storage_path>/
         transcripts/
-            session.jsonl       ← main conversation transcript
-            summary.md          ← auto-generated session summary (optional)
+            session.jsonl       ← executor.STMHandle (append/recent/search)
+            summary.md          ← Geny side (executor STM has no summary surface)
 
-Each line in the JSONL file is a JSON object::
-
-    {"type": "message", "role": "user",      "content": "...", "ts": "..."}
-    {"type": "message", "role": "assistant",  "content": "...", "ts": "..."}
-    {"type": "event",   "event": "tool_call", "data": {...},    "ts": "..."}
-
-Short-term memory is ephemeral — it lives for the duration of the
-session (and maybe a bit longer for post-mortem analysis).
+Geny still drives:
+- DB dual-write (`session_memory_entries` mirror) for operator analytics
+- `summary.md` direct disk write (no executor protocol equivalent)
+- `MemoryEntry` / `MemorySearchResult` shape adapters for legacy callers
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,32 +35,19 @@ logger = getLogger(__name__)
 # Use configured timezone from GENY_TIMEZONE env var
 from service.utils.utils import _configured_tz as _get_tz
 
-# Maximum transcript entries kept in the JSONL file.
-# DB retains full history; this limit prevents unbounded file growth.
-MAX_TRANSCRIPT_ENTRIES = 2000
 
-# Check for file truncation every N writes (amortised cost).
-_TRUNCATE_CHECK_INTERVAL = 100
+_RECENT_LARGE_N = 5000
 
 
 class ShortTermMemory:
-    """JSONL-backed short-term transcript memory.
+    """Thin adapter over the executor's STMHandle.
 
-    Each message exchanged with the LLM is persisted as a JSONL line,
-    enabling post-session review, search, and context replay.
-
-    Supports DB-backed storage (primary) with JSONL file fallback.
-
-    Usage::
-
-        stm = ShortTermMemory("/tmp/sessions/abc123")
-        stm.ensure_directory()
-
-        stm.add_message("user", "Implement the login feature")
-        stm.add_message("assistant", "I'll start by creating...")
-
-        recent = stm.get_recent(n=10)
-        results = stm.search("login")
+    Construction stays compatible with the pre-migration call site
+    (`ShortTermMemory(storage_path)`); attach the executor provider
+    via `set_memory_provider(provider)` once the agent session has
+    built it. All writes (`add_message`, `add_event`, `write_summary`)
+    are no-ops + warning if no provider is attached, mirroring the
+    PR-3g pattern for `StructuredMemoryWriter`.
     """
 
     TRANSCRIPT_DIR = "transcripts"
@@ -68,57 +55,30 @@ class ShortTermMemory:
     SUMMARY_FILE = "summary.md"
 
     def __init__(self, storage_path: str):
-        """
-        Args:
-            storage_path: The session's root storage directory.
-        """
         self._storage_path = Path(storage_path)
         self._transcript_dir = self._storage_path / self.TRANSCRIPT_DIR
         self._main_file = self._transcript_dir / self.MAIN_FILE
         self._summary_file = self._transcript_dir / self.SUMMARY_FILE
 
-        # DB support (set via set_database)
+        # DB support (set via set_database) — kept for the operator
+        # analytics mirror; will be revisited in GENY-8.
         self._db_manager = None
         self._session_id: Optional[str] = None
 
-        # Write counter for periodic file truncation
-        self._write_count: int = 0
+        # Executor provider — wired post-construction by AgentSession.
+        self._provider: Any = None
 
-        # Memory v2 PR 3 — concurrency lock.
-        #
-        # Multiple writers can land here in production:
-        #
-        #   * normal user/assistant ``record_message`` from the
-        #     async pipeline,
-        #   * ``record_event`` calls from synchronous tool runs,
-        #   * background ActivityTrigger / IdleTrigger reflections
-        #     that fire from a separate task,
-        #   * the periodic ``_maybe_truncate_file`` rewrite that
-        #     replaces the whole file.
-        #
-        # Without a lock, two writers can interleave inside
-        # ``_append_jsonl`` and produce a half-baked jsonl line
-        # (`{"role":"user","cont` + `"role":"assistant",…`) — the
-        # next read silently drops both lines. We use ``RLock`` so
-        # ``_maybe_truncate_file`` can call ``_read_jsonl`` while
-        # already holding the lock.
-        import threading  # local import — keeps the module lean
-        self._lock = threading.RLock()
+    def set_memory_provider(self, provider: Any) -> None:
+        self._provider = provider
 
     def set_database(self, db_manager, session_id: str) -> None:
-        """Enable DB-backed persistence for this memory store.
-
-        Args:
-            db_manager: AppDatabaseManager instance.
-            session_id: Session ID for DB queries.
-        """
+        """Enable DB-backed mirror for operator analytics."""
         self._db_manager = db_manager
         self._session_id = session_id
         logger.debug("ShortTermMemory: DB backend enabled for session %s", session_id)
 
     @property
     def _db_available(self) -> bool:
-        """True if DB is configured and the session ID is set."""
         return self._db_manager is not None and self._session_id is not None
 
     @property
@@ -130,15 +90,13 @@ class ShortTermMemory:
     # ------------------------------------------------------------------
 
     def ensure_directory(self) -> None:
-        """Create the transcripts/ directory if absent."""
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
 
     def exists(self) -> bool:
-        """True if the transcript file has content."""
         return self._main_file.exists() and self._main_file.stat().st_size > 0
 
     # ------------------------------------------------------------------
-    # Write operations
+    # Write — route through executor STMHandle
     # ------------------------------------------------------------------
 
     def add_message(
@@ -148,38 +106,36 @@ class ShortTermMemory:
         *,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Append a message to the transcript.
+        """Append a message to the executor-owned transcript."""
+        if self._provider is None:
+            logger.warning(
+                "ShortTermMemory.add_message: no MemoryProvider attached; "
+                "skipping append (path-A requires provider).",
+            )
+            return
 
-        Args:
-            role: Conventionally one of ``"user"``, ``"assistant"``, or
-                ``"system"``, but this layer is role-agnostic — callers
-                may also pass ``"internal_trigger"`` (idle/activity auto
-                triggers) or ``"assistant_dm"`` (inter-agent DM received)
-                so retrieval can distinguish real user input from system
-                self-prompts and counterpart messages. See
-                ``dev_docs/20260420_8/plan/03_turn_memory_continuity.md``
-                § 4-2.
-            content: Message text.
-            metadata: Optional extra fields (tool_calls, duration_ms, etc.).
-        """
-        self.ensure_directory()
-        now = datetime.now(_get_tz())
+        from geny_executor.memory.provider import Turn
+        from service.memory.sync_async_bridge import run_coro_sync
 
-        record: Dict[str, Any] = {
-            "type": "message",
-            "role": role,
-            "content": content,
-            "ts": now.isoformat(),
-        }
-        if metadata:
-            record["metadata"] = metadata
+        turn = Turn(
+            role=role,
+            content=content,
+            timestamp=datetime.now(_get_tz()),
+            metadata=dict(metadata) if metadata else {},
+        )
+        try:
+            run_coro_sync(self._provider.stm().append(turn))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "ShortTermMemory.add_message: provider append failed",
+                exc_info=True,
+            )
+            return
 
-        self._append_jsonl(record)
-
-        # Dual-write to DB
         if self._db_available:
             try:
                 from service.database.memory_db_helper import db_stm_add_message
+
                 db_stm_add_message(
                     self._db_manager,
                     self._session_id,
@@ -195,29 +151,31 @@ class ShortTermMemory:
         event: str,
         data: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Append an event (tool call, state change, etc.) to the transcript.
+        """Append a non-message event line to the executor-owned transcript."""
+        if self._provider is None:
+            logger.warning(
+                "ShortTermMemory.add_event: no MemoryProvider attached; "
+                "skipping append.",
+            )
+            return
 
-        Args:
-            event: Event type string (e.g., "tool_call", "state_change").
-            data: Event payload.
-        """
-        self.ensure_directory()
-        now = datetime.now(_get_tz())
+        from service.memory.sync_async_bridge import run_coro_sync
 
-        record: Dict[str, Any] = {
-            "type": "event",
-            "event": event,
-            "ts": now.isoformat(),
-        }
-        if data:
-            record["data"] = data
+        try:
+            run_coro_sync(
+                self._provider.stm().append_event(event, dict(data) if data else None)
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "ShortTermMemory.add_event: provider append_event failed",
+                exc_info=True,
+            )
+            return
 
-        self._append_jsonl(record)
-
-        # Dual-write to DB
         if self._db_available:
             try:
                 from service.database.memory_db_helper import db_stm_add_event
+
                 db_stm_add_event(
                     self._db_manager,
                     self._session_id,
@@ -228,10 +186,11 @@ class ShortTermMemory:
                 logger.debug("ShortTermMemory: DB event write failed (non-critical): %s", e)
 
     def write_summary(self, summary: str) -> None:
-        """Write or overwrite the session summary.
+        """Write the session summary markdown file.
 
-        Args:
-            summary: Markdown-formatted session summary.
+        Stays as direct disk write — `STMHandle` has no summary
+        surface (it's a Geny-side cosmetic artefact, not part of the
+        canonical conversation transcript).
         """
         self.ensure_directory()
         self._summary_file.write_text(summary, encoding="utf-8")
@@ -240,69 +199,67 @@ class ShortTermMemory:
             len(summary), self._summary_file,
         )
 
-        # Dual-write to DB
         if self._db_available:
             try:
                 from service.database.memory_db_helper import db_stm_write_summary
+
                 db_stm_write_summary(self._db_manager, self._session_id, summary)
             except Exception as e:
                 logger.debug("ShortTermMemory: DB summary write failed (non-critical): %s", e)
 
     # ------------------------------------------------------------------
-    # Read operations
+    # Read — DB first, then executor STMHandle
     # ------------------------------------------------------------------
 
     def load_all(self) -> List[MemoryEntry]:
-        """Load all transcript entries as MemoryEntry objects.
+        """Load every transcript message as a `MemoryEntry`.
 
-        Tries DB first, falls back to JSONL file.
+        DB mirror first (richer metadata + cross-session analytics),
+        falls back to `provider.stm().recent(_RECENT_LARGE_N)` so the
+        result still works when the DB is disabled. Pre-migration
+        callers (transcripts controller, memory inspect tools,
+        manager.compact_session) keep their existing return shape.
         """
-        # Try DB first
         if self._db_available:
             db_entries = self._load_all_from_db()
             if db_entries is not None:
                 return db_entries
 
-        # Fallback to file
-        records = self._read_jsonl()
-        entries: list[MemoryEntry] = []
+        if self._provider is None:
+            return []
 
-        for i, record in enumerate(records):
-            if record.get("type") != "message":
-                continue
+        from service.memory.sync_async_bridge import run_coro_sync
 
-            role = record.get("role", "unknown")
-            content = record.get("content", "")
-            ts_str = record.get("ts")
+        try:
+            turns = run_coro_sync(self._provider.stm().recent(n=_RECENT_LARGE_N))
+        except Exception:  # noqa: BLE001
+            logger.debug("ShortTermMemory.load_all: provider recent failed", exc_info=True)
+            return []
 
-            timestamp = None
-            if ts_str:
-                try:
-                    timestamp = datetime.fromisoformat(ts_str)
-                except (ValueError, TypeError):
-                    pass
-
-            entries.append(MemoryEntry(
-                source=MemorySource.SHORT_TERM,
-                content=f"[{role}] {content}",
-                timestamp=timestamp,
-                filename=str(self._main_file.relative_to(self._storage_path)),
-                line_start=i + 1,
-                line_end=i + 1,
-                metadata={"role": role, **(record.get("metadata") or {})},
-            ))
-
+        entries: List[MemoryEntry] = []
+        for i, turn in enumerate(turns):
+            entries.append(
+                MemoryEntry(
+                    source=MemorySource.SHORT_TERM,
+                    content=f"[{turn.role}] {_content_to_text(turn.content)}",
+                    timestamp=turn.timestamp,
+                    filename=str(self._main_file.relative_to(self._storage_path)),
+                    line_start=i + 1,
+                    line_end=i + 1,
+                    metadata={"role": turn.role, **(turn.metadata or {})},
+                )
+            )
         return entries
 
     def _load_all_from_db(self) -> Optional[List[MemoryEntry]]:
-        """Load all entries from DB. Returns None if unavailable."""
         try:
             from service.database.memory_db_helper import db_stm_load_all
+
             rows = db_stm_load_all(self._db_manager, self._session_id)
             if rows is None:
                 return None
 
-            entries: list[MemoryEntry] = []
+            entries: List[MemoryEntry] = []
             for i, row in enumerate(rows):
                 entry_type = row.get("entry_type", "message")
                 role = row.get("role", "unknown")
@@ -322,78 +279,99 @@ class ShortTermMemory:
                     event_name = row.get("event_name", "event")
                     display = f"[event:{event_name}]"
 
-                entries.append(MemoryEntry(
-                    source=MemorySource.SHORT_TERM,
-                    content=display,
-                    timestamp=timestamp,
-                    filename=str(self._main_file.relative_to(self._storage_path)),
-                    line_start=i + 1,
-                    line_end=i + 1,
-                    metadata={"role": role, **row.get("metadata", {})},
-                ))
+                entries.append(
+                    MemoryEntry(
+                        source=MemorySource.SHORT_TERM,
+                        content=display,
+                        timestamp=timestamp,
+                        filename=str(self._main_file.relative_to(self._storage_path)),
+                        line_start=i + 1,
+                        line_end=i + 1,
+                        metadata={"role": role, **row.get("metadata", {})},
+                    )
+                )
             return entries
         except Exception as e:
-            logger.debug("ShortTermMemory: DB load_all failed, falling back to file: %s", e)
+            logger.debug("ShortTermMemory: DB load_all failed: %s", e)
             return None
 
     def get_recent(self, n: int = 20) -> List[MemoryEntry]:
-        """Load the N most recent messages.
-
-        Tries DB first, falls back to JSONL file.
-
-        Args:
-            n: Number of messages to return.
-        """
-        # Try DB first
+        """Load the N most recent messages."""
         if self._db_available:
-            try:
-                from service.database.memory_db_helper import db_stm_get_recent
-                rows = db_stm_get_recent(self._db_manager, self._session_id, n=n)
-                if rows is not None:
-                    entries: list[MemoryEntry] = []
-                    for i, row in enumerate(rows):
-                        role = row.get("role", "unknown")
-                        content = row.get("content", "")
-                        ts_str = row.get("entry_timestamp", "")
-                        timestamp = None
-                        if ts_str:
-                            try:
-                                timestamp = datetime.fromisoformat(ts_str)
-                            except (ValueError, TypeError):
-                                pass
-                        entries.append(MemoryEntry(
-                            source=MemorySource.SHORT_TERM,
-                            content=f"[{role}] {content}",
-                            timestamp=timestamp,
-                            filename=str(self._main_file.relative_to(self._storage_path)),
-                            line_start=i + 1,
-                            line_end=i + 1,
-                            metadata={"role": role, **row.get("metadata", {})},
-                        ))
-                    return entries
-            except Exception as e:
-                logger.debug("ShortTermMemory: DB get_recent failed: %s", e)
+            db_entries = self._get_recent_from_db(n)
+            if db_entries is not None:
+                return db_entries
 
-        # Fallback
-        all_entries = self.load_all()
-        return all_entries[-n:] if len(all_entries) > n else all_entries
+        if self._provider is None:
+            return []
+
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            turns = run_coro_sync(self._provider.stm().recent(n=n))
+        except Exception:  # noqa: BLE001
+            logger.debug("ShortTermMemory.get_recent: provider recent failed", exc_info=True)
+            return []
+
+        return [
+            MemoryEntry(
+                source=MemorySource.SHORT_TERM,
+                content=f"[{turn.role}] {_content_to_text(turn.content)}",
+                timestamp=turn.timestamp,
+                filename=str(self._main_file.relative_to(self._storage_path)),
+                line_start=i + 1,
+                line_end=i + 1,
+                metadata={"role": turn.role, **(turn.metadata or {})},
+            )
+            for i, turn in enumerate(turns)
+        ]
+
+    def _get_recent_from_db(self, n: int) -> Optional[List[MemoryEntry]]:
+        try:
+            from service.database.memory_db_helper import db_stm_get_recent
+
+            rows = db_stm_get_recent(self._db_manager, self._session_id, n=n)
+            if rows is None:
+                return None
+            entries: List[MemoryEntry] = []
+            for i, row in enumerate(rows):
+                role = row.get("role", "unknown")
+                content = row.get("content", "")
+                ts_str = row.get("entry_timestamp", "")
+                timestamp = None
+                if ts_str:
+                    try:
+                        timestamp = datetime.fromisoformat(ts_str)
+                    except (ValueError, TypeError):
+                        pass
+                entries.append(
+                    MemoryEntry(
+                        source=MemorySource.SHORT_TERM,
+                        content=f"[{role}] {content}",
+                        timestamp=timestamp,
+                        filename=str(self._main_file.relative_to(self._storage_path)),
+                        line_start=i + 1,
+                        line_end=i + 1,
+                        metadata={"role": role, **row.get("metadata", {})},
+                    )
+                )
+            return entries
+        except Exception as e:
+            logger.debug("ShortTermMemory: DB get_recent failed: %s", e)
+            return None
 
     def get_summary(self) -> Optional[str]:
-        """Load the session summary if it exists.
-
-        Tries DB first, falls back to file.
-        """
-        # Try DB first
+        """Load the session summary."""
         if self._db_available:
             try:
                 from service.database.memory_db_helper import db_stm_get_summary
+
                 summary = db_stm_get_summary(self._db_manager, self._session_id)
                 if summary is not None:
                     return summary
             except Exception as e:
                 logger.debug("ShortTermMemory: DB get_summary failed: %s", e)
 
-        # Fallback to file
         if not self._summary_file.exists():
             return None
         try:
@@ -407,191 +385,118 @@ class ShortTermMemory:
         *,
         max_results: int = 10,
     ) -> List[MemorySearchResult]:
-        """Keyword search over transcript messages.
-
-        Tries DB first, falls back to file-based search.
-
-        Args:
-            query: Search string.
-            max_results: Maximum results to return.
-        """
+        """Keyword search over transcript messages."""
         if not query.strip():
             return []
 
-        # Try DB first
         if self._db_available:
-            try:
-                from service.database.memory_db_helper import db_stm_search
-                db_rows = db_stm_search(
-                    self._db_manager, self._session_id,
-                    query_text=query, max_results=max_results,
-                )
-                if db_rows is not None and len(db_rows) > 0:
-                    results: list[MemorySearchResult] = []
-                    for row in db_rows:
-                        content = f"[{row.get('role', 'unknown')}] {row.get('content', '')}"
-                        ts_str = row.get("entry_timestamp", "")
-                        timestamp = None
-                        if ts_str:
-                            try:
-                                timestamp = datetime.fromisoformat(ts_str)
-                            except (ValueError, TypeError):
-                                pass
-                        entry = MemoryEntry(
-                            source=MemorySource.SHORT_TERM,
-                            content=content,
-                            timestamp=timestamp,
-                            filename=str(self._main_file.relative_to(self._storage_path)),
-                            metadata={"role": row.get("role", ""), **row.get("metadata", {})},
-                        )
-                        snippet = content[:240] + "..." if len(content) > 240 else content
-                        results.append(MemorySearchResult(
-                            entry=entry,
-                            score=1.0,
-                            snippet=snippet,
-                            match_type="db_keyword",
-                        ))
-                    return results
-            except Exception as e:
-                logger.debug("ShortTermMemory: DB search failed: %s", e)
+            db_results = self._search_db(query, max_results)
+            if db_results is not None and db_results:
+                return db_results
 
-        # Fallback to file-based search
-        entries = self.load_all()
-        query_lower = query.lower()
-        keywords = [w for w in query_lower.split() if len(w) >= 2]
-
-        if not keywords:
+        if self._provider is None:
             return []
 
-        results: list[MemorySearchResult] = []
+        from service.memory.sync_async_bridge import run_coro_sync
 
-        for entry in entries:
-            content_lower = entry.content.lower()
-            hits = sum(content_lower.count(kw) for kw in keywords)
-            if hits == 0:
-                continue
+        try:
+            turns = run_coro_sync(
+                self._provider.stm().search(query, limit=max_results)
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("ShortTermMemory.search: provider search failed", exc_info=True)
+            return []
 
-            score = hits / max(1, len(entry.content.split()))
+        results: List[MemorySearchResult] = []
+        for turn in turns:
+            content = f"[{turn.role}] {_content_to_text(turn.content)}"
+            entry = MemoryEntry(
+                source=MemorySource.SHORT_TERM,
+                content=content,
+                timestamp=turn.timestamp,
+                filename=str(self._main_file.relative_to(self._storage_path)),
+                metadata={"role": turn.role, **(turn.metadata or {})},
+            )
+            snippet = content[:240] + "..." if len(content) > 240 else content
+            results.append(
+                MemorySearchResult(
+                    entry=entry,
+                    score=1.0,
+                    snippet=snippet,
+                    match_type="keyword",
+                )
+            )
+        return results
 
-            # Recency boost: more recent entries score higher
-            if entry.line_start is not None:
-                recency = entry.line_start / max(1, len(entries))
-                score = score * 0.6 + recency * 0.4
+    def _search_db(
+        self, query: str, max_results: int,
+    ) -> Optional[List[MemorySearchResult]]:
+        try:
+            from service.database.memory_db_helper import db_stm_search
 
-            snippet = entry.content[:240]
-            if len(entry.content) > 240:
-                snippet += "..."
-
-            results.append(MemorySearchResult(
-                entry=entry,
-                score=score,
-                snippet=snippet,
-                match_type="keyword",
-            ))
-
-        results.sort(key=lambda r: r.score, reverse=True)
-        return results[:max_results]
+            db_rows = db_stm_search(
+                self._db_manager,
+                self._session_id,
+                query_text=query,
+                max_results=max_results,
+            )
+            if db_rows is None:
+                return None
+            results: List[MemorySearchResult] = []
+            for row in db_rows:
+                content = f"[{row.get('role', 'unknown')}] {row.get('content', '')}"
+                ts_str = row.get("entry_timestamp", "")
+                timestamp = None
+                if ts_str:
+                    try:
+                        timestamp = datetime.fromisoformat(ts_str)
+                    except (ValueError, TypeError):
+                        pass
+                entry = MemoryEntry(
+                    source=MemorySource.SHORT_TERM,
+                    content=content,
+                    timestamp=timestamp,
+                    filename=str(self._main_file.relative_to(self._storage_path)),
+                    metadata={"role": row.get("role", ""), **row.get("metadata", {})},
+                )
+                snippet = content[:240] + "..." if len(content) > 240 else content
+                results.append(
+                    MemorySearchResult(
+                        entry=entry,
+                        score=1.0,
+                        snippet=snippet,
+                        match_type="db_keyword",
+                    )
+                )
+            return results
+        except Exception as e:
+            logger.debug("ShortTermMemory: DB search failed: %s", e)
+            return None
 
     def message_count(self) -> int:
-        """Count total messages in the transcript.
-
-        Tries DB first, falls back to file.
-        """
+        """Count total messages in the transcript."""
         if self._db_available:
             try:
                 from service.database.memory_db_helper import db_stm_message_count
+
                 count = db_stm_message_count(self._db_manager, self._session_id)
                 if count is not None:
-                    return count
+                    return int(count)
             except Exception as e:
                 logger.debug("ShortTermMemory: DB message_count failed: %s", e)
 
-        # Fallback
-        records = self._read_jsonl()
-        return sum(1 for r in records if r.get("type") == "message")
+        return len(self.load_all())
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
-    def _append_jsonl(self, record: Dict[str, Any]) -> None:
-        """Append a JSON record to the transcript file.
-
-        Lock-protected (PR 3). The whole append + counter bump +
-        possible truncation happens atomically so a concurrent
-        writer cannot interleave its bytes between the
-        ``json.dumps`` and the trailing newline.
-        """
-        with self._lock:
-            try:
-                with open(self._main_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-            except OSError as exc:
-                logger.warning("ShortTermMemory: write failed: %s", exc)
-
-            # Periodic truncation to prevent unbounded file growth
-            self._write_count += 1
-            if self._write_count % _TRUNCATE_CHECK_INTERVAL == 0:
-                self._maybe_truncate_file()
-
-    def _read_jsonl(self) -> List[Dict[str, Any]]:
-        """Read all records from the transcript file.
-
-        Lock-protected so a concurrent ``_append_jsonl`` doesn't
-        return a partially-flushed view to the reader. RLock means
-        ``_maybe_truncate_file`` can hold the outer lock and still
-        call this without deadlock.
-        """
-        with self._lock:
-            if not self._main_file.exists():
-                return []
-
-            records: list[Dict[str, Any]] = []
-            try:
-                with open(self._main_file, "r", encoding="utf-8") as f:
-                    for line_no, line in enumerate(f, 1):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            records.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            logger.debug(
-                                "ShortTermMemory: bad JSON at line %d", line_no
-                            )
-            except OSError as exc:
-                logger.warning("ShortTermMemory: read failed: %s", exc)
-
-            return records
-
-    def _maybe_truncate_file(self) -> None:
-        """Truncate JSONL file to MAX_TRANSCRIPT_ENTRIES if oversized.
-
-        DB retains full history; this only trims the file to prevent
-        unbounded growth.  Keeps the most recent entries.
-
-        Lock-protected (RLock) so the read-modify-write happens
-        atomically. Memory v2 deliberately keeps this cap intact —
-        the leaf source of truth lives in
-        ``memory/conversations/``, not the STM jsonl, so trimming
-        old jsonl lines no longer loses information.
-        """
-        with self._lock:
-            if not self._main_file.exists():
-                return
-            try:
-                records = self._read_jsonl()
-                if len(records) <= MAX_TRANSCRIPT_ENTRIES:
-                    return
-
-                keep = records[-MAX_TRANSCRIPT_ENTRIES:]
-                with open(self._main_file, "w", encoding="utf-8") as f:
-                    for rec in keep:
-                        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-
-                logger.info(
-                    "ShortTermMemory: truncated %d → %d entries (DB retains full history)",
-                    len(records), len(keep),
-                )
-            except Exception as exc:
-                logger.debug("ShortTermMemory: truncation failed (non-critical): %s", exc)
+def _content_to_text(content: Any) -> str:
+    """Best-effort string projection of `Turn.content`."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        if parts:
+            return "\n".join(parts)
+    return str(content)
