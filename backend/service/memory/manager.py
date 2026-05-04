@@ -764,6 +764,29 @@ class SessionMemoryManager:
                 "record_execution: #%d (%d chars) → executions/",
                 execution_number, len(entry),
             )
+            try:
+                from service.memory.event_emitter import emit_memory_event
+
+                emit_memory_event(
+                    self._session_id,
+                    event_type="execution_recorded",
+                    source="Memory",
+                    layer="ltm",
+                    chars=len(entry),
+                    extra={
+                        "execution_number": execution_number,
+                        "success": bool(success),
+                    },
+                    message=(
+                        f"execution_recorded: #{execution_number} "
+                        f"({len(entry)} chars, success={success})"
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "record_execution: memory_event emit skipped",
+                    exc_info=True,
+                )
 
             # ── Structured note (dual-write) ─────────────────────────
             if self._structured_writer is not None:
