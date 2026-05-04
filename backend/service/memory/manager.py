@@ -139,19 +139,30 @@ class SessionMemoryManager:
         speaks to it.
 
         Called by `AgentSession` immediately after the composite
-        provider is built. Two consumers today:
+        provider is built. Three consumers today:
 
         - `VectorMemoryManager` (Phase 2): vector retrieval +
           indexing route through `provider.vector()`.
-        - `StructuredMemoryWriter` (Phase 3a): `write_note` routes
-          through `provider.notes()` — disk layout, frontmatter,
-          dedup all owned by the executor. Update / delete / link
-          stay on the legacy path until PR-3b/3c.
+        - `StructuredMemoryWriter` (Phase 3a/3b): write / update /
+          delete / link route through `provider.notes()` — disk
+          layout, frontmatter, dedup, backlink propagation all
+          owned by the executor.
+        - `CompactionArchiver` (Phase 3c): compaction vault writes
+          route through `provider.notes()`. The audit copy under
+          `transcripts/compactions/` keeps its direct disk path.
         """
         if self._vmm is not None:
             self._vmm.set_memory_provider(provider)
         if self._structured_writer is not None:
             self._structured_writer.set_memory_provider(provider)
+        if self._compaction_archiver is not None:
+            try:
+                self._compaction_archiver.set_memory_provider(provider)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "set_memory_provider: compaction wiring skipped",
+                    exc_info=True,
+                )
 
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for LTM and STM.
