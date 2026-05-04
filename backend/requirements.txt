@@ -6,10 +6,7 @@ python-multipart>=0.0.9
 httpx>=0.28.0
 python-dotenv>=1.0.0
 jinja2>=3.1.0
-# FAISS still required by the legacy service.memory.vector_store path
-# during the cut-over window. Dropped in the follow-up PR once every
-# caller has been ported.
-faiss-cpu>=1.9.0
+# numpy stays for image / waveform / statistics; FAISS removed.
 numpy>=1.26.0
 # File pattern matching
 pathspec>=0.12.0

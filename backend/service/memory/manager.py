@@ -96,6 +96,11 @@ class SessionMemoryManager:
 
         self._ltm = LongTermMemory(storage_path)
         self._stm = ShortTermMemory(storage_path)
+        # The vector layer is an adapter over the executor `MemoryProvider`
+        # — `set_memory_provider` plugs the live composite in once
+        # `AgentSession._init_memory_provider` has built it. Until that
+        # point `_vmm.enabled` is False so retrieval / indexing is a
+        # no-op, never a hard failure.
         self._vmm = VectorMemoryManager(storage_path, session_id=session_id or "")
 
         # Structured memory layer (Obsidian-like)
@@ -128,6 +133,17 @@ class SessionMemoryManager:
         # checked ``is None``. New construction defaults to "" via the
         # constructor kwarg so archiver filenames carry a real id.
         self._session_id: Optional[str] = session_id or None
+
+    def set_memory_provider(self, provider) -> None:
+        """Plug the executor `MemoryProvider` into the vector adapter.
+
+        Called by `AgentSession` immediately after the composite
+        provider is built — the legacy `VectorMemoryManager` shim
+        forwards every operation onto `provider.vector()` and is
+        idle (`enabled=False`) until this lands.
+        """
+        if self._vmm is not None:
+            self._vmm.set_memory_provider(provider)
 
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for LTM and STM.
