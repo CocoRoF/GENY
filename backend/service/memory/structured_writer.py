@@ -419,6 +419,161 @@ class StructuredMemoryWriter:
         filepath.write_text(full_content, encoding="utf-8")
         return relative_path, full_content, metadata
 
+    # ── Provider-backed update / delete / link (PR-3b) ─────────────
+
+    def _update_via_provider(
+        self,
+        filename: str,
+        *,
+        content: Optional[str],
+        tags: Optional[List[str]],
+        importance: Optional[str],
+        category: Optional[str],
+        append: bool,
+    ) -> bool:
+        """Update through `NotesHandle.update`. Geny tag semantics
+        (merge-with-existing) are honoured by reading the current
+        note first; the executor's `NotePatch.tags` is replace-only.
+
+        Returns False when the file does not exist — matches the
+        legacy contract.
+        """
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NotePatch,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        notes = self._provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(filename))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "update_note: read failed via provider for %s",
+                filename, exc_info=True,
+            )
+            return False
+        if existing is None:
+            logger.warning("update_note: file not found: %s", filename)
+            return False
+
+        merged_tags: Optional[List[str]] = None
+        if tags:
+            merged = set(existing.tags or [])
+            merged.update(t.lower().strip() for t in tags if t.strip())
+            merged_tags = sorted(merged)
+
+        importance_enum = None
+        if importance:
+            try:
+                importance_enum = _ExecutorImportance(importance)
+            except ValueError:
+                importance_enum = None
+
+        body_replace = content if (content is not None and not append) else None
+        body_append = content if (content is not None and append) else None
+
+        patch = NotePatch(
+            body=body_replace,
+            append_body=body_append,
+            tags=merged_tags,
+            importance=importance_enum,
+            category=category,
+        )
+        try:
+            run_coro_sync(notes.update(filename, patch))
+        except KeyError:
+            logger.warning("update_note: provider missing %s", filename)
+            return False
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "update_note: provider write failed for %s",
+                filename, exc_info=True,
+            )
+            return False
+
+        # Geny side: keep the in-memory index cache in sync until
+        # PR-3c moves IndexHandle over.
+        try:
+            self._index.update_file(filename)
+        except Exception:  # noqa: BLE001
+            logger.debug("update_note: index update skipped", exc_info=True)
+        logger.debug("update_note: updated %s (via provider)", filename)
+        return True
+
+    def _delete_via_provider(self, filename: str) -> bool:
+        """Delete through `NotesHandle.delete`. The executor handles
+        explicit_links cleanup + cache invalidation; we only need to
+        sweep the Geny in-memory index entry."""
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            ok = run_coro_sync(self._provider.notes().delete(filename))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "delete_note: provider delete failed for %s",
+                filename, exc_info=True,
+            )
+            return False
+        if not ok:
+            return False
+        try:
+            self._index.remove_file(filename)
+        except Exception:  # noqa: BLE001
+            logger.debug("delete_note: index remove skipped", exc_info=True)
+        logger.info("delete_note: removed %s (via provider)", filename)
+        return True
+
+    def _link_via_provider(self, source_file: str, target_file: str) -> bool:
+        """Create a `> See also: [[target]]` reference in the source
+        note via `NotesHandle.update(append_body=...)`. Mirrors the
+        legacy `link_notes` semantics (visible body marker, not just
+        an internal explicit_links entry) so a user opening the
+        source note still sees the link in Obsidian.
+        """
+        from geny_executor.memory.provider import NotePatch
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        target_stem = Path(target_file).stem
+        notes = self._provider.notes()
+
+        try:
+            existing = run_coro_sync(notes.read(source_file))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "link_notes: read failed via provider for %s",
+                source_file, exc_info=True,
+            )
+            return False
+        if existing is None:
+            return False
+
+        # Idempotency — same as legacy.
+        marker = f"[[{target_stem}]]"
+        if marker.lower() in existing.body.lower():
+            return True
+        if target_stem in (existing.links_out or []):
+            return True
+
+        patch = NotePatch(append_body=f"> See also: {marker}")
+        try:
+            run_coro_sync(notes.update(source_file, patch))
+        except KeyError:
+            return False
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "link_notes: provider update failed for %s → %s",
+                source_file, target_stem, exc_info=True,
+            )
+            return False
+
+        try:
+            self._index.update_file(source_file)
+            self._index.update_file(target_file)
+        except Exception:  # noqa: BLE001
+            logger.debug("link_notes: index update skipped", exc_info=True)
+        return True
+
     def update_note(
         self,
         filename: str,
@@ -441,6 +596,16 @@ class StructuredMemoryWriter:
         Returns:
             True if the file was successfully updated.
         """
+        if self._provider is not None:
+            return self._update_via_provider(
+                filename,
+                content=content,
+                tags=tags,
+                importance=importance,
+                category=category,
+                append=append,
+            )
+
         filepath = self._memory_dir / filename
         if not filepath.exists():
             logger.warning("update_note: file not found: %s", filename)
@@ -517,6 +682,9 @@ class StructuredMemoryWriter:
         Returns:
             True if deleted.
         """
+        if self._provider is not None:
+            return self._delete_via_provider(filename)
+
         filepath = self._memory_dir / filename
         if not filepath.exists():
             return False
@@ -542,6 +710,9 @@ class StructuredMemoryWriter:
         Returns:
             True if link was created.
         """
+        if self._provider is not None:
+            return self._link_via_provider(source_file, target_file)
+
         filepath = self._memory_dir / source_file
         if not filepath.exists():
             return False
