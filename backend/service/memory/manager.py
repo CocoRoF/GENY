@@ -298,18 +298,9 @@ class SessionMemoryManager:
         # single truth. STM/LTM keep their analytics mirrors for now
         # (revisited in GENY-9).
 
-        # Run migration for legacy files (idempotent)
-        try:
-            from service.memory.migrator import MemoryMigrator
-            migrator = MemoryMigrator(str(memory_dir), self._session_id or "")
-            if migrator.needs_migration():
-                report = migrator.migrate()
-                logger.info(
-                    "Memory migration: %s",
-                    report.summary if report else "no changes",
-                )
-        except Exception:
-            logger.debug("Memory migration failed (non-critical)", exc_info=True)
+        # Path-A migration GENY-7c — `MemoryMigrator` retired. The
+        # plan explicitly opted out of legacy-data migration; new
+        # sessions land in the executor-owned layout from the start.
 
         self._initialized = True
         logger.info("SessionMemoryManager initialized at %s", self._storage_path)
