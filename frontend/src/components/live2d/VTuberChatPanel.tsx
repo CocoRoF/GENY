@@ -249,14 +249,33 @@ export default function VTuberChatPanel({
               // mirrors how the TTS path already feeds the panel.
               if (msg.session_id && msg.memory_events?.length) {
                 const store = useVTuberStore.getState();
+                // One console row per turn so an operator looking at
+                // devtools can confirm the WS payload actually carries
+                // memory_events even if something downstream swallows
+                // them later. Cheap — fires at most once per turn.
+                console.debug(
+                  '[VTuberChatPanel] received',
+                  msg.memory_events.length,
+                  'memory event(s) for session',
+                  msg.session_id,
+                  msg.memory_events.map((e) => e.event_type),
+                );
                 for (const ev of msg.memory_events) {
-                  store.addLog(
-                    msg.session_id,
-                    'info',
-                    ev.source,
-                    ev.message,
-                    ev as unknown as Record<string, unknown>,
-                  );
+                  try {
+                    store.addLog(
+                      msg.session_id,
+                      'info',
+                      ev.source,
+                      ev.message,
+                      ev as unknown as Record<string, unknown>,
+                    );
+                  } catch (err) {
+                    console.warn(
+                      '[VTuberChatPanel] addLog failed for memory event',
+                      ev,
+                      err,
+                    );
+                  }
                 }
               }
 

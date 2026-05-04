@@ -826,9 +826,23 @@ async def _run_broadcast(
                         me = session_logger.extract_memory_events_from_cache(0)
                     if me:
                         msg_data["memory_events"] = me
-                        logger.debug(
-                            "[Broadcast:%s] session=%s: %d memory events",
+                        # INFO so the operator can confirm in the
+                        # backend log that the channel is alive without
+                        # toggling DEBUG. Empty case stays silent — no
+                        # need to spam the log for "no memory events
+                        # this turn".
+                        logger.info(
+                            "[Broadcast:%s] session=%s: forwarding %d memory event(s) (events=%s)",
                             room_id[:8], session_id[:8], len(me),
+                            [ev.get("event_type", "?") for ev in me[:5]],
+                        )
+                    else:
+                        logger.info(
+                            "[Broadcast:%s] session=%s: 0 memory events this turn "
+                            "(agent=%s, cursor=%s)",
+                            room_id[:8], session_id[:8],
+                            "live" if agent is not None else "none",
+                            getattr(agent, "_memory_events_cursor", None) if agent else None,
                         )
                 store.add_message(room_id, msg_data)
                 state.responded += 1
