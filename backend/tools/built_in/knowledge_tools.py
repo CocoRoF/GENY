@@ -351,7 +351,21 @@ class KnowledgeReadTool(BaseTool):
 
         note = curated.read_note(filename)
         if note is None:
+            _log_knowledge_event(
+                session_id,
+                event_type="knowledge_read_miss",
+                source="Knowledge",
+                message=f"knowledge_read miss: {filename}",
+            )
             return _error(f"Note not found: {filename}")
+        body_chars = len((note.get("body") or ""))
+        _log_knowledge_event(
+            session_id,
+            event_type="knowledge_read",
+            source="Knowledge",
+            message=f"knowledge_read: {filename} ({body_chars} chars)",
+            extra={"chars": body_chars, "filename": filename},
+        )
         return _ok(note)
 
 
@@ -397,6 +411,20 @@ class KnowledgeListTool(BaseTool):
             kwargs["tag"] = tag
 
         notes = curated.list_notes(**kwargs)
+        filter_label = (
+            f"category={category}" if category else f"tag={tag}" if tag else "all"
+        )
+        _log_knowledge_event(
+            session_id,
+            event_type="knowledge_list",
+            source="Knowledge",
+            message=f"knowledge_list ({filter_label}): {len(notes)} note(s)",
+            extra={
+                "category": category or None,
+                "tag": tag or None,
+                "count": len(notes),
+            },
+        )
         return _ok({
             "total": len(notes),
             "filters": {"category": category or None, "tag": tag or None},
