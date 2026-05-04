@@ -95,19 +95,52 @@ _LEGACY_PLATFORM_TOOL_PREFIXES = ("memory_", "knowledge_", "opsidian_")
 
 # Framework-shipped built-in tool selection per role.
 #
-# Worker seeds get the full set (``["*"]``) — ``Read`` / ``Write`` /
-# ``Edit`` / ``Bash`` / ``Glob`` / ``Grep``. This fixes the Sub-Worker
-# file-creation gap: previously "create test.txt" fell back to
-# ``memory_write`` because no filesystem tool was in the roster. The
-# executor sandboxes every write to ``ToolContext.working_dir`` —
-# which :class:`AgentSession` sets to the session's ``storage_path``
-# — so Worker writes land in ``backend/storage/<session_id>/``.
+# Worker seeds get the full set (``["*"]``) — every tool registered in
+# ``geny_executor.tools.built_in.BUILT_IN_TOOL_CLASSES``. This covers
+# ``Read`` / ``Write`` / ``Edit`` / ``Bash`` / ``Glob`` / ``Grep`` for
+# the Sub-Worker file-creation path, plus the meta / planning /
+# interaction families. The executor sandboxes every write to
+# ``ToolContext.working_dir`` — which :class:`AgentSession` sets to
+# the session's ``storage_path`` — so Worker writes land in
+# ``backend/storage/<session_id>/``.
 #
-# VTuber seeds get ``[]``. The conversational persona must not touch
-# files directly; every file operation is delegated to its bound
-# Sub-Worker via :func:`send_direct_message_internal` (Plan/01).
+# VTuber seeds get a curated subset. The persona must not write files
+# or run shell — those side-effects stay delegated to its bound
+# Sub-Worker via :func:`send_direct_message_internal` (Plan/01) — but
+# read-only inspection, multi-turn planning, and direct interaction
+# with the user are core to the persona's expressive surface and have
+# no side-effects beyond the existing chat / storage_path read-path.
+# Concretely:
+#
+# - ``Read`` / ``Glob`` / ``Grep``: read-only filesystem inspection
+#   inside the session's ``storage_path``. Lets the persona consult
+#   conversation logs and character-context files directly without a
+#   round-trip through the Sub-Worker for a read.
+# - ``TodoWrite`` / ``EnterPlanMode`` / ``ExitPlanMode``: structured
+#   multi-turn planning. Pure state, no filesystem or network.
+# - ``AskUserQuestion``: persona asks the user clarifying questions
+#   inline.
+# - ``PushNotification``: persona pushes proactive notifications
+#   (emergent mood / event signalling) over the existing chat channel.
+#
+# Write / Edit / Bash / NotebookEdit / WebFetch / WebSearch / Agent /
+# MCP / cron / task / messaging / dev / worktree / operator stay off
+# — those either touch files, the network, or external systems, and
+# the persona's design routes those through the Sub-Worker.
 _WORKER_BUILT_IN_TOOL_NAMES: List[str] = ["*"]
-_VTUBER_BUILT_IN_TOOL_NAMES: List[str] = []
+_VTUBER_BUILT_IN_TOOL_NAMES: List[str] = [
+    # Read-only filesystem inspection
+    "Read",
+    "Glob",
+    "Grep",
+    # Multi-turn planning
+    "TodoWrite",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    # Direct user interaction
+    "AskUserQuestion",
+    "PushNotification",
+]
 
 
 # Platform tools a VTuber persona should *not* see even though they
@@ -222,7 +255,8 @@ def create_vtuber_env(
 ) -> EnvironmentManifest:
     """Default VTuber environment manifest.
 
-    Uses the ``vtuber`` stage chain — no Stage 8 (Think),
+    Uses the ``vtuber`` stage chain — Stage 8 (Think) ships
+    ``active=False`` (host can opt the persona into Extended Thinking),
     ``system_cache``, ``signal_based`` evaluation, ``max_turns=10``.
 
     *all_tool_names* is the full roster the boot-time

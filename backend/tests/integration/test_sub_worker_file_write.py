@@ -102,9 +102,13 @@ async def test_worker_pipeline_write_tool_rejects_escape(tmp_path) -> None:
     assert not escape.exists()
 
 
-def test_vtuber_env_has_no_write_tool() -> None:
-    """Symmetric guard for PR-3: the VTuber env must *not* register
-    ``Write`` (or any framework built-in). Every file operation for
+def test_vtuber_env_has_no_write_or_shell_tools() -> None:
+    """Symmetric guard for PR-3: the VTuber env may carry the curated
+    read-only / planning / interaction built-ins (Read / Glob / Grep /
+    TodoWrite / EnterPlanMode / ExitPlanMode / AskUserQuestion /
+    PushNotification — see :data:`_VTUBER_BUILT_IN_TOOL_NAMES` in
+    ``service/environment/templates.py``) but must *not* register any
+    write-side built-in. Every file mutation and shell invocation for
     the VTuber goes through its bound Sub-Worker via
     ``send_direct_message_internal``."""
     from geny_executor.core.pipeline import Pipeline
@@ -115,6 +119,20 @@ def test_vtuber_env_has_no_write_tool() -> None:
     pipeline = Pipeline.from_manifest(
         manifest, api_key="sk-test", strict=False, adhoc_providers=[]
     )
-    assert pipeline.tool_registry.get("Write") is None, (
-        "VTuber env leaked Write tool — role separation regressed."
+    forbidden = ("Write", "Edit", "Bash", "NotebookEdit")
+    for name in forbidden:
+        assert pipeline.tool_registry.get(name) is None, (
+            f"VTuber env leaked {name} tool — role separation regressed."
+        )
+
+    # And the curated allow-list is actually present, otherwise the
+    # persona's read / plan / ask surface silently regressed.
+    expected = (
+        "Read", "Glob", "Grep",
+        "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+        "AskUserQuestion", "PushNotification",
     )
+    for name in expected:
+        assert pipeline.tool_registry.get(name) is not None, (
+            f"VTuber env dropped {name} — read/plan/ask surface regressed."
+        )
