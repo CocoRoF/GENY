@@ -110,6 +110,7 @@ class StructuredMemoryWriter:
         index_manager: MemoryIndexManager,
         session_id: str = "",
         db_manager=None,
+        memory_provider=None,
     ):
         """
         Args:
@@ -117,11 +118,31 @@ class StructuredMemoryWriter:
             index_manager: MemoryIndexManager instance for index updates.
             session_id: Session ID for metadata.
             db_manager: Optional DB manager for dual-write.
+            memory_provider: Live executor `MemoryProvider`. When set,
+                `write_note` / `update_note` / `delete_note` /
+                `link_notes` route through `provider.notes()`; the
+                legacy disk-write code stays as a fallback for
+                provider-less call sites (e.g. transient unit tests
+                or boot phases before AgentSession plugs the
+                provider in).
         """
         self._memory_dir = Path(memory_dir)
         self._index = index_manager
         self._session_id = session_id
         self._db_manager = db_manager
+        self._provider = memory_provider
+
+    def set_memory_provider(self, provider) -> None:
+        """Plug the executor `MemoryProvider` post-construction.
+
+        AgentSession calls this once `_init_memory_provider` finishes
+        — see `service.executor.agent_session._init_memory_provider`
+        for the wiring. Until then `write_note` falls back to the
+        legacy disk-write path so a session that boots without a
+        provider (rare — only happens if the executor build fails)
+        keeps working.
+        """
+        self._provider = provider
 
     @property
     def memory_dir(self) -> Path:
@@ -150,6 +171,16 @@ class StructuredMemoryWriter:
     ) -> str:
         """Create a new structured note with YAML frontmatter.
 
+        With a `MemoryProvider` attached (the standard runtime path
+        wired by `AgentSession._init_memory_provider`), the disk
+        write goes through `provider.notes().write(NoteDraft(...))`
+        — the executor handles frontmatter rendering, wikilink
+        extraction, dedup, and backlink propagation. The Geny-side
+        bookkeeping (operator log event, in-memory index cache,
+        DB dual-write) still runs around the executor write so the
+        existing retriever / vault_map / DB queries stay coherent
+        during the cut-over window.
+
         Args:
             title: Note title.
             content: Markdown body content.
@@ -166,39 +197,32 @@ class StructuredMemoryWriter:
         category = category if category in VALID_CATEGORIES else "topics"
         tags = [t.lower().strip() for t in (tags or []) if t.strip()]
 
-        # Build metadata
-        metadata = build_default_metadata(
-            title=title,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source=source,
-            session_id=self._session_id,
-        )
-
         # Extract wikilinks from content and merge with explicit links
         auto_links = extract_wikilinks(content)
         all_links = list(set(auto_links + (links or [])))
-        metadata["links_to"] = all_links
 
-        # Build full markdown
-        full_content = render_frontmatter(metadata, content)
-
-        # Determine file path
-        if filename_override:
-            relative_path = filename_override
+        if self._provider is not None:
+            relative_path, full_content, metadata = self._write_via_provider(
+                title=title,
+                content=content,
+                category=category,
+                tags=tags,
+                importance=importance,
+                source=source,
+                all_links=all_links,
+                filename_override=filename_override,
+            )
         else:
-            relative_path = self._make_filepath(title, category)
-
-        filepath = self._memory_dir / relative_path
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-
-        # Handle duplicate filenames
-        if filepath.exists() and not filename_override:
-            relative_path = self._deduplicate(relative_path)
-            filepath = self._memory_dir / relative_path
-
-        filepath.write_text(full_content, encoding="utf-8")
+            relative_path, full_content, metadata = self._write_via_disk(
+                title=title,
+                content=content,
+                category=category,
+                tags=tags,
+                importance=importance,
+                source=source,
+                all_links=all_links,
+                filename_override=filename_override,
+            )
 
         logger.info(
             "StructuredMemoryWriter: created %s (%d chars, %d tags)",
@@ -252,6 +276,148 @@ class StructuredMemoryWriter:
         self._db_write(relative_path, full_content, metadata)
 
         return relative_path
+
+    # ── Internal write paths ────────────────────────────────────────
+
+    def _write_via_provider(
+        self,
+        *,
+        title: str,
+        content: str,
+        category: str,
+        tags: List[str],
+        importance: str,
+        source: str,
+        all_links: List[str],
+        filename_override: Optional[str],
+    ):
+        """Disk write through the executor `NotesHandle`.
+
+        The executor handles frontmatter rendering, dedup, wikilink
+        extraction, and backlink propagation. We still build a
+        Geny-shaped metadata dict so the DB dual-write column
+        contents stay identical to the legacy path.
+        """
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NoteDraft,
+            Scope,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        # Build the metadata that DB / event-emitter consumers expect.
+        # The dict mirrors `build_default_metadata` exactly so a
+        # downstream reader cannot tell whether the disk row came from
+        # the legacy path or this branch.
+        metadata = build_default_metadata(
+            title=title,
+            category=category,
+            tags=tags,
+            importance=importance,
+            source=source,
+            session_id=self._session_id,
+        )
+        metadata["links_to"] = list(all_links)
+
+        # Pass Geny-specific fields (aliases, source, session_id,
+        # links_to) to the executor as `frontmatter=...` so the
+        # rendered .md file keeps the same superset of frontmatter
+        # keys the legacy disk path produced. The executor's own
+        # title/tags/category/importance/created/modified keys take
+        # priority; everything else flows through verbatim.
+        passthrough = {
+            "aliases": metadata.get("aliases", []),
+            "source": metadata.get("source", source),
+            "session_id": metadata.get("session_id", self._session_id),
+            "linked_from": metadata.get("linked_from", []),
+            "links_to": metadata.get("links_to", []),
+        }
+
+        try:
+            importance_enum = _ExecutorImportance(importance)
+        except ValueError:
+            importance_enum = _ExecutorImportance.MEDIUM
+
+        # Dedup is the only piece we cannot fully delegate: the
+        # executor rejects an existing filename outright when
+        # `draft.filename` is set, but Geny's contract is to slip a
+        # uuid suffix on the way in. Compute the override pre-flight
+        # so the executor sees a unique name and never raises.
+        if filename_override:
+            relative_path = filename_override
+        else:
+            relative_path = self._make_filepath(title, category)
+            candidate_path = self._memory_dir / relative_path
+            if candidate_path.exists():
+                relative_path = self._deduplicate(relative_path)
+
+        draft = NoteDraft(
+            title=title,
+            body=content,
+            category=category,
+            tags=list(tags),
+            importance=importance_enum,
+            scope=Scope.SESSION,
+            filename=relative_path,
+            frontmatter=passthrough,
+        )
+
+        meta = run_coro_sync(self._provider.notes().write(draft))
+        # The executor preserves the filename we hand in; double-
+        # check just in case a backend (sql / future) renames.
+        relative_path = meta.ref.filename or relative_path
+
+        # Re-render the metadata dict with executor-effective values
+        # so downstream consumers see the row the way it actually
+        # landed on disk (importance/category may have been coerced
+        # by the executor's NoteDraft validation).
+        metadata["category"] = meta.category or category
+        metadata["importance"] = meta.importance.value
+        metadata["modified"] = (
+            meta.updated_at.isoformat() if meta.updated_at else metadata["modified"]
+        )
+        # Build the textual representation used by the DB dual-write
+        # path. The same shape `render_frontmatter` produces is fine
+        # because the actual on-disk write is owned by the executor.
+        full_content = render_frontmatter(metadata, content)
+        return relative_path, full_content, metadata
+
+    def _write_via_disk(
+        self,
+        *,
+        title: str,
+        content: str,
+        category: str,
+        tags: List[str],
+        importance: str,
+        source: str,
+        all_links: List[str],
+        filename_override: Optional[str],
+    ):
+        """Legacy disk-direct write — used only when no provider is
+        attached (rare boot edge case or unit tests)."""
+        metadata = build_default_metadata(
+            title=title,
+            category=category,
+            tags=tags,
+            importance=importance,
+            source=source,
+            session_id=self._session_id,
+        )
+        metadata["links_to"] = list(all_links)
+        full_content = render_frontmatter(metadata, content)
+
+        if filename_override:
+            relative_path = filename_override
+        else:
+            relative_path = self._make_filepath(title, category)
+        filepath = self._memory_dir / relative_path
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        if filepath.exists() and not filename_override:
+            relative_path = self._deduplicate(relative_path)
+            filepath = self._memory_dir / relative_path
+        filepath.write_text(full_content, encoding="utf-8")
+        return relative_path, full_content, metadata
 
     def update_note(
         self,
