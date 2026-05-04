@@ -33,6 +33,21 @@ const LEVEL_LABELS: Record<VTuberLogEntry['level'], string> = {
   debug: 'DEBUG',
 };
 
+// Per-source colour table. Memory subsystem rows get a distinct cyan
+// family so the operator can spot vector / curated / knowledge
+// activity without parsing the message text. Falls back to purple
+// (the historical default) for any source not listed here.
+const SOURCE_COLORS: Record<string, string> = {
+  TTS: 'text-purple-400',
+  Model: 'text-purple-400',
+  WS: 'text-purple-400',
+  UI: 'text-purple-400',
+  Memory: 'text-cyan-400',
+  Vector: 'text-sky-400',
+  Curated: 'text-emerald-400',
+  Knowledge: 'text-amber-400',
+};
+
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -82,7 +97,11 @@ export default function VTuberLogPanel({ sessionId }: VTuberLogPanelProps) {
               <span className={`shrink-0 w-[3.25rem] text-right select-none ${LEVEL_COLORS[entry.level]}`}>
                 {LEVEL_LABELS[entry.level]}
               </span>
-              <span className="text-purple-400 shrink-0 w-[3.5rem] text-right select-none">
+              <span
+                className={`shrink-0 w-[4.5rem] text-right select-none ${
+                  SOURCE_COLORS[entry.source] ?? 'text-purple-400'
+                }`}
+              >
                 {entry.source}
               </span>
               <span className="text-gray-300 break-all">

@@ -963,11 +963,46 @@ class AgentSession:
                 storage_path=sp,
                 username=self._owner_username,
             )
+            descriptor = self._memory_provider.descriptor
             logger.info(
                 "[%s] MemoryProvider initialized: %s",
                 self._session_id,
-                self._memory_provider.descriptor.name,
+                descriptor.name,
             )
+            # Surface the same fact on the per-session log channel so
+            # the VTuber LOGS panel can show it in real time. Only
+            # report the embedding model when one is configured —
+            # otherwise the panel implies "vector layer enabled" which
+            # is misleading.
+            try:
+                slog = get_session_logger(self._session_id, create_if_missing=False)
+                if slog is not None:
+                    layers = sorted(layer.value for layer in descriptor.layers)
+                    embedding = descriptor.embedding
+                    msg = f"MemoryProvider ready: {descriptor.name} (layers={','.join(layers)})"
+                    slog.log_memory_event(
+                        event_type="provider_initialized",
+                        message=msg,
+                        source="Memory",
+                        layer=None,
+                        backend="filesystem",
+                        extra={
+                            "layers": layers,
+                            "embedding": (
+                                {
+                                    "provider": embedding.provider,
+                                    "model": embedding.model,
+                                    "dimension": embedding.dimension,
+                                }
+                                if embedding is not None
+                                else None
+                            ),
+                        },
+                    )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] memory_event log skipped (init)", self._session_id, exc_info=True,
+                )
         except Exception:  # noqa: BLE001
             logger.warning(
                 "[%s] MemoryProvider init failed; continuing with legacy memory only",
@@ -975,6 +1010,16 @@ class AgentSession:
                 exc_info=True,
             )
             self._memory_provider = None
+            try:
+                slog = get_session_logger(self._session_id, create_if_missing=False)
+                if slog is not None:
+                    slog.log_memory_event(
+                        event_type="provider_init_failed",
+                        message="MemoryProvider init failed; running on legacy path",
+                        source="Memory",
+                    )
+            except Exception:  # noqa: BLE001
+                pass
 
     @property
     def memory_provider(self) -> Optional[Any]:

@@ -242,6 +242,24 @@ export default function VTuberChatPanel({
                 return [...prev, displayMsg];
               });
 
+              // Drop every memory subsystem event from this turn into
+              // the VTuber LOGS panel so the operator can watch
+              // MemoryProvider activity (note writes, vector indexing,
+              // curated promotions, knowledge searches) line by line —
+              // mirrors how the TTS path already feeds the panel.
+              if (msg.session_id && msg.memory_events?.length) {
+                const store = useVTuberStore.getState();
+                for (const ev of msg.memory_events) {
+                  store.addLog(
+                    msg.session_id,
+                    'info',
+                    ev.source,
+                    ev.message,
+                    ev as unknown as Record<string, unknown>,
+                  );
+                }
+              }
+
               // Refresh the per-session creature state snapshot once per turn
               // so the VTuberTab status badge / InfoTab Status sub-tab stay
               // current with backend mood/vitals updates.

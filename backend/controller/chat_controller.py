@@ -805,6 +805,19 @@ async def _run_broadcast(
                     if fc:
                         msg_data["file_changes"] = fc
                         logger.debug("[Broadcast:%s] session=%s: %d file changes", room_id[:8], session_id[:8], len(fc))
+                    # Memory subsystem events (note writes, vector
+                    # indexing, curated promotions, knowledge searches)
+                    # — same cursor convention as file_changes. The
+                    # frontend chat handler forwards each record to
+                    # `useVTuberStore.addLog` so the operator can
+                    # watch the MemoryProvider activity in real time.
+                    me = session_logger.extract_memory_events_from_cache(pre_exec_cursor)
+                    if me:
+                        msg_data["memory_events"] = me
+                        logger.debug(
+                            "[Broadcast:%s] session=%s: %d memory events",
+                            room_id[:8], session_id[:8], len(me),
+                        )
                 store.add_message(room_id, msg_data)
                 state.responded += 1
                 if agent_state:
