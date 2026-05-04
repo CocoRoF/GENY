@@ -112,7 +112,6 @@ from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from service.memory.frontmatter import parse_frontmatter
 from service.memory.interaction_event import (
     Direction,
     InteractionEventView,
@@ -1058,15 +1057,16 @@ class ConversationArchiver:
             return None
 
         with self._lock:
-            target_rel, target_abs, existing_text = self._locate_or_initialise(
-                bucket=bucket,
-                base_slug=base_slug,
-                derived_title_seed=derived_title_seed,
+            target_rel, target_abs, existing_meta, existing_body = (
+                self._locate_or_initialise(
+                    bucket=bucket,
+                    base_slug=base_slug,
+                    derived_title_seed=derived_title_seed,
+                )
             )
             if target_rel is None:
                 return None
 
-            existing_meta, existing_body = _split_frontmatter_body(existing_text)
             new_body = _append_turn_block(existing_body, eid8, turn_block)
 
             # Idempotency: if the anchor already lived inside
@@ -1103,7 +1103,7 @@ class ConversationArchiver:
                 target_abs=target_abs,
                 new_meta=new_meta,
                 new_body=new_body,
-                is_new_file=(not existing_text),
+                is_new_file=(not existing_body and not existing_meta),
             ):
                 return None
 
@@ -1200,60 +1200,88 @@ class ConversationArchiver:
         bucket: str,
         base_slug: str,
         derived_title_seed: str,
-    ) -> Tuple[Optional[str], Optional[str], str]:
+    ) -> Tuple[Optional[str], Optional[str], Dict[str, Any], str]:
         """Resolve the on-disk rollup file for this ``(session, bucket)``.
 
-        Returns ``(relative_path, absolute_path, existing_text)``.
-        ``existing_text`` is empty when the file is being created.
-        Returns ``(None, None, "")`` only on a hard error.
+        Returns ``(relative_path, absolute_path, existing_meta,
+        existing_body)``. Both ``existing_meta`` and ``existing_body``
+        are empty when the file is being created. Returns
+        ``(None, None, {}, "")`` only on a hard error.
 
         Filename resolution per bucket:
 
-          1. If the bucket already has a cached rel, reuse it.
-          2. Otherwise enumerate
-             ``conversations/<sid_slug>__<base_slug>*.md`` for the
-             current session — non-user buckets match exactly,
-             the user bucket matches the prefix (so a previously
-             chosen ``user__<title>`` is reused even when the
-             current call's title would slugify differently).
+          1. If the bucket already has a cached rel, reuse it and
+             read the existing rollup via ``NotesHandle.read``.
+          2. Otherwise enumerate ``provider.notes().list(category=
+             "conversations")`` for the current session — non-user
+             buckets match exactly, the user bucket matches the
+             prefix.
           3. Otherwise create a new file using
              :func:`bucket_path_for` to compose the suffix.
         """
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        notes = self._provider.notes() if self._provider is not None else None
+
+        def _read_meta_body(rel: str) -> Tuple[Dict[str, Any], str]:
+            if notes is None:
+                return {}, ""
+            bare = Path(rel).name
+            try:
+                note = run_coro_sync(notes.read(bare))
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "conversation_archiver: provider read failed for %s",
+                    rel, exc_info=True,
+                )
+                return {}, ""
+            if note is None:
+                return {}, ""
+            meta: Dict[str, Any] = {
+                "title": note.title,
+                "tags": list(note.tags),
+                "category": note.category or CATEGORY,
+                "importance": note.importance.value,
+            }
+            if note.created_at:
+                meta["created"] = note.created_at.isoformat()
+            if note.updated_at:
+                meta["modified"] = note.updated_at.isoformat()
+            if note.links_out:
+                meta["links_to"] = list(note.links_out)
+            for k, v in (note.frontmatter or {}).items():
+                if k not in meta:
+                    meta[k] = v
+            return meta, note.body
+
         cached = self._cached_rel.get(base_slug)
         if cached:
-            abs_path = self._memory_dir / cached
-            try:
-                text = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
-            except OSError as exc:
-                logger.warning(
-                    "conversation_archiver: read failed for %s: %s",
-                    abs_path, exc,
-                )
-                return None, None, ""
-            return cached, str(abs_path), text
+            meta, body = _read_meta_body(cached)
+            return cached, str(self._memory_dir / cached), meta, body
 
         sid_slug = _slug_for_session_id(self._session_id)
-        # Exact-name candidate: ``<sid>__<base_slug>``.
-        # Prefix-name candidate: ``<sid>__<base_slug>__…``  (only the
-        # user bucket appends a title slug; others use the exact form).
         exact_stem = f"{sid_slug}__{base_slug}"
         prefix_stem = f"{exact_stem}__"
-        for entry in sorted(self.conversations_dir.glob("*.md")):
-            stem = entry.stem
-            if stem == exact_stem or (
-                bucket == Bucket.USER and stem.startswith(prefix_stem)
-            ):
-                rel = f"{CATEGORY}/{entry.name}"
-                self._cached_rel[base_slug] = rel
-                try:
-                    text = entry.read_text(encoding="utf-8")
-                except OSError as exc:
-                    logger.warning(
-                        "conversation_archiver: read failed for %s: %s",
-                        entry, exc,
-                    )
-                    return None, None, ""
-                return rel, str(entry), text
+
+        if notes is not None:
+            try:
+                metas = run_coro_sync(notes.list(category=CATEGORY))
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "conversation_archiver: provider list failed",
+                    exc_info=True,
+                )
+                metas = []
+            for meta_entry in metas:
+                bare = meta_entry.ref.filename
+                stem = bare[:-3] if bare.endswith(".md") else bare
+                if stem == exact_stem or (
+                    bucket == Bucket.USER and stem.startswith(prefix_stem)
+                ):
+                    rel = f"{CATEGORY}/{bare}"
+                    self._cached_rel[base_slug] = rel
+                    em, eb = _read_meta_body(rel)
+                    return rel, str(self._memory_dir / rel), em, eb
 
         title_slug = _slug_for_title(derived_title_seed) if bucket == Bucket.USER else ""
         bucket_path = bucket_path_for(
@@ -1263,7 +1291,7 @@ class ConversationArchiver:
             session_id=self._session_id, bucket_path=bucket_path,
         )
         self._cached_rel[base_slug] = rel
-        return rel, str(self._memory_dir / rel), ""
+        return rel, str(self._memory_dir / rel), {}, ""
 
     def _merge_frontmatter(
         self,
@@ -1385,27 +1413,6 @@ def _str_list(value: Any) -> List[str]:
     if isinstance(value, str) and value:
         return [value]
     return []
-
-
-def _split_frontmatter_body(text: str) -> Tuple[Dict[str, Any], str]:
-    """Parse a markdown file into ``(frontmatter_dict, body)``.
-
-    Empty / non-existing files map to ``({}, "")`` so the caller can
-    treat them as "fresh start". Malformed frontmatter is logged at
-    debug and treated the same — better to start clean than refuse
-    to write a turn.
-    """
-    if not text:
-        return {}, ""
-    try:
-        meta, body = parse_frontmatter(text)
-    except Exception:
-        logger.debug(
-            "conversation_archiver: malformed frontmatter; resetting",
-            exc_info=True,
-        )
-        return {}, ""
-    return (meta or {}), (body or "")
 
 
 def _append_turn_block(existing_body: str, eid8: str, turn_block: str) -> str:
