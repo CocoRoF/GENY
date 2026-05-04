@@ -508,15 +508,49 @@ class CuratedKnowledgeManager:
         if "promoted" not in tags:
             tags.append("promoted")
 
-        return self.write_note(
-            title=meta.get("title", filename.replace(".md", "")),
+        importance = meta.get("importance", "medium")
+        category = meta.get("category", "topics")
+        title = meta.get("title", filename.replace(".md", ""))
+
+        curated_filename = self.write_note(
+            title=title,
             content=body,
-            category=meta.get("category", "topics"),
+            category=category,
             tags=tags,
-            importance=meta.get("importance", "medium"),
+            importance=importance,
             source="promoted",
             source_filename=filename,
         )
+
+        # Surface the promotion on the operator-facing log channel.
+        # Routed via the session id of the *source* turn (the caller
+        # passes it in) — that's the session whose VTuber LOGS panel
+        # the operator is watching.
+        if curated_filename:
+            try:
+                from service.memory.event_emitter import emit_memory_event
+
+                emit_memory_event(
+                    session_id,
+                    event_type="curated_promoted",
+                    source="Curated",
+                    layer="curated",
+                    importance=importance,
+                    category=category,
+                    path=curated_filename,
+                    chars=len(body),
+                    message=(
+                        f"curated_promoted: {filename} → {curated_filename} "
+                        f"(importance={importance})"
+                    ),
+                    extra={"title": title, "source_filename": filename},
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "CuratedKnowledgeManager: promote memory_event emit skipped",
+                    exc_info=True,
+                )
+        return curated_filename
 
     def curate_from_opsidian(
         self,

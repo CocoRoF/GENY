@@ -205,6 +205,33 @@ class StructuredMemoryWriter:
             relative_path, len(full_content), len(tags),
         )
 
+        # Forward the write to the session-bound memory event channel
+        # so it lands on the operator-facing VTuber LOGS panel. The
+        # routing handles cross-session writers (curated:* / user:*)
+        # gracefully — they short-circuit without an agent lookup.
+        try:
+            from service.memory.event_emitter import emit_memory_event
+            emit_memory_event(
+                self._session_id,
+                event_type="note_written",
+                source="Memory",
+                layer="notes",
+                category=category,
+                importance=importance,
+                path=relative_path,
+                chars=len(content),
+                message=(
+                    f"note_written: {relative_path} "
+                    f"({len(content)} chars, importance={importance})"
+                ),
+                extra={"tags": list(tags)} if tags else None,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "StructuredMemoryWriter: memory_event emit skipped",
+                exc_info=True,
+            )
+
         # Update index
         self._index.update_file(relative_path)
 

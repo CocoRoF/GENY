@@ -96,7 +96,7 @@ class SessionMemoryManager:
 
         self._ltm = LongTermMemory(storage_path)
         self._stm = ShortTermMemory(storage_path)
-        self._vmm = VectorMemoryManager(storage_path)
+        self._vmm = VectorMemoryManager(storage_path, session_id=session_id or "")
 
         # Structured memory layer (Obsidian-like)
         self._index_manager: Optional[MemoryIndexManager] = None

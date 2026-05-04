@@ -59,8 +59,13 @@ class VectorMemoryManager:
         storage_path: Session's root storage directory.
     """
 
-    def __init__(self, storage_path: str):
+    def __init__(self, storage_path: str, *, session_id: str = ""):
         self._storage_path = storage_path
+        # Carrier for the memory event emitter — empty for cross-session
+        # vaults (curated / user opsidian) where there is no enclosing
+        # turn to surface to. Per-session callers (`SessionMemoryManager`)
+        # pass their own id.
+        self._session_id = session_id
         self._store: Optional[SessionVectorStore] = None
         self._provider: Optional[EmbeddingProvider] = None
         self._enabled = False
@@ -240,6 +245,44 @@ class VectorMemoryManager:
         added = await self._index_single_file(source_file, text)
         if added > 0:
             self._store.save()
+            # Surface the indexing on the operator-facing log channel
+            # so the VTuber LOGS panel narrates "Vector indexed: ..."
+            # right next to the markdown write that triggered it.
+            try:
+                from service.memory.event_emitter import emit_memory_event
+
+                provider = (
+                    self._provider.descriptor if self._provider is not None else None
+                )
+                emit_memory_event(
+                    self._session_id,
+                    event_type="vector_indexed",
+                    source="Vector",
+                    layer="vector",
+                    backend="filesystem",
+                    path=source_file,
+                    chunks=added,
+                    chars=len(text),
+                    extra={
+                        "embedding_provider": (
+                            provider.provider if provider is not None else None
+                        ),
+                        "embedding_model": (
+                            provider.model if provider is not None else None
+                        ),
+                        "embedding_dimension": (
+                            provider.dimension if provider is not None else None
+                        ),
+                    },
+                    message=(
+                        f"vector_indexed: {source_file} → {added} chunk(s)"
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "VectorMemoryManager: memory_event emit skipped",
+                    exc_info=True,
+                )
         return added
 
     async def _index_single_file(self, source_file: str, content: str) -> int:
