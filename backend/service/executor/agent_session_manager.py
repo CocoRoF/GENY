@@ -885,6 +885,24 @@ class AgentSessionManager:
                 "linked_session_id": request.linked_session_id,
             })
             logger.info(f"[{session_id}] 📝 Session logger created")
+            # Replay every memory event the agent recorded *before* the
+            # logger was provisioned (provider init fires inside
+            # AgentSession.initialize() — earlier than the logger
+            # creation right here). Without this flush the boot-time
+            # rows ("MemoryProvider ready: ...") never reach the
+            # frontend cache cursor and the VTuber LOGS panel stays
+            # silent on the first turn.
+            try:
+                replayed = agent.flush_pending_memory_events()
+                if replayed:
+                    logger.info(
+                        f"[{session_id}] flushed {replayed} pending memory event(s) into session logger"
+                    )
+            except Exception as flush_exc:  # noqa: BLE001
+                logger.debug(
+                    f"[{session_id}] memory event flush skipped: {flush_exc}",
+                    exc_info=True,
+                )
 
         # Lifecycle bus emit — SESSION_CREATED. For a sub-worker spawned
         # from a VTuber, ``linked_session_id`` on the request is the

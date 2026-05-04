@@ -366,6 +366,14 @@ class AgentSession:
         # paths route through this provider's curated/notes/vector
         # handles instead.
         self._memory_provider: Optional[Any] = None
+        # Memory subsystem events that fire *before* the session logger
+        # is created (provider init is one boot-tier earlier than
+        # session_logger creation in agent_session_manager). The list is
+        # drained into the logger by `flush_pending_memory_events()`
+        # right after the manager wires the logger up — that way the
+        # first chat broadcast already sees the boot-time events on the
+        # frontend's VTuber LOGS panel.
+        self._pending_memory_events: List[Dict[str, Any]] = []
 
         # Execution state
         self._initialized = False
@@ -970,39 +978,35 @@ class AgentSession:
                 descriptor.name,
             )
             # Surface the same fact on the per-session log channel so
-            # the VTuber LOGS panel can show it in real time. Only
-            # report the embedding model when one is configured —
-            # otherwise the panel implies "vector layer enabled" which
-            # is misleading.
-            try:
-                slog = get_session_logger(self._session_id, create_if_missing=False)
-                if slog is not None:
-                    layers = sorted(layer.value for layer in descriptor.layers)
-                    embedding = descriptor.embedding
-                    msg = f"MemoryProvider ready: {descriptor.name} (layers={','.join(layers)})"
-                    slog.log_memory_event(
-                        event_type="provider_initialized",
-                        message=msg,
-                        source="Memory",
-                        layer=None,
-                        backend="filesystem",
-                        extra={
-                            "layers": layers,
-                            "embedding": (
-                                {
-                                    "provider": embedding.provider,
-                                    "model": embedding.model,
-                                    "dimension": embedding.dimension,
-                                }
-                                if embedding is not None
-                                else None
-                            ),
-                        },
-                    )
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "[%s] memory_event log skipped (init)", self._session_id, exc_info=True,
-                )
+            # the VTuber LOGS panel can show it in real time. Routed
+            # through `record_memory_event` so the event is parked on
+            # `_pending_memory_events` if the session logger has not
+            # been provisioned yet (boot ordering — see
+            # agent_session_manager.create_agent which wires the
+            # logger *after* AgentSession.initialize() returns).
+            layers = sorted(layer.value for layer in descriptor.layers)
+            embedding = descriptor.embedding
+            self.record_memory_event(
+                event_type="provider_initialized",
+                message=(
+                    f"MemoryProvider ready: {descriptor.name} "
+                    f"(layers={','.join(layers)})"
+                ),
+                source="Memory",
+                backend="filesystem",
+                extra={
+                    "layers": layers,
+                    "embedding": (
+                        {
+                            "provider": embedding.provider,
+                            "model": embedding.model,
+                            "dimension": embedding.dimension,
+                        }
+                        if embedding is not None
+                        else None
+                    ),
+                },
+            )
         except Exception:  # noqa: BLE001
             logger.warning(
                 "[%s] MemoryProvider init failed; continuing with legacy memory only",
@@ -1010,16 +1014,11 @@ class AgentSession:
                 exc_info=True,
             )
             self._memory_provider = None
-            try:
-                slog = get_session_logger(self._session_id, create_if_missing=False)
-                if slog is not None:
-                    slog.log_memory_event(
-                        event_type="provider_init_failed",
-                        message="MemoryProvider init failed; running on legacy path",
-                        source="Memory",
-                    )
-            except Exception:  # noqa: BLE001
-                pass
+            self.record_memory_event(
+                event_type="provider_init_failed",
+                message="MemoryProvider init failed; running on legacy path",
+                source="Memory",
+            )
 
     @property
     def memory_provider(self) -> Optional[Any]:
@@ -1031,6 +1030,88 @@ class AgentSession:
         ``initialize()`` runs the provider build.
         """
         return self._memory_provider
+
+    def record_memory_event(
+        self,
+        event_type: str,
+        message: str,
+        *,
+        source: str = "Memory",
+        layer: Optional[str] = None,
+        backend: Optional[str] = None,
+        engine: Optional[str] = None,
+        importance: Optional[str] = None,
+        category: Optional[str] = None,
+        path: Optional[str] = None,
+        chars: Optional[int] = None,
+        chunks: Optional[int] = None,
+        score: Optional[float] = None,
+        duration_ms: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Single entry point for every memory subsystem event.
+
+        Routes the event to the live `SessionLogger` when one exists
+        — that is the path the chat broadcast cursor reads. Before
+        the session logger is provisioned (provider init fires inside
+        `AgentSession.initialize()`, the logger is wired *after*
+        `agent_session_manager` returns from session creation), the
+        event is parked on `_pending_memory_events` and flushed by
+        `flush_pending_memory_events()` once the logger appears.
+        """
+        kwargs: Dict[str, Any] = {
+            "event_type": event_type,
+            "message": message,
+            "source": source,
+        }
+        for k, v in (
+            ("layer", layer), ("backend", backend), ("engine", engine),
+            ("importance", importance), ("category", category),
+            ("path", path), ("chars", chars), ("chunks", chunks),
+            ("score", score), ("duration_ms", duration_ms),
+        ):
+            if v is not None:
+                kwargs[k] = v
+        if extra is not None:
+            kwargs["extra"] = extra
+
+        slog = get_session_logger(self._session_id, create_if_missing=False)
+        if slog is not None:
+            try:
+                slog.log_memory_event(**kwargs)
+                return
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] log_memory_event failed; parking on pending list",
+                    self._session_id, exc_info=True,
+                )
+        # Logger absent — keep the event in memory for replay.
+        self._pending_memory_events.append(kwargs)
+
+    def flush_pending_memory_events(self) -> int:
+        """Replay every parked event into the now-live `SessionLogger`.
+
+        Called by `agent_session_manager` immediately after it
+        provisions the logger so the boot-time events (provider
+        initialised, vector layer ready, ...) are present on the
+        frontend's first poll.
+        """
+        if not self._pending_memory_events:
+            return 0
+        slog = get_session_logger(self._session_id, create_if_missing=False)
+        if slog is None:
+            return 0
+        replayed = 0
+        for kwargs in self._pending_memory_events:
+            try:
+                slog.log_memory_event(**kwargs)
+                replayed += 1
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] memory event replay failed", self._session_id, exc_info=True,
+                )
+        self._pending_memory_events.clear()
+        return replayed
 
     async def initialize(self) -> bool:
         """Initialize the AgentSession.
