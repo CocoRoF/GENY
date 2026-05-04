@@ -133,6 +133,33 @@ export interface ChatRoomListResponse {
   total: number;
 }
 
+/**
+ * One memory subsystem event emitted by the backend during an
+ * execution turn. Mirrors :func:`SessionLogger.log_memory_event` /
+ * :func:`extract_memory_events_from_cache` on the backend side.
+ *
+ * The frontend chat handler turns each record into a row in the
+ * VTuber LOGS panel via ``useVTuberStore.addLog`` with the matching
+ * `source` bucket (Memory / Vector / Curated / Knowledge).
+ */
+export interface MemoryEvent {
+  ts?: string;
+  event_type: string;
+  source: string;
+  message: string;
+  layer?: string;
+  backend?: string;
+  engine?: string;
+  importance?: string;
+  category?: string;
+  path?: string;
+  chars?: number;
+  chunks?: number;
+  score?: number;
+  duration_ms?: number;
+  extra?: Record<string, unknown>;
+}
+
 export interface ChatRoomMessage {
   id: string;
   type: 'user' | 'agent' | 'system';
@@ -143,6 +170,12 @@ export interface ChatRoomMessage {
   role?: string | null;
   duration_ms?: number | null;
   file_changes?: FileChanges[];
+  /**
+   * Memory subsystem events recorded during this turn (note writes,
+   * vector indexing, curated promotions, knowledge searches). Drives
+   * the VTuber LOGS panel rendering downstream.
+   */
+  memory_events?: MemoryEvent[];
   /** Attachment metadata (image / file refs uploaded via POST /api/uploads). */
   attachments?: ChatAttachment[];
   meta?: Record<string, unknown>;

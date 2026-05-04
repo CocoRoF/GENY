@@ -29,6 +29,41 @@ logger = getLogger(__name__)
 _T = TypeVar("_T")
 
 
+def _log_knowledge_event(
+    session_id: str,
+    *,
+    event_type: str,
+    source: str,
+    message: str,
+    engine: Optional[str] = None,
+    hits: Optional[int] = None,
+    top_score: Optional[float] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Drop a `MEMORY` log row that the chat broadcast forwards to the
+    frontend's VTuber LOGS panel.
+
+    Best-effort — a logger import failure or a missing session logger
+    must not fail the tool call.
+    """
+    try:
+        from service.logging.session_logger import get_session_logger
+
+        slog = get_session_logger(session_id, create_if_missing=False)
+        if slog is None:
+            return
+        slog.log_memory_event(
+            event_type=event_type,
+            message=message,
+            source=source,
+            engine=engine,
+            score=top_score,
+            extra={"hits": hits, **(extra or {})} if hits is not None else extra,
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("knowledge_search: memory_event log skipped", exc_info=True)
+
+
 def _run_async_in_sync_call(coro: Awaitable[_T]) -> _T:
     """Run an awaitable from a sync context.
 
@@ -181,6 +216,20 @@ class KnowledgeSearchTool(BaseTool):
             session_id, query, max_results
         )
         if provider_results is not None:
+            _log_knowledge_event(
+                session_id,
+                event_type="knowledge_search",
+                source="Knowledge",
+                engine="executor.memory_provider",
+                message=(
+                    f"knowledge_search: '{query[:60]}' → {len(provider_results)} hits "
+                    f"via executor.memory_provider"
+                ),
+                hits=len(provider_results),
+                top_score=(
+                    provider_results[0]["score"] if provider_results else None
+                ),
+            )
             return _ok({
                 "query": query,
                 "total": len(provider_results),
@@ -202,6 +251,18 @@ class KnowledgeSearchTool(BaseTool):
                 "score": round(r.get("score", 0), 4),
                 "snippet": r.get("snippet", "")[:500],
             })
+        _log_knowledge_event(
+            session_id,
+            event_type="knowledge_search",
+            source="Knowledge",
+            engine="legacy.keyword",
+            message=(
+                f"knowledge_search: '{query[:60]}' → {len(items)} hits "
+                f"via legacy.keyword"
+            ),
+            hits=len(items),
+            top_score=items[0]["score"] if items else None,
+        )
         return _ok({
             "query": query,
             "total": len(items),

@@ -53,6 +53,11 @@ class LogLevel(str, Enum):
     TOOL_RESULT = "TOOL_RES"    # Tool execution results
     STREAM_EVENT = "STREAM"     # Stream-json events
     ITERATION = "ITER"          # Autonomous execution iteration complete
+    # Memory subsystem events — note writes, vector indexing, curated
+    # promotions, knowledge searches. Frontend (VTuber LOGS panel)
+    # surfaces these so the operator can watch the executor
+    # MemoryProvider and the legacy archive paths in real time.
+    MEMORY = "MEMORY"
 
 
 # ── Stage order lookup ───────────────────────────────────────────
@@ -265,6 +270,79 @@ class SessionLogger:
     def error(self, message: str, metadata: Optional[Dict[str, Any]] = None):
         """Log an error message."""
         self.log(LogLevel.ERROR, message, metadata)
+
+    def log_memory_event(
+        self,
+        event_type: str,
+        message: str,
+        *,
+        source: str = "Memory",
+        layer: Optional[str] = None,
+        backend: Optional[str] = None,
+        engine: Optional[str] = None,
+        importance: Optional[str] = None,
+        category: Optional[str] = None,
+        path: Optional[str] = None,
+        chars: Optional[int] = None,
+        chunks: Optional[int] = None,
+        score: Optional[float] = None,
+        duration_ms: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a memory subsystem event for live operator visibility.
+
+        Drops a structured `MEMORY` log entry that the chat broadcast
+        path forwards to the frontend's VTuber LOGS panel. The
+        `source` argument is the panel-side bucket (``Memory`` /
+        ``Vector`` / ``Curated`` / ``Knowledge``) so the panel can
+        render colour-coded rows without parsing message strings.
+
+        Every keyword is optional — pass only the fields that are
+        meaningful for the event being recorded:
+
+        - `event_type`: short machine identifier (e.g.
+          ``"provider_initialized"``, ``"note_written"``,
+          ``"vector_indexed"``, ``"curated_promoted"``,
+          ``"knowledge_search"``).
+        - `layer`: executor `Layer` value (``stm`` / ``ltm`` /
+          ``notes`` / ``vector`` / ``curated`` / ``index``).
+        - `backend`: ``filesystem`` / ``postgres`` / etc.
+        - `engine`: which retrieval engine answered
+          (``executor.memory_provider`` / ``legacy.keyword`` /
+          ``legacy.vector``).
+        - `path`: relative note path written or read.
+        - `chunks`, `chars`, `score`, `duration_ms`: numeric fields
+          rendered inline by the panel.
+        - `extra`: free-form bag for fields the panel does not yet
+          structure but may want to inspect on hover.
+        """
+        meta: Dict[str, Any] = {
+            "memory_event": event_type,
+            "memory_source": source,
+        }
+        if layer is not None:
+            meta["memory_layer"] = layer
+        if backend is not None:
+            meta["memory_backend"] = backend
+        if engine is not None:
+            meta["memory_engine"] = engine
+        if importance is not None:
+            meta["memory_importance"] = importance
+        if category is not None:
+            meta["memory_category"] = category
+        if path is not None:
+            meta["memory_path"] = path
+        if chars is not None:
+            meta["memory_chars"] = chars
+        if chunks is not None:
+            meta["memory_chunks"] = chunks
+        if score is not None:
+            meta["memory_score"] = score
+        if duration_ms is not None:
+            meta["memory_duration_ms"] = duration_ms
+        if extra:
+            meta["memory_extra"] = dict(extra)
+        self.log(LogLevel.MEMORY, message, meta)
 
     def log_command(
         self,
@@ -1079,6 +1157,57 @@ class SessionLogger:
             "level": self._last_entry_level,
             "tool_name": self._last_tool_name,
         }
+
+    def extract_memory_events_from_cache(self, since_cursor: int = 0) -> list:
+        """Extract memory subsystem events written after `since_cursor`.
+
+        Mirrors :meth:`extract_file_changes_from_cache` — same
+        write-count cursor, same rule (entries written *after* the
+        cursor are inspected). Frontend chat handler turns each
+        returned record into a VTuber LOGS row via the
+        ``useVTuberStore.addLog`` ``Memory`` / ``Vector`` /
+        ``Curated`` / ``Knowledge`` source bucket.
+
+        Records mirror the metadata produced by :meth:`log_memory_event`
+        — anything optional that the caller did not set is omitted so
+        the JSON payload stays compact.
+        """
+        with self._lock:
+            new_writes = self._write_count - since_cursor
+            if new_writes <= 0:
+                entries = []
+            else:
+                available = min(new_writes, len(self._log_cache))
+                entries = self._log_cache[-available:]
+        result = []
+        for entry in entries:
+            if entry.level != LogLevel.MEMORY:
+                continue
+            meta = entry.metadata or {}
+            record: Dict[str, Any] = {
+                "ts": entry.timestamp,
+                "event_type": meta.get("memory_event", "memory_event"),
+                "source": meta.get("memory_source", "Memory"),
+                "message": entry.message,
+            }
+            for src_key, dst_key in (
+                ("memory_layer", "layer"),
+                ("memory_backend", "backend"),
+                ("memory_engine", "engine"),
+                ("memory_importance", "importance"),
+                ("memory_category", "category"),
+                ("memory_path", "path"),
+                ("memory_chars", "chars"),
+                ("memory_chunks", "chunks"),
+                ("memory_score", "score"),
+                ("memory_duration_ms", "duration_ms"),
+            ):
+                if src_key in meta:
+                    record[dst_key] = meta[src_key]
+            if "memory_extra" in meta:
+                record["extra"] = dict(meta["memory_extra"])
+            result.append(record)
+        return result
 
     def extract_file_changes_from_cache(self, since_cursor: int = 0) -> list:
         """Extract file change entries from cached TOOL logs.
