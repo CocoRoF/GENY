@@ -377,26 +377,15 @@ class SessionMemoryManager:
             meta.update(metadata)
         out_meta: Optional[Dict[str, Any]] = meta if meta else None
 
-        # Memory v2 — archive to ``conversations/<date>/<id>.md`` BEFORE
-        # the STM write so the resulting ``payload.conversation_ref``
-        # can travel into the STM jsonl line. The hook is best-effort
-        # — a write failure is logged at debug and the STM path
-        # continues unchanged (so a flaky disk never silently drops
-        # the canonical user/assistant turn).
-        archived = self._maybe_archive_conversation(role, content, out_meta)
-        if archived is not None and out_meta is not None:
-            out_meta = _augment_meta_with_conversation_ref(out_meta, archived)
-
-        # PR 4 — index writers fire AFTER the leaf SoT exists so the
-        # bundle entries can include a wikilink to the just-written
-        # conversations/ rollup. Best-effort and non-blocking on the
-        # STM write. Cycle 20260503_6 retired the daily-journal
-        # writer; the conversations rollup files carry every turn
-        # with date_first/date_last in frontmatter so the
-        # chronological lookup is now done by the index, not by a
-        # separate per-day file.
-        conv_ref = archived.relative_path if archived else None
-        self._maybe_archive_dm(role, content, out_meta, conv_ref)
+        # Path-A GENY-5/6 — `_maybe_archive_conversation` /
+        # `_maybe_archive_dm` are no longer called from here. The
+        # executor's `after_record_turn` hook (installed by
+        # `AgentSession._install_memory_hooks`) drives both archivers
+        # for every STM append, which now includes both the stage 18
+        # `_drive_provider` path *and* this synchronous
+        # `record_message` (agent-DM tool, internal triggers, etc.)
+        # — both call `provider.stm().append` via
+        # `ShortTermMemory.add_message`, which fires the hook.
         self._stm.add_message(role, content, metadata=out_meta)
 
     def _maybe_archive_conversation(

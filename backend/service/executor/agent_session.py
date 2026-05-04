@@ -997,6 +997,18 @@ class AgentSession:
                         "[%s] memory_manager.set_memory_provider failed",
                         self._session_id, exc_info=True,
                     )
+                # Wire the provider's `after_record_turn` hook so every
+                # STM append automatically drives the Geny business
+                # archivers (conversation bucket router + agent-DM
+                # bundle). This replaces the legacy `record_message`
+                # → `_maybe_archive_*` chain.
+                try:
+                    self._install_memory_hooks()
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "[%s] memory hooks install failed",
+                        self._session_id, exc_info=True,
+                    )
             logger.info(
                 "[%s] MemoryProvider initialized: %s",
                 self._session_id,
@@ -1055,6 +1067,46 @@ class AgentSession:
         ``initialize()`` runs the provider build.
         """
         return self._memory_provider
+
+    def _install_memory_hooks(self) -> None:
+        """Wire `MemoryHooks.after_record_turn` so every STM append
+        drives the Geny business archivers automatically.
+
+        Path-A migration GENY-5/6 — the legacy `record_message` →
+        `_maybe_archive_conversation` / `_maybe_archive_dm` chain is
+        retired. `provider.record_turn` (called by stage 18's
+        `_drive_provider`) now triggers the executor's `after_record_turn`
+        callback, which forwards to the manager's archive helpers.
+        Bucket-router / DM-bundle business stays in Geny; the
+        executor only knows "STM landed; fire the hook".
+        """
+        provider = self._memory_provider
+        mgr = self._memory_manager
+        if provider is None or mgr is None:
+            return
+        if not hasattr(provider, "set_hooks"):
+            return  # provider doesn't expose hook injection
+        from geny_executor.memory.provider import MemoryHooks
+
+        async def _on_record_turn(turn, _receipt) -> None:
+            try:
+                role = str(turn.role or "")
+                content = _turn_text(turn.content)
+                metadata = dict(turn.metadata or {}) or None
+                archived = mgr._maybe_archive_conversation(
+                    role, content, metadata,
+                )
+                conv_ref = (
+                    archived.relative_path if archived is not None else None
+                )
+                mgr._maybe_archive_dm(role, content, metadata, conv_ref)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] memory after_record_turn hook failed",
+                    self._session_id, exc_info=True,
+                )
+
+        provider.set_hooks(MemoryHooks(after_record_turn=_on_record_turn))
 
     def record_memory_event(
         self,
@@ -3755,3 +3807,18 @@ class AgentSession:
             f"status={self._status.value}, "
             f"initialized={self._initialized})"
         )
+
+
+def _turn_text(content: Any) -> str:
+    """Best-effort string projection of `Turn.content`."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        if parts:
+            return "\n".join(parts)
+    return str(content)
+
