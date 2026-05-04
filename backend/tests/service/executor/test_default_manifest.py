@@ -52,20 +52,19 @@ _ACTIVE_SCAFFOLDS_BY_PRESET: dict[str, set[int]] = {
 def test_manifest_declares_21_stage_layout(preset: str) -> None:
     """Sub-phase 9a (executor 1.0+) widened the layout to 21 slots.
 
-    Every preset emits all 21 entries. Scaffold opt-in tracked in
-    :data:`_ACTIVE_SCAFFOLDS_BY_PRESET` — each G2.x sprint flips
-    one or more scaffold stages from default inactive to active.
+    Every preset emits all 21 entries — vtuber's Stage 8 (think) ships
+    active=False rather than being omitted, so the canvas's order-8
+    node behaves like every other inactive stage instead of a
+    "missing" slot. Scaffold opt-in tracked in
+    :data:`_ACTIVE_SCAFFOLDS_BY_PRESET` — each G2.x sprint flips one
+    or more scaffold stages from default inactive to active.
     """
     from service.executor.default_manifest import build_default_manifest
 
     manifest = build_default_manifest(preset)
     orders = {entry["order"] for entry in manifest.stages}
 
-    if preset == "vtuber":
-        # vtuber omits Stage 8 (think) — same legacy diff.
-        expected = set(range(1, 22)) - {8}
-    else:
-        expected = set(range(1, 22))
+    expected = set(range(1, 22))
     assert orders == expected, (
         f"{preset}: orders={sorted(orders)} expected={sorted(expected)}"
     )
@@ -232,14 +231,26 @@ def test_emit_stage_uses_empty_chain(preset: str) -> None:
     assert entry["chain_order"] == {"emitters": []}
 
 
-def test_vtuber_manifest_omits_think_stage() -> None:
-    """Negative control: Stage 8 (think) is intentionally dropped on
-    VTuber. Guards against a future 'add every stage' regression that
-    would re-introduce the think stage on VTuber."""
+def test_vtuber_manifest_declares_think_inactive() -> None:
+    """VTuber declares Stage 8 (think) but ships it inactive.
+
+    Previously the entry was omitted entirely so the canvas's order-8
+    node was a "missing" slot — clicking it produced a stage-not-found
+    error rather than the standard inactive editor. The entry now lives
+    in the manifest with ``active=False`` so the slot behaves like
+    every other inactive stage and a host can opt the persona into
+    Extended Thinking by flipping the flag."""
     from service.executor.default_manifest import build_default_manifest
 
-    orders = {e["order"] for e in build_default_manifest("vtuber").stages}
-    assert 8 not in orders, "VTuber should not declare Stage 8 (think)"
+    think = next(
+        (e for e in build_default_manifest("vtuber").stages if e["order"] == 8),
+        None,
+    )
+    assert think is not None, "VTuber must declare Stage 8 (think) entry"
+    assert think["name"] == "think"
+    assert think["active"] is False, (
+        "VTuber's Stage 8 must default inactive — flip is opt-in"
+    )
 
 
 @pytest.mark.parametrize("preset", _known_preset_ids())

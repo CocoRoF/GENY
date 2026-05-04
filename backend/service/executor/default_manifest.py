@@ -491,10 +491,19 @@ def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
 def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
     """Mirror :meth:`GenyPresets.vtuber` stage chain.
 
-    Diff vs worker_adaptive: no Stage 8 (think), cache is
-    ``system_cache`` (not ``aggressive_cache``), evaluator is
-    ``signal_based`` (not ``binary_classify``), and loop
-    ``max_turns`` is 10 (not 30).
+    Diff vs worker_adaptive: Stage 8 (think) ships ``active=False``
+    (the persona's turns are conversational, not deep-planning), cache
+    is ``system_cache`` (not ``aggressive_cache``), evaluator is
+    ``signal_based`` (not ``binary_classify``), and loop ``max_turns``
+    is 10 (not 30).
+
+    Note on Stage 8: previously this entry was omitted entirely so
+    the manifest declared 14 base stages instead of 15. That made the
+    canvas's order-8 node a "missing" slot — clicking it produced a
+    "stage not in draft" error rather than the standard inactive
+    editor. The entry now lives in the manifest with ``active=False``
+    so the slot behaves like every other inactive stage and a user
+    can opt the persona into Extended Thinking by flipping the flag.
     """
     return [
         StageManifestEntry(
@@ -540,6 +549,20 @@ def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
             strategies={
                 "tracker": "default",
                 "calculator": "anthropic_pricing",
+            },
+        ),
+        # Stage 8 (think) — inactive on the vtuber preset. Strategies
+        # mirror worker_adaptive's defaults so the entry is runnable
+        # the moment a host flips ``active=True``; until then the
+        # stage's own ``should_bypass`` is irrelevant because the
+        # active flag short-circuits execution.
+        StageManifestEntry(
+            order=8,
+            name="think",
+            active=False,
+            strategies={
+                "processor": "extract_and_store",
+                "budget_planner": "adaptive",
             },
         ),
         StageManifestEntry(
