@@ -106,15 +106,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from service.memory.frontmatter import parse_frontmatter, render_frontmatter
+from service.memory.frontmatter import parse_frontmatter
 from service.memory.interaction_event import (
     Direction,
     InteractionEventView,
@@ -1093,22 +1091,21 @@ class ConversationArchiver:
                 eid8=eid8,
             )
 
-            if self._provider is not None:
-                # Provider path: hand the merged frontmatter+body to
-                # NotesHandle. write() vs update() picks based on
-                # whether the rollup file exists on disk yet.
-                if not self._write_via_provider(
-                    target_rel=target_rel,
-                    target_abs=target_abs,
-                    new_meta=new_meta,
-                    new_body=new_body,
-                    is_new_file=(not existing_text),
-                ):
-                    return None
-            else:
-                full = render_frontmatter(new_meta, new_body)
-                if not _atomic_write(Path(target_abs), full):
-                    return None
+            if self._provider is None:
+                logger.warning(
+                    "conversation_archiver: no MemoryProvider attached; "
+                    "skipping rollup write for %s",
+                    target_rel,
+                )
+                return None
+            if not self._write_via_provider(
+                target_rel=target_rel,
+                target_abs=target_abs,
+                new_meta=new_meta,
+                new_body=new_body,
+                is_new_file=(not existing_text),
+            ):
+                return None
 
             if self._index_manager is not None:
                 try:
@@ -1434,35 +1431,6 @@ def _append_turn_block(existing_body: str, eid8: str, turn_block: str) -> str:
         return turn_block
 
     return f"{base}{sep}{turn_block}"
-
-
-def _atomic_write(path: Path, contents: str) -> bool:
-    """Write ``contents`` to ``path`` via temp-file + rename so a
-    crash mid-write never leaves a half-rewritten rollup.
-    """
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            prefix=path.stem + ".",
-            suffix=".md.tmp",
-            dir=str(path.parent),
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(contents)
-            os.replace(tmp, path)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-    except OSError as exc:
-        logger.warning(
-            "conversation_archiver: write failed for %s: %s", path, exc,
-        )
-        return False
-    return True
 
 
 def iter_turn_anchors(text: str) -> Iterable[Tuple[str, int]]:
