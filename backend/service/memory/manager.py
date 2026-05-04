@@ -141,6 +141,10 @@ class SessionMemoryManager:
         Called by `AgentSession` immediately after the composite
         provider is built. Consumers:
 
+        - `ShortTermMemory`: append / recent / search route through
+          `provider.stm()` (GENY-1, path A migration). DB dual-write
+          stays as analytics mirror; cosmetic `summary.md` stays as
+          direct disk write.
         - `VectorMemoryManager`: vector retrieval + indexing route
           through `provider.vector()`.
         - `StructuredMemoryWriter`: write / update / delete / link /
@@ -157,6 +161,8 @@ class SessionMemoryManager:
         which the executor's flat-category NotesHandle doesn't
         model.
         """
+        if self._stm is not None:
+            self._stm.set_memory_provider(provider)
         if self._vmm is not None:
             self._vmm.set_memory_provider(provider)
         if self._structured_writer is not None:

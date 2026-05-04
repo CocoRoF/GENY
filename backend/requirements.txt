@@ -17,11 +17,12 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# 1.16.0 ships the unified MemoryProvider with composite-layer
-# CuratedHandle/GlobalHandle wrappers plus auto-vector on note write.
-# `[openai]` is required because Geny's LTM settings default to the
-# OpenAI embedding backend.
-geny-executor[web,cron,openai]>=1.16.0,<2.0.0
+# 1.17.0 ships the path-A thin-adapter EXEC track: `metadata`
+# extension on every stage I/O dataclass, `MemoryHooks.after_*`,
+# `STMHandle.append_event`, `NotesHandle.load_pinned`,
+# `IndexHandle.render_vault_map`. `[openai]` is required because
+# Geny's LTM settings default to the OpenAI embedding backend.
+geny-executor[web,cron,openai]>=1.17.0,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
