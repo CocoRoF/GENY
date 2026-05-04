@@ -861,6 +861,7 @@ class ConversationArchiver:
         session_id: str = "",
         tz: Optional[tzinfo] = None,
         index_manager: Optional[Any] = None,
+        memory_provider=None,
     ) -> None:
         self._memory_dir = Path(memory_dir)
         self._session_id = session_id
@@ -871,6 +872,17 @@ class ConversationArchiver:
         import threading  # local import — keeps the eager import set lean
         self._lock = threading.RLock()
         self._index_manager = index_manager
+        self._provider = memory_provider
+
+    def set_memory_provider(self, provider) -> None:
+        """Plug the executor `MemoryProvider` post-construction.
+
+        With a provider attached, `_merge_to_disk` runs as a
+        `NotesHandle.read → mutate frontmatter+body in memory →
+        NotesHandle.write/update` round trip. The legacy direct
+        atomic-write path stays as a provider-less fallback.
+        """
+        self._provider = provider
         # Bucket → cached relative path. PR 14 split conversations by
         # ``(kind, counterpart)`` so each session can own up to one
         # ``user``, one ``reflection``, one ``system``, and N ``dm``
@@ -1081,9 +1093,22 @@ class ConversationArchiver:
                 eid8=eid8,
             )
 
-            full = render_frontmatter(new_meta, new_body)
-            if not _atomic_write(Path(target_abs), full):
-                return None
+            if self._provider is not None:
+                # Provider path: hand the merged frontmatter+body to
+                # NotesHandle. write() vs update() picks based on
+                # whether the rollup file exists on disk yet.
+                if not self._write_via_provider(
+                    target_rel=target_rel,
+                    target_abs=target_abs,
+                    new_meta=new_meta,
+                    new_body=new_body,
+                    is_new_file=(not existing_text),
+                ):
+                    return None
+            else:
+                full = render_frontmatter(new_meta, new_body)
+                if not _atomic_write(Path(target_abs), full):
+                    return None
 
             if self._index_manager is not None:
                 try:
@@ -1094,6 +1119,77 @@ class ConversationArchiver:
                         exc_info=True,
                     )
             return target_rel
+
+    def _write_via_provider(
+        self,
+        *,
+        target_rel: str,
+        target_abs: str,
+        new_meta: Dict[str, Any],
+        new_body: str,
+        is_new_file: bool,
+    ) -> bool:
+        """Write the merged frontmatter+body via NotesHandle.
+
+        - ``is_new_file=True``: NoteDraft via `notes.write`.
+        - else: NotePatch via `notes.update`.
+
+        Returns True on success, False on routing failure (logged at
+        WARNING). Geny's bucket / filename / merge logic stays
+        authoritative — this method only translates the resulting
+        meta dict + body string into NoteDraft/NotePatch shape.
+        """
+        try:
+            from geny_executor.memory.provider import (
+                Importance as _Importance,
+                NoteDraft,
+                NotePatch,
+                Scope,
+            )
+            from service.memory.sync_async_bridge import run_coro_sync
+
+            notes = self._provider.notes()
+            try:
+                importance_enum = _Importance(
+                    new_meta.get("importance_max")
+                    or new_meta.get("importance", "medium")
+                )
+            except ValueError:
+                importance_enum = _Importance.MEDIUM
+
+            extra_fm = {
+                k: v for k, v in new_meta.items()
+                if k not in {"title", "tags", "category", "importance"}
+            }
+
+            if is_new_file:
+                draft = NoteDraft(
+                    title=new_meta.get("title", target_rel),
+                    body=new_body,
+                    category=new_meta.get("category", CATEGORY),
+                    tags=list(new_meta.get("tags") or []),
+                    importance=importance_enum,
+                    scope=Scope.SESSION,
+                    filename=target_rel,
+                    frontmatter=extra_fm,
+                )
+                run_coro_sync(notes.write(draft))
+            else:
+                patch = NotePatch(
+                    body=new_body,
+                    tags=list(new_meta.get("tags") or []),
+                    importance=importance_enum,
+                    category=new_meta.get("category", CATEGORY),
+                    frontmatter=extra_fm,
+                )
+                run_coro_sync(notes.update(target_rel, patch))
+            return True
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "conversation_archiver: provider write failed for %s",
+                target_rel, exc_info=True,
+            )
+            return False
 
     def _locate_or_initialise(
         self,
