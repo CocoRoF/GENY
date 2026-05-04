@@ -1,222 +1,192 @@
-"""
-Vector Memory Manager — orchestrates FAISS indexing & retrieval.
+"""Thin adapter — delegates every vector op to the executor MemoryProvider.
 
-Sits between the ``SessionMemoryManager`` and the low-level
-:class:`SessionVectorStore`, providing:
+Pre-Phase-2 this module ran a self-hosted FAISS index plus its own
+HTTP-direct embedding clients (OpenAI / Voyage / Google). Phase 2
+demolished that — the executor's `MemoryProvider.vector()` handle
+now owns indexing + search, and this file is an adapter that
+preserves the *external* surface (``VectorMemoryManager.search`` /
+``index_text`` / ``initialize`` / ``enabled``) the rest of Geny —
+specifically the ``geny_executor.memory.retriever.GenyMemoryRetriever``
+that still calls ``mgr.vector_memory.search(...)`` — already expects.
 
-1. **Automatic indexing** — scans ``memory/*.md`` files, chunks them,
-   embeds via the configured provider, and upserts into FAISS.
-2. **Semantic search** — given a query string, embeds it and runs
-   a similarity search against the session's vector DB.
-3. **Lifecycle** — initialises, persists, and tears down cleanly.
+Why an adapter and not a direct rewrite of every caller? Two reasons:
 
-Configuration is read from :class:`LTMConfig` at init time so
-it can be toggled without a server restart (config reload).
+1. The retriever lives inside the geny-executor library and treats
+   ``mgr.vector_memory`` as a *duck-typed* surface (``.enabled``,
+   ``.search()``, ``.index_text()``). Rewriting the executor was out
+   of scope; preserving the surface keeps the retriever working
+   while the embedding work moves under the executor's
+   ``EmbeddingClient`` machinery.
+2. ``faiss-cpu`` and the self-hosted embedding clients can be
+   removed from Geny's dep set the moment this module stops
+   importing them — no dependency cascade through manager.py.
 
-Usage::
-
-    from service.memory.vector_memory import VectorMemoryManager
-
-    vmm = VectorMemoryManager(storage_path="/tmp/sessions/abc123")
-    await vmm.initialize()               # loads config, creates index
-    await vmm.index_memory_files()        # scans + embeds + upserts
-    results = await vmm.search("JWT token expiration")
-    vmm.save()                            # persist index to disk
+Result is a small, well-typed shim. ``VectorSearchResult`` is
+re-exported with the same shape it had in the legacy ``vector_store``
+module so existing callers (``manager.build_memory_context_async``,
+``GenyMemoryRetriever._load_vector_memory``) consume identical
+objects.
 """
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass, field
 from logging import getLogger
-from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-from service.memory.embedding import (
-    EmbeddingProvider,
-    get_embedding_provider,
-    get_dimension,
-)
-from service.memory.vector_store import (
-    SessionVectorStore,
-    VectorSearchResult,
-    chunk_text,
-)
 
 logger = getLogger(__name__)
 
-# Use configured timezone (unused in this module but kept for consistency)
-from service.utils.utils import _configured_tz as _get_tz  # noqa: F401
+
+# ── Search result (legacy shape, kept for retriever compatibility) ─────
+
+@dataclass
+class VectorSearchResult:
+    """Single hit from a vector similarity search.
+
+    Mirrors the dataclass that lived under the old `service.memory.
+    vector_store` so any caller that read `.text` / `.source_file` /
+    `.score` / `.chunk_index` keeps working without modification.
+    """
+
+    text: str
+    source_file: str
+    score: float
+    chunk_index: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def chunk_text(*args, **kwargs):
+    """Backwards-compat re-export kept for any caller that still imports
+    `chunk_text` from `service.memory.vector_memory`. The executor
+    handles chunking internally now (per `EmbeddingClient` config)
+    so this proxies into the executor helper to keep behaviour
+    consistent if any straggler caller surfaces.
+    """
+    from geny_executor.memory.providers.file.vector_store import chunk_text as _impl
+
+    return _impl(*args, **kwargs)
+
+
+# ── Manager (executor-backed adapter) ───────────────────────────────────
 
 
 class VectorMemoryManager:
-    """High-level orchestrator for vector-based long-term memory.
+    """Vector-layer adapter on top of the executor's `composite.vector()`.
 
-    One instance per session.  Lazily initialised — does nothing
-    until :meth:`initialize` is awaited.
+    The constructor still accepts ``storage_path`` / ``session_id`` so
+    legacy build sites (``SessionMemoryManager.__init__``) don't have
+    to change. ``set_memory_provider`` lets the surrounding
+    ``SessionMemoryManager`` plug the live executor provider in once
+    ``AgentSession.initialize()`` has built it — providers come up
+    lazily so the manager constructs without one and learns about it
+    later.
 
-    Args:
-        storage_path: Session's root storage directory.
+    All async operations no-op until a provider with a vector handle
+    has been attached. The retriever's ``.enabled`` check uses the
+    same property so an embedding-disabled session degrades to
+    keyword-only retrieval gracefully.
     """
 
-    def __init__(self, storage_path: str, *, session_id: str = ""):
+    def __init__(
+        self,
+        storage_path: str,
+        *,
+        session_id: str = "",
+        memory_provider: Optional[Any] = None,
+    ) -> None:
         self._storage_path = storage_path
-        # Carrier for the memory event emitter — empty for cross-session
-        # vaults (curated / user opsidian) where there is no enclosing
-        # turn to surface to. Per-session callers (`SessionMemoryManager`)
-        # pass their own id.
         self._session_id = session_id
-        self._store: Optional[SessionVectorStore] = None
-        self._provider: Optional[EmbeddingProvider] = None
-        self._enabled = False
+        self._provider: Optional[Any] = memory_provider
 
-        # Config cache (loaded from LTMConfig)
-        self._chunk_size = 1024
-        self._chunk_overlap = 256
-        self._top_k = 6
-        self._score_threshold = 0.35
-        self._max_inject_chars = 10000
+    # ── Wiring ────────────────────────────────────────────────────────
 
-        self._initialized = False
+    def set_memory_provider(self, provider: Optional[Any]) -> None:
+        """Attach the live `MemoryProvider` once it's been built.
 
-    # ── Properties ────────────────────────────────────────────────────
+        AgentSession calls this after `_init_memory_provider` so the
+        session's vector handle is reachable from `mgr.vector_memory`.
+        """
+        self._provider = provider
+
+    @property
+    def memory_provider(self) -> Optional[Any]:
+        return self._provider
+
+    @property
+    def store(self) -> Optional[Any]:
+        """Legacy accessor kept for completeness — returns the
+        executor `VectorHandle` when one is attached, otherwise None.
+        Geny code rarely reaches for this directly."""
+        if self._provider is None:
+            return None
+        return self._provider.vector()
+
+    # ── Properties used by retriever / manager ────────────────────────
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        return self._provider is not None and self._provider.vector() is not None
 
     @property
     def initialized(self) -> bool:
-        return self._initialized
-
-    @property
-    def store(self) -> Optional[SessionVectorStore]:
-        return self._store
+        return self.enabled
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     async def initialize(self) -> bool:
-        """Load config and set up the vector store + embedding provider.
-
-        Returns:
-            ``True`` if successfully initialised (and enabled),
-            ``False`` if disabled or misconfigured.
+        """No-op: the executor `MemoryProvider` is initialised by
+        `AgentSession._init_memory_provider`. Returning the enabled
+        state lets `SessionMemoryManager.initialize_vector_memory`
+        keep its `if ok: index_memory_files()` flow.
         """
-        try:
-            config = self._load_config()
-            if config is None or not config.enabled:
-                logger.debug("VectorMemoryManager: disabled by config")
-                self._enabled = False
-                return False
-
-            # Resolve API key: config value, or fall back to env
-            api_key = config.embedding_api_key
-            if not api_key:
-                import os
-                api_key = os.environ.get("LTM_EMBEDDING_API_KEY", "")
-            if not api_key:
-                logger.warning(
-                    "VectorMemoryManager: no embedding API key configured"
-                )
-                self._enabled = False
-                return False
-
-            # Embedding provider
-            self._provider = get_embedding_provider(
-                provider_name=config.embedding_provider,
-                model=config.embedding_model,
-                api_key=api_key,
-            )
-
-            # Vector store
-            dim = self._provider.dimension()
-            self._store = SessionVectorStore(
-                storage_path=self._storage_path,
-                dimension=dim,
-            )
-            self._store.load_or_create()
-
-            # Cache config values
-            self._chunk_size = config.chunk_size
-            self._chunk_overlap = config.chunk_overlap
-            self._top_k = config.top_k
-            self._score_threshold = config.score_threshold
-            self._max_inject_chars = config.max_inject_chars
-
-            self._enabled = True
-            self._initialized = True
-
-            logger.info(
-                "VectorMemoryManager initialized: provider=%s model=%s dim=%d "
-                "chunks=%d/%d top_k=%d",
-                config.embedding_provider, config.embedding_model, dim,
-                self._chunk_size, self._chunk_overlap, self._top_k,
-            )
-            return True
-
-        except Exception:
-            logger.warning(
-                "VectorMemoryManager: initialization failed",
-                exc_info=True,
-            )
-            self._enabled = False
-            return False
+        return self.enabled
 
     def save(self) -> None:
-        """Persist the vector index to disk."""
-        if self._store:
-            self._store.save()
+        """No-op — the executor's file vector store flushes on every
+        write. Kept on the API so legacy `auto_flush` paths that call
+        ``self._vmm.save()`` stay valid."""
+        return None
 
     # ── Indexing ──────────────────────────────────────────────────────
 
     async def index_memory_files(self) -> Dict[str, int]:
-        """Scan all long-term memory .md files and index new chunks.
+        """Index every existing markdown note via the executor's
+        `VectorHandle.index_batch`.
 
-        Reads from ``<storage_path>/memory/*.md``, chunks, embeds,
-        and upserts into the FAISS index.  Already-indexed chunks
-        (identified by source + chunk_index) are skipped.
-
-        Returns:
-            Dict mapping source_file → number of NEW chunks indexed.
+        Run once on session boot so a revived session whose disk
+        already carries notes from a previous run gets those rows
+        into the vector store. New writes route through
+        `notes_store.attach_vector_indexer` automatically.
         """
-        if not self._enabled or not self._provider or not self._store:
+        if not self.enabled or self._provider is None:
             return {}
 
-        memory_dir = Path(self._storage_path) / "memory"
-        if not memory_dir.exists():
-            return {}
+        try:
+            from geny_executor.memory.provider import NoteRef, Scope
 
-        results: Dict[str, int] = {}
-
-        md_files = sorted(memory_dir.rglob("*.md"))
-        for filepath in md_files:
-            try:
-                if filepath.stat().st_size == 0:
+            notes_handle = self._provider.notes()
+            vector_handle = self._provider.vector()
+            metas = await notes_handle.list()
+            items: List = []
+            for m in metas:
+                note = await notes_handle.read(m.ref.filename)
+                if note is None or not note.body:
                     continue
-                content = filepath.read_text(encoding="utf-8").strip()
-                if not content:
-                    continue
-
-                rel_path = str(filepath.relative_to(Path(self._storage_path)))
-                added = await self._index_single_file(rel_path, content)
-                if added > 0:
-                    results[rel_path] = added
-
-            except Exception as exc:
-                logger.warning(
-                    "VectorMemoryManager: failed to index %s: %s",
-                    filepath, exc,
-                )
-
-        if results:
-            self._store.save()
-            total = sum(results.values())
+                items.append((note.ref, note.body))
+            if not items:
+                return {}
+            added = await vector_handle.index_batch(items)
             logger.info(
-                "VectorMemoryManager: indexed %d new chunks across %d files",
-                total, len(results),
+                "VectorMemoryManager.index_memory_files: indexed %d existing note(s)",
+                added,
             )
-
-        return results
+            return {f.filename: 1 for f, _ in items}
+        except Exception:
+            logger.warning(
+                "VectorMemoryManager.index_memory_files failed",
+                exc_info=True,
+            )
+            return {}
 
     async def index_text(
         self,
@@ -225,93 +195,30 @@ class VectorMemoryManager:
         *,
         replace: bool = False,
     ) -> int:
-        """Index a single piece of text (e.g. a new execution record).
+        """Index a single piece of text — used by `record_execution` to
+        embed the per-turn execution log.
 
-        Args:
-            text: Text content to chunk and embed.
-            source_file: Logical source identifier.
-            replace: If ``True``, remove previous chunks for this
-                     source before adding.
-
-        Returns:
-            Number of chunks added.
+        ``replace`` is honoured for parity with the legacy API; the
+        executor's `VectorHandle.index` already replaces rows keyed by
+        the same NoteRef filename, so there is nothing extra to do.
         """
-        if not self._enabled or not self._provider or not self._store:
+        if not self.enabled or self._provider is None or not text:
             return 0
-
-        if replace:
-            self._store.remove_source(source_file)
-
-        added = await self._index_single_file(source_file, text)
-        if added > 0:
-            self._store.save()
-            # Surface the indexing on the operator-facing log channel
-            # so the VTuber LOGS panel narrates "Vector indexed: ..."
-            # right next to the markdown write that triggered it.
-            try:
-                from service.memory.event_emitter import emit_memory_event
-
-                provider = (
-                    self._provider.descriptor if self._provider is not None else None
-                )
-                emit_memory_event(
-                    self._session_id,
-                    event_type="vector_indexed",
-                    source="Vector",
-                    layer="vector",
-                    backend="filesystem",
-                    path=source_file,
-                    chunks=added,
-                    chars=len(text),
-                    extra={
-                        "embedding_provider": (
-                            provider.provider if provider is not None else None
-                        ),
-                        "embedding_model": (
-                            provider.model if provider is not None else None
-                        ),
-                        "embedding_dimension": (
-                            provider.dimension if provider is not None else None
-                        ),
-                    },
-                    message=(
-                        f"vector_indexed: {source_file} → {added} chunk(s)"
-                    ),
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "VectorMemoryManager: memory_event emit skipped",
-                    exc_info=True,
-                )
-        return added
-
-    async def _index_single_file(self, source_file: str, content: str) -> int:
-        """Chunk, embed, and upsert a single file's content."""
-        chunks = chunk_text(
-            content,
-            chunk_size=self._chunk_size,
-            chunk_overlap=self._chunk_overlap,
-        )
-        if not chunks:
-            return 0
-
-        # Embed
         try:
-            vectors = await self._provider.embed_batch(chunks)
-        except Exception as exc:
+            from geny_executor.memory.provider import NoteRef, Scope
+
+            ref = NoteRef(
+                filename=source_file,
+                scope=Scope.SESSION,
+                backend="filesystem",
+            )
+            return await self._provider.vector().index(ref, text)
+        except Exception:
             logger.warning(
-                "VectorMemoryManager: embedding failed for %s: %s",
-                source_file, exc,
+                "VectorMemoryManager.index_text failed (source=%s)",
+                source_file, exc_info=True,
             )
             return 0
-
-        # Upsert into FAISS
-        added = self._store.add_chunks(
-            texts=chunks,
-            vectors=vectors,
-            source_file=source_file,
-        )
-        return added
 
     # ── Search ────────────────────────────────────────────────────────
 
@@ -320,106 +227,71 @@ class VectorMemoryManager:
         query: str,
         *,
         top_k: Optional[int] = None,
-        score_threshold: Optional[float] = None,
     ) -> List[VectorSearchResult]:
-        """Semantic similarity search against the session's vector DB.
+        """Cosine-similarity search via the executor `VectorHandle`.
 
-        Args:
-            query: Natural language search query.
-            top_k: Override config top_k.
-            score_threshold: Override config score_threshold.
-
-        Returns:
-            List of :class:`VectorSearchResult` sorted by descending score.
+        Returns legacy-shaped `VectorSearchResult` records so the
+        retriever's iteration code (`vr.text`, `vr.source_file`,
+        `vr.score`, `vr.chunk_index`) keeps working without
+        modification.
         """
-        if not self._enabled or not self._provider or not self._store:
+        if not self.enabled or self._provider is None or not query:
             return []
-
-        if not query or not query.strip():
-            return []
-
         try:
-            query_vector = await self._provider.embed_text(query)
-        except Exception as exc:
+            top_k_eff = top_k if top_k is not None else 6
+            chunks = await self._provider.vector().search(query, top_k=top_k_eff)
+            out: List[VectorSearchResult] = []
+            for chunk in chunks:
+                meta = dict(chunk.metadata or {})
+                out.append(
+                    VectorSearchResult(
+                        text=chunk.content,
+                        source_file=chunk.key,
+                        score=float(chunk.relevance_score),
+                        chunk_index=int(meta.get("chunk_index", 0)),
+                        metadata=meta,
+                    )
+                )
+            return out
+        except Exception:
             logger.warning(
-                "VectorMemoryManager: query embedding failed: %s", exc
+                "VectorMemoryManager.search failed", exc_info=True,
             )
             return []
-
-        return self._store.search(
-            query_vector,
-            top_k=top_k or self._top_k,
-            score_threshold=score_threshold if score_threshold is not None else self._score_threshold,
-        )
 
     def build_vector_context(
         self,
         results: List[VectorSearchResult],
         *,
-        max_chars: Optional[int] = None,
-    ) -> Optional[str]:
-        """Format vector search results as an XML-tagged context block.
+        max_chars: int = 5000,
+    ) -> str:
+        """Render `search()` results into the XML block the prompt
+        builder injects. Same shape as the legacy implementation:
 
-        Args:
-            results: Search results from :meth:`search`.
-            max_chars: Character budget (default: config max_inject_chars).
-
-        Returns:
-            Formatted string for prompt injection, or ``None``.
+            <vector-memory source="..." score="...">
+            <body>
+            </vector-memory>
         """
         if not results:
-            return None
-
-        budget = max_chars or self._max_inject_chars
+            return ""
         parts: List[str] = []
-        total_chars = 0
-
+        total = 0
         for r in results:
-            chunk = (
+            block = (
                 f'<vector-memory source="{r.source_file}" '
                 f'score="{r.score:.3f}" chunk="{r.chunk_index}">\n'
                 f"{r.text}\n"
                 f"</vector-memory>"
             )
-            if (total_chars + len(chunk)) > budget:
+            if total + len(block) > max_chars and parts:
                 break
-            parts.append(chunk)
-            total_chars += len(chunk)
-
-        if not parts:
-            return None
-
+            parts.append(block)
+            total += len(block)
         return "\n\n".join(parts)
 
-    # ── Stats ─────────────────────────────────────────────────────────
 
-    def get_stats(self) -> Dict[str, Any]:
-        """Return diagnostic info about the vector memory."""
-        base = {
-            "enabled": self._enabled,
-            "initialized": self._initialized,
-        }
-        if self._store:
-            base.update(self._store.get_stats())
-        return base
-
-    # ── Config loader ─────────────────────────────────────────────────
-
-    @staticmethod
-    def _load_config():
-        """Load ``LTMConfig`` from the global config manager.
-
-        Returns ``None`` if the config system is unavailable.
-        """
-        try:
-            from service.config import get_config_manager
-            from service.config.sub_config.general.ltm_config import LTMConfig
-
-            mgr = get_config_manager()
-            return mgr.load_config(LTMConfig)
-        except Exception:
-            logger.debug(
-                "VectorMemoryManager: could not load LTMConfig",
-                exc_info=True,
-            )
-            return None
+__all__ = [
+    "VectorMemoryManager",
+    "VectorSearchResult",
+    "chunk_text",
+]

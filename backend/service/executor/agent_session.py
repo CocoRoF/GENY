@@ -983,6 +983,20 @@ class AgentSession:
                 username=self._owner_username,
             )
             descriptor = self._memory_provider.descriptor
+            # Plug the live provider into the legacy vector adapter so
+            # `mgr.vector_memory.search(...)` (still called by
+            # `geny_executor.memory.retriever`) routes onto the
+            # composite's vector handle. Without this the adapter
+            # stays in disabled mode and Stage 2 vector retrieval
+            # silently returns nothing.
+            if self._memory_manager is not None:
+                try:
+                    self._memory_manager.set_memory_provider(self._memory_provider)
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "[%s] memory_manager.set_memory_provider failed",
+                        self._session_id, exc_info=True,
+                    )
             logger.info(
                 "[%s] MemoryProvider initialized: %s",
                 self._session_id,
