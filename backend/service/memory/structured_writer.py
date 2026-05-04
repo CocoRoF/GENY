@@ -20,9 +20,7 @@ from typing import Any, Dict, List, Optional
 from service.memory.frontmatter import (
     build_default_metadata,
     extract_wikilinks,
-    parse_frontmatter,
     render_frontmatter,
-    resolve_wikilink,
 )
 from service.memory.index import MemoryIndexManager, MemoryFileInfo
 
@@ -261,7 +259,7 @@ class StructuredMemoryWriter:
         # wikilink? No-op. Failure here mustn't block the write so
         # the call is best-effort.
         try:
-            _propagate_linked_from(self._memory_dir, relative_path, all_links)
+            _propagate_linked_from(self._provider, relative_path, all_links)
         except Exception:
             logger.debug(
                 "StructuredMemoryWriter: linked_from propagation failed",
@@ -806,7 +804,7 @@ class StructuredMemoryWriter:
 
 
 def _propagate_linked_from(
-    memory_dir: Path,
+    provider,
     source_filename: str,
     target_wikilinks: list,
 ) -> None:
@@ -819,37 +817,68 @@ def _propagate_linked_from(
     so Obsidian's Properties pane and external readers see backlinks
     without waiting for a reindex.
 
-    Resolution rules (mirror ``frontmatter.resolve_wikilink``):
-      * exact stem match in any subdir of ``memory_dir``
-      * partial stem match if uniquely resolvable (>=3 chars, ≥50% coverage)
+    Routes the read+update through the executor's `NotesHandle` so
+    the in-memory cache stays consistent with the on-disk
+    ``linked_from`` field. Earlier revisions wrote target files
+    directly with `Path.write_text`, which bypassed the executor's
+    note cache and left `target.links_in` empty for the rest of the
+    session.
 
-    No-op when the source has no wikilinks. Best-effort: if a single
-    target rewrite fails, the others still go through.
+    Resolution: exact bare-stem match against `notes.list()`, with a
+    substring fallback when the wikilink doesn't match a stem
+    verbatim.
+
+    No-op when the source has no wikilinks or the provider isn't
+    attached. Best-effort: if a single target rewrite fails, the
+    others still go through.
     """
-    if not target_wikilinks:
+    if not target_wikilinks or provider is None:
         return
+    from geny_executor.memory.provider import NotePatch
+    from service.memory.sync_async_bridge import run_coro_sync
+
+    notes = provider.notes()
+    try:
+        metas = run_coro_sync(notes.list())
+    except Exception:
+        logger.debug(
+            "_propagate_linked_from: provider list failed", exc_info=True,
+        )
+        return
+
+    by_stem: Dict[str, str] = {}
+    for m in metas:
+        stem = Path(m.ref.filename).stem
+        by_stem.setdefault(stem, m.ref.filename)
+
+    source_bare = Path(source_filename).name
     source_stem = Path(source_filename).stem
+
     for target_link in target_wikilinks:
+        link = str(target_link).strip().lower()
+        if not link:
+            continue
+        link_stem = Path(link).stem
+        bare_target = by_stem.get(link_stem)
+        if bare_target is None:
+            for stem, fname in by_stem.items():
+                if link_stem and link_stem in stem:
+                    bare_target = fname
+                    break
+        if bare_target is None or bare_target == source_bare:
+            continue
         try:
-            resolved = resolve_wikilink(target_link, str(memory_dir))
-            if not resolved:
+            existing = run_coro_sync(notes.read(bare_target))
+            if existing is None:
                 continue
-            target_path = memory_dir / resolved
-            if not target_path.exists():
+            fm = dict(existing.frontmatter or {})
+            linked = list(fm.get("linked_from") or [])
+            if source_stem in linked or source_filename in linked:
                 continue
-            text = target_path.read_text(encoding="utf-8")
-            meta, body = parse_frontmatter(text)
-            if not meta:
-                continue
-            existing = list(meta.get("linked_from") or [])
-            if source_stem in existing or source_filename in existing:
-                continue  # already recorded
-            existing.append(source_stem)
-            meta["linked_from"] = existing
-            target_path.write_text(
-                render_frontmatter(meta, body), encoding="utf-8",
-            )
-        except (OSError, UnicodeDecodeError):
+            linked.append(source_stem)
+            fm["linked_from"] = linked
+            run_coro_sync(notes.update(bare_target, NotePatch(frontmatter=fm)))
+        except Exception:
             logger.debug(
                 "_propagate_linked_from: rewrite failed for %s", target_link,
                 exc_info=True,
