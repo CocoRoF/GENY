@@ -17,11 +17,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.frontmatter import (
-    build_default_metadata,
-    extract_wikilinks,
-    render_frontmatter,
-)
+from service.memory.frontmatter import extract_wikilinks
 from service.memory.index import MemoryIndexManager, MemoryFileInfo
 
 logger = getLogger(__name__)
@@ -107,49 +103,32 @@ class StructuredMemoryWriter:
         memory_dir: str,
         index_manager: MemoryIndexManager,
         session_id: str = "",
-        db_manager=None,
         memory_provider=None,
     ):
         """
         Args:
             memory_dir: Absolute path to the memory/ directory.
             index_manager: MemoryIndexManager instance for index updates.
-            session_id: Session ID for metadata.
-            db_manager: Optional DB manager for dual-write.
-            memory_provider: Live executor `MemoryProvider`. When set,
-                `write_note` / `update_note` / `delete_note` /
-                `link_notes` route through `provider.notes()`; the
-                legacy disk-write code stays as a fallback for
-                provider-less call sites (e.g. transient unit tests
-                or boot phases before AgentSession plugs the
-                provider in).
+            session_id: Session ID stamped onto note frontmatter.
+            memory_provider: Live executor `MemoryProvider`. Required
+                at write time; provider-less calls warn and no-op.
         """
         self._memory_dir = Path(memory_dir)
         self._index = index_manager
         self._session_id = session_id
-        self._db_manager = db_manager
         self._provider = memory_provider
 
     def set_memory_provider(self, provider) -> None:
         """Plug the executor `MemoryProvider` post-construction.
 
         AgentSession calls this once `_init_memory_provider` finishes
-        — see `service.executor.agent_session._init_memory_provider`
-        for the wiring. Until then `write_note` falls back to the
-        legacy disk-write path so a session that boots without a
-        provider (rare — only happens if the executor build fails)
-        keeps working.
+        — see `service.executor.agent_session._init_memory_provider`.
         """
         self._provider = provider
 
     @property
     def memory_dir(self) -> Path:
         return self._memory_dir
-
-    def set_database(self, db_manager, session_id: str) -> None:
-        """Enable DB-backed persistence after construction."""
-        self._db_manager = db_manager
-        self._session_id = session_id
 
     # ------------------------------------------------------------------
     # Write operations
@@ -207,7 +186,7 @@ class StructuredMemoryWriter:
             )
             return ""
 
-        relative_path, full_content, metadata = self._write_via_provider(
+        relative_path = self._write_via_provider(
             title=title,
             content=content,
             category=category,
@@ -220,7 +199,7 @@ class StructuredMemoryWriter:
 
         logger.info(
             "StructuredMemoryWriter: created %s (%d chars, %d tags)",
-            relative_path, len(full_content), len(tags),
+            relative_path, len(content), len(tags),
         )
 
         # Forward the write to the session-bound memory event channel
@@ -266,9 +245,6 @@ class StructuredMemoryWriter:
                 exc_info=True,
             )
 
-        # Dual-write to DB
-        self._db_write(relative_path, full_content, metadata)
-
         return relative_path
 
     # ── Internal write paths ────────────────────────────────────────
@@ -284,13 +260,17 @@ class StructuredMemoryWriter:
         source: str,
         all_links: List[str],
         filename_override: Optional[str],
-    ):
+    ) -> str:
         """Disk write through the executor `NotesHandle`.
 
         The executor handles frontmatter rendering, dedup, wikilink
-        extraction, and backlink propagation. We still build a
-        Geny-shaped metadata dict so the DB dual-write column
-        contents stay identical to the legacy path.
+        extraction, and backlink propagation. Geny passes its
+        business-specific keys (`source`, `session_id`,
+        `linked_from`, `links_to`, `aliases`) through
+        `NoteDraft.frontmatter` so the rendered YAML keeps the same
+        superset of keys the host expects. Returns the
+        `<category>/<file>.md` form so callers (index, operator log,
+        `_propagate_linked_from`) see the legacy shape.
         """
         from geny_executor.memory.provider import (
             Importance as _ExecutorImportance,
@@ -299,32 +279,12 @@ class StructuredMemoryWriter:
         )
         from service.memory.sync_async_bridge import run_coro_sync
 
-        # Build the metadata that DB / event-emitter consumers expect.
-        # The dict mirrors `build_default_metadata` exactly so a
-        # downstream reader cannot tell whether the disk row came from
-        # the legacy path or this branch.
-        metadata = build_default_metadata(
-            title=title,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source=source,
-            session_id=self._session_id,
-        )
-        metadata["links_to"] = list(all_links)
-
-        # Pass Geny-specific fields (aliases, source, session_id,
-        # links_to) to the executor as `frontmatter=...` so the
-        # rendered .md file keeps the same superset of frontmatter
-        # keys the legacy disk path produced. The executor's own
-        # title/tags/category/importance/created/modified keys take
-        # priority; everything else flows through verbatim.
-        passthrough = {
-            "aliases": metadata.get("aliases", []),
-            "source": metadata.get("source", source),
-            "session_id": metadata.get("session_id", self._session_id),
-            "linked_from": metadata.get("linked_from", []),
-            "links_to": metadata.get("links_to", []),
+        passthrough: Dict[str, Any] = {
+            "aliases": [],
+            "source": source,
+            "session_id": self._session_id,
+            "linked_from": [],
+            "links_to": list(all_links),
         }
 
         try:
@@ -332,11 +292,6 @@ class StructuredMemoryWriter:
         except ValueError:
             importance_enum = _ExecutorImportance.MEDIUM
 
-        # Dedup is the only piece we cannot fully delegate: the
-        # executor rejects an existing filename outright when
-        # `draft.filename` is set, but Geny's contract is to slip a
-        # uuid suffix on the way in. Compute the override pre-flight
-        # so the executor sees a unique name and never raises.
         if filename_override:
             relative_path = filename_override
         else:
@@ -346,11 +301,9 @@ class StructuredMemoryWriter:
                 relative_path = self._deduplicate(relative_path)
 
         # The executor's NotesHandle lives one level inside the
-        # category dir — `note_dir(category) / draft.filename` is the
-        # on-disk path. Pass the BARE basename here; if we hand it
-        # the category-prefixed `relative_path`, the file lands at
-        # `memory/<cat>/<cat>/<file>.md` and Opsidian (which scans
-        # the flat layout) sees nothing.
+        # category dir — `note_dir(category) / draft.filename` is
+        # the on-disk path. Pass the BARE basename here; the
+        # category-prefixed form is reattached when we return.
         bare_filename = Path(relative_path).name
 
         draft = NoteDraft(
@@ -365,28 +318,10 @@ class StructuredMemoryWriter:
         )
 
         meta = run_coro_sync(self._provider.notes().write(draft))
-        # The executor returns a bare filename; reattach the category
-        # prefix so callers downstream (index update, db dual-write,
-        # operator log) keep seeing the legacy `<cat>/<file>.md` form.
         bare_returned = meta.ref.filename or bare_filename
-        relative_path = (
+        return (
             bare_returned if category == "root" else f"{category}/{bare_returned}"
         )
-
-        # Re-render the metadata dict with executor-effective values
-        # so downstream consumers see the row the way it actually
-        # landed on disk (importance/category may have been coerced
-        # by the executor's NoteDraft validation).
-        metadata["category"] = meta.category or category
-        metadata["importance"] = meta.importance.value
-        metadata["modified"] = (
-            meta.updated_at.isoformat() if meta.updated_at else metadata["modified"]
-        )
-        # Build the textual representation used by the DB dual-write
-        # path. The same shape `render_frontmatter` produces is fine
-        # because the actual on-disk write is owned by the executor.
-        full_content = render_frontmatter(metadata, content)
-        return relative_path, full_content, metadata
 
     # ── Provider-backed update / delete / link (PR-3b) ─────────────
 
@@ -749,53 +684,6 @@ class StructuredMemoryWriter:
             return parts[0]
         return "root"
 
-    def _db_write(self, filename: str, content: str, metadata: Dict[str, Any]) -> None:
-        """Dual-write to database (non-critical)."""
-        if self._db_manager is None or not self._session_id:
-            return
-        try:
-            import json
-            import uuid
-            from service.database.memory_db_helper import _get_db_manager, _is_db_available
-
-            if not _is_db_available(self._db_manager):
-                return
-
-            mgr = _get_db_manager(self._db_manager)
-            entry_id = str(uuid.uuid4())
-            now = datetime.now(_get_tz()).isoformat()
-            tags_json = json.dumps(metadata.get("tags", []), ensure_ascii=False)
-            category = metadata.get("category", "topics")
-            importance = metadata.get("importance", "medium")
-            links_json = json.dumps(metadata.get("links_to", []), ensure_ascii=False)
-
-            query = (
-                "INSERT INTO session_memory_entries "
-                "(entry_id, session_id, source, entry_type, content, filename, "
-                "heading, topic, metadata_json, entry_timestamp, "
-                "category, tags_json, importance, links_to_json, source_type) "
-                "VALUES (%s, %s, 'long_term', %s, %s, %s, %s, %s, %s, %s, "
-                "%s, %s, %s, %s, %s) "
-                "RETURNING id"
-            )
-            params = (
-                entry_id, self._session_id,
-                category,  # entry_type = category
-                content,
-                f"memory/{filename}",
-                metadata.get("title", ""),
-                "",  # topic
-                json.dumps(metadata, ensure_ascii=False, default=str),
-                now,
-                category,
-                tags_json,
-                importance,
-                links_json,
-                metadata.get("source", "system"),
-            )
-            mgr.execute_insert(query, params)
-        except Exception as exc:
-            logger.debug("StructuredMemoryWriter: DB write failed (non-critical): %s", exc)
 
 
 # ─────────────────────────────────────────────────────────────────
