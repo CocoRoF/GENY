@@ -165,55 +165,48 @@ class CompactionArchiver:
         body = "\n".join(body_lines)
         full_text = render_frontmatter(frontmatter, body)
 
-        # Vault copy: route through `NotesHandle.write` when a
-        # provider is attached so the executor owns disk layout +
-        # frontmatter rendering. The legacy direct write stays as a
-        # provider-less fallback for the rare boot edge case where
-        # `set_memory_provider` has not landed yet.
-        if self._provider is not None:
-            try:
-                from geny_executor.memory.provider import (
-                    Importance as _Importance,
-                    NoteDraft,
-                    Scope,
-                )
-                from service.memory.sync_async_bridge import run_coro_sync
+        # Vault copy: route through `NotesHandle.write`. The
+        # executor owns disk layout + frontmatter rendering; the
+        # `full_text` we render above is reused for the audit copy.
+        if self._provider is None:
+            logger.warning(
+                "compaction_archiver: no MemoryProvider attached; "
+                "skipping vault write for %s", rel_vault,
+            )
+            return None
+        try:
+            from geny_executor.memory.provider import (
+                Importance as _Importance,
+                NoteDraft,
+                Scope,
+            )
+            from service.memory.sync_async_bridge import run_coro_sync
 
-                draft = NoteDraft(
-                    title=frontmatter["title"],
-                    body=body,
-                    category=CATEGORY,
-                    tags=list(frontmatter.get("tags") or []),
-                    importance=_Importance.MEDIUM,
-                    scope=Scope.SESSION,
-                    filename=vault_filename,
-                    frontmatter={
-                        "ts": frontmatter["ts"],
-                        "session_id": frontmatter["session_id"],
-                        "replaced_count": frontmatter["replaced_count"],
-                        "strategy": frontmatter["strategy"],
-                        "saved_tokens": frontmatter["saved_tokens"],
-                        "links_to": frontmatter.get("links_to", []),
-                        "linked_from": frontmatter.get("linked_from", []),
-                    },
-                )
-                run_coro_sync(self._provider.notes().write(draft))
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "compaction_archiver: provider write failed for %s",
-                    vault_abs, exc_info=True,
-                )
-                return None
-        else:
-            try:
-                vault_abs.parent.mkdir(parents=True, exist_ok=True)
-                vault_abs.write_text(full_text, encoding="utf-8")
-            except OSError as exc:
-                logger.warning(
-                    "compaction_archiver: vault write failed for %s: %s",
-                    vault_abs, exc,
-                )
-                return None
+            draft = NoteDraft(
+                title=frontmatter["title"],
+                body=body,
+                category=CATEGORY,
+                tags=list(frontmatter.get("tags") or []),
+                importance=_Importance.MEDIUM,
+                scope=Scope.SESSION,
+                filename=vault_filename,
+                frontmatter={
+                    "ts": frontmatter["ts"],
+                    "session_id": frontmatter["session_id"],
+                    "replaced_count": frontmatter["replaced_count"],
+                    "strategy": frontmatter["strategy"],
+                    "saved_tokens": frontmatter["saved_tokens"],
+                    "links_to": frontmatter.get("links_to", []),
+                    "linked_from": frontmatter.get("linked_from", []),
+                },
+            )
+            run_coro_sync(self._provider.notes().write(draft))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "compaction_archiver: provider write failed for %s",
+                vault_abs, exc_info=True,
+            )
+            return None
         try:
             audit_abs.parent.mkdir(parents=True, exist_ok=True)
             audit_abs.write_text(full_text, encoding="utf-8")
