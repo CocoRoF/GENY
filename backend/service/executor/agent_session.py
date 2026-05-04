@@ -359,6 +359,13 @@ class AgentSession:
 
         # Memory manager (initialized lazily once storage_path is available)
         self._memory_manager: Optional["SessionMemoryManager"] = None
+        # geny-executor MemoryProvider — built from LTMConfig + storage_path.
+        # Single source of truth for vault layout and vector indexing
+        # going forward. The legacy SessionMemoryManager stays around for
+        # the archive / curation business logic; new search/retrieval
+        # paths route through this provider's curated/notes/vector
+        # handles instead.
+        self._memory_provider: Optional[Any] = None
 
         # Execution state
         self._initialized = False
@@ -935,6 +942,51 @@ class AgentSession:
             logger.warning(f"[{self._session_id}] Failed to initialize memory: {e}")
             self._memory_manager = None
 
+    async def _init_memory_provider(self) -> None:
+        """Build the executor's `MemoryProvider` for this session.
+
+        Uses :func:`service.memory.provider_bridge.build_memory_provider`
+        which derives the composite config from the live `LTMConfig`
+        (embedding provider/key/model + curated flags) and the
+        session's storage path. Failures land at WARNING — the
+        provider stays optional, the legacy `SessionMemoryManager`
+        path keeps working.
+        """
+        sp = self.storage_path
+        if not sp:
+            return
+        try:
+            from service.memory.provider_bridge import build_memory_provider
+
+            self._memory_provider = await build_memory_provider(
+                session_id=self._session_id or "",
+                storage_path=sp,
+                username=self._owner_username,
+            )
+            logger.info(
+                "[%s] MemoryProvider initialized: %s",
+                self._session_id,
+                self._memory_provider.descriptor.name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[%s] MemoryProvider init failed; continuing with legacy memory only",
+                self._session_id,
+                exc_info=True,
+            )
+            self._memory_provider = None
+
+    @property
+    def memory_provider(self) -> Optional[Any]:
+        """Public accessor for the executor `MemoryProvider`.
+
+        Tools and controllers that need cross-layer memory access
+        (curated knowledge search, vector retrieval, scope-aware
+        promotion) reach for this. Returns ``None`` until
+        ``initialize()`` runs the provider build.
+        """
+        return self._memory_provider
+
     async def initialize(self) -> bool:
         """Initialize the AgentSession.
 
@@ -954,6 +1006,14 @@ class AgentSession:
         try:
             # 1. Initialize memory manager (before pipeline, so pipeline can use it)
             self._init_memory()
+
+            # 1a. Build the geny-executor MemoryProvider (composite with
+            # session + optional user-curated delegates). This is the
+            # canonical memory surface going forward — note writes,
+            # vector indexing, and curated retrieval all route through
+            # the provider's handles. See provider_bridge.py for the
+            # config shape.
+            await self._init_memory_provider()
 
             # 1b. Initialize vector memory layer (async, non-blocking)
             if self._memory_manager:
@@ -1720,6 +1780,21 @@ class AgentSession:
             ),
             "llm_client": llm_client,
         }
+
+        # Forward the executor MemoryProvider on `state.session_runtime`
+        # so any stage / tool / hook that wants to reach the unified
+        # memory surface (curated handle, vector search, scope-aware
+        # promotion) can do `getattr(state.session_runtime,
+        # "memory_provider", None)`. The legacy retriever / strategy /
+        # persistence triple still attaches below — both paths coexist
+        # during the cut-over window.
+        if self._memory_provider is not None:
+            from types import SimpleNamespace
+            attach_kwargs["session_runtime"] = SimpleNamespace(
+                memory_provider=self._memory_provider,
+                session_id=self._session_id,
+                username=self._owner_username or "",
+            )
 
         # G6.3: forward host-side permission rules + mode. Returns an
         # empty dict when no rule files are present (every tool stays

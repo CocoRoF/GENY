@@ -15,13 +15,46 @@ These tools are auto-loaded by ToolLoader (matches *_tools.py pattern).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from logging import getLogger
+from typing import Any, Awaitable, Dict, List, Optional, TypeVar
 
 from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
 
 logger = getLogger(__name__)
+
+
+_T = TypeVar("_T")
+
+
+def _run_async_in_sync_call(coro: Awaitable[_T]) -> _T:
+    """Run an awaitable from a sync context.
+
+    `BaseTool.run` is sync, but the executor's `VectorHandle.search`
+    is async. Use the running loop when one exists (FastAPI request
+    handler running in a thread pool sees the worker loop) and fall
+    back to a fresh `asyncio.run` for direct CLI / test invocations.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)  # type: ignore[arg-type]
+    # In a running loop — schedule on a fresh helper loop in a thread
+    # so we don't reenter. Keeps the behaviour identical for both
+    # request and CLI contexts.
+    import concurrent.futures
+
+    def _runner() -> _T:
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(coro)  # type: ignore[arg-type]
+        finally:
+            new_loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_runner).result()
 
 
 # Read-only knowledge / Opsidian browse defaults — every search/read/list
@@ -118,6 +151,14 @@ class KnowledgeSearchTool(BaseTool):
     ) -> str:
         """Search curated knowledge notes.
 
+        Hybrid search: when the executor's `MemoryProvider` is wired
+        on the session AND the curated handle exposes a vector layer,
+        the tool runs a semantic search first. Empty / missing vector
+        layer falls back to the legacy keyword search inside
+        `CuratedKnowledgeManager.search`. This makes the FAISS-backed
+        retrieval path the default once a host enables the embedding
+        provider in LTMConfig — no per-tool flag flip required.
+
         Args:
             session_id: Your session ID.
             query: Search query — keyword, phrase, or question.
@@ -131,6 +172,24 @@ class KnowledgeSearchTool(BaseTool):
         if curated is None:
             return _error("Curated knowledge manager not available")
 
+        # Prefer the executor MemoryProvider's curated handle when the
+        # agent session has one wired. The handle owns both the
+        # markdown notes and (when an embedding client is present) the
+        # vector layer; auto-vector indexing on note write keeps the
+        # two in lockstep.
+        provider_results = self._search_via_provider(
+            session_id, query, max_results
+        )
+        if provider_results is not None:
+            return _ok({
+                "query": query,
+                "total": len(provider_results),
+                "results": provider_results,
+                "engine": "executor.memory_provider",
+            })
+
+        # Legacy keyword path — still useful when the provider is
+        # disabled or the user has no curated vault yet.
         results = curated.search(query, max_results=max_results)
         items = []
         for r in results:
@@ -143,7 +202,61 @@ class KnowledgeSearchTool(BaseTool):
                 "score": round(r.get("score", 0), 4),
                 "snippet": r.get("snippet", "")[:500],
             })
-        return _ok({"query": query, "total": len(items), "results": items})
+        return _ok({
+            "query": query,
+            "total": len(items),
+            "results": items,
+            "engine": "legacy.keyword",
+        })
+
+    @staticmethod
+    def _search_via_provider(
+        session_id: str, query: str, max_results: int
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Run vector search through the executor MemoryProvider.
+
+        Returns ``None`` to mean "not available, fall back to legacy".
+        Returns ``[]`` for "available but no hits" — that distinction
+        lets the caller decide whether to retry on the keyword path.
+        """
+        from service.executor.agent_session_manager import agent_manager
+
+        agent = agent_manager.get_agent(session_id)
+        provider = getattr(agent, "memory_provider", None) if agent else None
+        if provider is None:
+            return None
+        curated_handle = provider.curated()
+        if curated_handle is None:
+            return None
+        vector = curated_handle.vector()
+        if vector is None:
+            return None
+
+        # `_run_async_in_sync_call` mirrors the helper this module
+        # already uses for other async-from-sync hops.
+        try:
+            chunks = _run_async_in_sync_call(
+                vector.search(query, top_k=max_results)
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "knowledge_search: vector search failed; falling back to keyword",
+                exc_info=True,
+            )
+            return None
+
+        return [
+            {
+                "filename": c.key,
+                "title": (c.metadata or {}).get("title", c.key),
+                "category": (c.metadata or {}).get("category"),
+                "tags": (c.metadata or {}).get("tags", []),
+                "importance": (c.metadata or {}).get("importance"),
+                "score": round(c.relevance_score, 4),
+                "snippet": (c.content or "")[:500],
+            }
+            for c in chunks
+        ]
 
 
 # ============================================================================

@@ -6,7 +6,9 @@ python-multipart>=0.0.9
 httpx>=0.28.0
 python-dotenv>=1.0.0
 jinja2>=3.1.0
-# Vector search
+# FAISS still required by the legacy service.memory.vector_store path
+# during the cut-over window. Dropped in the follow-up PR once every
+# caller has been ported.
 faiss-cpu>=1.9.0
 numpy>=1.26.0
 # File pattern matching
@@ -18,12 +20,11 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# Bumped to 1.3.0 for new-executor-uplift Cycle A+B+D (Task lifecycle /
-# Slash commands / Cron / settings.json / SKILL.md richer / PLAN modes /
-# Workspace abstraction). cron extra pulls croniter for the scheduling
-# daemon. Pin matches backend/pyproject.toml so docker layer cache and
-# pip lockstep agree on the resolved version.
-geny-executor[web,cron]>=1.11.0,<2.0.0
+# 1.16.0 ships the unified MemoryProvider with composite-layer
+# CuratedHandle/GlobalHandle wrappers plus auto-vector on note write.
+# `[openai]` is required because Geny's LTM settings default to the
+# OpenAI embedding backend.
+geny-executor[web,cron,openai]>=1.16.0,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

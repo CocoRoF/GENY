@@ -15,7 +15,10 @@ dependencies = [
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
     "jinja2>=3.1.0",
-    # Vector search
+    # FAISS still required by the legacy `service.memory.vector_store`
+    # path that ships alongside the new executor MemoryProvider during
+    # the cut-over window. The follow-up PR drops it once every caller
+    # has been ported and the legacy vault code is deleted.
     "faiss-cpu>=1.9.0",
     "numpy>=1.26.0",
     # File pattern matching
@@ -29,7 +32,13 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    "geny-executor[web,cron]>=1.15.0,<2.0.0",
+    # geny-executor 1.16.0 ships the unified MemoryProvider with native
+    # CuratedHandle / GlobalHandle wrappers in the composite layer plus
+    # auto-vector indexing on note write. The `[openai]` extra is
+    # required because Geny's settings UI defaults the embedding
+    # provider to OpenAI; switching to Voyage / Google later is a
+    # config flip.
+    "geny-executor[web,cron,openai]>=1.16.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
