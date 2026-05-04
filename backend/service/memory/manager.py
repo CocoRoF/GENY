@@ -210,8 +210,9 @@ class SessionMemoryManager:
         # (typically ``None``) and never re-bound, so files landed
         # under ``conversations/unknown__*.md``. Now a late
         # ``set_database`` call refreshes them.
-        if self._structured_writer is not None:
-            self._structured_writer.set_database(db_manager, session_id)
+        # `StructuredMemoryWriter.set_database` was retired in
+        # GENY-7b/8 — note disk writes are owned by `provider.notes()`
+        # and the analytics mirror is no longer dual-written.
         for archiver_attr in (
             "_conversation_archiver",
             "_dm_archiver",
@@ -292,9 +293,10 @@ class SessionMemoryManager:
             self._storage_path,
             session_id=self._session_id or "",
         )
-        # Propagate DB if already set
-        if self._db_manager is not None and self._session_id is not None:
-            self._structured_writer.set_database(self._db_manager, self._session_id)
+        # GENY-7b/8 — `StructuredMemoryWriter` no longer has a DB
+        # dual-write path; the disk via `provider.notes()` is the
+        # single truth. STM/LTM keep their analytics mirrors for now
+        # (revisited in GENY-9).
 
         # Run migration for legacy files (idempotent)
         try:
