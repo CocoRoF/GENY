@@ -17,7 +17,6 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.frontmatter import extract_wikilinks
 from service.memory.index import MemoryIndexManager, MemoryFileInfo
 
 logger = getLogger(__name__)
@@ -82,6 +81,25 @@ def _slugify(text: str) -> str:
     slug = re.sub(r"[\s_]+", "-", slug)
     slug = slug.strip("-")
     return slug[:_MAX_SLUG] or "untitled"
+
+
+_WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]")
+
+
+def extract_wikilinks(content: str) -> List[str]:
+    """Extract `[[wikilink]]` targets from `content` (lowercased,
+    deduped). Inlined from `frontmatter.py` after GENY-7c — Geny no
+    longer maintains its own frontmatter parser; the executor's
+    `_extract_links` runs on the same regex inside NotesHandle.
+    """
+    found: List[str] = []
+    seen: set = set()
+    for match in _WIKILINK_RE.finditer(content):
+        target = match.group(1).strip().lower()
+        if target and target not in seen:
+            found.append(target)
+            seen.add(target)
+    return found
 
 
 class StructuredMemoryWriter:

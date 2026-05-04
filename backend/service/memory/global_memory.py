@@ -46,9 +46,8 @@ class GlobalMemoryManager:
             from service.memory.structured_writer import StructuredMemoryWriter
             from service.memory.index import MemoryIndexManager
 
-            self._writer = StructuredMemoryWriter(self.memory_dir)
             self._index = MemoryIndexManager(self.memory_dir)
-            self._index.load()
+            self._writer = StructuredMemoryWriter(self.memory_dir, self._index)
             logger.info(
                 "GlobalMemoryManager initialized at %s", self.memory_dir,
             )

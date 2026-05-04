@@ -380,22 +380,17 @@ async def reindex_memory(request: Request, session_id: str = Path(...)):
 
 @router.post("/{session_id}/memory/migrate")
 async def migrate_memory(session_id: str = Path(...)):
-    """Run memory migration (convert legacy files to structured format)."""
-    mm = _get_memory_manager(session_id)
-    try:
-        from service.memory.migrator import MemoryMigrator
-        memory_dir = mm.long_term.memory_dir
-        migrator = MemoryMigrator(str(memory_dir), session_id)
-        report = migrator.migrate()
-        return {
-            "message": "Migration complete",
-            "summary": report.summary if report else "No changes needed",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Memory migration failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Migration failed: {e}")
+    """Legacy migration endpoint — retired in path-A migration GENY-7c.
+
+    The thin-adapter cycle dropped legacy-data migration entirely;
+    new sessions land directly in the executor-owned layout. This
+    endpoint stays for back-compat with any operator UI that polls
+    it, but it is now a no-op.
+    """
+    return {
+        "message": "Migration retired — sessions use the executor layout from boot.",
+        "summary": "no changes (path-A migration removed the migrator)",
+    }
 
 
 # ============================================================================

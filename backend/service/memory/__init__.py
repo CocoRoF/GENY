@@ -11,7 +11,6 @@ search (see ``VectorMemoryManager``).
 Structured memory layer (Obsidian-like):
     StructuredMemoryWriter — frontmatter-based note creation
     MemoryIndexManager     — in-memory file index with tags/links
-    MemoryMigrator         — legacy file migration
 
 Public API:
     SessionMemoryManager   — per-session facade
