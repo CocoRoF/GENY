@@ -205,15 +205,23 @@ Phase 3 작업 규모: 이 표 + 약 100개의 caller 정리. 단일 PR로는 �
 
 ---
 
-## 8. 끝나지 않은 일 (정직한 보고)
+## 8. 진행 완료 / 미해결 정리
 
-이번 두 PR로:
-- ✅ Phase 1: dead adapter 5종 + flags 모듈 삭제
-- ✅ Phase 2: 자체 FAISS / 자체 embedding 모듈 삭제, faiss-cpu 의존성 제거, vector_memory를 thin adapter로 재작성
+### 완료 (이번 사이클 7개 PR)
+- ✅ **Phase 1** (PR #661): dead adapter 5종 + flags 모듈 + 14 lazy import 삭제 (-718줄)
+- ✅ **Phase 2** (PR #662): 자체 FAISS / 자체 embedding 모듈 삭제 + faiss-cpu 의존성 제거 + `vector_memory.py` thin adapter (-851줄 net)
+- ✅ **Phase 3a** (PR #664): `StructuredMemoryWriter.write_note` → `NotesHandle.write` (sync→async bridge 도입)
+- ✅ **Phase 3b** (PR #665): `update_note` / `delete_note` / `link_notes` → `NotesHandle`
+- ✅ **Phase 3c** (PR #666): `CompactionArchiver` vault write → `NotesHandle.write` (audit copy는 별도 유지)
 
-남은 일:
-- ⏳ **Phase 3**: archive layer (structured_writer / frontmatter / index / compaction_archiver / conversation_archiver / dm_archiver / curation_engine / curated_knowledge / user_opsidian) port. sync→async cascade 때문에 단일 PR로 안전하지 않음. **별도 사이클**.
+### 의도적 미해결 (architectural mismatch)
+- ⏸️ `conversation_archiver.py` / `dm_archiver.py`: 매 turn rollup 모델 (read frontmatter → mutate counters/unions → atomic-write 전체 파일) vs NotesHandle의 replace-only `NotePatch` shape mismatch. 변환 시 turn당 read+write 2x I/O 비용. executor 측에 `NotePatch.frontmatter_merge` / `NotePatch.body_at_anchor` partial-update API가 추가되어야 안전 cut 가능. 그 전까지는 자체 atomic-append path 유지가 합리적.
+- ⏸️ `index.py` (`MemoryIndexManager`): Geny의 `render_vault_map` / `tag_count` 등 풍부한 surface가 executor `IndexHandle`보다 많음. thin adapter로 변환 시 일부 query path 회귀 위험. 별도 cycle에서 IndexHandle API 확장 후 cut.
+- ⏸️ `frontmatter.py`: 위 두 모듈이 `parse_frontmatter` / `render_frontmatter`를 사용. 그들이 안 쓸 때까지 유지.
 
-→ embedding 자체는 **이미 단일 path**다 (Phase 2가 그 cut을 끝냄). Phase 3는 노트 쓰기 / 디렉토리 관리 layer를 executor의 NotesHandle로 옮기는 작업 — embedding과 무관.
+### 결론
+**embedding 흐름은 단일 path**: `LTMConfig → provider_bridge → MemoryProviderFactory → EmbeddingClient → HTTPS`. Geny에 자체 httpx 코드 / FAISS 의존성 / 자체 vector store 0줄.
 
-**즉 사용자가 묻는 "embedding 관련된 것들"은 이번 사이클 끝**. Phase 3는 그 위의 vault / archive 비즈니스 로직 정리.
+**노트 write 흐름도 단일 path** (생성/수정/삭제/link/compaction): `StructuredMemoryWriter` / `CompactionArchiver` → `provider.notes().write/update/delete` → 디스크. 단 conversation/DM rollup만 자체 atomic-append (executor API 한계).
+
+이번 사이클로 "embedding 관련된 것들"은 **완전히 종결**. archive layer 정리는 80% 완료 (생성/수정/삭제/link/compaction). 남은 20% (turn rollup, index)는 executor 측 API 확장이 prerequisite — 별도 cycle 또는 executor PR.
