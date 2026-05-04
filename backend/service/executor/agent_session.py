@@ -374,6 +374,17 @@ class AgentSession:
         # first chat broadcast already sees the boot-time events on the
         # frontend's VTuber LOGS panel.
         self._pending_memory_events: List[Dict[str, Any]] = []
+        # Per-session cursor for the chat broadcast handler: tracks how
+        # many `MEMORY` log entries have already been forwarded to the
+        # frontend. The legacy `file_changes` pipe uses
+        # `pre_exec_cursor` (cache length captured *just before* the
+        # turn runs), but that misses every memory event that landed
+        # earlier — most notably the `provider_initialized` row that
+        # fires inside `initialize()` before the session ever runs a
+        # turn. Tracking the cursor on the session itself lets the
+        # broadcast handler advance it from 0 on the first call and
+        # from the cached value on every later one.
+        self._memory_events_cursor: int = 0
 
         # Execution state
         self._initialized = False
@@ -1087,6 +1098,32 @@ class AgentSession:
                 )
         # Logger absent — keep the event in memory for replay.
         self._pending_memory_events.append(kwargs)
+
+    def consume_memory_events(self) -> List[Dict[str, Any]]:
+        """Drain every memory event recorded since the last consume.
+
+        The chat broadcast handler calls this once per turn. On the
+        first call the cursor is 0, so every event the agent has
+        recorded so far (including boot-time `provider_initialized`)
+        ships to the frontend; subsequent calls only see new rows.
+
+        Returns an empty list if the session logger has not yet been
+        provisioned — callers should still attach an empty
+        `memory_events` field so the frontend doesn't have to worry
+        about None/undefined.
+        """
+        slog = get_session_logger(self._session_id, create_if_missing=False)
+        if slog is None:
+            return []
+        try:
+            events = slog.extract_memory_events_from_cache(self._memory_events_cursor)
+            self._memory_events_cursor = slog.get_cache_length()
+            return events
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] consume_memory_events failed", self._session_id, exc_info=True,
+            )
+            return []
 
     def flush_pending_memory_events(self) -> int:
         """Replay every parked event into the now-live `SessionLogger`.

@@ -704,6 +704,10 @@ async def _run_broadcast(
         log_poll_task: Optional[asyncio.Task] = None
         session_logger = get_session_logger(session_id, create_if_missing=False)
         pre_exec_cursor = session_logger.get_cache_length() if session_logger else 0
+        # Resolve the live agent — used downstream by the memory event
+        # consumer which owns its own cursor (boot events would never
+        # ship under pre_exec_cursor's convention).
+        agent = agent_manager.get_agent(session_id)
 
         if session_logger and agent_state:
             _MAX_RECENT_LOGS = 20
@@ -806,12 +810,20 @@ async def _run_broadcast(
                         msg_data["file_changes"] = fc
                         logger.debug("[Broadcast:%s] session=%s: %d file changes", room_id[:8], session_id[:8], len(fc))
                     # Memory subsystem events (note writes, vector
-                    # indexing, curated promotions, knowledge searches)
-                    # — same cursor convention as file_changes. The
-                    # frontend chat handler forwards each record to
-                    # `useVTuberStore.addLog` so the operator can
-                    # watch the MemoryProvider activity in real time.
-                    me = session_logger.extract_memory_events_from_cache(pre_exec_cursor)
+                    # indexing, curated promotions, knowledge searches).
+                    # We avoid the `pre_exec_cursor` convention used by
+                    # `file_changes` because boot-time events
+                    # (`provider_initialized`, etc.) fire *before* the
+                    # very first turn even starts — pre_exec_cursor
+                    # would skip them forever. Instead the session
+                    # owns its own memory cursor that starts at 0 and
+                    # advances after every successful drain, so the
+                    # first broadcast captures the boot rows and the
+                    # rest follow turn-by-turn deltas.
+                    if agent is not None:
+                        me = agent.consume_memory_events()
+                    else:
+                        me = session_logger.extract_memory_events_from_cache(0)
                     if me:
                         msg_data["memory_events"] = me
                         logger.debug(
