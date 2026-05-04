@@ -139,17 +139,23 @@ class SessionMemoryManager:
         speaks to it.
 
         Called by `AgentSession` immediately after the composite
-        provider is built. Three consumers today:
+        provider is built. Consumers:
 
-        - `VectorMemoryManager` (Phase 2): vector retrieval +
-          indexing route through `provider.vector()`.
-        - `StructuredMemoryWriter` (Phase 3a/3b): write / update /
-          delete / link route through `provider.notes()` — disk
-          layout, frontmatter, dedup, backlink propagation all
-          owned by the executor.
-        - `CompactionArchiver` (Phase 3c): compaction vault writes
-          route through `provider.notes()`. The audit copy under
+        - `VectorMemoryManager`: vector retrieval + indexing route
+          through `provider.vector()`.
+        - `StructuredMemoryWriter`: write / update / delete / link /
+          read / list route through `provider.notes()`.
+        - `ConversationArchiver`: per-session rollup route through
+          `provider.notes()` (single-level filename within
+          `memory/conversations/`).
+        - `CompactionArchiver`: compaction vault writes route
+          through `provider.notes()`. The audit copy under
           `transcripts/compactions/` keeps its direct disk path.
+
+        DM archiver intentionally stays on direct atomic-write —
+        its `dms/<cp>/<date>.md` layout has a counterpart subdir
+        which the executor's flat-category NotesHandle doesn't
+        model.
         """
         if self._vmm is not None:
             self._vmm.set_memory_provider(provider)
@@ -163,16 +169,9 @@ class SessionMemoryManager:
                     "set_memory_provider: compaction wiring skipped",
                     exc_info=True,
                 )
-        if self._dm_archiver is not None and hasattr(
-            self._dm_archiver, "set_memory_provider"
-        ):
-            try:
-                self._dm_archiver.set_memory_provider(provider)
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "set_memory_provider: dm archiver wiring skipped",
-                    exc_info=True,
-                )
+        # DM archiver stays on direct atomic-write — its
+        # `dms/<cp>/<date>.md` layout has a counterpart subdir which
+        # the executor's flat-category NotesHandle doesn't model.
         if self._conversation_archiver is not None and hasattr(
             self._conversation_archiver, "set_memory_provider"
         ):

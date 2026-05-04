@@ -21,6 +21,16 @@ existing Stream tab already groups events by counterpart, the
 chooses to write one) wants to ``[[wikilink]]`` to the matching
 dms bundle. A counterpart-keyed layout makes those three consumers'
 lookup O(1).
+
+Why this archiver does **not** route through the executor's
+``NotesHandle``: the executor's ``FileMemoryProvider`` keys notes
+by bare basename within the category dir (``memory/<cat>/<file>.md``)
+and only ``mkdir(parents=True)`` for the category dir itself. The
+``dms/<cp>/<date>.md`` two-level layout would either collide (same
+``<date>.md`` across counterparts) or fail to write (missing parent
+``<cp>/`` directory). The per-counterpart subdir is a Geny business
+choice that doesn't fit the flat-category contract, so dms keeps
+its own atomic-write path.
 """
 
 from __future__ import annotations
@@ -87,7 +97,6 @@ class DmArchiver:
         session_id: str = "",
         tz: Optional[tzinfo] = None,
         index_manager: Optional[Any] = None,
-        memory_provider=None,
     ) -> None:
         self._memory_dir = Path(memory_dir)
         self._session_id = session_id
@@ -98,16 +107,6 @@ class DmArchiver:
         # writer that re-enters can't deadlock.
         self._lock = threading.RLock()
         self._index_manager = index_manager
-        self._provider = memory_provider
-
-    def set_memory_provider(self, provider) -> None:
-        """Plug the executor `MemoryProvider` post-construction.
-
-        The append path becomes a `NotesHandle.read → mutate →
-        NotesHandle.update` round trip when this is set; the legacy
-        atomic-write fallback stays as a provider-less safety net.
-        """
-        self._provider = provider
 
     @property
     def memory_dir(self) -> Path:
@@ -163,19 +162,14 @@ class DmArchiver:
         rel_path = f"{CATEGORY}/{cp_safe}/{date}.md"
         abs_path = self._memory_dir / rel_path
 
-        if self._provider is not None:
-            return self._append_via_provider(
-                rel_path=rel_path,
-                abs_path=abs_path,
-                view=view,
-                ts=ts,
-                date=date,
-                cp_safe=cp_safe,
-                role=role,
-                content=content,
-                conversation_ref=conversation_ref,
-            )
-
+        # The dms layout — `memory/dms/<cp>/<date>.md` — has a
+        # counterpart subdirectory inside the category. The
+        # executor's NotesHandle keys notes by bare basename within
+        # `memory/<category>/`, so a 2-level subpath like this would
+        # collide across counterparts on the same day. dms rollup
+        # stays on the direct atomic-write path; the per-counterpart
+        # directory is a Geny business choice that doesn't fit
+        # NotesHandle's flat-category contract.
         with self._lock:
             existing_meta, existing_body = self._load_or_init(
                 abs_path, view, date, cp_safe,
@@ -195,123 +189,6 @@ class DmArchiver:
                     abs_path, exc,
                 )
                 return None
-            if self._index_manager is not None:
-                try:
-                    self._index_manager.update_file(rel_path)
-                except Exception:
-                    logger.debug(
-                        "dm_archiver: index update failed", exc_info=True,
-                    )
-            return DmBundleUpdate(
-                relative_path=rel_path,
-                absolute_path=str(abs_path),
-                event_count=int(new_meta.get("event_count", 0)),
-            )
-
-    def _append_via_provider(
-        self,
-        *,
-        rel_path: str,
-        abs_path: Path,
-        view: InteractionEventView,
-        ts: datetime,
-        date: str,
-        cp_safe: str,
-        role: str,
-        content: str,
-        conversation_ref: Optional[str],
-    ) -> Optional[DmBundleUpdate]:
-        """Read the existing rollup via NotesHandle, mutate
-        frontmatter+body in memory, and write the merged result back
-        via NotesHandle.update (or NotesHandle.write for a brand-new
-        bundle). The 2x I/O is the cost of the rollup business
-        model — see docs/analysis/CURRENT_MEMORY_STATE_AUDIT.md.
-        """
-        from geny_executor.memory.provider import (
-            Importance as _Importance,
-            NoteDraft,
-            NotePatch,
-            Scope,
-        )
-        from service.memory.sync_async_bridge import run_coro_sync
-
-        notes = self._provider.notes()
-        with self._lock:
-            try:
-                existing = run_coro_sync(notes.read(rel_path))
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "dm_archiver: provider read failed for %s",
-                    rel_path, exc_info=True,
-                )
-                existing = None
-
-            if existing is None:
-                base_meta, base_body = self._load_or_init(
-                    abs_path, view, date, cp_safe,
-                )
-            else:
-                base_meta = {
-                    "title": existing.title,
-                    "category": existing.category or CATEGORY,
-                    "tags": list(existing.tags),
-                    "importance": existing.importance.value,
-                    **(existing.frontmatter or {}),
-                }
-                # event_ids may have round-tripped to a comma string —
-                # the legacy parser tolerated that, mirror that here.
-                eids = base_meta.get("event_ids")
-                if isinstance(eids, str):
-                    base_meta["event_ids"] = [
-                        e.strip() for e in eids.split(",") if e.strip()
-                    ]
-                elif not isinstance(eids, list):
-                    base_meta["event_ids"] = []
-                base_body = existing.body
-
-            entry = self._render_entry(view, ts, role, content, conversation_ref)
-            new_body = (base_body.rstrip() + "\n\n" + entry).strip() + "\n"
-            new_meta = self._update_meta(base_meta, view, ts, conversation_ref)
-
-            try:
-                if existing is None:
-                    draft = NoteDraft(
-                        title=new_meta.get("title", f"DM bundle ({cp_safe})"),
-                        body=new_body,
-                        category=CATEGORY,
-                        tags=list(new_meta.get("tags") or []),
-                        importance=_Importance(
-                            new_meta.get("importance", "medium")
-                        ),
-                        scope=Scope.SESSION,
-                        filename=rel_path,
-                        frontmatter={
-                            k: v for k, v in new_meta.items()
-                            if k not in {"title", "tags", "category", "importance"}
-                        },
-                    )
-                    run_coro_sync(notes.write(draft))
-                else:
-                    patch = NotePatch(
-                        body=new_body,
-                        tags=list(new_meta.get("tags") or []),
-                        importance=_Importance(
-                            new_meta.get("importance", "medium")
-                        ),
-                        category=new_meta.get("category", CATEGORY),
-                        frontmatter={
-                            k: v for k, v in new_meta.items()
-                            if k not in {"title", "tags", "category", "importance"}
-                        },
-                    )
-                    run_coro_sync(notes.update(rel_path, patch))
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "dm_archiver: provider write failed for %s",
-                    rel_path, exc_info=True,
-                )
-                return None
-
             if self._index_manager is not None:
                 try:
                     self._index_manager.update_file(rel_path)

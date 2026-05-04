@@ -1162,6 +1162,12 @@ class ConversationArchiver:
                 if k not in {"title", "tags", "category", "importance"}
             }
 
+            # Executor's NotesHandle keys notes by bare basename
+            # within the category dir — ``conversations/<sid>__<bucket>.md``
+            # → ``<sid>__<bucket>.md`` once the executor places it
+            # under ``memory/conversations/``.
+            bare_filename = Path(target_rel).name
+
             if is_new_file:
                 draft = NoteDraft(
                     title=new_meta.get("title", target_rel),
@@ -1170,7 +1176,7 @@ class ConversationArchiver:
                     tags=list(new_meta.get("tags") or []),
                     importance=importance_enum,
                     scope=Scope.SESSION,
-                    filename=target_rel,
+                    filename=bare_filename,
                     frontmatter=extra_fm,
                 )
                 run_coro_sync(notes.write(draft))
@@ -1182,7 +1188,7 @@ class ConversationArchiver:
                     category=new_meta.get("category", CATEGORY),
                     frontmatter=extra_fm,
                 )
-                run_coro_sync(notes.update(target_rel, patch))
+                run_coro_sync(notes.update(bare_filename, patch))
             return True
         except Exception:  # noqa: BLE001
             logger.warning(

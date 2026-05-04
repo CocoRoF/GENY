@@ -347,6 +347,14 @@ class StructuredMemoryWriter:
             if candidate_path.exists():
                 relative_path = self._deduplicate(relative_path)
 
+        # The executor's NotesHandle lives one level inside the
+        # category dir — `note_dir(category) / draft.filename` is the
+        # on-disk path. Pass the BARE basename here; if we hand it
+        # the category-prefixed `relative_path`, the file lands at
+        # `memory/<cat>/<cat>/<file>.md` and Opsidian (which scans
+        # the flat layout) sees nothing.
+        bare_filename = Path(relative_path).name
+
         draft = NoteDraft(
             title=title,
             body=content,
@@ -354,14 +362,18 @@ class StructuredMemoryWriter:
             tags=list(tags),
             importance=importance_enum,
             scope=Scope.SESSION,
-            filename=relative_path,
+            filename=bare_filename,
             frontmatter=passthrough,
         )
 
         meta = run_coro_sync(self._provider.notes().write(draft))
-        # The executor preserves the filename we hand in; double-
-        # check just in case a backend (sql / future) renames.
-        relative_path = meta.ref.filename or relative_path
+        # The executor returns a bare filename; reattach the category
+        # prefix so callers downstream (index update, db dual-write,
+        # operator log) keep seeing the legacy `<cat>/<file>.md` form.
+        bare_returned = meta.ref.filename or bare_filename
+        relative_path = (
+            bare_returned if category == "root" else f"{category}/{bare_returned}"
+        )
 
         # Re-render the metadata dict with executor-effective values
         # so downstream consumers see the row the way it actually
@@ -403,9 +415,14 @@ class StructuredMemoryWriter:
         )
         from service.memory.sync_async_bridge import run_coro_sync
 
+        # Geny callers pass `<category>/<file>.md`; the executor's
+        # NotesHandle keys notes by bare basename within the category
+        # dir, so strip the prefix at this boundary.
+        bare = Path(filename).name
+
         notes = self._provider.notes()
         try:
-            existing = run_coro_sync(notes.read(filename))
+            existing = run_coro_sync(notes.read(bare))
         except Exception:  # noqa: BLE001
             logger.warning(
                 "update_note: read failed via provider for %s",
@@ -440,7 +457,7 @@ class StructuredMemoryWriter:
             category=category,
         )
         try:
-            run_coro_sync(notes.update(filename, patch))
+            run_coro_sync(notes.update(bare, patch))
         except KeyError:
             logger.warning("update_note: provider missing %s", filename)
             return False
@@ -466,8 +483,9 @@ class StructuredMemoryWriter:
         sweep the Geny in-memory index entry."""
         from service.memory.sync_async_bridge import run_coro_sync
 
+        bare = Path(filename).name
         try:
-            ok = run_coro_sync(self._provider.notes().delete(filename))
+            ok = run_coro_sync(self._provider.notes().delete(bare))
         except Exception:  # noqa: BLE001
             logger.warning(
                 "delete_note: provider delete failed for %s",
@@ -494,10 +512,11 @@ class StructuredMemoryWriter:
         from service.memory.sync_async_bridge import run_coro_sync
 
         target_stem = Path(target_file).stem
+        bare_source = Path(source_file).name
         notes = self._provider.notes()
 
         try:
-            existing = run_coro_sync(notes.read(source_file))
+            existing = run_coro_sync(notes.read(bare_source))
         except Exception:  # noqa: BLE001
             logger.warning(
                 "link_notes: read failed via provider for %s",
@@ -516,7 +535,7 @@ class StructuredMemoryWriter:
 
         patch = NotePatch(append_body=f"> See also: {marker}")
         try:
-            run_coro_sync(notes.update(source_file, patch))
+            run_coro_sync(notes.update(bare_source, patch))
         except KeyError:
             return False
         except Exception:  # noqa: BLE001
@@ -619,8 +638,9 @@ class StructuredMemoryWriter:
             return None
         from service.memory.sync_async_bridge import run_coro_sync
 
+        bare = Path(filename).name
         try:
-            note = run_coro_sync(self._provider.notes().read(filename))
+            note = run_coro_sync(self._provider.notes().read(bare))
         except Exception:  # noqa: BLE001
             logger.debug(
                 "read_note(%s): provider read failed",
@@ -686,10 +706,13 @@ class StructuredMemoryWriter:
             metas = []
         results: List[MemoryFileInfo] = []
         for m in metas:
+            cat = m.category or "root"
+            bare = m.ref.filename
+            display_filename = bare if cat == "root" else f"{cat}/{bare}"
             results.append(MemoryFileInfo(
-                filename=m.ref.filename,
-                title=m.title or m.ref.filename,
-                category=m.category or "root",
+                filename=display_filename,
+                title=m.title or bare,
+                category=cat,
                 tags=list(m.tags),
                 importance=m.importance.value,
                 created=m.created_at.isoformat() if m.created_at else "",
