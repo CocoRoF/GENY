@@ -750,10 +750,44 @@ class StructuredMemoryWriter:
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
         """Read a note and return parsed metadata + body.
 
-        Returns:
-            Dict with keys: filename, title, metadata, content, raw,
-            links_to, linked_from.  Or None if not found.
+        With a `MemoryProvider` attached, the read happens through
+        `NotesHandle.read` so the disk format / frontmatter parsing
+        is owned by the executor. Returns the same dict shape as
+        before (`filename`, `title`, `metadata`, `body`, `raw`,
+        `links_to`, `linked_from`) for caller compatibility.
         """
+        if self._provider is not None:
+            from service.memory.sync_async_bridge import run_coro_sync
+
+            try:
+                note = run_coro_sync(self._provider.notes().read(filename))
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "read_note(%s): provider read failed",
+                    filename, exc_info=True,
+                )
+                return None
+            if note is None:
+                return None
+            metadata = {
+                "title": note.title,
+                "tags": list(note.tags),
+                "category": note.category,
+                "importance": note.importance.value,
+                "links_to": list(note.links_out),
+                "linked_from": list(note.links_in),
+                **(note.frontmatter or {}),
+            }
+            return {
+                "filename": filename,
+                "title": note.title,
+                "metadata": metadata,
+                "body": note.body,
+                "raw": "",  # the executor owns the rendered file; raw text is rebuilt only if a caller needs it
+                "links_to": list(note.links_out),
+                "linked_from": list(note.links_in),
+            }
+
         filepath = self._memory_dir / filename
         if not filepath.exists():
             return None
@@ -788,14 +822,50 @@ class StructuredMemoryWriter:
     ) -> List[MemoryFileInfo]:
         """List notes with optional filtering.
 
-        Args:
-            category: Filter by category.
-            tag: Filter by tag.
-            importance: Filter by importance.
-
-        Returns:
-            Filtered list of MemoryFileInfo.
+        Returns Geny-shaped `MemoryFileInfo` objects. With a provider
+        attached the listing goes through `NotesHandle.list` and is
+        adapted into MemoryFileInfo so callers (controllers, tools,
+        retriever vault map) keep their existing iteration code.
         """
+        if self._provider is not None:
+            from geny_executor.memory.provider import Importance as _Importance
+            from service.memory.sync_async_bridge import run_coro_sync
+
+            importance_filter = None
+            if importance:
+                try:
+                    importance_filter = _Importance(importance)
+                except ValueError:
+                    importance_filter = None
+            try:
+                metas = run_coro_sync(
+                    self._provider.notes().list(
+                        category=category,
+                        tag=tag,
+                        importance=importance_filter,
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("list_notes: provider list failed", exc_info=True)
+                metas = []
+            results: List[MemoryFileInfo] = []
+            for m in metas:
+                results.append(MemoryFileInfo(
+                    filename=m.ref.filename,
+                    title=m.title or m.ref.filename,
+                    category=m.category or "root",
+                    tags=list(m.tags),
+                    importance=m.importance.value,
+                    created=m.created_at.isoformat() if m.created_at else "",
+                    modified=m.updated_at.isoformat() if m.updated_at else "",
+                    source="system",
+                    char_count=m.size_bytes,
+                    links_to=[],
+                    linked_from=[],
+                ))
+            results.sort(key=lambda f: f.modified, reverse=True)
+            return results
+
         idx = self._index.index
         results = list(idx.files.values())
 

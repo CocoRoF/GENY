@@ -163,6 +163,26 @@ class SessionMemoryManager:
                     "set_memory_provider: compaction wiring skipped",
                     exc_info=True,
                 )
+        if self._dm_archiver is not None and hasattr(
+            self._dm_archiver, "set_memory_provider"
+        ):
+            try:
+                self._dm_archiver.set_memory_provider(provider)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "set_memory_provider: dm archiver wiring skipped",
+                    exc_info=True,
+                )
+        if self._conversation_archiver is not None and hasattr(
+            self._conversation_archiver, "set_memory_provider"
+        ):
+            try:
+                self._conversation_archiver.set_memory_provider(provider)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "set_memory_provider: conversation archiver wiring skipped",
+                    exc_info=True,
+                )
 
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for LTM and STM.
