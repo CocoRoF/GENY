@@ -58,26 +58,11 @@ class LongTermMemory:
         self._main_file = self._memory_dir / self.MAIN_FILE
         self._topics_dir = self._memory_dir / self.TOPICS_SUBDIR
 
-        # DB support (set via set_database) — operator analytics mirror.
-        self._db_manager = None
-        self._session_id: Optional[str] = None
-
         # Executor provider — wired post-construction by AgentSession.
         self._provider: Any = None
 
     def set_memory_provider(self, provider: Any) -> None:
         self._provider = provider
-
-    def set_database(self, db_manager, session_id: str) -> None:
-        self._db_manager = db_manager
-        self._session_id = session_id
-        logger.debug(
-            "LongTermMemory: DB backend enabled for session %s", session_id,
-        )
-
-    @property
-    def _db_available(self) -> bool:
-        return self._db_manager is not None and self._session_id is not None
 
     @property
     def memory_dir(self) -> Path:
@@ -119,20 +104,6 @@ class LongTermMemory:
                 "LongTermMemory.append: provider append failed",
                 exc_info=True,
             )
-            return
-
-        if self._db_available:
-            try:
-                from service.database.memory_db_helper import db_ltm_append
-
-                db_ltm_append(
-                    self._db_manager, self._session_id,
-                    text=text, heading=heading,
-                )
-            except Exception as e:
-                logger.debug(
-                    "LongTermMemory: DB append failed (non-critical): %s", e,
-                )
 
     def write_dated(
         self, text: str, *, date: Optional[datetime] = None,
@@ -153,19 +124,6 @@ class LongTermMemory:
                 exc_info=True,
             )
             return None
-
-        if self._db_available:
-            try:
-                from service.database.memory_db_helper import db_ltm_append
-
-                db_ltm_append(
-                    self._db_manager, self._session_id,
-                    text=text, heading=None,
-                )
-            except Exception as e:
-                logger.debug(
-                    "LongTermMemory: DB dated write failed: %s", e,
-                )
         return self._memory_dir / ref.filename if ref and ref.filename else None
 
     def write_topic(self, topic: str, text: str) -> Optional[Path]:

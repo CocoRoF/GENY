@@ -202,17 +202,14 @@ class SessionMemoryManager:
         """
         self._db_manager = db_manager
         self._session_id = session_id
-        self._ltm.set_database(db_manager, session_id)
-        self._stm.set_database(db_manager, session_id)
-        # Propagate DB + session_id to anything we built in
-        # ``initialize()``. Cycle 20260503_5 — archivers used to be
-        # bound with whatever ``self._session_id`` was at init time
-        # (typically ``None``) and never re-bound, so files landed
-        # under ``conversations/unknown__*.md``. Now a late
-        # ``set_database`` call refreshes them.
-        # `StructuredMemoryWriter.set_database` was retired in
-        # GENY-7b/8 — note disk writes are owned by `provider.notes()`
-        # and the analytics mirror is no longer dual-written.
+        # GENY-9 — STM/LTM/structured_writer no longer dual-write to
+        # the DB analytics mirror; their writes route through
+        # `provider.stm()` / `provider.ltm()` / `provider.notes()`
+        # exclusively. The manager keeps `_db_manager` because
+        # `compute_memory_stats` still aggregates from it for the
+        # operator dashboards. Late `set_database` calls now only
+        # refresh the archivers' `session_id` (legacy fix from cycle
+        # 20260503_5 — archivers used to bind None at init time).
         for archiver_attr in (
             "_conversation_archiver",
             "_dm_archiver",
@@ -1588,25 +1585,3 @@ class SessionMemoryManager:
 # ─────────────────────────────────────────────────────────────────
 
 
-def _augment_meta_with_conversation_ref(
-    meta: Dict[str, Any], archived,
-) -> Dict[str, Any]:
-    """Return a *new* metadata dict with ``payload.conversation_ref``
-    pointing at the archiver-written file.
-
-    Defensive copy — the caller's dict is not mutated. Existing
-    ``payload`` keys (e.g. tool_run_summary's tools_used /
-    files_written) are preserved unchanged; only the new
-    ``conversation_ref`` is added (or overwritten if a stale value
-    happened to be there).
-
-    Used by :meth:`SessionMemoryManager.record_message` to thread
-    the conversations/<id>.md pointer into STM's jsonl line so the
-    Stream tab can hydrate the full body without scanning the
-    vault. See plan §2.1.1.
-    """
-    new_meta = dict(meta)
-    payload = dict(new_meta.get("payload") or {})
-    payload["conversation_ref"] = archived.relative_path
-    new_meta["payload"] = payload
-    return new_meta
