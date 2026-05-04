@@ -165,6 +165,8 @@ class SessionMemoryManager:
             self._stm.set_memory_provider(provider)
         if self._ltm is not None:
             self._ltm.set_memory_provider(provider)
+        if self._index_manager is not None:
+            self._index_manager.set_memory_provider(provider)
         if self._vmm is not None:
             self._vmm.set_memory_provider(provider)
         if self._structured_writer is not None:

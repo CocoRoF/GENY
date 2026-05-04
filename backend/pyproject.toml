@@ -40,7 +40,7 @@ dependencies = [
     # 1.16.0 surfaces (composite curated/global, auto-vector on
     # note write) remain. The `[openai]` extra is required because
     # Geny's settings UI defaults the embedding provider to OpenAI.
-    "geny-executor[web,cron,openai]>=1.17.0,<2.0.0",
+    "geny-executor[web,cron,openai]>=1.17.1,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
