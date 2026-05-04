@@ -201,28 +201,24 @@ class StructuredMemoryWriter:
         auto_links = extract_wikilinks(content)
         all_links = list(set(auto_links + (links or [])))
 
-        if self._provider is not None:
-            relative_path, full_content, metadata = self._write_via_provider(
-                title=title,
-                content=content,
-                category=category,
-                tags=tags,
-                importance=importance,
-                source=source,
-                all_links=all_links,
-                filename_override=filename_override,
+        if self._provider is None:
+            logger.warning(
+                "StructuredMemoryWriter.write_note(%r): no MemoryProvider attached; "
+                "skipping disk write (provider-less path was retired in PR-3g)",
+                title[:60],
             )
-        else:
-            relative_path, full_content, metadata = self._write_via_disk(
-                title=title,
-                content=content,
-                category=category,
-                tags=tags,
-                importance=importance,
-                source=source,
-                all_links=all_links,
-                filename_override=filename_override,
-            )
+            return ""
+
+        relative_path, full_content, metadata = self._write_via_provider(
+            title=title,
+            content=content,
+            category=category,
+            tags=tags,
+            importance=importance,
+            source=source,
+            all_links=all_links,
+            filename_override=filename_override,
+        )
 
         logger.info(
             "StructuredMemoryWriter: created %s (%d chars, %d tags)",
@@ -380,43 +376,6 @@ class StructuredMemoryWriter:
         # path. The same shape `render_frontmatter` produces is fine
         # because the actual on-disk write is owned by the executor.
         full_content = render_frontmatter(metadata, content)
-        return relative_path, full_content, metadata
-
-    def _write_via_disk(
-        self,
-        *,
-        title: str,
-        content: str,
-        category: str,
-        tags: List[str],
-        importance: str,
-        source: str,
-        all_links: List[str],
-        filename_override: Optional[str],
-    ):
-        """Legacy disk-direct write — used only when no provider is
-        attached (rare boot edge case or unit tests)."""
-        metadata = build_default_metadata(
-            title=title,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source=source,
-            session_id=self._session_id,
-        )
-        metadata["links_to"] = list(all_links)
-        full_content = render_frontmatter(metadata, content)
-
-        if filename_override:
-            relative_path = filename_override
-        else:
-            relative_path = self._make_filepath(title, category)
-        filepath = self._memory_dir / relative_path
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        if filepath.exists() and not filename_override:
-            relative_path = self._deduplicate(relative_path)
-            filepath = self._memory_dir / relative_path
-        filepath.write_text(full_content, encoding="utf-8")
         return relative_path, full_content, metadata
 
     # ── Provider-backed update / delete / link (PR-3b) ─────────────
@@ -596,82 +555,20 @@ class StructuredMemoryWriter:
         Returns:
             True if the file was successfully updated.
         """
-        if self._provider is not None:
-            return self._update_via_provider(
+        if self._provider is None:
+            logger.warning(
+                "StructuredMemoryWriter.update_note(%s): no MemoryProvider attached",
                 filename,
-                content=content,
-                tags=tags,
-                importance=importance,
-                category=category,
-                append=append,
             )
-
-        filepath = self._memory_dir / filename
-        if not filepath.exists():
-            logger.warning("update_note: file not found: %s", filename)
             return False
-
-        try:
-            existing = filepath.read_text(encoding="utf-8")
-            metadata, body = parse_frontmatter(existing)
-
-            # If no frontmatter, create minimal metadata
-            if not metadata:
-                metadata = build_default_metadata(
-                    title=Path(filename).stem.replace("-", " ").title(),
-                    category=self._infer_category(filename),
-                    source="system",
-                    session_id=self._session_id,
-                )
-
-            # Update metadata fields
-            now = datetime.now(_get_tz()).isoformat()
-            metadata["modified"] = now
-
-            if tags:
-                existing_tags = set(metadata.get("tags", []))
-                existing_tags.update(t.lower().strip() for t in tags if t.strip())
-                metadata["tags"] = sorted(existing_tags)
-
-            if importance:
-                metadata["importance"] = importance
-
-            if category:
-                metadata["category"] = category
-
-            # Update content
-            if content is not None:
-                if append:
-                    body = body.rstrip() + "\n\n" + content
-                else:
-                    body = content
-
-            # Re-extract wikilinks
-            metadata["links_to"] = extract_wikilinks(body)
-
-            full_content = render_frontmatter(metadata, body)
-            filepath.write_text(full_content, encoding="utf-8")
-
-            # Update index
-            self._index.update_file(filename)
-
-            # PR 15 — propagate linked_from to wikilink targets.
-            try:
-                _propagate_linked_from(
-                    self._memory_dir, filename, metadata["links_to"],
-                )
-            except Exception:
-                logger.debug(
-                    "StructuredMemoryWriter: linked_from propagation failed",
-                    exc_info=True,
-                )
-
-            logger.debug("update_note: updated %s", filename)
-            return True
-
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning("update_note(%s): %s", filename, exc)
-            return False
+        return self._update_via_provider(
+            filename,
+            content=content,
+            tags=tags,
+            importance=importance,
+            category=category,
+            append=append,
+        )
 
     def delete_note(self, filename: str) -> bool:
         """Delete a note and remove from index.
@@ -682,21 +579,13 @@ class StructuredMemoryWriter:
         Returns:
             True if deleted.
         """
-        if self._provider is not None:
-            return self._delete_via_provider(filename)
-
-        filepath = self._memory_dir / filename
-        if not filepath.exists():
+        if self._provider is None:
+            logger.warning(
+                "StructuredMemoryWriter.delete_note(%s): no MemoryProvider attached",
+                filename,
+            )
             return False
-
-        try:
-            filepath.unlink()
-            self._index.remove_file(filename)
-            logger.info("delete_note: removed %s", filename)
-            return True
-        except OSError as exc:
-            logger.warning("delete_note(%s): %s", filename, exc)
-            return False
+        return self._delete_via_provider(filename)
 
     def link_notes(self, source_file: str, target_file: str) -> bool:
         """Create a bidirectional link between two notes.
@@ -710,108 +599,54 @@ class StructuredMemoryWriter:
         Returns:
             True if link was created.
         """
-        if self._provider is not None:
-            return self._link_via_provider(source_file, target_file)
-
-        filepath = self._memory_dir / source_file
-        if not filepath.exists():
+        if self._provider is None:
+            logger.warning(
+                "StructuredMemoryWriter.link_notes(%s→%s): no MemoryProvider attached",
+                source_file, target_file,
+            )
             return False
-
-        target_stem = Path(target_file).stem
-
-        try:
-            existing = filepath.read_text(encoding="utf-8")
-            metadata, body = parse_frontmatter(existing)
-
-            # Check if link already exists
-            if f"[[{target_stem}]]" in body.lower() or target_stem.lower() in [
-                l.lower() for l in metadata.get("links_to", [])
-            ]:
-                return True  # Already linked
-
-            # Append link reference
-            body = body.rstrip() + f"\n\n> See also: [[{target_stem}]]\n"
-
-            metadata["modified"] = datetime.now(_get_tz()).isoformat()
-            metadata["links_to"] = extract_wikilinks(body)
-
-            full_content = render_frontmatter(metadata, body)
-            filepath.write_text(full_content, encoding="utf-8")
-
-            # Update both files in index
-            self._index.update_file(source_file)
-            self._index.update_file(target_file)
-
-            return True
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning("link_notes: %s", exc)
-            return False
+        return self._link_via_provider(source_file, target_file)
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
-        """Read a note and return parsed metadata + body.
-
-        With a `MemoryProvider` attached, the read happens through
-        `NotesHandle.read` so the disk format / frontmatter parsing
-        is owned by the executor. Returns the same dict shape as
-        before (`filename`, `title`, `metadata`, `body`, `raw`,
-        `links_to`, `linked_from`) for caller compatibility.
+        """Read a note via `NotesHandle.read` and return the legacy
+        Geny dict shape (`filename`, `title`, `metadata`, `body`,
+        `raw`, `links_to`, `linked_from`) for caller compatibility.
         """
-        if self._provider is not None:
-            from service.memory.sync_async_bridge import run_coro_sync
-
-            try:
-                note = run_coro_sync(self._provider.notes().read(filename))
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "read_note(%s): provider read failed",
-                    filename, exc_info=True,
-                )
-                return None
-            if note is None:
-                return None
-            metadata = {
-                "title": note.title,
-                "tags": list(note.tags),
-                "category": note.category,
-                "importance": note.importance.value,
-                "links_to": list(note.links_out),
-                "linked_from": list(note.links_in),
-                **(note.frontmatter or {}),
-            }
-            return {
-                "filename": filename,
-                "title": note.title,
-                "metadata": metadata,
-                "body": note.body,
-                "raw": "",  # the executor owns the rendered file; raw text is rebuilt only if a caller needs it
-                "links_to": list(note.links_out),
-                "linked_from": list(note.links_in),
-            }
-
-        filepath = self._memory_dir / filename
-        if not filepath.exists():
+        if self._provider is None:
+            logger.debug(
+                "read_note(%s): no MemoryProvider attached", filename,
+            )
             return None
+        from service.memory.sync_async_bridge import run_coro_sync
 
         try:
-            raw = filepath.read_text(encoding="utf-8")
-            metadata, body = parse_frontmatter(raw)
-
-            # Get backlinks from index
-            idx_info = self._index.index.files.get(filename)
-            linked_from = idx_info.linked_from if idx_info else []
-
-            return {
-                "filename": filename,
-                "title": metadata.get("title", Path(filename).stem),
-                "metadata": metadata,
-                "body": body,
-                "raw": raw,
-                "links_to": metadata.get("links_to", []),
-                "linked_from": linked_from,
-            }
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning("read_note(%s): %s", filename, exc)
+            note = run_coro_sync(self._provider.notes().read(filename))
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "read_note(%s): provider read failed",
+                filename, exc_info=True,
+            )
             return None
+        if note is None:
+            return None
+        metadata = {
+            "title": note.title,
+            "tags": list(note.tags),
+            "category": note.category,
+            "importance": note.importance.value,
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+            **(note.frontmatter or {}),
+        }
+        return {
+            "filename": filename,
+            "title": note.title,
+            "metadata": metadata,
+            "body": note.body,
+            "raw": "",  # executor owns the rendered file; raw text rebuilt on demand
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+        }
 
     def list_notes(
         self,
@@ -827,57 +662,43 @@ class StructuredMemoryWriter:
         adapted into MemoryFileInfo so callers (controllers, tools,
         retriever vault map) keep their existing iteration code.
         """
-        if self._provider is not None:
-            from geny_executor.memory.provider import Importance as _Importance
-            from service.memory.sync_async_bridge import run_coro_sync
+        if self._provider is None:
+            return []
+        from geny_executor.memory.provider import Importance as _Importance
+        from service.memory.sync_async_bridge import run_coro_sync
 
-            importance_filter = None
-            if importance:
-                try:
-                    importance_filter = _Importance(importance)
-                except ValueError:
-                    importance_filter = None
-            try:
-                metas = run_coro_sync(
-                    self._provider.notes().list(
-                        category=category,
-                        tag=tag,
-                        importance=importance_filter,
-                    )
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug("list_notes: provider list failed", exc_info=True)
-                metas = []
-            results: List[MemoryFileInfo] = []
-            for m in metas:
-                results.append(MemoryFileInfo(
-                    filename=m.ref.filename,
-                    title=m.title or m.ref.filename,
-                    category=m.category or "root",
-                    tags=list(m.tags),
-                    importance=m.importance.value,
-                    created=m.created_at.isoformat() if m.created_at else "",
-                    modified=m.updated_at.isoformat() if m.updated_at else "",
-                    source="system",
-                    char_count=m.size_bytes,
-                    links_to=[],
-                    linked_from=[],
-                ))
-            results.sort(key=lambda f: f.modified, reverse=True)
-            return results
-
-        idx = self._index.index
-        results = list(idx.files.values())
-
-        if category:
-            results = [f for f in results if f.category == category]
-        if tag:
-            tag_lower = tag.lower()
-            results = [f for f in results if tag_lower in f.tags]
+        importance_filter = None
         if importance:
-            results = [f for f in results if f.importance == importance]
-
-        # Sort by modified date (newest first)
+            try:
+                importance_filter = _Importance(importance)
+            except ValueError:
+                importance_filter = None
+        try:
+            metas = run_coro_sync(
+                self._provider.notes().list(
+                    category=category,
+                    tag=tag,
+                    importance=importance_filter,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("list_notes: provider list failed", exc_info=True)
+            metas = []
+        results: List[MemoryFileInfo] = []
+        for m in metas:
+            results.append(MemoryFileInfo(
+                filename=m.ref.filename,
+                title=m.title or m.ref.filename,
+                category=m.category or "root",
+                tags=list(m.tags),
+                importance=m.importance.value,
+                created=m.created_at.isoformat() if m.created_at else "",
+                modified=m.updated_at.isoformat() if m.updated_at else "",
+                source="system",
+                char_count=m.size_bytes,
+                links_to=[],
+                linked_from=[],
+            ))
         results.sort(key=lambda f: f.modified, reverse=True)
         return results
 
