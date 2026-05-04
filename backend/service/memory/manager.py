@@ -135,15 +135,23 @@ class SessionMemoryManager:
         self._session_id: Optional[str] = session_id or None
 
     def set_memory_provider(self, provider) -> None:
-        """Plug the executor `MemoryProvider` into the vector adapter.
+        """Plug the executor `MemoryProvider` into every layer that
+        speaks to it.
 
         Called by `AgentSession` immediately after the composite
-        provider is built — the legacy `VectorMemoryManager` shim
-        forwards every operation onto `provider.vector()` and is
-        idle (`enabled=False`) until this lands.
+        provider is built. Two consumers today:
+
+        - `VectorMemoryManager` (Phase 2): vector retrieval +
+          indexing route through `provider.vector()`.
+        - `StructuredMemoryWriter` (Phase 3a): `write_note` routes
+          through `provider.notes()` — disk layout, frontmatter,
+          dedup all owned by the executor. Update / delete / link
+          stay on the legacy path until PR-3b/3c.
         """
         if self._vmm is not None:
             self._vmm.set_memory_provider(provider)
+        if self._structured_writer is not None:
+            self._structured_writer.set_memory_provider(provider)
 
     def set_database(self, db_manager, session_id: str) -> None:
         """Enable DB-backed persistence for LTM and STM.
