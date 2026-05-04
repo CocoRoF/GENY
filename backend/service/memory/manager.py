@@ -333,13 +333,6 @@ class SessionMemoryManager:
         # separate per-day file.
         conv_ref = archived.relative_path if archived else None
         self._maybe_archive_dm(role, content, out_meta, conv_ref)
-
-        try:
-            from service.memory_provider.adapters.stm_adapter import try_record_message
-            if try_record_message(self._session_id, role, content, out_meta):
-                return
-        except Exception as exc:
-            logger.warning(f"STM provider adapter failed, using legacy path: {exc}")
         self._stm.add_message(role, content, metadata=out_meta)
 
     def _maybe_archive_conversation(
@@ -443,12 +436,6 @@ class SessionMemoryManager:
             text: The knowledge to persist.
             heading: Optional markdown heading.
         """
-        try:
-            from service.memory_provider.adapters.ltm_adapter import try_append
-            if try_append(self._session_id, text, heading=heading):
-                return
-        except Exception as exc:
-            logger.warning(f"LTM provider adapter failed, using legacy path: {exc}")
         self._ltm.append(text, heading=heading)
 
     def remember_dated(self, text: str) -> None:
@@ -461,22 +448,10 @@ class SessionMemoryManager:
         ``DailyJournalWriter``) to ``memory/executions/<YYYY-MM-DD>.md``
         so the two streams no longer collide on one file.
         """
-        try:
-            from service.memory_provider.adapters.ltm_adapter import try_write_dated
-            if try_write_dated(self._session_id, text):
-                return
-        except Exception as exc:
-            logger.warning(f"LTM provider adapter failed, using legacy path: {exc}")
         self._ltm.write_execution(text)
 
     def remember_topic(self, topic: str, text: str) -> None:
         """Write knowledge to a topic-specific long-term memory file."""
-        try:
-            from service.memory_provider.adapters.ltm_adapter import try_write_topic
-            if try_write_topic(self._session_id, topic, text):
-                return
-        except Exception as exc:
-            logger.warning(f"LTM provider adapter failed, using legacy path: {exc}")
         self._ltm.write_topic(topic, text)
 
     # ------------------------------------------------------------------
@@ -498,17 +473,6 @@ class SessionMemoryManager:
 
         Returns the filename of the created note, or None on failure.
         """
-        try:
-            from service.memory_provider.adapters.notes_adapter import try_write_note
-            result = try_write_note(
-                self._session_id, title, content,
-                category=category, tags=tags, importance=importance,
-                source=source, links_to=links_to,
-            )
-            if result is not None:
-                return result
-        except Exception as exc:
-            logger.warning(f"Notes provider adapter failed, using legacy path: {exc}")
         if self._structured_writer is None:
             # Fallback to legacy write
             self._ltm.write_topic(title, content)
@@ -535,16 +499,6 @@ class SessionMemoryManager:
 
         Returns True if updated successfully.
         """
-        try:
-            from service.memory_provider.adapters.notes_adapter import try_update_note
-            result = try_update_note(
-                self._session_id, filename,
-                body=body, tags=tags, importance=importance,
-            )
-            if result is not None:
-                return result
-        except Exception as exc:
-            logger.warning(f"Notes provider adapter failed, using legacy path: {exc}")
         if self._structured_writer is None:
             return False
         return self._structured_writer.update_note(
@@ -556,13 +510,6 @@ class SessionMemoryManager:
 
         Returns True if deleted successfully.
         """
-        try:
-            from service.memory_provider.adapters.notes_adapter import try_delete_note
-            result = try_delete_note(self._session_id, filename)
-            if result is not None:
-                return result
-        except Exception as exc:
-            logger.warning(f"Notes provider adapter failed, using legacy path: {exc}")
         if self._structured_writer is None:
             return False
         return self._structured_writer.delete_note(filename)
@@ -596,13 +543,6 @@ class SessionMemoryManager:
 
         Returns True if link was created successfully.
         """
-        try:
-            from service.memory_provider.adapters.notes_adapter import try_link_notes
-            result = try_link_notes(self._session_id, source_filename, target_filename)
-            if result is not None:
-                return result
-        except Exception as exc:
-            logger.warning(f"Notes provider adapter failed, using legacy path: {exc}")
         if self._structured_writer is None:
             return False
         return self._structured_writer.link_notes(source_filename, target_filename)
@@ -822,20 +762,7 @@ class SessionMemoryManager:
                 try:
                     date_str = datetime.now(_get_tz()).strftime("%Y-%m-%d")
                     source = f"memory/{date_str}.md"
-                    handled = False
-                    try:
-                        from service.memory_provider.adapters.vector_adapter import (
-                            try_index_text,
-                        )
-                        result = await try_index_text(self._session_id, entry, source)
-                        if result is not None:
-                            handled = True
-                    except Exception as exc:
-                        logger.warning(
-                            f"Vector provider adapter failed, using legacy path: {exc}"
-                        )
-                    if not handled:
-                        await self._vmm.index_text(entry, source)
+                    await self._vmm.index_text(entry, source)
                 except Exception:
                     logger.debug(
                         "record_execution: vector indexing failed (non-critical)",
