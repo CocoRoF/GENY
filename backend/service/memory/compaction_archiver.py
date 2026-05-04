@@ -66,14 +66,27 @@ class CompactionArchiver:
         *,
         session_id: str = "",
         tz: Optional[tzinfo] = None,
+        memory_provider=None,
     ) -> None:
         self._storage_path = Path(storage_path)
         self._memory_dir = self._storage_path / "memory"
         self._transcripts_dir = self._storage_path / "transcripts"
         self._session_id = session_id
         self._tz = tz or _get_tz()
+        self._provider = memory_provider
         import threading
         self._lock = threading.RLock()
+
+    def set_memory_provider(self, provider) -> None:
+        """Plug the executor `MemoryProvider` post-construction.
+
+        The vault write (`memory/compactions/<sid>__<ts>.md`) routes
+        through `provider.notes().write` when this is set; the audit
+        copy at `transcripts/compactions/<ts>.md` keeps its direct
+        disk write because that path lives outside the executor's
+        notes namespace.
+        """
+        self._provider = provider
 
     def archive(
         self,
@@ -152,17 +165,55 @@ class CompactionArchiver:
         body = "\n".join(body_lines)
         full_text = render_frontmatter(frontmatter, body)
 
-        # Write both locations from the same rendered text so they
-        # diff cleanly.
-        try:
-            vault_abs.parent.mkdir(parents=True, exist_ok=True)
-            vault_abs.write_text(full_text, encoding="utf-8")
-        except OSError as exc:
-            logger.warning(
-                "compaction_archiver: vault write failed for %s: %s",
-                vault_abs, exc,
-            )
-            return None
+        # Vault copy: route through `NotesHandle.write` when a
+        # provider is attached so the executor owns disk layout +
+        # frontmatter rendering. The legacy direct write stays as a
+        # provider-less fallback for the rare boot edge case where
+        # `set_memory_provider` has not landed yet.
+        if self._provider is not None:
+            try:
+                from geny_executor.memory.provider import (
+                    Importance as _Importance,
+                    NoteDraft,
+                    Scope,
+                )
+                from service.memory.sync_async_bridge import run_coro_sync
+
+                draft = NoteDraft(
+                    title=frontmatter["title"],
+                    body=body,
+                    category=CATEGORY,
+                    tags=list(frontmatter.get("tags") or []),
+                    importance=_Importance.MEDIUM,
+                    scope=Scope.SESSION,
+                    filename=vault_filename,
+                    frontmatter={
+                        "ts": frontmatter["ts"],
+                        "session_id": frontmatter["session_id"],
+                        "replaced_count": frontmatter["replaced_count"],
+                        "strategy": frontmatter["strategy"],
+                        "saved_tokens": frontmatter["saved_tokens"],
+                        "links_to": frontmatter.get("links_to", []),
+                        "linked_from": frontmatter.get("linked_from", []),
+                    },
+                )
+                run_coro_sync(self._provider.notes().write(draft))
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "compaction_archiver: provider write failed for %s",
+                    vault_abs, exc_info=True,
+                )
+                return None
+        else:
+            try:
+                vault_abs.parent.mkdir(parents=True, exist_ok=True)
+                vault_abs.write_text(full_text, encoding="utf-8")
+            except OSError as exc:
+                logger.warning(
+                    "compaction_archiver: vault write failed for %s: %s",
+                    vault_abs, exc,
+                )
+                return None
         try:
             audit_abs.parent.mkdir(parents=True, exist_ok=True)
             audit_abs.write_text(full_text, encoding="utf-8")
