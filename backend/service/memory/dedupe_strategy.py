@@ -85,12 +85,22 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
     """
 
     def _record_transcript(self, state: PipelineState) -> None:
-        if not self._mgr:
-            return
-        record = getattr(self._mgr, "record_message", None)
-        if record is None:
-            return
+        """Stamp pending InteractionEvent metadata onto each new
+        message dict so stage 18's `_drive_provider` carries it into
+        STM (executor 1.17.0 EXEC-1: `Turn.from_state_message` lifts
+        `message["metadata"]` onto `Turn.metadata`).
 
+        Path-A migration GENY-2: this strategy no longer calls
+        `mgr.record_message`. The executor's `_drive_provider` is
+        the single STM write site; this method's only remaining job
+        is to attach the `_pending_message_metadata` hint to the
+        right message before the provider walks `state.messages`.
+
+        Idempotency: walks only the slice past
+        `_stm_recorded_count`. If `_drive_provider` already updated
+        the cursor (it uses its own `memory.last_recorded_idx`),
+        we still respect ours so re-entry doesn't double-stamp.
+        """
         pending = state.metadata.get(_PENDING_KEY) or {}
         recorded_count = int(state.metadata.get("_stm_recorded_count", 0))
         new_messages = state.messages[recorded_count:]
@@ -99,39 +109,31 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
 
         for msg in new_messages:
             role = msg.get("role", "")
-            content = msg.get("content", "")
-
             if role not in ("user", "assistant"):
                 continue
 
+            content = msg.get("content", "")
             if isinstance(content, list):
                 text_parts = []
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
                         text_parts.append(block.get("text", ""))
                 content = "\n".join(text_parts)
-
             if not content:
                 continue
 
+            hint = pending.get(role)
             metadata: Dict[str, Any] | None = None
-            if role in applied:
-                hint = pending.get(role)
-                if isinstance(hint, dict) and hint:
-                    if not applied[role]:
-                        metadata = hint
-                    else:
-                        metadata = _fresh_from_template(hint)
-                applied[role] = True
+            if isinstance(hint, dict) and hint:
+                metadata = hint if not applied[role] else _fresh_from_template(hint)
+            applied[role] = True
 
-            try:
-                record(role, content[:5000], metadata=metadata)
-            except Exception:
-                logger.debug(
-                    "GenyDedupeStrategy: record_message failed for role %s",
-                    role,
-                    exc_info=True,
-                )
+            if metadata and isinstance(msg, dict) and "metadata" not in msg:
+                # Mutate the message in place so `Turn.from_state_message`
+                # picks the metadata up. The executor lifts it onto
+                # `Turn.metadata` and Geny's STMHandle round-trips
+                # it through the jsonl.
+                msg["metadata"] = dict(metadata)
 
         state.metadata["_stm_recorded_count"] = len(state.messages)
 
