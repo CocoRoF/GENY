@@ -46,8 +46,15 @@ class GlobalMemoryManager:
             from service.memory.structured_writer import StructuredMemoryWriter
             from service.memory.index import MemoryIndexManager
 
+            # Sprint 3 step 4 — ``StructuredMemoryWriter`` no longer
+            # takes an index_manager arg; the executor's IndexHandle
+            # owns ``_index.json`` refresh on every write. We still
+            # construct ``MemoryIndexManager`` here so the cross-cutting
+            # ``mgr.index`` lookups (vault map, opsidian list) keep
+            # working until the global/curator/user surfaces are
+            # migrated in Step 5+.
             self._index = MemoryIndexManager(self.memory_dir)
-            self._writer = StructuredMemoryWriter(self.memory_dir, self._index)
+            self._writer = StructuredMemoryWriter(self.memory_dir)
             logger.info(
                 "GlobalMemoryManager initialized at %s", self.memory_dir,
             )

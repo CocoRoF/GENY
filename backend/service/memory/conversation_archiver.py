@@ -857,7 +857,6 @@ class ConversationArchiver:
         *,
         session_id: str = "",
         tz: Optional[tzinfo] = None,
-        index_manager: Optional[Any] = None,
         memory_provider=None,
     ) -> None:
         self._memory_dir = Path(memory_dir)
@@ -868,7 +867,10 @@ class ConversationArchiver:
         # produce torn files.
         import threading  # local import — keeps the eager import set lean
         self._lock = threading.RLock()
-        self._index_manager = index_manager
+        # Sprint 3 step 4 — host-side index_manager parameter retired;
+        # the executor's IndexHandle refreshes ``_index.json`` and the
+        # per-category shards automatically on every NotesHandle.write
+        # (1.20.0 EXEC-5).
         self._provider = memory_provider
 
     def set_memory_provider(self, provider) -> None:
@@ -1106,15 +1108,8 @@ class ConversationArchiver:
                 is_new_file=(not existing_body and not existing_meta),
             ):
                 return None
-
-            if self._index_manager is not None:
-                try:
-                    self._index_manager.update_file(target_rel)
-                except Exception:
-                    logger.debug(
-                        "conversation_archiver: index update failed",
-                        exc_info=True,
-                    )
+            # Sprint 3 step 4 — index update is owned by the executor's
+            # IndexHandle and fires inside ``NotesStore.write``.
             return target_rel
 
     def _write_via_provider(

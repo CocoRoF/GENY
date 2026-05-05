@@ -23,7 +23,11 @@ from typing import Any, Dict, List, Optional
 
 from service.memory.vector_memory import VectorSearchResult
 from service.memory.structured_writer import StructuredMemoryWriter
-from service.memory.index import MemoryIndexManager
+from service.memory.index import (
+    MemoryFileInfo,
+    MemoryIndex,
+    _CATEGORY_DESCRIPTIONS,
+)
 from service.memory.types import (
     MemoryEntry,
     MemorySearchResult,
@@ -147,8 +151,11 @@ class SessionMemoryManager:
         # which constructs its own per-user vector store; that wiring
         # is retired in step 3.5.
 
-        # Structured memory layer (Obsidian-like)
-        self._index_manager: Optional[MemoryIndexManager] = None
+        # Structured memory layer (Obsidian-like).
+        # The legacy ``MemoryIndexManager`` adapter was retired in
+        # Sprint 3 step 4. Index reads/rebuilds route directly through
+        # ``provider.index()`` via inline ``_index_*`` helpers below;
+        # the host no longer caches the snapshot.
         self._structured_writer: Optional[StructuredMemoryWriter] = None
 
         # Memory v2 — leaf source-of-truth writer (plan §1.5).
@@ -209,8 +216,6 @@ class SessionMemoryManager:
         # ``_ltm_*`` helpers can route every operation through
         # ``provider.stm()`` / ``provider.ltm()`` / ``provider.notes()``.
         self._memory_provider = provider
-        if self._index_manager is not None:
-            self._index_manager.set_memory_provider(provider)
         if self._structured_writer is not None:
             self._structured_writer.set_memory_provider(provider)
         if self._compaction_archiver is not None:
@@ -282,9 +287,12 @@ class SessionMemoryManager:
     # manager. Inline ``_vector_*`` helpers route through
     # ``provider.vector()``.
 
-    @property
-    def index_manager(self) -> Optional[MemoryIndexManager]:
-        return self._index_manager
+    # NOTE: the ``index_manager`` property was retired in Sprint 3
+    # step 4 along with the ``MemoryIndexManager`` field on the
+    # manager. Inline ``_index_*`` helpers route through
+    # ``provider.index()``; callers that previously did
+    # ``mgr.index_manager.build_vault_map()`` should call
+    # ``mgr.build_vault_map()``.
 
     @property
     def structured_writer(self) -> Optional[StructuredMemoryWriter]:
@@ -792,6 +800,112 @@ class SessionMemoryManager:
         return entries
 
     # ------------------------------------------------------------------
+    # Index helpers (Sprint 3 step 4 — provider direct, no host adapter)
+    #
+    # ``MemoryIndexManager`` was retired; index reads route through
+    # ``provider.index()`` directly. Each helper wraps the executor's
+    # async ``IndexHandle`` in a sync call via ``run_coro_sync`` and
+    # rehydrates the snapshot into ``MemoryIndex`` / ``MemoryFileInfo``
+    # so callers (memory API, opsidian routes, memory_inspect tools)
+    # keep their existing shape.
+    # ------------------------------------------------------------------
+
+    def _index_snapshot(self) -> MemoryIndex:
+        """Lazy snapshot of the executor's IndexHandle.
+        Returns an empty `MemoryIndex` when no provider is attached.
+        """
+        if self._memory_provider is None:
+            return MemoryIndex()
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            payload = run_coro_sync(self._memory_provider.index().snapshot())
+        except Exception:  # noqa: BLE001
+            logger.debug("manager._index_snapshot: provider call failed", exc_info=True)
+            return MemoryIndex()
+
+        files: Dict[str, MemoryFileInfo] = {}
+        for fname, entry in (payload.get("files") or {}).items():
+            files[fname] = MemoryFileInfo.from_dict(entry)
+        tag_map = {
+            tag: list(names) for tag, names in (payload.get("tag_map") or {}).items()
+        }
+        link_graph = {
+            src: list(targets)
+            for src, targets in (payload.get("link_graph") or {}).items()
+        }
+        return MemoryIndex(
+            files=files,
+            tag_map=tag_map,
+            link_graph=link_graph,
+            last_rebuilt=str(payload.get("last_rebuilt", "")),
+            total_chars=int(payload.get("total_chars", 0) or 0),
+            total_files=int(payload.get("total_files", len(files)) or len(files)),
+        )
+
+    def _index_rebuild(self) -> int:
+        """Force a fresh index rebuild on the executor side.
+        Returns the post-rebuild total_files count (0 if no provider).
+        """
+        if self._memory_provider is None:
+            return 0
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(self._memory_provider.index().rebuild())
+        except Exception:  # noqa: BLE001
+            logger.debug("manager._index_rebuild: provider rebuild failed", exc_info=True)
+        return self._index_snapshot().total_files
+
+    def _index_build_vault_map(self) -> Dict[str, Any]:
+        """Build the vault map payload (categories, top tags, recently
+        modified, MEMORY.md preview). Geny's category descriptions are
+        injected so the executor's render matches the legacy
+        operator-prompt layout. Returns an empty payload when the
+        provider isn't attached.
+        """
+        if self._memory_provider is None:
+            return {
+                "categories": {},
+                "top_tags": [],
+                "recently_modified": [],
+                "memory_md_preview": "",
+                "total_files": 0,
+                "generated_at": datetime.now(_get_tz()).isoformat(),
+            }
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            return run_coro_sync(
+                self._memory_provider.index().build_vault_map(
+                    category_descriptions=_CATEGORY_DESCRIPTIONS,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._index_build_vault_map: provider call failed",
+                exc_info=True,
+            )
+            return {
+                "categories": {},
+                "top_tags": [],
+                "recently_modified": [],
+                "memory_md_preview": "",
+                "total_files": 0,
+                "generated_at": datetime.now(_get_tz()).isoformat(),
+            }
+
+    def build_vault_map(self) -> Dict[str, Any]:
+        """Public surface for the vault map render.
+
+        Replaces the retired ``mgr.index_manager.build_vault_map()``
+        call site. Memory tools (`memory_categories`) and any other
+        operator-facing surface that previously reached for the index
+        manager should call this method instead.
+        """
+        return self._index_build_vault_map()
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
@@ -803,29 +917,24 @@ class SessionMemoryManager:
         # the first append; nothing to do here.
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize structured memory layer
+        # Initialize structured memory layer.
+        # Sprint 3 step 4 — ``MemoryIndexManager`` retired; writers no
+        # longer receive a host-side index handle. The executor's
+        # IndexHandle refreshes ``_index.json`` / per-category shards /
+        # ``_summary.json`` automatically on every ``NotesStore.write``
+        # (1.20.0 EXEC-5), so the host has nothing to invalidate.
         memory_dir = self._memory_dir
-        self._index_manager = MemoryIndexManager(str(memory_dir))
         self._structured_writer = StructuredMemoryWriter(
-            str(memory_dir), self._index_manager,
+            str(memory_dir),
             session_id=self._session_id or "",
         )
-        # Memory v2 — leaf SoT archiver + index writers (plan §1.5).
-        # Constructed once per session; reused for every
-        # record_message call so the per-call overhead is just the
-        # disk write, not the path/tz/session_id bookkeeping.
-        # ``index_manager`` is wired in so each turn auto-refreshes
-        # ``_index.json`` + ``_vault_map.json`` without forcing the
-        # caller to manually rebuild.
         self._conversation_archiver = self._ConversationArchiver(
             str(memory_dir),
             session_id=self._session_id or "",
-            index_manager=self._index_manager,
         )
         self._dm_archiver = self._DmArchiver(
             str(memory_dir),
             session_id=self._session_id or "",
-            index_manager=self._index_manager,
         )
         # PR 8 — compaction archiver. Takes the session storage_path
         # (not memory_dir) because it writes to two locations:
@@ -1132,9 +1241,9 @@ class SessionMemoryManager:
 
     def get_memory_index(self) -> Optional[Dict[str, Any]]:
         """Get the full memory index for API responses."""
-        if self._index_manager is None:
+        if self._memory_provider is None:
             return None
-        idx = self._index_manager.index
+        idx = self._index_snapshot()
         return {
             "files": {k: self._file_info_to_dict(v) for k, v in idx.files.items()},
             "tag_map": idx.tag_map,
@@ -1144,9 +1253,9 @@ class SessionMemoryManager:
 
     def get_memory_tags(self) -> Dict[str, int]:
         """Get tag counts from the index."""
-        if self._index_manager is None:
+        if self._memory_provider is None:
             return {}
-        idx = self._index_manager.index
+        idx = self._index_snapshot()
         tag_counts: Dict[str, int] = {}
         for tag, filenames in idx.tag_map.items():
             tag_counts[tag] = len(filenames)
@@ -1154,9 +1263,9 @@ class SessionMemoryManager:
 
     def get_memory_graph(self) -> Dict[str, Any]:
         """Get link graph data for visualization (enhanced with tag edges + metadata)."""
-        if self._index_manager is None:
+        if self._memory_provider is None:
             return {"nodes": [], "edges": []}
-        idx = self._index_manager.index
+        idx = self._index_snapshot()
         nodes = []
         edges = []
         edge_set: set = set()
@@ -1216,10 +1325,7 @@ class SessionMemoryManager:
 
         Returns total number of indexed files.
         """
-        if self._index_manager is None:
-            return 0
-        self._index_manager.rebuild()
-        return self._index_manager.index.total_files
+        return self._index_rebuild()
 
     @staticmethod
     def _file_info_to_dict(info) -> Dict[str, Any]:
@@ -2040,8 +2146,8 @@ class SessionMemoryManager:
                     categories: Dict[str, int] = {}
                     total_tags = 0
                     total_links = 0
-                    if self._index_manager is not None:
-                        idx = self._index_manager.index
+                    if self._memory_provider is not None:
+                        idx = self._index_snapshot()
                         for info in idx.files.values():
                             cat = info.category or "root"
                             categories[cat] = categories.get(cat, 0) + 1
@@ -2081,8 +2187,8 @@ class SessionMemoryManager:
         categories: Dict[str, int] = {}
         total_tags = 0
         total_links = 0
-        if self._index_manager is not None:
-            idx = self._index_manager.index
+        if self._memory_provider is not None:
+            idx = self._index_snapshot()
             for info in idx.files.values():
                 cat = info.category or "root"
                 categories[cat] = categories.get(cat, 0) + 1

@@ -42,10 +42,20 @@ from service.memory.index import MemoryIndexManager  # noqa: E402
 
 
 class _FakeManager:
-    """Minimal SessionMemoryManager stand-in carrying just the index_manager."""
+    """Minimal SessionMemoryManager stand-in exposing ``build_vault_map``.
+
+    Sprint 3 step 4 — ``MemoryCategoriesTool`` now calls
+    ``manager.build_vault_map()`` directly; the legacy
+    ``manager.index_manager.build_vault_map()`` chain was retired.
+    The fake delegates to a real ``MemoryIndexManager`` to keep the
+    integration shape (vault-map payload) realistic.
+    """
 
     def __init__(self, idx_mgr: MemoryIndexManager) -> None:
-        self.index_manager = idx_mgr
+        self._idx_mgr = idx_mgr
+
+    def build_vault_map(self):
+        return self._idx_mgr.build_vault_map()
 
 
 def _build_vault(tmp_path: Path) -> _FakeManager:

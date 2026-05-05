@@ -519,11 +519,13 @@ class MemoryCategoriesTool(BaseTool):
         if mem is None:
             return _error(f"Session not found: {session_id}")
 
-        idx_mgr = getattr(mem, "index_manager", None) or getattr(mem, "_index_manager", None)
-        if idx_mgr is None:
+        # Sprint 3 step 4 — ``build_vault_map`` moved to the manager
+        # itself; the legacy ``index_manager`` adapter was retired.
+        build = getattr(mem, "build_vault_map", None)
+        if not callable(build):
             return _error("Memory index not initialised")
         try:
-            vmap = idx_mgr.build_vault_map()
+            vmap = build()
         except Exception as exc:
             return _error(f"Failed to build vault map: {exc}")
 
