@@ -1,12 +1,13 @@
 """
 Memory subsystem for Geny Agent.
 
-Provides long-term and short-term memory backed by files inside the
-session's storage directory, inspired by OpenClaw's MEMORY.md +
-session JSONL patterns.
+Long-term memory backed by files inside the session's storage
+directory; short-term memory (transcripts/session.jsonl) is owned
+entirely by the executor's ``MemoryProvider.stm()`` after 1.21.0 —
+``SessionMemoryManager`` reaches for it through inline ``_stm_*``
+helpers; no host-side ``ShortTermMemory`` adapter exists.
 
-Includes an optional FAISS-backed vector memory layer for semantic
-search (see ``VectorMemoryManager``).
+Vector layer is an adapter on top of ``MemoryProvider.vector()``.
 
 Structured memory layer (Obsidian-like):
     StructuredMemoryWriter — frontmatter-based note creation
@@ -15,14 +16,12 @@ Structured memory layer (Obsidian-like):
 Public API:
     SessionMemoryManager   — per-session facade
     LongTermMemory         — MEMORY.md file I/O
-    ShortTermMemory        — JSONL transcript I/O
-    VectorMemoryManager    — FAISS vector indexing & retrieval
+    VectorMemoryManager    — vector adapter over provider.vector()
     MemorySearchResult     — search hit dataclass
 """
 
 from service.memory.manager import SessionMemoryManager
 from service.memory.long_term import LongTermMemory
-from service.memory.short_term import ShortTermMemory
 from service.memory.vector_memory import VectorMemoryManager
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import MemoryIndexManager
@@ -33,7 +32,6 @@ from service.memory.curated_knowledge import CuratedKnowledgeManager, get_curate
 __all__ = [
     "SessionMemoryManager",
     "LongTermMemory",
-    "ShortTermMemory",
     "VectorMemoryManager",
     "StructuredMemoryWriter",
     "MemoryIndexManager",

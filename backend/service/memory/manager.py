@@ -7,7 +7,8 @@ per session, analogous to OpenClaw's MemorySearchManager.
 Each session gets its own SessionMemoryManager tied to its storage_path.
 The manager owns:
   - LongTermMemory  (memory/*.md files)
-  - ShortTermMemory (transcripts/session.jsonl)
+  - STM access      (transcripts/session.jsonl) — provider direct,
+                     no host-side adapter (1.21.0 retired ``ShortTermMemory``).
 
 It handles:
   - Unified search across both stores
@@ -20,10 +21,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from service.memory.long_term import LongTermMemory
-from service.memory.short_term import ShortTermMemory
 from service.memory.vector_memory import VectorMemoryManager
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import MemoryIndexManager
@@ -46,6 +47,41 @@ DEFAULT_MAX_INJECT_CHARS = 8_000
 _LTM_INPUT_PREVIEW = 300
 _LTM_OUTPUT_PREVIEW = 800
 _LTM_TODO_RESULT_PREVIEW = 400
+
+# Bound for `_stm_load_all` — same as the legacy `ShortTermMemory`
+# adapter used. Keeps memory inspect tools from accidentally pulling
+# the entire session history when a session has thousands of turns.
+_RECENT_LARGE_N = 5000
+
+
+def _content_to_text(content: Any) -> str:
+    """Render `Turn.content` as a flat string. Mirrors what the
+    retired `ShortTermMemory._content_to_text` helper produced."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+                elif block.get("type") == "tool_use":
+                    parts.append(f"[tool_use:{block.get('name', '?')}]")
+                elif block.get("type") == "tool_result":
+                    parts.append(f"[tool_result:{block.get('tool_use_id', '?')}]")
+                else:
+                    parts.append(str(block))
+            else:
+                parts.append(str(block))
+        return "\n".join(p for p in parts if p)
+    try:
+        import json as _json
+
+        return _json.dumps(content, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(content)
 
 
 class SessionMemoryManager:
@@ -95,7 +131,15 @@ class SessionMemoryManager:
         self._max_inject_chars = max_inject_chars
 
         self._ltm = LongTermMemory(storage_path)
-        self._stm = ShortTermMemory(storage_path)
+        # STM access goes through the executor `MemoryProvider` directly
+        # — the legacy `ShortTermMemory` adapter was retired in 1.21.0.
+        # Helper methods on this class (``_stm_*``) wrap the async
+        # provider calls in `run_coro_sync` so the rest of the manager
+        # keeps its sync surface.
+        self._memory_provider: Optional[Any] = None
+        self._transcript_dir = Path(storage_path) / "transcripts"
+        self._stm_jsonl = self._transcript_dir / "session.jsonl"
+        self._stm_summary_path = self._transcript_dir / "summary.md"
         # The vector layer is an adapter over the executor `MemoryProvider`
         # — `set_memory_provider` plugs the live composite in once
         # `AgentSession._init_memory_provider` has built it. Until that
@@ -161,8 +205,9 @@ class SessionMemoryManager:
         which the executor's flat-category NotesHandle doesn't
         model.
         """
-        if self._stm is not None:
-            self._stm.set_memory_provider(provider)
+        # Cache the provider on the manager so the inline ``_stm_*``
+        # helpers can route every operation through ``provider.stm()``.
+        self._memory_provider = provider
         if self._ltm is not None:
             self._ltm.set_memory_provider(provider)
         if self._index_manager is not None:
@@ -229,9 +274,10 @@ class SessionMemoryManager:
     def long_term(self) -> LongTermMemory:
         return self._ltm
 
-    @property
-    def short_term(self) -> ShortTermMemory:
-        return self._stm
+    # NOTE: the ``short_term`` property was retired in 1.21.0 along with
+    # the ``ShortTermMemory`` adapter. Callers that previously did
+    # ``mgr.short_term.load_all()`` should call ``mgr.load_all_stm()``
+    # (kept on the manager as the public read surface).
 
     @property
     def vector_memory(self) -> VectorMemoryManager:
@@ -250,13 +296,182 @@ class SessionMemoryManager:
         return self._storage_path
 
     # ------------------------------------------------------------------
+    # STM helpers (1.21.0 — provider direct, no host adapter)
+    #
+    # Each helper wraps the executor's async ``STMHandle`` in a sync
+    # call via ``run_coro_sync`` so the rest of the manager keeps its
+    # synchronous surface. Type conversion (Turn → MemoryEntry,
+    # Turn → MemorySearchResult) happens inline.
+    # ------------------------------------------------------------------
+
+    def _stm_append_message(
+        self,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._memory_provider is None:
+            return
+        from geny_executor.memory.provider import Turn
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        turn = Turn(
+            role=role,
+            content=content,
+            timestamp=datetime.now(_get_tz()),
+            metadata=dict(metadata) if metadata else {},
+        )
+        try:
+            run_coro_sync(self._memory_provider.stm().append(turn))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._stm_append_message: provider.stm().append failed",
+                exc_info=True,
+            )
+
+    def _stm_append_event(
+        self,
+        event: str,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._memory_provider is None:
+            return
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(
+                self._memory_provider.stm().append_event(
+                    event, dict(data) if data else None
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._stm_append_event: provider.stm().append_event failed",
+                exc_info=True,
+            )
+
+    def _stm_get_summary(self) -> Optional[str]:
+        if self._memory_provider is None:
+            return None
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            text = run_coro_sync(self._memory_provider.stm().read_summary())
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._stm_get_summary: provider.stm().read_summary failed",
+                exc_info=True,
+            )
+            return None
+        if not text:
+            return None
+        return text.strip() or None
+
+    def _stm_write_summary(self, body: str) -> None:
+        if self._memory_provider is None:
+            return
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(self._memory_provider.stm().write_summary(body))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._stm_write_summary: provider.stm().write_summary failed",
+                exc_info=True,
+            )
+
+    def _stm_get_recent(self, n: int) -> List[MemoryEntry]:
+        if self._memory_provider is None or n <= 0:
+            return []
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            turns = run_coro_sync(self._memory_provider.stm().recent(n=n))
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._stm_get_recent: provider.stm().recent failed",
+                exc_info=True,
+            )
+            return []
+        return [self._turn_to_entry(turn, idx=i) for i, turn in enumerate(turns)]
+
+    def _stm_load_all(self) -> List[MemoryEntry]:
+        # Bounded large-N read — same shape `ShortTermMemory.load_all`
+        # used to return.
+        return self._stm_get_recent(_RECENT_LARGE_N)
+
+    def _stm_search(
+        self,
+        query: str,
+        max_results: int = 10,
+    ) -> List[MemorySearchResult]:
+        if not query or not query.strip() or self._memory_provider is None:
+            return []
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            turns = run_coro_sync(
+                self._memory_provider.stm().search(query, limit=max_results)
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._stm_search: provider.stm().search failed",
+                exc_info=True,
+            )
+            return []
+        results: List[MemorySearchResult] = []
+        for turn in turns:
+            entry = self._turn_to_entry(turn)
+            content = entry.content
+            snippet = content[:240] + "..." if len(content) > 240 else content
+            results.append(
+                MemorySearchResult(
+                    entry=entry,
+                    score=1.0,
+                    snippet=snippet,
+                    match_type="keyword",
+                )
+            )
+        return results
+
+    def _turn_to_entry(self, turn: Any, *, idx: int = 0) -> MemoryEntry:
+        """Convert an executor `Turn` into the host-side `MemoryEntry`."""
+        content_text = _content_to_text(turn.content)
+        role = getattr(turn, "role", "user") or "user"
+        try:
+            transcript_rel = str(self._stm_jsonl.relative_to(self._storage_path))
+        except ValueError:
+            transcript_rel = "transcripts/session.jsonl"
+        return MemoryEntry(
+            source=MemorySource.SHORT_TERM,
+            content=f"[{role}] {content_text}",
+            timestamp=getattr(turn, "timestamp", None),
+            filename=transcript_rel,
+            line_start=idx + 1,
+            line_end=idx + 1,
+            metadata={"role": role, **(getattr(turn, "metadata", None) or {})},
+        )
+
+    # Public read surface that legacy callers
+    # (``memory_inspect_tools._stm_load_all``) can reach for. Keeps
+    # the post-1.21.0 surface deliberately small — no parallel
+    # ``ShortTermMemory`` object to expose.
+    def load_all_stm(self) -> List[MemoryEntry]:
+        return self._stm_load_all()
+
+    def get_recent_stm(self, n: int = 20) -> List[MemoryEntry]:
+        return self._stm_get_recent(n)
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
         """Set up directory structure for both memory stores."""
         self._ltm.ensure_directory()
-        self._stm.ensure_directory()
+        # transcripts/ dir is created by the executor's STM store on
+        # the first append; nothing to do here.
+        self._transcript_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize structured memory layer
         memory_dir = self._ltm.memory_dir
@@ -374,9 +589,8 @@ class SessionMemoryManager:
         # for every STM append, which now includes both the stage 18
         # `_drive_provider` path *and* this synchronous
         # `record_message` (agent-DM tool, internal triggers, etc.)
-        # — both call `provider.stm().append` via
-        # `ShortTermMemory.add_message`, which fires the hook.
-        self._stm.add_message(role, content, metadata=out_meta)
+        # — both call `provider.stm().append`, which fires the hook.
+        self._stm_append_message(role, content, out_meta)
 
     def _maybe_archive_conversation(
         self,
@@ -432,7 +646,7 @@ class SessionMemoryManager:
 
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""
-        self._stm.add_event(event, data)
+        self._stm_append_event(event, data)
 
     def record_compaction(
         self,
@@ -1067,7 +1281,7 @@ class SessionMemoryManager:
             results.extend(ltm_results)
 
         if sources is None or MemorySource.SHORT_TERM in sources:
-            stm_results = self._stm.search(query, max_results=max_results)
+            stm_results = self._stm_search(query, max_results)
             results.extend(stm_results)
 
         # Sort by combined score, deduplicate if needed
@@ -1209,7 +1423,7 @@ class SessionMemoryManager:
 
         # 1. Session summary (if available)
         if include_summary:
-            summary = self._stm.get_summary()
+            summary = self._stm_get_summary()
             if summary and (total_chars + len(summary)) <= budget:
                 parts.append(f"<session-summary>\n{summary}\n</session-summary>")
                 total_chars += len(summary)
@@ -1241,7 +1455,7 @@ class SessionMemoryManager:
 
         # 4. Recent transcript messages
         if include_recent > 0:
-            recent = self._stm.get_recent(n=include_recent)
+            recent = self._stm_get_recent(include_recent)
             for entry in recent:
                 if (total_chars + entry.char_count) > budget:
                     break
@@ -1292,7 +1506,7 @@ class SessionMemoryManager:
 
         # 1. Session summary
         if include_summary:
-            summary = self._stm.get_summary()
+            summary = self._stm_get_summary()
             if summary and (total_chars + len(summary)) <= budget:
                 parts.append(f"<session-summary>\n{summary}\n</session-summary>")
                 total_chars += len(summary)
@@ -1342,7 +1556,7 @@ class SessionMemoryManager:
 
         # 5. Recent transcript messages
         if include_recent > 0:
-            recent = self._stm.get_recent(n=include_recent)
+            recent = self._stm_get_recent(include_recent)
             for entry in recent:
                 if (total_chars + entry.char_count) > budget:
                     break
@@ -1404,7 +1618,7 @@ class SessionMemoryManager:
             return None
 
         now = datetime.now(_get_tz())
-        all_entries = self._stm.load_all()
+        all_entries = self._stm_load_all()
         if not all_entries:
             return None
 
@@ -1477,7 +1691,7 @@ class SessionMemoryManager:
         self._ltm.write_execution(summary_text)
 
         # Persist session summary for future context injection on restore
-        self._stm.write_summary(summary_text)
+        self._stm_write_summary(summary_text)
 
         # Persist vector index
         if self._vmm.enabled:
@@ -1544,7 +1758,7 @@ class SessionMemoryManager:
 
         # Fallback: load all entries from file system
         ltm_entries = self._ltm.load_all()
-        stm_entries = self._stm.load_all()
+        stm_entries = self._stm_load_all()
 
         ltm_chars = sum(e.char_count for e in ltm_entries)
         stm_chars = sum(e.char_count for e in stm_entries)
