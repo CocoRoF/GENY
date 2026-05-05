@@ -2186,7 +2186,7 @@ class AgentSession:
             # every layer (retrieval, record_turn fan-out, reflection
             # gate) sees the same policy view.
             from service.memory.dedupe_strategy import GenyDedupeStrategy
-            from service.memory.index import _CATEGORY_DESCRIPTIONS
+            from service.memory.types import CATEGORY_DESCRIPTIONS as _CATEGORY_DESCRIPTIONS
 
             # ── 1. Hooks (single bag of policy + business callbacks)
             hooks_kwargs: Dict[str, Any] = dict(

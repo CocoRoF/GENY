@@ -22,13 +22,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from service.memory.vector_memory import VectorSearchResult
-from service.memory.index import (
+from service.memory.types import (
+    CATEGORY_DESCRIPTIONS,
+    MemoryEntry,
     MemoryFileInfo,
     MemoryIndex,
-    _CATEGORY_DESCRIPTIONS,
-)
-from service.memory.types import (
-    MemoryEntry,
     MemorySearchResult,
     MemorySource,
     MemoryStats,
@@ -879,7 +877,7 @@ class SessionMemoryManager:
         try:
             return run_coro_sync(
                 self._memory_provider.index().build_vault_map(
-                    category_descriptions=_CATEGORY_DESCRIPTIONS,
+                    category_descriptions=CATEGORY_DESCRIPTIONS,
                 )
             )
         except Exception:  # noqa: BLE001
