@@ -43,7 +43,7 @@
 | PR | 내용 | 상태 |
 |---|---|---|
 | PR-B (executor#189) | EXEC-1+2+3+4+5+7+8+9 모두 단일 PR 로 통합 (4-commit stack on `feat/generic-retriever-strategy-hooks`) | ⏳ CI 진행 중 / 1.20.0 |
-| PR-C1 | Geny `AgentSession` 단일 hook 주입 | ⏳ 대기 |
+| PR-C1 ([Geny#689](https://github.com/CocoRoF/Geny/pull/689)) | bump 1.20.0 + retriever/strategy/persistence 새 클래스 + hooks 통합 | ✅ 머지 |
 | PR-C2 | Geny thin adapter 일괄 폐기 | ⏳ 대기 |
 | PR-C3 | Geny controller / FastAPI async 일원화 (`run_coro_sync` 제거) | ⏳ 대기 |
 | PR-C4 | Geny 비즈니스 hook 함수 (`service/hooks/geny_memory_hooks.py`) | ⏳ 대기 |
