@@ -1,14 +1,16 @@
 """
 Memory Controller — REST API for structured memory management.
 
-Provides endpoints for browsing, searching, creating, updating, and
-deleting structured memory notes within an agent session.
-
-All endpoints are scoped to a session via ``/api/agents/{session_id}/memory``.
+All endpoints are scoped to a session via ``/api/agents/{session_id}/memory``
+and call the executor's ``MemoryProvider`` directly. The legacy host-side
+``SessionMemoryManager`` facade is no longer touched here — we go through
+the provider's typed handles (``stm()`` / ``ltm()`` / ``notes()`` /
+``vector()`` / ``index()``) for every operation.
 """
+
 import json
 from logging import getLogger
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
@@ -58,16 +60,30 @@ class SearchRequest(BaseModel):
 # Helpers
 # ============================================================================
 
-def _get_memory_manager(session_id: str):
-    """Get the SessionMemoryManager for a session, raising 404 if not found."""
+def _get_provider(session_id: str):
+    """Return the live `MemoryProvider` for a session, raising 404 when
+    the session doesn't exist or hasn't initialised the provider yet.
+    """
     agent_manager = get_agent_session_manager()
     agent = agent_manager.get_agent(session_id)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-    mm = agent.memory_manager
-    if mm is None:
-        raise HTTPException(status_code=503, detail="Memory manager not initialized")
-    return mm
+    provider = getattr(agent, "memory_provider", None)
+    if provider is None:
+        raise HTTPException(status_code=503, detail="Memory provider not initialized")
+    return provider
+
+
+def _importance_value(importance: str):
+    """Coerce a string importance into the executor's ``Importance``
+    enum; falls back to ``MEDIUM`` for unknown values.
+    """
+    from geny_executor.memory.provider import Importance
+
+    try:
+        return Importance(str(importance).lower())
+    except ValueError:
+        return Importance.MEDIUM
 
 
 # ============================================================================
@@ -76,36 +92,62 @@ def _get_memory_manager(session_id: str):
 
 @router.get("/{session_id}/memory")
 async def get_memory_index(request: Request, session_id: str = Path(...)):
-    """Get the full memory index (file list, tags, stats)."""
-    mm = _get_memory_manager(session_id)
-    index = mm.get_memory_index()
-    stats = mm.get_stats()
+    """Return the in-memory index snapshot + simple counts.
+
+    The on-disk root ``_index.json`` is a *bounded* folder-tree summary
+    (executor 1.21.0). For per-note metadata callers must drill into a
+    category shard; this endpoint returns the in-memory ``snapshot()``
+    payload (`files` / `tag_map` / `link_graph`) for backwards
+    compatibility with existing UI consumers.
+    """
+    provider = _get_provider(session_id)
+    snap = await provider.index().snapshot()
+    files = snap.get("files") or {}
     return {
-        "index": index or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
-        "stats": stats.to_dict(),
+        "index": snap if files or "files" in snap else {
+            "files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0,
+        },
+        "stats": {
+            "total_files": int(snap.get("total_files", len(files)) or 0),
+            "total_chars": int(snap.get("total_chars", 0) or 0),
+        },
     }
 
 
 @router.get("/{session_id}/memory/stats")
 async def get_memory_stats(request: Request, session_id: str = Path(...)):
-    """Get memory statistics."""
-    mm = _get_memory_manager(session_id)
-    stats = mm.get_stats()
-    return stats.to_dict()
+    """Memory statistics — totals + per-category counts."""
+    provider = _get_provider(session_id)
+    snap = await provider.index().snapshot()
+    files = snap.get("files") or {}
+    by_cat: Dict[str, int] = {}
+    for entry in files.values():
+        cat = entry.get("category") or "root"
+        by_cat[cat] = by_cat.get(cat, 0) + 1
+    return {
+        "total_files": int(snap.get("total_files", len(files)) or 0),
+        "total_chars": int(snap.get("total_chars", 0) or 0),
+        "categories": by_cat,
+    }
 
 
 @router.get("/{session_id}/memory/tags")
 async def get_memory_tags(request: Request, session_id: str = Path(...)):
-    """Get all tags and their counts."""
-    mm = _get_memory_manager(session_id)
-    return {"tags": mm.get_memory_tags()}
+    """All tags in use + their note counts."""
+    provider = _get_provider(session_id)
+    counts = await provider.index().tag_counts()
+    return {"tags": counts}
 
 
 @router.get("/{session_id}/memory/graph")
 async def get_memory_graph(request: Request, session_id: str = Path(...)):
-    """Get link graph data for visualization."""
-    mm = _get_memory_manager(session_id)
-    return mm.get_memory_graph()
+    """Wikilink graph snapshot (nodes + directed edges)."""
+    provider = _get_provider(session_id)
+    graph = await provider.index().graph()
+    return {
+        "nodes": [n.ref.filename for n in (graph.nodes or [])],
+        "edges": [{"source": s, "target": t} for s, t in (graph.edges or [])],
+    }
 
 
 # ============================================================================
@@ -118,11 +160,36 @@ async def list_memory_files(
     session_id: str = Path(...),
     category: Optional[str] = Query(None),
     tag: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
-    """List memory files with optional filters."""
-    mm = _get_memory_manager(session_id)
-    notes = mm.list_notes(category=category, tag=tag)
-    return {"files": notes, "total": len(notes)}
+    """List memory files with optional filters. Uses the
+    progressive-disclosure ``IndexHandle.list_notes`` API — bounded
+    by ``limit``/``offset`` so the response stays small even on a
+    vault with thousands of notes.
+    """
+    provider = _get_provider(session_id)
+    summaries = await provider.index().list_notes(
+        category=category, tag=tag, limit=limit, offset=offset,
+    )
+    return {
+        "files": [
+            {
+                "filename": s.filename,
+                "title": s.title,
+                "category": s.category,
+                "tags": list(s.tags),
+                "importance": s.importance,
+                "char_count": s.char_count,
+                "modified": s.modified,
+                "first_paragraph": s.first_paragraph,
+            }
+            for s in summaries
+        ],
+        "total": len(summaries),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{session_id}/memory/files/{filename:path}")
@@ -131,12 +198,87 @@ async def read_memory_file(
     session_id: str = Path(...),
     filename: str = Path(...),
 ):
-    """Read a single memory file with metadata and body."""
-    mm = _get_memory_manager(session_id)
-    result = mm.read_note(filename)
-    if result is None:
+    """Read a single memory file (frontmatter metadata + body)."""
+    provider = _get_provider(session_id)
+    note = await provider.notes().read(filename)
+    if note is None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-    return result
+    return {
+        "filename": note.ref.filename,
+        "title": note.title,
+        "body": note.body,
+        "category": note.category,
+        "tags": list(note.tags or []),
+        "importance": (
+            note.importance.value if hasattr(note.importance, "value") else str(note.importance)
+        ),
+        "frontmatter": dict(note.frontmatter or {}),
+        "links_to": list(note.links_out or []),
+        "linked_from": list(note.links_in or []),
+        "created": note.created_at.isoformat() if note.created_at else "",
+        "modified": note.updated_at.isoformat() if note.updated_at else "",
+        "metadata": dict(note.metadata or {}),
+        "interaction": {
+            "event_id": note.event_id,
+            "linked_event_id": note.linked_event_id,
+            "kind": note.kind,
+            "direction": note.direction,
+            "counterpart_id": note.counterpart_id,
+            "counterpart_role": note.counterpart_role,
+            "session_id": note.session_id,
+        },
+    }
+
+
+@router.get("/{session_id}/memory/files/{filename:path}/outline")
+async def read_memory_outline(
+    request: Request,
+    session_id: str = Path(...),
+    filename: str = Path(...),
+):
+    """Return the markdown heading tree of a single note. Step 3 of
+    the progressive-disclosure read chain (categories → notes →
+    outline → section).
+    """
+    provider = _get_provider(session_id)
+    outline = await provider.index().read_outline(filename)
+    if outline is None:
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    def _node_to_dict(n) -> Dict[str, Any]:
+        return {
+            "level": n.level,
+            "heading": n.heading,
+            "line_start": n.line_start,
+            "line_end": n.line_end,
+            "children": [_node_to_dict(c) for c in (n.children or [])],
+        }
+
+    return {
+        "filename": outline.filename,
+        "title": outline.title,
+        "headings": [_node_to_dict(h) for h in outline.headings],
+    }
+
+
+@router.get("/{session_id}/memory/files/{filename:path}/sections/{heading}")
+async def read_memory_section(
+    request: Request,
+    session_id: str = Path(...),
+    filename: str = Path(...),
+    heading: str = Path(...),
+):
+    """Return the body of a single section by heading. Step 4 of the
+    progressive-disclosure chain.
+    """
+    provider = _get_provider(session_id)
+    body = await provider.index().read_section(filename, heading)
+    if body is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Section not found: {filename} / {heading}",
+        )
+    return {"filename": filename, "heading": heading, "body": body}
 
 
 @router.post("/{session_id}/memory/files")
@@ -145,20 +287,20 @@ async def create_memory_file(
     session_id: str = Path(...),
     req: WriteNoteRequest = ...,
 ):
-    """Create a new structured memory note."""
-    mm = _get_memory_manager(session_id)
-    filename = mm.write_note(
+    """Create a new structured memory note via ``provider.notes().write``."""
+    from geny_executor.memory.provider import NoteDraft
+
+    provider = _get_provider(session_id)
+    draft = NoteDraft(
         title=req.title,
-        content=req.content,
+        body=req.content,
+        importance=_importance_value(req.importance),
+        tags=list(req.tags),
         category=req.category,
-        tags=req.tags,
-        importance=req.importance,
-        source=req.source,
-        links_to=req.links_to,
+        metadata={"source": req.source} if req.source else {},
     )
-    if filename is None:
-        raise HTTPException(status_code=500, detail="Failed to create memory note")
-    return {"filename": filename, "message": "Note created successfully"}
+    meta = await provider.notes().write(draft)
+    return {"filename": meta.ref.filename, "message": "Note created successfully"}
 
 
 @router.put("/{session_id}/memory/files/{filename:path}")
@@ -169,15 +311,18 @@ async def update_memory_file(
     req: UpdateNoteRequest = ...,
 ):
     """Update an existing memory note."""
-    mm = _get_memory_manager(session_id)
-    ok = mm.update_note(
-        filename,
+    from geny_executor.memory.provider import NotePatch
+
+    provider = _get_provider(session_id)
+    patch = NotePatch(
         body=req.content,
-        tags=req.tags,
-        importance=req.importance,
+        tags=list(req.tags) if req.tags is not None else None,
+        importance=_importance_value(req.importance) if req.importance is not None else None,
     )
-    if not ok:
-        raise HTTPException(status_code=404, detail=f"File not found or update failed: {filename}")
+    try:
+        await provider.notes().update(filename, patch)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     return {"filename": filename, "message": "Note updated successfully"}
 
 
@@ -188,10 +333,10 @@ async def delete_memory_file(
     filename: str = Path(...),
 ):
     """Delete a memory note."""
-    mm = _get_memory_manager(session_id)
-    ok = mm.delete_note(filename)
+    provider = _get_provider(session_id)
+    ok = await provider.notes().delete(filename)
     if not ok:
-        raise HTTPException(status_code=404, detail=f"File not found or delete failed: {filename}")
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     return {"message": "Note deleted successfully"}
 
 
@@ -210,66 +355,83 @@ async def search_memory(
     counterpart: Optional[str] = Query(
         None,
         description=(
-            "Cycle 20260430_3 E — narrow InteractionEvent hits to a "
-            "specific counterpart_id (canonical). Non-event memories "
-            "(LTM notes / curated knowledge) are unaffected."
+            "Narrow InteractionEvent hits to a specific ``counterpart_id``. "
+            "Non-event memories (LTM notes / curated knowledge) pass through."
         ),
     ),
     kinds: Optional[str] = Query(
         None,
         description=(
             "Comma-separated InteractionEvent kinds — e.g. "
-            "'tool_run_summary,task_result'. Non-event memories "
-            "are unaffected."
+            "'tool_run_summary,task_result'. Non-event memories pass through."
         ),
     ),
 ):
-    """Search memory with keyword matching."""
-    mm = _get_memory_manager(session_id)
-    results = mm.search(q, max_results=max_results)
+    """Keyword search across notes (importance + category boost)."""
+    provider = _get_provider(session_id)
+    chunks = await provider.notes().search(q, limit=max_results)
 
     kind_set = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
     filtered = _apply_interaction_event_filters(
-        results, counterpart=counterpart, kinds=kind_set,
+        chunks, counterpart=counterpart, kinds=kind_set,
     )
+    if category:
+        filtered = [c for c in filtered if (c.metadata or {}).get("category") == category]
+    if tag:
+        needle = tag.lower()
+        filtered = [
+            c for c in filtered
+            if needle in {str(t).lower() for t in (c.metadata or {}).get("tags", [])}
+        ]
 
     return {
         "query": q,
-        "results": [r.to_dict() for r in filtered],
+        "results": [
+            {
+                "key": c.key,
+                "content": c.content,
+                "source": c.source,
+                "relevance_score": c.relevance_score,
+                "metadata": dict(c.metadata or {}),
+            }
+            for c in filtered
+        ],
         "total": len(filtered),
         "filters": {
             "counterpart": counterpart,
             "kinds": sorted(kind_set) if kind_set else None,
+            "category": category,
+            "tag": tag,
         },
     }
 
 
 def _apply_interaction_event_filters(
-    results,
+    chunks,
     *,
     counterpart: Optional[str],
     kinds: Optional[set],
 ):
-    """Cycle 20260430_3 E — narrow only InteractionEvent hits.
+    """Narrow only InteractionEvent hits.
 
-    A search result is treated as an InteractionEvent hit when its
-    entry metadata carries an ``event_id``. Non-event hits (LTM
-    notes / curated knowledge / vector hits without an event_id)
-    pass through every filter so the durable knowledge layer never
-    disappears just because the user added an event filter.
+    A chunk is treated as an InteractionEvent hit when its metadata
+    carries an ``event_id``. Non-event hits (LTM notes / curated
+    knowledge / vector hits without an event_id) pass through every
+    filter so the durable knowledge layer never disappears just
+    because the user added an event filter.
     """
     if not counterpart and not kinds:
-        return list(results)
+        return list(chunks)
     out = []
-    for r in results:
-        meta = getattr(r.entry, "metadata", None) or {}
+    for c in chunks:
+        meta = c.metadata or {}
         event_id = meta.get("event_id")
         if event_id:
             if counterpart and meta.get("counterpart_id") != counterpart:
                 continue
             if kinds is not None and meta.get("kind") not in kinds:
                 continue
-        out.append(r)
+        out.append(c)
     return out
 
 
@@ -280,12 +442,21 @@ async def search_memory_post(
     req: SearchRequest = ...,
 ):
     """Search memory (POST variant for complex queries)."""
-    mm = _get_memory_manager(session_id)
-    results = mm.search(req.query, max_results=req.max_results)
+    provider = _get_provider(session_id)
+    chunks = await provider.notes().search(req.query, limit=req.max_results)
     return {
         "query": req.query,
-        "results": [r.to_dict() for r in results],
-        "total": len(results),
+        "results": [
+            {
+                "key": c.key,
+                "content": c.content,
+                "source": c.source,
+                "relevance_score": c.relevance_score,
+                "metadata": dict(c.metadata or {}),
+            }
+            for c in chunks
+        ],
+        "total": len(chunks),
     }
 
 
@@ -300,8 +471,8 @@ async def create_memory_link(
     req: LinkNotesRequest = ...,
 ):
     """Create a wikilink between two notes."""
-    mm = _get_memory_manager(session_id)
-    ok = mm.link_notes(req.source_filename, req.target_filename)
+    provider = _get_provider(session_id)
+    ok = await provider.notes().link(req.source_filename, req.target_filename)
     if not ok:
         raise HTTPException(status_code=400, detail="Failed to create link")
     return {"message": "Link created successfully"}
@@ -314,24 +485,41 @@ async def create_memory_link(
 @router.post("/{session_id}/memory/reindex")
 async def reindex_memory(request: Request, session_id: str = Path(...)):
     """Force a full rebuild of the memory index."""
-    mm = _get_memory_manager(session_id)
-    count = mm.reindex_memory()
-    return {"message": "Reindex complete", "total_files": count}
+    provider = _get_provider(session_id)
+    await provider.index().rebuild()
+    snap = await provider.index().snapshot()
+    return {
+        "message": "Reindex complete",
+        "total_files": int(snap.get("total_files", 0) or 0),
+    }
 
 
 @router.post("/{session_id}/memory/migrate")
 async def migrate_memory(session_id: str = Path(...)):
-    """Legacy migration endpoint — retired in path-A migration GENY-7c.
-
-    The thin-adapter cycle dropped legacy-data migration entirely;
-    new sessions land directly in the executor-owned layout. This
-    endpoint stays for back-compat with any operator UI that polls
-    it, but it is now a no-op.
+    """Legacy migration endpoint — retired. Sessions land directly in
+    the executor-owned layout from boot.
     """
     return {
         "message": "Migration retired — sessions use the executor layout from boot.",
-        "summary": "no changes (path-A migration removed the migrator)",
+        "summary": "no changes",
     }
+
+
+# ============================================================================
+# Endpoints — Categories (progressive disclosure step 1)
+# ============================================================================
+
+@router.get("/{session_id}/memory/categories")
+async def list_memory_categories(
+    request: Request,
+    session_id: str = Path(...),
+):
+    """Step 1 of the progressive-disclosure read chain: every
+    category folder + file count + description.
+    """
+    provider = _get_provider(session_id)
+    cats = await provider.index().list_categories()
+    return {"categories": cats}
 
 
 # ============================================================================
@@ -347,7 +535,13 @@ async def promote_to_global(
     filename = req.get("filename")
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
-    mm = _get_memory_manager(session_id)
+    agent_manager = get_agent_session_manager()
+    agent = agent_manager.get_agent(session_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    mm = agent.memory_manager
+    if mm is None:
+        raise HTTPException(status_code=503, detail="Memory manager not initialized")
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
     global_fn = gmm.promote(mm, filename, session_id=session_id)
