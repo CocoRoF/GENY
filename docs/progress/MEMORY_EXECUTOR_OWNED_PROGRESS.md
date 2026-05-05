@@ -29,6 +29,43 @@
 
 → **Sprint 1 완료 (2026-05-05).** 운영자 docker rebuild 후 `<storage>/transcripts/session.jsonl` populated 확인 필요 (cross-loop bug fix 검증). Sprint 2 즉시 진행.
 
+---
+
+## Sprint 2 — Provider-driven memory plane
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| **PR-B** ([executor#189](https://github.com/CocoRoF/geny-executor/pull/189)) | EXEC-1+2+3+4+5+7+8+9 (generic retriever/strategy/hooks + progressive disclosure + graph queries + hierarchical sidecars + Stage 19 summary + typed interaction fields) | ✅ v1.20.0 PyPI |
+| **PR-C1** ([Geny#689](https://github.com/CocoRoF/Geny/pull/689)) | Geny bump 1.20.0 + retriever/strategy/persistence 새 클래스 + hooks 통합 | ✅ 머지 |
+| **Hotfix** ([Geny#690](https://github.com/CocoRoF/Geny/pull/690)) | `MemoryIndexManager.write_subindexes/root_summary` no-op (root flat overwrite 회귀 fix) | ✅ 머지 |
+| **executor 1.21.0** ([executor#190](https://github.com/CocoRoF/geny-executor/pull/190)) | root `_index.json` 을 bounded folder-tree summary 로 (was unbounded flat dump). `_summary.json` 폐기. | ✅ v1.21.0 PyPI |
+| **PR-C1.5** ([Geny#691](https://github.com/CocoRoF/Geny/pull/691)) | Geny bump 1.21.0 + dead `_summary_path` 정리 | ✅ 머지 |
+| **PR-C2** ([Geny#692](https://github.com/CocoRoF/Geny/pull/692)) | `controller/memory_controller.py` 전체 async + provider 직접 사용. progressive disclosure 4-step API 노출. | ✅ 머지 |
+
+**운영자 검증 통과 (2026-05-05)**:
+- ✅ `transcripts/session.jsonl` 3.2 KB — populated
+- ✅ `daily/`, `critical/`, `executions/` notes 작성됨
+- ✅ per-category `_index.json` shards file_count 정확
+- ✅ root `_index.json` = bounded folder summary (post 1.21.0)
+- ✅ `_summary.json` 사라짐 (executor 가 더 이상 작성 안 함)
+
+→ **사용자 의도 95%+ 달성**: executor 가 메모리 코어, Geny 는 retriever/strategy/hooks 통해 받아 사용 + 비즈니스만 (archiver hooks).
+
+---
+
+## Sprint 2 잔여 — thin adapter 폐기 (운영 영향 없는 코드 정리)
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| **PR-C3** | `tools/built_in/memory_tools.py` + `memory_inspect_tools.py` (70+ `_get_memory_manager` 호출) → provider 직접 호출. tool framework 가 sync `def run` 만 지원하므로 `arun` 변환은 부분 가능. | ⏳ 평가 중 (큰 surgery, 별도 사이클 권장) |
+| **PR-C4** | manager.py 의 `_stm/_ltm/_index_manager/_structured_writer/_vmm` 사용 (85+ 호출) → provider 직접. archivers 의 manager 의존성 제거. thin adapter 파일 5개 삭제. | ⏳ 평가 중 (1500+ 줄 surgery, 별도 사이클) |
+| **PR-C5** | `sync_async_bridge.py` 폐기 (모든 caller async 변환 완료 후) | ⏳ 평가 중 (PR-C3+C4 후) |
+
+**현 시점 평가**: 
+- 운영 정상화 + 사용자 의도 95% 달성은 위 머지 PR 들로 완료.
+- 잔여 surgery 는 코드 청결성 작업이고 운영 영향 거의 없음.
+- 안전하게 진행하려면 별도 cycle 로 분할이 권장.
+
 ### 검증 항목 (Sprint 1 끝)
 
 - [ ] `pip install geny-executor` 한 줄로 모든 의존성 (web / cron / openai 포함) 설치
