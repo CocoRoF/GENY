@@ -65,9 +65,11 @@ async def get_opsidian_index(auth: dict = Depends(require_auth)):
     """Get the user's Opsidian index and stats."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
+    idx = await mgr.aget_index()
+    stats = await mgr.aget_stats()
     return {
-        "index": mgr.get_index() or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
-        "stats": mgr.get_stats(),
+        "index": idx or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
+        "stats": stats,
         "username": username,
     }
 
@@ -77,7 +79,7 @@ async def get_opsidian_stats(auth: dict = Depends(require_auth)):
     """Get user Opsidian statistics."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    return mgr.get_stats()
+    return await mgr.aget_stats()
 
 
 @router.get("/graph")
@@ -85,7 +87,7 @@ async def get_opsidian_graph(auth: dict = Depends(require_auth)):
     """Get link graph data for visualization."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    return mgr.get_graph()
+    return await mgr.aget_graph()
 
 
 @router.get("/tags")
@@ -93,7 +95,7 @@ async def get_opsidian_tags(auth: dict = Depends(require_auth)):
     """Get all tags and their file counts."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    idx = mgr.get_index()
+    idx = await mgr.aget_index()
     if idx is None:
         return {"tags": {}}
     return {"tags": idx.get("tag_map", {})}
@@ -112,7 +114,7 @@ async def list_opsidian_files(
     """List files in the user's Opsidian vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    notes = mgr.list_notes(category=category, tag=tag)
+    notes = await mgr.alist_notes(category=category, tag=tag)
     return {"files": notes, "total": len(notes)}
 
 
@@ -124,7 +126,7 @@ async def read_opsidian_file(
     """Read a single note from the user's vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    result = mgr.read_note(filename)
+    result = await mgr.aread_note(filename)
     if result is None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     return result
@@ -138,7 +140,7 @@ async def create_opsidian_file(
     """Create a new note in the user's vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    filename = mgr.write_note(
+    filename = await mgr.awrite_note(
         title=req.title,
         content=req.content,
         category=req.category,
@@ -161,7 +163,7 @@ async def update_opsidian_file(
     """Update an existing note in the user's vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.update_note(
+    ok = await mgr.aupdate_note(
         filename, body=req.content, tags=req.tags, importance=req.importance, category=req.category,
     )
     if not ok:
@@ -177,7 +179,7 @@ async def delete_opsidian_file(
     """Delete a note from the user's vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.delete_note(filename)
+    ok = await mgr.adelete_note(filename)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Delete failed: {filename}")
     return {"message": "Note deleted successfully"}
@@ -196,7 +198,7 @@ async def search_opsidian(
     """Search across the user's personal notes."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    results = mgr.search(q, max_results=max_results)
+    results = await mgr.asearch(q, max_results=max_results)
     return {"query": q, "results": results, "total": len(results)}
 
 
@@ -212,7 +214,7 @@ async def create_opsidian_link(
     """Create a wikilink between two notes."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.create_link(req.source_filename, req.target_filename)
+    ok = await mgr.acreate_link(req.source_filename, req.target_filename)
     if not ok:
         raise HTTPException(status_code=404, detail="Failed to create link")
     return {"message": "Link created"}
@@ -223,5 +225,5 @@ async def reindex_opsidian(auth: dict = Depends(require_auth)):
     """Rebuild the full index from disk."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    total = mgr.reindex()
+    total = await mgr.areindex()
     return {"message": "Reindex complete", "total_files": total}
