@@ -21,7 +21,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.vector_memory import VectorMemoryManager
+from service.memory.vector_memory import VectorSearchResult
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import MemoryIndexManager
 from service.memory.types import (
@@ -139,12 +139,13 @@ class SessionMemoryManager:
         self._stm_summary_path = self._transcript_dir / "summary.md"
         self._memory_dir = Path(storage_path) / "memory"
         self._ltm_main_file = self._memory_dir / "MEMORY.md"
-        # The vector layer is an adapter over the executor `MemoryProvider`
-        # — `set_memory_provider` plugs the live composite in once
-        # `AgentSession._init_memory_provider` has built it. Until that
-        # point `_vmm.enabled` is False so retrieval / indexing is a
-        # no-op, never a hard failure.
-        self._vmm = VectorMemoryManager(storage_path, session_id=session_id or "")
+        # Vector access goes through the provider directly via inline
+        # ``_vmm_*`` helpers — no host-side ``VectorMemoryManager``
+        # stored on the manager (Sprint 3 step 3 retired it from the
+        # session manager). The adapter class itself stays in
+        # ``service/memory/vector_memory.py`` for ``curated_knowledge``
+        # which constructs its own per-user vector store; that wiring
+        # is retired in step 3.5.
 
         # Structured memory layer (Obsidian-like)
         self._index_manager: Optional[MemoryIndexManager] = None
@@ -210,8 +211,6 @@ class SessionMemoryManager:
         self._memory_provider = provider
         if self._index_manager is not None:
             self._index_manager.set_memory_provider(provider)
-        if self._vmm is not None:
-            self._vmm.set_memory_provider(provider)
         if self._structured_writer is not None:
             self._structured_writer.set_memory_provider(provider)
         if self._compaction_archiver is not None:
@@ -278,9 +277,10 @@ class SessionMemoryManager:
     # ``mgr.short_term.load_all()`` should call ``mgr.load_all_stm()``
     # (kept on the manager as the public read surface).
 
-    @property
-    def vector_memory(self) -> VectorMemoryManager:
-        return self._vmm
+    # NOTE: the ``vector_memory`` property was retired in Sprint 3
+    # step 3 along with the ``VectorMemoryManager`` field on the
+    # manager. Inline ``_vector_*`` helpers route through
+    # ``provider.vector()``.
 
     @property
     def index_manager(self) -> Optional[MemoryIndexManager]:
@@ -646,6 +646,117 @@ class SessionMemoryManager:
             )
         return results
 
+    # ------------------------------------------------------------------
+    # Vector helpers (Sprint 3 step 3 — provider direct)
+    # ------------------------------------------------------------------
+
+    @property
+    def _vector_enabled(self) -> bool:
+        return (
+            self._memory_provider is not None
+            and self._memory_provider.vector() is not None
+        )
+
+    async def _vector_initialize_and_index(self) -> bool:
+        """Index every existing markdown note into the vector store.
+
+        Mirror of the legacy ``VectorMemoryManager.initialize() +
+        index_memory_files()`` flow. New writes are auto-vectored by
+        the executor's ``_FilesystemNotesStore.attach_vector_indexer``
+        — this method exists so a session whose disk already carries
+        notes (e.g. resumed session) gets those rows into the vector
+        store on boot.
+        """
+        if not self._vector_enabled or self._memory_provider is None:
+            return False
+        notes_handle = self._memory_provider.notes()
+        vector_handle = self._memory_provider.vector()
+        try:
+            metas = await notes_handle.list()
+            items: List = []
+            for m in metas:
+                note = await notes_handle.read(m.ref.filename)
+                if note is None or not note.body:
+                    continue
+                items.append((note.ref, note.body))
+            if items:
+                await vector_handle.index_batch(items)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._vector_initialize_and_index failed",
+                exc_info=True,
+            )
+            return False
+        return True
+
+    async def _vector_index_text(self, text: str, source_filename: str) -> int:
+        if not self._vector_enabled or self._memory_provider is None or not text:
+            return 0
+        from geny_executor.memory.provider import NoteRef, Scope
+
+        ref = NoteRef(
+            filename=source_filename,
+            scope=Scope.SESSION,
+            backend="filesystem",
+        )
+        try:
+            return await self._memory_provider.vector().index(ref, text)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._vector_index_text failed (source=%s)",
+                source_filename, exc_info=True,
+            )
+            return 0
+
+    async def _vector_search(
+        self, query: str, *, top_k: int = 6
+    ) -> List["VectorSearchResult"]:
+        if not self._vector_enabled or self._memory_provider is None or not query:
+            return []
+        try:
+            chunks = await self._memory_provider.vector().search(query, top_k=top_k)
+        except Exception:  # noqa: BLE001
+            logger.warning("manager._vector_search failed", exc_info=True)
+            return []
+        out: List[VectorSearchResult] = []
+        for chunk in chunks:
+            meta = dict(chunk.metadata or {})
+            out.append(
+                VectorSearchResult(
+                    text=chunk.content,
+                    source_file=chunk.key,
+                    score=float(chunk.relevance_score),
+                    chunk_index=int(meta.get("chunk_index", 0)),
+                    metadata=meta,
+                )
+            )
+        return out
+
+    @staticmethod
+    def _vector_build_context(
+        results: List["VectorSearchResult"],
+        *,
+        max_chars: int = 5000,
+    ) -> str:
+        """Render vector hits as the XML block the prompt builder
+        injects (was ``VectorMemoryManager.build_vector_context``)."""
+        if not results:
+            return ""
+        parts: List[str] = []
+        total = 0
+        for r in results:
+            block = (
+                f'<vector-memory source="{r.source_file}" '
+                f'score="{r.score:.3f}" chunk="{r.chunk_index}">\n'
+                f"{r.text}\n"
+                f"</vector-memory>"
+            )
+            if total + len(block) > max_chars and parts:
+                break
+            parts.append(block)
+            total += len(block)
+        return "\n\n".join(parts)
+
     def _ltm_load_all(self) -> List[MemoryEntry]:
         """Load every LTM markdown file. Used by compaction.
 
@@ -746,11 +857,7 @@ class SessionMemoryManager:
             ``True`` if vector memory was enabled and initialised.
         """
         try:
-            ok = await self._vmm.initialize()
-            if ok:
-                # Index existing memory files on first load
-                await self._vmm.index_memory_files()
-            return ok
+            return await self._vector_initialize_and_index()
         except Exception:
             logger.warning(
                 "initialize_vector_memory failed (non-critical)",
@@ -1234,11 +1341,11 @@ class SessionMemoryManager:
             # Index into vector DB (only when LTM config is enabled)
             from service.config.sub_config.general.ltm_config import LTMConfig
 
-            if LTMConfig.is_enabled() and self._vmm.enabled:
+            if LTMConfig.is_enabled() and self._vector_enabled:
                 try:
                     date_str = datetime.now(_get_tz()).strftime("%Y-%m-%d")
                     source = f"memory/{date_str}.md"
-                    await self._vmm.index_text(entry, source)
+                    await self._vector_index_text(entry, source)
                 except Exception:
                     logger.debug(
                         "record_execution: vector indexing failed (non-critical)",
@@ -1526,15 +1633,16 @@ class SessionMemoryManager:
         #    are by definition LTM-derived).
         vector_results: list[MemorySearchResult] = []
         if sources is None or MemorySource.LONG_TERM in sources:
-            vmm = getattr(self, "_vmm", None)
-            if vmm is not None and getattr(vmm, "enabled", False):
+            if self._vector_enabled:
                 try:
-                    v_hits = await vmm.search(query, top_k=max_results)
+                    v_hits = await self._vector_search(query, top_k=max_results)
                 except Exception:
                     logger.debug(
                         "search_async: vector search failed", exc_info=True,
                     )
                     v_hits = []
+            else:
+                v_hits = []
                 for vr in v_hits or []:
                     text = getattr(vr, "text", "") or ""
                     if not text.strip():
@@ -1723,10 +1831,10 @@ class SessionMemoryManager:
             total_chars += main_mem.char_count
 
         # 3. Vector semantic search (if enabled)
-        if query and self._vmm.enabled:
+        if query and self._vector_enabled:
             try:
-                v_results = await self._vmm.search(query)
-                v_context = self._vmm.build_vector_context(
+                v_results = await self._vector_search(query)
+                v_context = self._vector_build_context(
                     v_results, max_chars=budget - total_chars
                 )
                 if v_context:
@@ -1894,9 +2002,8 @@ class SessionMemoryManager:
         # Persist session summary for future context injection on restore
         self._stm_write_summary(summary_text)
 
-        # Persist vector index
-        if self._vmm.enabled:
-            self._vmm.save()
+        # Vector store flushes on every write (executor file backend);
+        # nothing extra to do here on auto_flush.
 
         logger.info(
             "auto_flush: session summary (%d chars, %d messages) → long-term",
