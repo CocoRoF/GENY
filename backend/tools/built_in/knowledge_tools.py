@@ -368,6 +368,33 @@ class KnowledgeReadTool(BaseTool):
         )
         return _ok(note)
 
+    async def arun(self, session_id: str, filename: str) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.curated_knowledge_enabled:
+            return _error("Curated knowledge is not enabled")
+        curated, _ = _get_context_managers(session_id)
+        if curated is None:
+            return _error("Curated knowledge manager not available")
+        aread = getattr(curated, "aread_note", None)
+        note = await aread(filename) if callable(aread) else curated.read_note(filename)
+        if note is None:
+            _log_knowledge_event(
+                session_id,
+                event_type="knowledge_read_miss",
+                source="Knowledge",
+                message=f"knowledge_read miss: {filename}",
+            )
+            return _error(f"Note not found: {filename}")
+        body_chars = len((note.get("body") or ""))
+        _log_knowledge_event(
+            session_id,
+            event_type="knowledge_read",
+            source="Knowledge",
+            message=f"knowledge_read: {filename} ({body_chars} chars)",
+            extra={"chars": body_chars, "filename": filename},
+        )
+        return _ok(note)
+
 
 # ============================================================================
 # Knowledge List Tool
@@ -411,6 +438,48 @@ class KnowledgeListTool(BaseTool):
             kwargs["tag"] = tag
 
         notes = curated.list_notes(**kwargs)
+        filter_label = (
+            f"category={category}" if category else f"tag={tag}" if tag else "all"
+        )
+        _log_knowledge_event(
+            session_id,
+            event_type="knowledge_list",
+            source="Knowledge",
+            message=f"knowledge_list ({filter_label}): {len(notes)} note(s)",
+            extra={
+                "category": category or None,
+                "tag": tag or None,
+                "count": len(notes),
+            },
+        )
+        return _ok({
+            "total": len(notes),
+            "filters": {"category": category or None, "tag": tag or None},
+            "notes": notes,
+        })
+
+    async def arun(
+        self,
+        session_id: str,
+        category: str = "",
+        tag: str = "",
+    ) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.curated_knowledge_enabled:
+            return _error("Curated knowledge is not enabled")
+        curated, _ = _get_context_managers(session_id)
+        if curated is None:
+            return _error("Curated knowledge manager not available")
+        kwargs: Dict[str, Any] = {}
+        if category:
+            kwargs["category"] = category
+        if tag:
+            kwargs["tag"] = tag
+        alist = getattr(curated, "alist_notes", None)
+        notes = (
+            await alist(**kwargs) if callable(alist)
+            else curated.list_notes(**kwargs)
+        )
         filter_label = (
             f"category={category}" if category else f"tag={tag}" if tag else "all"
         )
@@ -486,6 +555,35 @@ class KnowledgePromoteTool(BaseTool):
             })
         return _error(f"Failed to promote note: {filename}")
 
+    async def arun(self, session_id: str, filename: str) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.curated_knowledge_enabled:
+            return _error("Curated knowledge is not enabled")
+        curated, _ = _get_context_managers(session_id)
+        if curated is None:
+            return _error("Curated knowledge manager not available")
+        agent_mgr = _get_agent_manager()
+        agent = agent_mgr.get_agent(session_id)
+        if agent is None:
+            agent = agent_mgr.resolve_session(session_id)
+        if agent is None:
+            return _error(f"Session not found: {session_id}")
+        mem = getattr(agent, "memory_manager", None)
+        if mem is None:
+            return _error("Session memory manager not available")
+        apromote = getattr(curated, "apromote_from_session", None)
+        curated_fn = (
+            await apromote(mem, filename, session_id=session_id) if callable(apromote)
+            else curated.promote_from_session(mem, filename, session_id=session_id)
+        )
+        if curated_fn:
+            return _ok({
+                "status": "promoted",
+                "source_filename": filename,
+                "curated_filename": curated_fn,
+            })
+        return _error(f"Failed to promote note: {filename}")
+
 
 # ============================================================================
 # Opsidian Browse Tool — browse user's personal vault index
@@ -536,6 +634,34 @@ class OpsidianBrowseTool(BaseTool):
             "notes": notes,
         })
 
+    async def arun(
+        self,
+        session_id: str,
+        category: str = "",
+        tag: str = "",
+    ) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.user_opsidian_index_enabled:
+            return _error("User Opsidian index access is not enabled")
+        _, opsidian = _get_context_managers(session_id)
+        if opsidian is None:
+            return _error("User Opsidian manager not available")
+        kwargs: Dict[str, Any] = {}
+        if category:
+            kwargs["category"] = category
+        if tag:
+            kwargs["tag"] = tag
+        alist = getattr(opsidian, "alist_notes", None)
+        notes = (
+            await alist(**kwargs) if callable(alist)
+            else opsidian.list_notes(**kwargs)
+        )
+        return _ok({
+            "total": len(notes),
+            "filters": {"category": category or None, "tag": tag or None},
+            "notes": notes,
+        })
+
 
 # ============================================================================
 # Opsidian Read Tool — read a specific user note
@@ -568,6 +694,22 @@ class OpsidianReadTool(BaseTool):
             return _error("User Opsidian manager not available")
 
         note = opsidian.read_note(filename)
+        if note is None:
+            return _error(f"Note not found: {filename}")
+        return _ok(note)
+
+    async def arun(self, session_id: str, filename: str) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.user_opsidian_raw_read_enabled:
+            return _error("User Opsidian raw read access is not enabled")
+        _, opsidian = _get_context_managers(session_id)
+        if opsidian is None:
+            return _error("User Opsidian manager not available")
+        aread = getattr(opsidian, "aread_note", None)
+        note = (
+            await aread(filename) if callable(aread)
+            else opsidian.read_note(filename)
+        )
         if note is None:
             return _error(f"Note not found: {filename}")
         return _ok(note)
