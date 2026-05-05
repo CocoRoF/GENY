@@ -1233,7 +1233,25 @@ class AgentSession:
                     self._session_id, exc_info=True,
                 )
 
-        provider.set_hooks(MemoryHooks(after_record_turn=_on_record_turn))
+        async def _on_note_changed(_meta) -> None:
+            """Refresh hierarchical sidecars after every note write/update."""
+            idx_mgr = getattr(mgr, "_index_manager", None)
+            if idx_mgr is None:
+                return
+            try:
+                idx_mgr.write_subindexes()
+                idx_mgr.write_root_summary()
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] hierarchical index refresh failed",
+                    self._session_id, exc_info=True,
+                )
+
+        provider.set_hooks(MemoryHooks(
+            after_record_turn=_on_record_turn,
+            after_note_write=_on_note_changed,
+            after_note_update=_on_note_changed,
+        ))
 
     def record_memory_event(
         self,
