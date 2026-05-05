@@ -366,6 +366,12 @@ class AgentSession:
         # paths route through this provider's curated/notes/vector
         # handles instead.
         self._memory_provider: Optional[Any] = None
+        # The shared MemoryHooks instance (built in `_build_pipeline`)
+        # carries every retrieval policy + business callback. The same
+        # object is attached to the provider via `set_hooks` and passed
+        # into `MemoryAwareRetriever`; `_install_memory_hooks` mutates
+        # it in place when the host installs business callbacks.
+        self._memory_hooks: Optional[Any] = None
         # Memory subsystem events that fire *before* the session logger
         # is created (provider init is one boot-tier earlier than
         # session_logger creation in agent_session_manager). The list is
@@ -1178,28 +1184,25 @@ class AgentSession:
                 pass
 
     def _install_memory_hooks(self) -> None:
-        """Wire `MemoryHooks.after_record_turn` so every STM append
-        drives the Geny business archivers automatically.
+        """Plug Geny's per-turn business onto the shared `MemoryHooks`
+        bag built in `_build_pipeline`.
 
-        Path-A migration GENY-5/6 — the legacy `record_message` →
-        `_maybe_archive_conversation` / `_maybe_archive_dm` chain is
-        retired. `provider.record_turn` (called by stage 18's
-        `_drive_provider`) now triggers the executor's `after_record_turn`
-        callback, which forwards to the manager's archive helpers.
-        Bucket-router / DM-bundle business stays in Geny; the
-        executor only knows "STM landed; fire the hook".
+        ``_build_pipeline`` already created a hooks instance carrying
+        the retrieval policy (vault_descriptions, importance_boost,
+        layer_budget_ratio, …) and called ``provider.set_hooks(hooks)``
+        once. This method *mutates that same instance* by attaching
+        the post-write callbacks (``after_record_turn`` etc.) that
+        run Geny's bucket router + DM bundle archiver.
+
+        EXEC-5 (executor 1.20.0) means hierarchical sidecar refresh is
+        already automatic — Geny no longer needs an after_note_write
+        callback for that.
         """
         provider = self._memory_provider
         mgr = self._memory_manager
-        if provider is None or mgr is None:
+        hooks = self._memory_hooks
+        if provider is None or mgr is None or hooks is None:
             return
-        # Pre-1.17.2 composite providers lacked `set_hooks` and the
-        # hasattr fallback silently no-op'd. 1.17.2 made set_hooks
-        # part of the Protocol surface — every provider implements
-        # it. We keep no fallback so a future regression surfaces
-        # loud (AttributeError → caught by outer try/except in
-        # `_init_memory_provider`).
-        from geny_executor.memory.provider import MemoryHooks
 
         async def _on_record_turn(turn, _receipt) -> None:
             try:
@@ -1209,9 +1212,7 @@ class AgentSession:
                 archived = mgr._maybe_archive_conversation(
                     role, content, metadata,
                 )
-                conv_ref = (
-                    archived.relative_path if archived is not None else None
-                )
+                conv_ref = archived.relative_path if archived is not None else None
                 mgr._maybe_archive_dm(role, content, metadata, conv_ref)
             except Exception:  # noqa: BLE001
                 logger.debug(
@@ -1219,25 +1220,10 @@ class AgentSession:
                     self._session_id, exc_info=True,
                 )
 
-        async def _on_note_changed(_meta) -> None:
-            """Refresh hierarchical sidecars after every note write/update."""
-            idx_mgr = getattr(mgr, "_index_manager", None)
-            if idx_mgr is None:
-                return
-            try:
-                idx_mgr.write_subindexes()
-                idx_mgr.write_root_summary()
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "[%s] hierarchical index refresh failed",
-                    self._session_id, exc_info=True,
-                )
-
-        provider.set_hooks(MemoryHooks(
-            after_record_turn=_on_record_turn,
-            after_note_write=_on_note_changed,
-            after_note_update=_on_note_changed,
-        ))
+        hooks.after_record_turn = _on_record_turn
+        # Re-apply the (mutated) hooks bag so the provider's STM /
+        # notes stores observe the new callbacks.
+        provider.set_hooks(hooks)
 
     def record_memory_event(
         self,
@@ -1764,10 +1750,12 @@ class AgentSession:
             )
 
         from geny_executor.memory import (
-            GenyMemoryRetriever,
-            GenyMemoryStrategy,
-            GenyPersistence,
-            ReflectionResolver,
+            MemoryAwareRetriever,
+            MemoryHooks,
+            ProviderDrivenStrategy,
+        )
+        from geny_executor.stages.s18_memory.artifact.default.persistence import (
+            NullPersistence,
         )
         from geny_executor.tools.base import ToolContext
         from geny_executor.stages.s03_system.artifact.default.builders import (
@@ -2041,14 +2029,12 @@ class AgentSession:
                     "falling back to placeholder",
                     exc_info=True,
                 )
-        if s18_stage is not None:
-            reflection_resolver = ReflectionResolver(
-                resolve_cfg=lambda state, _stage=s18_stage: _stage.resolve_model_config(state),
-                has_override=lambda _stage=s18_stage: getattr(_stage, "_model_override", None) is not None,
-                client_getter=lambda state: getattr(state, "llm_client", None),
-            )
-        else:
-            reflection_resolver = None
+        # ReflectionResolver was retired upstream (geny-executor 1.20.0,
+        # D5). Reflection / promotion now flow through MemoryStage itself
+        # via ``MemoryHooks.should_reflect`` / ``should_auto_promote``;
+        # the legacy resolver helper is no longer needed.
+        reflection_resolver = None
+        _ = s18_stage  # silence unused-name linters when the resolver is gone
 
         # ── Session-scoped runtime objects ──
         #
@@ -2192,110 +2178,60 @@ class AgentSession:
                 exc_info=True,
             )
 
-        if self._memory_manager is not None:
-            # Memory v2 PR 10 — slim_mode reads the optional tuning
-            # flag. Default False (legacy 6-layer behaviour) so callers
-            # opt in deliberately. When PR 12 lands the ladder doc,
-            # the role-default tuning will flip slim_mode=True for
-            # all roles automatically (plan §5.2).
-            #
-            # Backwards-compat guard: only pass ``slim_mode`` when it
-            # is True. Older installed ``geny-executor`` releases (pre
-            # PR 10) reject unknown kwargs; defaulting through the
-            # standard 6-layer path works against any executor pin.
-            retriever_kwargs: Dict[str, Any] = dict(
-                max_inject_chars=max_inject_chars,
-                enable_vector_search=_tuning["enable_vector_search"],
-                curated_knowledge_manager=curated_km,
-                recent_turns=_tuning["recent_turns"],
-            )
-            if _tuning.get("slim_mode"):
-                retriever_kwargs["slim_mode"] = True
-            # Memory v2 PR 12 — host-side retrieval policy. Older
-            # executor pins (< 1.13) ignore unknown kwargs only
-            # because they raise ``TypeError`` from ``__init__``;
-            # we therefore filter against the actual signature so
-            # Geny still imports against a downgraded executor
-            # (e.g. during a hotfix rollback).
-            try:
-                import inspect as _inspect
-                _retriever_params = _inspect.signature(
-                    GenyMemoryRetriever.__init__
-                ).parameters
-            except Exception:
-                _retriever_params = {}
-            if "pin_budget_ratio" in _retriever_params:
-                retriever_kwargs["pin_budget_ratio"] = _tuning.get(
-                    "pin_budget_ratio", 0.30,
-                )
-            if "category_boosts" in _retriever_params:
-                # Bias keyword search toward distilled / decision-bearing
-                # surfaces. Tunable via ``settings.json:memory.tuning.
-                # category_boosts``; falls back to the conservative
-                # default when the operator hasn't customised it.
-                retriever_kwargs["category_boosts"] = _tuning.get(
-                    "category_boosts",
-                    {"insights": 1.2, "projects": 1.2, "critical": 1.5},
-                )
-            if "always_render_vault_map" in _retriever_params:
-                retriever_kwargs["always_render_vault_map"] = bool(
-                    _tuning.get("always_render_vault_map", True)
-                )
-            attach_kwargs["memory_retriever"] = GenyMemoryRetriever(
-                self._memory_manager, **retriever_kwargs,
-            )
-            # Cycle 20260501_1 C — single STM write site at s18 via the
-            # dedupe-aware subclass. _invoke_pipeline / _astream_pipeline
-            # no longer call record_message themselves; they push the
-            # InteractionEvent metadata for the upcoming user / assistant
-            # turn onto state.metadata['_pending_message_metadata'] and
-            # this strategy applies the hint when it walks state.messages.
+        if self._memory_provider is not None:
+            # PR-C1 (executor 1.20.0): provider-driven Stage 2 / Stage 18.
+            # All retrieval policy is captured in a single ``MemoryHooks``
+            # instance; the same instance is attached to the provider via
+            # ``set_hooks`` and passed into ``MemoryAwareRetriever`` so
+            # every layer (retrieval, record_turn fan-out, reflection
+            # gate) sees the same policy view.
             from service.memory.dedupe_strategy import GenyDedupeStrategy
-            from service.memory.pin_policy import make_promote_callback
-            # Memory v2 followup — insight quality gate. The
-            # ``min_insight_importance`` kwarg landed in
-            # geny-executor 1.10. We pass it conditionally so this
-            # code still imports against 1.9.x (kwarg becomes a
-            # TypeError on older releases). Default ``high`` —
-            # insights/ should hold *insights*, not behavioural
-            # patterns or per-turn tactics.
-            strategy_kwargs: Dict[str, Any] = dict(
-                enable_reflection=_tuning["enable_reflection"],
-                llm_reflect=llm_reflect,
-                curated_knowledge_manager=curated_km,
-                resolver=reflection_resolver,
+            from service.memory.index import _CATEGORY_DESCRIPTIONS
+
+            # ── 1. Hooks (single bag of policy + business callbacks)
+            hooks_kwargs: Dict[str, Any] = dict(
+                max_inject_chars=int(max_inject_chars),
+                enable_vector_search=bool(_tuning["enable_vector_search"]),
+                recent_turns=int(_tuning["recent_turns"]),
+                slim_mode=bool(_tuning.get("slim_mode", False)),
+                always_render_vault_map=bool(
+                    _tuning.get("always_render_vault_map", True)
+                ),
+                vault_descriptions=dict(_CATEGORY_DESCRIPTIONS),
             )
-            try:
-                import inspect as _inspect
-                strategy_init_params = _inspect.signature(
-                    GenyDedupeStrategy.__init__
-                ).parameters
-            except Exception:
-                strategy_init_params = {}
-            if (
-                "min_insight_importance" in _tuning
-                and "min_insight_importance" in strategy_init_params
+            if "category_boosts" in _tuning and isinstance(
+                _tuning["category_boosts"], dict
             ):
-                strategy_kwargs["min_insight_importance"] = (
-                    _tuning["min_insight_importance"]
+                hooks_kwargs["category_boosts"] = dict(_tuning["category_boosts"])
+            if "pin_budget_ratio" in _tuning:
+                # The retriever reads `layer_budget_ratio["pinned"]`.
+                # Override only the pinned slot so other layers keep
+                # the default ratio.
+                from geny_executor.memory.provider import (
+                    _DEFAULT_LAYER_BUDGET_RATIO,
                 )
-            # Memory v2 PR 12 — pin auto-promote callback. The
-            # ``promote_callback`` kwarg was added in geny-executor
-            # 1.13.0; older pins simply skip it. Whenever an
-            # insight clears the importance gate, the callback
-            # writes a copy into ``memory/critical/`` so the next
-            # turn's retriever lifts the fact into the prompt's
-            # ``# Pinned Facts`` section regardless of query
-            # wording. Failures inside the callback are non-fatal
-            # — the underlying insights/<slug>.md still lands.
-            if "promote_callback" in strategy_init_params:
-                strategy_kwargs["promote_callback"] = make_promote_callback()
-            attach_kwargs["memory_strategy"] = GenyDedupeStrategy(
-                self._memory_manager, **strategy_kwargs,
+
+                ratio = dict(_DEFAULT_LAYER_BUDGET_RATIO)
+                ratio["pinned"] = float(_tuning["pin_budget_ratio"])
+                hooks_kwargs["layer_budget_ratio"] = ratio
+            hooks = MemoryHooks(**hooks_kwargs)
+            self._memory_provider.set_hooks(hooks)
+            self._memory_hooks = hooks  # store for _install_memory_hooks
+
+            # ── 2. Stage 2 retriever (provider + hooks, no host duck-type)
+            attach_kwargs["memory_retriever"] = MemoryAwareRetriever(
+                self._memory_provider, hooks=hooks,
             )
-            attach_kwargs["memory_persistence"] = GenyPersistence(
-                self._memory_manager
-            )
+            # ── 3. Stage 18 strategy (Geny dedupe wraps ProviderDrivenStrategy)
+            attach_kwargs["memory_strategy"] = GenyDedupeStrategy(self._memory_provider)
+            # ── 4. Persistence is now a no-op — provider owns every write
+            attach_kwargs["memory_persistence"] = NullPersistence()
+            # `llm_reflect`, `reflection_resolver`, `curated_knowledge_manager`
+            # and `max_inject_chars` are now host-supplied via the hooks
+            # bag (or — for reflection — through MemoryStage's native path).
+            # They remain defined locally only so the older code paths
+            # below (e.g. system-prompt builders) compile; nothing
+            # downstream of this block consumes the legacy values.
 
         self._pipeline = self._prebuilt_pipeline
         self._pipeline.attach_runtime(**attach_kwargs)

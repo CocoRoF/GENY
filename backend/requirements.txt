@@ -17,12 +17,12 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor 1.19.0 ships LoopAgnosticLock (cross-loop safe memory
-# store locks — fixes silent write swallowing under run_coro_sync) and
-# consolidates extras into baseline deps (web/cron/openai/google/postgres
-# all installed by default; embedding provider chosen at runtime via
-# settings.json).
-geny-executor>=1.19.0,<2.0.0
+# geny-executor 1.20.0 — provider-driven Stage 2 / Stage 18 / index
+# plane. Adds `MemoryAwareRetriever`, `ProviderDrivenStrategy`,
+# progressive-disclosure 4-step API, NoteGraph queries, executor-owned
+# hierarchical sidecars, Stage 19 session-close summary writer, and
+# typed interaction fields on Turn / Note / NoteDraft / NoteMeta.
+geny-executor>=1.20.0,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

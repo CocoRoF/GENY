@@ -1,51 +1,27 @@
-"""GenyDedupeStrategy — cycle 20260501_1 C.
+"""``GenyDedupeStrategy`` — provider-driven, metadata-aware Stage 18 strategy.
 
-Single STM write site at s18_memory.
+Wraps the executor's ``ProviderDrivenStrategy`` (1.20.0+) with one
+piece of Geny-specific behaviour: stamp the next user / assistant
+message with the ``_pending_message_metadata`` hint pushed by
+``AgentSession._invoke_pipeline`` so the executor's
+``Turn.from_state_message`` lifts the InteractionEvent dimensions
+onto ``Turn.metadata`` (and the typed interaction fields landed in
+1.20.0 — ``event_id``, ``kind``, ``direction``, etc.).
 
-Background — before this cycle the codebase had *two* writers
-recording every user / assistant turn into the session's STM:
-
-  1. ``AgentSession._invoke_pipeline`` / ``_astream_pipeline`` —
-     called ``record_message(role, content, metadata=…)`` directly
-     at invoke start (user) and again at invoke end (assistant).
-     This carried the full InteractionEvent metadata (cycle
-     20260430_2).
-  2. ``s18_memory.GenyMemoryStrategy._record_transcript`` —
-     called ``record_message(role, content)`` for every
-     ``state.messages`` entry on terminal state. Without metadata.
-
-Result: every user / assistant turn was recorded *twice* into STM.
-``recent_turns`` retrieval and the new transcripts API both
-showed duplicates; the second copy lacked metadata so InteractionEvent
-filters silently dropped half of it.
-
-Cycle 20260501_1 C consolidates: ``_invoke_pipeline`` no longer
-calls ``record_message`` itself; instead it stamps the resolved
-metadata for the upcoming user / assistant turn onto
-``state.metadata['_pending_message_metadata']``. This subclass'
-``_record_transcript`` reads that hint when it walks
-``state.messages`` so the *canonical* record happens exactly once,
-inside s18, with full metadata.
-
-Invariants this class enforces:
-
-  * STM record_message has a single call site (s18) for every
-    user / assistant message. (The cycle-20260430_3 entity_bootstrap
-    side-effect was retired in Memory v2 — counterpart context now
-    rides solely on the dms/ index path.)
-  * InteractionEvent metadata threaded through unchanged from the
-    Geny-side resolver to the LTM line.
-  * Empty / non-text content blocks are dropped silently (parent
-    class behaviour preserved).
+Behaviour mirrors the legacy version: the *first* same-role message
+in a batch gets the verbatim hint; *subsequent* same-role messages
+in the same batch derive a fresh ``event_id`` from the same template
+so a single VTuber turn that emits multiple assistant messages
+doesn't share one event id across them.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from geny_executor.core.state import PipelineState
-from geny_executor.memory.strategy import GenyMemoryStrategy
+from geny_executor.memory.strategy import ProviderDrivenStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -53,60 +29,49 @@ logger = logging.getLogger(__name__)
 _PENDING_KEY = "_pending_message_metadata"
 
 
-class GenyDedupeStrategy(GenyMemoryStrategy):
-    """``GenyMemoryStrategy`` subclass that respects metadata hints
-    pushed by ``AgentSession._invoke_pipeline`` (cycle 20260501_1 C).
+class GenyDedupeStrategy(ProviderDrivenStrategy):
+    """Pre-stamp ``state.messages`` with InteractionEvent metadata
+    before the executor's per-turn record fan-out runs.
 
-    The hint is a dict shaped ``{"user": <metadata>, "assistant":
-    <metadata>}`` placed on ``state.metadata`` before the pipeline
-    runs. Each metadata value is the output of
-    ``make_event_metadata`` (cycle 20260430_2). When we walk the
-    new ``state.messages`` slice we:
-
-      * apply the ``user`` hint to the *first* user message we
-        record this batch;
-      * apply the ``assistant`` hint to the *first* assistant
-        message;
-      * for any *subsequent* same-role message in the same batch,
-        derive a *fresh* metadata dict from the same template —
-        new ``event_id``, identical kind / direction /
-        counterpart_id / counterpart_role / linked_event_id /
-        payload (cycle 20260501_2 F1). A single VTuber turn that
-        produces multiple assistant messages must not have half
-        of them recorded with ``metadata=None``.
-      * fall back to ``metadata=None`` only when no hint exists
-        for the role at all.
-
-    The hint is *not* popped — kept on state for the duration of
-    the turn so a hypothetical second walk (re-entrant strategy
-    chain) sees the same value. ``_stm_recorded_count`` advances
-    as in the parent so a second invocation in the same turn is a
-    no-op.
+    The parent ``ProviderDrivenStrategy.update`` walks the new tail of
+    ``state.messages`` and forwards each entry to ``provider.record_turn``.
+    ``Turn.from_state_message`` lifts top-level keys + ``metadata`` onto
+    the typed interaction surface (1.20.0). This subclass guarantees
+    those fields are present by stamping ``msg["metadata"]`` ahead of
+    the parent walk.
     """
 
-    def _record_transcript(self, state: PipelineState) -> None:
-        """Stamp pending InteractionEvent metadata onto each new
-        message dict so stage 18's `_drive_provider` carries it into
-        STM (executor 1.17.0 EXEC-1: `Turn.from_state_message` lifts
-        `message["metadata"]` onto `Turn.metadata`).
+    @property
+    def name(self) -> str:
+        return "geny_dedupe"
 
-        Path-A migration GENY-2: this strategy no longer calls
-        `mgr.record_message`. The executor's `_drive_provider` is
-        the single STM write site; this method's only remaining job
-        is to attach the `_pending_message_metadata` hint to the
-        right message before the provider walks `state.messages`.
+    @property
+    def description(self) -> str:
+        return "Provider-driven STM record + InteractionEvent metadata stamping"
 
-        Idempotency: walks only the slice past
-        `_stm_recorded_count`. If `_drive_provider` already updated
-        the cursor (it uses its own `memory.last_recorded_idx`),
-        we still respect ours so re-entry doesn't double-stamp.
+    async def update(self, state: PipelineState) -> None:
+        self._stamp_pending_metadata(state)
+        await super().update(state)
+
+    # ── stamping ────────────────────────────────────────────────────
+
+    def _stamp_pending_metadata(self, state: PipelineState) -> None:
+        """Apply ``_pending_message_metadata`` to the next user /
+        assistant entry in the un-recorded tail of ``state.messages``.
         """
         pending = state.metadata.get(_PENDING_KEY) or {}
+        if not pending:
+            return
         recorded_count = int(state.metadata.get("_stm_recorded_count", 0))
+        # Use the same anchor key the parent uses so stamping aligns
+        # exactly with what record_turn will walk.
+        if recorded_count == 0:
+            recorded_count = int(
+                state.metadata.get("memory.provider_strategy_recorded_idx", 0)
+            )
         new_messages = state.messages[recorded_count:]
 
         applied = {"user": False, "assistant": False}
-
         for msg in new_messages:
             role = msg.get("role", "")
             if role not in ("user", "assistant"):
@@ -114,39 +79,38 @@ class GenyDedupeStrategy(GenyMemoryStrategy):
 
             content = msg.get("content", "")
             if isinstance(content, list):
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                content = "\n".join(text_parts)
+                text_parts = [
+                    str(b.get("text", ""))
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                content = "\n".join(p for p in text_parts if p)
             if not content:
                 continue
 
             hint = pending.get(role)
-            metadata: Dict[str, Any] | None = None
+            metadata: Optional[Dict[str, Any]] = None
             if isinstance(hint, dict) and hint:
                 metadata = hint if not applied[role] else _fresh_from_template(hint)
             applied[role] = True
 
             if metadata and isinstance(msg, dict) and "metadata" not in msg:
-                # Mutate the message in place so `Turn.from_state_message`
-                # picks the metadata up. The executor lifts it onto
-                # `Turn.metadata` and Geny's STMHandle round-trips
-                # it through the jsonl.
+                # Mutate in place — the executor's ``Turn.from_state_message``
+                # picks ``message["metadata"]`` up and lifts the typed
+                # interaction fields onto the resulting Turn.
                 msg["metadata"] = dict(metadata)
 
+        # Track our own stamp cursor so re-entry doesn't double-stamp.
+        # The parent's record cursor (``memory.provider_strategy_recorded_idx``)
+        # is updated by the super().update() call after stamping.
         state.metadata["_stm_recorded_count"] = len(state.messages)
 
 
-def _fresh_from_template(hint: Dict[str, Any]) -> Dict[str, Any] | None:
+def _fresh_from_template(hint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Build a new InteractionEvent metadata dict using *hint* as a
-    template for kind / direction / counterpart_* and a fresh
-    ``event_id`` (cycle 20260501_2 F1).
-
-    Returns ``None`` if the import or coercion fails — caller treats
-    that as "no metadata" and records the line plainly. We deliberately
-    do not partially copy — either the new event has all five
-    canonical dimensions or it has none.
+    template (same kind / direction / counterpart_*) but a fresh
+    ``event_id``. Returns ``None`` if anything goes wrong — caller
+    falls through to the verbatim hint.
     """
     try:
         from service.memory.interaction_event import (
@@ -157,21 +121,28 @@ def _fresh_from_template(hint: Dict[str, Any]) -> Dict[str, Any] | None:
         )
 
         kind_v = hint.get("kind")
-        dir_v = hint.get("direction")
-        cp_id = hint.get("counterpart_id")
+        direction_v = hint.get("direction")
         cp_role = hint.get("counterpart_role")
-        if not (kind_v and dir_v and cp_id and cp_role):
+
+        kind = Kind(kind_v) if kind_v else None
+        direction = Direction(direction_v) if direction_v else None
+        counterpart_role = CounterpartRole(cp_role) if cp_role else None
+        if kind is None or direction is None:
             return None
+
         return make_event_metadata(
-            kind=Kind(kind_v),
-            direction=Direction(dir_v),
-            counterpart_id=cp_id,
-            counterpart_role=CounterpartRole(cp_role),
+            kind=kind,
+            direction=direction,
+            counterpart_id=hint.get("counterpart_id"),
+            counterpart_role=counterpart_role,
             linked_event_id=hint.get("linked_event_id"),
-            payload=hint.get("payload") if isinstance(hint.get("payload"), dict) else None,
+            payload=hint.get("payload"),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.debug(
-            "GenyDedupeStrategy: _fresh_from_template failed", exc_info=True,
+            "GenyDedupeStrategy: _fresh_from_template failed", exc_info=True
         )
         return None
+
+
+__all__ = ["GenyDedupeStrategy"]
