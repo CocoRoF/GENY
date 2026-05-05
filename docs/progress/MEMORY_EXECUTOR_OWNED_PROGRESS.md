@@ -24,8 +24,10 @@
 
 | PR | 내용 | 상태 | 머지 / Release |
 |---|---|---|---|
-| **PR-A1** | executor EXEC-6 (`LoopAgnosticLock` 도입, 8 sites) + EXEC-10 (extras 통합) | ✅ 머지 · release v1.19.0 | [executor#188](https://github.com/CocoRoF/geny-executor/pull/188) / [v1.19.0](https://github.com/CocoRoF/geny-executor/releases/tag/v1.19.0) |
-| **PR-A2** | Geny `pyproject.toml` / `requirements.txt` extras 제거 + version bump >= 1.19.0 + 운영 검증 | ⏳ 변경 준비 완료 · PyPI publish 대기 | — |
+| **PR-A1** | executor EXEC-6 (`LoopAgnosticLock` 도입, 8 sites) + EXEC-10 (extras 통합) | ✅ 머지 · release v1.19.0 · PyPI 등록 | [executor#188](https://github.com/CocoRoF/geny-executor/pull/188) / [v1.19.0](https://github.com/CocoRoF/geny-executor/releases/tag/v1.19.0) |
+| **PR-A2** | Geny bump 1.19.0 + extras drop + plan/progress docs | ✅ 머지 | [Geny#688](https://github.com/CocoRoF/Geny/pull/688) |
+
+→ **Sprint 1 완료 (2026-05-05).** 운영자 docker rebuild 후 `<storage>/transcripts/session.jsonl` populated 확인 필요 (cross-loop bug fix 검증). Sprint 2 즉시 진행.
 
 ### 검증 항목 (Sprint 1 끝)
 
@@ -40,10 +42,7 @@
 
 | PR | 내용 | 상태 |
 |---|---|---|
-| PR-B1 | executor EXEC-1 (generic `MemoryAwareRetriever`) + EXEC-2 (`ProviderDrivenStrategy`) + EXEC-8 (MemoryHooks 확장) | ⏳ 대기 |
-| PR-B2 | executor EXEC-3 (progressive disclosure 4단 API) + EXEC-4 (NoteGraph 쿼리 헬퍼) | ⏳ 대기 |
-| PR-B3 | executor EXEC-5 (incremental hierarchical index) + EXEC-7 (stage 19 session-close summary) + EXEC-9 (NoteRef/NoteMeta optional 필드) | ⏳ 대기 |
-| PR-B4 | executor 1.20.0 release | ⏳ 대기 |
+| PR-B (executor#189) | EXEC-1+2+3+4+5+7+8+9 모두 단일 PR 로 통합 (4-commit stack on `feat/generic-retriever-strategy-hooks`) | ⏳ CI 진행 중 / 1.20.0 |
 | PR-C1 | Geny `AgentSession` 단일 hook 주입 | ⏳ 대기 |
 | PR-C2 | Geny thin adapter 일괄 폐기 | ⏳ 대기 |
 | PR-C3 | Geny controller / FastAPI async 일원화 (`run_coro_sync` 제거) | ⏳ 대기 |
