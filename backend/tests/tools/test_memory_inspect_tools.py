@@ -717,13 +717,14 @@ def test_distill_update_note_writes_when_writer_available(world) -> None:
     """
     captured = []
 
-    class _FakeWriter:
-        def write_note(self, **kwargs):
-            captured.append(kwargs)
-            return f"insights/{kwargs.get('filename_override','x').split('/')[-1]}"
+    # Sprint 3 step 5 — ``StructuredMemoryWriter`` retired from the
+    # session manager; the inspect tool now calls ``mem.write_note(...)``
+    # directly. Stub the public method instead of the legacy field.
+    def _fake_write_note(**kwargs):
+        captured.append(kwargs)
+        return f"insights/{kwargs.get('filename_override','x').split('/')[-1]}"
 
-    # Attach the writer onto our fake memory manager
-    world["vtuber"]._memory_manager._structured_writer = _FakeWriter()
+    world["vtuber"]._memory_manager.write_note = _fake_write_note
 
     out = _run_distill(
         MemoryDistillTool(),
@@ -743,10 +744,12 @@ def test_distill_update_note_writes_when_writer_available(world) -> None:
 
 
 def test_distill_update_note_silent_when_no_writer(world) -> None:
-    """When the memory manager has no structured writer (minimal
+    """When the memory manager has no public write_note (minimal
     test setup, early init), update_note=true returns
     note_written=None instead of crashing."""
-    # No _structured_writer attribute
+    # Sprint 3 step 5 — fake manager doesn't expose write_note here;
+    # the inspect tool's getattr fallback returns None and the call
+    # is skipped silently.
     out = _run_distill(
         MemoryDistillTool(),
         counterpart="paired_subworker",
@@ -800,14 +803,15 @@ def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
         _fake_run,
     )
 
-    class _CapturingWriter:
-        def __init__(self): self.calls = []
-        def write_note(self, **kw):
-            self.calls.append(kw)
-            return f"insights/{kw['filename_override'].split('/')[-1]}"
+    # Sprint 3 step 5 — patch the public ``write_note`` instead of
+    # the retired ``_structured_writer`` field.
+    captured_calls: list = []
 
-    writer = _CapturingWriter()
-    world["vtuber"]._memory_manager._structured_writer = writer
+    def _capturing_write_note(**kw):
+        captured_calls.append(kw)
+        return f"insights/{kw['filename_override'].split('/')[-1]}"
+
+    world["vtuber"]._memory_manager.write_note = _capturing_write_note
 
     out = _run_distill(
         MemoryDistillTool(),
@@ -824,7 +828,7 @@ def test_distill_narrative_calls_llm_when_requested(monkeypatch, world) -> None:
     assert captured[0]["counterpart_id"] == "sub-1"
     assert captured[0]["caller_agent"] is world["vtuber"]
     # Entity note body has narrative ABOVE stats
-    body = writer.calls[0]["content"]
+    body = captured_calls[0]["content"]
     narrative_idx = body.find("안정적인 모습")
     stats_idx = body.find("Stats")
     assert narrative_idx >= 0 and stats_idx >= 0 and narrative_idx < stats_idx

@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from service.memory.vector_memory import VectorSearchResult
-from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import (
     MemoryFileInfo,
     MemoryIndex,
@@ -152,11 +151,11 @@ class SessionMemoryManager:
         # is retired in step 3.5.
 
         # Structured memory layer (Obsidian-like).
-        # The legacy ``MemoryIndexManager`` adapter was retired in
-        # Sprint 3 step 4. Index reads/rebuilds route directly through
-        # ``provider.index()`` via inline ``_index_*`` helpers below;
-        # the host no longer caches the snapshot.
-        self._structured_writer: Optional[StructuredMemoryWriter] = None
+        # The legacy ``MemoryIndexManager`` (Sprint 3 step 4) and
+        # ``StructuredMemoryWriter`` (Sprint 3 step 5) adapters were
+        # retired from the session manager. Index reads route through
+        # ``provider.index()`` via ``_index_*`` helpers; note CRUD
+        # routes through ``provider.notes()`` via ``_notes_*`` helpers.
 
         # Memory v2 — leaf source-of-truth writer (plan §1.5).
         # Auto-archives every record_message into
@@ -216,8 +215,6 @@ class SessionMemoryManager:
         # ``_ltm_*`` helpers can route every operation through
         # ``provider.stm()`` / ``provider.ltm()`` / ``provider.notes()``.
         self._memory_provider = provider
-        if self._structured_writer is not None:
-            self._structured_writer.set_memory_provider(provider)
         if self._compaction_archiver is not None:
             try:
                 self._compaction_archiver.set_memory_provider(provider)
@@ -294,9 +291,13 @@ class SessionMemoryManager:
     # ``mgr.index_manager.build_vault_map()`` should call
     # ``mgr.build_vault_map()``.
 
-    @property
-    def structured_writer(self) -> Optional[StructuredMemoryWriter]:
-        return self._structured_writer
+    # NOTE: the ``structured_writer`` property was retired in Sprint 3
+    # step 5 along with the ``StructuredMemoryWriter`` field on the
+    # manager. Inline ``_notes_*`` helpers route through
+    # ``provider.notes()``; callers that previously reached for
+    # ``mgr.structured_writer.X(...)`` should use the manager's
+    # public ``write_note`` / ``update_note`` / ``delete_note`` /
+    # ``read_note`` / ``list_notes`` / ``link_notes`` surface.
 
     @property
     def storage_path(self) -> str:
@@ -906,6 +907,349 @@ class SessionMemoryManager:
         return self._index_build_vault_map()
 
     # ------------------------------------------------------------------
+    # Notes helpers (Sprint 3 step 5 — provider direct, no host adapter)
+    #
+    # ``StructuredMemoryWriter`` was retired from the session manager;
+    # write/update/delete/read/list/link route through
+    # ``provider.notes()`` directly. The writer module stays alive as a
+    # multi-tenant helper for ``GlobalMemoryManager`` /
+    # ``CuratedKnowledgeManager`` / ``UserOpsidianManager``, which all
+    # share the same Geny-shape (slug + frontmatter passthrough +
+    # backlink propagation) but live outside the session lifecycle.
+    # ------------------------------------------------------------------
+
+    def _notes_write(
+        self,
+        *,
+        title: str,
+        content: str,
+        category: str,
+        tags: Optional[List[str]],
+        importance: str,
+        source: str,
+        links_to: Optional[List[str]],
+        filename_override: Optional[str] = None,
+    ) -> Optional[str]:
+        if self._memory_provider is None:
+            return None
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NoteDraft,
+            Scope,
+        )
+        from service.memory.structured_writer import (
+            VALID_CATEGORIES,
+            _slugify,
+            extract_wikilinks,
+            _propagate_linked_from,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        cat = category if category in VALID_CATEGORIES else "topics"
+        tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
+        auto_links = extract_wikilinks(content)
+        all_links = list(set(auto_links + (links_to or [])))
+
+        try:
+            importance_enum = _ExecutorImportance(importance)
+        except ValueError:
+            importance_enum = _ExecutorImportance.MEDIUM
+
+        if filename_override:
+            bare_filename = Path(filename_override).name
+        else:
+            slug = _slugify(title)
+            bare_filename = f"{slug}.md"
+            cat_dir = self._memory_dir if cat == "root" else self._memory_dir / cat
+            candidate = cat_dir / bare_filename
+            if candidate.exists():
+                counter = 1
+                while (cat_dir / f"{slug}-{counter}.md").exists():
+                    counter += 1
+                bare_filename = f"{slug}-{counter}.md"
+
+        passthrough: Dict[str, Any] = {
+            "aliases": [],
+            "source": source,
+            "session_id": self._session_id or "",
+            "linked_from": [],
+            "links_to": list(all_links),
+        }
+        draft = NoteDraft(
+            title=title,
+            body=content,
+            category=cat,
+            tags=list(tag_list),
+            importance=importance_enum,
+            scope=Scope.SESSION,
+            filename=bare_filename,
+            frontmatter=passthrough,
+        )
+        try:
+            meta = run_coro_sync(self._memory_provider.notes().write(draft))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_write: provider write failed", exc_info=True,
+            )
+            return None
+        bare_returned = meta.ref.filename or bare_filename
+        relative_path = (
+            bare_returned if cat == "root" else f"{cat}/{bare_returned}"
+        )
+
+        try:
+            from service.memory.event_emitter import emit_memory_event
+
+            emit_memory_event(
+                self._session_id or "",
+                event_type="note_written",
+                source="Memory",
+                layer="notes",
+                category=cat,
+                importance=importance,
+                path=relative_path,
+                chars=len(content),
+                message=(
+                    f"note_written: {relative_path} "
+                    f"({len(content)} chars, importance={importance})"
+                ),
+                extra={"tags": list(tag_list)} if tag_list else None,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._notes_write: memory_event emit skipped", exc_info=True,
+            )
+
+        try:
+            _propagate_linked_from(self._memory_provider, relative_path, all_links)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._notes_write: linked_from propagation failed",
+                exc_info=True,
+            )
+
+        logger.info(
+            "manager._notes_write: created %s (%d chars, %d tags)",
+            relative_path, len(content), len(tag_list),
+        )
+        return relative_path
+
+    def _notes_update(
+        self,
+        filename: str,
+        *,
+        body: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        importance: Optional[str] = None,
+        category: Optional[str] = None,
+        append: bool = False,
+    ) -> bool:
+        if self._memory_provider is None:
+            return False
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NotePatch,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        notes = self._memory_provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(bare))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_update: read failed for %s", filename,
+                exc_info=True,
+            )
+            return False
+        if existing is None:
+            logger.warning("manager._notes_update: file not found: %s", filename)
+            return False
+
+        merged_tags: Optional[List[str]] = None
+        if tags:
+            merged = set(existing.tags or [])
+            merged.update(t.lower().strip() for t in tags if t.strip())
+            merged_tags = sorted(merged)
+
+        importance_enum = None
+        if importance:
+            try:
+                importance_enum = _ExecutorImportance(importance)
+            except ValueError:
+                importance_enum = None
+
+        body_replace = body if (body is not None and not append) else None
+        body_append = body if (body is not None and append) else None
+
+        patch = NotePatch(
+            body=body_replace,
+            append_body=body_append,
+            tags=merged_tags,
+            importance=importance_enum,
+            category=category,
+        )
+        try:
+            run_coro_sync(notes.update(bare, patch))
+        except KeyError:
+            logger.warning("manager._notes_update: provider missing %s", filename)
+            return False
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_update: provider write failed for %s", filename,
+                exc_info=True,
+            )
+            return False
+        logger.debug("manager._notes_update: updated %s (via provider)", filename)
+        return True
+
+    def _notes_delete(self, filename: str) -> bool:
+        if self._memory_provider is None:
+            return False
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            ok = run_coro_sync(self._memory_provider.notes().delete(bare))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_delete: provider delete failed for %s", filename,
+                exc_info=True,
+            )
+            return False
+        if not ok:
+            return False
+        logger.info("manager._notes_delete: removed %s (via provider)", filename)
+        return True
+
+    def _notes_read(self, filename: str) -> Optional[Dict[str, Any]]:
+        if self._memory_provider is None:
+            return None
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            note = run_coro_sync(self._memory_provider.notes().read(bare))
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._notes_read(%s): provider read failed", filename,
+                exc_info=True,
+            )
+            return None
+        if note is None:
+            return None
+        metadata = {
+            "title": note.title,
+            "tags": list(note.tags),
+            "category": note.category,
+            "importance": note.importance.value,
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+            **(note.frontmatter or {}),
+        }
+        return {
+            "filename": filename,
+            "title": note.title,
+            "metadata": metadata,
+            "body": note.body,
+            "raw": "",
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+        }
+
+    def _notes_list(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+        importance: Optional[str] = None,
+    ) -> List[MemoryFileInfo]:
+        if self._memory_provider is None:
+            return []
+        from geny_executor.memory.provider import Importance as _ExecutorImportance
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        importance_filter = None
+        if importance:
+            try:
+                importance_filter = _ExecutorImportance(importance)
+            except ValueError:
+                importance_filter = None
+        try:
+            metas = run_coro_sync(
+                self._memory_provider.notes().list(
+                    category=category,
+                    tag=tag,
+                    importance=importance_filter,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("manager._notes_list: provider list failed", exc_info=True)
+            metas = []
+        results: List[MemoryFileInfo] = []
+        for m in metas:
+            cat = m.category or "root"
+            bare = m.ref.filename
+            display_filename = bare if cat == "root" else f"{cat}/{bare}"
+            results.append(
+                MemoryFileInfo(
+                    filename=display_filename,
+                    title=m.title or bare,
+                    category=cat,
+                    tags=list(m.tags),
+                    importance=m.importance.value,
+                    created=m.created_at.isoformat() if m.created_at else "",
+                    modified=m.updated_at.isoformat() if m.updated_at else "",
+                    source="system",
+                    char_count=m.size_bytes,
+                    links_to=[],
+                    linked_from=[],
+                )
+            )
+        results.sort(key=lambda f: f.modified, reverse=True)
+        return results
+
+    def _notes_link(self, source_file: str, target_file: str) -> bool:
+        if self._memory_provider is None:
+            return False
+        from geny_executor.memory.provider import NotePatch
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        target_stem = Path(target_file).stem
+        bare_source = Path(source_file).name
+        notes = self._memory_provider.notes()
+
+        try:
+            existing = run_coro_sync(notes.read(bare_source))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_link: read failed for %s", source_file,
+                exc_info=True,
+            )
+            return False
+        if existing is None:
+            return False
+
+        marker = f"[[{target_stem}]]"
+        if marker.lower() in existing.body.lower():
+            return True
+        if target_stem in (existing.links_out or []):
+            return True
+
+        patch = NotePatch(append_body=f"> See also: {marker}")
+        try:
+            run_coro_sync(notes.update(bare_source, patch))
+        except KeyError:
+            return False
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._notes_link: provider update failed for %s → %s",
+                source_file, target_stem, exc_info=True,
+            )
+            return False
+        return True
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
@@ -919,15 +1263,11 @@ class SessionMemoryManager:
 
         # Initialize structured memory layer.
         # Sprint 3 step 4 — ``MemoryIndexManager`` retired; writers no
-        # longer receive a host-side index handle. The executor's
-        # IndexHandle refreshes ``_index.json`` / per-category shards /
-        # ``_summary.json`` automatically on every ``NotesStore.write``
-        # (1.20.0 EXEC-5), so the host has nothing to invalidate.
+        # longer receive a host-side index handle.
+        # Sprint 3 step 5 — ``StructuredMemoryWriter`` retired from the
+        # manager; note CRUD routes through ``provider.notes()`` via
+        # the inline ``_notes_*`` helpers above.
         memory_dir = self._memory_dir
-        self._structured_writer = StructuredMemoryWriter(
-            str(memory_dir),
-            session_id=self._session_id or "",
-        )
         self._conversation_archiver = self._ConversationArchiver(
             str(memory_dir),
             session_id=self._session_id or "",
@@ -1160,23 +1500,25 @@ class SessionMemoryManager:
         importance: str = "medium",
         source: str = "system",
         links_to: Optional[List[str]] = None,
+        filename_override: Optional[str] = None,
     ) -> Optional[str]:
         """Write a structured memory note with frontmatter.
 
         Returns the filename of the created note, or None on failure.
         """
-        if self._structured_writer is None:
+        if self._memory_provider is None:
             # Fallback to legacy write
             self._ltm_write_topic(title, content)
             return None
-        return self._structured_writer.write_note(
+        return self._notes_write(
             title=title,
             content=content,
             category=category,
             tags=tags,
             importance=importance,
             source=source,
-            links=links_to,
+            links_to=links_to,
+            filename_override=filename_override,
         )
 
     def update_note(
@@ -1191,10 +1533,8 @@ class SessionMemoryManager:
 
         Returns True if updated successfully.
         """
-        if self._structured_writer is None:
-            return False
-        return self._structured_writer.update_note(
-            filename, content=body, tags=tags, importance=importance,
+        return self._notes_update(
+            filename, body=body, tags=tags, importance=importance,
         )
 
     def delete_note(self, filename: str) -> bool:
@@ -1202,18 +1542,14 @@ class SessionMemoryManager:
 
         Returns True if deleted successfully.
         """
-        if self._structured_writer is None:
-            return False
-        return self._structured_writer.delete_note(filename)
+        return self._notes_delete(filename)
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
         """Read a structured memory note and return its metadata + body.
 
         Returns dict with keys: metadata, body, filename. None if not found.
         """
-        if self._structured_writer is None:
-            return None
-        return self._structured_writer.read_note(filename)
+        return self._notes_read(filename)
 
     def list_notes(
         self,
@@ -1225,9 +1561,7 @@ class SessionMemoryManager:
 
         Returns list of note info dicts.
         """
-        if self._structured_writer is None:
-            return []
-        notes = self._structured_writer.list_notes(category=category, tag=tag)
+        notes = self._notes_list(category=category, tag=tag)
         return [self._file_info_to_dict(n) for n in notes]
 
     def link_notes(self, source_filename: str, target_filename: str) -> bool:
@@ -1235,9 +1569,7 @@ class SessionMemoryManager:
 
         Returns True if link was created successfully.
         """
-        if self._structured_writer is None:
-            return False
-        return self._structured_writer.link_notes(source_filename, target_filename)
+        return self._notes_link(source_filename, target_filename)
 
     def get_memory_index(self) -> Optional[Dict[str, Any]]:
         """Get the full memory index for API responses."""
@@ -1418,7 +1750,7 @@ class SessionMemoryManager:
                 )
 
             # ── Structured note (dual-write) ─────────────────────────
-            if self._structured_writer is not None:
+            if self._memory_provider is not None:
                 try:
                     auto_tags = self._extract_execution_tags(
                         input_text, result_state,
@@ -1430,13 +1762,14 @@ class SessionMemoryManager:
                         f"Execution #{execution_number} — "
                         f"{input_text[:60].strip()}"
                     )
-                    self._structured_writer.write_note(
+                    self._notes_write(
                         title=title,
                         content=entry,
                         category="daily",
                         tags=all_tags,
                         importance=imp,
                         source="execution",
+                        links_to=None,
                     )
                 except Exception:
                     logger.debug(
