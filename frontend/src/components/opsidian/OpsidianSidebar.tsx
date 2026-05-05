@@ -47,6 +47,7 @@ const IMPORTANCE_DOT: Record<string, string> = {
 export default function OpsidianSidebar() {
   const {
     files,
+    categories,
     selectedFile,
     selectedSessionId,
     sidebarCollapsed,
@@ -59,6 +60,7 @@ export default function OpsidianSidebar() {
     openFile,
     setFileDetail,
     setFiles,
+    setCategories,
     setMemoryIndex,
     setMemoryStats,
     setGraphData,
@@ -80,9 +82,19 @@ export default function OpsidianSidebar() {
     });
   };
 
-  // Group files by category
+  // Group files by category — every category folder (canonical +
+  // host-defined) gets a slot even when it currently holds zero
+  // notes. Empty folders render as a dim row with a `(0)` count so
+  // the operator sees the full vault structure at all times.
   const grouped = useMemo(() => {
     const groups: Record<string, typeof files[string][]> = {};
+
+    // Seed every known category from the categories API response so
+    // empty folders survive into the render pass below.
+    for (const c of categories || []) {
+      if (c.name) groups[c.name] = [];
+    }
+
     Object.values(files).forEach((f) => {
       const cat = f.category || 'root';
       if (!groups[cat]) groups[cat] = [];
@@ -104,7 +116,39 @@ export default function OpsidianSidebar() {
       groups[cat].sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
     }
     return groups;
-  }, [files, filterText]);
+  }, [files, categories, filterText]);
+
+  // Stable order — categories[] from the backend keeps the canonical
+  // sort (NOTE_CATEGORIES first, then host-defined alphabetically).
+  // Fall back to alphabetical when categories haven't loaded yet.
+  const orderedCategoryNames = useMemo(() => {
+    const known = new Set<string>();
+    const out: string[] = [];
+    for (const c of categories || []) {
+      if (c.name && !known.has(c.name)) {
+        out.push(c.name);
+        known.add(c.name);
+      }
+    }
+    // Append any category that appeared in `files` but was missing
+    // from the categories API (host-defined that hasn't been picked
+    // up yet — corner case).
+    for (const cat of Object.keys(grouped)) {
+      if (!known.has(cat)) {
+        out.push(cat);
+        known.add(cat);
+      }
+    }
+    return out;
+  }, [categories, grouped]);
+
+  const categoryDescriptions = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories || []) {
+      if (c.description) map[c.name] = c.description;
+    }
+    return map;
+  }, [categories]);
 
   // Tags from index
   const sortedTags = useMemo(
@@ -134,13 +178,15 @@ export default function OpsidianSidebar() {
     if (!selectedSessionId) return;
     setLoading(true);
     try {
-      const [indexRes, graphRes] = await Promise.all([
+      const [indexRes, graphRes, catsRes] = await Promise.all([
         memoryApi.getIndex(selectedSessionId),
         memoryApi.getGraph(selectedSessionId),
+        memoryApi.listCategories(selectedSessionId),
       ]);
       setMemoryIndex(indexRes.index);
       setMemoryStats(indexRes.stats);
       setFiles(indexRes.index.files);
+      setCategories(catsRes.categories || []);
       setGraphData(graphRes.nodes, graphRes.edges);
     } finally {
       setLoading(false);
@@ -297,22 +343,33 @@ export default function OpsidianSidebar() {
               />
             </div>
             <div className="obs-sb-tree">
-              {Object.entries(grouped).map(([cat, catFiles]) => {
-                if (catFiles.length === 0) return null;
+              {orderedCategoryNames.map((cat) => {
+                const catFiles = grouped[cat] || [];
+                // While a filter is active, hide categories that have
+                // zero matching files — non-matching empty folders
+                // would just clutter the filtered list.
+                if (filterText && catFiles.length === 0) return null;
                 const CatIcon = CATEGORY_ICONS[cat] || File;
                 const expanded = expandedCategories.has(cat);
+                const isEmpty = catFiles.length === 0;
+                const description = categoryDescriptions[cat];
                 return (
-                  <div key={cat} className="obs-sb-category">
+                  <div
+                    key={cat}
+                    className={`obs-sb-category ${isEmpty ? 'obs-sb-cat-empty' : ''}`}
+                  >
                     <button
                       className="obs-sb-cat-header"
                       onClick={() => toggleCategory(cat)}
+                      title={description || cat}
+                      style={isEmpty ? { opacity: 0.55 } : undefined}
                     >
                       {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                       <CatIcon size={13} style={{ color: CATEGORY_COLORS[cat] }} />
                       <span className="obs-sb-cat-name">{cat}</span>
                       <span className="obs-sb-cat-count">{catFiles.length}</span>
                     </button>
-                    {expanded && (
+                    {expanded && !isEmpty && (
                       <div className="obs-sb-cat-files">
                         {catFiles.map((f) => (
                           <button

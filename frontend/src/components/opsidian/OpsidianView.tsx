@@ -28,6 +28,7 @@ export default function OpsidianView() {
     setMemoryIndex,
     setMemoryStats,
     setFiles,
+    setCategories,
     setGraphData,
     setSessions,
     setLoadingSessions,
@@ -65,20 +66,22 @@ export default function OpsidianView() {
   const loadSessionMemory = useCallback(async (sessionId: string) => {
     setLoading(true);
     try {
-      const [indexRes, graphRes] = await Promise.all([
+      const [indexRes, graphRes, catsRes] = await Promise.all([
         memoryApi.getIndex(sessionId),
         memoryApi.getGraph(sessionId),
+        memoryApi.listCategories(sessionId),
       ]);
       setMemoryIndex(indexRes.index);
       setMemoryStats(indexRes.stats);
       setFiles(indexRes.index.files);
+      setCategories(catsRes.categories || []);
       setGraphData(graphRes.nodes, graphRes.edges);
     } catch (err) {
       console.error('Failed to load session memory:', err);
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setMemoryIndex, setMemoryStats, setFiles, setGraphData]);
+  }, [setLoading, setMemoryIndex, setMemoryStats, setFiles, setCategories, setGraphData]);
 
   useEffect(() => {
     if (selectedSessionId) {

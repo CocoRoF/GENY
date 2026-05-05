@@ -30,6 +30,16 @@ export interface OpsidianState {
 
   // Files
   files: Record<string, MemoryFileInfo>;
+  // Every category folder (canonical + host-defined) with its file_count
+  // and description. Drives the sidebar so empty folders also appear —
+  // populated by `memoryApi.listCategories(...)`.
+  categories: Array<{
+    name: string;
+    file_count: number;
+    path: string;
+    exists: boolean;
+    description?: string;
+  }>;
   selectedFile: string | null;
   fileDetail: MemoryFileDetail | null;
   openFiles: string[]; // tabs
@@ -57,6 +67,15 @@ export interface OpsidianState {
   setMemoryStats: (s: MemoryStats | null) => void;
   setLoading: (v: boolean) => void;
   setFiles: (f: Record<string, MemoryFileInfo>) => void;
+  setCategories: (
+    c: Array<{
+      name: string;
+      file_count: number;
+      path: string;
+      exists: boolean;
+      description?: string;
+    }>,
+  ) => void;
   setSelectedFile: (fn: string | null) => void;
   setFileDetail: (d: MemoryFileDetail | null) => void;
   openFile: (fn: string) => void;
@@ -80,6 +99,13 @@ const initialState = {
   memoryStats: null as MemoryStats | null,
   loading: false,
   files: {} as Record<string, MemoryFileInfo>,
+  categories: [] as Array<{
+    name: string;
+    file_count: number;
+    path: string;
+    exists: boolean;
+    description?: string;
+  }>,
   selectedFile: null as string | null,
   fileDetail: null as MemoryFileDetail | null,
   openFiles: [] as string[],
@@ -104,6 +130,7 @@ export const useOpsidianStore = create<OpsidianState>((set) => ({
   setMemoryStats: (s) => set({ memoryStats: s }),
   setLoading: (v) => set({ loading: v }),
   setFiles: (f) => set({ files: f }),
+  setCategories: (c) => set({ categories: c }),
   setSelectedFile: (fn) => set({ selectedFile: fn }),
   setFileDetail: (d) => set({ fileDetail: d }),
   openFile: (fn) =>

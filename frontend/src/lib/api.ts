@@ -1845,6 +1845,21 @@ export const memoryApi = {
     );
   },
 
+  /** GET /api/agents/{sid}/memory/categories — every category folder
+   * (canonical + host-defined) with file_count + description. Used by
+   * the Opsidian sidebar so empty folders also surface.
+   */
+  listCategories: (sessionId: string) =>
+    apiCall<{
+      categories: Array<{
+        name: string;
+        file_count: number;
+        path: string;
+        exists: boolean;
+        description?: string;
+      }>;
+    }>(`/api/agents/${sessionId}/memory/categories`),
+
   /** POST /api/agents/{sid}/memory/links — create link */
   createLink: (sessionId: string, sourceFilename: string, targetFilename: string) =>
     apiCall<{ message: string }>(`/api/agents/${sessionId}/memory/links`, {
