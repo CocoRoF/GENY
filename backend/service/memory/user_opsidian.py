@@ -16,9 +16,9 @@ Storage layout::
         _index.json
 
 Each user gets their own single-tenant ``MemoryProvider`` (file-backed,
-scope=user) so every read/write/index call routes through
-``provider.notes()`` / ``provider.index()`` directly — no host-side
-adapters.
+scope=user). Sync + async dual surface (Step 7-2): every public method
+has an ``a*`` async sibling. Sync wrappers call into the async path
+via ``run_coro_sync``; async callers should prefer the ``a*`` form.
 """
 
 from __future__ import annotations
@@ -32,11 +32,7 @@ logger = getLogger(__name__)
 
 
 class UserOpsidianManager:
-    """Per-user personal knowledge vault with Obsidian-like notes.
-
-    Each user gets an isolated directory under ``_user_opsidian/{username}/``
-    backed by a dedicated single-tenant ``MemoryProvider``.
-    """
+    """Per-user personal knowledge vault with Obsidian-like notes."""
 
     def __init__(self, username: str, base_path: Optional[str] = None):
         if base_path is None:
@@ -76,27 +72,6 @@ class UserOpsidianManager:
                 self.username, exc_info=True,
             )
 
-    # ── Read Operations ───────────────────────────────────────────────
-
-    def list_notes(
-        self,
-        *,
-        category: Optional[str] = None,
-        tag: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        if self._provider is None:
-            return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
-        try:
-            metas = run_coro_sync(
-                self._provider.notes().list(category=category, tag=tag)
-            )
-        except Exception:
-            logger.debug("UserOpsidianManager.list_notes: failed", exc_info=True)
-            return []
-        return [self._meta_to_dict(m) for m in metas]
-
     @staticmethod
     def _meta_to_dict(meta) -> Dict[str, Any]:
         cat = meta.category or "root"
@@ -117,14 +92,38 @@ class UserOpsidianManager:
             "summary": None,
         }
 
-    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+    # ── Read Operations (async-native) ───────────────────────────────
+
+    async def alist_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self._provider is None:
+            return []
+        try:
+            metas = await self._provider.notes().list(category=category, tag=tag)
+        except Exception:
+            logger.debug("UserOpsidianManager.alist_notes: failed", exc_info=True)
+            return []
+        return [self._meta_to_dict(m) for m in metas]
+
+    def list_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.alist_notes(category=category, tag=tag))
+
+    async def aread_note(self, filename: str) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            note = run_coro_sync(self._provider.notes().read(bare))
+            note = await self._provider.notes().read(bare)
         except Exception:
             return None
         if note is None:
@@ -148,16 +147,20 @@ class UserOpsidianManager:
             "linked_from": list(note.links_in),
         }
 
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Keyword search across user notes."""
+    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aread_note(filename))
+
+    async def asearch(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Keyword search across user notes (async)."""
         if self._provider is None:
             return []
-        all_notes = self.list_notes()
+        all_notes = await self.alist_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
             fn = note_info["filename"]
-            note = self.read_note(fn)
+            note = await self.aread_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
@@ -180,13 +183,15 @@ class UserOpsidianManager:
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:max_results]
 
-    def get_index(self) -> Optional[Dict[str, Any]]:
+    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.asearch(query, max_results))
+
+    async def aget_index(self) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            payload = run_coro_sync(self._provider.index().snapshot())
+            payload = await self._provider.index().snapshot()
         except Exception:
             return None
         files = payload.get("files") or {}
@@ -210,8 +215,12 @@ class UserOpsidianManager:
             "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
-    def get_stats(self) -> Dict[str, Any]:
-        idx = self.get_index()
+    def get_index(self) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_index())
+
+    async def aget_stats(self) -> Dict[str, Any]:
+        idx = await self.aget_index()
         if idx is None:
             return {"total_files": 0, "total_chars": 0, "categories": {}, "total_tags": 0}
         categories: Dict[str, int] = {}
@@ -225,9 +234,21 @@ class UserOpsidianManager:
             "total_tags": len(idx.get("tag_map", {})),
         }
 
+    def get_stats(self) -> Dict[str, Any]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_stats())
+
+    async def aget_graph(self) -> Dict[str, Any]:
+        """Get graph data for visualization (async)."""
+        idx = await self.aget_index()
+        return self._build_graph(idx)
+
     def get_graph(self) -> Dict[str, Any]:
-        """Get graph data for visualization (enhanced with tag edges + metadata)."""
-        idx = self.get_index()
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_graph())
+
+    @staticmethod
+    def _build_graph(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if idx is None:
             return {"nodes": [], "edges": []}
         nodes = []
@@ -252,7 +273,6 @@ class UserOpsidianManager:
                 "charCount": info.get("char_count", 0),
             })
 
-            # Wikilink edges
             for target in links_to:
                 if target in files_map:
                     key = (fn, target)
@@ -265,11 +285,9 @@ class UserOpsidianManager:
                             "weight": 1.0,
                         })
 
-            # Build tag map
             for tag in tags:
                 tag_to_files.setdefault(tag, []).append(fn)
 
-        # Tag-based edges
         for tag, fns in tag_to_files.items():
             if len(fns) < 2:
                 continue
@@ -288,9 +306,9 @@ class UserOpsidianManager:
 
         return {"nodes": nodes, "edges": edges}
 
-    # ── Write Operations ──────────────────────────────────────────────
+    # ── Write Operations (async-native) ──────────────────────────────
 
-    def write_note(
+    async def awrite_note(
         self,
         title: str,
         content: str,
@@ -313,7 +331,6 @@ class UserOpsidianManager:
             _slugify,
             extract_wikilinks,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         cat = category if category in VALID_CATEGORIES else "topics"
         tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
@@ -356,17 +373,35 @@ class UserOpsidianManager:
             frontmatter=passthrough,
         )
         try:
-            meta = run_coro_sync(self._provider.notes().write(draft))
+            meta = await self._provider.notes().write(draft)
         except Exception:
             logger.warning(
-                "UserOpsidianManager.write_note: provider write failed",
+                "UserOpsidianManager.awrite_note: provider write failed",
                 exc_info=True,
             )
             return None
         bare_returned = meta.ref.filename or bare_filename
         return bare_returned if cat == "root" else f"{cat}/{bare_returned}"
 
-    def update_note(
+    def write_note(
+        self,
+        title: str,
+        content: str,
+        *,
+        category: str = "topics",
+        tags: Optional[List[str]] = None,
+        importance: str = "medium",
+        source: str = "user",
+        links_to: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.awrite_note(
+            title, content,
+            category=category, tags=tags, importance=importance,
+            source=source, links_to=links_to,
+        ))
+
+    async def aupdate_note(
         self,
         filename: str,
         *,
@@ -381,12 +416,11 @@ class UserOpsidianManager:
             Importance as _ExecutorImportance,
             NotePatch,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         bare = Path(filename).name
         notes = self._provider.notes()
         try:
-            existing = run_coro_sync(notes.read(bare))
+            existing = await notes.read(bare)
         except Exception:
             return False
         if existing is None:
@@ -412,49 +446,71 @@ class UserOpsidianManager:
             category=category,
         )
         try:
-            run_coro_sync(notes.update(bare, patch))
+            await notes.update(bare, patch)
         except Exception:
             return False
         return True
 
-    def delete_note(self, filename: str) -> bool:
+    def update_note(
+        self,
+        filename: str,
+        *,
+        body: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        importance: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aupdate_note(
+            filename, body=body, tags=tags, importance=importance, category=category,
+        ))
+
+    async def adelete_note(self, filename: str) -> bool:
         if self._provider is None:
             return False
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+            return bool(await self._provider.notes().delete(bare))
         except Exception:
             return False
 
-    def create_link(self, source_filename: str, target_filename: str) -> bool:
-        """Create a wikilink between two notes."""
+    def delete_note(self, filename: str) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.adelete_note(filename))
+
+    async def acreate_link(self, source_filename: str, target_filename: str) -> bool:
+        """Create a wikilink between two notes (async)."""
         if self._provider is None:
             return False
-        note = self.read_note(source_filename)
+        note = await self.aread_note(source_filename)
         if note is None:
             return False
         body = note.get("body", "")
         link_ref = f"[[{target_filename}]]"
         if link_ref not in body:
             body = body.rstrip() + f"\n\n{link_ref}\n"
-            return self.update_note(source_filename, body=body)
+            return await self.aupdate_note(source_filename, body=body)
         return True
 
-    def reindex(self) -> int:
-        """Rebuild the full index from disk."""
+    def create_link(self, source_filename: str, target_filename: str) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.acreate_link(source_filename, target_filename))
+
+    async def areindex(self) -> int:
+        """Rebuild the full index from disk (async)."""
         if self._provider is None:
             return 0
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(self._provider.index().rebuild())
-            payload = run_coro_sync(self._provider.index().snapshot())
+            await self._provider.index().rebuild()
+            payload = await self._provider.index().snapshot()
             files = payload.get("files") or {}
             return int(payload.get("total_files", len(files)) or len(files))
         except Exception:
             return 0
+
+    def reindex(self) -> int:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.areindex())
 
 
 # ── Manager cache (username → manager) ────────────────────────────────

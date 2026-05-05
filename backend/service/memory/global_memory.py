@@ -6,6 +6,12 @@ and promote notes to. The manager owns its own single-tenant
 ``MemoryProvider`` (file-backed, rooted at ``<storage>/_global_memory``)
 so every operation flows through ``provider.notes()`` /
 ``provider.index()`` directly — no host-side adapters.
+
+Sync + async dual surface (Step 7-2): every public method has an
+``a*`` async sibling. Sync wrappers call into the async path via
+``run_coro_sync``; async callers (controllers, agent_session, tools
+that override ``arun``) should prefer the ``a*`` form to skip the
+bridge.
 """
 
 from __future__ import annotations
@@ -23,8 +29,7 @@ class GlobalMemoryManager:
 
     Uses the same structured note format (YAML frontmatter + Markdown)
     as session-level memory, but stored in a shared ``_global_memory/``
-    directory accessible to all sessions. Backed by a single-tenant
-    ``MemoryProvider`` constructed lazily on first use.
+    directory accessible to all sessions.
     """
 
     def __init__(self, base_path: Optional[str] = None):
@@ -68,27 +73,6 @@ class GlobalMemoryManager:
         """Attach database connection (analytics mirror)."""
         self._db = db
 
-    # ── Read Operations ───────────────────────────────────────────────
-
-    def list_notes(
-        self,
-        *,
-        category: Optional[str] = None,
-        tag: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        if self._provider is None:
-            return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
-        try:
-            metas = run_coro_sync(
-                self._provider.notes().list(category=category, tag=tag)
-            )
-        except Exception:
-            logger.debug("GlobalMemoryManager.list_notes: failed", exc_info=True)
-            return []
-        return [self._meta_to_dict(m) for m in metas]
-
     @staticmethod
     def _meta_to_dict(meta) -> Dict[str, Any]:
         cat = meta.category or "root"
@@ -109,17 +93,41 @@ class GlobalMemoryManager:
             "summary": None,
         }
 
-    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+    # ── Read Operations (async-native) ───────────────────────────────
+
+    async def alist_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self._provider is None:
+            return []
+        try:
+            metas = await self._provider.notes().list(category=category, tag=tag)
+        except Exception:
+            logger.debug("GlobalMemoryManager.alist_notes: failed", exc_info=True)
+            return []
+        return [self._meta_to_dict(m) for m in metas]
+
+    def list_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.alist_notes(category=category, tag=tag))
+
+    async def aread_note(self, filename: str) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            note = run_coro_sync(self._provider.notes().read(bare))
+            note = await self._provider.notes().read(bare)
         except Exception:
             logger.debug(
-                "GlobalMemoryManager.read_note(%s): failed", filename,
+                "GlobalMemoryManager.aread_note(%s): failed", filename,
                 exc_info=True,
             )
             return None
@@ -144,16 +152,20 @@ class GlobalMemoryManager:
             "linked_from": list(note.links_in),
         }
 
-    def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
-        """Simple keyword search across global notes."""
+    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aread_note(filename))
+
+    async def asearch(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """Simple keyword search across global notes (async)."""
         if self._provider is None:
             return []
-        all_notes = self.list_notes()
+        all_notes = await self.alist_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
             fn = note_info["filename"]
-            note = self.read_note(fn)
+            note = await self.aread_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
@@ -176,15 +188,17 @@ class GlobalMemoryManager:
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:max_results]
 
-    def get_index(self) -> Optional[Dict[str, Any]]:
+    def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.asearch(query, max_results))
+
+    async def aget_index(self) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            payload = run_coro_sync(self._provider.index().snapshot())
+            payload = await self._provider.index().snapshot()
         except Exception:
-            logger.debug("GlobalMemoryManager.get_index: failed", exc_info=True)
+            logger.debug("GlobalMemoryManager.aget_index: failed", exc_info=True)
             return None
         files = payload.get("files") or {}
         return {
@@ -206,8 +220,12 @@ class GlobalMemoryManager:
             "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
-    def get_stats(self) -> Dict[str, Any]:
-        idx = self.get_index()
+    def get_index(self) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_index())
+
+    async def aget_stats(self) -> Dict[str, Any]:
+        idx = await self.aget_index()
         if idx is None:
             return {"total_files": 0, "total_chars": 0}
         categories: Dict[str, int] = {}
@@ -221,9 +239,13 @@ class GlobalMemoryManager:
             "total_tags": len(idx.get("tag_map", {})),
         }
 
-    # ── Write Operations ──────────────────────────────────────────────
+    def get_stats(self) -> Dict[str, Any]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_stats())
 
-    def write_note(
+    # ── Write Operations (async-native) ──────────────────────────────
+
+    async def awrite_note(
         self,
         title: str,
         content: str,
@@ -246,7 +268,6 @@ class GlobalMemoryManager:
             _slugify,
             extract_wikilinks,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         cat = category if category in VALID_CATEGORIES else "topics"
         tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
@@ -288,17 +309,35 @@ class GlobalMemoryManager:
             frontmatter=passthrough,
         )
         try:
-            meta = run_coro_sync(self._provider.notes().write(draft))
+            meta = await self._provider.notes().write(draft)
         except Exception:
             logger.warning(
-                "GlobalMemoryManager.write_note: provider write failed",
+                "GlobalMemoryManager.awrite_note: provider write failed",
                 exc_info=True,
             )
             return None
         bare_returned = meta.ref.filename or bare_filename
         return bare_returned if cat == "root" else f"{cat}/{bare_returned}"
 
-    def update_note(
+    def write_note(
+        self,
+        title: str,
+        content: str,
+        *,
+        category: str = "topics",
+        tags: Optional[List[str]] = None,
+        importance: str = "medium",
+        source: str = "global",
+        source_session_id: Optional[str] = None,
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.awrite_note(
+            title, content,
+            category=category, tags=tags, importance=importance,
+            source=source, source_session_id=source_session_id,
+        ))
+
+    async def aupdate_note(
         self,
         filename: str,
         *,
@@ -312,12 +351,11 @@ class GlobalMemoryManager:
             Importance as _ExecutorImportance,
             NotePatch,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         bare = Path(filename).name
         notes = self._provider.notes()
         try:
-            existing = run_coro_sync(notes.read(bare))
+            existing = await notes.read(bare)
         except Exception:
             return False
         if existing is None:
@@ -342,36 +380,53 @@ class GlobalMemoryManager:
             importance=importance_enum,
         )
         try:
-            run_coro_sync(notes.update(bare, patch))
+            await notes.update(bare, patch)
         except Exception:
             return False
         return True
 
-    def delete_note(self, filename: str) -> bool:
+    def update_note(
+        self,
+        filename: str,
+        *,
+        body: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        importance: Optional[str] = None,
+    ) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aupdate_note(
+            filename, body=body, tags=tags, importance=importance,
+        ))
+
+    async def adelete_note(self, filename: str) -> bool:
         if self._provider is None:
             return False
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+            return bool(await self._provider.notes().delete(bare))
         except Exception:
             return False
 
+    def delete_note(self, filename: str) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.adelete_note(filename))
+
     # ── Promote from Session ──────────────────────────────────────────
 
-    def promote(
+    async def apromote(
         self,
         session_memory_manager,
         filename: str,
         *,
         session_id: str = "",
     ) -> Optional[str]:
-        """Copy a note from session memory to global memory.
-
-        Returns the new global filename, or None on failure.
-        """
-        note = session_memory_manager.read_note(filename)
+        """Copy a note from session memory to global memory (async)."""
+        # Prefer async siblings on the session manager when available.
+        aread = getattr(session_memory_manager, "aread_note", None)
+        if callable(aread):
+            note = await aread(filename)
+        else:
+            note = session_memory_manager.read_note(filename)
         if note is None:
             logger.warning(
                 "promote: source note not found: %s", filename,
@@ -385,7 +440,7 @@ class GlobalMemoryManager:
         if "promoted" not in tags:
             tags.append("promoted")
 
-        global_fn = self.write_note(
+        global_fn = await self.awrite_note(
             title=meta.get("title", filename.replace(".md", "")),
             content=body,
             category=meta.get("category", "topics"),
@@ -402,16 +457,25 @@ class GlobalMemoryManager:
             )
         return global_fn
 
-    def inject_context(
+    def promote(
+        self,
+        session_memory_manager,
+        filename: str,
+        *,
+        session_id: str = "",
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.apromote(
+            session_memory_manager, filename, session_id=session_id,
+        ))
+
+    async def ainject_context(
         self,
         query: str,
         max_chars: int = 4000,
     ) -> str:
-        """Build a global memory context block for injection into prompts.
-
-        Returns formatted XML-tagged text or empty string.
-        """
-        results = self.search(query, max_results=5)
+        """Build a global memory context block (async)."""
+        results = await self.asearch(query, max_results=5)
         if not results:
             return ""
 
@@ -431,6 +495,14 @@ class GlobalMemoryManager:
             total += len(chunk)
 
         return "\n\n".join(parts)
+
+    def inject_context(
+        self,
+        query: str,
+        max_chars: int = 4000,
+    ) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.ainject_context(query, max_chars))
 
 
 # ── Singleton ─────────────────────────────────────────────────────────
