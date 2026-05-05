@@ -310,7 +310,7 @@ class SessionMemoryManager:
     # Turn → MemorySearchResult) happens inline.
     # ------------------------------------------------------------------
 
-    def _stm_append_message(
+    async def _stm_append_message(
         self,
         role: str,
         content: str,
@@ -319,7 +319,6 @@ class SessionMemoryManager:
         if self._memory_provider is None:
             return
         from geny_executor.memory.provider import Turn
-        from service.memory.sync_async_bridge import run_coro_sync
 
         turn = Turn(
             role=role,
@@ -328,27 +327,23 @@ class SessionMemoryManager:
             metadata=dict(metadata) if metadata else {},
         )
         try:
-            run_coro_sync(self._memory_provider.stm().append(turn))
+            await self._memory_provider.stm().append(turn)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._stm_append_message: provider.stm().append failed",
                 exc_info=True,
             )
 
-    def _stm_append_event(
+    async def _stm_append_event(
         self,
         event: str,
         data: Optional[Dict[str, Any]] = None,
     ) -> None:
         if self._memory_provider is None:
             return
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(
-                self._memory_provider.stm().append_event(
-                    event, dict(data) if data else None
-                )
+            await self._memory_provider.stm().append_event(
+                event, dict(data) if data else None
             )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -356,13 +351,11 @@ class SessionMemoryManager:
                 exc_info=True,
             )
 
-    def _stm_get_summary(self) -> Optional[str]:
+    async def _stm_get_summary(self) -> Optional[str]:
         if self._memory_provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            text = run_coro_sync(self._memory_provider.stm().read_summary())
+            text = await self._memory_provider.stm().read_summary()
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._stm_get_summary: provider.stm().read_summary failed",
@@ -373,26 +366,22 @@ class SessionMemoryManager:
             return None
         return text.strip() or None
 
-    def _stm_write_summary(self, body: str) -> None:
+    async def _stm_write_summary(self, body: str) -> None:
         if self._memory_provider is None:
             return
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(self._memory_provider.stm().write_summary(body))
+            await self._memory_provider.stm().write_summary(body)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._stm_write_summary: provider.stm().write_summary failed",
                 exc_info=True,
             )
 
-    def _stm_get_recent(self, n: int) -> List[MemoryEntry]:
+    async def _stm_get_recent(self, n: int) -> List[MemoryEntry]:
         if self._memory_provider is None or n <= 0:
             return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            turns = run_coro_sync(self._memory_provider.stm().recent(n=n))
+            turns = await self._memory_provider.stm().recent(n=n)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._stm_get_recent: provider.stm().recent failed",
@@ -401,24 +390,20 @@ class SessionMemoryManager:
             return []
         return [self._turn_to_entry(turn, idx=i) for i, turn in enumerate(turns)]
 
-    def _stm_load_all(self) -> List[MemoryEntry]:
+    async def _stm_load_all(self) -> List[MemoryEntry]:
         # Bounded large-N read — same shape `ShortTermMemory.load_all`
         # used to return.
-        return self._stm_get_recent(_RECENT_LARGE_N)
+        return await self._stm_get_recent(_RECENT_LARGE_N)
 
-    def _stm_search(
+    async def _stm_search(
         self,
         query: str,
         max_results: int = 10,
     ) -> List[MemorySearchResult]:
         if not query or not query.strip() or self._memory_provider is None:
             return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            turns = run_coro_sync(
-                self._memory_provider.stm().search(query, limit=max_results)
-            )
+            turns = await self._memory_provider.stm().search(query, limit=max_results)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._stm_search: provider.stm().search failed",
@@ -461,37 +446,42 @@ class SessionMemoryManager:
     # Public read surface that legacy callers
     # (``memory_inspect_tools._stm_load_all``) can reach for. Keeps
     # the post-1.21.0 surface deliberately small — no parallel
-    # ``ShortTermMemory`` object to expose.
+    # ``ShortTermMemory`` object to expose. Sync wrappers; async
+    # callers should use ``aload_all_stm`` / ``aget_recent_stm``.
     def load_all_stm(self) -> List[MemoryEntry]:
-        return self._stm_load_all()
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._stm_load_all())
 
     def get_recent_stm(self, n: int = 20) -> List[MemoryEntry]:
-        return self._stm_get_recent(n)
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._stm_get_recent(n))
+
+    async def aload_all_stm(self) -> List[MemoryEntry]:
+        return await self._stm_load_all()
+
+    async def aget_recent_stm(self, n: int = 20) -> List[MemoryEntry]:
+        return await self._stm_get_recent(n)
 
     # ------------------------------------------------------------------
     # LTM helpers (Sprint 3 step 2 — provider direct, no host adapter)
     # ------------------------------------------------------------------
 
-    def _ltm_append(self, text: str, *, heading: Optional[str] = None) -> None:
+    async def _ltm_append(self, text: str, *, heading: Optional[str] = None) -> None:
         if self._memory_provider is None:
             return
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(self._memory_provider.ltm().append(text, heading=heading))
+            await self._memory_provider.ltm().append(text, heading=heading)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._ltm_append: provider.ltm().append failed",
                 exc_info=True,
             )
 
-    def _ltm_write_topic(self, topic: str, text: str) -> Optional[Path]:
+    async def _ltm_write_topic(self, topic: str, text: str) -> Optional[Path]:
         if self._memory_provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            ref = run_coro_sync(self._memory_provider.ltm().write_topic(topic, text))
+            ref = await self._memory_provider.ltm().write_topic(topic, text)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._ltm_write_topic: provider.ltm().write_topic failed",
@@ -502,7 +492,7 @@ class SessionMemoryManager:
             return self._memory_dir / ref.filename
         return None
 
-    def _ltm_write_execution(
+    async def _ltm_write_execution(
         self, entry: str, *, date: Optional[datetime] = None
     ) -> Optional[str]:
         """Append an execution-summary line to ``memory/executions/<YYYY-MM-DD>.md``.
@@ -519,14 +509,13 @@ class SessionMemoryManager:
             NotePatch,
             Scope,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         ts = date or datetime.now(_get_tz())
         day = ts.date().isoformat()
         bare_filename = f"{day}.md"
         notes = self._memory_provider.notes()
         try:
-            existing = run_coro_sync(notes.read(bare_filename))
+            existing = await notes.read(bare_filename)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._ltm_write_execution: provider read failed",
@@ -548,10 +537,10 @@ class SessionMemoryManager:
                         "geny.day": day,
                     },
                 )
-                run_coro_sync(notes.write(draft))
+                await notes.write(draft)
             else:
                 patch = NotePatch(append_body=entry.rstrip())
-                run_coro_sync(notes.update(bare_filename, patch))
+                await notes.update(bare_filename, patch)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._ltm_write_execution: provider write/update failed",
@@ -560,13 +549,11 @@ class SessionMemoryManager:
             return None
         return f"executions/{bare_filename}"
 
-    def _ltm_load_main(self) -> Optional[MemoryEntry]:
+    async def _ltm_load_main(self) -> Optional[MemoryEntry]:
         if self._memory_provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            text = run_coro_sync(self._memory_provider.ltm().read_main())
+            text = await self._memory_provider.ltm().read_main()
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._ltm_load_main: provider read failed",
@@ -583,17 +570,13 @@ class SessionMemoryManager:
             metadata={"category": "root"},
         )
 
-    def _ltm_load_pinned(self, *, max_chars: int = 3000) -> Optional[MemoryEntry]:
+    async def _ltm_load_pinned(self, *, max_chars: int = 3000) -> Optional[MemoryEntry]:
         if self._memory_provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            body = run_coro_sync(
-                self._memory_provider.notes().load_pinned(
-                    category="critical",
-                    max_chars=max_chars,
-                )
+            body = await self._memory_provider.notes().load_pinned(
+                category="critical",
+                max_chars=max_chars,
             )
         except Exception:  # noqa: BLE001
             logger.debug(
@@ -614,17 +597,13 @@ class SessionMemoryManager:
             metadata={"pinned": True},
         )
 
-    def _ltm_search(
+    async def _ltm_search(
         self, query: str, *, max_results: int = 10
     ) -> List[MemorySearchResult]:
         if not query.strip() or self._memory_provider is None:
             return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            chunks = run_coro_sync(
-                self._memory_provider.ltm().search(query, limit=max_results)
-            )
+            chunks = await self._memory_provider.ltm().search(query, limit=max_results)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._ltm_search: provider.ltm().search failed",
@@ -802,23 +781,21 @@ class SessionMemoryManager:
     # Index helpers (Sprint 3 step 4 — provider direct, no host adapter)
     #
     # ``MemoryIndexManager`` was retired; index reads route through
-    # ``provider.index()`` directly. Each helper wraps the executor's
-    # async ``IndexHandle`` in a sync call via ``run_coro_sync`` and
-    # rehydrates the snapshot into ``MemoryIndex`` / ``MemoryFileInfo``
-    # so callers (memory API, opsidian routes, memory_inspect tools)
-    # keep their existing shape.
+    # ``provider.index()`` directly. Helpers are async-native; sync
+    # public methods (``get_memory_index``, etc.) wrap with one
+    # ``run_coro_sync`` per call. Snapshot payloads are rehydrated
+    # into ``MemoryIndex`` / ``MemoryFileInfo`` so callers (memory API,
+    # opsidian routes, memory_inspect tools) keep their existing shape.
     # ------------------------------------------------------------------
 
-    def _index_snapshot(self) -> MemoryIndex:
+    async def _index_snapshot(self) -> MemoryIndex:
         """Lazy snapshot of the executor's IndexHandle.
         Returns an empty `MemoryIndex` when no provider is attached.
         """
         if self._memory_provider is None:
             return MemoryIndex()
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            payload = run_coro_sync(self._memory_provider.index().snapshot())
+            payload = await self._memory_provider.index().snapshot()
         except Exception:  # noqa: BLE001
             logger.debug("manager._index_snapshot: provider call failed", exc_info=True)
             return MemoryIndex()
@@ -842,21 +819,20 @@ class SessionMemoryManager:
             total_files=int(payload.get("total_files", len(files)) or len(files)),
         )
 
-    def _index_rebuild(self) -> int:
+    async def _index_rebuild(self) -> int:
         """Force a fresh index rebuild on the executor side.
         Returns the post-rebuild total_files count (0 if no provider).
         """
         if self._memory_provider is None:
             return 0
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(self._memory_provider.index().rebuild())
+            await self._memory_provider.index().rebuild()
         except Exception:  # noqa: BLE001
             logger.debug("manager._index_rebuild: provider rebuild failed", exc_info=True)
-        return self._index_snapshot().total_files
+        snapshot = await self._index_snapshot()
+        return snapshot.total_files
 
-    def _index_build_vault_map(self) -> Dict[str, Any]:
+    async def _index_build_vault_map(self) -> Dict[str, Any]:
         """Build the vault map payload (categories, top tags, recently
         modified, MEMORY.md preview). Geny's category descriptions are
         injected so the executor's render matches the legacy
@@ -872,13 +848,9 @@ class SessionMemoryManager:
                 "total_files": 0,
                 "generated_at": datetime.now(_get_tz()).isoformat(),
             }
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            return run_coro_sync(
-                self._memory_provider.index().build_vault_map(
-                    category_descriptions=CATEGORY_DESCRIPTIONS,
-                )
+            return await self._memory_provider.index().build_vault_map(
+                category_descriptions=CATEGORY_DESCRIPTIONS,
             )
         except Exception:  # noqa: BLE001
             logger.debug(
@@ -895,14 +867,19 @@ class SessionMemoryManager:
             }
 
     def build_vault_map(self) -> Dict[str, Any]:
-        """Public surface for the vault map render.
+        """Public sync surface for the vault map render.
 
         Replaces the retired ``mgr.index_manager.build_vault_map()``
         call site. Memory tools (`memory_categories`) and any other
         operator-facing surface that previously reached for the index
-        manager should call this method instead.
+        manager should call this method instead. Async callers should
+        use :meth:`abuild_vault_map`.
         """
-        return self._index_build_vault_map()
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._index_build_vault_map())
+
+    async def abuild_vault_map(self) -> Dict[str, Any]:
+        return await self._index_build_vault_map()
 
     # ------------------------------------------------------------------
     # Notes helpers (Sprint 3 step 5 — provider direct, no host adapter)
@@ -916,7 +893,7 @@ class SessionMemoryManager:
     # backlink propagation) but live outside the session lifecycle.
     # ------------------------------------------------------------------
 
-    def _notes_write(
+    async def _notes_write(
         self,
         *,
         title: str,
@@ -939,9 +916,8 @@ class SessionMemoryManager:
             VALID_CATEGORIES,
             _slugify,
             extract_wikilinks,
-            _propagate_linked_from,
+            apropagate_linked_from,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         cat = category if category in VALID_CATEGORIES else "topics"
         tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
@@ -984,7 +960,7 @@ class SessionMemoryManager:
             frontmatter=passthrough,
         )
         try:
-            meta = run_coro_sync(self._memory_provider.notes().write(draft))
+            meta = await self._memory_provider.notes().write(draft)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._notes_write: provider write failed", exc_info=True,
@@ -1019,7 +995,7 @@ class SessionMemoryManager:
             )
 
         try:
-            _propagate_linked_from(self._memory_provider, relative_path, all_links)
+            await apropagate_linked_from(self._memory_provider, relative_path, all_links)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._notes_write: linked_from propagation failed",
@@ -1032,7 +1008,7 @@ class SessionMemoryManager:
         )
         return relative_path
 
-    def _notes_update(
+    async def _notes_update(
         self,
         filename: str,
         *,
@@ -1048,12 +1024,11 @@ class SessionMemoryManager:
             Importance as _ExecutorImportance,
             NotePatch,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         bare = Path(filename).name
         notes = self._memory_provider.notes()
         try:
-            existing = run_coro_sync(notes.read(bare))
+            existing = await notes.read(bare)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._notes_update: read failed for %s", filename,
@@ -1088,7 +1063,7 @@ class SessionMemoryManager:
             category=category,
         )
         try:
-            run_coro_sync(notes.update(bare, patch))
+            await notes.update(bare, patch)
         except KeyError:
             logger.warning("manager._notes_update: provider missing %s", filename)
             return False
@@ -1101,14 +1076,12 @@ class SessionMemoryManager:
         logger.debug("manager._notes_update: updated %s (via provider)", filename)
         return True
 
-    def _notes_delete(self, filename: str) -> bool:
+    async def _notes_delete(self, filename: str) -> bool:
         if self._memory_provider is None:
             return False
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            ok = run_coro_sync(self._memory_provider.notes().delete(bare))
+            ok = await self._memory_provider.notes().delete(bare)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._notes_delete: provider delete failed for %s", filename,
@@ -1120,14 +1093,12 @@ class SessionMemoryManager:
         logger.info("manager._notes_delete: removed %s (via provider)", filename)
         return True
 
-    def _notes_read(self, filename: str) -> Optional[Dict[str, Any]]:
+    async def _notes_read(self, filename: str) -> Optional[Dict[str, Any]]:
         if self._memory_provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            note = run_coro_sync(self._memory_provider.notes().read(bare))
+            note = await self._memory_provider.notes().read(bare)
         except Exception:  # noqa: BLE001
             logger.debug(
                 "manager._notes_read(%s): provider read failed", filename,
@@ -1155,7 +1126,7 @@ class SessionMemoryManager:
             "linked_from": list(note.links_in),
         }
 
-    def _notes_list(
+    async def _notes_list(
         self,
         *,
         category: Optional[str] = None,
@@ -1165,7 +1136,6 @@ class SessionMemoryManager:
         if self._memory_provider is None:
             return []
         from geny_executor.memory.provider import Importance as _ExecutorImportance
-        from service.memory.sync_async_bridge import run_coro_sync
 
         importance_filter = None
         if importance:
@@ -1174,12 +1144,10 @@ class SessionMemoryManager:
             except ValueError:
                 importance_filter = None
         try:
-            metas = run_coro_sync(
-                self._memory_provider.notes().list(
-                    category=category,
-                    tag=tag,
-                    importance=importance_filter,
-                )
+            metas = await self._memory_provider.notes().list(
+                category=category,
+                tag=tag,
+                importance=importance_filter,
             )
         except Exception:  # noqa: BLE001
             logger.debug("manager._notes_list: provider list failed", exc_info=True)
@@ -1207,18 +1175,17 @@ class SessionMemoryManager:
         results.sort(key=lambda f: f.modified, reverse=True)
         return results
 
-    def _notes_link(self, source_file: str, target_file: str) -> bool:
+    async def _notes_link(self, source_file: str, target_file: str) -> bool:
         if self._memory_provider is None:
             return False
         from geny_executor.memory.provider import NotePatch
-        from service.memory.sync_async_bridge import run_coro_sync
 
         target_stem = Path(target_file).stem
         bare_source = Path(source_file).name
         notes = self._memory_provider.notes()
 
         try:
-            existing = run_coro_sync(notes.read(bare_source))
+            existing = await notes.read(bare_source)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "manager._notes_link: read failed for %s", source_file,
@@ -1236,7 +1203,7 @@ class SessionMemoryManager:
 
         patch = NotePatch(append_body=f"> See also: {marker}")
         try:
-            run_coro_sync(notes.update(bare_source, patch))
+            await notes.update(bare_source, patch)
         except KeyError:
             return False
         except Exception:  # noqa: BLE001
@@ -1363,7 +1330,8 @@ class SessionMemoryManager:
         # `_drive_provider` path *and* this synchronous
         # `record_message` (agent-DM tool, internal triggers, etc.)
         # — both call `provider.stm().append`, which fires the hook.
-        self._stm_append_message(role, content, out_meta)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._stm_append_message(role, content, out_meta))
 
     def _maybe_archive_conversation(
         self,
@@ -1419,7 +1387,8 @@ class SessionMemoryManager:
 
     def record_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Record a non-message event (tool call, state change, etc.)."""
-        self._stm_append_event(event, data)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._stm_append_event(event, data))
 
     def record_compaction(
         self,
@@ -1466,7 +1435,8 @@ class SessionMemoryManager:
             text: The knowledge to persist.
             heading: Optional markdown heading.
         """
-        self._ltm_append(text, heading=heading)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._ltm_append(text, heading=heading))
 
     def remember_dated(self, text: str) -> None:
         """Write an execution-summary block to today's executions file.
@@ -1478,11 +1448,13 @@ class SessionMemoryManager:
         ``DailyJournalWriter``) to ``memory/executions/<YYYY-MM-DD>.md``
         so the two streams no longer collide on one file.
         """
-        self._ltm_write_execution(text)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._ltm_write_execution(text))
 
     def remember_topic(self, topic: str, text: str) -> None:
         """Write knowledge to a topic-specific long-term memory file."""
-        self._ltm_write_topic(topic, text)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._ltm_write_topic(topic, text))
 
     # ------------------------------------------------------------------
     # Structured memory operations (Obsidian-like)
@@ -1503,12 +1475,41 @@ class SessionMemoryManager:
         """Write a structured memory note with frontmatter.
 
         Returns the filename of the created note, or None on failure.
+        Sync wrapper; async callers should use :meth:`awrite_note`.
         """
         if self._memory_provider is None:
             # Fallback to legacy write
-            self._ltm_write_topic(title, content)
+            from service.memory.sync_async_bridge import run_coro_sync
+            run_coro_sync(self._ltm_write_topic(title, content))
             return None
-        return self._notes_write(
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._notes_write(
+            title=title,
+            content=content,
+            category=category,
+            tags=tags,
+            importance=importance,
+            source=source,
+            links_to=links_to,
+            filename_override=filename_override,
+        ))
+
+    async def awrite_note(
+        self,
+        title: str,
+        content: str,
+        *,
+        category: str = "topics",
+        tags: Optional[List[str]] = None,
+        importance: str = "medium",
+        source: str = "system",
+        links_to: Optional[List[str]] = None,
+        filename_override: Optional[str] = None,
+    ) -> Optional[str]:
+        if self._memory_provider is None:
+            await self._ltm_write_topic(title, content)
+            return None
+        return await self._notes_write(
             title=title,
             content=content,
             category=category,
@@ -1531,7 +1532,20 @@ class SessionMemoryManager:
 
         Returns True if updated successfully.
         """
-        return self._notes_update(
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._notes_update(
+            filename, body=body, tags=tags, importance=importance,
+        ))
+
+    async def aupdate_note(
+        self,
+        filename: str,
+        *,
+        body: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        importance: Optional[str] = None,
+    ) -> bool:
+        return await self._notes_update(
             filename, body=body, tags=tags, importance=importance,
         )
 
@@ -1540,14 +1554,22 @@ class SessionMemoryManager:
 
         Returns True if deleted successfully.
         """
-        return self._notes_delete(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._notes_delete(filename))
+
+    async def adelete_note(self, filename: str) -> bool:
+        return await self._notes_delete(filename)
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
         """Read a structured memory note and return its metadata + body.
 
         Returns dict with keys: metadata, body, filename. None if not found.
         """
-        return self._notes_read(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._notes_read(filename))
+
+    async def aread_note(self, filename: str) -> Optional[Dict[str, Any]]:
+        return await self._notes_read(filename)
 
     def list_notes(
         self,
@@ -1559,7 +1581,17 @@ class SessionMemoryManager:
 
         Returns list of note info dicts.
         """
-        notes = self._notes_list(category=category, tag=tag)
+        from service.memory.sync_async_bridge import run_coro_sync
+        notes = run_coro_sync(self._notes_list(category=category, tag=tag))
+        return [self._file_info_to_dict(n) for n in notes]
+
+    async def alist_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        notes = await self._notes_list(category=category, tag=tag)
         return [self._file_info_to_dict(n) for n in notes]
 
     def link_notes(self, source_filename: str, target_filename: str) -> bool:
@@ -1567,13 +1599,20 @@ class SessionMemoryManager:
 
         Returns True if link was created successfully.
         """
-        return self._notes_link(source_filename, target_filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._notes_link(source_filename, target_filename))
+
+    async def alink_notes(
+        self, source_filename: str, target_filename: str
+    ) -> bool:
+        return await self._notes_link(source_filename, target_filename)
 
     def get_memory_index(self) -> Optional[Dict[str, Any]]:
         """Get the full memory index for API responses."""
         if self._memory_provider is None:
             return None
-        idx = self._index_snapshot()
+        from service.memory.sync_async_bridge import run_coro_sync
+        idx = run_coro_sync(self._index_snapshot())
         return {
             "files": {k: self._file_info_to_dict(v) for k, v in idx.files.items()},
             "tag_map": idx.tag_map,
@@ -1585,7 +1624,8 @@ class SessionMemoryManager:
         """Get tag counts from the index."""
         if self._memory_provider is None:
             return {}
-        idx = self._index_snapshot()
+        from service.memory.sync_async_bridge import run_coro_sync
+        idx = run_coro_sync(self._index_snapshot())
         tag_counts: Dict[str, int] = {}
         for tag, filenames in idx.tag_map.items():
             tag_counts[tag] = len(filenames)
@@ -1595,7 +1635,8 @@ class SessionMemoryManager:
         """Get link graph data for visualization (enhanced with tag edges + metadata)."""
         if self._memory_provider is None:
             return {"nodes": [], "edges": []}
-        idx = self._index_snapshot()
+        from service.memory.sync_async_bridge import run_coro_sync
+        idx = run_coro_sync(self._index_snapshot())
         nodes = []
         edges = []
         edge_set: set = set()
@@ -1655,7 +1696,11 @@ class SessionMemoryManager:
 
         Returns total number of indexed files.
         """
-        return self._index_rebuild()
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._index_rebuild())
+
+    async def areindex_memory(self) -> int:
+        return await self._index_rebuild()
 
     @staticmethod
     def _file_info_to_dict(info) -> Dict[str, Any]:
@@ -1718,7 +1763,7 @@ class SessionMemoryManager:
             # daily-journal root file. The structured-note dual
             # write below still goes to ``memory/daily/`` so the
             # human-friendly card surface keeps working.
-            self._ltm_write_execution(entry)
+            await self._ltm_write_execution(entry)
             logger.info(
                 "record_execution: #%d (%d chars) → executions/",
                 execution_number, len(entry),
@@ -1760,7 +1805,7 @@ class SessionMemoryManager:
                         f"Execution #{execution_number} — "
                         f"{input_text[:60].strip()}"
                     )
-                    self._notes_write(
+                    await self._notes_write(
                         title=title,
                         content=entry,
                         category="daily",
@@ -1989,12 +2034,14 @@ class SessionMemoryManager:
 
         Reads ``memory/critical/*.md`` via the executor's
         ``NotesHandle.load_pinned`` and packs the bodies (frontmatter
-        stripped) into one ``MemoryEntry``. The retriever consumes
-        this directly through the new generic ``MemoryAwareRetriever``
-        in 1.20.0 — but the host method stays as a sync convenience
-        for any in-process caller that still wants the packaged entry.
+        stripped) into one ``MemoryEntry``. Sync wrapper; async
+        callers should use :meth:`aload_pinned`.
         """
-        return self._ltm_load_pinned(max_chars=max_chars)
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self._ltm_load_pinned(max_chars=max_chars))
+
+    async def aload_pinned(self, *, max_chars: int = 3000):
+        return await self._ltm_load_pinned(max_chars=max_chars)
 
     # ------------------------------------------------------------------
     # Search
@@ -2017,16 +2064,20 @@ class SessionMemoryManager:
             max_results: Maximum total results.
             sources: Filter to specific sources. None = all.
         """
+        from service.memory.sync_async_bridge import run_coro_sync
+
         results: list[MemorySearchResult] = []
 
         if sources is None or MemorySource.LONG_TERM in sources:
-            ltm_results = self._ltm_search(query, max_results=max_results)
+            ltm_results = run_coro_sync(
+                self._ltm_search(query, max_results=max_results)
+            )
             for r in ltm_results:
                 r.score *= 1.2  # Long-term memory relevance boost
             results.extend(ltm_results)
 
         if sources is None or MemorySource.SHORT_TERM in sources:
-            stm_results = self._stm_search(query, max_results)
+            stm_results = run_coro_sync(self._stm_search(query, max_results))
             results.extend(stm_results)
 
         # Sort by combined score, deduplicate if needed
@@ -2167,15 +2218,17 @@ class SessionMemoryManager:
         parts: list[str] = []
         total_chars = 0
 
+        from service.memory.sync_async_bridge import run_coro_sync
+
         # 1. Session summary (if available)
         if include_summary:
-            summary = self._stm_get_summary()
+            summary = run_coro_sync(self._stm_get_summary())
             if summary and (total_chars + len(summary)) <= budget:
                 parts.append(f"<session-summary>\n{summary}\n</session-summary>")
                 total_chars += len(summary)
 
         # 2. Long-term memory: main MEMORY.md
-        main_mem = self._ltm_load_main()
+        main_mem = run_coro_sync(self._ltm_load_main())
         if main_mem and (total_chars + main_mem.char_count) <= budget:
             parts.append(
                 f"<long-term-memory source=\"{main_mem.filename}\">\n"
@@ -2201,7 +2254,7 @@ class SessionMemoryManager:
 
         # 4. Recent transcript messages
         if include_recent > 0:
-            recent = self._stm_get_recent(include_recent)
+            recent = run_coro_sync(self._stm_get_recent(include_recent))
             for entry in recent:
                 if (total_chars + entry.char_count) > budget:
                     break
@@ -2252,13 +2305,13 @@ class SessionMemoryManager:
 
         # 1. Session summary
         if include_summary:
-            summary = self._stm_get_summary()
+            summary = await self._stm_get_summary()
             if summary and (total_chars + len(summary)) <= budget:
                 parts.append(f"<session-summary>\n{summary}\n</session-summary>")
                 total_chars += len(summary)
 
         # 2. Main MEMORY.md
-        main_mem = self._ltm_load_main()
+        main_mem = await self._ltm_load_main()
         if main_mem and (total_chars + main_mem.char_count) <= budget:
             parts.append(
                 f"<long-term-memory source=\"{main_mem.filename}\">\n"
@@ -2302,7 +2355,7 @@ class SessionMemoryManager:
 
         # 5. Recent transcript messages
         if include_recent > 0:
-            recent = self._stm_get_recent(include_recent)
+            recent = await self._stm_get_recent(include_recent)
             for entry in recent:
                 if (total_chars + entry.char_count) > budget:
                     break
@@ -2336,7 +2389,8 @@ class SessionMemoryManager:
             content: Text to persist.
             heading: Section heading in MEMORY.md.
         """
-        self._ltm_append(content, heading=heading)
+        from service.memory.sync_async_bridge import run_coro_sync
+        run_coro_sync(self._ltm_append(content, heading=heading))
         logger.info(
             "Memory flush: %d chars saved to long-term memory", len(content)
         )
@@ -2363,8 +2417,10 @@ class SessionMemoryManager:
             logger.debug("auto_flush: LTM disabled by config — skipping")
             return None
 
+        from service.memory.sync_async_bridge import run_coro_sync
+
         now = datetime.now(_get_tz())
-        all_entries = self._stm_load_all()
+        all_entries = run_coro_sync(self._stm_load_all())
         if not all_entries:
             return None
 
@@ -2434,10 +2490,10 @@ class SessionMemoryManager:
         # Save to today's executions file (was the daily-journal
         # root file pre-cycle-20260503_5 — same content shape, new
         # location to keep daily-journal index pure).
-        self._ltm_write_execution(summary_text)
+        run_coro_sync(self._ltm_write_execution(summary_text))
 
         # Persist session summary for future context injection on restore
-        self._stm_write_summary(summary_text)
+        run_coro_sync(self._stm_write_summary(summary_text))
 
         # Vector store flushes on every write (executor file backend);
         # nothing extra to do here on auto_flush.
@@ -2458,6 +2514,8 @@ class SessionMemoryManager:
         Uses DB aggregation when available for efficiency;
         falls back to loading all entries from file.
         """
+        from service.memory.sync_async_bridge import run_coro_sync
+
         # Try lightweight DB aggregation first
         if self._db_manager is not None and self._session_id is not None:
             try:
@@ -2478,7 +2536,7 @@ class SessionMemoryManager:
                     total_tags = 0
                     total_links = 0
                     if self._memory_provider is not None:
-                        idx = self._index_snapshot()
+                        idx = run_coro_sync(self._index_snapshot())
                         for info in idx.files.values():
                             cat = info.category or "root"
                             categories[cat] = categories.get(cat, 0) + 1
@@ -2503,7 +2561,7 @@ class SessionMemoryManager:
 
         # Fallback: load all entries from file system
         ltm_entries = self._ltm_load_all()
-        stm_entries = self._stm_load_all()
+        stm_entries = run_coro_sync(self._stm_load_all())
 
         ltm_chars = sum(e.char_count for e in ltm_entries)
         stm_chars = sum(e.char_count for e in stm_entries)
@@ -2519,7 +2577,7 @@ class SessionMemoryManager:
         total_tags = 0
         total_links = 0
         if self._memory_provider is not None:
-            idx = self._index_snapshot()
+            idx = run_coro_sync(self._index_snapshot())
             for info in idx.files.values():
                 cat = info.category or "root"
                 categories[cat] = categories.get(cat, 0) + 1
