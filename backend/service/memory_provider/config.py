@@ -203,14 +203,19 @@ def load_memory_tuning(*, is_vtuber: bool) -> Dict[str, Any]:
 
 
 def is_attach_enabled() -> bool:
-    """Return True when providers should be attached to pipeline Stage 2.
+    """Deprecated — always returns True.
 
-    Controlled by ``MEMORY_PROVIDER_ATTACH`` (default ``false``). Kept
-    false until operators opt in so the legacy SessionMemoryManager path
-    remains authoritative. Accepts the usual truthy strings: ``1``,
-    ``true``, ``yes``, ``on`` (case-insensitive).
+    Path-A migration retired the opt-in flag because the provider
+    *must* be wired into stage 18 / context for STM/LTM/notes to
+    flow through executor-owned stores at all. Kept as a callable
+    so any caller that still imports it doesn't break; the
+    underlying ``MEMORY_PROVIDER_ATTACH`` env var is no longer
+    consulted (and is removed from docker-compose).
+
+    Will be deleted entirely in a follow-up cleanup PR once all
+    call sites stop importing it.
     """
-    return _env("MEMORY_PROVIDER_ATTACH").lower() in ("1", "true", "yes", "on")
+    return True
 
 
 def is_api_provider_enabled() -> bool:

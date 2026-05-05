@@ -22,7 +22,7 @@ playwright>=1.49.0
 # `STMHandle.append_event`, `NotesHandle.load_pinned`,
 # `IndexHandle.render_vault_map`. `[openai]` is required because
 # Geny's LTM settings default to the OpenAI embedding backend.
-geny-executor[web,cron,openai]>=1.17.1,<2.0.0
+geny-executor[web,cron,openai]>=1.17.2,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

@@ -83,7 +83,6 @@ services:
       - MEMORY_SCOPE=${MEMORY_SCOPE:-session}
       - MEMORY_TIMEZONE=${MEMORY_TIMEZONE:-}
       # Phase 4 attach flag (false keeps legacy SessionMemoryManager authoritative).
-      - MEMORY_PROVIDER_ATTACH=${MEMORY_PROVIDER_ATTACH:-false}
       # Phase 7 API routing flag — when true, /api/agents/{id}/memory/*
       # endpoints prefer the per-session MemoryProvider over legacy.
       - MEMORY_API_PROVIDER=${MEMORY_API_PROVIDER:-false}
