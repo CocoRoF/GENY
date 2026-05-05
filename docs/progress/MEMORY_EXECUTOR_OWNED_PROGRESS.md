@@ -79,9 +79,9 @@
 | **Step 3** ([Geny#698](https://github.com/CocoRoF/Geny/pull/698)) | manager 측 `VectorMemoryManager` 필드 폐기 — inline `_vector_*` helper 로 `provider.vector()` 직접 호출. `vector_memory.py` 파일은 curated 가 사용해서 보존 | ✅ 머지 |
 | **Step 4** ([Geny#699](https://github.com/CocoRoF/Geny/pull/699)) | manager 측 `MemoryIndexManager` 필드 폐기 — inline `_index_*` helper 로 `provider.index()` 직접 호출. archivers + structured_writer 에서 `index_manager` 파라미터 제거. 새 public `mgr.build_vault_map()` (memory_categories 툴이 사용). `index.py` 파일은 외부 콜러 (global/curated/user/agent_session/tests) 가 사용해서 보존 | ✅ 머지 |
 | **Step 5** ([Geny#700](https://github.com/CocoRoF/Geny/pull/700)) | manager 측 `StructuredMemoryWriter` 필드 폐기 — inline `_notes_*` helper (write/update/delete/read/list/link) 로 `provider.notes()` 직접 호출. `mgr.write_note` 가 `filename_override` 도 지원. `memory_inspect_tools` distillation 경로가 `mgr.write_note` 직접 호출. `structured_writer.py` 파일은 global/curated/user 가 사용해서 보존 | ✅ 머지 |
-| **Step 6** | `frontmatter.py` 데드 코드 (`extract_wikilinks` / `resolve_wikilink` / `build_default_metadata` / `_DEFAULT_METADATA`) 삭제 — 외부 콜러는 `parse_frontmatter` / `render_frontmatter` 만 사용. ~110줄 감소 | ⏳ 진행 |
-| **Step 7** | `sync_async_bridge.py` 폐기 (모든 callers async 전환 후) | ⏳ 대기 |
-| **Cleanup** | 외부 콜러 정리 후 `index.py` / `vector_memory.py` / `structured_writer.py` 파일 삭제 | ⏳ 대기 |
+| **Step 6** ([Geny#701](https://github.com/CocoRoF/Geny/pull/701)) | `frontmatter.py` 데드 코드 (`extract_wikilinks` / `resolve_wikilink` / `build_default_metadata` / `_DEFAULT_METADATA`) 삭제 — 외부 콜러는 `parse_frontmatter` / `render_frontmatter` 만 사용. ~110줄 감소 | ✅ 머지 |
+| **Step 7** | `sync_async_bridge.py` 감사 + docstring 갱신. **전체 폐기는 보류** — 87개 호출 사이트 (manager + archivers + FastAPI 컨트롤러 + tools 프레임워크 `run`) 가 동기. async 일원화는 별도 sprint 필요 (executor `arun` 지원 + 컨트롤러 전체 async 전환). | ⏳ 진행 |
+| **Cleanup** | 외부 콜러 정리 후 `index.py` / `vector_memory.py` / `structured_writer.py` 파일 삭제 | ⏳ 대기 (별도 sprint) |
 
 **현 시점 평가**:
 - 운영 정상화 + 사용자 의도 95%+ 달성은 위 11개 머지 PR 로 완료.
@@ -113,6 +113,7 @@
 11. [Geny#698](https://github.com/CocoRoF/Geny/pull/698) — Sprint 3 step 3: manager 측 `VectorMemoryManager` 폐기
 12. [Geny#699](https://github.com/CocoRoF/Geny/pull/699) — Sprint 3 step 4: manager 측 `MemoryIndexManager` 폐기
 13. [Geny#700](https://github.com/CocoRoF/Geny/pull/700) — Sprint 3 step 5: manager 측 `StructuredMemoryWriter` 폐기
+14. [Geny#701](https://github.com/CocoRoF/Geny/pull/701) — Sprint 3 step 6: `frontmatter.py` 데드 코드 삭제
 
 ### 운영 검증 (2026-05-05)
 
