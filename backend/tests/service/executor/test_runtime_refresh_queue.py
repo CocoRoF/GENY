@@ -193,7 +193,7 @@ def test_memory_tuning_apply_mutates_retriever_attrs(monkeypatch) -> None:
     ])
     s._role = "worker"
 
-    import service.memory_provider.config as mem_cfg
+    import service.memory.tuning as mem_cfg
 
     monkeypatch.setattr(
         mem_cfg, "load_memory_tuning",
@@ -223,7 +223,7 @@ def test_memory_tuning_apply_mutates_strategy_attr(monkeypatch) -> None:
     ])
     s._role = "worker"
 
-    import service.memory_provider.config as mem_cfg
+    import service.memory.tuning as mem_cfg
 
     monkeypatch.setattr(
         mem_cfg, "load_memory_tuning",
@@ -307,7 +307,7 @@ def test_all_scope_includes_new_branches(monkeypatch) -> None:
     s._pipeline._set_tool_stage_hook_runner = MagicMock()
     s._role = "worker"
 
-    import service.memory_provider.config as mem_cfg
+    import service.memory.tuning as mem_cfg
     import service.emit.chain_install as ci
     import service.permission.install as perm_install
     import service.hooks.install as hook_install

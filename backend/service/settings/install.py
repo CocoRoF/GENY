@@ -77,9 +77,8 @@ def install_geny_settings() -> Optional[Any]:
     # FrameworkSettingsPanel can edit it consistently with the others
     # and the D.2 reader map carries the entry.
     register_section("permissions", PermissionsConfigSection)
-    # G.1 (cycle 20260426_2) — memory provider section. Read by
-    # service.memory_provider.config.build_default_memory_config with
-    # env-fallback semantics.
+    # Memory section. The ``tuning`` sub-section is read by
+    # service.memory.tuning.load_memory_tuning at session-build time.
     register_section("memory", MemoryConfigSection)
     # G.3 (cycle 20260426_2) — affect tag emitter knob.
     register_section("affect", AffectConfigSection)

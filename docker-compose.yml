@@ -74,25 +74,6 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
-      # MemoryProvider (Phase 2) — unset / "disabled" keeps registry dormant.
-      # Supported values: ephemeral | file | sql. See docs/memory-provider.md
-      - MEMORY_PROVIDER=${MEMORY_PROVIDER:-}
-      - MEMORY_DSN=${MEMORY_DSN:-}
-      - MEMORY_DIALECT=${MEMORY_DIALECT:-}
-      - MEMORY_ROOT=${MEMORY_ROOT:-}
-      - MEMORY_SCOPE=${MEMORY_SCOPE:-session}
-      - MEMORY_TIMEZONE=${MEMORY_TIMEZONE:-}
-      # Phase 4 attach flag (false keeps legacy SessionMemoryManager authoritative).
-      # Phase 7 API routing flag — when true, /api/agents/{id}/memory/*
-      # endpoints prefer the per-session MemoryProvider over legacy.
-      - MEMORY_API_PROVIDER=${MEMORY_API_PROVIDER:-false}
-      # Phase 5 per-layer legacy/provider routing — flip to `false` per layer
-      # as its Phase 5 PR (stm/ltm/notes/vector/curated) lands and is verified.
-      - MEMORY_LEGACY_STM=${MEMORY_LEGACY_STM:-true}
-      - MEMORY_LEGACY_LTM=${MEMORY_LEGACY_LTM:-true}
-      - MEMORY_LEGACY_NOTES=${MEMORY_LEGACY_NOTES:-true}
-      - MEMORY_LEGACY_VECTOR=${MEMORY_LEGACY_VECTOR:-true}
-      - MEMORY_LEGACY_CURATED=${MEMORY_LEGACY_CURATED:-true}
       # EnvironmentService (Phase 3)
       - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-./data/environments}
     volumes:

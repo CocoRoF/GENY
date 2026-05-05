@@ -141,9 +141,6 @@ class AgentSessionManager:
         # Database reference (for per-session memory/log DB wiring)
         self._app_db = None
 
-        # Memory provider registry (Phase 4 attach point; None = legacy path only)
-        self._memory_registry = None
-
         # Environment service (Phase 3 — enables env_id-driven session creation)
         self._environment_service = None
 
@@ -242,16 +239,6 @@ class AgentSessionManager:
         """
         self._app_db = app_db
         logger.info("AgentSessionManager: app_db set for per-session memory DB wiring")
-
-    def set_memory_registry(self, memory_registry) -> None:
-        """Store the MemorySessionRegistry for per-session MemoryProvider wiring.
-
-        Phase 4 attach point: until populated, sessions run on the legacy
-        SessionMemoryManager path only. Once a registry is set, Phase 4 wiring
-        will pull a provider per session and attach it to Stage 2 (Context).
-        """
-        self._memory_registry = memory_registry
-        logger.info("AgentSessionManager: memory_registry set for per-session provider wiring")
 
     def set_state_provider(
         self,
@@ -819,60 +806,6 @@ class AgentSessionManager:
 
         # Register in local store
         self._local_agents[session_id] = agent
-
-        # ── Provision + attach MemoryProvider ────────────────────────────────
-        # Path-A migration: provider is the single STM/LTM/notes write
-        # path. Pipeline attachment is no longer optional — without it
-        # stage 18's `_drive_provider` runs with `provider=None` and
-        # all user/assistant turns silently miss STM. Provision +
-        # attach is a single atomic step; if either part fails the
-        # session creation surfaces the error loud (no longer silent).
-        if self._memory_registry is not None:
-            try:
-                provider = self._memory_registry.provision(
-                    session_id, override=memory_config
-                )
-                if provider is not None:
-                    logger.info(
-                        f"[{session_id}] MemoryProvider provisioned "
-                        f"(capabilities={[c.name for c in provider.descriptor.capabilities]})"
-                    )
-                    if agent._pipeline is not None:
-                        try:
-                            self._memory_registry.attach_to_pipeline(
-                                agent._pipeline, provider
-                            )
-                            logger.info(
-                                f"[{session_id}] MemoryProvider attached "
-                                f"(Stage 2 Context + Stage 18 Memory + "
-                                f"session_runtime.memory_provider)"
-                            )
-                        except Exception as attach_exc:
-                            # Path-A makes attach load-bearing: surface
-                            # the failure on the session-scoped log
-                            # channel so the operator catches the
-                            # regression in real time.
-                            logger.error(
-                                f"[{session_id}] MemoryProvider attach FAILED — "
-                                f"stage 18 _drive_provider will be inactive, "
-                                f"all user/assistant turns will miss STM: {attach_exc}",
-                                exc_info=True,
-                            )
-                            try:
-                                agent.record_memory_event(
-                                    event_type="provider_attach_failed",
-                                    message=(
-                                        f"MemoryProvider attach failed — "
-                                        f"stage 18 inactive: {attach_exc}"
-                                    ),
-                                    source="Memory",
-                                    backend="error",
-                                    extra={"error": str(attach_exc)},
-                                )
-                            except Exception:  # noqa: BLE001
-                                pass
-            except Exception as e:
-                logger.warning(f"[{session_id}] MemoryProvider provisioning skipped: {e}")
 
         # Wire DB into session memory manager (if available)
         if self._app_db is not None and agent.memory_manager is not None:

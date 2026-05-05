@@ -68,19 +68,6 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
-      # MemoryProvider (Phase 2) — unset / "disabled" keeps registry dormant.
-      - MEMORY_PROVIDER=${MEMORY_PROVIDER:-}
-      - MEMORY_DSN=${MEMORY_DSN:-}
-      - MEMORY_DIALECT=${MEMORY_DIALECT:-}
-      - MEMORY_ROOT=${MEMORY_ROOT:-}
-      - MEMORY_SCOPE=${MEMORY_SCOPE:-session}
-      - MEMORY_TIMEZONE=${MEMORY_TIMEZONE:-}
-      - MEMORY_API_PROVIDER=${MEMORY_API_PROVIDER:-false}
-      - MEMORY_LEGACY_STM=${MEMORY_LEGACY_STM:-true}
-      - MEMORY_LEGACY_LTM=${MEMORY_LEGACY_LTM:-true}
-      - MEMORY_LEGACY_NOTES=${MEMORY_LEGACY_NOTES:-true}
-      - MEMORY_LEGACY_VECTOR=${MEMORY_LEGACY_VECTOR:-true}
-      - MEMORY_LEGACY_CURATED=${MEMORY_LEGACY_CURATED:-true}
       # EnvironmentService (Phase 3)
       - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-./data/environments}
     volumes:

@@ -59,9 +59,9 @@ SECTION_READERS: Dict[str, List[str]] = {
     "permissions": [
         "service.permission.install",
     ],
-    # G.1 (cycle 20260426_2) — memory provider config.
+    # Memory tuning knobs (max_inject_chars, recent_turns, …).
     "memory": [
-        "service.memory_provider.config",
+        "service.memory.tuning",
     ],
     # G.3 (cycle 20260426_2) — affect tag emitter knob.
     "affect": [

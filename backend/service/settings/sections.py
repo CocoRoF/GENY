@@ -283,13 +283,16 @@ class MemoryTuningSection(BaseModel):
 
 
 class MemoryConfigSection(BaseModel):
-    """``settings.memory`` schema (G.1 / cycle 20260426_2).
+    """``settings.memory`` schema.
 
-    Mirrors the keys ``service.memory_provider.config`` resolves with
-    settings.json-first → env-fallback semantics. Every field is
-    optional; an absent ``provider`` keeps the legacy
-    ``SessionMemoryManager`` path authoritative (operators must opt
-    in explicitly).
+    The ``tuning`` sub-section is consumed by
+    ``service.memory.tuning.load_memory_tuning`` to override per-session
+    memory knobs (max_inject_chars, recent_turns, vector / reflection
+    enablement, pin budget, category boosts, …). Other top-level fields
+    (provider/scope/root/dsn/dialect/timezone) are settings-only metadata
+    that operators may set; the runtime no longer reads them since the
+    registry layer was removed and ``AgentSession`` builds its own
+    provider directly.
     """
 
     provider: Optional[str] = Field(

@@ -1011,15 +1011,9 @@ class AgentSession:
                     )
                 # Path-A: ensure stage 18's `_drive_provider` and stage 2
                 # context retriever see the same provider the manager and
-                # archivers use. The pipeline-attach path through
-                # `agent_session_manager._memory_registry` is gated on
-                # `MEMORY_PROVIDER` env (registry stays dormant when
-                # unset) — but path-A makes the provider load-bearing
-                # for STM/archive at every turn, so we attach directly
-                # here instead of waiting on the registry. Without this,
-                # `transcripts/session.jsonl` never gets a single
-                # user/assistant line because `_drive_provider` runs
-                # with `provider=None`.
+                # archivers use. Without this attach, `_drive_provider`
+                # runs with `provider=None` and `transcripts/session.jsonl`
+                # never gets a single user/assistant line.
                 try:
                     self._attach_provider_to_pipeline_stages()
                 except Exception:  # noqa: BLE001
@@ -1088,24 +1082,16 @@ class AgentSession:
 
     def _attach_provider_to_pipeline_stages(self) -> None:
         """Plug the live `MemoryProvider` into every pipeline stage
-        that consults it.
+        that consults it (stage 2 ContextStage + stage 18 MemoryStage
+        + session_runtime.memory_provider).
 
-        Path-A migration P0 fix: the legacy attach path through
-        `agent_session_manager._memory_registry.attach_to_pipeline`
-        is gated on `MEMORY_PROVIDER` env (registry stays dormant
-        when unset). Path-A makes the provider load-bearing for
-        every turn — without attach, stage 18's `_drive_provider`
-        runs with `provider=None` and silently skips
-        `provider.record_turn(turn)`, so user/assistant messages
-        never reach STM and `transcripts/session.jsonl` stays empty.
-
-        This method does what the registry's `attach_to_pipeline`
-        does (stage 2 ContextStage + stage 18 MemoryStage +
-        session_runtime.memory_provider) but unconditionally —
-        whenever the agent has built its own provider via
-        `_init_memory_provider`, we install it on the pipeline
-        directly. Failures are surfaced loud (ERROR + memory event)
-        so the operator catches the regression in real time.
+        Path-A makes the provider load-bearing for every turn —
+        without this attach, stage 18's `_drive_provider` runs with
+        `provider=None` and silently skips `provider.record_turn(turn)`,
+        so user/assistant messages never reach STM and
+        `transcripts/session.jsonl` stays empty. Failures are surfaced
+        loud (ERROR + memory event) so the operator catches the
+        regression in real time.
         """
         provider = self._memory_provider
         pipeline = getattr(self, "_pipeline", None)
@@ -1568,7 +1554,7 @@ class AgentSession:
         ever rename, the change is silent (``getattr`` guards) and the
         live session keeps the pre-refresh values.
         """
-        from service.memory_provider.config import load_memory_tuning
+        from service.memory.tuning import load_memory_tuning
 
         is_vtuber = getattr(self._role, "value", None) == "vtuber" or (
             isinstance(self._role, str) and self._role == "vtuber"
@@ -1836,7 +1822,7 @@ class AgentSession:
         # operator setting settings.json:memory.tuning.<field>
         # overrides them without a code change.
         try:
-            from service.memory_provider.config import load_memory_tuning
+            from service.memory.tuning import load_memory_tuning
             _tuning = load_memory_tuning(is_vtuber=is_vtuber)
         except Exception:
             _tuning = {
