@@ -171,10 +171,139 @@ async def apropagate_linked_from(
             )
 
 
+def scan_dms_directory(memory_dir: Path | str) -> Dict[str, Dict[str, Any]]:
+    """Deep-scan ``memory/dms/<counterpart_id>/<date>.md`` and return a
+    flat ``{display_filename: file_info}`` dict.
+
+    The ``dms/`` category uses a 2-level layout (one bundle per
+    counterpart per day) which the executor's ``IndexHandle`` —
+    designed for flat ``memory/<category>/<file>.md`` — cannot pick
+    up. This helper does the deep walk and returns rows in the same
+    shape the executor's snapshot produces, so callers (manager
+    snapshot merger, ``dm_archiver._maintain_shard``) can splice them
+    into the global index without the executor needing dms-specific
+    awareness.
+
+    The ``display_filename`` key uses the relative ``dms/<cp>/<date>.md``
+    form so it can't collide across counterparts on the same day.
+    """
+    from service.memory.frontmatter import parse_frontmatter
+
+    out: Dict[str, Dict[str, Any]] = {}
+    root = Path(memory_dir) / "dms"
+    if not root.exists():
+        return out
+
+    for cp_dir in sorted(root.iterdir()):
+        if not cp_dir.is_dir():
+            continue
+        for path in sorted(cp_dir.glob("*.md")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                meta, body = parse_frontmatter(text)
+            except Exception:  # noqa: BLE001
+                meta, body = {}, text
+            try:
+                rel = str(path.relative_to(memory_dir)).replace("\\", "/")
+            except ValueError:
+                rel = f"dms/{cp_dir.name}/{path.name}"
+            stat = None
+            try:
+                stat = path.stat()
+            except OSError:
+                pass
+            tags = meta.get("tags") or []
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",") if t.strip()]
+            row: Dict[str, Any] = {
+                "filename": rel,
+                "title": meta.get("title") or path.stem,
+                "category": "dms",
+                "tags": list(tags),
+                "importance": meta.get("importance") or "medium",
+                "char_count": len(text),
+                "links_to": list(meta.get("links_to") or []),
+                "linked_from": list(meta.get("linked_from") or []),
+                "summary": (
+                    body.split("\n", 1)[0][:240].strip() if body.strip() else ""
+                ),
+                "created": meta.get("created") or "",
+                "modified": meta.get("modified") or "",
+                "source": "dm_bundle",
+                # Counterpart-specific dimensions surfaced for index
+                # consumers (Opsidian sidebar grouping, retriever).
+                "counterpart": cp_dir.name,
+                "counterpart_role": meta.get("counterpart_role") or "",
+                "session_id": meta.get("session_id") or "",
+                "event_count": int(meta.get("event_count") or 0),
+                "date_first": meta.get("date_first") or "",
+                "date_last": meta.get("date_last") or "",
+            }
+            if stat is not None and not row["modified"]:
+                from datetime import datetime, timezone
+                row["modified"] = datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc,
+                ).isoformat()
+            out[rel] = row
+    return out
+
+
+def write_dms_shard(memory_dir: Path | str) -> None:
+    """Atomically rewrite ``memory/dms/_index.json`` from a deep scan.
+
+    Called by ``dm_archiver._append_locked`` after every bundle
+    write so the operator-facing JSON shard reflects reality. The
+    schema mirrors the executor's per-category shard format
+    (``file_count`` / ``files`` / ``last_rebuilt`` / ``tag_counts``)
+    so existing readers don't see a different shape.
+    """
+    import json
+    import os
+    import tempfile
+    from datetime import datetime
+    from service.utils.utils import _configured_tz as _get_tz
+
+    files = scan_dms_directory(memory_dir)
+    tag_counts: Dict[str, int] = {}
+    for row in files.values():
+        for tag in row.get("tags") or []:
+            tag_counts[str(tag).lower()] = tag_counts.get(str(tag).lower(), 0) + 1
+
+    payload = {
+        "category": "dms",
+        "description": "Per-counterpart-per-day DM index bundles.",
+        "file_count": len(files),
+        "files": files,
+        "last_rebuilt": datetime.now(_get_tz()).isoformat(),
+        "tag_counts": tag_counts,
+        "version": "2",
+    }
+    shard_path = Path(memory_dir) / "dms" / "_index.json"
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix="_index.", suffix=".json.tmp", dir=str(shard_path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
+        os.replace(tmp, shard_path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 __all__ = [
     "VALID_CATEGORIES",
     "PINNED_CATEGORY",
     "_slugify",
     "extract_wikilinks",
     "apropagate_linked_from",
+    "scan_dms_directory",
+    "write_dms_shard",
 ]

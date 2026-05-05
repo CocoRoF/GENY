@@ -191,8 +191,22 @@ class DmArchiver:
                     abs_path, exc,
                 )
                 return None
-            # Sprint 3 step 4 — index update retired; executor scans
-            # the dms tree on the next snapshot/rebuild.
+            # Refresh ``dms/_index.json`` ourselves. The executor's
+            # IndexHandle uses a flat ``memory/<cat>/*.md`` glob that
+            # cannot see the 2-level ``dms/<cp>/<date>.md`` layout, so
+            # without this maintenance step the dms shard stays at
+            # bootstrap (file_count=0, files={}) forever even though
+            # bundles are being written. The Sprint 3 step 4 comment
+            # below was incorrect — the executor never sees these
+            # files, so we own the shard.
+            try:
+                from service.memory.note_utils import write_dms_shard
+                write_dms_shard(self._memory_dir)
+            except Exception:
+                logger.debug(
+                    "dm_archiver: dms shard refresh failed",
+                    exc_info=True,
+                )
             return DmBundleUpdate(
                 relative_path=rel_path,
                 absolute_path=str(abs_path),

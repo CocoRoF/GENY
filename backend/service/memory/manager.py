@@ -789,7 +789,11 @@ class SessionMemoryManager:
     # ------------------------------------------------------------------
 
     async def _index_snapshot(self) -> MemoryIndex:
-        """Lazy snapshot of the executor's IndexHandle.
+        """Lazy snapshot of the executor's IndexHandle, merged with a
+        host-side scan of ``memory/dms/`` (the executor's flat
+        ``glob("*.md")`` cannot see the 2-level ``dms/<cp>/<date>.md``
+        layout, so we splice those rows in here).
+
         Returns an empty `MemoryIndex` when no provider is attached.
         """
         if self._memory_provider is None:
@@ -803,20 +807,39 @@ class SessionMemoryManager:
         files: Dict[str, MemoryFileInfo] = {}
         for fname, entry in (payload.get("files") or {}).items():
             files[fname] = MemoryFileInfo.from_dict(entry)
-        tag_map = {
+        tag_map: Dict[str, List[str]] = {
             tag: list(names) for tag, names in (payload.get("tag_map") or {}).items()
         }
-        link_graph = {
+        link_graph: Dict[str, List[str]] = {
             src: list(targets)
             for src, targets in (payload.get("link_graph") or {}).items()
         }
+        total_chars = int(payload.get("total_chars", 0) or 0)
+
+        # Splice in dms/<cp>/<date>.md rows the executor cannot see.
+        try:
+            from service.memory.note_utils import scan_dms_directory
+            dms_rows = scan_dms_directory(self._memory_dir)
+            for rel, row in dms_rows.items():
+                # Use the relative path as the key so per-counterpart
+                # rows can't collide on the same date.
+                files[rel] = MemoryFileInfo.from_dict(row)
+                total_chars += int(row.get("char_count") or 0)
+                for tag in row.get("tags") or []:
+                    tag_map.setdefault(str(tag).lower(), []).append(rel)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._index_snapshot: dms scan/merge failed",
+                exc_info=True,
+            )
+
         return MemoryIndex(
             files=files,
             tag_map=tag_map,
             link_graph=link_graph,
             last_rebuilt=str(payload.get("last_rebuilt", "")),
-            total_chars=int(payload.get("total_chars", 0) or 0),
-            total_files=int(payload.get("total_files", len(files)) or len(files)),
+            total_chars=total_chars,
+            total_files=len(files),
         )
 
     async def _index_rebuild(self) -> int:

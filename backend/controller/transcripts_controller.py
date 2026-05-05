@@ -122,15 +122,24 @@ def _resolve_session_or_404(session_id: str):
     return agent, memory
 
 
-def _stm_load_all(memory_manager) -> List[Any]:
-    """Load all STM entries with the same defensive shape as
-    ``memory_inspect_tools._stm_load_all`` — falls back to ``[]``
-    on any error."""
+async def _astm_load_all(memory_manager) -> List[Any]:
+    """Load all STM entries (async-native).
+
+    Sprint 3 step 1 retired ``ShortTermMemory`` so the legacy
+    ``mgr.short_term.load_all()`` path returns ``None`` and silently
+    yields ``[]`` — that's why every transcripts endpoint returned
+    empty data after the refactor. Now reaches for the manager's
+    ``aload_all_stm`` (Step 7-1) first, with a sync ``load_all_stm``
+    fallback for any pre-async caller.
+    """
     try:
-        stm = getattr(memory_manager, "short_term", None)
-        if stm is None:
-            return []
-        return list(stm.load_all() or [])
+        aloader = getattr(memory_manager, "aload_all_stm", None)
+        if callable(aloader):
+            return list(await aloader() or [])
+        loader = getattr(memory_manager, "load_all_stm", None)
+        if callable(loader):
+            return list(loader() or [])
+        return []
     except Exception:
         logger.debug("transcripts: STM load_all failed", exc_info=True)
         return []
@@ -309,7 +318,7 @@ async def list_transcripts(
 ):
     """List InteractionEvents for *session_id* with optional filters."""
     _agent, memory = _resolve_session_or_404(session_id)
-    entries = _stm_load_all(memory)
+    entries = await _astm_load_all(memory)
 
     kind_set: Optional[set] = None
     if kinds:
@@ -360,7 +369,7 @@ async def list_counterparts(
 ):
     """Per-counterpart summary cards (id, role, count, last_ts)."""
     _agent, memory = _resolve_session_or_404(session_id)
-    entries = _stm_load_all(memory)
+    entries = await _astm_load_all(memory)
 
     by_id: Dict[str, Dict[str, Any]] = {}
     for entry in entries:
@@ -426,7 +435,7 @@ async def get_transcript_artifact(
     file lives under the *counterpart* session's working dir.
     """
     _agent, memory = _resolve_session_or_404(session_id)
-    entries = _stm_load_all(memory)
+    entries = await _astm_load_all(memory)
 
     target_meta: Dict[str, Any] = {}
     for entry in entries:
@@ -521,7 +530,7 @@ async def get_transcript_event(
 ):
     """Full payload for a single InteractionEvent + linked parent summary."""
     _agent, memory = _resolve_session_or_404(session_id)
-    entries = _stm_load_all(memory)
+    entries = await _astm_load_all(memory)
 
     target_entry: Optional[Any] = None
     target_meta: Dict[str, Any] = {}
