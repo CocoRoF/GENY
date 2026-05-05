@@ -310,7 +310,13 @@ class CurationEngine:
             return CurationResult(success=False, reason="No User Opsidian manager")
 
         # ── Stage 1: Triage ──
-        note = self._opsidian.read_note(filename)
+        # Prefer the multi-tenant manager's async sibling so the
+        # curation pipeline doesn't burn worker threads on every read.
+        aread = getattr(self._opsidian, "aread_note", None)
+        if callable(aread):
+            note = await aread(filename)
+        else:
+            note = self._opsidian.read_note(filename)
         if note is None:
             return CurationResult(success=False, reason=f"Note not found: {filename}")
 
@@ -389,16 +395,29 @@ class CurationEngine:
         if enrichment and enrichment.get("suggested_links"):
             links_to = enrichment["suggested_links"]
 
-        curated_fn = self._curated.write_note(
-            title=title,
-            content=transformed_content,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source="auto-curated",
-            links_to=links_to,
-            source_filename=filename,
-        )
+        awrite = getattr(self._curated, "awrite_note", None)
+        if callable(awrite):
+            curated_fn = await awrite(
+                title=title,
+                content=transformed_content,
+                category=category,
+                tags=tags,
+                importance=importance,
+                source="auto-curated",
+                links_to=links_to,
+                source_filename=filename,
+            )
+        else:
+            curated_fn = self._curated.write_note(
+                title=title,
+                content=transformed_content,
+                category=category,
+                tags=tags,
+                importance=importance,
+                source="auto-curated",
+                links_to=links_to,
+                source_filename=filename,
+            )
 
         if curated_fn is None:
             return CurationResult(success=False, reason="Failed to write curated note")
@@ -445,7 +464,11 @@ class CurationEngine:
         # Build existing index summary for context
         existing_index = ""
         try:
-            idx = self._curated.get_index()
+            aget_index = getattr(self._curated, "aget_index", None)
+            idx = (
+                await aget_index() if callable(aget_index)
+                else self._curated.get_index()
+            )
             if idx and idx.get("files"):
                 entries = []
                 for fn, info in list(idx["files"].items())[:20]:
@@ -546,8 +569,12 @@ class CurationEngine:
         if analysis and analysis.get("merge_candidates"):
             candidates = analysis["merge_candidates"]
 
+        aread = getattr(self._curated, "aread_note", None)
         for fn in candidates[:3]:  # Limit merge targets
-            existing = self._curated.read_note(fn)
+            existing = (
+                await aread(fn) if callable(aread)
+                else self._curated.read_note(fn)
+            )
             if existing:
                 ex_body = existing.get("body") or ""
                 ex_title = (existing.get("metadata") or {}).get("title", fn)
@@ -572,7 +599,11 @@ class CurationEngine:
         # Build existing index summary
         existing_summary = ""
         try:
-            idx = self._curated.get_index()
+            aget_index = getattr(self._curated, "aget_index", None)
+            idx = (
+                await aget_index() if callable(aget_index)
+                else self._curated.get_index()
+            )
             if idx and idx.get("files"):
                 entries = []
                 for fn, info in list(idx["files"].items())[:15]:

@@ -374,7 +374,7 @@ async def curate_all_from_opsidian(
     opsidian_mgr = _get_opsidian_manager(username)
 
     # Get all User Opsidian filenames
-    opsidian_index = opsidian_mgr.get_index()
+    opsidian_index = await opsidian_mgr.aget_index()
     if not opsidian_index or not opsidian_index.get("files"):
         return {
             "total": 0,

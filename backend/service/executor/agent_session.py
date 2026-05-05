@@ -3682,7 +3682,9 @@ class AgentSession:
     async def cleanup(self):
         """Clean up the AgentSession and release all resources.
 
-        Flushes short-term memory to long-term before shutting down.
+        Flushes short-term memory to long-term and closes the executor
+        ``MemoryProvider`` so vector backends, FAISS handles, and
+        embedding-client connections drop their resources.
         """
         logger.info(f"[{self._session_id}] Cleaning up AgentSession...")
 
@@ -3694,6 +3696,19 @@ class AgentSession:
             except Exception:
                 logger.debug("Failed to flush memory — non-critical", exc_info=True)
             self._memory_manager = None
+
+        # Release the executor MemoryProvider — pre-audit fix this was
+        # never called, leaking FAISS / embedding-client handles per
+        # session shutdown.
+        if self._memory_provider is not None:
+            try:
+                await self._memory_provider.close()
+            except Exception:
+                logger.debug(
+                    "MemoryProvider close failed — non-critical",
+                    exc_info=True,
+                )
+            self._memory_provider = None
 
         self._pipeline = None
         self._initialized = False
