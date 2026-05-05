@@ -2,12 +2,14 @@
 Global Memory Manager — Cross-session shared knowledge store.
 
 Provides a singleton global memory that all sessions can read from
-and promote notes to. Modelled after SharedFolderManager's pattern.
+and promote notes to. The manager owns its own single-tenant
+``MemoryProvider`` (file-backed, rooted at ``<storage>/_global_memory``)
+so every operation flows through ``provider.notes()`` /
+``provider.index()`` directly — no host-side adapters.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from logging import getLogger
 from pathlib import Path
@@ -21,7 +23,8 @@ class GlobalMemoryManager:
 
     Uses the same structured note format (YAML frontmatter + Markdown)
     as session-level memory, but stored in a shared ``_global_memory/``
-    directory accessible to all sessions.
+    directory accessible to all sessions. Backed by a single-tenant
+    ``MemoryProvider`` constructed lazily on first use.
     """
 
     def __init__(self, base_path: Optional[str] = None):
@@ -30,8 +33,7 @@ class GlobalMemoryManager:
         self.memory_dir = os.path.join(base_path, "_global_memory")
         os.makedirs(self.memory_dir, exist_ok=True)
 
-        self._writer: Optional[Any] = None
-        self._index: Optional[Any] = None
+        self._provider: Optional[Any] = None
         self._db = None
         self._initialize()
 
@@ -41,20 +43,18 @@ class GlobalMemoryManager:
         return DEFAULT_STORAGE_ROOT
 
     def _initialize(self):
-        """Set up writer and index manager."""
+        """Build the single-tenant `MemoryProvider`."""
         try:
-            from service.memory.structured_writer import StructuredMemoryWriter
-            from service.memory.index import MemoryIndexManager
+            from service.memory.provider_bridge import build_single_tenant_provider
+            from service.memory.sync_async_bridge import run_coro_sync
 
-            # Sprint 3 step 4 — ``StructuredMemoryWriter`` no longer
-            # takes an index_manager arg; the executor's IndexHandle
-            # owns ``_index.json`` refresh on every write. We still
-            # construct ``MemoryIndexManager`` here so the cross-cutting
-            # ``mgr.index`` lookups (vault map, opsidian list) keep
-            # working until the global/curator/user surfaces are
-            # migrated in Step 5+.
-            self._index = MemoryIndexManager(self.memory_dir)
-            self._writer = StructuredMemoryWriter(self.memory_dir)
+            self._provider = run_coro_sync(
+                build_single_tenant_provider(
+                    root=self.memory_dir,
+                    scope_id="global",
+                    scope="session",
+                )
+            )
             logger.info(
                 "GlobalMemoryManager initialized at %s", self.memory_dir,
             )
@@ -65,10 +65,8 @@ class GlobalMemoryManager:
             )
 
     def set_database(self, db):
-        """Attach database connection for dual-write."""
+        """Attach database connection (analytics mirror)."""
         self._db = db
-        if self._writer is not None:
-            self._writer.set_database(db, "global")
 
     # ── Read Operations ───────────────────────────────────────────────
 
@@ -78,49 +76,89 @@ class GlobalMemoryManager:
         category: Optional[str] = None,
         tag: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return []
-        notes = self._writer.list_notes(category=category, tag=tag)
-        return [self._file_info_to_dict(n) for n in notes]
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            metas = run_coro_sync(
+                self._provider.notes().list(category=category, tag=tag)
+            )
+        except Exception:
+            logger.debug("GlobalMemoryManager.list_notes: failed", exc_info=True)
+            return []
+        return [self._meta_to_dict(m) for m in metas]
 
     @staticmethod
-    def _file_info_to_dict(info) -> Dict[str, Any]:
+    def _meta_to_dict(meta) -> Dict[str, Any]:
+        cat = meta.category or "root"
+        bare = meta.ref.filename
+        display_filename = bare if cat == "root" else f"{cat}/{bare}"
         return {
-            "filename": info.filename,
-            "title": info.title,
-            "category": info.category,
-            "tags": info.tags,
-            "importance": info.importance,
-            "created": info.created,
-            "modified": info.modified,
-            "source": info.source,
-            "char_count": info.char_count,
-            "links_to": info.links_to,
-            "linked_from": info.linked_from,
-            "summary": info.summary,
+            "filename": display_filename,
+            "title": meta.title or bare,
+            "category": cat,
+            "tags": list(meta.tags),
+            "importance": meta.importance.value,
+            "created": meta.created_at.isoformat() if meta.created_at else "",
+            "modified": meta.updated_at.isoformat() if meta.updated_at else "",
+            "source": "global",
+            "char_count": meta.size_bytes,
+            "links_to": [],
+            "linked_from": [],
+            "summary": None,
         }
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return None
-        return self._writer.read_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            note = run_coro_sync(self._provider.notes().read(bare))
+        except Exception:
+            logger.debug(
+                "GlobalMemoryManager.read_note(%s): failed", filename,
+                exc_info=True,
+            )
+            return None
+        if note is None:
+            return None
+        metadata = {
+            "title": note.title,
+            "tags": list(note.tags),
+            "category": note.category,
+            "importance": note.importance.value,
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+            **(note.frontmatter or {}),
+        }
+        return {
+            "filename": filename,
+            "title": note.title,
+            "metadata": metadata,
+            "body": note.body,
+            "raw": "",
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+        }
 
     def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """Simple keyword search across global notes."""
-        if self._writer is None:
+        if self._provider is None:
             return []
-        all_notes = self._writer.list_notes()
+        all_notes = self.list_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
-            fn = note_info.filename
-            note = self._writer.read_note(fn)
+            fn = note_info["filename"]
+            note = self.read_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
             title = (note.get("metadata", {}).get("title") or "").lower()
             tags = note.get("metadata", {}).get("tags") or []
-            # Simple relevance score
             score = 0.0
             if query_lower in title:
                 score += 2.0
@@ -131,7 +169,7 @@ class GlobalMemoryManager:
                     score += 0.5
             if score > 0:
                 results.append({
-                    **self._file_info_to_dict(note_info),
+                    **note_info,
                     "score": score,
                     "snippet": (note.get("body") or "")[:300],
                 })
@@ -139,26 +177,33 @@ class GlobalMemoryManager:
         return results[:max_results]
 
     def get_index(self) -> Optional[Dict[str, Any]]:
-        if self._index is None:
+        if self._provider is None:
             return None
-        idx = self._index.index
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            payload = run_coro_sync(self._provider.index().snapshot())
+        except Exception:
+            logger.debug("GlobalMemoryManager.get_index: failed", exc_info=True)
+            return None
+        files = payload.get("files") or {}
         return {
             "files": {
                 k: {
-                    "filename": v.filename,
-                    "title": v.title,
-                    "category": v.category,
-                    "tags": v.tags,
-                    "importance": v.importance,
-                    "char_count": v.char_count,
-                    "links_to": v.links_to,
-                    "linked_from": v.linked_from,
+                    "filename": v.get("filename", k),
+                    "title": v.get("title", ""),
+                    "category": v.get("category", "root"),
+                    "tags": v.get("tags", []),
+                    "importance": v.get("importance", "medium"),
+                    "char_count": v.get("char_count", 0),
+                    "links_to": v.get("links_to", []),
+                    "linked_from": v.get("linked_from", []),
                 }
-                for k, v in idx.files.items()
+                for k, v in files.items()
             },
-            "tag_map": idx.tag_map,
-            "total_files": idx.total_files,
-            "total_chars": idx.total_chars,
+            "tag_map": payload.get("tag_map", {}),
+            "total_files": int(payload.get("total_files", len(files)) or len(files)),
+            "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -189,16 +234,69 @@ class GlobalMemoryManager:
         source: str = "global",
         source_session_id: Optional[str] = None,
     ) -> Optional[str]:
-        if self._writer is None:
+        if self._provider is None:
             return None
-        return self._writer.write_note(
-            title=title,
-            content=content,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source=source,
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NoteDraft,
+            Scope,
         )
+        from service.memory.structured_writer import (
+            VALID_CATEGORIES,
+            _slugify,
+            extract_wikilinks,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        cat = category if category in VALID_CATEGORIES else "topics"
+        tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
+        all_links = list(set(extract_wikilinks(content)))
+
+        try:
+            importance_enum = _ExecutorImportance(importance)
+        except ValueError:
+            importance_enum = _ExecutorImportance.MEDIUM
+
+        slug = _slugify(title)
+        bare_filename = f"{slug}.md"
+        cat_dir = (
+            Path(self.memory_dir) if cat == "root"
+            else Path(self.memory_dir) / cat
+        )
+        candidate = cat_dir / bare_filename
+        if candidate.exists():
+            counter = 1
+            while (cat_dir / f"{slug}-{counter}.md").exists():
+                counter += 1
+            bare_filename = f"{slug}-{counter}.md"
+
+        passthrough: Dict[str, Any] = {
+            "aliases": [],
+            "source": source,
+            "session_id": source_session_id or "global",
+            "linked_from": [],
+            "links_to": list(all_links),
+        }
+        draft = NoteDraft(
+            title=title,
+            body=content,
+            category=cat,
+            tags=list(tag_list),
+            importance=importance_enum,
+            scope=Scope.SESSION,
+            filename=bare_filename,
+            frontmatter=passthrough,
+        )
+        try:
+            meta = run_coro_sync(self._provider.notes().write(draft))
+        except Exception:
+            logger.warning(
+                "GlobalMemoryManager.write_note: provider write failed",
+                exc_info=True,
+            )
+            return None
+        bare_returned = meta.ref.filename or bare_filename
+        return bare_returned if cat == "root" else f"{cat}/{bare_returned}"
 
     def update_note(
         self,
@@ -208,16 +306,57 @@ class GlobalMemoryManager:
         tags: Optional[List[str]] = None,
         importance: Optional[str] = None,
     ) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.update_note(
-            filename, content=body, tags=tags, importance=importance,
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NotePatch,
         )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        notes = self._provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(bare))
+        except Exception:
+            return False
+        if existing is None:
+            return False
+
+        merged_tags: Optional[List[str]] = None
+        if tags:
+            merged = set(existing.tags or [])
+            merged.update(t.lower().strip() for t in tags if t.strip())
+            merged_tags = sorted(merged)
+
+        importance_enum = None
+        if importance:
+            try:
+                importance_enum = _ExecutorImportance(importance)
+            except ValueError:
+                importance_enum = None
+
+        patch = NotePatch(
+            body=body,
+            tags=merged_tags,
+            importance=importance_enum,
+        )
+        try:
+            run_coro_sync(notes.update(bare, patch))
+        except Exception:
+            return False
+        return True
 
     def delete_note(self, filename: str) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.delete_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+        except Exception:
+            return False
 
     # ── Promote from Session ──────────────────────────────────────────
 

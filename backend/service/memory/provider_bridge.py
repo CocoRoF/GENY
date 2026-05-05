@@ -239,7 +239,80 @@ async def build_memory_provider(
     return provider
 
 
+async def build_single_tenant_provider(
+    *,
+    root: str,
+    scope_id: str,
+    scope: str = "session",
+    enable_embedding: bool = False,
+    ltm_config: Optional[Any] = None,
+):
+    """Build and `initialize()` a single-tenant `MemoryProvider`.
+
+    Unlike :func:`build_memory_provider`, this does *not* construct
+    a composite layout — the returned provider is a plain
+    file-backed delegate rooted at ``root``. Used by the multi-tenant
+    helpers (``GlobalMemoryManager`` /  ``CuratedKnowledgeManager`` /
+    ``UserOpsidianManager``) which operate outside the session
+    lifecycle and need their own NotesHandle / IndexHandle / VectorHandle
+    scoped to a fixed directory.
+
+    Args:
+        root: Absolute path to the tenant's memory directory.
+        scope_id: Identifier the executor records on every BackendInfo
+            descriptor — used as ``session_id`` for the underlying
+            file provider so audit logs surface a recognisable origin
+            (e.g., ``"global"`` / ``"curated:<user>"`` /
+            ``"user:<user>"``).
+        scope: ``"session"`` (default) or ``"user"``. Notes get this
+            scope tag in their ``NoteRef``.
+        enable_embedding: When True and ``ltm_config`` carries a valid
+            embedding spec, the provider attaches the executor's
+            embedding client so vector search works. When False, the
+            provider stays markdown-only.
+        ltm_config: Live :class:`LTMConfig`. Loaded from disk if not
+            supplied. Only consulted when ``enable_embedding`` is set.
+
+    Returns:
+        A live `MemoryProvider`. Caller is responsible for
+        ``await provider.close()`` at teardown.
+    """
+    from geny_executor.memory.factory import MemoryProviderFactory
+
+    if enable_embedding and ltm_config is None:
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.ltm_config import LTMConfig
+
+            mgr = get_config_manager()
+            ltm_config = mgr.load_config(LTMConfig) or LTMConfig.get_default_instance()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "build_single_tenant_provider: failed to load LTMConfig; "
+                "embedding disabled",
+                exc_info=True,
+            )
+            ltm_config = None
+
+    config: Dict[str, Any] = {
+        "provider": "file",
+        "root": str(root),
+        "session_id": scope_id,
+        "scope": scope,
+    }
+    if enable_embedding and ltm_config is not None:
+        embedding = _embedding_config(ltm_config)
+        if embedding is not None:
+            config["embedding"] = embedding
+
+    factory = MemoryProviderFactory()
+    provider = factory.build(config)
+    await provider.initialize()
+    return provider
+
+
 __all__ = [
     "build_memory_provider",
     "build_memory_provider_config",
+    "build_single_tenant_provider",
 ]
