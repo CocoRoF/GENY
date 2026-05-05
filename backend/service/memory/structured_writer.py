@@ -17,7 +17,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.index import MemoryIndexManager, MemoryFileInfo
+from service.memory.index import MemoryFileInfo
 
 logger = getLogger(__name__)
 
@@ -107,7 +107,7 @@ class StructuredMemoryWriter:
 
     Usage::
 
-        writer = StructuredMemoryWriter(memory_dir, index_manager)
+        writer = StructuredMemoryWriter(memory_dir)
         filename = writer.write_note(
             title="FastAPI 비동기 패턴",
             content="# FastAPI\\n\\n- async def 사용...",
@@ -119,20 +119,23 @@ class StructuredMemoryWriter:
     def __init__(
         self,
         memory_dir: str,
-        index_manager: MemoryIndexManager,
         session_id: str = "",
         memory_provider=None,
     ):
         """
         Args:
             memory_dir: Absolute path to the memory/ directory.
-            index_manager: MemoryIndexManager instance for index updates.
             session_id: Session ID stamped onto note frontmatter.
             memory_provider: Live executor `MemoryProvider`. Required
                 at write time; provider-less calls warn and no-op.
+
+        Sprint 3 step 4 — the legacy ``index_manager`` parameter was
+        dropped. The executor's ``IndexHandle`` refreshes
+        ``_index.json`` / per-category shards / ``_summary.json``
+        automatically on every ``NotesStore.write`` (1.20.0 EXEC-5),
+        so the writer no longer needs a host-side cache to invalidate.
         """
         self._memory_dir = Path(memory_dir)
-        self._index = index_manager
         self._session_id = session_id
         self._provider = memory_provider
 
@@ -247,8 +250,10 @@ class StructuredMemoryWriter:
                 exc_info=True,
             )
 
-        # Update index
-        self._index.update_file(relative_path)
+        # Sprint 3 step 4 — host-side index cache invalidation retired;
+        # the executor's IndexHandle refreshes ``_index.json`` and the
+        # per-category shards on every NotesHandle.write (1.20.0
+        # EXEC-5), so there is nothing for Geny to invalidate.
 
         # Memory v2 PR 15 — propagate linked_from to wikilink targets.
         # The new note declares ``links_to: [a, b, c]`` so each of
@@ -419,12 +424,8 @@ class StructuredMemoryWriter:
             )
             return False
 
-        # Geny side: keep the in-memory index cache in sync until
-        # PR-3c moves IndexHandle over.
-        try:
-            self._index.update_file(filename)
-        except Exception:  # noqa: BLE001
-            logger.debug("update_note: index update skipped", exc_info=True)
+        # Sprint 3 step 4 — index cache invalidation retired; the
+        # executor's IndexHandle refreshes on its own.
         logger.debug("update_note: updated %s (via provider)", filename)
         return True
 
@@ -445,10 +446,8 @@ class StructuredMemoryWriter:
             return False
         if not ok:
             return False
-        try:
-            self._index.remove_file(filename)
-        except Exception:  # noqa: BLE001
-            logger.debug("delete_note: index remove skipped", exc_info=True)
+        # Sprint 3 step 4 — index cache invalidation retired; the
+        # executor's IndexHandle refreshes on its own.
         logger.info("delete_note: removed %s (via provider)", filename)
         return True
 
@@ -496,11 +495,8 @@ class StructuredMemoryWriter:
             )
             return False
 
-        try:
-            self._index.update_file(source_file)
-            self._index.update_file(target_file)
-        except Exception:  # noqa: BLE001
-            logger.debug("link_notes: index update skipped", exc_info=True)
+        # Sprint 3 step 4 — index cache invalidation retired; the
+        # executor's IndexHandle refreshes on its own.
         return True
 
     def update_note(

@@ -81,11 +81,12 @@ class CuratedKnowledgeManager:
             from service.memory.structured_writer import StructuredMemoryWriter
             from service.memory.index import MemoryIndexManager
 
+            # Sprint 3 step 4 — ``StructuredMemoryWriter`` no longer
+            # takes an index_manager arg.
             self._index = MemoryIndexManager(self.memory_dir)
             self._index.load_or_rebuild()
             self._writer = StructuredMemoryWriter(
                 self.memory_dir,
-                self._index,
                 session_id=f"curated:{self.username}",
             )
             self._initialized = True

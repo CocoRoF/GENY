@@ -96,7 +96,6 @@ class DmArchiver:
         *,
         session_id: str = "",
         tz: Optional[tzinfo] = None,
-        index_manager: Optional[Any] = None,
     ) -> None:
         self._memory_dir = Path(memory_dir)
         self._session_id = session_id
@@ -106,7 +105,10 @@ class DmArchiver:
         # ``dms/<cp>/<date>.md``. RLock so unit tests using a fake
         # writer that re-enters can't deadlock.
         self._lock = threading.RLock()
-        self._index_manager = index_manager
+        # Sprint 3 step 4 — host-side index_manager parameter retired;
+        # ``dms/`` rollups stay on direct atomic-write but the executor
+        # picks up newly-written files via its bare-basename scanner
+        # on the next IndexHandle.snapshot() / .rebuild() pass.
 
     @property
     def memory_dir(self) -> Path:
@@ -189,13 +191,8 @@ class DmArchiver:
                     abs_path, exc,
                 )
                 return None
-            if self._index_manager is not None:
-                try:
-                    self._index_manager.update_file(rel_path)
-                except Exception:
-                    logger.debug(
-                        "dm_archiver: index update failed", exc_info=True,
-                    )
+            # Sprint 3 step 4 — index update retired; executor scans
+            # the dms tree on the next snapshot/rebuild.
             return DmBundleUpdate(
                 relative_path=rel_path,
                 absolute_path=str(abs_path),
