@@ -115,6 +115,22 @@ def _stm_load_all(memory_manager) -> List[Any]:
         return []
 
 
+async def _astm_load_all(memory_manager) -> List[Any]:
+    """Async sibling of :func:`_stm_load_all`. Prefers
+    ``mgr.aload_all_stm`` so the inspect tool dispatch never crosses
+    the sync→async bridge.
+    """
+    try:
+        aloader = getattr(memory_manager, "aload_all_stm", None)
+        if callable(aloader):
+            return list(await aloader() or [])
+        # Sync fallback
+        return _stm_load_all(memory_manager)
+    except Exception:
+        logger.debug("STM aload_all failed during inspect", exc_info=True)
+        return []
+
+
 def _entry_meta(entry) -> Dict[str, Any]:
     """Return entry.metadata or an empty dict."""
     meta = getattr(entry, "metadata", None)
@@ -200,6 +216,10 @@ class MemoryStatusTool(BaseTool):
     def run(self, session_id: str, counterpart: Optional[str] = None) -> str:
         """Return the snapshot. ``session_id`` is the caller's own id —
         injected by the runtime adapter, never seen by the LLM."""
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.arun(session_id, counterpart))
+
+    async def arun(self, session_id: str, counterpart: Optional[str] = None) -> str:
         caller = _get_caller(session_id)
         if caller is None:
             return _error(f"caller session not found: {session_id}")
@@ -221,7 +241,7 @@ class MemoryStatusTool(BaseTool):
                 "last_event": None,
             })
 
-        entries = _stm_load_all(memory)
+        entries = await _astm_load_all(memory)
         last = _find_last_event(entries, canonical)
 
         # ``is_executing`` only meaningful when the canonical id is a
@@ -385,6 +405,17 @@ class MemoryWithTool(BaseTool):
         limit: int = _DEFAULT_WITH_LIMIT,
         since: Optional[str] = None,
     ) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.arun(session_id, counterpart, kinds, limit, since))
+
+    async def arun(
+        self,
+        session_id: str,
+        counterpart: str,
+        kinds: Optional[List[str]] = None,
+        limit: int = _DEFAULT_WITH_LIMIT,
+        since: Optional[str] = None,
+    ) -> str:
         caller = _get_caller(session_id)
         if caller is None:
             return _error(f"caller session not found: {session_id}")
@@ -409,7 +440,7 @@ class MemoryWithTool(BaseTool):
         if kinds:
             kind_filter = {str(k) for k in kinds if isinstance(k, str)}
 
-        entries = _stm_load_all(memory)
+        entries = await _astm_load_all(memory)
         cutoff = _resolve_since_cutoff(entries, since) if since else None
 
         # Walk newest-first; collect up to limit_clamped matches.
@@ -504,6 +535,10 @@ class MemoryEventTool(BaseTool):
         }
 
     def run(self, session_id: str, event_id: str) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.arun(session_id, event_id))
+
+    async def arun(self, session_id: str, event_id: str) -> str:
         caller = _get_caller(session_id)
         if caller is None:
             return _error(f"caller session not found: {session_id}")
@@ -513,7 +548,7 @@ class MemoryEventTool(BaseTool):
         if not event_id or not isinstance(event_id, str):
             return _error("event_id required")
 
-        entries = _stm_load_all(memory)
+        entries = await _astm_load_all(memory)
         match_entry, match_meta = _find_event_by_id(entries, event_id)
         if match_entry is None:
             return _error(f"event not found: {event_id}")
@@ -636,6 +671,16 @@ class MemoryArtifactTool(BaseTool):
         path: str,
         max_bytes: int = _DEFAULT_ARTIFACT_BYTES,
     ) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.arun(session_id, event_id, path, max_bytes))
+
+    async def arun(
+        self,
+        session_id: str,
+        event_id: str,
+        path: str,
+        max_bytes: int = _DEFAULT_ARTIFACT_BYTES,
+    ) -> str:
         caller = _get_caller(session_id)
         if caller is None:
             return _error(f"caller session not found: {session_id}")
@@ -652,7 +697,7 @@ class MemoryArtifactTool(BaseTool):
         except (TypeError, ValueError):
             cap = _DEFAULT_ARTIFACT_BYTES
 
-        entries = _stm_load_all(memory)
+        entries = await _astm_load_all(memory)
         entry, meta = _find_event_by_id(entries, event_id)
         if entry is None:
             return _error(f"event not found: {event_id}")
@@ -953,6 +998,19 @@ class MemoryDistillTool(BaseTool):
         update_note: bool = False,
         narrative: bool = False,
     ) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.arun(
+            session_id, counterpart, max_events, update_note, narrative,
+        ))
+
+    async def arun(
+        self,
+        session_id: str,
+        counterpart: str,
+        max_events: int = _DEFAULT_DISTILL_EVENTS,
+        update_note: bool = False,
+        narrative: bool = False,
+    ) -> str:
         caller = _get_caller(session_id)
         if caller is None:
             return _error(f"caller session not found: {session_id}")
@@ -976,7 +1034,7 @@ class MemoryDistillTool(BaseTool):
         except (TypeError, ValueError):
             cap = _DEFAULT_DISTILL_EVENTS
 
-        entries = _stm_load_all(memory)
+        entries = await _astm_load_all(memory)
         stats = _summarise_counterpart_events(entries, canonical, cap)
 
         # Try to enrich with the counterpart_role from the most recent
@@ -1006,7 +1064,7 @@ class MemoryDistillTool(BaseTool):
 
         note_path: Optional[str] = None
         if update_note:
-            note_path = _write_entity_note(
+            note_path = await _awrite_entity_note(
                 memory, stats, cp_role, narrative=narrative_text,
             )
 
@@ -1082,6 +1140,53 @@ def _write_entity_note(
         )
     except Exception:
         logger.debug("memory_distill: write_note failed", exc_info=True)
+        return None
+
+
+async def _awrite_entity_note(
+    memory_manager,
+    stats: Dict[str, Any],
+    counterpart_role: Optional[str],
+    *,
+    narrative: Optional[str] = None,
+) -> Optional[str]:
+    """Async sibling of :func:`_write_entity_note`. Prefers
+    ``mgr.awrite_note`` to skip the sync→async bridge."""
+    awrite = getattr(memory_manager, "awrite_note", None)
+    write = getattr(memory_manager, "write_note", None)
+    try:
+        sanitized = _sanitize_counterpart_for_filename(stats["counterpart_id"])
+        rel_path = f"insights/counterpart-{sanitized}.md"
+        body = _render_entity_markdown(stats, counterpart_role, narrative=narrative)
+        title = f"Counterpart distillation — {stats['counterpart_id']}"
+        tags = ["counterpart", "distillation"]
+        if counterpart_role:
+            tags.append(counterpart_role)
+        if narrative:
+            tags.append("narrative")
+        if callable(awrite):
+            return await awrite(
+                title=title,
+                content=body,
+                category="insights",
+                tags=tags,
+                importance="medium",
+                source="distillation",
+                filename_override=rel_path,
+            )
+        elif callable(write):
+            return write(
+                title=title,
+                content=body,
+                category="insights",
+                tags=tags,
+                importance="medium",
+                source="distillation",
+                filename_override=rel_path,
+            )
+        return None
+    except Exception:
+        logger.debug("memory_distill: awrite_note failed", exc_info=True)
         return None
 
 
