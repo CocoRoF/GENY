@@ -798,10 +798,14 @@ class SessionMemoryManager:
         """
         if self._memory_provider is None:
             return MemoryIndex()
+        from service.memory.note_utils import aget_index_snapshot_with_dms
+
         try:
-            payload = await self._memory_provider.index().snapshot()
+            payload = await aget_index_snapshot_with_dms(
+                self._memory_provider, self._memory_dir,
+            )
         except Exception:  # noqa: BLE001
-            logger.debug("manager._index_snapshot: provider call failed", exc_info=True)
+            logger.debug("manager._index_snapshot: snapshot failed", exc_info=True)
             return MemoryIndex()
 
         files: Dict[str, MemoryFileInfo] = {}
@@ -814,32 +818,13 @@ class SessionMemoryManager:
             src: list(targets)
             for src, targets in (payload.get("link_graph") or {}).items()
         }
-        total_chars = int(payload.get("total_chars", 0) or 0)
-
-        # Splice in dms/<cp>/<date>.md rows the executor cannot see.
-        try:
-            from service.memory.note_utils import scan_dms_directory
-            dms_rows = scan_dms_directory(self._memory_dir)
-            for rel, row in dms_rows.items():
-                # Use the relative path as the key so per-counterpart
-                # rows can't collide on the same date.
-                files[rel] = MemoryFileInfo.from_dict(row)
-                total_chars += int(row.get("char_count") or 0)
-                for tag in row.get("tags") or []:
-                    tag_map.setdefault(str(tag).lower(), []).append(rel)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "manager._index_snapshot: dms scan/merge failed",
-                exc_info=True,
-            )
-
         return MemoryIndex(
             files=files,
             tag_map=tag_map,
             link_graph=link_graph,
             last_rebuilt=str(payload.get("last_rebuilt", "")),
-            total_chars=total_chars,
-            total_files=len(files),
+            total_chars=int(payload.get("total_chars", 0) or 0),
+            total_files=int(payload.get("total_files", len(files)) or len(files)),
         )
 
     async def _index_rebuild(self) -> int:
