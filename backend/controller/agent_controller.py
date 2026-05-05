@@ -77,13 +77,10 @@ class CreateAgentRequest(CreateSessionRequest):
     memory_config: Optional[dict] = Field(
         default=None,
         description=(
-            "Per-session MemoryProvider override (MemoryProviderFactory config "
-            "DSL). Takes precedence over the process default set via "
-            "MEMORY_PROVIDER env. "
-            "Q.1 (cycle 20260426_3): may include a ``tuning`` sub-object "
-            "with ``max_inject_chars`` / ``recent_turns`` / "
+            "Per-session memory tuning overrides. May include a ``tuning`` "
+            "sub-object with ``max_inject_chars`` / ``recent_turns`` / "
             "``enable_vector_search`` / ``enable_reflection`` to override "
-            "the global memory tuning for this session only."
+            "the settings.json:memory.tuning defaults for this session only."
         ),
     )
 

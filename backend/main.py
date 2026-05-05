@@ -54,7 +54,6 @@ from controller.mcp_oauth_controller import (
 from controller.docs_controller import router as docs_router
 from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
-from controller.session_memory_controller import router as session_memory_router
 from controller.transcripts_controller import router as transcripts_router
 from controller.environment_controller import router as environment_router
 from controller.catalog_controller import router as catalog_router
@@ -307,34 +306,6 @@ async def lifespan(app: FastAPI):
     app.state.ws_abandoned_detector = ws_abandoned_detector
     app.state.ws_detector_engine = _ws_detector_engine
     logger.info("   - WS abandoned detector: started (120s threshold, 60s±5s tick)")
-
-    # ── MemoryProvider Registry (Phase 2) ──────────────────────────────
-    # Registry sits next to the legacy SessionMemoryManager. Its default
-    # config is resolved from MEMORY_* env vars; if MEMORY_PROVIDER is
-    # unset / "disabled", the registry stays dormant and the new
-    # /api/sessions/{id}/memory endpoints return 404. agent_manager gets
-    # a handle via set_memory_registry() so Phase 4 can attach providers
-    # to Stage 2.
-    from service.memory_provider import (
-        MemoryConfigError,
-        MemorySessionRegistry,
-        build_default_memory_config,
-    )
-    try:
-        default_memory_config = build_default_memory_config()
-    except MemoryConfigError as exc:
-        logger.error(f"   - MemorySessionRegistry: config error: {exc}")
-        raise
-    memory_registry = MemorySessionRegistry(default_config=default_memory_config)
-    app.state.memory_registry = memory_registry
-    agent_manager.set_memory_registry(memory_registry)
-    if default_memory_config:
-        logger.info(
-            f"   - MemorySessionRegistry: default provider='{default_memory_config['provider']}' "
-            f"scope='{default_memory_config.get('scope', 'session')}'"
-        )
-    else:
-        logger.info("   - MemorySessionRegistry: dormant (MEMORY_PROVIDER=disabled or unset)")
 
     # ── EnvironmentService (Phase 3) ───────────────────────────────────
     # Persists EnvironmentManifest templates to ./data/environments/*.json
@@ -690,7 +661,6 @@ app.include_router(mcp_resource_router)  # mcp:// URI resolver (G10.3)
 app.include_router(docs_router)  # Documentation API
 app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
-app.include_router(session_memory_router)  # Per-session MemoryProvider API (Phase 2)
 app.include_router(transcripts_router)  # InteractionEvent stream view (cycle 20260430_3)
 app.include_router(environment_router)  # Environment CRUD API (Phase 3)
 app.include_router(catalog_router)  # Stage/Artifact catalog API (Phase 3)
