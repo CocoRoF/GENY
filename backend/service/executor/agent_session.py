@@ -1003,18 +1003,12 @@ class AgentSession:
                         "[%s] memory_manager.set_memory_provider failed",
                         self._session_id, exc_info=True,
                     )
-                # Wire the provider's `after_record_turn` hook so every
-                # STM append automatically drives the Geny business
-                # archivers (conversation bucket router + agent-DM
-                # bundle). This replaces the legacy `record_message`
-                # → `_maybe_archive_*` chain.
-                try:
-                    self._install_memory_hooks()
-                except Exception:  # noqa: BLE001
-                    logger.debug(
-                        "[%s] memory hooks install failed",
-                        self._session_id, exc_info=True,
-                    )
+                # NOTE: ``_install_memory_hooks`` USED to be called here,
+                # but at this point in the bootstrap ``self._memory_hooks``
+                # is still ``None`` (the bag is created later inside
+                # ``_build_pipeline``). The post-pipeline call there is
+                # the load-bearing one; keeping the call here as well
+                # would just be a guaranteed no-op.
                 # Path-A: ensure stage 18's `_drive_provider` and stage 2
                 # context retriever see the same provider the manager and
                 # archivers use. Without this attach, `_drive_provider`
@@ -2217,6 +2211,21 @@ class AgentSession:
             hooks = MemoryHooks(**hooks_kwargs)
             self._memory_provider.set_hooks(hooks)
             self._memory_hooks = hooks  # store for _install_memory_hooks
+
+            # Wire the post-write callbacks (after_record_turn driver
+            # for ConversationArchiver + DmArchiver). This was
+            # previously called from ``_init_memory_provider`` but at
+            # that point ``self._memory_hooks`` is still ``None`` and
+            # the install short-circuited — every conversation/dm
+            # archive was silently dropped. Now that the hooks bag
+            # exists we install for real.
+            try:
+                self._install_memory_hooks()
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[%s] _install_memory_hooks (post-pipeline) failed",
+                    self._session_id, exc_info=True,
+                )
 
             # ── 2. Stage 2 retriever (provider + hooks, no host duck-type)
             attach_kwargs["memory_retriever"] = MemoryAwareRetriever(
