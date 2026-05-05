@@ -31,16 +31,17 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 1.17.0 ships the path-A thin-adapter EXEC track:
-    # `metadata` extension field on every stage I/O dataclass (incl.
-    # `Turn.from_state_message` lifting `message["metadata"]`),
-    # `MemoryHooks.after_*` callbacks, `STMHandle.append_event`,
-    # `NotesHandle.load_pinned`, `IndexHandle.render_vault_map`, and
-    # the `_refresh_backlinks` wikilink mismatch fix. All earlier
-    # 1.16.0 surfaces (composite curated/global, auto-vector on
-    # note write) remain. The `[openai]` extra is required because
-    # Geny's settings UI defaults the embedding provider to OpenAI.
-    "geny-executor[web,cron,openai]>=1.18.0,<2.0.0",
+    # geny-executor 1.19.0 ships:
+    # 1. `LoopAgnosticLock` — memory store locks no longer bind to a
+    #    single event loop, so cross-loop drives (run_coro_sync /
+    #    worker-thread bridges) no longer silently swallow writes.
+    #    This was the root cause of empty `_index.json` shards and
+    #    missing `transcripts/session.jsonl` entries.
+    # 2. Consolidated install — runtime extras (web/cron/openai/
+    #    google/postgres/numpy) are now baseline `dependencies`.
+    #    Hosts drop bracket suffixes and let settings.json pick the
+    #    embedding provider at runtime.
+    "geny-executor>=1.19.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

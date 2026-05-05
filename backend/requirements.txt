@@ -17,12 +17,12 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# 1.17.0 ships the path-A thin-adapter EXEC track: `metadata`
-# extension on every stage I/O dataclass, `MemoryHooks.after_*`,
-# `STMHandle.append_event`, `NotesHandle.load_pinned`,
-# `IndexHandle.render_vault_map`. `[openai]` is required because
-# Geny's LTM settings default to the OpenAI embedding backend.
-geny-executor[web,cron,openai]>=1.18.0,<2.0.0
+# geny-executor 1.19.0 ships LoopAgnosticLock (cross-loop safe memory
+# store locks — fixes silent write swallowing under run_coro_sync) and
+# consolidates extras into baseline deps (web/cron/openai/google/postgres
+# all installed by default; embedding provider chosen at runtime via
+# settings.json).
+geny-executor>=1.19.0,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
