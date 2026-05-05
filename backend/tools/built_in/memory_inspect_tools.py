@@ -96,11 +96,16 @@ def _resolve_counterpart_id(caller_agent, counterpart: Optional[str]) -> Optiona
 def _stm_load_all(memory_manager) -> List[Any]:
     """Load the full STM for the caller. Falls back to ``[]`` on error.
 
-    Uses ``load_all`` (DB-first) when available — memory_inspect tools
-    need to address arbitrary historical events, not just the recent
-    tail.
+    Post-1.21.0 the host-side ``ShortTermMemory`` adapter was retired —
+    the manager exposes ``load_all_stm`` directly. Pre-1.21.0 callers
+    that still expect ``mgr.short_term.load_all()`` are caught by the
+    ``getattr`` fallback so a downgrade path works.
     """
     try:
+        loader = getattr(memory_manager, "load_all_stm", None)
+        if callable(loader):
+            return list(loader() or [])
+        # Pre-1.21.0 surface (legacy compat)
         stm = getattr(memory_manager, "short_term", None)
         if stm is None:
             return []
