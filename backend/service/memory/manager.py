@@ -1,17 +1,14 @@
 """
 Session Memory Manager — unified facade.
 
-Combines long-term and short-term memory into a single interface
-per session, analogous to OpenClaw's MemorySearchManager.
-
-Each session gets its own SessionMemoryManager tied to its storage_path.
-The manager owns:
-  - LongTermMemory  (memory/*.md files)
-  - STM access      (transcripts/session.jsonl) — provider direct,
-                     no host-side adapter (1.21.0 retired ``ShortTermMemory``).
+Each session gets its own SessionMemoryManager tied to its
+``storage_path``. The manager calls the executor's
+``MemoryProvider`` directly through inline helper methods —
+host-side STM / LTM adapter classes were retired in 1.21.0
+(``ShortTermMemory``) and Sprint 3 step 2 (``LongTermMemory``).
 
 It handles:
-  - Unified search across both stores
+  - Unified search across STM + LTM + vector
   - Memory injection for prompts (build context string)
   - Memory flush before compaction (save durable facts)
   - Statistics
@@ -24,7 +21,6 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.long_term import LongTermMemory
 from service.memory.vector_memory import VectorMemoryManager
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import MemoryIndexManager
@@ -130,16 +126,19 @@ class SessionMemoryManager:
         self._storage_path = storage_path
         self._max_inject_chars = max_inject_chars
 
-        self._ltm = LongTermMemory(storage_path)
-        # STM access goes through the executor `MemoryProvider` directly
-        # — the legacy `ShortTermMemory` adapter was retired in 1.21.0.
-        # Helper methods on this class (``_stm_*``) wrap the async
-        # provider calls in `run_coro_sync` so the rest of the manager
-        # keeps its sync surface.
+        # STM + LTM both go through the executor `MemoryProvider`
+        # directly — the legacy `ShortTermMemory` (retired 1.21.0)
+        # and `LongTermMemory` (retired Sprint 3 step 2) adapters
+        # are gone. Inline helpers on this class (``_stm_*`` /
+        # ``_ltm_*``) wrap the async provider calls in
+        # ``run_coro_sync`` so the rest of the manager keeps its
+        # synchronous surface.
         self._memory_provider: Optional[Any] = None
         self._transcript_dir = Path(storage_path) / "transcripts"
         self._stm_jsonl = self._transcript_dir / "session.jsonl"
         self._stm_summary_path = self._transcript_dir / "summary.md"
+        self._memory_dir = Path(storage_path) / "memory"
+        self._ltm_main_file = self._memory_dir / "MEMORY.md"
         # The vector layer is an adapter over the executor `MemoryProvider`
         # — `set_memory_provider` plugs the live composite in once
         # `AgentSession._init_memory_provider` has built it. Until that
@@ -205,11 +204,10 @@ class SessionMemoryManager:
         which the executor's flat-category NotesHandle doesn't
         model.
         """
-        # Cache the provider on the manager so the inline ``_stm_*``
-        # helpers can route every operation through ``provider.stm()``.
+        # Cache the provider on the manager so the inline ``_stm_*`` /
+        # ``_ltm_*`` helpers can route every operation through
+        # ``provider.stm()`` / ``provider.ltm()`` / ``provider.notes()``.
         self._memory_provider = provider
-        if self._ltm is not None:
-            self._ltm.set_memory_provider(provider)
         if self._index_manager is not None:
             self._index_manager.set_memory_provider(provider)
         if self._vmm is not None:
@@ -270,9 +268,10 @@ class SessionMemoryManager:
                 pass
         logger.info("SessionMemoryManager: DB backend enabled for session %s", session_id)
 
-    @property
-    def long_term(self) -> LongTermMemory:
-        return self._ltm
+    # NOTE: the ``long_term`` property was retired in Sprint 3 step 2
+    # along with the ``LongTermMemory`` adapter. Callers go through
+    # the manager's public LTM surface
+    # (``remember`` / ``remember_dated`` / ``remember_topic`` / `search`).
 
     # NOTE: the ``short_term`` property was retired in 1.21.0 along with
     # the ``ShortTermMemory`` adapter. Callers that previously did
@@ -463,18 +462,238 @@ class SessionMemoryManager:
         return self._stm_get_recent(n)
 
     # ------------------------------------------------------------------
+    # LTM helpers (Sprint 3 step 2 — provider direct, no host adapter)
+    # ------------------------------------------------------------------
+
+    def _ltm_append(self, text: str, *, heading: Optional[str] = None) -> None:
+        if self._memory_provider is None:
+            return
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(self._memory_provider.ltm().append(text, heading=heading))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._ltm_append: provider.ltm().append failed",
+                exc_info=True,
+            )
+
+    def _ltm_write_topic(self, topic: str, text: str) -> Optional[Path]:
+        if self._memory_provider is None:
+            return None
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            ref = run_coro_sync(self._memory_provider.ltm().write_topic(topic, text))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._ltm_write_topic: provider.ltm().write_topic failed",
+                exc_info=True,
+            )
+            return None
+        if ref and ref.filename:
+            return self._memory_dir / ref.filename
+        return None
+
+    def _ltm_write_execution(
+        self, entry: str, *, date: Optional[datetime] = None
+    ) -> Optional[str]:
+        """Append an execution-summary line to ``memory/executions/<YYYY-MM-DD>.md``.
+
+        Routed through ``NotesHandle`` (category="executions") — new
+        file → ``notes.write``; existing → ``notes.update(append_body=...)``.
+        Returns ``"executions/<file>.md"`` on success.
+        """
+        if self._memory_provider is None:
+            return None
+        from geny_executor.memory.provider import (
+            Importance,
+            NoteDraft,
+            NotePatch,
+            Scope,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        ts = date or datetime.now(_get_tz())
+        day = ts.date().isoformat()
+        bare_filename = f"{day}.md"
+        notes = self._memory_provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(bare_filename))
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._ltm_write_execution: provider read failed",
+                exc_info=True,
+            )
+            existing = None
+        try:
+            if existing is None:
+                draft = NoteDraft(
+                    title=f"Executions {day}",
+                    body=entry.rstrip() + "\n",
+                    category="executions",
+                    tags=["execution"],
+                    importance=Importance.MEDIUM,
+                    scope=Scope.SESSION,
+                    filename=bare_filename,
+                    metadata={
+                        "geny.kind": "executions_journal",
+                        "geny.day": day,
+                    },
+                )
+                run_coro_sync(notes.write(draft))
+            else:
+                patch = NotePatch(append_body=entry.rstrip())
+                run_coro_sync(notes.update(bare_filename, patch))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "manager._ltm_write_execution: provider write/update failed",
+                exc_info=True,
+            )
+            return None
+        return f"executions/{bare_filename}"
+
+    def _ltm_load_main(self) -> Optional[MemoryEntry]:
+        if self._memory_provider is None:
+            return None
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            text = run_coro_sync(self._memory_provider.ltm().read_main())
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._ltm_load_main: provider read failed",
+                exc_info=True,
+            )
+            return None
+        if not text:
+            return None
+        return MemoryEntry(
+            source=MemorySource.LONG_TERM,
+            content=text,
+            timestamp=None,
+            filename="MEMORY.md",
+            metadata={"category": "root"},
+        )
+
+    def _ltm_load_pinned(self, *, max_chars: int = 3000) -> Optional[MemoryEntry]:
+        if self._memory_provider is None:
+            return None
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            body = run_coro_sync(
+                self._memory_provider.notes().load_pinned(
+                    category="critical",
+                    max_chars=max_chars,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._ltm_load_pinned: provider load_pinned failed",
+                exc_info=True,
+            )
+            return None
+        if not body:
+            return None
+        return MemoryEntry(
+            source=MemorySource.LONG_TERM,
+            content=body,
+            timestamp=None,
+            filename="critical/",
+            category="critical",
+            tags=["pinned"],
+            importance="critical",
+            metadata={"pinned": True},
+        )
+
+    def _ltm_search(
+        self, query: str, *, max_results: int = 10
+    ) -> List[MemorySearchResult]:
+        if not query.strip() or self._memory_provider is None:
+            return []
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            chunks = run_coro_sync(
+                self._memory_provider.ltm().search(query, limit=max_results)
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "manager._ltm_search: provider.ltm().search failed",
+                exc_info=True,
+            )
+            return []
+        results: List[MemorySearchResult] = []
+        for chunk in chunks:
+            entry = MemoryEntry(
+                source=MemorySource.LONG_TERM,
+                content=chunk.content,
+                timestamp=None,
+                filename=chunk.key,
+                metadata=dict(chunk.metadata or {}),
+            )
+            snippet = (
+                chunk.content[:240] + "..." if len(chunk.content) > 240 else chunk.content
+            )
+            results.append(
+                MemorySearchResult(
+                    entry=entry,
+                    score=float(chunk.relevance_score or 0.0),
+                    snippet=snippet,
+                    match_type=str(chunk.source or "ltm"),
+                )
+            )
+        return results
+
+    def _ltm_load_all(self) -> List[MemoryEntry]:
+        """Load every LTM markdown file. Used by compaction.
+
+        Reads ``memory/`` directly since the executor's `LTMHandle`
+        doesn't expose a dump-everything call (out of scope for the
+        protocol) — and the on-disk layout is shared with the executor.
+        """
+        entries: List[MemoryEntry] = []
+        if not self._memory_dir.exists():
+            return entries
+        for path in sorted(self._memory_dir.rglob("*.md")):
+            if path.name in ("_index.json", "_vault_map.json"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not text.strip():
+                continue
+            try:
+                rel = str(path.relative_to(self._memory_dir))
+            except ValueError:
+                rel = path.name
+            entries.append(
+                MemoryEntry(
+                    source=MemorySource.LONG_TERM,
+                    content=text,
+                    timestamp=None,
+                    filename=rel,
+                    metadata={"path": str(path)},
+                )
+            )
+        return entries
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
         """Set up directory structure for both memory stores."""
-        self._ltm.ensure_directory()
+        self._memory_dir.mkdir(parents=True, exist_ok=True)
+        (self._memory_dir / "topics").mkdir(parents=True, exist_ok=True)
         # transcripts/ dir is created by the executor's STM store on
         # the first append; nothing to do here.
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize structured memory layer
-        memory_dir = self._ltm.memory_dir
+        memory_dir = self._memory_dir
         self._index_manager = MemoryIndexManager(str(memory_dir))
         self._structured_writer = StructuredMemoryWriter(
             str(memory_dir), self._index_manager,
@@ -693,7 +912,7 @@ class SessionMemoryManager:
             text: The knowledge to persist.
             heading: Optional markdown heading.
         """
-        self._ltm.append(text, heading=heading)
+        self._ltm_append(text, heading=heading)
 
     def remember_dated(self, text: str) -> None:
         """Write an execution-summary block to today's executions file.
@@ -705,11 +924,11 @@ class SessionMemoryManager:
         ``DailyJournalWriter``) to ``memory/executions/<YYYY-MM-DD>.md``
         so the two streams no longer collide on one file.
         """
-        self._ltm.write_execution(text)
+        self._ltm_write_execution(text)
 
     def remember_topic(self, topic: str, text: str) -> None:
         """Write knowledge to a topic-specific long-term memory file."""
-        self._ltm.write_topic(topic, text)
+        self._ltm_write_topic(topic, text)
 
     # ------------------------------------------------------------------
     # Structured memory operations (Obsidian-like)
@@ -732,7 +951,7 @@ class SessionMemoryManager:
         """
         if self._structured_writer is None:
             # Fallback to legacy write
-            self._ltm.write_topic(title, content)
+            self._ltm_write_topic(title, content)
             return None
         return self._structured_writer.write_note(
             title=title,
@@ -956,7 +1175,7 @@ class SessionMemoryManager:
             # daily-journal root file. The structured-note dual
             # write below still goes to ``memory/daily/`` so the
             # human-friendly card surface keeps working.
-            self._ltm.write_execution(entry)
+            self._ltm_write_execution(entry)
             logger.info(
                 "record_execution: #%d (%d chars) → executions/",
                 execution_number, len(entry),
@@ -1224,32 +1443,14 @@ class SessionMemoryManager:
     def load_pinned(self, *, max_chars: int = 3000):
         """Return the always-inject pinned-facts surface.
 
-        Delegates to :meth:`LongTermMemory.load_pinned`, which reads
-        ``memory/critical/*.md`` plus ``MEMORY.md`` and packs the
-        bodies (frontmatter stripped) into one ``MemoryEntry``.
-
-        The ``geny-executor`` ``GenyMemoryRetriever`` discovers this
-        method by duck-typing on the memory manager and injects the
-        returned content into the system prompt's ``# Pinned Facts``
-        section every turn — independent of the user's query
-        wording. That behaviour is what makes "주요한 사실" (key
-        facts) survive across sessions even when the user's first
-        message has zero lexical overlap with the pinned content.
+        Reads ``memory/critical/*.md`` via the executor's
+        ``NotesHandle.load_pinned`` and packs the bodies (frontmatter
+        stripped) into one ``MemoryEntry``. The retriever consumes
+        this directly through the new generic ``MemoryAwareRetriever``
+        in 1.20.0 — but the host method stays as a sync convenience
+        for any in-process caller that still wants the packaged entry.
         """
-        ltm = getattr(self, "_ltm", None)
-        if ltm is None:
-            return None
-        loader = getattr(ltm, "load_pinned", None)
-        if loader is None:
-            return None
-        try:
-            return loader(max_chars=max_chars)
-        except Exception:
-            logger.debug(
-                "SessionMemoryManager.load_pinned: delegation failed",
-                exc_info=True,
-            )
-            return None
+        return self._ltm_load_pinned(max_chars=max_chars)
 
     # ------------------------------------------------------------------
     # Search
@@ -1275,7 +1476,7 @@ class SessionMemoryManager:
         results: list[MemorySearchResult] = []
 
         if sources is None or MemorySource.LONG_TERM in sources:
-            ltm_results = self._ltm.search(query, max_results=max_results)
+            ltm_results = self._ltm_search(query, max_results=max_results)
             for r in ltm_results:
                 r.score *= 1.2  # Long-term memory relevance boost
             results.extend(ltm_results)
@@ -1429,7 +1630,7 @@ class SessionMemoryManager:
                 total_chars += len(summary)
 
         # 2. Long-term memory: main MEMORY.md
-        main_mem = self._ltm.load_main()
+        main_mem = self._ltm_load_main()
         if main_mem and (total_chars + main_mem.char_count) <= budget:
             parts.append(
                 f"<long-term-memory source=\"{main_mem.filename}\">\n"
@@ -1512,7 +1713,7 @@ class SessionMemoryManager:
                 total_chars += len(summary)
 
         # 2. Main MEMORY.md
-        main_mem = self._ltm.load_main()
+        main_mem = self._ltm_load_main()
         if main_mem and (total_chars + main_mem.char_count) <= budget:
             parts.append(
                 f"<long-term-memory source=\"{main_mem.filename}\">\n"
@@ -1590,7 +1791,7 @@ class SessionMemoryManager:
             content: Text to persist.
             heading: Section heading in MEMORY.md.
         """
-        self._ltm.append(content, heading=heading)
+        self._ltm_append(content, heading=heading)
         logger.info(
             "Memory flush: %d chars saved to long-term memory", len(content)
         )
@@ -1688,7 +1889,7 @@ class SessionMemoryManager:
         # Save to today's executions file (was the daily-journal
         # root file pre-cycle-20260503_5 — same content shape, new
         # location to keep daily-journal index pure).
-        self._ltm.write_execution(summary_text)
+        self._ltm_write_execution(summary_text)
 
         # Persist session summary for future context injection on restore
         self._stm_write_summary(summary_text)
@@ -1757,7 +1958,7 @@ class SessionMemoryManager:
                 pass
 
         # Fallback: load all entries from file system
-        ltm_entries = self._ltm.load_all()
+        ltm_entries = self._ltm_load_all()
         stm_entries = self._stm_load_all()
 
         ltm_chars = sum(e.char_count for e in ltm_entries)
