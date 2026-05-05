@@ -3,8 +3,9 @@ Curated Knowledge Manager — Refined knowledge layer between User Opsidian and 
 
 The Curated Knowledge scope acts as a quality-controlled bridge:
 - Notes are 100% compatible with the existing Opsidian format
-  (StructuredMemoryWriter + MemoryIndexManager + YAML frontmatter)
-- Adds optional FAISS vector search for semantic retrieval
+  (YAML frontmatter + structured Markdown)
+- Adds optional FAISS vector search for semantic retrieval (when
+  ``LTMConfig.curated_vector_enabled`` is on)
 - Notes originate from User Opsidian (via curation) or agent promotions
 
 Storage layout::
@@ -17,6 +18,11 @@ Storage layout::
         reference/
         _index.json
         _vector/               (FAISS index, when vector search is enabled)
+
+Each user gets their own single-tenant ``MemoryProvider`` (file-backed,
+scope=user). When ``curated_vector_enabled`` is set, the provider's
+embedding hook auto-indexes every note write so vector search picks
+up new content without an explicit reindex pass.
 """
 
 from __future__ import annotations
@@ -32,10 +38,8 @@ logger = getLogger(__name__)
 class CuratedKnowledgeManager:
     """Per-user curated knowledge vault with Obsidian-like notes + optional vector search.
 
-    Each user gets an isolated directory under ``_curated_knowledge/{username}/``.
-    Reuses StructuredMemoryWriter and MemoryIndexManager for full Opsidian
-    compatibility, and optionally layers on VectorMemoryManager for semantic
-    retrieval.
+    Each user gets an isolated directory under ``_curated_knowledge/{username}/``
+    backed by a dedicated single-tenant ``MemoryProvider``.
     """
 
     def __init__(self, username: str, base_path: Optional[str] = None):
@@ -45,10 +49,9 @@ class CuratedKnowledgeManager:
         self.memory_dir = os.path.join(base_path, "_curated_knowledge", username)
         os.makedirs(self.memory_dir, exist_ok=True)
 
-        self._writer: Optional[Any] = None
-        self._index: Optional[Any] = None
-        self._vector: Optional[Any] = None
+        self._provider: Optional[Any] = None
         self._initialized = False
+        self._vector_enabled = False
         self._initialize()
 
     @staticmethod
@@ -76,24 +79,45 @@ class CuratedKnowledgeManager:
         return DEFAULT_STORAGE_ROOT
 
     def _initialize(self):
-        """Set up writer, index manager, and optional vector store."""
+        """Build the per-user single-tenant `MemoryProvider`."""
         try:
-            from service.memory.structured_writer import StructuredMemoryWriter
-            from service.memory.index import MemoryIndexManager
+            from service.memory.provider_bridge import build_single_tenant_provider
+            from service.memory.sync_async_bridge import run_coro_sync
 
-            # Sprint 3 step 4 — ``StructuredMemoryWriter`` no longer
-            # takes an index_manager arg.
-            self._index = MemoryIndexManager(self.memory_dir)
-            self._index.load_or_rebuild()
-            self._writer = StructuredMemoryWriter(
-                self.memory_dir,
-                session_id=f"curated:{self.username}",
+            # Read curated_vector_enabled to decide whether the
+            # embedding plane attaches. When the flag is off the
+            # provider stays markdown-only — list/read/write still
+            # work but ``provider.vector()`` returns None.
+            enable_embedding = False
+            try:
+                from service.config import get_config_manager
+                from service.config.sub_config.general.ltm_config import LTMConfig
+
+                cfg_mgr = get_config_manager()
+                ltm = cfg_mgr.load_config(LTMConfig) or LTMConfig.get_default_instance()
+                enable_embedding = bool(getattr(ltm, "curated_vector_enabled", False))
+            except Exception:  # noqa: BLE001
+                ltm = None
+
+            self._provider = run_coro_sync(
+                build_single_tenant_provider(
+                    root=self.memory_dir,
+                    scope_id=f"curated:{self.username}",
+                    scope="user",
+                    enable_embedding=enable_embedding,
+                    ltm_config=ltm if enable_embedding else None,
+                )
             )
+            try:
+                self._vector_enabled = self._provider.vector() is not None
+            except Exception:  # noqa: BLE001
+                self._vector_enabled = False
             self._initialized = True
 
             logger.info(
-                "CuratedKnowledgeManager initialized for '%s' at %s",
-                self.username, self.memory_dir,
+                "CuratedKnowledgeManager initialized for '%s' at %s "
+                "(vector=%s)",
+                self.username, self.memory_dir, self._vector_enabled,
             )
         except Exception:
             logger.warning(
@@ -102,30 +126,12 @@ class CuratedKnowledgeManager:
             )
 
     async def initialize_vector(self) -> bool:
-        """Lazily initialize FAISS vector search (requires LTMConfig.curated_vector_enabled).
-
-        Returns:
-            True if vector search is now available.
+        """Compatibility shim — vector layer is provisioned at provider
+        build time when ``curated_vector_enabled`` is set. This method
+        kept as a no-op for callers that historically gated vector use
+        on its return value.
         """
-        if self._vector is not None:
-            return self._vector.enabled
-
-        try:
-            from service.memory.vector_memory import VectorMemoryManager
-            self._vector = VectorMemoryManager(self.memory_dir)
-            ok = await self._vector.initialize()
-            if ok:
-                logger.info(
-                    "CuratedKnowledgeManager: vector search enabled for '%s'",
-                    self.username,
-                )
-            return ok
-        except Exception:
-            logger.warning(
-                "CuratedKnowledgeManager: vector init failed for '%s'",
-                self.username, exc_info=True,
-            )
-            return False
+        return self._vector_enabled
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -135,7 +141,7 @@ class CuratedKnowledgeManager:
 
     @property
     def vector_enabled(self) -> bool:
-        return self._vector is not None and self._vector.enabled
+        return self._vector_enabled
 
     # ── Read Operations ───────────────────────────────────────────────
 
@@ -145,43 +151,82 @@ class CuratedKnowledgeManager:
         category: Optional[str] = None,
         tag: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return []
-        notes = self._writer.list_notes(category=category, tag=tag)
-        return [self._file_info_to_dict(n) for n in notes]
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            metas = run_coro_sync(
+                self._provider.notes().list(category=category, tag=tag)
+            )
+        except Exception:
+            logger.debug(
+                "CuratedKnowledgeManager.list_notes: failed", exc_info=True,
+            )
+            return []
+        return [self._meta_to_dict(m) for m in metas]
 
     @staticmethod
-    def _file_info_to_dict(info) -> Dict[str, Any]:
+    def _meta_to_dict(meta) -> Dict[str, Any]:
+        cat = meta.category or "root"
+        bare = meta.ref.filename
+        display_filename = bare if cat == "root" else f"{cat}/{bare}"
         return {
-            "filename": info.filename,
-            "title": info.title,
-            "category": info.category,
-            "tags": info.tags,
-            "importance": info.importance,
-            "created": info.created,
-            "modified": info.modified,
-            "source": info.source,
-            "char_count": info.char_count,
-            "links_to": info.links_to,
-            "linked_from": info.linked_from,
-            "summary": info.summary,
+            "filename": display_filename,
+            "title": meta.title or bare,
+            "category": cat,
+            "tags": list(meta.tags),
+            "importance": meta.importance.value,
+            "created": meta.created_at.isoformat() if meta.created_at else "",
+            "modified": meta.updated_at.isoformat() if meta.updated_at else "",
+            "source": "curated",
+            "char_count": meta.size_bytes,
+            "links_to": [],
+            "linked_from": [],
+            "summary": None,
         }
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return None
-        return self._writer.read_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            note = run_coro_sync(self._provider.notes().read(bare))
+        except Exception:
+            return None
+        if note is None:
+            return None
+        metadata = {
+            "title": note.title,
+            "tags": list(note.tags),
+            "category": note.category,
+            "importance": note.importance.value,
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+            **(note.frontmatter or {}),
+        }
+        return {
+            "filename": filename,
+            "title": note.title,
+            "metadata": metadata,
+            "body": note.body,
+            "raw": "",
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+        }
 
     def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """Keyword search across curated notes."""
-        if self._writer is None:
+        if self._provider is None:
             return []
-        all_notes = self._writer.list_notes()
+        all_notes = self.list_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
-            fn = note_info.filename
-            note = self._writer.read_note(fn)
+            fn = note_info["filename"]
+            note = self.read_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
@@ -203,7 +248,7 @@ class CuratedKnowledgeManager:
             score *= importance_boost.get(importance, 1.0)
             if score > 0:
                 results.append({
-                    **self._file_info_to_dict(note_info),
+                    **note_info,
                     "score": score,
                     "snippet": (note.get("body") or "")[:300],
                 })
@@ -219,45 +264,66 @@ class CuratedKnowledgeManager:
     ) -> List[Dict[str, Any]]:
         """Semantic vector search across curated notes.
 
-        Requires prior call to `initialize_vector()`.
-        Falls back to empty list if vector search is unavailable.
+        Requires ``curated_vector_enabled`` in LTMConfig at provider
+        build time. Falls back to empty list when the vector handle
+        is unavailable.
         """
-        if not self.vector_enabled or self._vector is None:
+        if self._provider is None or not self._vector_enabled:
             return []
-        results = await self._vector.search(
-            query, top_k=top_k, score_threshold=score_threshold,
-        )
+        vector = self._provider.vector()
+        if vector is None:
+            return []
+        try:
+            chunks = await vector.search(
+                query, top_k=top_k, threshold=score_threshold,
+            )
+        except Exception:
+            logger.debug(
+                "CuratedKnowledgeManager.vector_search: provider failed",
+                exc_info=True,
+            )
+            return []
         return [
             {
-                "source_file": r.source_file,
-                "text": r.text,
-                "score": r.score,
-                "chunk_index": r.chunk_index,
+                "source_file": (c.metadata.get("filename") or c.key) if c.metadata else c.key,
+                "text": c.content,
+                "score": c.relevance_score,
+                "chunk_index": int(c.metadata.get("chunk_index", 0)) if c.metadata else 0,
             }
-            for r in results
+            for c in chunks
         ]
 
     def get_index(self) -> Optional[Dict[str, Any]]:
-        if self._index is None:
+        if self._provider is None:
             return None
-        idx = self._index.index
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            payload = run_coro_sync(self._provider.index().snapshot())
+        except Exception:
+            logger.debug(
+                "CuratedKnowledgeManager.get_index: failed", exc_info=True,
+            )
+            return None
+        files = payload.get("files") or {}
         return {
             "files": {
                 k: {
-                    "filename": v.filename,
-                    "title": v.title,
-                    "category": v.category,
-                    "tags": v.tags,
-                    "importance": v.importance,
-                    "char_count": v.char_count,
-                    "links_to": v.links_to,
-                    "linked_from": v.linked_from,
+                    "filename": v.get("filename", k),
+                    "title": v.get("title", ""),
+                    "category": v.get("category", "root"),
+                    "tags": v.get("tags", []),
+                    "importance": v.get("importance", "medium"),
+                    "char_count": v.get("char_count", 0),
+                    "links_to": v.get("links_to", []),
+                    "linked_from": v.get("linked_from", []),
+                    "summary": v.get("summary"),
                 }
-                for k, v in idx.files.items()
+                for k, v in files.items()
             },
-            "tag_map": idx.tag_map,
-            "total_files": idx.total_files,
-            "total_chars": idx.total_chars,
+            "tag_map": payload.get("tag_map", {}),
+            "total_files": int(payload.get("total_files", len(files)) or len(files)),
+            "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -357,43 +423,82 @@ class CuratedKnowledgeManager:
         links_to: Optional[List[str]] = None,
         source_filename: Optional[str] = None,
     ) -> Optional[str]:
-        """Create a curated note.
-
-        Args:
-            title: Note title.
-            content: Markdown body.
-            category: Category folder.
-            tags: List of tags.
-            importance: Importance level (low/medium/high/critical).
-            source: Origin indicator (curated, promoted, auto-curated, user).
-            links_to: Filenames to wikilink to.
-            source_filename: Original filename if curated from User Opsidian.
-        """
-        if self._writer is None:
+        """Create a curated note via ``provider.notes().write``."""
+        if self._provider is None:
             return None
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NoteDraft,
+            Scope,
+        )
+        from service.memory.structured_writer import (
+            VALID_CATEGORIES,
+            _slugify,
+            extract_wikilinks,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
 
         # Add source tracking tags
         all_tags = list(tags or [])
-        if source and source not in all_tags:
+        if source and f"source:{source}" not in all_tags:
             all_tags.append(f"source:{source}")
         if source_filename:
             all_tags.append(f"origin:{source_filename}")
 
-        filename = self._writer.write_note(
-            title=title,
-            content=content,
-            category=category,
-            tags=all_tags,
-            importance=importance,
-            source=source,
-            links=links_to,
-        )
+        cat = category if category in VALID_CATEGORIES else "topics"
+        tag_list = [t.lower().strip() for t in all_tags if t.strip()]
+        auto_links = extract_wikilinks(content)
+        all_links = list(set(auto_links + (links_to or [])))
 
-        if filename:
-            logger.info(
-                "CuratedKnowledgeManager: wrote note '%s' → %s (source=%s)",
-                title, filename, source,
+        try:
+            importance_enum = _ExecutorImportance(importance)
+        except ValueError:
+            importance_enum = _ExecutorImportance.MEDIUM
+
+        slug = _slugify(title)
+        bare_filename = f"{slug}.md"
+        cat_dir = (
+            Path(self.memory_dir) if cat == "root"
+            else Path(self.memory_dir) / cat
+        )
+        candidate = cat_dir / bare_filename
+        if candidate.exists():
+            counter = 1
+            while (cat_dir / f"{slug}-{counter}.md").exists():
+                counter += 1
+            bare_filename = f"{slug}-{counter}.md"
+
+        passthrough: Dict[str, Any] = {
+            "aliases": [],
+            "source": source,
+            "session_id": f"curated:{self.username}",
+            "linked_from": [],
+            "links_to": list(all_links),
+        }
+        draft = NoteDraft(
+            title=title,
+            body=content,
+            category=cat,
+            tags=list(tag_list),
+            importance=importance_enum,
+            scope=Scope.USER,
+            filename=bare_filename,
+            frontmatter=passthrough,
+        )
+        try:
+            meta = run_coro_sync(self._provider.notes().write(draft))
+        except Exception:
+            logger.warning(
+                "CuratedKnowledgeManager.write_note: provider write failed",
+                exc_info=True,
             )
+            return None
+        bare_returned = meta.ref.filename or bare_filename
+        filename = bare_returned if cat == "root" else f"{cat}/{bare_returned}"
+        logger.info(
+            "CuratedKnowledgeManager: wrote note '%s' → %s (source=%s)",
+            title, filename, source,
+        )
         return filename
 
     def update_note(
@@ -405,43 +510,112 @@ class CuratedKnowledgeManager:
         importance: Optional[str] = None,
         category: Optional[str] = None,
     ) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.update_note(
-            filename, content=body, tags=tags, importance=importance, category=category,
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NotePatch,
         )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        notes = self._provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(bare))
+        except Exception:
+            return False
+        if existing is None:
+            return False
+
+        merged_tags: Optional[List[str]] = None
+        if tags:
+            merged = set(existing.tags or [])
+            merged.update(t.lower().strip() for t in tags if t.strip())
+            merged_tags = sorted(merged)
+
+        importance_enum = None
+        if importance:
+            try:
+                importance_enum = _ExecutorImportance(importance)
+            except ValueError:
+                importance_enum = None
+
+        patch = NotePatch(
+            body=body,
+            tags=merged_tags,
+            importance=importance_enum,
+            category=category,
+        )
+        try:
+            run_coro_sync(notes.update(bare, patch))
+        except Exception:
+            return False
+        return True
 
     def delete_note(self, filename: str) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.delete_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+        except Exception:
+            return False
 
     def create_link(self, source_filename: str, target_filename: str) -> bool:
         """Create a wikilink between two curated notes."""
-        if self._writer is None:
+        if self._provider is None:
             return False
-        note = self._writer.read_note(source_filename)
+        note = self.read_note(source_filename)
         if note is None:
             return False
         body = note.get("body", "")
         link_ref = f"[[{target_filename}]]"
         if link_ref not in body:
             body = body.rstrip() + f"\n\n{link_ref}\n"
-            return self._writer.update_note(source_filename, content=body)
+            return self.update_note(source_filename, body=body)
         return True
 
     def reindex(self) -> int:
         """Rebuild the full index from disk."""
-        if self._index is None:
+        if self._provider is None:
             return 0
-        self._index.rebuild()
-        return self._index.index.total_files
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(self._provider.index().rebuild())
+            payload = run_coro_sync(self._provider.index().snapshot())
+            files = payload.get("files") or {}
+            return int(payload.get("total_files", len(files)) or len(files))
+        except Exception:
+            return 0
 
     async def reindex_vector(self) -> Dict[str, int]:
-        """Re-index all curated notes for vector search."""
-        if not self.vector_enabled or self._vector is None:
+        """Re-index all curated notes for vector search.
+
+        With the executor-backed vector handle, the index is kept up
+        to date by the auto-vector hook on every note write. This
+        method exists as a manual reindex trigger; it returns the
+        post-reindex chunk count when supported.
+        """
+        if self._provider is None or not self._vector_enabled:
             return {}
-        return await self._vector.index_memory_files()
+        vector = self._provider.vector()
+        if vector is None:
+            return {}
+        try:
+            plan = await vector.reindex()
+            return {
+                "indexed": getattr(plan, "indexed", 0),
+                "skipped": getattr(plan, "skipped", 0),
+            }
+        except Exception:
+            logger.debug(
+                "CuratedKnowledgeManager.reindex_vector: failed",
+                exc_info=True,
+            )
+            return {}
 
     # ── Promote / Curate Operations ───────────────────────────────────
 
@@ -601,27 +775,39 @@ class CuratedKnowledgeManager:
 
         Returns formatted XML-tagged text or empty string.
         """
-        if not self.vector_enabled or self._vector is None:
+        if self._provider is None or not self._vector_enabled:
+            return ""
+        vector = self._provider.vector()
+        if vector is None:
             return ""
 
-        results = await self._vector.search(query, top_k=top_k)
-        if not results:
+        try:
+            chunks = await vector.search(query, top_k=top_k)
+        except Exception:
+            return ""
+        if not chunks:
             return ""
 
         budget = max_chars
         parts = []
         total = 0
-        for r in results:
-            chunk = (
-                f'<curated-knowledge source="{r.source_file}" '
-                f'score="{r.score:.3f}" chunk="{r.chunk_index}">\n'
-                f"{r.text}\n"
+        for c in chunks:
+            source_file = (
+                (c.metadata.get("filename") or c.key) if c.metadata else c.key
+            )
+            chunk_index = (
+                int(c.metadata.get("chunk_index", 0)) if c.metadata else 0
+            )
+            block = (
+                f'<curated-knowledge source="{source_file}" '
+                f'score="{c.relevance_score:.3f}" chunk="{chunk_index}">\n'
+                f"{c.content}\n"
                 f"</curated-knowledge>"
             )
-            if total + len(chunk) > budget:
+            if total + len(block) > budget:
                 break
-            parts.append(chunk)
-            total += len(chunk)
+            parts.append(block)
+            total += len(block)
 
         return "\n\n".join(parts)
 
