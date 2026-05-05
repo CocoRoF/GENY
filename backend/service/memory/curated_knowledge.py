@@ -19,10 +19,10 @@ Storage layout::
         _index.json
         _vector/               (FAISS index, when vector search is enabled)
 
-Each user gets their own single-tenant ``MemoryProvider`` (file-backed,
-scope=user). When ``curated_vector_enabled`` is set, the provider's
-embedding hook auto-indexes every note write so vector search picks
-up new content without an explicit reindex pass.
+Each user gets their own single-tenant ``MemoryProvider``. Sync +
+async dual surface (Step 7-2): every public method has an ``a*``
+async sibling. Sync wrappers call into the async path via
+``run_coro_sync``; async callers should prefer the ``a*`` form.
 """
 
 from __future__ import annotations
@@ -36,11 +36,7 @@ logger = getLogger(__name__)
 
 
 class CuratedKnowledgeManager:
-    """Per-user curated knowledge vault with Obsidian-like notes + optional vector search.
-
-    Each user gets an isolated directory under ``_curated_knowledge/{username}/``
-    backed by a dedicated single-tenant ``MemoryProvider``.
-    """
+    """Per-user curated knowledge vault with Obsidian-like notes + optional vector search."""
 
     def __init__(self, username: str, base_path: Optional[str] = None):
         if base_path is None:
@@ -56,9 +52,6 @@ class CuratedKnowledgeManager:
 
     @staticmethod
     def _default_path() -> str:
-        """N.1 (cycle 20260426_3) — settings.json:curated_knowledge.root
-        wins; falls back to ``DEFAULT_STORAGE_ROOT`` from the platform
-        helper."""
         try:
             from geny_executor.settings import get_default_loader
 
@@ -84,11 +77,8 @@ class CuratedKnowledgeManager:
             from service.memory.provider_bridge import build_single_tenant_provider
             from service.memory.sync_async_bridge import run_coro_sync
 
-            # Read curated_vector_enabled to decide whether the
-            # embedding plane attaches. When the flag is off the
-            # provider stays markdown-only — list/read/write still
-            # work but ``provider.vector()`` returns None.
             enable_embedding = False
+            ltm = None
             try:
                 from service.config import get_config_manager
                 from service.config.sub_config.general.ltm_config import LTMConfig
@@ -97,7 +87,7 @@ class CuratedKnowledgeManager:
                 ltm = cfg_mgr.load_config(LTMConfig) or LTMConfig.get_default_instance()
                 enable_embedding = bool(getattr(ltm, "curated_vector_enabled", False))
             except Exception:  # noqa: BLE001
-                ltm = None
+                pass
 
             self._provider = run_coro_sync(
                 build_single_tenant_provider(
@@ -127,13 +117,8 @@ class CuratedKnowledgeManager:
 
     async def initialize_vector(self) -> bool:
         """Compatibility shim — vector layer is provisioned at provider
-        build time when ``curated_vector_enabled`` is set. This method
-        kept as a no-op for callers that historically gated vector use
-        on its return value.
-        """
+        build time when ``curated_vector_enabled`` is set."""
         return self._vector_enabled
-
-    # ── Properties ────────────────────────────────────────────────────
 
     @property
     def initialized(self) -> bool:
@@ -142,29 +127,6 @@ class CuratedKnowledgeManager:
     @property
     def vector_enabled(self) -> bool:
         return self._vector_enabled
-
-    # ── Read Operations ───────────────────────────────────────────────
-
-    def list_notes(
-        self,
-        *,
-        category: Optional[str] = None,
-        tag: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        if self._provider is None:
-            return []
-        from service.memory.sync_async_bridge import run_coro_sync
-
-        try:
-            metas = run_coro_sync(
-                self._provider.notes().list(category=category, tag=tag)
-            )
-        except Exception:
-            logger.debug(
-                "CuratedKnowledgeManager.list_notes: failed", exc_info=True,
-            )
-            return []
-        return [self._meta_to_dict(m) for m in metas]
 
     @staticmethod
     def _meta_to_dict(meta) -> Dict[str, Any]:
@@ -186,14 +148,40 @@ class CuratedKnowledgeManager:
             "summary": None,
         }
 
-    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+    # ── Read Operations (async-native) ───────────────────────────────
+
+    async def alist_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self._provider is None:
+            return []
+        try:
+            metas = await self._provider.notes().list(category=category, tag=tag)
+        except Exception:
+            logger.debug(
+                "CuratedKnowledgeManager.alist_notes: failed", exc_info=True,
+            )
+            return []
+        return [self._meta_to_dict(m) for m in metas]
+
+    def list_notes(
+        self,
+        *,
+        category: Optional[str] = None,
+        tag: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.alist_notes(category=category, tag=tag))
+
+    async def aread_note(self, filename: str) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            note = run_coro_sync(self._provider.notes().read(bare))
+            note = await self._provider.notes().read(bare)
         except Exception:
             return None
         if note is None:
@@ -217,16 +205,20 @@ class CuratedKnowledgeManager:
             "linked_from": list(note.links_in),
         }
 
-    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Keyword search across curated notes."""
+    def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aread_note(filename))
+
+    async def asearch(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Keyword search across curated notes (async)."""
         if self._provider is None:
             return []
-        all_notes = self.list_notes()
+        all_notes = await self.alist_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
             fn = note_info["filename"]
-            note = self.read_note(fn)
+            note = await self.aread_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
@@ -241,7 +233,6 @@ class CuratedKnowledgeManager:
             for tag in tags:
                 if query_lower in tag.lower():
                     score += 0.5
-            # Boost by importance
             importance_boost = {
                 "critical": 2.0, "high": 1.5, "medium": 1.0, "low": 0.5,
             }
@@ -255,6 +246,10 @@ class CuratedKnowledgeManager:
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:max_results]
 
+    def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.asearch(query, max_results))
+
     async def vector_search(
         self,
         query: str,
@@ -262,12 +257,7 @@ class CuratedKnowledgeManager:
         top_k: int = 5,
         score_threshold: float = 0.35,
     ) -> List[Dict[str, Any]]:
-        """Semantic vector search across curated notes.
-
-        Requires ``curated_vector_enabled`` in LTMConfig at provider
-        build time. Falls back to empty list when the vector handle
-        is unavailable.
-        """
+        """Semantic vector search across curated notes (async-native)."""
         if self._provider is None or not self._vector_enabled:
             return []
         vector = self._provider.vector()
@@ -293,17 +283,12 @@ class CuratedKnowledgeManager:
             for c in chunks
         ]
 
-    def get_index(self) -> Optional[Dict[str, Any]]:
+    async def aget_index(self) -> Optional[Dict[str, Any]]:
         if self._provider is None:
             return None
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            payload = run_coro_sync(self._provider.index().snapshot())
+            payload = await self._provider.index().snapshot()
         except Exception:
-            logger.debug(
-                "CuratedKnowledgeManager.get_index: failed", exc_info=True,
-            )
             return None
         files = payload.get("files") or {}
         return {
@@ -326,8 +311,12 @@ class CuratedKnowledgeManager:
             "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
-    def get_stats(self) -> Dict[str, Any]:
-        idx = self.get_index()
+    def get_index(self) -> Optional[Dict[str, Any]]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_index())
+
+    async def aget_stats(self) -> Dict[str, Any]:
+        idx = await self.aget_index()
         if idx is None:
             return {
                 "total_files": 0, "total_chars": 0,
@@ -346,9 +335,20 @@ class CuratedKnowledgeManager:
             "vector_enabled": self.vector_enabled,
         }
 
+    def get_stats(self) -> Dict[str, Any]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_stats())
+
+    async def aget_graph(self) -> Dict[str, Any]:
+        idx = await self.aget_index()
+        return self._build_graph(idx)
+
     def get_graph(self) -> Dict[str, Any]:
-        """Get graph data for visualization (enhanced with tag edges + metadata)."""
-        idx = self.get_index()
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aget_graph())
+
+    @staticmethod
+    def _build_graph(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if idx is None:
             return {"nodes": [], "edges": []}
         nodes = []
@@ -373,7 +373,6 @@ class CuratedKnowledgeManager:
                 "charCount": info.get("char_count", 0),
             })
 
-            # Wikilink edges
             for target in links_to:
                 if target in files_map:
                     key = (fn, target)
@@ -386,11 +385,9 @@ class CuratedKnowledgeManager:
                             "weight": 1.0,
                         })
 
-            # Build tag map
             for tag in tags:
                 tag_to_files.setdefault(tag, []).append(fn)
 
-        # Tag-based edges
         for tag, fns in tag_to_files.items():
             if len(fns) < 2:
                 continue
@@ -409,9 +406,9 @@ class CuratedKnowledgeManager:
 
         return {"nodes": nodes, "edges": edges}
 
-    # ── Write Operations ──────────────────────────────────────────────
+    # ── Write Operations (async-native) ──────────────────────────────
 
-    def write_note(
+    async def awrite_note(
         self,
         title: str,
         content: str,
@@ -423,7 +420,7 @@ class CuratedKnowledgeManager:
         links_to: Optional[List[str]] = None,
         source_filename: Optional[str] = None,
     ) -> Optional[str]:
-        """Create a curated note via ``provider.notes().write``."""
+        """Create a curated note (async)."""
         if self._provider is None:
             return None
         from geny_executor.memory.provider import (
@@ -436,9 +433,7 @@ class CuratedKnowledgeManager:
             _slugify,
             extract_wikilinks,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
-        # Add source tracking tags
         all_tags = list(tags or [])
         if source and f"source:{source}" not in all_tags:
             all_tags.append(f"source:{source}")
@@ -486,10 +481,10 @@ class CuratedKnowledgeManager:
             frontmatter=passthrough,
         )
         try:
-            meta = run_coro_sync(self._provider.notes().write(draft))
+            meta = await self._provider.notes().write(draft)
         except Exception:
             logger.warning(
-                "CuratedKnowledgeManager.write_note: provider write failed",
+                "CuratedKnowledgeManager.awrite_note: provider write failed",
                 exc_info=True,
             )
             return None
@@ -501,7 +496,26 @@ class CuratedKnowledgeManager:
         )
         return filename
 
-    def update_note(
+    def write_note(
+        self,
+        title: str,
+        content: str,
+        *,
+        category: str = "topics",
+        tags: Optional[List[str]] = None,
+        importance: str = "medium",
+        source: str = "curated",
+        links_to: Optional[List[str]] = None,
+        source_filename: Optional[str] = None,
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.awrite_note(
+            title, content,
+            category=category, tags=tags, importance=importance,
+            source=source, links_to=links_to, source_filename=source_filename,
+        ))
+
+    async def aupdate_note(
         self,
         filename: str,
         *,
@@ -516,12 +530,11 @@ class CuratedKnowledgeManager:
             Importance as _ExecutorImportance,
             NotePatch,
         )
-        from service.memory.sync_async_bridge import run_coro_sync
 
         bare = Path(filename).name
         notes = self._provider.notes()
         try:
-            existing = run_coro_sync(notes.read(bare))
+            existing = await notes.read(bare)
         except Exception:
             return False
         if existing is None:
@@ -547,58 +560,74 @@ class CuratedKnowledgeManager:
             category=category,
         )
         try:
-            run_coro_sync(notes.update(bare, patch))
+            await notes.update(bare, patch)
         except Exception:
             return False
         return True
 
-    def delete_note(self, filename: str) -> bool:
+    def update_note(
+        self,
+        filename: str,
+        *,
+        body: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        importance: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.aupdate_note(
+            filename, body=body, tags=tags, importance=importance, category=category,
+        ))
+
+    async def adelete_note(self, filename: str) -> bool:
         if self._provider is None:
             return False
-        from service.memory.sync_async_bridge import run_coro_sync
-
         bare = Path(filename).name
         try:
-            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+            return bool(await self._provider.notes().delete(bare))
         except Exception:
             return False
 
-    def create_link(self, source_filename: str, target_filename: str) -> bool:
-        """Create a wikilink between two curated notes."""
+    def delete_note(self, filename: str) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.adelete_note(filename))
+
+    async def acreate_link(self, source_filename: str, target_filename: str) -> bool:
+        """Create a wikilink between two curated notes (async)."""
         if self._provider is None:
             return False
-        note = self.read_note(source_filename)
+        note = await self.aread_note(source_filename)
         if note is None:
             return False
         body = note.get("body", "")
         link_ref = f"[[{target_filename}]]"
         if link_ref not in body:
             body = body.rstrip() + f"\n\n{link_ref}\n"
-            return self.update_note(source_filename, body=body)
+            return await self.aupdate_note(source_filename, body=body)
         return True
 
-    def reindex(self) -> int:
-        """Rebuild the full index from disk."""
+    def create_link(self, source_filename: str, target_filename: str) -> bool:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.acreate_link(source_filename, target_filename))
+
+    async def areindex(self) -> int:
+        """Rebuild the full index from disk (async)."""
         if self._provider is None:
             return 0
-        from service.memory.sync_async_bridge import run_coro_sync
-
         try:
-            run_coro_sync(self._provider.index().rebuild())
-            payload = run_coro_sync(self._provider.index().snapshot())
+            await self._provider.index().rebuild()
+            payload = await self._provider.index().snapshot()
             files = payload.get("files") or {}
             return int(payload.get("total_files", len(files)) or len(files))
         except Exception:
             return 0
 
-    async def reindex_vector(self) -> Dict[str, int]:
-        """Re-index all curated notes for vector search.
+    def reindex(self) -> int:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.areindex())
 
-        With the executor-backed vector handle, the index is kept up
-        to date by the auto-vector hook on every note write. This
-        method exists as a manual reindex trigger; it returns the
-        post-reindex chunk count when supported.
-        """
+    async def reindex_vector(self) -> Dict[str, int]:
+        """Re-index all curated notes for vector search (async-native)."""
         if self._provider is None or not self._vector_enabled:
             return {}
         vector = self._provider.vector()
@@ -619,20 +648,21 @@ class CuratedKnowledgeManager:
 
     # ── Promote / Curate Operations ───────────────────────────────────
 
-    def promote_from_session(
+    async def apromote_from_session(
         self,
         session_memory_manager,
         filename: str,
         *,
         session_id: str = "",
     ) -> Optional[str]:
-        """Promote a note from session memory into curated knowledge.
-
-        Returns the new curated filename, or None on failure.
-        """
-        note = session_memory_manager.read_note(filename)
+        """Promote a note from session memory into curated knowledge (async)."""
+        aread = getattr(session_memory_manager, "aread_note", None)
+        if callable(aread):
+            note = await aread(filename)
+        else:
+            note = session_memory_manager.read_note(filename)
         if note is None:
-            logger.warning("promote_from_session: note not found: %s", filename)
+            logger.warning("apromote_from_session: note not found: %s", filename)
             return None
 
         meta = note.get("metadata") or {}
@@ -646,7 +676,7 @@ class CuratedKnowledgeManager:
         category = meta.get("category", "topics")
         title = meta.get("title", filename.replace(".md", ""))
 
-        curated_filename = self.write_note(
+        curated_filename = await self.awrite_note(
             title=title,
             content=body,
             category=category,
@@ -656,10 +686,6 @@ class CuratedKnowledgeManager:
             source_filename=filename,
         )
 
-        # Surface the promotion on the operator-facing log channel.
-        # Routed via the session id of the *source* turn (the caller
-        # passes it in) — that's the session whose VTuber LOGS panel
-        # the operator is watching.
         if curated_filename:
             try:
                 from service.memory.event_emitter import emit_memory_event
@@ -686,7 +712,19 @@ class CuratedKnowledgeManager:
                 )
         return curated_filename
 
-    def curate_from_opsidian(
+    def promote_from_session(
+        self,
+        session_memory_manager,
+        filename: str,
+        *,
+        session_id: str = "",
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.apromote_from_session(
+            session_memory_manager, filename, session_id=session_id,
+        ))
+
+    async def acurate_from_opsidian(
         self,
         user_opsidian_manager,
         filename: str,
@@ -695,23 +733,15 @@ class CuratedKnowledgeManager:
         extra_tags: Optional[List[str]] = None,
         importance_override: Optional[str] = None,
     ) -> Optional[str]:
-        """Curate a note from the user's Opsidian vault into curated knowledge.
-
-        Optionally transforms the content (e.g., LLM-refined summary).
-
-        Args:
-            user_opsidian_manager: The source UserOpsidianManager.
-            filename: Source note filename in User Opsidian.
-            transformed_content: If provided, uses this instead of raw content.
-            extra_tags: Additional tags to add.
-            importance_override: Override the importance level.
-
-        Returns:
-            New curated filename, or None on failure.
-        """
-        note = user_opsidian_manager.read_note(filename)
+        """Curate a note from the user's Opsidian vault into curated
+        knowledge (async)."""
+        aread = getattr(user_opsidian_manager, "aread_note", None)
+        if callable(aread):
+            note = await aread(filename)
+        else:
+            note = user_opsidian_manager.read_note(filename)
         if note is None:
-            logger.warning("curate_from_opsidian: note not found: %s", filename)
+            logger.warning("acurate_from_opsidian: note not found: %s", filename)
             return None
 
         meta = note.get("metadata") or {}
@@ -721,7 +751,7 @@ class CuratedKnowledgeManager:
         if extra_tags:
             tags.extend(extra_tags)
 
-        return self.write_note(
+        return await self.awrite_note(
             title=meta.get("title", filename.replace(".md", "")),
             content=body,
             category=meta.get("category", "topics"),
@@ -731,19 +761,32 @@ class CuratedKnowledgeManager:
             source_filename=filename,
         )
 
+    def curate_from_opsidian(
+        self,
+        user_opsidian_manager,
+        filename: str,
+        *,
+        transformed_content: Optional[str] = None,
+        extra_tags: Optional[List[str]] = None,
+        importance_override: Optional[str] = None,
+    ) -> Optional[str]:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.acurate_from_opsidian(
+            user_opsidian_manager, filename,
+            transformed_content=transformed_content,
+            extra_tags=extra_tags,
+            importance_override=importance_override,
+        ))
+
     # ── Context Injection ─────────────────────────────────────────────
 
-    def inject_context(
+    async def ainject_context(
         self,
         query: str,
         max_chars: int = 5000,
     ) -> str:
-        """Build a curated knowledge context block for prompt injection.
-
-        Uses keyword search. For vector search, use `vector_inject_context`.
-        Returns formatted XML-tagged text or empty string.
-        """
-        results = self.search(query, max_results=5)
+        """Build a curated knowledge context block for prompt injection (async)."""
+        results = await self.asearch(query, max_results=5)
         if not results:
             return ""
 
@@ -765,16 +808,21 @@ class CuratedKnowledgeManager:
 
         return "\n\n".join(parts)
 
+    def inject_context(
+        self,
+        query: str,
+        max_chars: int = 5000,
+    ) -> str:
+        from service.memory.sync_async_bridge import run_coro_sync
+        return run_coro_sync(self.ainject_context(query, max_chars))
+
     async def vector_inject_context(
         self,
         query: str,
         max_chars: int = 5000,
         top_k: int = 5,
     ) -> str:
-        """Build a curated knowledge context block using vector search.
-
-        Returns formatted XML-tagged text or empty string.
-        """
+        """Build a curated knowledge context block using vector search (async)."""
         if self._provider is None or not self._vector_enabled:
             return ""
         vector = self._provider.vector()
