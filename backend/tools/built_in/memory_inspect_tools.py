@@ -1052,8 +1052,12 @@ def _write_entity_note(
     block as the human-readable opener. Stats stay underneath as
     a verifiable evidence layer.
     """
-    writer = getattr(memory_manager, "_structured_writer", None)
-    if writer is None:
+    # Sprint 3 step 5 — ``StructuredMemoryWriter`` retired from the
+    # session manager. Note CRUD now routes through the manager's
+    # public ``write_note`` surface (which calls ``provider.notes()``
+    # via inline ``_notes_*`` helpers).
+    write_note = getattr(memory_manager, "write_note", None)
+    if not callable(write_note):
         return None
     try:
         sanitized = _sanitize_counterpart_for_filename(stats["counterpart_id"])
@@ -1067,7 +1071,7 @@ def _write_entity_note(
             tags.append("narrative")
         # `filename_override` keeps repeated runs writing to the
         # same file rather than ``insights/counterpart-<x>-1.md`` etc.
-        return writer.write_note(
+        return write_note(
             title=title,
             content=body,
             category="insights",

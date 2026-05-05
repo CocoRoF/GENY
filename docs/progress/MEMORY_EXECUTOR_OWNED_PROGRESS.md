@@ -77,8 +77,8 @@
 | **Step 1** ([Geny#696](https://github.com/CocoRoF/Geny/pull/696)) | `short_term.py` adapter 폐기 — manager 가 `provider.stm()` 을 inline `_stm_*` helper 로 직접 호출 | ✅ 머지 |
 | **Step 2** ([Geny#697](https://github.com/CocoRoF/Geny/pull/697)) | `long_term.py` adapter 폐기 — manager 가 `provider.ltm()` / `provider.notes()` 직접 호출. 깨진 `test_pin_policy.py` 삭제 | ✅ 머지 |
 | **Step 3** ([Geny#698](https://github.com/CocoRoF/Geny/pull/698)) | manager 측 `VectorMemoryManager` 필드 폐기 — inline `_vector_*` helper 로 `provider.vector()` 직접 호출. `vector_memory.py` 파일은 curated 가 사용해서 보존 | ✅ 머지 |
-| **Step 4** | manager 측 `MemoryIndexManager` 필드 폐기 — inline `_index_*` helper 로 `provider.index()` 직접 호출. archivers + structured_writer 에서 `index_manager` 파라미터 제거. `index.py` 파일은 외부 콜러 (global/curated/user/agent_session/tests) 가 사용해서 보존 | ⏳ 진행 |
-| **Step 5** | `structured_writer.py` 외부 콜러 정리 + 가능시 manager 측 사용 정리 | ⏳ 대기 |
+| **Step 4** ([Geny#699](https://github.com/CocoRoF/Geny/pull/699)) | manager 측 `MemoryIndexManager` 필드 폐기 — inline `_index_*` helper 로 `provider.index()` 직접 호출. archivers + structured_writer 에서 `index_manager` 파라미터 제거. 새 public `mgr.build_vault_map()` (memory_categories 툴이 사용). `index.py` 파일은 외부 콜러 (global/curated/user/agent_session/tests) 가 사용해서 보존 | ✅ 머지 |
+| **Step 5** | manager 측 `StructuredMemoryWriter` 필드 폐기 — inline `_notes_*` helper (write/update/delete/read/list/link) 로 `provider.notes()` 직접 호출. `mgr.write_note` 가 `filename_override` 도 지원. `memory_inspect_tools` distillation 경로가 `mgr.write_note` 직접 호출. `structured_writer.py` 파일은 global/curated/user 가 사용해서 보존 | ⏳ 진행 |
 | **Step 6** | `frontmatter.py` 사용 정리 (archivers + tests) | ⏳ 대기 |
 | **Step 7** | `sync_async_bridge.py` 폐기 (모든 callers async 전환 후) | ⏳ 대기 |
 | **Cleanup** | 외부 콜러 정리 후 `index.py` / `vector_memory.py` / `structured_writer.py` 파일 삭제 | ⏳ 대기 |
@@ -111,6 +111,7 @@
 9. [Geny#696](https://github.com/CocoRoF/Geny/pull/696) — Sprint 3 step 1: `short_term.py` adapter 폐기
 10. [Geny#697](https://github.com/CocoRoF/Geny/pull/697) — Sprint 3 step 2: `long_term.py` adapter 폐기
 11. [Geny#698](https://github.com/CocoRoF/Geny/pull/698) — Sprint 3 step 3: manager 측 `VectorMemoryManager` 폐기
+12. [Geny#699](https://github.com/CocoRoF/Geny/pull/699) — Sprint 3 step 4: manager 측 `MemoryIndexManager` 폐기
 
 ### 운영 검증 (2026-05-05)
 
