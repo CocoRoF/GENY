@@ -251,6 +251,67 @@ def scan_dms_directory(memory_dir: Path | str) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+async def aget_index_snapshot_with_dms(
+    provider, memory_dir: Path | str
+) -> Dict[str, Any]:
+    """One-shot helper: ``await provider.index().snapshot()`` + restore
+    the ``dms/_index.json`` shard the executor clobbered + splice dms
+    rows into the in-memory payload.
+
+    The executor's ``IndexHandle.snapshot()`` (and ``.rebuild()``)
+    rewrites every per-category shard from a flat ``glob("*.md")`` that
+    cannot see the 2-level ``dms/<cp>/<date>.md`` layout. So even
+    after ``dm_archiver`` writes a fresh shard, the *next* snapshot
+    call clobbers it. This helper:
+
+      1. Calls the executor's snapshot.
+      2. Re-runs ``write_dms_shard`` so the on-disk shard is correct
+         again before the next operator refresh.
+      3. Splices the dms rows into the in-memory ``files`` dict so
+         the returned payload reports them too (totals updated).
+
+    Use from anywhere that needs a session-scoped index snapshot —
+    ``SessionMemoryManager._index_snapshot``, controller routes, or
+    any other reader. Multi-tenant managers (Global / Curated /
+    UserOpsidian) don't need this — their providers don't have
+    a ``dms/`` category in scope.
+    """
+    snap = await provider.index().snapshot()
+    try:
+        write_dms_shard(memory_dir)
+    except Exception:
+        logger.debug(
+            "aget_index_snapshot_with_dms: shard restore failed",
+            exc_info=True,
+        )
+    try:
+        dms_rows = scan_dms_directory(memory_dir)
+    except Exception:
+        logger.debug(
+            "aget_index_snapshot_with_dms: dms scan failed",
+            exc_info=True,
+        )
+        return snap
+    if not dms_rows:
+        return snap
+    files = dict(snap.get("files") or {})
+    tag_map: Dict[str, List[str]] = {
+        k: list(v) for k, v in (snap.get("tag_map") or {}).items()
+    }
+    total_chars = int(snap.get("total_chars", 0) or 0)
+    for rel, row in dms_rows.items():
+        files[rel] = row
+        total_chars += int(row.get("char_count") or 0)
+        for tag in row.get("tags") or []:
+            tag_map.setdefault(str(tag).lower(), []).append(rel)
+    out = dict(snap)
+    out["files"] = files
+    out["tag_map"] = tag_map
+    out["total_chars"] = total_chars
+    out["total_files"] = len(files)
+    return out
+
+
 def write_dms_shard(memory_dir: Path | str) -> None:
     """Atomically rewrite ``memory/dms/_index.json`` from a deep scan.
 
@@ -306,4 +367,5 @@ __all__ = [
     "apropagate_linked_from",
     "scan_dms_directory",
     "write_dms_shard",
+    "aget_index_snapshot_with_dms",
 ]

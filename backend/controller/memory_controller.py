@@ -74,6 +74,39 @@ def _get_provider(session_id: str):
     return provider
 
 
+def _get_provider_and_memory_dir(session_id: str):
+    """Return ``(provider, memory_dir)`` for the session.
+
+    ``memory_dir`` is the on-disk root for the session's notes/index.
+    Used by routes that need the dms shard helpers in
+    ``service.memory.note_utils`` (which deep-walk
+    ``<memory_dir>/dms/`` to produce rows the executor's flat scan
+    misses).
+    """
+    agent_manager = get_agent_session_manager()
+    agent = agent_manager.get_agent(session_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    provider = getattr(agent, "memory_provider", None)
+    if provider is None:
+        raise HTTPException(status_code=503, detail="Memory provider not initialized")
+    mgr = getattr(agent, "memory_manager", None) or getattr(
+        agent, "_memory_manager", None,
+    )
+    memory_dir = (
+        getattr(mgr, "_memory_dir", None) if mgr is not None else None
+    )
+    if memory_dir is None:
+        # Fallback: storage_path/memory — matches SessionMemoryManager.__init__.
+        storage = getattr(agent, "storage_path", None) or getattr(
+            agent, "_storage_path", None,
+        )
+        if storage is not None:
+            from pathlib import Path
+            memory_dir = Path(storage) / "memory"
+    return provider, memory_dir
+
+
 def _importance_value(importance: str):
     """Coerce a string importance into the executor's ``Importance``
     enum; falls back to ``MEDIUM`` for unknown values.
@@ -100,8 +133,9 @@ async def get_memory_index(request: Request, session_id: str = Path(...)):
     payload (`files` / `tag_map` / `link_graph`) for backwards
     compatibility with existing UI consumers.
     """
-    provider = _get_provider(session_id)
-    snap = await provider.index().snapshot()
+    from service.memory.note_utils import aget_index_snapshot_with_dms
+    provider, memory_dir = _get_provider_and_memory_dir(session_id)
+    snap = await aget_index_snapshot_with_dms(provider, memory_dir)
     files = snap.get("files") or {}
     return {
         "index": snap if files or "files" in snap else {
@@ -117,8 +151,9 @@ async def get_memory_index(request: Request, session_id: str = Path(...)):
 @router.get("/{session_id}/memory/stats")
 async def get_memory_stats(request: Request, session_id: str = Path(...)):
     """Memory statistics — totals + per-category counts."""
-    provider = _get_provider(session_id)
-    snap = await provider.index().snapshot()
+    from service.memory.note_utils import aget_index_snapshot_with_dms
+    provider, memory_dir = _get_provider_and_memory_dir(session_id)
+    snap = await aget_index_snapshot_with_dms(provider, memory_dir)
     files = snap.get("files") or {}
     by_cat: Dict[str, int] = {}
     for entry in files.values():
@@ -485,9 +520,13 @@ async def create_memory_link(
 @router.post("/{session_id}/memory/reindex")
 async def reindex_memory(request: Request, session_id: str = Path(...)):
     """Force a full rebuild of the memory index."""
-    provider = _get_provider(session_id)
+    from service.memory.note_utils import aget_index_snapshot_with_dms
+    provider, memory_dir = _get_provider_and_memory_dir(session_id)
     await provider.index().rebuild()
-    snap = await provider.index().snapshot()
+    # ``rebuild()`` clobbers the dms shard the same way ``snapshot()``
+    # does (both fan out via ``_write_hierarchical_sidecars
+    # (category=None)``). Restore + splice via the helper.
+    snap = await aget_index_snapshot_with_dms(provider, memory_dir)
     return {
         "message": "Reindex complete",
         "total_files": int(snap.get("total_files", 0) or 0),
