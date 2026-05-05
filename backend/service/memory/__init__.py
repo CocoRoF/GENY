@@ -13,14 +13,11 @@ the executor's ``MemoryProvider`` directly:
 
 Public API:
     SessionMemoryManager   — per-session facade
-    VectorMemoryManager    — kept as a slim ``provider.vector()`` adapter
-                              for callers that pre-date the inline helpers
     MemoryEntry / MemorySearchResult / MemoryStats — search hit shapes
     GlobalMemoryManager / CuratedKnowledgeManager / UserOpsidianManager
 """
 
 from service.memory.manager import SessionMemoryManager
-from service.memory.vector_memory import VectorMemoryManager
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.types import MemoryEntry, MemorySearchResult, MemoryStats
 from service.memory.global_memory import GlobalMemoryManager, get_global_memory_manager
@@ -28,7 +25,6 @@ from service.memory.curated_knowledge import CuratedKnowledgeManager, get_curate
 
 __all__ = [
     "SessionMemoryManager",
-    "VectorMemoryManager",
     "StructuredMemoryWriter",
     "MemoryEntry",
     "MemorySearchResult",

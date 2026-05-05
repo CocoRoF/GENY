@@ -21,7 +21,6 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.vector_memory import VectorSearchResult
 from service.memory.types import (
     CATEGORY_DESCRIPTIONS,
     MemoryEntry,
@@ -30,6 +29,7 @@ from service.memory.types import (
     MemorySearchResult,
     MemorySource,
     MemoryStats,
+    VectorSearchResult,
 )
 
 logger = getLogger(__name__)

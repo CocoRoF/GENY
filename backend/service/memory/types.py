@@ -89,6 +89,24 @@ class MemoryFileInfo:
 
 
 @dataclass
+class VectorSearchResult:
+    """Single hit from a vector similarity search.
+
+    Mirrors the dataclass that lived under the old
+    ``service.memory.vector_store`` so any caller that read ``.text`` /
+    ``.source_file`` / ``.score`` / ``.chunk_index`` keeps working
+    without modification. The session manager produces these from
+    ``provider.vector().search(...)`` payloads.
+    """
+
+    text: str
+    source_file: str
+    score: float
+    chunk_index: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class MemoryIndex:
     """Full index snapshot. Caller-compatible shape."""
     files: Dict[str, MemoryFileInfo] = field(default_factory=dict)
