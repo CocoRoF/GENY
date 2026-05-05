@@ -1,27 +1,29 @@
-"""Tiny sync↔async bridge for archive layer cut-over.
+"""Sync→async bridge for the host-side memory layer.
 
-The legacy archive functions (`StructuredMemoryWriter.write_note`,
-`SessionMemoryManager.record_message`, `ConversationArchiver.archive`,
-…) are all synchronous. The executor's `NotesHandle.write` is async.
-Phase 3 cuts the disk-write path over to NotesHandle without
-converting every caller to async — that cascade would touch ~30 call
-sites including FastAPI request handlers and the executor's pipeline
-runtime.
+After Sprint 3 the manager + archivers route every memory call
+(``provider.stm()`` / ``provider.ltm()`` / ``provider.notes()`` /
+``provider.index()`` / ``provider.vector()``) through this bridge.
+The provider handles are async by design (the executor owns its
+own loop policy), but the host surfaces — ``SessionMemoryManager``,
+``ConversationArchiver``, ``CompactionArchiver``, every FastAPI
+controller built on top — are still synchronous. Converting them
+would cascade through ~90 call sites plus the in-process tools
+framework (no ``arun`` yet).
 
-`run_coro_sync(coro)` is the choke point: it awaits `coro` from a
-sync caller. When invoked from within an event loop (the normal
-case — the chat broadcast handler is async), it offloads to a
-worker thread with its own loop. When invoked outside any loop
-(scripts, tests), it uses `asyncio.run` directly.
+``run_coro_sync(coro)`` is the choke point:
+- **Outside an event loop** (CLI, pytest sync test): ``asyncio.run``
+  spins up a fresh loop and tears it down.
+- **Inside a running loop** (FastAPI handler, websocket callback):
+  offloads to a one-shot worker thread with its own loop so we
+  never re-enter the caller's loop.
 
-Cost: each call spawns one short-lived worker thread + a fresh event
-loop. For one note write that is ~1-3 ms of overhead on top of the
-disk write itself. The phase 3 plan budgets <50 ms per turn (5-10
-note writes) which the measurement bears out.
+Cost per call: ~1-3 ms of overhead on top of the underlying I/O.
+A ``record_message`` turn does 5-10 provider calls and stays under
+the 50 ms budget operator measured in 1.21.0.
 
-Centralising the bridge here means later promotion to a shared
-worker pool or a different async-friendly path is a one-file change
-— callers stay on `run_coro_sync(...)`.
+Full retirement is gated on async-ifying every caller (``PR-C5`` in
+the original plan). Until then, centralising the bridge here keeps
+later promotion to a shared worker pool a one-file change.
 """
 
 from __future__ import annotations
