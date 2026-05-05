@@ -88,7 +88,7 @@ def extract_wikilinks(content: str) -> List[str]:
     return found
 
 
-def _propagate_linked_from(
+async def apropagate_linked_from(
     provider,
     source_filename: str,
     target_wikilinks: list,
@@ -122,14 +122,13 @@ def _propagate_linked_from(
     if not target_wikilinks or provider is None:
         return
     from geny_executor.memory.provider import NotePatch
-    from service.memory.sync_async_bridge import run_coro_sync
 
     notes = provider.notes()
     try:
-        metas = run_coro_sync(notes.list())
+        metas = await notes.list()
     except Exception:
         logger.debug(
-            "_propagate_linked_from: provider list failed", exc_info=True,
+            "apropagate_linked_from: provider list failed", exc_info=True,
         )
         return
 
@@ -155,7 +154,7 @@ def _propagate_linked_from(
         if bare_target is None or bare_target == source_bare:
             continue
         try:
-            existing = run_coro_sync(notes.read(bare_target))
+            existing = await notes.read(bare_target)
             if existing is None:
                 continue
             fm = dict(existing.frontmatter or {})
@@ -164,10 +163,10 @@ def _propagate_linked_from(
                 continue
             linked.append(source_stem)
             fm["linked_from"] = linked
-            run_coro_sync(notes.update(bare_target, NotePatch(frontmatter=fm)))
+            await notes.update(bare_target, NotePatch(frontmatter=fm))
         except Exception:
             logger.debug(
-                "_propagate_linked_from: rewrite failed for %s", target_link,
+                "apropagate_linked_from: rewrite failed for %s", target_link,
                 exc_info=True,
             )
 
@@ -177,5 +176,5 @@ __all__ = [
     "PINNED_CATEGORY",
     "_slugify",
     "extract_wikilinks",
-    "_propagate_linked_from",
+    "apropagate_linked_from",
 ]
