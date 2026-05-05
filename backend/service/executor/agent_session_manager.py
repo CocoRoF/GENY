@@ -820,13 +820,13 @@ class AgentSessionManager:
         # Register in local store
         self._local_agents[session_id] = agent
 
-        # ── Provision + optionally attach MemoryProvider (Phase 4) ───────────
-        # If a memory_config override is supplied, or a process-wide default
-        # exists (MEMORY_PROVIDER=ephemeral/file/sql), spin up a provider now.
-        # When MEMORY_PROVIDER_ATTACH=true is set, the provider is also
-        # wired into Pipeline Stage 2 (ContextStage.provider). Default is
-        # off so the legacy SessionMemoryManager keeps ownership until each
-        # layer is migrated (Phase 5a-5e).
+        # ── Provision + attach MemoryProvider ────────────────────────────────
+        # Path-A migration: provider is the single STM/LTM/notes write
+        # path. Pipeline attachment is no longer optional — without it
+        # stage 18's `_drive_provider` runs with `provider=None` and
+        # all user/assistant turns silently miss STM. Provision +
+        # attach is a single atomic step; if either part fails the
+        # session creation surfaces the error loud (no longer silent).
         if self._memory_registry is not None:
             try:
                 provider = self._memory_registry.provision(
@@ -837,8 +837,7 @@ class AgentSessionManager:
                         f"[{session_id}] MemoryProvider provisioned "
                         f"(capabilities={[c.name for c in provider.descriptor.capabilities]})"
                     )
-                    from service.memory_provider.config import is_attach_enabled
-                    if is_attach_enabled() and agent._pipeline is not None:
+                    if agent._pipeline is not None:
                         try:
                             self._memory_registry.attach_to_pipeline(
                                 agent._pipeline, provider
@@ -849,9 +848,29 @@ class AgentSessionManager:
                                 f"session_runtime.memory_provider)"
                             )
                         except Exception as attach_exc:
-                            logger.warning(
-                                f"[{session_id}] MemoryProvider attach failed: {attach_exc}"
+                            # Path-A makes attach load-bearing: surface
+                            # the failure on the session-scoped log
+                            # channel so the operator catches the
+                            # regression in real time.
+                            logger.error(
+                                f"[{session_id}] MemoryProvider attach FAILED — "
+                                f"stage 18 _drive_provider will be inactive, "
+                                f"all user/assistant turns will miss STM: {attach_exc}",
+                                exc_info=True,
                             )
+                            try:
+                                agent.record_memory_event(
+                                    event_type="provider_attach_failed",
+                                    message=(
+                                        f"MemoryProvider attach failed — "
+                                        f"stage 18 inactive: {attach_exc}"
+                                    ),
+                                    source="Memory",
+                                    backend="error",
+                                    extra={"error": str(attach_exc)},
+                                )
+                            except Exception:  # noqa: BLE001
+                                pass
             except Exception as e:
                 logger.warning(f"[{session_id}] MemoryProvider provisioning skipped: {e}")
 
