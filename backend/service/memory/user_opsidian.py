@@ -14,6 +14,11 @@ Storage layout::
         projects/
         insights/
         _index.json
+
+Each user gets their own single-tenant ``MemoryProvider`` (file-backed,
+scope=user) so every read/write/index call routes through
+``provider.notes()`` / ``provider.index()`` directly — no host-side
+adapters.
 """
 
 from __future__ import annotations
@@ -29,9 +34,8 @@ logger = getLogger(__name__)
 class UserOpsidianManager:
     """Per-user personal knowledge vault with Obsidian-like notes.
 
-    Each user gets an isolated directory under ``_user_opsidian/{username}/``.
-    Internally reuses the same StructuredMemoryWriter and MemoryIndexManager
-    used by session and global memory.
+    Each user gets an isolated directory under ``_user_opsidian/{username}/``
+    backed by a dedicated single-tenant ``MemoryProvider``.
     """
 
     def __init__(self, username: str, base_path: Optional[str] = None):
@@ -41,8 +45,7 @@ class UserOpsidianManager:
         self.memory_dir = os.path.join(base_path, "_user_opsidian", username)
         os.makedirs(self.memory_dir, exist_ok=True)
 
-        self._writer: Optional[Any] = None
-        self._index: Optional[Any] = None
+        self._provider: Optional[Any] = None
         self._initialize()
 
     @staticmethod
@@ -51,17 +54,17 @@ class UserOpsidianManager:
         return DEFAULT_STORAGE_ROOT
 
     def _initialize(self):
-        """Set up writer and index manager."""
+        """Build the per-user single-tenant `MemoryProvider`."""
         try:
-            from service.memory.structured_writer import StructuredMemoryWriter
-            from service.memory.index import MemoryIndexManager
+            from service.memory.provider_bridge import build_single_tenant_provider
+            from service.memory.sync_async_bridge import run_coro_sync
 
-            # Sprint 3 step 4 — ``StructuredMemoryWriter`` no longer
-            # takes an index_manager arg.
-            self._index = MemoryIndexManager(self.memory_dir)
-            self._index.load_or_rebuild()
-            self._writer = StructuredMemoryWriter(
-                self.memory_dir, session_id=f"user:{self.username}",
+            self._provider = run_coro_sync(
+                build_single_tenant_provider(
+                    root=self.memory_dir,
+                    scope_id=f"user:{self.username}",
+                    scope="user",
+                )
             )
             logger.info(
                 "UserOpsidianManager initialized for '%s' at %s",
@@ -81,43 +84,80 @@ class UserOpsidianManager:
         category: Optional[str] = None,
         tag: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return []
-        notes = self._writer.list_notes(category=category, tag=tag)
-        return [self._file_info_to_dict(n) for n in notes]
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            metas = run_coro_sync(
+                self._provider.notes().list(category=category, tag=tag)
+            )
+        except Exception:
+            logger.debug("UserOpsidianManager.list_notes: failed", exc_info=True)
+            return []
+        return [self._meta_to_dict(m) for m in metas]
 
     @staticmethod
-    def _file_info_to_dict(info) -> Dict[str, Any]:
+    def _meta_to_dict(meta) -> Dict[str, Any]:
+        cat = meta.category or "root"
+        bare = meta.ref.filename
+        display_filename = bare if cat == "root" else f"{cat}/{bare}"
         return {
-            "filename": info.filename,
-            "title": info.title,
-            "category": info.category,
-            "tags": info.tags,
-            "importance": info.importance,
-            "created": info.created,
-            "modified": info.modified,
-            "source": info.source,
-            "char_count": info.char_count,
-            "links_to": info.links_to,
-            "linked_from": info.linked_from,
-            "summary": info.summary,
+            "filename": display_filename,
+            "title": meta.title or bare,
+            "category": cat,
+            "tags": list(meta.tags),
+            "importance": meta.importance.value,
+            "created": meta.created_at.isoformat() if meta.created_at else "",
+            "modified": meta.updated_at.isoformat() if meta.updated_at else "",
+            "source": "user",
+            "char_count": meta.size_bytes,
+            "links_to": [],
+            "linked_from": [],
+            "summary": None,
         }
 
     def read_note(self, filename: str) -> Optional[Dict[str, Any]]:
-        if self._writer is None:
+        if self._provider is None:
             return None
-        return self._writer.read_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            note = run_coro_sync(self._provider.notes().read(bare))
+        except Exception:
+            return None
+        if note is None:
+            return None
+        metadata = {
+            "title": note.title,
+            "tags": list(note.tags),
+            "category": note.category,
+            "importance": note.importance.value,
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+            **(note.frontmatter or {}),
+        }
+        return {
+            "filename": filename,
+            "title": note.title,
+            "metadata": metadata,
+            "body": note.body,
+            "raw": "",
+            "links_to": list(note.links_out),
+            "linked_from": list(note.links_in),
+        }
 
     def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """Keyword search across user notes."""
-        if self._writer is None:
+        if self._provider is None:
             return []
-        all_notes = self._writer.list_notes()
+        all_notes = self.list_notes()
         query_lower = query.lower()
         results = []
         for note_info in all_notes:
-            fn = note_info.filename
-            note = self._writer.read_note(fn)
+            fn = note_info["filename"]
+            note = self.read_note(fn)
             if note is None:
                 continue
             body = (note.get("body") or "").lower()
@@ -133,7 +173,7 @@ class UserOpsidianManager:
                     score += 0.5
             if score > 0:
                 results.append({
-                    **self._file_info_to_dict(note_info),
+                    **note_info,
                     "score": score,
                     "snippet": (note.get("body") or "")[:300],
                 })
@@ -141,26 +181,33 @@ class UserOpsidianManager:
         return results[:max_results]
 
     def get_index(self) -> Optional[Dict[str, Any]]:
-        if self._index is None:
+        if self._provider is None:
             return None
-        idx = self._index.index
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            payload = run_coro_sync(self._provider.index().snapshot())
+        except Exception:
+            return None
+        files = payload.get("files") or {}
         return {
             "files": {
                 k: {
-                    "filename": v.filename,
-                    "title": v.title,
-                    "category": v.category,
-                    "tags": v.tags,
-                    "importance": v.importance,
-                    "char_count": v.char_count,
-                    "links_to": v.links_to,
-                    "linked_from": v.linked_from,
+                    "filename": v.get("filename", k),
+                    "title": v.get("title", ""),
+                    "category": v.get("category", "root"),
+                    "tags": v.get("tags", []),
+                    "importance": v.get("importance", "medium"),
+                    "char_count": v.get("char_count", 0),
+                    "links_to": v.get("links_to", []),
+                    "linked_from": v.get("linked_from", []),
+                    "summary": v.get("summary"),
                 }
-                for k, v in idx.files.items()
+                for k, v in files.items()
             },
-            "tag_map": idx.tag_map,
-            "total_files": idx.total_files,
-            "total_chars": idx.total_chars,
+            "tag_map": payload.get("tag_map", {}),
+            "total_files": int(payload.get("total_files", len(files)) or len(files)),
+            "total_chars": int(payload.get("total_chars", 0) or 0),
         }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -254,17 +301,70 @@ class UserOpsidianManager:
         source: str = "user",
         links_to: Optional[List[str]] = None,
     ) -> Optional[str]:
-        if self._writer is None:
+        if self._provider is None:
             return None
-        return self._writer.write_note(
-            title=title,
-            content=content,
-            category=category,
-            tags=tags,
-            importance=importance,
-            source=source,
-            links=links_to,
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NoteDraft,
+            Scope,
         )
+        from service.memory.structured_writer import (
+            VALID_CATEGORIES,
+            _slugify,
+            extract_wikilinks,
+        )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        cat = category if category in VALID_CATEGORIES else "topics"
+        tag_list = [t.lower().strip() for t in (tags or []) if t.strip()]
+        auto_links = extract_wikilinks(content)
+        all_links = list(set(auto_links + (links_to or [])))
+
+        try:
+            importance_enum = _ExecutorImportance(importance)
+        except ValueError:
+            importance_enum = _ExecutorImportance.MEDIUM
+
+        slug = _slugify(title)
+        bare_filename = f"{slug}.md"
+        cat_dir = (
+            Path(self.memory_dir) if cat == "root"
+            else Path(self.memory_dir) / cat
+        )
+        candidate = cat_dir / bare_filename
+        if candidate.exists():
+            counter = 1
+            while (cat_dir / f"{slug}-{counter}.md").exists():
+                counter += 1
+            bare_filename = f"{slug}-{counter}.md"
+
+        passthrough: Dict[str, Any] = {
+            "aliases": [],
+            "source": source,
+            "session_id": f"user:{self.username}",
+            "linked_from": [],
+            "links_to": list(all_links),
+        }
+        draft = NoteDraft(
+            title=title,
+            body=content,
+            category=cat,
+            tags=list(tag_list),
+            importance=importance_enum,
+            scope=Scope.USER,
+            filename=bare_filename,
+            frontmatter=passthrough,
+        )
+        try:
+            meta = run_coro_sync(self._provider.notes().write(draft))
+        except Exception:
+            logger.warning(
+                "UserOpsidianManager.write_note: provider write failed",
+                exc_info=True,
+            )
+            return None
+        bare_returned = meta.ref.filename or bare_filename
+        return bare_returned if cat == "root" else f"{cat}/{bare_returned}"
 
     def update_note(
         self,
@@ -275,37 +375,86 @@ class UserOpsidianManager:
         importance: Optional[str] = None,
         category: Optional[str] = None,
     ) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.update_note(
-            filename, content=body, tags=tags, importance=importance, category=category,
+        from geny_executor.memory.provider import (
+            Importance as _ExecutorImportance,
+            NotePatch,
         )
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        notes = self._provider.notes()
+        try:
+            existing = run_coro_sync(notes.read(bare))
+        except Exception:
+            return False
+        if existing is None:
+            return False
+
+        merged_tags: Optional[List[str]] = None
+        if tags:
+            merged = set(existing.tags or [])
+            merged.update(t.lower().strip() for t in tags if t.strip())
+            merged_tags = sorted(merged)
+
+        importance_enum = None
+        if importance:
+            try:
+                importance_enum = _ExecutorImportance(importance)
+            except ValueError:
+                importance_enum = None
+
+        patch = NotePatch(
+            body=body,
+            tags=merged_tags,
+            importance=importance_enum,
+            category=category,
+        )
+        try:
+            run_coro_sync(notes.update(bare, patch))
+        except Exception:
+            return False
+        return True
 
     def delete_note(self, filename: str) -> bool:
-        if self._writer is None:
+        if self._provider is None:
             return False
-        return self._writer.delete_note(filename)
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        bare = Path(filename).name
+        try:
+            return bool(run_coro_sync(self._provider.notes().delete(bare)))
+        except Exception:
+            return False
 
     def create_link(self, source_filename: str, target_filename: str) -> bool:
         """Create a wikilink between two notes."""
-        if self._writer is None:
+        if self._provider is None:
             return False
-        note = self._writer.read_note(source_filename)
+        note = self.read_note(source_filename)
         if note is None:
             return False
         body = note.get("body", "")
         link_ref = f"[[{target_filename}]]"
         if link_ref not in body:
             body = body.rstrip() + f"\n\n{link_ref}\n"
-            return self._writer.update_note(source_filename, content=body)
+            return self.update_note(source_filename, body=body)
         return True
 
     def reindex(self) -> int:
         """Rebuild the full index from disk."""
-        if self._index is None:
+        if self._provider is None:
             return 0
-        self._index.rebuild()
-        return self._index.index.total_files
+        from service.memory.sync_async_bridge import run_coro_sync
+
+        try:
+            run_coro_sync(self._provider.index().rebuild())
+            payload = run_coro_sync(self._provider.index().snapshot())
+            files = payload.get("files") or {}
+            return int(payload.get("total_files", len(files)) or len(files))
+        except Exception:
+            return 0
 
 
 # ── Manager cache (username → manager) ────────────────────────────────
