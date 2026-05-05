@@ -196,135 +196,48 @@ class MemoryIndexManager:
     def update_file(self, relative_path: str) -> Optional[MemoryFileInfo]:
         """Invalidate the snapshot — the executor's IndexHandle has
         already absorbed the write through `after_note_write`. Return
-        the file's current info if it still exists. Also refreshes
-        the per-category sub-index shard + the root summary so
-        operators drilling into a single category folder see a
-        local index without parsing the whole vault.
+        the file's current info if it still exists.
+
+        Per-category shard refresh + root summary refresh is owned by
+        the executor (1.20.0 EXEC-5) — it fires on every successful
+        ``NotesStore.write`` / ``update`` / ``delete``. The Geny side
+        no longer rewrites those sidecars; doing so would clobber the
+        executor's flat ``<root>/_index.json`` with a host-format
+        shard (the regression operator saw on 2026-05-05).
         """
         self._cached_index = None
         idx = self.index
         bare = Path(relative_path).name
-        info = idx.files.get(bare) or idx.files.get(relative_path)
-        # Refresh hierarchical sidecars (Geny business — root
-        # `_index.json` stays as the executor's canonical inventory).
-        try:
-            self.write_subindexes()
-        except Exception:  # noqa: BLE001
-            logger.debug("update_file: subindex refresh failed", exc_info=True)
-        try:
-            self.write_root_summary()
-        except Exception:  # noqa: BLE001
-            logger.debug("update_file: root summary refresh failed", exc_info=True)
-        return info
+        return idx.files.get(bare) or idx.files.get(relative_path)
 
     def remove_file(self, relative_path: str) -> None:
+        # Same as ``update_file`` — the executor refreshes its own
+        # sidecars; Geny only invalidates the cached snapshot.
         self._cached_index = None
-        try:
-            self.write_subindexes()
-            self.write_root_summary()
-        except Exception:  # noqa: BLE001
-            logger.debug("remove_file: shard refresh failed", exc_info=True)
 
-    # ── hierarchical sidecars (Geny business) ────────────────────────
+    # ── hierarchical sidecars (executor-owned, Geny no-ops) ──────────
 
     def write_subindexes(self) -> None:
-        """Per-category `<cat>/_index.json` sidecar.
+        """No-op — executor 1.20.0 EXEC-5 owns per-category shards.
 
-        Geny-side business — the executor's IndexHandle owns the
-        canonical `_index.json` (single root file, executor format).
-        This writer drops a sidecar shard inside each category dir
-        with that category's files + tag counts, so an operator
-        drilling into `memory/topics/` sees a local index without
-        parsing the whole vault.
-
-        Atomic write per shard via tempfile + rename. Empty
-        categories get an empty shard `{"files": {}, "category":
-        "<cat>", "file_count": 0}` so the file's existence itself
-        signals "this category exists, currently empty".
+        Pre-1.20.0 Geny wrote ``<cat>/_index.json`` shards itself; with
+        the executor now refreshing them incrementally on every note
+        write the host write would clobber the canonical
+        ``<root>/_index.json`` (root flat dump becomes a category shard
+        because the filename is shared). Kept as a method only so the
+        few remaining call sites don't import-error; the real work is
+        in ``_FileIndexStore.refresh_for_category`` upstream.
         """
-        if not self._memory_dir.exists():
-            return
-        snap = self.index
-        by_cat: Dict[str, List[MemoryFileInfo]] = {}
-        for info in snap.files.values():
-            cat = info.category or "root"
-            by_cat.setdefault(cat, []).append(info)
-
-        # Discover existing category dirs even when empty
-        existing_dirs: List[Path] = [
-            p for p in self._memory_dir.iterdir()
-            if p.is_dir() and not p.name.startswith(".") and p.name != "_curated_knowledge"
-        ]
-        # Add `root` pseudo-category for files directly under memory/
-        all_cats = {p.name for p in existing_dirs} | set(by_cat.keys()) | {"root"}
-
-        for cat in sorted(all_cats):
-            files = by_cat.get(cat, [])
-            cat_dir = self._memory_dir if cat == "root" else self._memory_dir / cat
-            if not cat_dir.exists() and not files:
-                continue  # don't create dirs we don't own
-            try:
-                cat_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                continue
-            tag_counts: Dict[str, int] = {}
-            for f in files:
-                for t in f.tags or []:
-                    tag_counts[t] = tag_counts.get(t, 0) + 1
-            shard_payload = {
-                "version": "2",
-                "category": cat,
-                "description": _CATEGORY_DESCRIPTIONS.get(cat, ""),
-                "file_count": len(files),
-                "files": {f.filename: f.to_dict() for f in files},
-                "tag_counts": tag_counts,
-                "last_rebuilt": datetime.now(_get_tz()).isoformat(),
-            }
-            shard_path = cat_dir / self.SUBINDEX_FILE
-            try:
-                _atomic_write_json(shard_path, shard_payload)
-            except OSError as exc:
-                logger.debug(
-                    "write_subindexes: shard write failed for %s: %s",
-                    shard_path, exc,
-                )
+        return
 
     def write_root_summary(self) -> None:
-        """`memory/_summary.json` — folder-tree overview.
+        """No-op — executor 1.20.0 EXEC-5 owns ``_summary.json``.
 
-        Hierarchical companion to the executor's flat `_index.json`.
-        Operators (and the Opsidian sidebar) consult this to render
-        the category tree without parsing every file's metadata.
-        Includes empty categories so the sidebar shows them as
-        `(0)` slots before any note lands.
+        See ``write_subindexes`` for the rationale. The executor writes
+        the folder-tree overview atomically alongside every shard
+        refresh.
         """
-        if self._provider is None:
-            return
-        from service.memory.sync_async_bridge import run_coro_sync
-
-        try:
-            cats = run_coro_sync(self._provider.index().list_categories())
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "write_root_summary: list_categories failed", exc_info=True,
-            )
-            return
-        # Annotate with Geny's category descriptions
-        for cat in cats:
-            cat["description"] = _CATEGORY_DESCRIPTIONS.get(cat["name"], "")
-        payload = {
-            "version": "2",
-            "categories": cats,
-            "category_descriptions": _CATEGORY_DESCRIPTIONS,
-            "generated_at": datetime.now(_get_tz()).isoformat(),
-        }
-        try:
-            _atomic_write_json(self._summary_path, payload)
-        except OSError as exc:
-            logger.debug(
-                "write_root_summary: write failed for %s: %s",
-                self._summary_path, exc,
-            )
+        return
 
     # ── query helpers (unchanged caller surface) ─────────────────────
 
