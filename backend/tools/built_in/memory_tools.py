@@ -716,7 +716,7 @@ class MemoryPinTool(BaseTool):
 
         # Import locally so the constant is not a hard import-time
         # dependency (keeps tool-module load order forgiving).
-        from service.memory.structured_writer import PINNED_CATEGORY
+        from service.memory.note_utils import PINNED_CATEGORY
 
         filename = mem.write_note(
             title=title.strip(),
