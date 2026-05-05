@@ -152,14 +152,12 @@ class MemoryIndexManager:
     provider the index returns empty.
     """
 
-    SUMMARY_FILE = "_summary.json"
     SUBINDEX_FILE = "_index.json"  # also used by per-category shards
 
     def __init__(self, memory_dir: str):
         self._memory_dir = Path(memory_dir)
         self._index_path = self._memory_dir / _INDEX_FILE
         self._vault_map_path = self._memory_dir / _VAULT_MAP_FILE
-        self._summary_path = self._memory_dir / self.SUMMARY_FILE
         self._cached_index: Optional[MemoryIndex] = None
         self._provider: Any = None
 
