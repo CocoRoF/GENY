@@ -989,11 +989,11 @@ class AgentSession:
                 username=self._owner_username,
             )
             descriptor = self._memory_provider.descriptor
-            # Plug the live provider into the legacy vector adapter so
-            # `mgr.vector_memory.search(...)` (still called by
-            # `geny_executor.memory.retriever`) routes onto the
-            # composite's vector handle. Without this the adapter
-            # stays in disabled mode and Stage 2 vector retrieval
+            # Plug the live provider into the session manager so its
+            # inline ``_vector_*`` / ``_stm_*`` / ``_ltm_*`` /
+            # ``_notes_*`` / ``_index_*`` helpers can route every
+            # operation through the composite's handles. Without this
+            # the manager stays in disabled mode and Stage 2 retrieval
             # silently returns nothing.
             if self._memory_manager is not None:
                 try:
