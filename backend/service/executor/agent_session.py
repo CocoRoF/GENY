@@ -1009,6 +1009,24 @@ class AgentSession:
                         "[%s] memory hooks install failed",
                         self._session_id, exc_info=True,
                     )
+                # Path-A: ensure stage 18's `_drive_provider` and stage 2
+                # context retriever see the same provider the manager and
+                # archivers use. The pipeline-attach path through
+                # `agent_session_manager._memory_registry` is gated on
+                # `MEMORY_PROVIDER` env (registry stays dormant when
+                # unset) — but path-A makes the provider load-bearing
+                # for STM/archive at every turn, so we attach directly
+                # here instead of waiting on the registry. Without this,
+                # `transcripts/session.jsonl` never gets a single
+                # user/assistant line because `_drive_provider` runs
+                # with `provider=None`.
+                try:
+                    self._attach_provider_to_pipeline_stages()
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "[%s] direct stage attach failed",
+                        self._session_id, exc_info=True,
+                    )
             logger.info(
                 "[%s] MemoryProvider initialized: %s",
                 self._session_id,
@@ -1068,6 +1086,111 @@ class AgentSession:
         """
         return self._memory_provider
 
+    def _attach_provider_to_pipeline_stages(self) -> None:
+        """Plug the live `MemoryProvider` into every pipeline stage
+        that consults it.
+
+        Path-A migration P0 fix: the legacy attach path through
+        `agent_session_manager._memory_registry.attach_to_pipeline`
+        is gated on `MEMORY_PROVIDER` env (registry stays dormant
+        when unset). Path-A makes the provider load-bearing for
+        every turn — without attach, stage 18's `_drive_provider`
+        runs with `provider=None` and silently skips
+        `provider.record_turn(turn)`, so user/assistant messages
+        never reach STM and `transcripts/session.jsonl` stays empty.
+
+        This method does what the registry's `attach_to_pipeline`
+        does (stage 2 ContextStage + stage 18 MemoryStage +
+        session_runtime.memory_provider) but unconditionally —
+        whenever the agent has built its own provider via
+        `_init_memory_provider`, we install it on the pipeline
+        directly. Failures are surfaced loud (ERROR + memory event)
+        so the operator catches the regression in real time.
+        """
+        provider = self._memory_provider
+        pipeline = getattr(self, "_pipeline", None)
+        if provider is None or pipeline is None:
+            return
+
+        attached: List[str] = []
+        # Stage 2 — Context (retriever-aware strategies consult provider)
+        try:
+            context_stage = pipeline.get_stage(2)
+            if context_stage is not None and hasattr(context_stage, "provider"):
+                context_stage.provider = provider
+                attached.append("stage 2 (context)")
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] stage 2 attach skipped", self._session_id, exc_info=True,
+            )
+
+        # Stage 18 — Memory (drives record_turn / record_execution)
+        try:
+            memory_stage = pipeline.get_stage(18)
+            if memory_stage is not None and hasattr(memory_stage, "provider"):
+                memory_stage.provider = provider
+                attached.append("stage 18 (memory)")
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] stage 18 attach skipped", self._session_id, exc_info=True,
+            )
+
+        # session_runtime.memory_provider — read by stage 19 Summarize
+        try:
+            runtime = getattr(pipeline, "_attached_session_runtime", None)
+            if runtime is None:
+                # Lightweight container so the runtime attribute exists.
+                class _SimpleRuntimeContainer:
+                    pass
+                runtime = _SimpleRuntimeContainer()
+                try:
+                    pipeline._attached_session_runtime = runtime  # type: ignore[attr-defined]
+                except AttributeError:
+                    runtime = None
+            if runtime is not None:
+                try:
+                    runtime.memory_provider = provider  # type: ignore[attr-defined]
+                    attached.append("session_runtime")
+                except AttributeError:
+                    pass
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] runtime attach skipped", self._session_id, exc_info=True,
+            )
+
+        if attached:
+            logger.info(
+                "[%s] MemoryProvider attached directly to %s",
+                self._session_id, ", ".join(attached),
+            )
+            try:
+                self.record_memory_event(
+                    event_type="provider_attached",
+                    message=f"MemoryProvider attached to {', '.join(attached)}",
+                    source="Memory",
+                    extra={"stages": attached},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            logger.warning(
+                "[%s] MemoryProvider attach: no pipeline stages accepted "
+                "the provider — STM/archive will not function",
+                self._session_id,
+            )
+            try:
+                self.record_memory_event(
+                    event_type="provider_attach_failed",
+                    message=(
+                        "MemoryProvider direct attach found no compatible "
+                        "stages — STM will not record user/assistant turns"
+                    ),
+                    source="Memory",
+                    backend="error",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
     def _install_memory_hooks(self) -> None:
         """Wire `MemoryHooks.after_record_turn` so every STM append
         drives the Geny business archivers automatically.
@@ -1084,8 +1207,12 @@ class AgentSession:
         mgr = self._memory_manager
         if provider is None or mgr is None:
             return
-        if not hasattr(provider, "set_hooks"):
-            return  # provider doesn't expose hook injection
+        # Pre-1.17.2 composite providers lacked `set_hooks` and the
+        # hasattr fallback silently no-op'd. 1.17.2 made set_hooks
+        # part of the Protocol surface — every provider implements
+        # it. We keep no fallback so a future regression surfaces
+        # loud (AttributeError → caught by outer try/except in
+        # `_init_memory_provider`).
         from geny_executor.memory.provider import MemoryHooks
 
         async def _on_record_turn(turn, _receipt) -> None:
