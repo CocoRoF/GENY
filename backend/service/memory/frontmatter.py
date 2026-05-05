@@ -2,41 +2,28 @@
 YAML Frontmatter parser for structured memory files.
 
 Handles reading and writing YAML frontmatter blocks (``---`` delimited)
-at the top of Markdown files, plus extracting [[wikilink]] references.
+at the top of Markdown files. Used by the direct-write archiver paths
+(``DmArchiver``, ``CompactionArchiver``) whose on-disk layouts don't
+fit the executor's flat-category ``NotesHandle`` contract.
+
+Sprint 3 step 6 — the dead ``extract_wikilinks`` /  ``resolve_wikilink``
+/ ``build_default_metadata`` helpers and the unused ``_DEFAULT_METADATA``
+constant were dropped. ``extract_wikilinks`` lives in
+``service.memory.structured_writer`` (the only caller) and the executor
+itself extracts wikilinks inside ``NotesHandle`` for the indexed
+write-path.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-
-# Use configured timezone from GENY_TIMEZONE env var
-from service.utils.utils import _configured_tz as _get_tz
+from typing import Any, Dict, Tuple
 
 # Regex: match ``---`` delimited YAML block at file start.
 _FRONTMATTER_RE = re.compile(
     r"\A\s*---[ \t]*\n(.*?\n)---[ \t]*\n",
     re.DOTALL,
 )
-
-# Regex: match ``[[link]]`` or ``[[link|alias]]``.
-_WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]")
-
-# Standard frontmatter keys with defaults.
-_DEFAULT_METADATA: Dict[str, Any] = {
-    "title": "",
-    "aliases": [],
-    "tags": [],
-    "category": "topics",
-    "importance": "medium",
-    "created": "",
-    "modified": "",
-    "source": "system",
-    "session_id": "",
-    "links_to": [],
-    "linked_from": [],
-}
 
 
 def parse_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
@@ -83,102 +70,6 @@ def render_frontmatter(metadata: Dict[str, Any], body: str) -> str:
     # Ensure body starts without excessive blank lines
     body = body.lstrip("\n")
     return fm + body
-
-
-def extract_wikilinks(content: str) -> List[str]:
-    """Extract all ``[[wikilink]]`` targets from content.
-
-    Args:
-        content: Markdown content to scan.
-
-    Returns:
-        List of unique link targets (lowercase, stripped).
-    """
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in _WIKILINK_RE.finditer(content):
-        target = match.group(1).strip().lower()
-        if target and target not in seen:
-            found.append(target)
-            seen.add(target)
-    return found
-
-
-def resolve_wikilink(link: str, memory_dir: str, *, extensions: Tuple[str, ...] = (".md",)) -> Optional[str]:
-    """Resolve a wikilink target to an actual file path.
-
-    Search order:
-    1. Exact match in memory_dir
-    2. Match in subdirectories (topics/, projects/, etc.)
-    3. Partial stem match
-
-    Args:
-        link: The wikilink target string.
-        memory_dir: Absolute path to the memory/ directory.
-        extensions: File extensions to try.
-
-    Returns:
-        Relative path within memory_dir, or None if not found.
-    """
-    import os
-
-    slug = link.strip().lower()
-    if not slug:
-        return None
-
-    # Build candidate list
-    candidates: list[str] = []
-
-    for root, _dirs, files in os.walk(memory_dir):
-        for fname in files:
-            stem, ext = os.path.splitext(fname)
-            if ext.lower() not in extensions:
-                continue
-            rel = os.path.relpath(os.path.join(root, fname), memory_dir)
-            rel = rel.replace("\\", "/")
-            if stem.lower() == slug:
-                candidates.insert(0, rel)  # exact stem match → first
-            elif slug in stem.lower():
-                candidates.append(rel)
-
-    return candidates[0] if candidates else None
-
-
-def build_default_metadata(
-    title: str,
-    category: str = "topics",
-    tags: Optional[List[str]] = None,
-    importance: str = "medium",
-    source: str = "system",
-    session_id: str = "",
-) -> Dict[str, Any]:
-    """Build a metadata dict with defaults filled in.
-
-    Args:
-        title: Note title.
-        category: Category slug.
-        tags: List of tag strings.
-        importance: Importance level.
-        source: Creation source (execution/user/agent/system/import).
-        session_id: Creating session's ID.
-
-    Returns:
-        A complete metadata dict suitable for ``render_frontmatter``.
-    """
-    now = datetime.now(_get_tz()).isoformat()
-    return {
-        "title": title,
-        "aliases": [],
-        "tags": tags or [],
-        "category": category,
-        "importance": importance,
-        "created": now,
-        "modified": now,
-        "source": source,
-        "session_id": session_id,
-        "links_to": [],
-        "linked_from": [],
-    }
 
 
 # ------------------------------------------------------------------
