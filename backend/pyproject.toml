@@ -31,25 +31,18 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 1.20.0 — provider-driven Stage 2 / Stage 18 / index plane:
-    # 1. `MemoryAwareRetriever` (Stage 2) and `ProviderDrivenStrategy`
-    #    (Stage 18) talk to the `MemoryProvider` Protocol directly —
-    #    no host duck-type. Legacy `GenyMemoryRetriever` / `GenyMemoryStrategy`
-    #    / `GenyPersistence` deleted in upstream.
-    # 2. `MemoryHooks` is a single policy + callback bag (vault_descriptions,
-    #    importance_boost, layer_budget_ratio, pin_category, etc.).
-    # 3. Progressive-disclosure 4-step API on `IndexHandle`
-    #    (`list_categories` → `list_notes` → `read_outline` → `read_section`).
-    # 4. `NoteGraph` queries (`k_hop`, `connected_component`,
-    #    `linked_chain`, `notes_with_tag`).
-    # 5. Executor owns hierarchical sidecars — `<cat>/_index.json` +
-    #    `_summary.json` refresh incrementally on every note write.
-    # 6. Stage 19 writes session-close `transcripts/summary.md` once
-    #    the loop decision turns terminal (D1).
-    # 7. Typed interaction fields (`event_id`, `linked_event_id`,
-    #    `kind`, `direction`, `counterpart_id`, `counterpart_role`,
-    #    `session_id`) on `Turn` / `Note` / `NoteDraft` / `NoteMeta`.
-    "geny-executor>=1.20.0,<2.0.0",
+    # geny-executor 1.21.0 — root _index.json is a bounded folder-tree
+    # summary (was an unbounded flat dump in 1.20.0). Per-note metadata
+    # lives only inside <cat>/_index.json shards; the host drills via
+    # the progressive-disclosure 4-step chain. <root>/_summary.json is
+    # retired — its content moved into <root>/_index.json.
+    #
+    # Earlier 1.20.0 surfaces (provider-driven Stage 2 / Stage 18,
+    # MemoryAwareRetriever, ProviderDrivenStrategy, MemoryHooks single
+    # policy bag, NoteGraph queries, executor-owned hierarchical
+    # sidecars, Stage 19 session-close summary, typed interaction
+    # fields) all retained.
+    "geny-executor>=1.21.0,<2.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

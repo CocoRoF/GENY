@@ -17,12 +17,11 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor 1.20.0 — provider-driven Stage 2 / Stage 18 / index
-# plane. Adds `MemoryAwareRetriever`, `ProviderDrivenStrategy`,
-# progressive-disclosure 4-step API, NoteGraph queries, executor-owned
-# hierarchical sidecars, Stage 19 session-close summary writer, and
-# typed interaction fields on Turn / Note / NoteDraft / NoteMeta.
-geny-executor>=1.20.0,<2.0.0
+# geny-executor 1.21.0 — root _index.json is a bounded folder-tree
+# summary (was an unbounded flat dump in 1.20.0). Per-note metadata
+# lives only inside <cat>/_index.json shards. <root>/_summary.json
+# retired — content moved into <root>/_index.json.
+geny-executor>=1.21.0,<2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
