@@ -1,11 +1,13 @@
 """
 Memory subsystem for Geny Agent.
 
-Long-term memory backed by files inside the session's storage
-directory; short-term memory (transcripts/session.jsonl) is owned
-entirely by the executor's ``MemoryProvider.stm()`` after 1.21.0 —
-``SessionMemoryManager`` reaches for it through inline ``_stm_*``
-helpers; no host-side ``ShortTermMemory`` adapter exists.
+STM (transcripts/session.jsonl) and LTM (memory/*.md) are both owned
+by the executor's ``MemoryProvider`` after Sprint 3:
+    - 1.21.0 retired ``ShortTermMemory``
+    - Sprint 3 step 2 retired ``LongTermMemory``
+
+``SessionMemoryManager`` reaches for both through inline
+``_stm_*`` / ``_ltm_*`` helpers; no host-side adapter classes exist.
 
 Vector layer is an adapter on top of ``MemoryProvider.vector()``.
 
@@ -15,13 +17,11 @@ Structured memory layer (Obsidian-like):
 
 Public API:
     SessionMemoryManager   — per-session facade
-    LongTermMemory         — MEMORY.md file I/O
     VectorMemoryManager    — vector adapter over provider.vector()
     MemorySearchResult     — search hit dataclass
 """
 
 from service.memory.manager import SessionMemoryManager
-from service.memory.long_term import LongTermMemory
 from service.memory.vector_memory import VectorMemoryManager
 from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.index import MemoryIndexManager
@@ -31,7 +31,6 @@ from service.memory.curated_knowledge import CuratedKnowledgeManager, get_curate
 
 __all__ = [
     "SessionMemoryManager",
-    "LongTermMemory",
     "VectorMemoryManager",
     "StructuredMemoryWriter",
     "MemoryIndexManager",
