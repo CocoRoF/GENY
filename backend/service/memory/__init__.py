@@ -18,14 +18,12 @@ Public API:
 """
 
 from service.memory.manager import SessionMemoryManager
-from service.memory.structured_writer import StructuredMemoryWriter
 from service.memory.types import MemoryEntry, MemorySearchResult, MemoryStats
 from service.memory.global_memory import GlobalMemoryManager, get_global_memory_manager
 from service.memory.curated_knowledge import CuratedKnowledgeManager, get_curated_knowledge_manager
 
 __all__ = [
     "SessionMemoryManager",
-    "StructuredMemoryWriter",
     "MemoryEntry",
     "MemorySearchResult",
     "MemoryStats",

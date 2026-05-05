@@ -308,7 +308,7 @@ class UserOpsidianManager:
             NoteDraft,
             Scope,
         )
-        from service.memory.structured_writer import (
+        from service.memory.note_utils import (
             VALID_CATEGORIES,
             _slugify,
             extract_wikilinks,

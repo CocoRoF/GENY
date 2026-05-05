@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from service.memory.structured_writer import PINNED_CATEGORY
+from service.memory.note_utils import PINNED_CATEGORY
 
 logger = logging.getLogger(__name__)
 
