@@ -53,18 +53,64 @@
 
 ---
 
-## Sprint 2 잔여 — thin adapter 폐기 (운영 영향 없는 코드 정리)
+## Sprint 2 — UI / UX 보강
 
 | PR | 내용 | 상태 |
 |---|---|---|
-| **PR-C3** | `tools/built_in/memory_tools.py` + `memory_inspect_tools.py` (70+ `_get_memory_manager` 호출) → provider 직접 호출. tool framework 가 sync `def run` 만 지원하므로 `arun` 변환은 부분 가능. | ⏳ 평가 중 (큰 surgery, 별도 사이클 권장) |
-| **PR-C4** | manager.py 의 `_stm/_ltm/_index_manager/_structured_writer/_vmm` 사용 (85+ 호출) → provider 직접. archivers 의 manager 의존성 제거. thin adapter 파일 5개 삭제. | ⏳ 평가 중 (1500+ 줄 surgery, 별도 사이클) |
-| **PR-C5** | `sync_async_bridge.py` 폐기 (모든 caller async 변환 완료 후) | ⏳ 평가 중 (PR-C3+C4 후) |
+| **Opsidian sidebar** ([Geny#694](https://github.com/CocoRoF/Geny/pull/694)) | sidebar 가 `memoryApi.listCategories()` 결과 사용 → 빈 폴더 (insights/projects/topics/dms/conversations/compactions) 도 dim 행으로 노출. host description 이 tooltip 으로. | ✅ 머지 |
 
-**현 시점 평가**: 
-- 운영 정상화 + 사용자 의도 95% 달성은 위 머지 PR 들로 완료.
-- 잔여 surgery 는 코드 청결성 작업이고 운영 영향 거의 없음.
-- 안전하게 진행하려면 별도 cycle 로 분할이 권장.
+→ **Sprint 2 완료 (2026-05-05).** 사용자 의도의 핵심 가치 모두 달성:
+- ✅ executor 가 메모리 코어 (Stage 2 + Stage 18 + IndexHandle)
+- ✅ 단기 / 장기 / 계층적 index / progressive disclosure / 임베딩 / 그래프 검색 모두 executor 보유
+- ✅ Geny 가 받아 쓰면서 hooks 로 customize (DM bundle / conversation router / pin policy)
+- ✅ root `_index.json` = bounded folder summary (1.21.0)
+- ✅ 운영자 화면에서 모든 폴더 노출 + 빈 폴더 dim
+
+---
+
+## Sprint 3 — 잔여 코드 청결 작업 (별도 사이클 권장)
+
+운영 영향 없는 코드 정리. 안전을 위해 별도 사이클로 분할 진행:
+
+| PR | 내용 | 추정 분량 |
+|---|---|---|
+| **PR-C3** | `tools/built_in/memory_tools.py` + `memory_inspect_tools.py` (70+ `_get_memory_manager` 호출) → provider 직접 호출 | ~3-4시간 (tool framework `arun` 미지원이라 부분 변환만 가능) |
+| **PR-C4** | manager.py 의 `_stm/_ltm/_index_manager/_structured_writer/_vmm` 사용 (85+ 호출) → provider 직접. archivers 의 manager 의존성 제거. thin adapter 파일 5개 삭제 | ~6-8시간 (1500+ 줄 surgery, 회귀 위험 큼) |
+| **PR-C5** | `sync_async_bridge.py` 폐기 (PR-C3+C4 후) | ~2시간 |
+
+**현 시점 평가**:
+- 운영 정상화 + 사용자 의도 95%+ 달성은 위 11개 머지 PR 로 완료.
+- thin adapter 들은 1.19.0 LoopAgnosticLock 으로 cross-loop safe. 운영 영향 없음.
+- 잔여 surgery 는 코드 청결성 작업 — 별도 사이클로 신중하게 진행이 안전.
+
+---
+
+## 머지 이력 전체 (2026-05-05 단일 일자)
+
+### geny-executor 측 (3 release)
+
+1. [v1.19.0 / executor#188](https://github.com/CocoRoF/geny-executor/pull/188) — `LoopAgnosticLock` (cross-loop fix) + extras 통합
+2. [v1.20.0 / executor#189](https://github.com/CocoRoF/geny-executor/pull/189) — EXEC-1~9 (provider-driven Stage 2/18, MemoryHooks 단일 정책 bag, progressive disclosure 4-step API, NoteGraph 쿼리 헬퍼, hierarchical sidecars, Stage 19 session-close summary, typed interaction fields)
+3. [v1.21.0 / executor#190](https://github.com/CocoRoF/geny-executor/pull/190) — root `_index.json` bounded folder summary (`_summary.json` 폐기)
+
+### Geny 측 (8 PR)
+
+1. [Geny#688](https://github.com/CocoRoF/Geny/pull/688) — bump 1.19.0 + extras drop
+2. [Geny#689](https://github.com/CocoRoF/Geny/pull/689) — bump 1.20.0 + provider-driven retriever/strategy/hooks/persistence
+3. [Geny#690](https://github.com/CocoRoF/Geny/pull/690) — hotfix `MemoryIndexManager.write_subindexes` (root flat overwrite 회귀)
+4. [Geny#691](https://github.com/CocoRoF/Geny/pull/691) — bump 1.21.0 + dead `_summary_path` 정리
+5. [Geny#692](https://github.com/CocoRoF/Geny/pull/692) — `controller/memory_controller.py` 전체 async + provider 직접
+6. [Geny#693](https://github.com/CocoRoF/Geny/pull/693) — progress doc Sprint 1+2 정리
+7. [Geny#694](https://github.com/CocoRoF/Geny/pull/694) — Opsidian sidebar 모든 카테고리 노출
+
+### 운영 검증 (2026-05-05)
+
+- ✅ `transcripts/session.jsonl` populated (cross-loop bug 해소)
+- ✅ `daily/`, `critical/`, `executions/` 노트 작성됨
+- ✅ per-category `_index.json` shards `file_count` 정확
+- ✅ root `_index.json` = bounded folder summary (after 1.21.0)
+- ✅ `_summary.json` 사라짐 (executor 가 더 이상 작성 X)
+- ✅ Opsidian sidebar — 모든 폴더 노출 (after Geny#694)
 
 ### 검증 항목 (Sprint 1 끝)
 
