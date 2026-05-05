@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from logging import getLogger
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from geny_executor.tools.base import ToolCapabilities
 from tools.base import BaseTool
@@ -115,6 +115,45 @@ class MemoryWriteTool(BaseTool):
             })
         return _error("Failed to create memory note")
 
+    async def arun(
+        self,
+        session_id: str,
+        title: str,
+        content: str,
+        category: str = "topics",
+        tags: str = "",
+        importance: str = "medium",
+    ) -> str:
+        """Async sibling of :meth:`run` — calls ``mem.awrite_note``
+        directly so the tool dispatch never crosses the sync→async
+        bridge."""
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+        awrite = getattr(mem, "awrite_note", None)
+        if callable(awrite):
+            filename = await awrite(
+                title=title, content=content, category=category,
+                tags=tag_list, importance=importance, source="agent",
+            )
+        else:
+            filename = mem.write_note(
+                title=title, content=content, category=category,
+                tags=tag_list, importance=importance, source="agent",
+            )
+        if filename:
+            return _ok({
+                "status": "created",
+                "filename": filename,
+                "title": title,
+                "category": category,
+                "tags": tag_list,
+            })
+        return _error("Failed to create memory note")
+
 
 # ============================================================================
 # Memory Read Tool
@@ -143,6 +182,16 @@ class MemoryReadTool(BaseTool):
             return _error(f"Session not found: {session_id}")
 
         note = mem.read_note(filename)
+        if note is None:
+            return _error(f"Note not found: {filename}")
+        return _ok(note)
+
+    async def arun(self, session_id: str, filename: str) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+        aread = getattr(mem, "aread_note", None)
+        note = await aread(filename) if callable(aread) else mem.read_note(filename)
         if note is None:
             return _error(f"Note not found: {filename}")
         return _ok(note)
@@ -201,6 +250,38 @@ class MemoryUpdateTool(BaseTool):
             return _ok({"status": "updated", "filename": filename, **kwargs})
         return _error(f"Failed to update note: {filename}")
 
+    async def arun(
+        self,
+        session_id: str,
+        filename: str,
+        content: str = "",
+        tags: str = "",
+        importance: str = "",
+    ) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        kwargs: Dict[str, Any] = {}
+        if content:
+            kwargs["body"] = content
+        if tags:
+            kwargs["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+        if importance:
+            kwargs["importance"] = importance
+
+        if not kwargs:
+            return _error("No fields to update. Provide content, tags, or importance.")
+
+        aupdate = getattr(mem, "aupdate_note", None)
+        ok = (
+            await aupdate(filename, **kwargs) if callable(aupdate)
+            else mem.update_note(filename, **kwargs)
+        )
+        if ok:
+            return _ok({"status": "updated", "filename": filename, **kwargs})
+        return _error(f"Failed to update note: {filename}")
+
 
 # ============================================================================
 # Memory Delete Tool
@@ -232,6 +313,19 @@ class MemoryDeleteTool(BaseTool):
             return _error(f"Session not found: {session_id}")
 
         ok = mem.delete_note(filename)
+        if ok:
+            return _ok({"status": "deleted", "filename": filename})
+        return _error(f"Failed to delete note: {filename}")
+
+    async def arun(self, session_id: str, filename: str) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+        adelete = getattr(mem, "adelete_note", None)
+        ok = (
+            await adelete(filename) if callable(adelete)
+            else mem.delete_note(filename)
+        )
         if ok:
             return _ok({"status": "deleted", "filename": filename})
         return _error(f"Failed to delete note: {filename}")
@@ -555,6 +649,45 @@ class MemoryCategoriesTool(BaseTool):
             ],
         })
 
+    async def arun(self, session_id: str) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+        abuild = getattr(mem, "abuild_vault_map", None)
+        build = getattr(mem, "build_vault_map", None)
+        try:
+            if callable(abuild):
+                vmap = await abuild()
+            elif callable(build):
+                vmap = build()
+            else:
+                return _error("Memory index not initialised")
+        except Exception as exc:
+            return _error(f"Failed to build vault map: {exc}")
+        categories = vmap.get("categories") or {}
+        ranked = sorted(
+            (
+                {
+                    "category": cat,
+                    "file_count": int(d.get("files") or 0),
+                    "last_modified": d.get("last_modified") or "",
+                    "description": d.get("description") or "",
+                }
+                for cat, d in categories.items()
+            ),
+            key=lambda x: (-x["file_count"], x["category"]),
+        )
+        return _ok({
+            "categories": ranked,
+            "total_files": int(vmap.get("total_files") or 0),
+            "memory_md_preview": vmap.get("memory_md_preview") or "",
+            "next_steps": [
+                "memory_list(category=<name>) — list files in a folder",
+                "memory_search(query=<text>, category=<name>) — narrow search",
+                "memory_read(filename=<path>) — open a specific note",
+            ],
+        })
+
 
 class MemoryListTool(BaseTool):
     """List memory notes in a single category (Tier 2 — folder browse)."""
@@ -602,6 +735,28 @@ class MemoryListTool(BaseTool):
             "notes": notes,
         })
 
+    async def arun(
+        self,
+        session_id: str,
+        category: str = "",
+        tag: str = "",
+    ) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+        kwargs: Dict[str, Any] = {}
+        if category:
+            kwargs["category"] = category
+        if tag:
+            kwargs["tag"] = tag
+        alist = getattr(mem, "alist_notes", None)
+        notes = await alist(**kwargs) if callable(alist) else mem.list_notes(**kwargs)
+        return _ok({
+            "total": len(notes),
+            "filters": {"category": category or None, "tag": tag or None},
+            "notes": notes,
+        })
+
 
 # ============================================================================
 # Memory Link Tool
@@ -638,6 +793,28 @@ class MemoryLinkTool(BaseTool):
             return _error(f"Session not found: {session_id}")
 
         ok = mem.link_notes(source_filename, target_filename)
+        if ok:
+            return _ok({
+                "status": "linked",
+                "source": source_filename,
+                "target": target_filename,
+            })
+        return _error(f"Failed to link {source_filename} -> {target_filename}")
+
+    async def arun(
+        self,
+        session_id: str,
+        source_filename: str,
+        target_filename: str,
+    ) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+        alink = getattr(mem, "alink_notes", None)
+        ok = (
+            await alink(source_filename, target_filename) if callable(alink)
+            else mem.link_notes(source_filename, target_filename)
+        )
         if ok:
             return _ok({
                 "status": "linked",
@@ -726,6 +903,64 @@ class MemoryPinTool(BaseTool):
             importance=normalized_importance,
             source="agent_pin",
         )
+        if filename:
+            return _ok({
+                "status": "pinned",
+                "filename": filename,
+                "title": title.strip(),
+                "category": PINNED_CATEGORY,
+                "tags": tag_list,
+                "importance": normalized_importance,
+            })
+        return _error("Failed to pin memory note")
+
+    async def arun(
+        self,
+        session_id: str,
+        title: str,
+        content: str,
+        tags: str = "",
+        importance: str = "high",
+    ) -> str:
+        mem = _get_memory_manager(session_id)
+        if mem is None:
+            return _error(f"Session not found: {session_id}")
+
+        if not isinstance(title, str) or not title.strip():
+            return _error("title must be a non-empty string")
+        if not isinstance(content, str) or not content.strip():
+            return _error("content must be a non-empty string")
+
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        for marker in ("pinned",):
+            if marker not in tag_list:
+                tag_list.append(marker)
+
+        normalized_importance = (importance or "high").strip().lower()
+        if normalized_importance not in {"low", "medium", "high", "critical"}:
+            normalized_importance = "high"
+
+        from service.memory.note_utils import PINNED_CATEGORY
+
+        awrite = getattr(mem, "awrite_note", None)
+        if callable(awrite):
+            filename = await awrite(
+                title=title.strip(),
+                content=content.strip(),
+                category=PINNED_CATEGORY,
+                tags=tag_list,
+                importance=normalized_importance,
+                source="agent_pin",
+            )
+        else:
+            filename = mem.write_note(
+                title=title.strip(),
+                content=content.strip(),
+                category=PINNED_CATEGORY,
+                tags=tag_list,
+                importance=normalized_importance,
+                source="agent_pin",
+            )
         if filename:
             return _ok({
                 "status": "pinned",
