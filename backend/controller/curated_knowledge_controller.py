@@ -91,9 +91,11 @@ async def get_curated_index(auth: dict = Depends(require_auth)):
     """Get the user's curated knowledge index and stats."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
+    idx = await mgr.aget_index()
+    stats = await mgr.aget_stats()
     return {
-        "index": mgr.get_index() or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
-        "stats": mgr.get_stats(),
+        "index": idx or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
+        "stats": stats,
         "username": username,
     }
 
@@ -103,7 +105,7 @@ async def get_curated_stats(auth: dict = Depends(require_auth)):
     """Get curated knowledge statistics."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    return mgr.get_stats()
+    return await mgr.aget_stats()
 
 
 @router.get("/graph")
@@ -111,7 +113,7 @@ async def get_curated_graph(auth: dict = Depends(require_auth)):
     """Get link graph data for visualization."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    return mgr.get_graph()
+    return await mgr.aget_graph()
 
 
 @router.get("/tags")
@@ -119,7 +121,7 @@ async def get_curated_tags(auth: dict = Depends(require_auth)):
     """Get all tags and their file counts."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    idx = mgr.get_index()
+    idx = await mgr.aget_index()
     if idx is None:
         return {"tags": {}}
     return {"tags": idx.get("tag_map", {})}
@@ -138,7 +140,7 @@ async def list_curated_files(
     """List files in the user's curated knowledge vault."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    notes = mgr.list_notes(category=category, tag=tag)
+    notes = await mgr.alist_notes(category=category, tag=tag)
     return {"files": notes, "total": len(notes)}
 
 
@@ -150,7 +152,7 @@ async def read_curated_file(
     """Read a single curated knowledge note."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    result = mgr.read_note(filename)
+    result = await mgr.aread_note(filename)
     if result is None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     return result
@@ -164,7 +166,7 @@ async def create_curated_file(
     """Create a new curated knowledge note."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    filename = mgr.write_note(
+    filename = await mgr.awrite_note(
         title=req.title,
         content=req.content,
         category=req.category,
@@ -187,7 +189,7 @@ async def update_curated_file(
     """Update an existing curated knowledge note."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.update_note(
+    ok = await mgr.aupdate_note(
         filename, body=req.content, tags=req.tags, importance=req.importance, category=req.category,
     )
     if not ok:
@@ -203,7 +205,7 @@ async def delete_curated_file(
     """Delete a curated knowledge note."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.delete_note(filename)
+    ok = await mgr.adelete_note(filename)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Delete failed: {filename}")
     return {"message": "Note deleted successfully"}
@@ -222,7 +224,7 @@ async def search_curated(
     """Search across curated knowledge notes."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    results = mgr.search(q, max_results=max_results)
+    results = await mgr.asearch(q, max_results=max_results)
     return {"query": q, "results": results, "total": len(results)}
 
 
@@ -238,7 +240,7 @@ async def create_curated_link(
     """Create a wikilink between two curated notes."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    ok = mgr.create_link(req.source_filename, req.target_filename)
+    ok = await mgr.acreate_link(req.source_filename, req.target_filename)
     if not ok:
         raise HTTPException(status_code=404, detail="Failed to create link")
     return {"message": "Link created"}
@@ -249,7 +251,7 @@ async def reindex_curated(auth: dict = Depends(require_auth)):
     """Rebuild the full index from disk."""
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    total = mgr.reindex()
+    total = await mgr.areindex()
     return {"message": "Reindex complete", "total_files": total}
 
 

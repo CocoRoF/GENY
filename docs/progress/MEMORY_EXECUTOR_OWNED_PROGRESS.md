@@ -80,8 +80,12 @@
 | **Step 4** ([Geny#699](https://github.com/CocoRoF/Geny/pull/699)) | manager 측 `MemoryIndexManager` 필드 폐기 — inline `_index_*` helper 로 `provider.index()` 직접 호출. archivers + structured_writer 에서 `index_manager` 파라미터 제거. 새 public `mgr.build_vault_map()` (memory_categories 툴이 사용). `index.py` 파일은 외부 콜러 (global/curated/user/agent_session/tests) 가 사용해서 보존 | ✅ 머지 |
 | **Step 5** ([Geny#700](https://github.com/CocoRoF/Geny/pull/700)) | manager 측 `StructuredMemoryWriter` 필드 폐기 — inline `_notes_*` helper (write/update/delete/read/list/link) 로 `provider.notes()` 직접 호출. `mgr.write_note` 가 `filename_override` 도 지원. `memory_inspect_tools` distillation 경로가 `mgr.write_note` 직접 호출. `structured_writer.py` 파일은 global/curated/user 가 사용해서 보존 | ✅ 머지 |
 | **Step 6** ([Geny#701](https://github.com/CocoRoF/Geny/pull/701)) | `frontmatter.py` 데드 코드 (`extract_wikilinks` / `resolve_wikilink` / `build_default_metadata` / `_DEFAULT_METADATA`) 삭제 — 외부 콜러는 `parse_frontmatter` / `render_frontmatter` 만 사용. ~110줄 감소 | ✅ 머지 |
-| **Step 7** | `sync_async_bridge.py` 감사 + docstring 갱신. **전체 폐기는 보류** — 87개 호출 사이트 (manager + archivers + FastAPI 컨트롤러 + tools 프레임워크 `run`) 가 동기. async 일원화는 별도 sprint 필요 (executor `arun` 지원 + 컨트롤러 전체 async 전환). | ⏳ 진행 |
-| **Cleanup** | 외부 콜러 정리 후 `index.py` / `vector_memory.py` / `structured_writer.py` 파일 삭제 | ⏳ 대기 (별도 sprint) |
+| **Step 7-1** ([Geny#709](https://github.com/CocoRoF/Geny/pull/709)) | manager 인라인 헬퍼 (`_stm_*`/`_ltm_*`/`_notes_*`/`_index_*`) 전부 `async def` 로 변환. 공개 sync 메서드는 `run_coro_sync(self.aX(...))` thin wrapper. 모든 공개 메서드에 `a*` async sibling 추가 | ✅ 머지 |
+| **Step 7-2** ([Geny#710](https://github.com/CocoRoF/Geny/pull/710)) | multi-tenant 매니저 (Global / Curated / UserOpsidian) 에 `a*` async sibling 추가 — controllers/tools 가 `await mgr.aX()` 로 직접 호출 가능 | ✅ 머지 |
+| **Step 7-3a** ([Geny#711](https://github.com/CocoRoF/Geny/pull/711)) | `memory_tools.py` 9개 도구 모두 `arun` override — async manager 메서드 직접 호출. tool dispatch 가 sync→async 브릿지 우회 | ✅ 머지 |
+| **Step 7-3b** ([Geny#712](https://github.com/CocoRoF/Geny/pull/712)) | `memory_inspect_tools` + `knowledge_tools` arun override. shared `_astm_load_all` helper. distillation 경로도 async-native | ✅ 머지 |
+| **Step 7-3c** | `memory_controller` / `user_opsidian_controller` / `curated_knowledge_controller` 의 모든 mgr 호출을 `await mgr.aX(...)` 로 변환. bridge docstring 갱신: 남은 사용처는 multi-tenant 매니저 singleton 생성자 + sync back-compat wrapper + archiver 내부 (production tool/controller dispatch 는 100% bridge 우회) | ⏳ 진행 |
+| **Cleanup** | 외부 콜러 정리 후 `index.py` / `vector_memory.py` / `structured_writer.py` 파일 삭제 | ✅ 모두 완료 (A1~A6) |
 
 **현 시점 평가**:
 - 운영 정상화 + 사용자 의도 95%+ 달성은 위 11개 머지 PR 로 완료.
@@ -114,6 +118,17 @@
 12. [Geny#699](https://github.com/CocoRoF/Geny/pull/699) — Sprint 3 step 4: manager 측 `MemoryIndexManager` 폐기
 13. [Geny#700](https://github.com/CocoRoF/Geny/pull/700) — Sprint 3 step 5: manager 측 `StructuredMemoryWriter` 폐기
 14. [Geny#701](https://github.com/CocoRoF/Geny/pull/701) — Sprint 3 step 6: `frontmatter.py` 데드 코드 삭제
+15. [Geny#702](https://github.com/CocoRoF/Geny/pull/702) — Sprint 3 step 7 audit: bridge docstring + progress doc 갱신
+16. [Geny#703](https://github.com/CocoRoF/Geny/pull/703) — Cleanup A1: `GlobalMemoryManager` provider 직접
+17. [Geny#704](https://github.com/CocoRoF/Geny/pull/704) — Cleanup A2: `CuratedKnowledgeManager` provider 직접
+18. [Geny#705](https://github.com/CocoRoF/Geny/pull/705) — Cleanup A3: `UserOpsidianManager` provider 직접
+19. [Geny#706](https://github.com/CocoRoF/Geny/pull/706) — Cleanup A4: `index.py` 삭제
+20. [Geny#707](https://github.com/CocoRoF/Geny/pull/707) — Cleanup A5: `vector_memory.py` 삭제
+21. [Geny#708](https://github.com/CocoRoF/Geny/pull/708) — Cleanup A6: `structured_writer.py` 삭제 (`note_utils.py` 신설)
+22. [Geny#709](https://github.com/CocoRoF/Geny/pull/709) — Step 7-1: manager 인라인 헬퍼 async-native
+23. [Geny#710](https://github.com/CocoRoF/Geny/pull/710) — Step 7-2: multi-tenant 매니저 async sibling
+24. [Geny#711](https://github.com/CocoRoF/Geny/pull/711) — Step 7-3a: `memory_tools` arun override
+25. [Geny#712](https://github.com/CocoRoF/Geny/pull/712) — Step 7-3b: `memory_inspect_tools` + `knowledge_tools` arun override
 
 ### 운영 검증 (2026-05-05)
 

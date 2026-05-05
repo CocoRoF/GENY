@@ -544,7 +544,7 @@ async def promote_to_global(
         raise HTTPException(status_code=503, detail="Memory manager not initialized")
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    global_fn = gmm.promote(mm, filename, session_id=session_id)
+    global_fn = await gmm.apromote(mm, filename, session_id=session_id)
     if global_fn is None:
         raise HTTPException(status_code=404, detail=f"Failed to promote: {filename}")
     return {"message": "Note promoted to global memory", "global_filename": global_fn}
@@ -562,9 +562,11 @@ async def get_global_index():
     """Get the global memory index and stats."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
+    idx = await gmm.aget_index()
+    stats = await gmm.aget_stats()
     return {
-        "index": gmm.get_index() or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
-        "stats": gmm.get_stats(),
+        "index": idx or {"files": {}, "tag_map": {}, "total_files": 0, "total_chars": 0},
+        "stats": stats,
     }
 
 
@@ -576,7 +578,7 @@ async def list_global_files(
     """List global memory files."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    notes = gmm.list_notes(category=category, tag=tag)
+    notes = await gmm.alist_notes(category=category, tag=tag)
     return {"files": notes, "total": len(notes)}
 
 
@@ -585,7 +587,7 @@ async def read_global_file(filename: str = Path(...)):
     """Read a global memory file."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    result = gmm.read_note(filename)
+    result = await gmm.aread_note(filename)
     if result is None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
     return result
@@ -596,7 +598,7 @@ async def create_global_file(req: WriteNoteRequest = ...):
     """Create a new global memory note."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    filename = gmm.write_note(
+    filename = await gmm.awrite_note(
         title=req.title,
         content=req.content,
         category=req.category,
@@ -617,7 +619,7 @@ async def update_global_file(
     """Update a global memory note."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    ok = gmm.update_note(
+    ok = await gmm.aupdate_note(
         filename, body=req.content, tags=req.tags,
         importance=req.importance,
     )
@@ -631,7 +633,7 @@ async def delete_global_file(filename: str = Path(...)):
     """Delete a global memory note."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    ok = gmm.delete_note(filename)
+    ok = await gmm.adelete_note(filename)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Delete failed: {filename}")
     return {"message": "Global note deleted"}
@@ -645,5 +647,5 @@ async def search_global(
     """Search global memory."""
     from service.memory.global_memory import get_global_memory_manager
     gmm = get_global_memory_manager()
-    results = gmm.search(q, max_results=max_results)
+    results = await gmm.asearch(q, max_results=max_results)
     return {"query": q, "results": results, "total": len(results)}
