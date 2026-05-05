@@ -17,7 +17,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.index import MemoryFileInfo
+from service.memory.types import MemoryFileInfo
 
 logger = getLogger(__name__)
 

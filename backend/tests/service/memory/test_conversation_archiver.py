@@ -537,55 +537,11 @@ class TestArchiverSessionRollup:
         assert info["body"].count("## turn-") == N
         assert info["meta"]["turn_count"] == N
 
-    def test_index_round_trips_session_rollup(self, tmp_path: Path):
-        """MemoryIndexManager indexes the rollup as a single
-        ``conversations`` file. PR 14 — a single ``task_request``
-        archive call lands in the *dm* bucket (one file per
-        counterpart), and the session-level frontmatter aggregates
-        carry through to ``MemoryFileInfo``.
-        """
-        from service.memory.index import MemoryIndexManager
-
-        memory_dir = tmp_path / "memory"
-        archiver = ConversationArchiver(
-            str(memory_dir), session_id="sess-idx", tz=TEST_TZ,
-        )
-        archiver.archive(
-            "assistant_dm",
-            "[DM to worker]: please write test.txt",
-            _meta(
-                kind=Kind.TASK_REQUEST,
-                direction=Direction.OUT,
-                counterpart_id="82b10c90-4c95-4e4f-863d-0bef73801fde",
-                counterpart_role=CounterpartRole.PAIRED_SUBWORKER,
-            ),
-        )
-
-        idx_mgr = MemoryIndexManager(str(memory_dir))
-        idx_mgr.rebuild()
-        idx = idx_mgr.index
-
-        rollup_files = [k for k in idx.files if k.startswith(f"{CATEGORY}/")]
-        assert len(rollup_files) == 1
-        rel = rollup_files[0]
-        # DM bucket → counterpart-specific filename.
-        assert "__dm__" in rel
-        info = idx.files[rel]
-        assert info.category == "conversations"
-        assert "conversation" in info.tags
-        assert rel in idx.tag_map.get("conversation", [])
-        # PR 14 — session-rollup aggregates surface in MemoryFileInfo.
-        assert info.session_id == "sess-idx"
-        assert info.turn_count == 1
-        assert "task_request" in info.kinds
-        assert "82b10c90-4c95-4e4f-863d-0bef73801fde" in info.counterparts
-        assert info.importance_max in {"medium", "high"}
-        # Per-turn dimensions are intentionally empty on rollup files;
-        # callers should read aggregates instead.
-        assert info.event_id == ""
-        assert info.kind == ""
-        # Summary doesn't leak the ``<!--meta`` block.
-        assert info.summary is None or "<!--meta" not in info.summary
+    # ``test_index_round_trips_session_rollup`` retired in cleanup A4.
+    # The legacy ``MemoryIndexManager`` host-side scanner was deleted;
+    # the executor's IndexHandle owns the conversations/ frontmatter
+    # → MemoryFileInfo round-trip and is covered upstream
+    # (geny-executor tests/contract/test_index_handle_*.py).
 
 
 class TestBucketSplit:
