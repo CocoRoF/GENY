@@ -1,26 +1,29 @@
 'use client';
 
 /**
- * TriggerPresetEditor — full-surface editor for one trigger preset.
+ * TriggerPresetEditor — section-driven editor for one trigger preset.
  *
- * Layout follows :mod:`RegistryFormShell` so list view ↔ editor read
- * as two states of the same surface (no modal context-switch). The
- * body is a vertical stack of sections, each a self-contained form
- * group:
+ * Cycle 20260507 redesign — replaced the long vertical stack with a
+ * StageProgressBar-style section navigator. Five sections are
+ * surfaced as numbered nodes on a top bar; clicking one swaps the
+ * body to a focused workspace for that section.
  *
- *   1. 메타데이터    — name / description / tags / master enabled toggle
- *   2. 타이밍        — base/max idle, tick interval, sub-worker cooldown
- *   3. 시간대 경계   — morning/afternoon/evening/night start hours
- *   4. 페이즈        — list of consecutive-count brackets + event matrix
- *   5. 카테고리      — list of firable buckets + conditions + prompts
+ *   ┌─ TriggerFormShell ─────────────────────────────────────────────┐
+ *   │  hero (icon · title · subtitle)               [Discard] [Back]│
+ *   │  ─ TriggerSectionBar ──────────────────────────────────────── │
+ *   │   ◯ 메타 ── ◯ 타이밍 ── ◯ 시간대 ── ◯ 페이즈 ── ◯ 카테고리      │
+ *   │  ──────────────────────────────────────────────────────────── │
+ *   │   {active section body — full-bleed, breathing room}           │
+ *   │                                                                │
+ *   ├─ sticky footer ────────────────────────────────────────────────┤
+ *   │  [Cancel]                                       [Save]        │
+ *   └────────────────────────────────────────────────────────────────┘
  *
  * Save flow:
- *
  *   create → POST /api/trigger-presets  (with full manifest)
- *   edit   → PATCH metadata  +  PUT /manifest  (two calls so partial
- *            failures surface clearly; both are idempotent)
+ *   edit   → PATCH metadata  +  PUT /manifest  (idempotent, two calls)
  *
- * Live reload contract: the backend bumps a version counter on every
+ * Live reload contract: backend bumps a version counter on every
  * write, and :class:`ThinkingTriggerService` re-reads the cached
  * manifest on its next tick. Saves are visible to running sessions
  * within one tick (~30 s) without restart.
@@ -35,8 +38,13 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  Boxes,
+  Clock,
+  Layers,
   Plus,
   Save,
+  Sun,
+  Tag,
   Zap,
 } from 'lucide-react';
 
@@ -56,6 +64,18 @@ import type {
 
 import PhaseEditor from './PhaseEditor';
 import CategoryEditor from './CategoryEditor';
+import TriggerSectionBar, {
+  type TriggerSectionDef,
+} from './TriggerSectionBar';
+
+// ── Section identifiers ──────────────────────────────────────────
+
+type SectionId =
+  | 'metadata'
+  | 'timing'
+  | 'time_boundaries'
+  | 'phases'
+  | 'categories';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -66,9 +86,6 @@ function freshId(prefix: string) {
 }
 
 function emptyManifest(): TriggerPresetManifest {
-  // Used as a last-resort fallback if the defaults endpoint failed.
-  // The server-side ``create_blank`` will replace this with the real
-  // bundled defaults anyway.
   return {
     enabled: true,
     timing: {
@@ -126,12 +143,12 @@ export default function TriggerPresetEditor({
     seed?.manifest ? cloneManifest(seed.manifest) : emptyManifest(),
   );
 
+  const [section, setSection] = useState<SectionId>('metadata');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef(false);
 
-  // Re-seed on prop change — happens when caller re-fetches after a
-  // reset-to-defaults call.
+  // Re-seed on prop change.
   useEffect(() => {
     if (seed?.manifest) {
       setManifest(cloneManifest(seed.manifest));
@@ -144,13 +161,17 @@ export default function TriggerPresetEditor({
     }
   }, [seed, mode]);
 
-  // Mark dirty on any state change after first paint. Cheap proxy:
-  // wrap setManifest so callers don't have to remember.
   const updateManifest = useCallback(
-    (next: TriggerPresetManifest | ((prev: TriggerPresetManifest) => TriggerPresetManifest)) => {
+    (
+      next:
+        | TriggerPresetManifest
+        | ((prev: TriggerPresetManifest) => TriggerPresetManifest),
+    ) => {
       dirtyRef.current = true;
       setManifest((prev) =>
-        typeof next === 'function' ? (next as (p: TriggerPresetManifest) => TriggerPresetManifest)(prev) : next,
+        typeof next === 'function'
+          ? (next as (p: TriggerPresetManifest) => TriggerPresetManifest)(prev)
+          : next,
       );
     },
     [],
@@ -188,6 +209,61 @@ export default function TriggerPresetEditor({
     return map;
   }, [manifest.phases]);
 
+  // ── Validation flags surfaced as red dots on the section bar ──
+
+  const validation = useMemo(() => {
+    const phasesNoEvents = manifest.phases.filter(
+      (p) => p.events.length === 0,
+    ).length;
+    const phasesZeroWeight = manifest.phases.filter(
+      (p) =>
+        p.events.length > 0 &&
+        p.events.every((e) => e.weight <= 0),
+    ).length;
+
+    const orphanRefs: string[] = [];
+    const knownIds = new Set(manifest.categories.map((c) => c.id));
+    for (const p of manifest.phases) {
+      for (const ev of p.events) {
+        if (!knownIds.has(ev.category_id)) orphanRefs.push(ev.category_id);
+      }
+    }
+
+    const dupeCategoryIds =
+      manifest.categories.length !==
+      new Set(manifest.categories.map((c) => c.id)).size;
+
+    const noPrompts = manifest.categories.filter(
+      (c) =>
+        Object.values(c.prompts).reduce(
+          (sum, list) => sum + (list?.length ?? 0),
+          0,
+        ) === 0,
+    ).length;
+
+    return {
+      metadata: !name.trim(),
+      timing:
+        manifest.timing.base_idle_seconds <= 0 ||
+        manifest.timing.max_idle_seconds < manifest.timing.base_idle_seconds,
+      time_boundaries: false, // hours are clamped 0–23 at input
+      phases:
+        manifest.phases.length === 0 ||
+        phasesNoEvents > 0 ||
+        phasesZeroWeight > 0 ||
+        orphanRefs.length > 0,
+      categories: dupeCategoryIds || (manifest.categories.length > 0 && noPrompts === manifest.categories.length),
+      // Diagnostic notes surfaced inline on the relevant section.
+      _details: {
+        phasesNoEvents,
+        phasesZeroWeight,
+        orphanRefs,
+        noPromptsCount: noPrompts,
+        dupeCategoryIds,
+      },
+    };
+  }, [manifest, name]);
+
   // ── Phase actions ─────────────────────────────────────────────
 
   const addPhase = useCallback(() => {
@@ -203,8 +279,6 @@ export default function TriggerPresetEditor({
         max_consecutive: null,
         events: [],
       };
-      // If the previous phase was open-ended, close it at minNext - 1
-      // so the new phase has a valid range.
       const phases = prev.phases.map((p, i) =>
         i === prev.phases.length - 1 && p.max_consecutive === null
           ? { ...p, max_consecutive: minNext - 1 }
@@ -296,8 +370,6 @@ export default function TriggerPresetEditor({
     (catId: string) => {
       updateManifest((prev) => ({
         ...prev,
-        // Drop the category and any phase events referencing it so the
-        // server-side validator doesn't reject the save.
         categories: prev.categories.filter((c) => c.id !== catId),
         phases: prev.phases.map((p) => ({
           ...p,
@@ -313,6 +385,7 @@ export default function TriggerPresetEditor({
   const onSave = useCallback(async () => {
     setError(null);
     if (!name.trim()) {
+      setSection('metadata');
       setError('이름을 입력해주세요.');
       return;
     }
@@ -352,6 +425,59 @@ export default function TriggerPresetEditor({
     onClose();
   }, [onClose]);
 
+  // ── Section definitions for the top bar ───────────────────────
+
+  const sections: TriggerSectionDef<SectionId>[] = useMemo(
+    () => [
+      {
+        id: 'metadata',
+        label: '메타데이터',
+        icon: Tag,
+        hint: '프리셋 이름과 마스터 스위치',
+        hasIssue: validation.metadata,
+      },
+      {
+        id: 'timing',
+        label: '타이밍',
+        icon: Clock,
+        hint: '침묵 임계값과 적응형 백오프',
+        hasIssue: validation.timing,
+      },
+      {
+        id: 'time_boundaries',
+        label: '시간대 경계',
+        icon: Sun,
+        hint: '아침 / 오후 / 저녁 / 밤 시작 시각',
+      },
+      {
+        id: 'phases',
+        label: '페이즈',
+        icon: Layers,
+        hint: '연속 트리거 횟수별 확률 매트릭스',
+        badge: `${manifest.phases.length}개`,
+        hasIssue: validation.phases,
+      },
+      {
+        id: 'categories',
+        label: '카테고리',
+        icon: Boxes,
+        hint: '발사 가능한 이벤트와 프롬프트',
+        badge: `${manifest.categories.length}개`,
+        hasIssue: validation.categories,
+      },
+    ],
+    [
+      manifest.categories.length,
+      manifest.phases.length,
+      validation.categories,
+      validation.metadata,
+      validation.phases,
+      validation.timing,
+    ],
+  );
+
+  const activeSection = sections.find((s) => s.id === section) ?? sections[0];
+
   // ── Render ────────────────────────────────────────────────────
 
   return (
@@ -362,7 +488,7 @@ export default function TriggerPresetEditor({
       }
       subtitle={
         mode === 'create'
-          ? '현재 기본 동작과 동일한 페이즈/카테고리/프롬프트가 미리 채워져 있어요. 필요한 부분만 조정하세요.'
+          ? '현재 기본 동작과 동일한 페이즈/카테고리/프롬프트가 미리 채워져 있어요. 아래 섹션을 골라 필요한 부분만 조정하세요.'
           : '저장하면 이 프리셋을 부착한 모든 VTuber 세션에 다음 틱(약 30초)부터 자동 반영됩니다.'
       }
       backLabel="목록으로"
@@ -378,6 +504,10 @@ export default function TriggerPresetEditor({
           >
             취소
           </button>
+          <div className="hidden sm:flex items-center gap-1.5 mx-3 text-[0.7rem] text-[hsl(var(--muted-foreground))]">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500/70" />
+            현재 섹션: <span className="font-medium text-[hsl(var(--foreground))]">{activeSection.label}</span>
+          </div>
           <div className="flex-1" />
           <button
             type="button"
@@ -391,264 +521,421 @@ export default function TriggerPresetEditor({
         </>
       }
     >
-      {/* 1. Metadata */}
-      <SectionCard title="메타데이터" subtitle="프리셋 식별 정보와 마스터 스위치">
-        <FormRow label="이름" required>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => updateName(e.target.value)}
-            placeholder="예: 차분한 오후 페르소나"
-            className={INPUT_CLS}
-          />
-        </FormRow>
-        <FormRow label="설명">
-          <textarea
-            value={description}
-            onChange={(e) => updateDescription(e.target.value)}
-            rows={2}
-            placeholder="이 프리셋이 어떤 분위기인지 메모"
-            className={`${INPUT_CLS} resize-y min-h-[60px]`}
-          />
-        </FormRow>
-        <FormRow label="태그" hint="쉼표로 구분. preset 태그는 공유 프리셋 섹션에 표시됩니다.">
-          <input
-            type="text"
-            value={tagsInput}
-            onChange={(e) => updateTagsInput(e.target.value)}
-            placeholder="preset, vtuber, calm"
-            className={INPUT_CLS}
-          />
-        </FormRow>
-        <FormRow label="활성화">
-          <label className="inline-flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={manifest.enabled}
-              onChange={(e) =>
-                updateManifest({ ...manifest, enabled: e.target.checked })
-              }
-              className="w-4 h-4 accent-violet-500"
-            />
-            <span className="text-[0.8125rem] text-[hsl(var(--foreground))]">
-              {manifest.enabled
-                ? '이 프리셋이 부착된 세션에 트리거가 발사됩니다'
-                : '비활성화 — 부착된 세션은 자가 발화하지 않습니다'}
-            </span>
-          </label>
-        </FormRow>
-      </SectionCard>
+      {/* ── Section navigator ── */}
+      <div className="-mx-6">
+        <TriggerSectionBar
+          sections={sections}
+          selected={section}
+          onSelect={(id) => setSection(id)}
+        />
+      </div>
 
-      {/* 2. Timing */}
-      <SectionCard
-        title="타이밍"
-        subtitle="유저 침묵 후 첫 트리거가 발사되기까지의 시간과 적응형 백오프"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <NumericField
-            label="기본 침묵 시간 (초)"
-            hint="이 시간이 지나면 첫 트리거 발사"
-            value={manifest.timing.base_idle_seconds}
-            min={5}
-            step={5}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                timing: { ...manifest.timing, base_idle_seconds: v },
-              })
-            }
-          />
-          <NumericField
-            label="최대 침묵 시간 (초)"
-            hint="연속 트리거가 누적될수록 임계값이 이 값으로 수렴"
-            value={manifest.timing.max_idle_seconds}
-            min={manifest.timing.base_idle_seconds}
-            step={60}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                timing: { ...manifest.timing, max_idle_seconds: v },
-              })
-            }
-          />
-          <NumericField
-            label="틱 주기 (초)"
-            hint="스캔 주기 — 짧을수록 반응이 빠르지만 부하 증가"
-            value={manifest.timing.tick_interval_seconds}
-            min={5}
-            step={5}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                timing: { ...manifest.timing, tick_interval_seconds: v },
-              })
-            }
-          />
-          <NumericField
-            label="Sub-Worker 진행 중 쿨다운 (초)"
-            hint="Sub-Worker가 작업 중일 때 'still working' 메시지 반복 억제"
-            value={manifest.timing.sub_worker_working_cooldown_seconds}
-            min={0}
-            step={10}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                timing: {
-                  ...manifest.timing,
-                  sub_worker_working_cooldown_seconds: v,
-                },
-              })
-            }
-          />
-          <NumericField
-            label="적응형 스케일 트리거 수"
-            hint="이 횟수만큼 트리거가 누적되면 임계값이 최대치에 도달 (log scale)"
-            value={manifest.timing.adaptive_scale_triggers}
-            min={1}
-            step={1}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                timing: { ...manifest.timing, adaptive_scale_triggers: v },
-              })
-            }
-          />
-        </div>
-      </SectionCard>
+      {/* ── Section header (active section's title + hint) ── */}
+      <SectionHeader section={activeSection} />
 
-      {/* 3. Time boundaries */}
-      <SectionCard
-        title="시간대 경계"
-        subtitle="time_window 조건이 어느 시간대를 'morning/afternoon/evening/night' 으로 인식할지 (KST 기준 시간)"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <HourField
-            label="아침 시작"
-            value={manifest.time_boundaries.morning_start}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                time_boundaries: {
-                  ...manifest.time_boundaries,
-                  morning_start: v,
-                },
-              })
-            }
-          />
-          <HourField
-            label="오후 시작"
-            value={manifest.time_boundaries.afternoon_start}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                time_boundaries: {
-                  ...manifest.time_boundaries,
-                  afternoon_start: v,
-                },
-              })
-            }
-          />
-          <HourField
-            label="저녁 시작"
-            value={manifest.time_boundaries.evening_start}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                time_boundaries: {
-                  ...manifest.time_boundaries,
-                  evening_start: v,
-                },
-              })
-            }
-          />
-          <HourField
-            label="밤 시작"
-            value={manifest.time_boundaries.night_start}
-            onChange={(v) =>
-              updateManifest({
-                ...manifest,
-                time_boundaries: {
-                  ...manifest.time_boundaries,
-                  night_start: v,
-                },
-              })
-            }
-          />
-        </div>
-      </SectionCard>
+      {/* ── Section body ── */}
+      {section === 'metadata' && (
+        <MetadataSection
+          name={name}
+          description={description}
+          tagsInput={tagsInput}
+          enabled={manifest.enabled}
+          onName={updateName}
+          onDescription={updateDescription}
+          onTagsInput={updateTagsInput}
+          onEnabled={(enabled) =>
+            updateManifest({ ...manifest, enabled })
+          }
+        />
+      )}
 
-      {/* 4. Phases */}
-      <SectionCard
-        title="페이즈"
-        subtitle="연속 트리거 횟수에 따라 어떤 카테고리가 어떤 비율로 발화될지 정의합니다. 위에서부터 매칭되는 첫 페이즈가 적용돼요."
-        rightSlot={
-          <button
-            type="button"
-            onClick={addPhase}
-            className={SUBHEADER_BTN_CLS}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            페이즈 추가
-          </button>
-        }
-      >
-        {manifest.phases.length === 0 ? (
-          <EmptyHint text="아직 페이즈가 없습니다. ＋ 페이즈 추가로 시작하세요." />
-        ) : (
-          <div className="flex flex-col gap-3">
-            {manifest.phases.map((phase, idx) => (
-              <PhaseEditor
-                key={phase.id}
-                phase={phase}
-                categories={manifest.categories}
-                isFirst={idx === 0}
-                isLast={idx === manifest.phases.length - 1}
-                totalWeight={totalWeightByPhase[phase.id] ?? 0}
-                onPatch={(patch) => updatePhase(phase.id, patch)}
-                onRemove={() => removePhase(phase.id)}
-                onMoveUp={() => movePhase(phase.id, -1)}
-                onMoveDown={() => movePhase(phase.id, 1)}
-                onSetEvents={(events) => setPhaseEvents(phase.id, events)}
-              />
-            ))}
-          </div>
-        )}
-      </SectionCard>
+      {section === 'timing' && (
+        <TimingSection
+          manifest={manifest}
+          onChange={(timing) =>
+            updateManifest({ ...manifest, timing })
+          }
+        />
+      )}
 
-      {/* 5. Categories */}
-      <SectionCard
-        title="카테고리"
-        subtitle="발사 가능한 이벤트 종류 — 조건 게이트와 로케일별 프롬프트 묶음을 갖습니다."
-        rightSlot={
-          <button
-            type="button"
-            onClick={addCategory}
-            className={SUBHEADER_BTN_CLS}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            카테고리 추가
-          </button>
-        }
-      >
-        {manifest.categories.length === 0 ? (
-          <EmptyHint text="카테고리가 없으면 어떤 페이즈도 발화할 수 없어요." />
-        ) : (
-          <div className="flex flex-col gap-3">
-            {manifest.categories.map((cat) => (
-              <CategoryEditor
-                key={cat.id}
-                category={cat}
-                referencedBy={manifest.phases
-                  .filter((p) => p.events.some((e) => e.category_id === cat.id))
-                  .map((p) => p.label || p.id)}
-                onPatch={(patch) => updateCategory(cat.id, patch)}
-                onRemove={() => removeCategory(cat.id)}
-              />
-            ))}
-          </div>
-        )}
-      </SectionCard>
+      {section === 'time_boundaries' && (
+        <TimeBoundariesSection
+          manifest={manifest}
+          onChange={(time_boundaries) =>
+            updateManifest({ ...manifest, time_boundaries })
+          }
+        />
+      )}
+
+      {section === 'phases' && (
+        <PhasesSection
+          phases={manifest.phases}
+          categories={manifest.categories}
+          totalWeightByPhase={totalWeightByPhase}
+          onAdd={addPhase}
+          onPatch={updatePhase}
+          onRemove={removePhase}
+          onMove={movePhase}
+          onSetEvents={setPhaseEvents}
+          onJumpToCategories={() => setSection('categories')}
+          missingCategories={validation._details.orphanRefs}
+        />
+      )}
+
+      {section === 'categories' && (
+        <CategoriesSection
+          categories={manifest.categories}
+          phases={manifest.phases}
+          onAdd={addCategory}
+          onPatch={updateCategory}
+          onRemove={removeCategory}
+          onJumpToPhases={() => setSection('phases')}
+        />
+      )}
     </RegistryFormShell>
+  );
+}
+
+// ── Section header ─────────────────────────────────────────────
+
+function SectionHeader({
+  section,
+}: {
+  section: TriggerSectionDef<SectionId>;
+}) {
+  const Icon = section.icon;
+  return (
+    <div className="flex items-start gap-3 px-1">
+      <div className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[hsl(var(--primary)/0.1)] shrink-0 mt-0.5">
+        <Icon className="w-4 h-4 text-[hsl(var(--primary))]" strokeWidth={2.25} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <h3 className="text-[1.0625rem] font-semibold text-[hsl(var(--foreground))]">
+            {section.label}
+          </h3>
+          {section.badge && (
+            <span className="text-[0.75rem] tabular-nums text-[hsl(var(--muted-foreground))]">
+              {section.badge}
+            </span>
+          )}
+        </div>
+        {section.hint && (
+          <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] leading-relaxed mt-0.5">
+            {section.hint}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Per-section bodies ─────────────────────────────────────────
+
+function MetadataSection({
+  name,
+  description,
+  tagsInput,
+  enabled,
+  onName,
+  onDescription,
+  onTagsInput,
+  onEnabled,
+}: {
+  name: string;
+  description: string;
+  tagsInput: string;
+  enabled: boolean;
+  onName: (v: string) => void;
+  onDescription: (v: string) => void;
+  onTagsInput: (v: string) => void;
+  onEnabled: (v: boolean) => void;
+}) {
+  return (
+    <BodyCard>
+      <FormRow label="이름" required>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => onName(e.target.value)}
+          placeholder="예: 차분한 오후 페르소나"
+          className={INPUT_CLS}
+        />
+      </FormRow>
+      <FormRow label="설명">
+        <textarea
+          value={description}
+          onChange={(e) => onDescription(e.target.value)}
+          rows={2}
+          placeholder="이 프리셋이 어떤 분위기인지 메모"
+          className={`${INPUT_CLS} resize-y min-h-[60px]`}
+        />
+      </FormRow>
+      <FormRow
+        label="태그"
+        hint="쉼표로 구분. preset 태그는 공유 프리셋 섹션에 표시됩니다."
+      >
+        <input
+          type="text"
+          value={tagsInput}
+          onChange={(e) => onTagsInput(e.target.value)}
+          placeholder="preset, vtuber, calm"
+          className={INPUT_CLS}
+        />
+      </FormRow>
+      <FormRow label="활성화">
+        <label className="inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => onEnabled(e.target.checked)}
+            className="w-4 h-4 accent-violet-500"
+          />
+          <span className="text-[0.8125rem] text-[hsl(var(--foreground))]">
+            {enabled
+              ? '이 프리셋이 부착된 세션에 트리거가 발사됩니다'
+              : '비활성화 — 부착된 세션은 자가 발화하지 않습니다'}
+          </span>
+        </label>
+      </FormRow>
+    </BodyCard>
+  );
+}
+
+function TimingSection({
+  manifest,
+  onChange,
+}: {
+  manifest: TriggerPresetManifest;
+  onChange: (timing: TriggerPresetManifest['timing']) => void;
+}) {
+  const t = manifest.timing;
+  return (
+    <BodyCard>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <NumericField
+          label="기본 침묵 시간 (초)"
+          hint="이 시간이 지나면 첫 트리거가 발사됩니다."
+          value={t.base_idle_seconds}
+          min={5}
+          step={5}
+          onChange={(v) => onChange({ ...t, base_idle_seconds: v })}
+        />
+        <NumericField
+          label="최대 침묵 시간 (초)"
+          hint="연속 트리거가 누적될수록 임계값이 이 값으로 수렴합니다."
+          value={t.max_idle_seconds}
+          min={t.base_idle_seconds}
+          step={60}
+          onChange={(v) => onChange({ ...t, max_idle_seconds: v })}
+        />
+        <NumericField
+          label="틱 주기 (초)"
+          hint="스캔 주기 — 짧을수록 반응이 빠르지만 부하가 늘어납니다."
+          value={t.tick_interval_seconds}
+          min={5}
+          step={5}
+          onChange={(v) => onChange({ ...t, tick_interval_seconds: v })}
+        />
+        <NumericField
+          label="Sub-Worker 진행 중 쿨다운 (초)"
+          hint="Sub-Worker가 작업 중일 때 'still working' 메시지가 반복되지 않도록 억제합니다."
+          value={t.sub_worker_working_cooldown_seconds}
+          min={0}
+          step={10}
+          onChange={(v) =>
+            onChange({ ...t, sub_worker_working_cooldown_seconds: v })
+          }
+        />
+        <NumericField
+          label="적응형 스케일 트리거 수"
+          hint="이 횟수만큼 트리거가 누적되면 임계값이 최대치에 도달합니다 (log scale)."
+          value={t.adaptive_scale_triggers}
+          min={1}
+          step={1}
+          onChange={(v) => onChange({ ...t, adaptive_scale_triggers: v })}
+        />
+      </div>
+    </BodyCard>
+  );
+}
+
+function TimeBoundariesSection({
+  manifest,
+  onChange,
+}: {
+  manifest: TriggerPresetManifest;
+  onChange: (tb: TriggerPresetManifest['time_boundaries']) => void;
+}) {
+  const tb = manifest.time_boundaries;
+  return (
+    <BodyCard>
+      <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] -mt-1">
+        time_window 조건이 어느 시간대를 morning/afternoon/evening/night 으로
+        인식할지 (KST 기준).
+      </p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <HourField
+          label="아침 시작"
+          value={tb.morning_start}
+          onChange={(v) => onChange({ ...tb, morning_start: v })}
+        />
+        <HourField
+          label="오후 시작"
+          value={tb.afternoon_start}
+          onChange={(v) => onChange({ ...tb, afternoon_start: v })}
+        />
+        <HourField
+          label="저녁 시작"
+          value={tb.evening_start}
+          onChange={(v) => onChange({ ...tb, evening_start: v })}
+        />
+        <HourField
+          label="밤 시작"
+          value={tb.night_start}
+          onChange={(v) => onChange({ ...tb, night_start: v })}
+        />
+      </div>
+    </BodyCard>
+  );
+}
+
+function PhasesSection({
+  phases,
+  categories,
+  totalWeightByPhase,
+  onAdd,
+  onPatch,
+  onRemove,
+  onMove,
+  onSetEvents,
+  onJumpToCategories,
+  missingCategories,
+}: {
+  phases: TriggerPhase[];
+  categories: TriggerCategory[];
+  totalWeightByPhase: Record<string, number>;
+  onAdd: () => void;
+  onPatch: (phaseId: string, patch: Partial<TriggerPhase>) => void;
+  onRemove: (phaseId: string) => void;
+  onMove: (phaseId: string, dir: -1 | 1) => void;
+  onSetEvents: (phaseId: string, events: PhaseEvent[]) => void;
+  onJumpToCategories: () => void;
+  missingCategories: string[];
+}) {
+  return (
+    <BodyCard
+      rightSlot={
+        <button
+          type="button"
+          onClick={onAdd}
+          className={SUBHEADER_BTN_CLS}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          페이즈 추가
+        </button>
+      }
+    >
+      {missingCategories.length > 0 && (
+        <NoticeChip tone="warn">
+          {missingCategories.length}개 페이즈 이벤트가 존재하지 않는 카테고리(
+          <code className="font-mono text-[0.7rem]">
+            {Array.from(new Set(missingCategories)).slice(0, 3).join(', ')}
+            {missingCategories.length > 3 ? '…' : ''}
+          </code>
+          )를 참조하고 있어요.{' '}
+          <button
+            type="button"
+            onClick={onJumpToCategories}
+            className="underline hover:no-underline"
+          >
+            카테고리 섹션으로 가서 정리하기
+          </button>
+        </NoticeChip>
+      )}
+
+      {phases.length === 0 ? (
+        <EmptyHint text="아직 페이즈가 없습니다. ＋ 페이즈 추가로 시작하세요." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {phases.map((phase, idx) => (
+            <PhaseEditor
+              key={phase.id}
+              phase={phase}
+              categories={categories}
+              isFirst={idx === 0}
+              isLast={idx === phases.length - 1}
+              totalWeight={totalWeightByPhase[phase.id] ?? 0}
+              onPatch={(patch) => onPatch(phase.id, patch)}
+              onRemove={() => onRemove(phase.id)}
+              onMoveUp={() => onMove(phase.id, -1)}
+              onMoveDown={() => onMove(phase.id, 1)}
+              onSetEvents={(events) => onSetEvents(phase.id, events)}
+            />
+          ))}
+        </div>
+      )}
+    </BodyCard>
+  );
+}
+
+function CategoriesSection({
+  categories,
+  phases,
+  onAdd,
+  onPatch,
+  onRemove,
+  onJumpToPhases,
+}: {
+  categories: TriggerCategory[];
+  phases: TriggerPhase[];
+  onAdd: () => void;
+  onPatch: (catId: string, patch: Partial<TriggerCategory>) => void;
+  onRemove: (catId: string) => void;
+  onJumpToPhases: () => void;
+}) {
+  return (
+    <BodyCard
+      rightSlot={
+        <button type="button" onClick={onAdd} className={SUBHEADER_BTN_CLS}>
+          <Plus className="w-3.5 h-3.5" />
+          카테고리 추가
+        </button>
+      }
+    >
+      <NoticeChip tone="info">
+        카테고리는 발사 가능한 이벤트의 풀입니다. 어떤 페이즈에서 어떤 가중치로
+        등장시킬지는{' '}
+        <button
+          type="button"
+          onClick={onJumpToPhases}
+          className="underline hover:no-underline"
+        >
+          페이즈 섹션
+        </button>
+        에서 정합니다.
+      </NoticeChip>
+
+      {categories.length === 0 ? (
+        <EmptyHint text="카테고리가 없으면 어떤 페이즈도 발화할 수 없어요." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {categories.map((cat) => (
+            <CategoryEditor
+              key={cat.id}
+              category={cat}
+              referencedBy={phases
+                .filter((p) =>
+                  p.events.some((e) => e.category_id === cat.id),
+                )
+                .map((p) => p.label || p.id)}
+              onPatch={(patch) => onPatch(cat.id, patch)}
+              onRemove={() => onRemove(cat.id)}
+            />
+          ))}
+        </div>
+      )}
+    </BodyCard>
   );
 }
 
@@ -660,29 +947,16 @@ const INPUT_CLS =
 const SUBHEADER_BTN_CLS =
   'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors';
 
-interface SectionCardProps {
-  title: string;
-  subtitle?: string;
+function BodyCard({
+  rightSlot,
+  children,
+}: {
   rightSlot?: ReactNode;
   children: ReactNode;
-}
-
-function SectionCard({ title, subtitle, rightSlot, children }: SectionCardProps) {
+}) {
   return (
     <section className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 flex flex-col gap-4">
-      <header className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="text-[0.9375rem] font-semibold text-[hsl(var(--foreground))]">
-            {title}
-          </h3>
-          {subtitle && (
-            <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] leading-relaxed mt-0.5">
-              {subtitle}
-            </p>
-          )}
-        </div>
-        {rightSlot && <div className="shrink-0">{rightSlot}</div>}
-      </header>
+      {rightSlot && <div className="flex justify-end -mt-1">{rightSlot}</div>}
       <div className="flex flex-col gap-3">{children}</div>
     </section>
   );
@@ -801,6 +1075,26 @@ function EmptyHint({ text }: { text: string }) {
   );
 }
 
-// Re-export for type completeness in callers — keeps the editor's
-// internal types accessible without leaking implementation.
+function NoticeChip({
+  tone,
+  children,
+}: {
+  tone: 'info' | 'warn';
+  children: ReactNode;
+}) {
+  const cls =
+    tone === 'warn'
+      ? 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+      : 'border-sky-500/25 bg-sky-500/5 text-sky-800 dark:text-sky-300';
+  return (
+    <div
+      className={`px-3 py-2 rounded-lg border text-[0.75rem] leading-relaxed ${cls}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+// Re-export types for callers — keeps the editor's internal types
+// accessible without leaking implementation.
 export type { CategoryConditions, TimeWindow, TriggerKind };
