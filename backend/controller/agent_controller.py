@@ -83,6 +83,15 @@ class CreateAgentRequest(CreateSessionRequest):
             "the settings.json:memory.tuning defaults for this session only."
         ),
     )
+    trigger_preset_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Trigger preset id — VTuber sessions only. When set, the "
+            "thinking-trigger runtime reads timing / phases / categories "
+            "from the named preset; ``None`` keeps the bundled defaults. "
+            "The frontend manages presets via the '트리거 관리' tab."
+        ),
+    )
 
 
 class AgentInvokeRequest(BaseModel):
@@ -149,6 +158,7 @@ async def create_agent_session(request: CreateAgentRequest, auth: dict = Depends
             owner_username=owner_username,
             env_id=request.env_id,
             memory_config=request.memory_config,
+            trigger_preset_id=request.trigger_preset_id,
         )
 
         session_info = agent.get_session_info()
@@ -280,6 +290,22 @@ class UpdateThinkingTriggerRequest(BaseModel):
     )
 
 
+class AttachTriggerPresetRequest(BaseModel):
+    """Request to attach (or detach) a trigger preset for a VTuber session.
+
+    Pass ``trigger_preset_id=None`` to revert the session to the bundled
+    defaults. Idempotent — re-binding the same preset is a no-op.
+    """
+
+    trigger_preset_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Trigger preset id, or ``null`` to detach and use the bundled "
+            "defaults."
+        ),
+    )
+
+
 @router.put("/{session_id}/system-prompt")
 async def update_system_prompt(
     request: UpdateSystemPromptRequest,
@@ -342,6 +368,58 @@ async def update_thinking_trigger(
     else:
         service.disable(session_id)
     return {"success": True, "session_id": session_id, **service.get_status(session_id)}
+
+
+@router.put("/{session_id}/trigger-preset")
+async def attach_trigger_preset(
+    request: AttachTriggerPresetRequest,
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Attach (or detach) a trigger preset for a VTuber session.
+
+    The trigger runtime starts using the new preset on the next tick —
+    no restart required. ``trigger_preset_id=null`` reverts the session
+    to the bundled default ladder.
+    """
+    agent = agent_manager.get_agent(session_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
+
+    # Validate the preset exists (when one is requested) so the FE
+    # surfaces a 404 instead of silently no-op'ing on a typo.
+    if request.trigger_preset_id:
+        from service.trigger_preset import get_trigger_preset_service
+        svc = get_trigger_preset_service()
+        if svc is not None and svc.get(request.trigger_preset_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Trigger preset not found: {request.trigger_preset_id}",
+            )
+
+    from service.vtuber.thinking_trigger import get_thinking_trigger_service
+    get_thinking_trigger_service().attach_preset(
+        session_id, request.trigger_preset_id
+    )
+
+    # Persist on the session record so reverse-lookups + reads through
+    # SessionStore reflect the change.
+    try:
+        store = get_session_store()
+        store.update(session_id, {"trigger_preset_id": request.trigger_preset_id})
+    except Exception:
+        logger.debug(
+            "[%s] Failed to persist trigger_preset_id; runtime binding "
+            "still active",
+            session_id,
+            exc_info=True,
+        )
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "trigger_preset_id": request.trigger_preset_id,
+    }
 
 
 @router.delete("/{session_id}")
@@ -478,6 +556,7 @@ async def restore_session(
         agent = await agent_manager.create_agent_session(
             request=request,
             session_id=session_id,
+            trigger_preset_id=params.get("trigger_preset_id"),
         )
 
         # Restore the previously stored system prompt (user customization).

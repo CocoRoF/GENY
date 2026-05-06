@@ -7,6 +7,8 @@ import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { agentApi, ttsApi, type VoiceProfile } from '@/lib/api';
 // workflowApi removed — pipeline presets replace workflow selection
 import { toolPresetApi } from '@/lib/toolApi';
+import { triggerPresetApi } from '@/lib/triggerPresetApi';
+import type { TriggerPresetSummary } from '@/types/triggerPreset';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 import { X } from 'lucide-react';
@@ -86,6 +88,8 @@ export default function CreateSessionModal({ onClose }: Props) {
   } = useEnvironmentStore();
   const [selectedAvatar, setSelectedAvatar] = useState('');
   const [selectedTtsProfile, setSelectedTtsProfile] = useState('');
+  const [triggerPresets, setTriggerPresets] = useState<TriggerPresetSummary[]>([]);
+  const [selectedTriggerPresetId, setSelectedTriggerPresetId] = useState('');
   const [ttsProfiles, setTtsProfiles] = useState<VoiceProfile[]>([]);
   const [ttsProfilesLoaded, setTtsProfilesLoaded] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
@@ -132,6 +136,18 @@ export default function CreateSessionModal({ onClose }: Props) {
   useEffect(() => {
     loadEnvironments();
   }, [loadEnvironments]);
+
+  // Load trigger presets — only meaningful for VTuber role but cheap
+  // enough to fetch eagerly so the dropdown is populated when the
+  // operator switches role.
+  useEffect(() => {
+    triggerPresetApi
+      .list()
+      .then(setTriggerPresets)
+      .catch(() => {
+        // Non-fatal — the picker just stays empty.
+      });
+  }, []);
 
   const handlePromptChange = async (name: string) => {
     setSelectedPrompt(name);
@@ -253,6 +269,11 @@ export default function CreateSessionModal({ onClose }: Props) {
       if (formState.role === 'vtuber' && selectedSubWorkerEnvId) {
         payload.sub_worker_env_id = selectedSubWorkerEnvId;
       }
+      // Trigger preset attach — VTuber-only. Empty selection keeps the
+      // bundled defaults (current hardcoded ladder).
+      if (formState.role === 'vtuber' && selectedTriggerPresetId) {
+        payload.trigger_preset_id = selectedTriggerPresetId;
+      }
       const session = await createSession(payload);
       // Auto-assign avatar if selected for VTuber sessions
       if (selectedAvatar && session?.session_id && formState.role === 'vtuber') {
@@ -351,6 +372,45 @@ export default function CreateSessionModal({ onClose }: Props) {
                     <option key={p.name} value={p.name}>{p.display_name || p.name}</option>
                   ))}
                 </select>
+              )}
+            </div>
+          )}
+
+          {/* Trigger Preset (VTuber only) — bound at session creation,
+              swappable later via PUT /api/agents/{id}/trigger-preset.
+              When unset the runtime falls back to the bundled default
+              ladder, which is the historical hardcoded behaviour. */}
+          {formState.role === 'vtuber' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">
+                트리거 프리셋
+                <InfoTooltip text="VTuber 자가 발화의 페이즈/카테고리/프롬프트를 정의한 프리셋. 미선택 시 기본 동작으로 작동하며, '트리거 관리' 탭에서 새로 만들 수 있어요." />
+              </label>
+              <select
+                className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8"
+                style={selectArrow}
+                value={selectedTriggerPresetId}
+                onChange={e => setSelectedTriggerPresetId(e.target.value)}
+              >
+                <option value="">기본 트리거 (내장)</option>
+                {triggerPresets.length > 0 && (
+                  <optgroup label="내 프리셋">
+                    {triggerPresets.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.enabled ? '⚡' : '⏸'} {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {selectedTriggerPresetId ? (
+                <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
+                  {triggerPresets.find(p => p.id === selectedTriggerPresetId)?.description || ''}
+                </small>
+              ) : (
+                <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
+                  미선택 시 내장된 기본 페이즈/확률/프롬프트를 사용합니다.
+                </small>
               )}
             </div>
           )}

@@ -56,6 +56,7 @@ from controller.memory_controller import router as memory_router
 from controller.memory_controller import global_router as global_memory_router
 from controller.transcripts_controller import router as transcripts_router
 from controller.environment_controller import router as environment_router
+from controller.trigger_preset_controller import router as trigger_preset_router
 from controller.catalog_controller import router as catalog_router
 from controller.vtuber_controller import router as vtuber_router
 from controller.tts_controller import router as tts_router
@@ -414,6 +415,21 @@ async def lifespan(app: FastAPI):
     from service.execution.agent_executor import set_app_state
     set_app_state(app.state)
 
+    # ── Trigger Preset Service ────────────────────────────────────────
+    # Persists user-defined trigger bundles under ./data/trigger_presets/*.json.
+    # Created before ``thinking_trigger`` so the runtime can resolve
+    # preset records on the very first tick after boot.
+    from service.trigger_preset import (
+        TriggerPresetService,
+        set_trigger_preset_service,
+    )
+    trigger_preset_service = TriggerPresetService()
+    app.state.trigger_preset_service = trigger_preset_service
+    set_trigger_preset_service(trigger_preset_service)
+    logger.info(
+        f"   - TriggerPresetService: storage={trigger_preset_service.storage_path}"
+    )
+
     # ── VTuber Thinking Trigger Service ────────────────────────────────
     from service.vtuber.thinking_trigger import get_thinking_trigger_service
     thinking_trigger = get_thinking_trigger_service()
@@ -663,6 +679,7 @@ app.include_router(memory_router)  # Memory management API
 app.include_router(global_memory_router)  # Global memory API
 app.include_router(transcripts_router)  # InteractionEvent stream view (cycle 20260430_3)
 app.include_router(environment_router)  # Environment CRUD API (Phase 3)
+app.include_router(trigger_preset_router)  # Trigger Preset CRUD (cycle 20260506)
 app.include_router(catalog_router)  # Stage/Artifact catalog API (Phase 3)
 app.include_router(vtuber_router)  # VTuber Live2D API
 app.include_router(tts_router)  # TTS (Text-to-Speech) API

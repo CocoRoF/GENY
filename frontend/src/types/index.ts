@@ -88,6 +88,12 @@ export interface CreateAgentRequest {
   // both as optional; legacy preset path runs when env_id is absent.
   env_id?: string;
   memory_config?: Record<string, unknown>;
+  /**
+   * Trigger preset id (VTuber sessions only). When omitted, the
+   * thinking-trigger runtime falls back to the bundled defaults.
+   * Managed in the "트리거 관리" tab on the environments page.
+   */
+  trigger_preset_id?: string;
 }
 
 export interface ExecuteRequest {

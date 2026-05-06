@@ -3803,7 +3803,28 @@ class AgentSession:
             chat_room_id=self._chat_room_id,
             env_id=self._env_id,
             memory_config=self._memory_config,
+            trigger_preset_id=self._resolve_trigger_preset_id(),
         )
+
+    def _resolve_trigger_preset_id(self) -> Optional[str]:
+        """Lookup the trigger preset currently attached to this session.
+
+        Reads directly from the singleton ThinkingTriggerService — keeps
+        ``AgentSession`` free of trigger-runtime state while still
+        letting ``get_session_info`` surface what's bound. Returns
+        ``None`` for non-VTuber sessions or when the trigger service
+        is unavailable (e.g. early boot / tests).
+        """
+        try:
+            from service.vtuber.thinking_trigger import (
+                get_thinking_trigger_service,
+            )
+
+            return get_thinking_trigger_service().get_attached_preset(
+                self._session_id
+            )
+        except Exception:
+            return None
 
     async def load_creature_state_snapshot(self) -> Optional[Dict[str, Any]]:
         """Return a JSON-friendly snapshot of the session's CreatureState.

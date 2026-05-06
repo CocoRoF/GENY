@@ -39,6 +39,7 @@ import {
   Plug,
   Shield,
   Sparkles,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
@@ -48,7 +49,8 @@ export type EnvManagementTab =
   | 'mcp'
   | 'skills'
   | 'hooks'
-  | 'permissions';
+  | 'permissions'
+  | 'triggers';
 
 const TAB_ORDER: EnvManagementTab[] = [
   'environments',
@@ -56,6 +58,7 @@ const TAB_ORDER: EnvManagementTab[] = [
   'skills',
   'hooks',
   'permissions',
+  'triggers',
 ];
 
 interface TabDef {
@@ -101,6 +104,13 @@ const TABS: TabDef[] = [
     fallbackLabel: '권한',
     fallbackHint: '호스트에 등록된 권한 룰',
     key: 'permissions',
+  },
+  {
+    id: 'triggers',
+    icon: Zap,
+    fallbackLabel: '트리거 관리',
+    fallbackHint: 'VTuber 자가 발화 프리셋 관리',
+    key: 'triggers',
   },
 ];
 

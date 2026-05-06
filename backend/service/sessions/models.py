@@ -366,6 +366,13 @@ class SessionInfo(BaseModel):
         default=None,
         description="Per-session MemoryProvider override config, or None when the process default is used"
     )
+    trigger_preset_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Trigger preset id attached to this VTuber session. ``None`` "
+            "means the bundled defaults are in effect."
+        ),
+    )
 
     # Tamagotchi creature state — surfaced only for sessions that have
     # a state_provider wired (classic / non-Tamagotchi sessions keep

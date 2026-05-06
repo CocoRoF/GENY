@@ -695,6 +695,8 @@ const ko: Translations = {
       hooksHint: '호스트에 등록된 훅 — 새 env 기본 포함 여부 선택',
       permissions: '권한',
       permissionsHint: '호스트에 등록된 권한 룰 — 새 env 기본 포함 여부 선택 (preview)',
+      triggers: '트리거 관리',
+      triggersHint: 'VTuber 자가 발화(생각 트리거) 프리셋 — 페이즈/카테고리/프롬프트 커스텀',
     },
     // ── 공통 호스트 레지스트리 (MCP / SKILLS / HOOK / 권한) ──
     registry: {

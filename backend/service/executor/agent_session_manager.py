@@ -492,6 +492,7 @@ class AgentSessionManager:
         owner_username: Optional[str] = None,
         env_id: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
+        trigger_preset_id: Optional[str] = None,
     ) -> AgentSession:
         """
         Create a new AgentSession.
@@ -1015,7 +1016,24 @@ class AgentSessionManager:
                 # Register VTuber session with ThinkingTriggerService immediately
                 try:
                     from service.vtuber.thinking_trigger import get_thinking_trigger_service
-                    get_thinking_trigger_service().record_activity(session_id)
+                    trigger_svc = get_thinking_trigger_service()
+                    trigger_svc.record_activity(session_id)
+                    if trigger_preset_id:
+                        trigger_svc.attach_preset(session_id, trigger_preset_id)
+                        # Persist on the session record so reverse-lookups
+                        # (preset → sessions) and FE re-renders see the
+                        # binding without re-reading runtime state.
+                        try:
+                            self._store.update(
+                                session_id, {"trigger_preset_id": trigger_preset_id}
+                            )
+                        except Exception:
+                            logger.debug(
+                                "[%s] Failed to persist trigger_preset_id; "
+                                "runtime binding still active",
+                                session_id,
+                                exc_info=True,
+                            )
                 except Exception:
                     pass  # best-effort
 

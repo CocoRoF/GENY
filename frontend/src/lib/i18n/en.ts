@@ -693,6 +693,8 @@ const en = {
       hooksHint: 'Host-registered hooks — pick which seed new envs',
       permissions: 'Permissions',
       permissionsHint: 'Host-registered permission rules — preview, no enforcement yet',
+      triggers: 'Triggers',
+      triggersHint: 'VTuber idle-trigger presets — phases / categories / prompts',
     },
     registry: {
       add: 'Add',
