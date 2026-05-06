@@ -6,7 +6,6 @@ import { twMerge } from 'tailwind-merge';
 import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
-import FrameworkSettingsPanel from '@/components/settings/FrameworkSettingsPanel';
 import { TabShell, ActionButton } from '@/components/layout';
 import { Settings as SettingsIcon, Download, Upload, RefreshCw } from 'lucide-react';
 import { useI18n, type Locale } from '@/lib/i18n';
@@ -159,10 +158,15 @@ export default function SettingsTab() {
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        {/* Category Sidebar — horizontal scroll on mobile, vertical on desktop */}
-        <div className="md:w-[200px] border-b md:border-b-0 md:border-r border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-x-auto md:overflow-x-visible md:overflow-y-auto shrink-0">
+      {/* Content — h-full (not flex-1) because TabShell.body is not a flex container.
+           Inner sidebar + main pane each own their own scroll context so 12-section
+           General never gets clipped, and short content (e.g. empty section list)
+           still fills the viewport instead of collapsing to intrinsic height. */}
+      <div className="flex flex-col md:flex-row h-full overflow-hidden">
+        {/* Category Sidebar — horizontal scroll on mobile, vertical on desktop.
+             min-h-0 lets the flex item shrink below content height so overflow-y-auto
+             actually produces a scrollbar when categories overflow. */}
+        <div className="md:w-[200px] md:h-full md:min-h-0 border-b md:border-b-0 md:border-r border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-x-auto md:overflow-x-visible md:overflow-y-auto shrink-0">
           <div className="flex md:flex-col p-2 md:p-3 gap-1 md:gap-0">
             <button
               className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'all' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
@@ -170,16 +174,6 @@ export default function SettingsTab() {
             >
               <span className="flex-1">{t('settings.all')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{configs.length}</span>
-            </button>
-            {/* PR-F.1.6 — synthetic "Framework" category swaps the
-                right pane for the FrameworkSettingsPanel. */}
-            <button
-              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === '__framework__' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-              onClick={() => setSelectedCategory('__framework__')}
-              title="Edit framework subsystem settings (hooks/skills/model/telemetry/notifications)"
-            >
-              <span className="flex-1">Framework</span>
-              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">5+</span>
             </button>
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
@@ -196,11 +190,10 @@ export default function SettingsTab() {
           </div>
         </div>
 
-        {/* Config List */}
-        <div className="flex-1 overflow-y-auto p-3 md:p-5">
-          {selectedCategory === '__framework__' ? (
-            <FrameworkSettingsPanel />
-          ) : filtered.length === 0 ? (
+        {/* Config List — h-full + min-h-0 so content fills the row, and overflow-y-auto
+             gives this pane its own scroll context independent from the sidebar. */}
+        <div className="flex-1 h-full min-h-0 overflow-y-auto p-3 md:p-5">
+          {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4"><p className="text-[0.8125rem] text-[var(--text-muted)]">{t('settings.noConfigs')}</p></div>
           ) : (
             <div className="flex flex-col gap-3">
