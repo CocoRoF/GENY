@@ -3,16 +3,14 @@ Blog Agent Configuration.
 
 외부 블로그 (https://hrletsgo.me) 의 AI Agent 위임 통합 설정.
 
-다음 환경변수를 .env 또는 settings UI 로부터 받아온다:
+Settings UI 의 General 카테고리에 'Blog Agent' 카드로 노출되며,
+운영자가 .env 없이도 8개 필드를 동적으로 편집할 수 있다.
+.env 의 BLOG_AGENT_* 키는 부팅 시점의 default seed 로만 동작 —
+이후엔 ConfigManager 가 우선.
 
-    BLOG_AGENT_BASE_URL                 블로그 외부 API base URL
-    BLOG_AGENT_API_KEY                  Bearer 토큰 (admin 비밀번호 무게)
-    BLOG_AGENT_DEFAULT_MODEL            블로그 측 SDK 모델 default
-    BLOG_AGENT_DEFAULT_TIMEOUT_S        한 turn 의 최대 stream 수신 시간
-    BLOG_AGENT_PUMP_IDLE_GRACE_S        SSE frame 미수신 허용 시간 (transient)
-    BLOG_AGENT_ENABLED                  마스터 스위치
-    BLOG_AGENT_ENABLED_FOR_SUBWORKERS   Sub-Worker 노출 여부 (기본 OFF)
-    BLOG_AGENT_MAX_CONCURRENT_PER_SESSION  세션당 동시 위임 task 상한
+블로그 측 지원 모델은 blog frontend 의 ``AVAILABLE_MODELS``
+(:file:`hr_blog2.0/frontend/src/src/components/agent/AgentSettingsModal.tsx`)
+와 1:1 동기화. blog 가 새 모델을 추가하면 이 리스트도 갱신해야 한다.
 """
 
 from __future__ import annotations
@@ -22,6 +20,23 @@ from typing import Any, Dict, List
 
 from service.config.base import BaseConfig, ConfigField, FieldType, register_config
 from service.config.sub_config.general.env_utils import env_sync, read_env_defaults
+
+
+# ─── 블로그 측 지원 모델 — frontend AVAILABLE_MODELS 와 동기화 ─────
+#
+# blog 의 외부 API 는 model 값을 자유 문자열로 받지만, 실제로 검증된
+# 옵션은 frontend AgentSettingsModal 의 AVAILABLE_MODELS (3종):
+#
+#   - claude-opus-4-7              최고 추론력
+#   - claude-sonnet-4-6            균형 (권장 default)
+#   - claude-haiku-4-5-20251001    빠르고 저렴
+#
+# blog 가 새 모델을 추가하면 이 리스트도 갱신.
+BLOG_AGENT_MODEL_OPTIONS: List[Dict[str, str]] = [
+    {"value": "claude-opus-4-7", "label": "Claude Opus 4.7 (최고 추론력)"},
+    {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (균형 · 권장)"},
+    {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (빠르고 저렴)"},
+]
 
 
 @register_config
@@ -65,8 +80,9 @@ class BlogAgentConfig(BaseConfig):
     @classmethod
     def get_description(cls) -> str:
         return (
-            "Delegate writing/editing tasks to the external blog AI agent at "
-            "the configured base URL. Treat the API key as admin-equivalent."
+            "외부 블로그 AI Agent (예: hrletsgo.me) 에 글쓰기 / 편집 작업을 "
+            "위임하는 통합 설정. API 키는 admin 비밀번호와 동일한 무게로 "
+            "다룰 것."
         )
 
     @classmethod
@@ -88,7 +104,9 @@ class BlogAgentConfig(BaseConfig):
                     "무게로 다룰 것."
                 ),
                 "groups": {
-                    "blog_agent": "블로그 에이전트 위임",
+                    "connection": "연결",
+                    "behavior": "동작",
+                    "access": "접근 제어",
                 },
                 "fields": {
                     "base_url": {
@@ -101,7 +119,7 @@ class BlogAgentConfig(BaseConfig):
                     },
                     "default_model": {
                         "label": "기본 모델",
-                        "description": "블로그 SDK 가 사용할 모델 ID",
+                        "description": "위임 시 블로그 SDK 가 사용할 모델",
                     },
                     "default_timeout_s": {
                         "label": "Stream 타임아웃 (초)",
@@ -134,40 +152,62 @@ class BlogAgentConfig(BaseConfig):
     @classmethod
     def get_fields_metadata(cls) -> List[ConfigField]:
         return [
+            # ── 연결 ──────────────────────────────────────
             ConfigField(
                 name="base_url",
                 field_type=FieldType.URL,
                 label="Base URL",
-                description="블로그 외부 API base URL",
+                description="블로그 외부 API base URL (도메인까지만, path 없음)",
                 placeholder="https://hrletsgo.me",
-                group="blog_agent",
+                group="connection",
                 apply_change=env_sync("BLOG_AGENT_BASE_URL"),
             ),
             ConfigField(
                 name="api_key",
                 field_type=FieldType.PASSWORD,
                 label="API Key",
-                description="블로그 외부 API Bearer 토큰 (admin 비밀번호 무게)",
+                description=(
+                    "블로그 외부 API Bearer 토큰. 블로그 admin → Settings "
+                    "→ External API 에서 발급. admin 비밀번호와 동일한 무게."
+                ),
                 placeholder="32-hex-chars",
-                group="blog_agent",
+                group="connection",
                 secure=True,
                 apply_change=env_sync("BLOG_AGENT_API_KEY"),
             ),
             ConfigField(
+                name="enabled",
+                field_type=FieldType.BOOLEAN,
+                label="활성화",
+                description=(
+                    "OFF 일 때는 모든 blog_agent_* 도구가 즉시 명시적 에러를 "
+                    "반환 — 키나 URL 이 비어 있어도 안전."
+                ),
+                group="connection",
+                apply_change=env_sync("BLOG_AGENT_ENABLED"),
+            ),
+            # ── 동작 ──────────────────────────────────────
+            ConfigField(
                 name="default_model",
-                field_type=FieldType.STRING,
+                field_type=FieldType.SELECT,
                 label="기본 모델",
-                description="블로그 SDK 가 사용할 모델 ID",
-                placeholder="claude-sonnet-4-6",
-                group="blog_agent",
+                description=(
+                    "위임 시 블로그 SDK 가 사용할 Claude 모델. blog frontend "
+                    "AVAILABLE_MODELS 와 동기화된 옵션."
+                ),
+                options=BLOG_AGENT_MODEL_OPTIONS,
+                group="behavior",
                 apply_change=env_sync("BLOG_AGENT_DEFAULT_MODEL"),
             ),
             ConfigField(
                 name="default_timeout_s",
                 field_type=FieldType.NUMBER,
                 label="Stream 타임아웃 (초)",
-                description="한 위임 turn 의 최대 SSE 수신 시간",
-                group="blog_agent",
+                description=(
+                    "한 위임 turn 의 최대 SSE 수신 시간. 본문 자율 작성처럼 "
+                    "긴 turn 도 커버하도록 600 초 default."
+                ),
+                group="behavior",
                 min_value=30.0,
                 max_value=3600.0,
                 apply_change=env_sync("BLOG_AGENT_DEFAULT_TIMEOUT_S"),
@@ -176,39 +216,40 @@ class BlogAgentConfig(BaseConfig):
                 name="pump_idle_grace_s",
                 field_type=FieldType.NUMBER,
                 label="Idle 허용 시간 (초)",
-                description="SSE frame 이 N초 이상 안 오면 transient 경고",
-                group="blog_agent",
+                description=(
+                    "SSE frame 이 N초 이상 안 오면 'last_event_age_s' 가 "
+                    "올라가 status 도구가 사용자에게 'stuck' 신호를 줌."
+                ),
+                group="behavior",
                 min_value=5.0,
                 max_value=600.0,
                 apply_change=env_sync("BLOG_AGENT_PUMP_IDLE_GRACE_S"),
             ),
             ConfigField(
-                name="enabled",
-                field_type=FieldType.BOOLEAN,
-                label="활성화",
-                description="OFF면 blog_agent_* 도구가 명시적 에러를 반환",
-                group="blog_agent",
-                apply_change=env_sync("BLOG_AGENT_ENABLED"),
-            ),
-            ConfigField(
-                name="enabled_for_subworkers",
-                field_type=FieldType.BOOLEAN,
-                label="Sub-Worker 노출",
-                description=(
-                    "기본 OFF. ON 으로 바꿔도 Worker env template 이 자동 갱신되지 "
-                    "않으므로 별도 env 편집이 필요."
-                ),
-                group="blog_agent",
-                apply_change=env_sync("BLOG_AGENT_ENABLED_FOR_SUBWORKERS"),
-            ),
-            ConfigField(
                 name="max_concurrent_per_session",
                 field_type=FieldType.NUMBER,
                 label="세션당 동시 위임 상한",
-                description="한 Geny 세션이 동시에 진행할 수 있는 위임 task 수",
-                group="blog_agent",
+                description=(
+                    "한 Geny 세션이 동시에 진행할 수 있는 위임 task 수. "
+                    "초과 시 도구가 명시적 에러로 거부."
+                ),
+                group="behavior",
                 min_value=1,
                 max_value=10,
                 apply_change=env_sync("BLOG_AGENT_MAX_CONCURRENT_PER_SESSION"),
+            ),
+            # ── 접근 제어 ─────────────────────────────────
+            ConfigField(
+                name="enabled_for_subworkers",
+                field_type=FieldType.BOOLEAN,
+                label="Sub-Worker 에 노출",
+                description=(
+                    "기본 OFF — VTuber 만 위임 도구를 본다. ON 으로 바꾸면 "
+                    "Worker env template 의 deny 세트가 비워져 Sub-Worker / "
+                    "Developer / Researcher / Planner 도 도구를 받음 "
+                    "(템플릿 재생성 필요 — Geny 재기동 시 자동 적용)."
+                ),
+                group="access",
+                apply_change=env_sync("BLOG_AGENT_ENABLED_FOR_SUBWORKERS"),
             ),
         ]
