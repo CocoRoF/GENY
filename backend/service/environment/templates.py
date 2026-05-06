@@ -59,8 +59,54 @@ VTUBER_ENV_ID = "template-vtuber-env"
 # spawn a playwright browser on casual questions. Matches
 # ``backend/tool_presets/template-vtuber-tools.json``.
 _VTUBER_CUSTOM_TOOL_WHITELIST = frozenset(
-    {"web_search", "news_search", "web_fetch"}
+    {
+        "web_search", "news_search", "web_fetch",
+        # Blog AI Agent delegation tools — VTuber 가 외부 블로그 AI 에 위임.
+        # BLOG_AGENT_DELEGATION_PLAN.md § Phase 4. Sub-Worker 는
+        # _WORKER_CUSTOM_TOOL_DENY 로 차단.
+        "blog_agent_delegate",
+        "blog_agent_status",
+        "blog_agent_cancel",
+        "blog_agent_list_posts",
+        "blog_agent_get_post",
+    }
 )
+
+
+# Custom tools to *exclude* from the Worker (Sub-Worker / developer /
+# researcher / planner) environment. Default Worker env opts into every
+# external tool name from the loader; this set lets us subtract specific
+# tools that should be VTuber-only without writing per-role whitelists.
+#
+# BLOG_AGENT_DELEGATION_PLAN.md § Phase 4 / decision #2 — blog_agent_*
+# is VTuber-only by default. To enable for Sub-Workers an operator must
+# (1) flip BlogAgentConfig.enabled_for_subworkers and (2) regenerate
+# the env template (or hand-edit a custom env). The two-step gate is
+# intentional: prevents an accidental UI toggle from giving Sub-Workers
+# write access to the live blog.
+_WORKER_CUSTOM_TOOL_DENY = frozenset(
+    {
+        "blog_agent_delegate",
+        "blog_agent_status",
+        "blog_agent_cancel",
+        "blog_agent_list_posts",
+        "blog_agent_get_post",
+    }
+)
+
+
+def _resolve_worker_custom_deny() -> frozenset[str]:
+    """Live-read BlogAgentConfig — when ``enabled_for_subworkers=True``
+    the deny set becomes empty so Worker env picks up the tools on the
+    next env regeneration."""
+    try:
+        from service.config.manager import get_config_manager
+        cfg = get_config_manager().get_config("blog_agent")
+        if cfg is not None and getattr(cfg, "enabled_for_subworkers", False):
+            return frozenset()
+    except Exception:
+        pass
+    return _WORKER_CUSTOM_TOOL_DENY
 
 
 # Platform built-in source stems. :class:`ToolLoader` records each
@@ -234,10 +280,18 @@ def create_worker_env(
 
     The ``model`` block is left empty — session creation fills it in
     via :class:`PipelineConfig` based on the user's LLM settings.
+
+    External tool names are filtered through :func:`_resolve_worker_custom_deny`
+    so VTuber-only custom tools (e.g. ``blog_agent_*``) never land in the
+    Sub-Worker tool roster unless the operator explicitly opts in via
+    ``BlogAgentConfig.enabled_for_subworkers``. See
+    BLOG_AGENT_DELEGATION_PLAN.md § Phase 4.
     """
+    deny = _resolve_worker_custom_deny()
+    filtered = [n for n in (external_tool_names or []) if n not in deny]
     manifest = build_default_manifest(
         preset="worker_adaptive",
-        external_tool_names=list(external_tool_names or []),
+        external_tool_names=filtered,
         built_in_tool_names=list(_WORKER_BUILT_IN_TOOL_NAMES),
     )
     manifest.metadata.id = WORKER_ENV_ID

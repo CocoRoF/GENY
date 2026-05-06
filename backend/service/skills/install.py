@@ -28,6 +28,23 @@ logger = logging.getLogger(__name__)
 USER_SKILLS_DIR_NAME = "skills"
 SKILLS_OPT_IN_ENV = "GENY_ALLOW_USER_SKILLS"
 
+
+# Per-skill role allow-list. When a skill_id appears here, it is only
+# registered for sessions whose ``role`` is in the allowed set. Skills
+# absent from this map are unrestricted (default behaviour, preserves
+# existing skills).
+#
+# BLOG_AGENT_DELEGATION_PLAN.md § Phase 4 — ``blog-write`` is VTuber-only:
+# the Skill is the only place inside Geny that knows the *correct usage
+# pattern* for the blog_agent_* tools (fire-and-poll, paraphrase rules).
+# The tool gate is enforced at env-template level (Worker deny set),
+# so even if a Sub-Worker somehow saw this Skill the tools would be
+# absent and the Skill body would deadend. Role-gating the Skill itself
+# keeps the slash-command menu honest for each role.
+_SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
+    "blog-write": frozenset({"vtuber"}),
+}
+
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
 # relative to this module so it works regardless of CWD.
 _BUNDLED_REL = Path(__file__).resolve().parent.parent.parent / "skills" / "bundled"
@@ -75,8 +92,36 @@ def _user_skills_opted_in() -> bool:
     return False
 
 
-def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
+def _skill_allowed_for_role(skill: Any, role: Optional[str]) -> bool:
+    """Apply :data:`_SKILL_ROLE_RESTRICTIONS` to *skill*.
+
+    When *role* is None (no role context — global listing endpoint),
+    every restricted skill is allowed through so the catalog stays
+    visible. When a role is given, the skill is filtered out unless
+    its id is unrestricted or the role is in the allow-list.
+    """
+    skill_id = getattr(skill, "id", None) or getattr(
+        getattr(skill, "metadata", None), "id", None,
+    )
+    allow = _SKILL_ROLE_RESTRICTIONS.get(str(skill_id))
+    if allow is None:
+        return True
+    if role is None:
+        return True
+    return str(role).lower() in allow
+
+
+def install_skill_registry(
+    role: Optional[str] = None,
+) -> Tuple[Optional[Any], List[Any]]:
     """Build a populated :class:`SkillRegistry`.
+
+    Args:
+        role: Session role (e.g. ``"vtuber"`` / ``"worker"``). When given,
+            skills listed in :data:`_SKILL_ROLE_RESTRICTIONS` whose
+            allow-list does not include this role are filtered out
+            *before* registration. ``None`` (default) keeps the catalog
+            untrimmed — used by the global `/api/skills/list` endpoint.
 
     Three skill sources, in priority order (first-wins on id collision):
 
@@ -113,6 +158,8 @@ def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
 
         executor_report = load_bundled_skills(strict=False)
         for skill in executor_report.loaded:
+            if not _skill_allowed_for_role(skill, role):
+                continue
             try:
                 registry.register(skill)
                 loaded.append(skill)
@@ -137,6 +184,8 @@ def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
     if BUNDLED_SKILLS_DIR.exists():
         report = load_skills_dir(BUNDLED_SKILLS_DIR, strict=False)
         for skill in report.loaded:
+            if not _skill_allowed_for_role(skill, role):
+                continue
             try:
                 registry.register(skill)
                 loaded.append(skill)
@@ -156,6 +205,8 @@ def install_skill_registry() -> Tuple[Optional[Any], List[Any]]:
         if user_dir.exists():
             report = load_skills_dir(user_dir, strict=False)
             for skill in report.loaded:
+                if not _skill_allowed_for_role(skill, role):
+                    continue
                 try:
                     registry.register(skill)
                     loaded.append(skill)
