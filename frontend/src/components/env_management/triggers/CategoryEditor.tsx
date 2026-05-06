@@ -22,6 +22,7 @@ import { useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  CornerDownRight,
   Plus,
   Trash2,
   X,
@@ -64,19 +65,28 @@ const TIME_WINDOWS: { value: TimeWindow | ''; label: string }[] = [
 
 const DEFAULT_LOCALES = ['en', 'ko'];
 
+export interface CategoryReference {
+  phaseId: string;
+  phaseLabel: string;
+  weight: number;
+}
+
 export interface CategoryEditorProps {
   category: TriggerCategory;
-  /** Phase labels referencing this category (read-only display). */
-  referencedBy: string[];
+  /** Phases referencing this category (with weight) for "사용처" display. */
+  references: CategoryReference[];
   onPatch: (patch: Partial<TriggerCategory>) => void;
   onRemove: () => void;
+  /** Click-through to jump to the phases section, optionally to a specific phase. */
+  onJumpToPhase?: (phaseId: string) => void;
 }
 
 export default function CategoryEditor({
   category,
-  referencedBy,
+  references,
   onPatch,
   onRemove,
+  onJumpToPhase,
 }: CategoryEditorProps) {
   const [expanded, setExpanded] = useState(false);
   const [newLocaleInput, setNewLocaleInput] = useState('');
@@ -195,12 +205,54 @@ export default function CategoryEditor({
       {/* ── Body ── */}
       {expanded && (
         <div className="border-t border-[hsl(var(--border))] p-3 flex flex-col gap-4">
-          {/* Reference list */}
-          {referencedBy.length > 0 && (
-            <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
-              참조 페이즈: {referencedBy.join(', ')}
+          {/* 사용처 — reverse references */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <CornerDownRight className="w-3 h-3 text-[hsl(var(--muted-foreground))]" />
+              <span className="text-[0.6875rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold">
+                사용처
+              </span>
+              <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))]">
+                · 이 카테고리를 참조하는 페이즈
+              </span>
             </div>
-          )}
+            {references.length === 0 ? (
+              <div className="rounded border border-dashed border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[0.7rem] text-amber-700 dark:text-amber-300">
+                어떤 페이즈에서도 사용되지 않습니다 — 페이즈 섹션에서 이벤트로
+                추가하지 않으면 발화하지 않아요.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {references.map((ref, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={
+                      onJumpToPhase
+                        ? () => onJumpToPhase(ref.phaseId)
+                        : undefined
+                    }
+                    disabled={!onJumpToPhase}
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[0.7rem] transition-colors ${
+                      onJumpToPhase
+                        ? 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300 hover:bg-violet-500/20'
+                        : 'border-[hsl(var(--border))] bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
+                    }`}
+                    title={
+                      onJumpToPhase
+                        ? `${ref.phaseLabel} 페이즈로 이동`
+                        : undefined
+                    }
+                  >
+                    <span className="font-medium">{ref.phaseLabel}</span>
+                    <span className="text-[0.65rem] tabular-nums opacity-80">
+                      가중치 {ref.weight}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Conditions */}
           <div>

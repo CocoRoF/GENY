@@ -64,9 +64,15 @@ import type {
 
 import PhaseEditor from './PhaseEditor';
 import CategoryEditor from './CategoryEditor';
+import ScenarioBar from './ScenarioBar';
 import TriggerSectionBar, {
   type TriggerSectionDef,
 } from './TriggerSectionBar';
+import {
+  categoryReferences,
+  currentTimeWindow,
+  type RuntimeScenario,
+} from './triggerSimulator';
 
 // ── Section identifiers ──────────────────────────────────────────
 
@@ -148,6 +154,23 @@ export default function TriggerPresetEditor({
   const [error, setError] = useState<string | null>(null);
   const dirtyRef = useRef(false);
 
+  // Scenario for the phase preview — defaults to "auto" (current
+  // KST time window + sub-worker idle, consec=0) so the operator
+  // sees a sensible baseline. They can switch axes in ScenarioBar.
+  const [scenario, setScenario] = useState<RuntimeScenario>(() => ({
+    consecutive: 0,
+    subWorker: 'idle',
+    timeWindow: currentTimeWindow(
+      seed?.manifest ? cloneManifest(seed.manifest) : emptyManifest(),
+    ),
+    honourCooldowns: false,
+  }));
+
+  // Cross-section navigation: phase row → categories tab focusing on
+  // a specific category, and vice versa.
+  const [focusCategoryId, setFocusCategoryId] = useState<string | null>(null);
+  const [focusPhaseId, setFocusPhaseId] = useState<string | null>(null);
+
   // Re-seed on prop change.
   useEffect(() => {
     if (seed?.manifest) {
@@ -201,13 +224,22 @@ export default function TriggerPresetEditor({
     [tagsInput],
   );
 
-  const totalWeightByPhase = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const p of manifest.phases) {
-      map[p.id] = p.events.reduce((sum, e) => sum + Math.max(0, e.weight), 0);
-    }
-    return map;
-  }, [manifest.phases]);
+  // Reverse references — used by the categories tab + the simulator.
+  const references = useMemo(
+    () => categoryReferences(manifest),
+    [manifest],
+  );
+
+  // Phase shortcuts surfaced on the scenario bar so the operator can
+  // jump to the lower bound of each phase with one click.
+  const phaseShortcuts = useMemo(
+    () =>
+      manifest.phases.map((p) => ({
+        label: p.label || `phase ${p.min_consecutive}+`,
+        consecutive: p.min_consecutive,
+      })),
+    [manifest.phases],
+  );
 
   // ── Validation flags surfaced as red dots on the section bar ──
 
@@ -569,15 +601,21 @@ export default function TriggerPresetEditor({
 
       {section === 'phases' && (
         <PhasesSection
-          phases={manifest.phases}
-          categories={manifest.categories}
-          totalWeightByPhase={totalWeightByPhase}
+          manifest={manifest}
+          scenario={scenario}
+          onScenarioChange={setScenario}
+          phaseShortcuts={phaseShortcuts}
+          focusPhaseId={focusPhaseId}
           onAdd={addPhase}
           onPatch={updatePhase}
           onRemove={removePhase}
           onMove={movePhase}
           onSetEvents={setPhaseEvents}
-          onJumpToCategories={() => setSection('categories')}
+          onJumpToCategory={(categoryId) => {
+            setFocusCategoryId(categoryId);
+            setSection('categories');
+          }}
+          onJumpToCategoriesTab={() => setSection('categories')}
           missingCategories={validation._details.orphanRefs}
         />
       )}
@@ -585,11 +623,15 @@ export default function TriggerPresetEditor({
       {section === 'categories' && (
         <CategoriesSection
           categories={manifest.categories}
-          phases={manifest.phases}
+          references={references}
+          focusCategoryId={focusCategoryId}
           onAdd={addCategory}
           onPatch={updateCategory}
           onRemove={removeCategory}
-          onJumpToPhases={() => setSection('phases')}
+          onJumpToPhase={(phaseId) => {
+            setFocusPhaseId(phaseId);
+            setSection('phases');
+          }}
         />
       )}
     </RegistryFormShell>
@@ -801,98 +843,168 @@ function TimeBoundariesSection({
 }
 
 function PhasesSection({
-  phases,
-  categories,
-  totalWeightByPhase,
+  manifest,
+  scenario,
+  onScenarioChange,
+  phaseShortcuts,
+  focusPhaseId,
   onAdd,
   onPatch,
   onRemove,
   onMove,
   onSetEvents,
-  onJumpToCategories,
+  onJumpToCategory,
+  onJumpToCategoriesTab,
   missingCategories,
 }: {
-  phases: TriggerPhase[];
-  categories: TriggerCategory[];
-  totalWeightByPhase: Record<string, number>;
+  manifest: TriggerPresetManifest;
+  scenario: RuntimeScenario;
+  onScenarioChange: (s: RuntimeScenario) => void;
+  phaseShortcuts: { label: string; consecutive: number }[];
+  focusPhaseId: string | null;
   onAdd: () => void;
   onPatch: (phaseId: string, patch: Partial<TriggerPhase>) => void;
   onRemove: (phaseId: string) => void;
   onMove: (phaseId: string, dir: -1 | 1) => void;
   onSetEvents: (phaseId: string, events: PhaseEvent[]) => void;
-  onJumpToCategories: () => void;
+  onJumpToCategory: (categoryId: string) => void;
+  onJumpToCategoriesTab: () => void;
   missingCategories: string[];
 }) {
   return (
-    <BodyCard
-      rightSlot={
-        <button
-          type="button"
-          onClick={onAdd}
-          className={SUBHEADER_BTN_CLS}
-        >
-          <Plus className="w-3.5 h-3.5" />
-          페이즈 추가
-        </button>
-      }
-    >
-      {missingCategories.length > 0 && (
-        <NoticeChip tone="warn">
-          {missingCategories.length}개 페이즈 이벤트가 존재하지 않는 카테고리(
-          <code className="font-mono text-[0.7rem]">
-            {Array.from(new Set(missingCategories)).slice(0, 3).join(', ')}
-            {missingCategories.length > 3 ? '…' : ''}
-          </code>
-          )를 참조하고 있어요.{' '}
+    <div className="flex flex-col gap-4">
+      {/* Model explainer — one-time educational. */}
+      <ModelExplainer />
+
+      {/* Scenario picker drives all phase percentages. */}
+      <ScenarioBar
+        scenario={scenario}
+        onChange={onScenarioChange}
+        phaseShortcuts={phaseShortcuts}
+      />
+
+      <BodyCard
+        rightSlot={
           <button
             type="button"
-            onClick={onJumpToCategories}
-            className="underline hover:no-underline"
+            onClick={onAdd}
+            className={SUBHEADER_BTN_CLS}
           >
-            카테고리 섹션으로 가서 정리하기
+            <Plus className="w-3.5 h-3.5" />
+            페이즈 추가
           </button>
-        </NoticeChip>
-      )}
+        }
+      >
+        {missingCategories.length > 0 && (
+          <NoticeChip tone="warn">
+            {missingCategories.length}개 페이즈 이벤트가 존재하지 않는 카테고리(
+            <code className="font-mono text-[0.7rem]">
+              {Array.from(new Set(missingCategories)).slice(0, 3).join(', ')}
+              {missingCategories.length > 3 ? '…' : ''}
+            </code>
+            )를 참조하고 있어요.{' '}
+            <button
+              type="button"
+              onClick={onJumpToCategoriesTab}
+              className="underline hover:no-underline"
+            >
+              카테고리 섹션으로 가서 정리하기
+            </button>
+          </NoticeChip>
+        )}
 
-      {phases.length === 0 ? (
-        <EmptyHint text="아직 페이즈가 없습니다. ＋ 페이즈 추가로 시작하세요." />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {phases.map((phase, idx) => (
-            <PhaseEditor
-              key={phase.id}
-              phase={phase}
-              categories={categories}
-              isFirst={idx === 0}
-              isLast={idx === phases.length - 1}
-              totalWeight={totalWeightByPhase[phase.id] ?? 0}
-              onPatch={(patch) => onPatch(phase.id, patch)}
-              onRemove={() => onRemove(phase.id)}
-              onMoveUp={() => onMove(phase.id, -1)}
-              onMoveDown={() => onMove(phase.id, 1)}
-              onSetEvents={(events) => onSetEvents(phase.id, events)}
-            />
-          ))}
-        </div>
-      )}
-    </BodyCard>
+        {manifest.phases.length === 0 ? (
+          <EmptyHint text="아직 페이즈가 없습니다. ＋ 페이즈 추가로 시작하세요." />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {manifest.phases.map((phase, idx) => (
+              <div
+                key={phase.id}
+                className={
+                  focusPhaseId === phase.id
+                    ? 'rounded-lg ring-2 ring-violet-500/40 -m-0.5'
+                    : ''
+                }
+              >
+                <PhaseEditor
+                  phase={phase}
+                  categories={manifest.categories}
+                  manifest={manifest}
+                  scenario={scenario}
+                  isFirst={idx === 0}
+                  isLast={idx === manifest.phases.length - 1}
+                  onPatch={(patch) => onPatch(phase.id, patch)}
+                  onRemove={() => onRemove(phase.id)}
+                  onMoveUp={() => onMove(phase.id, -1)}
+                  onMoveDown={() => onMove(phase.id, 1)}
+                  onSetEvents={(events) => onSetEvents(phase.id, events)}
+                  onJumpToCategory={onJumpToCategory}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </BodyCard>
+    </div>
+  );
+}
+
+/**
+ * One-time explainer card — shows the Phase ↔ Category model so the
+ * operator's mental model matches the runtime. Compact, optional, and
+ * collapsible would be overkill: kept always-visible for now since the
+ * concept is the load-bearing one for this whole tab.
+ */
+function ModelExplainer() {
+  return (
+    <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-4 flex flex-col gap-2">
+      <div className="text-[0.6875rem] uppercase tracking-wider font-semibold text-violet-700 dark:text-violet-300">
+        모델 — 페이즈와 카테고리는 어떻게 함께 동작하나요?
+      </div>
+      <ol className="text-[0.8125rem] text-[hsl(var(--foreground))] leading-relaxed space-y-1 pl-5 list-decimal">
+        <li>
+          <span className="font-medium">카테고리</span>는 발사 가능한 이벤트의
+          정의입니다. 프롬프트 풀과 발사 조건(Sub-Worker 상태, 시간대, 연속
+          횟수, 쿨다운)을 갖습니다.
+        </li>
+        <li>
+          <span className="font-medium">페이즈</span>는 연속 트리거 횟수 범위
+          별로 어떤 카테고리를 어떤 가중치로 후보에 올릴지 정의합니다.
+        </li>
+        <li>
+          런타임에서는 ① 매칭되는 페이즈를 고르고 ② 그 페이즈의 이벤트 중
+          카테고리 조건을 통과한 것만 남기고 ③ 남은 가중치를 정규화해 룰렛으로
+          하나를 뽑습니다.
+        </li>
+        <li>
+          따라서 페이즈에 적힌 가중치 자체가 발사 비율은 아닙니다. 아래
+          시나리오 바를 바꾸면 실제 비율이 어떻게 변하는지 즉시 확인할 수
+          있어요.
+        </li>
+      </ol>
+    </div>
   );
 }
 
 function CategoriesSection({
   categories,
-  phases,
+  references,
+  focusCategoryId,
   onAdd,
   onPatch,
   onRemove,
-  onJumpToPhases,
+  onJumpToPhase,
 }: {
   categories: TriggerCategory[];
-  phases: TriggerPhase[];
+  references: Map<
+    string,
+    { phaseId: string; phaseLabel: string; weight: number }[]
+  >;
+  focusCategoryId: string | null;
   onAdd: () => void;
   onPatch: (catId: string, patch: Partial<TriggerCategory>) => void;
   onRemove: (catId: string) => void;
-  onJumpToPhases: () => void;
+  onJumpToPhase: (phaseId: string) => void;
 }) {
   return (
     <BodyCard
@@ -904,16 +1016,11 @@ function CategoriesSection({
       }
     >
       <NoticeChip tone="info">
-        카테고리는 발사 가능한 이벤트의 풀입니다. 어떤 페이즈에서 어떤 가중치로
-        등장시킬지는{' '}
-        <button
-          type="button"
-          onClick={onJumpToPhases}
-          className="underline hover:no-underline"
-        >
-          페이즈 섹션
-        </button>
-        에서 정합니다.
+        카테고리는 발사 가능한 이벤트의 카탈로그입니다. 각 카테고리는 어떤
+        조건에서 발사 가능한지(Sub-Worker, 시간대, 연속 횟수)와 로케일별
+        프롬프트를 갖고, 페이즈 섹션에서 어떤 가중치로 후보에 올릴지가
+        결정됩니다. 같은 카테고리를 여러 페이즈에서 다른 가중치로 사용할 수
+        있어요.
       </NoticeChip>
 
       {categories.length === 0 ? (
@@ -921,17 +1028,22 @@ function CategoriesSection({
       ) : (
         <div className="flex flex-col gap-3">
           {categories.map((cat) => (
-            <CategoryEditor
+            <div
               key={cat.id}
-              category={cat}
-              referencedBy={phases
-                .filter((p) =>
-                  p.events.some((e) => e.category_id === cat.id),
-                )
-                .map((p) => p.label || p.id)}
-              onPatch={(patch) => onPatch(cat.id, patch)}
-              onRemove={() => onRemove(cat.id)}
-            />
+              className={
+                focusCategoryId === cat.id
+                  ? 'rounded-lg ring-2 ring-violet-500/40 -m-0.5'
+                  : ''
+              }
+            >
+              <CategoryEditor
+                category={cat}
+                references={references.get(cat.id) ?? []}
+                onPatch={(patch) => onPatch(cat.id, patch)}
+                onRemove={() => onRemove(cat.id)}
+                onJumpToPhase={onJumpToPhase}
+              />
+            </div>
           ))}
         </div>
       )}
