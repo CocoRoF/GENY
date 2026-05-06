@@ -674,7 +674,13 @@ class AgentSessionManager:
                 install_skill_watcher,
             )
 
-            skill_registry, _skill_list = install_skill_registry()
+            # Role-aware install: blog-write Skill only resolves for the
+            # VTuber role; see service/skills/install.py
+            # _SKILL_ROLE_RESTRICTIONS and BLOG_AGENT_DELEGATION_PLAN.md.
+            _skill_role = (
+                request.role.value if request.role else "worker"
+            )
+            skill_registry, _skill_list = install_skill_registry(role=_skill_role)
             skill_provider = attach_provider(skill_registry)
             if skill_provider is not None:
                 adhoc_providers.append(skill_provider)

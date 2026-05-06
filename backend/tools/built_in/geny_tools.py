@@ -123,6 +123,23 @@ def _classify_outgoing_dm(
         Kind,
     )
 
+    # External agent envelopes — body-prefix shortcut. Used when a
+    # caller addresses an external (out-of-process) agent like
+    # ``blog:<uid>``; the target_agent will be None because the
+    # AgentManager doesn't know about external actors. See
+    # BLOG_AGENT_DELEGATION_PLAN.md § Phase 2.
+    leading = body.lstrip() if body else ""
+    is_external_target = (
+        target_agent is None
+        or (target_session_id or "").startswith(("blog:",))
+    )
+    if leading.startswith("[EXTERNAL_TASK_REQUEST]"):
+        return Kind.EXTERNAL_TASK_REQUEST, CounterpartRole.EXTERNAL_AGENT
+    if leading.startswith("[EXTERNAL_TASK_RESULT]"):
+        return Kind.EXTERNAL_TASK_RESULT, CounterpartRole.EXTERNAL_AGENT
+    if is_external_target:
+        return Kind.DM, CounterpartRole.EXTERNAL_AGENT
+
     sender_type = getattr(sender_agent, "_session_type", None)
     target_type = getattr(target_agent, "_session_type", None)
     linked_id = getattr(sender_agent, "_linked_session_id", None)
@@ -131,7 +148,7 @@ def _classify_outgoing_dm(
     if is_paired and sender_type == "vtuber" and target_type == "sub":
         return Kind.TASK_REQUEST, CounterpartRole.PAIRED_SUBWORKER
     if is_paired and sender_type == "sub" and target_type == "vtuber":
-        if body.lstrip().startswith("[SUB_WORKER_RESULT]"):
+        if leading.startswith("[SUB_WORKER_RESULT]"):
             return Kind.TASK_RESULT, CounterpartRole.PAIRED_VTUBER
         return Kind.DM, CounterpartRole.PAIRED_VTUBER
     return Kind.DM, CounterpartRole.PEER

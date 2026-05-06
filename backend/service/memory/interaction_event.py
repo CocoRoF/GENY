@@ -55,13 +55,21 @@ class Kind(str, Enum):
     treat unknown ``kind`` strings as opaque (do not assert on
     membership).
     """
-    USER_CHAT        = "user_chat"          # ordinary turn with the human user
-    DM               = "dm"                  # plain DM with any counterpart
-    TASK_REQUEST     = "task_request"        # VTuber → paired Sub-Worker task
-    TASK_RESULT      = "task_result"         # paired Sub-Worker's [SUB_WORKER_RESULT]
-    TOOL_RUN_SUMMARY = "tool_run_summary"    # categorised SubWorkerRun payload
-    REFLECTION       = "reflection"          # THINKING_TRIGGER / ACTIVITY_TRIGGER
-    SYSTEM_NOTE      = "system_note"         # runtime self-note (revival, schema migration, …)
+    USER_CHAT             = "user_chat"          # ordinary turn with the human user
+    DM                    = "dm"                  # plain DM with any counterpart
+    TASK_REQUEST          = "task_request"        # VTuber → paired Sub-Worker task
+    TASK_RESULT           = "task_result"         # paired Sub-Worker's [SUB_WORKER_RESULT]
+    TOOL_RUN_SUMMARY      = "tool_run_summary"    # categorised SubWorkerRun payload
+    REFLECTION            = "reflection"          # THINKING_TRIGGER / ACTIVITY_TRIGGER
+    SYSTEM_NOTE           = "system_note"         # runtime self-note (revival, schema migration, …)
+    # ── External agent delegation (BLOG_AGENT_DELEGATION_PLAN.md Phase 2) ──
+    # 외부 (Geny 프로세스 밖) AI Agent 에 작업을 위임할 때 양쪽 페어.
+    # PAIRED_SUBWORKER 통계와 분리되어야 LTM distill / STM 통계에서
+    # "내부 sub-worker 협업" 과 "외부 위임" 이 섞이지 않는다.
+    # counterpart_id 형식은 "<provider>:<id>" (예: "blog:abc-uid") 으로
+    # provider prefix 가 enum 외부 식별자 역할을 한다.
+    EXTERNAL_TASK_REQUEST = "external_task_request"  # caller → external agent
+    EXTERNAL_TASK_RESULT  = "external_task_result"   # external agent → caller
 
 
 class Direction(str, Enum):
@@ -91,6 +99,11 @@ class CounterpartRole(str, Enum):
     PEER             = "peer"               # any other live session
     SELF             = "self"               # reflection / system_note
     SYSTEM           = "system"             # the runtime itself
+    # External (out-of-process) AI agents — e.g. external blog AI accessed
+    # over HTTPS. Distinct from PEER (other Geny session) and PAIRED_*
+    # (bound counterpart in same process) so STM / LTM tooling does not
+    # mistake an external delegation for an internal Sub-Worker handoff.
+    EXTERNAL_AGENT   = "external_agent"     # remote AI agent (e.g. blog:<uid>)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +303,8 @@ _INCOMING_DM_HEADER = _re.compile(
 )
 _INBOX_HEADER = _re.compile(r"^\[INBOX from (?P<name>[^\]]+)\]")
 _SUBWORKER_RESULT_PREFIX = "[SUB_WORKER_RESULT]"
+_EXTERNAL_RESULT_PREFIX = "[EXTERNAL_TASK_RESULT]"
+_EXTERNAL_REQUEST_PREFIX = "[EXTERNAL_TASK_REQUEST]"
 
 
 def dm_kind_for_recipient(
@@ -317,8 +332,20 @@ def dm_kind_for_recipient(
       * any other shape → ``DM`` + ``PEER``.
 
     Pure / never raises — missing ``_session_type`` collapses the
-    case to ``DM`` + ``PEER``.
+    case to ``DM`` + ``PEER``. External agent envelopes are detected
+    by body prefix and resolve to ``EXTERNAL_TASK_RESULT`` /
+    ``EXTERNAL_AGENT`` regardless of sender_agent presence (the sender
+    is an out-of-process actor that never has an AgentSession).
     """
+    # Body-prefix shortcut for external delegation. The sender_agent will
+    # be missing/None for these because the sender (e.g. blog:<uid>) lives
+    # outside the local AgentManager.
+    leading = body.lstrip() if body else ""
+    if leading.startswith(_EXTERNAL_RESULT_PREFIX):
+        return Kind.EXTERNAL_TASK_RESULT, CounterpartRole.EXTERNAL_AGENT
+    if leading.startswith(_EXTERNAL_REQUEST_PREFIX):
+        return Kind.EXTERNAL_TASK_REQUEST, CounterpartRole.EXTERNAL_AGENT
+
     sender_type = getattr(sender_agent, "_session_type", None)
     recorder_type = getattr(recorder_agent, "_session_type", None)
     sender_linked = getattr(sender_agent, "_linked_session_id", None)
@@ -330,7 +357,7 @@ def dm_kind_for_recipient(
         # the sender-side mapping in A2.
         return Kind.TASK_REQUEST, CounterpartRole.PAIRED_VTUBER
     if is_paired and sender_type == "sub" and recorder_type == "vtuber":
-        if body.lstrip().startswith(_SUBWORKER_RESULT_PREFIX):
+        if leading.startswith(_SUBWORKER_RESULT_PREFIX):
             return Kind.TASK_RESULT, CounterpartRole.PAIRED_SUBWORKER
         return Kind.DM, CounterpartRole.PAIRED_SUBWORKER
     return Kind.DM, CounterpartRole.PEER
