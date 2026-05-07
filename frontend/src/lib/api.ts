@@ -2573,3 +2573,129 @@ export const ttsApi = {
       method: 'DELETE',
     }),
 };
+
+// ==================== Whiteboard API (Phase 0+) ====================
+// Captures, attachments, and ViewLedger inspection. The endpoints live
+// under /api/opsidian/* alongside the existing user-opsidian routes —
+// see docs/knowledge-whiteboard/02_ARCHITECTURE.md.
+
+export type WhiteboardCaptureType =
+  | 'text'
+  | 'image'
+  | 'screenshot'
+  | 'audio'
+  | 'drawing'
+  | 'link'
+  | 'file'
+  | 'code';
+
+export interface WhiteboardCapturePayloadIn {
+  inline_text?: string | null;
+  attachment_path?: string | null;
+  inline_base64?: string | null;
+  ref_url?: string | null;
+}
+
+export interface WhiteboardCaptureCreatedResponse {
+  capture_id: string;
+  draft_note_filename: string;
+  attachment_path: string | null;
+}
+
+export interface WhiteboardCaptureLogEntry {
+  capture_id: string;
+  ts: string;
+  username: string;
+  session_id: string | null;
+  type: WhiteboardCaptureType;
+  source: string;
+  draft_note: string;
+  attachment_path: string | null;
+  ref_url?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WhiteboardViewStats {
+  agent_id: string;
+  username: string;
+  total_notes_seen: number;
+  events: Record<string, number>;
+}
+
+export const whiteboardApi = {
+  /** POST /api/opsidian/captures — JSON ingest (text/link/clipboard-text). */
+  createCapture: (data: {
+    type: WhiteboardCaptureType;
+    source?: string;
+    payload: WhiteboardCapturePayloadIn;
+    metadata?: Record<string, unknown>;
+    session_id?: string | null;
+    title?: string | null;
+    suggested_filename?: string | null;
+  }) =>
+    apiCall<WhiteboardCaptureCreatedResponse>('/api/opsidian/captures', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** POST /api/opsidian/captures/upload — multipart (binary attachment). */
+  uploadCapture: async (params: {
+    file: Blob;
+    type: WhiteboardCaptureType;
+    source?: string;
+    title?: string | null;
+    sessionId?: string | null;
+    metadata?: Record<string, unknown>;
+    inlineText?: string | null;
+    filename?: string | null;
+  }): Promise<WhiteboardCaptureCreatedResponse> => {
+    const form = new FormData();
+    form.append('file', params.file, params.filename ?? 'capture.bin');
+    form.append('type', params.type);
+    form.append('source', params.source ?? 'manual');
+    if (params.title) form.append('title', params.title);
+    if (params.sessionId) form.append('session_id', params.sessionId);
+    if (params.inlineText) form.append('inline_text', params.inlineText);
+    if (params.metadata) form.append('metadata_json', JSON.stringify(params.metadata));
+
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/opsidian/captures/upload', {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<WhiteboardCaptureCreatedResponse>;
+  },
+
+  /** GET /api/opsidian/captures — recent capture audit log entries. */
+  listRecentCaptures: (limit = 50) =>
+    apiCall<{ captures: WhiteboardCaptureLogEntry[]; total: number }>(
+      `/api/opsidian/captures?limit=${encodeURIComponent(String(limit))}`,
+    ),
+
+  /** Fully-qualified URL for an attachment — usable as <img src=...>. */
+  attachmentUrl: (relativePath: string): string => {
+    const cleaned = relativePath.replace(/^\/+/, '');
+    const stripped = cleaned.startsWith('_attachments/') ? cleaned.slice('_attachments/'.length) : cleaned;
+    return `/api/opsidian/attachments/${encodeURI(stripped)}`;
+  },
+
+  /** DELETE /api/opsidian/captures/{capture_id} — remove draft + attachment. */
+  deleteCapture: (captureId: string) =>
+    apiCall<{ capture_id: string; note_deleted: boolean; attachment_deleted: boolean }>(
+      `/api/opsidian/captures/${encodeURIComponent(captureId)}`,
+      { method: 'DELETE' },
+    ),
+
+  /** GET /api/opsidian/views/stats — ViewLedger sanity check. */
+  getViewStats: (agentId?: string) => {
+    const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+    return apiCall<WhiteboardViewStats>(`/api/opsidian/views/stats${qs}`);
+  },
+};

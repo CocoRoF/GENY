@@ -25,6 +25,7 @@ import {
   Lightbulb,
   FolderKanban,
   Bookmark,
+  Inbox,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -42,6 +43,12 @@ import {
 } from 'lucide-react';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import CurationSettingsPanel from './CurationSettingsPanel';
+import InboxPanel from './InboxPanel';
+import {
+  attachmentMarkdownComponents,
+  preprocessAttachmentEmbeds,
+} from './AttachmentEmbed';
+import { uploadCaptureFile } from '@/lib/captureSources';
 import { useOpsidianShortcuts } from '../opsidian/useOpsidianShortcuts';
 import MarkdownToolbar, { useMarkdownEditorKeys } from '../opsidian/MarkdownToolbar';
 import QuickSwitcher from '../opsidian/QuickSwitcher';
@@ -53,6 +60,7 @@ import '../opsidian/opsidian.css';
 
 // ─── Constants ────────────────────────────────────────────────
 const CATEGORY_ICONS: Record<string, typeof File> = {
+  inbox: Inbox,
   daily: Calendar,
   topics: Bookmark,
   projects: FolderKanban,
@@ -61,6 +69,7 @@ const CATEGORY_ICONS: Record<string, typeof File> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
+  inbox: '#10b981',  // whiteboard P1 — fresh / unrefined captures
   daily: '#f59e0b',
   topics: '#3b82f6',
   projects: '#8b5cf6',
@@ -378,6 +387,14 @@ export default function UserOpsidianView() {
                   allFiles={files}
                 />
           )}
+          {viewMode === 'inbox' && (
+            <InboxPanel
+              onSelectFile={(fn) => {
+                handleSelectFile(fn);
+                setViewMode('editor');
+              }}
+            />
+          )}
           {viewMode === 'graph' && (
             <UnifiedGraphView nodes={graphNodes} edges={graphEdges} onSelectFile={handleSelectFile} />
           )}
@@ -420,7 +437,7 @@ function Sidebar({
   onSelectFile: (fn: string) => void;
   onSetSidebarCollapsed: (v: boolean) => void;
   onSetSidebarPanel: (p: 'files' | 'tags' | 'backlinks') => void;
-  onSetViewMode: (v: 'editor' | 'graph' | 'search') => void;
+  onSetViewMode: (v: 'editor' | 'graph' | 'search' | 'inbox') => void;
   onRefresh: () => void;
   onNewNote: () => void;
   onOpenCurationSettings: () => void;
@@ -472,6 +489,9 @@ function Sidebar({
         <div className="obs-sb-collapsed-icons">
           <button className={`obs-sb-icon-btn ${viewMode === 'editor' ? 'active' : ''}`} onClick={() => onSetViewMode('editor')} title={t('opsidian.editor')}>
             <FileText size={16} />
+          </button>
+          <button className={`obs-sb-icon-btn ${viewMode === 'inbox' ? 'active' : ''}`} onClick={() => onSetViewMode('inbox')} title="Whiteboard inbox">
+            <Inbox size={16} />
           </button>
           <button className={`obs-sb-icon-btn ${viewMode === 'graph' ? 'active' : ''}`} onClick={() => onSetViewMode('graph')} title={t('opsidian.graph')}>
             <GitGraph size={16} />
@@ -530,6 +550,9 @@ function Sidebar({
       <div className="obs-sb-view-modes">
         <button className={`obs-sb-view-btn ${viewMode === 'editor' ? 'active' : ''}`} onClick={() => onSetViewMode('editor')}>
           <FileText size={12} /> {t('opsidian.editor')}
+        </button>
+        <button className={`obs-sb-view-btn ${viewMode === 'inbox' ? 'active' : ''}`} onClick={() => onSetViewMode('inbox')} title="Whiteboard inbox — raw captures">
+          <Inbox size={12} /> Inbox
         </button>
         <button className={`obs-sb-view-btn ${viewMode === 'graph' ? 'active' : ''}`} onClick={() => onSetViewMode('graph')}>
           <GitGraph size={12} /> {t('opsidian.graph')}
@@ -836,8 +859,11 @@ function NoteEditor({
   const meta = fileDetail.metadata || {};
   const body = fileDetail.body ?? '';
 
-  // Process wikilinks for markdown rendering
-  const processedBody = body.replace(
+  // Pre-process attachment embeds (`![[file.png]]` → markdown image with
+  // attachment:// scheme) BEFORE wikilink rewriting so the leading `!`
+  // is consumed first and never leaks through as a stray character.
+  const bodyWithAttachments = preprocessAttachmentEmbeds(body);
+  const processedBody = bodyWithAttachments.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_match: string, target: string, alias: string) => {
       const display = alias || target;
@@ -953,8 +979,48 @@ function NoteEditor({
           />
         </div>
 
-        {/* Content textarea */}
-        <div style={{ flex: 1, padding: '0 32px 16px', maxWidth: 900, margin: '0 auto', width: '100%' }}>
+        {/* Content textarea — drop a file here to upload as attachment + insert wikilink */}
+        <div
+          style={{ flex: 1, padding: '0 32px 16px', maxWidth: 900, margin: '0 auto', width: '100%' }}
+          onDragOver={(e) => {
+            // Allow drop and show a subtle highlight cue.
+            if (e.dataTransfer?.types?.includes('Files')) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }
+          }}
+          onDrop={async (e) => {
+            const files = Array.from(e.dataTransfer?.files ?? []);
+            if (files.length === 0) return;
+            e.preventDefault();
+            for (const file of files) {
+              try {
+                const res = await uploadCaptureFile(file, { source: 'file_drop' });
+                const leaf = (res.attachment_path ?? '').replace(/^.*\//, '');
+                if (leaf) {
+                  // Splice the wikilink at the current cursor position.
+                  const ta = textareaRef.current;
+                  const insertion = `\n![[${leaf}]]\n`;
+                  if (ta) {
+                    const start = ta.selectionStart ?? editContent.length;
+                    const end = ta.selectionEnd ?? editContent.length;
+                    const next = editContent.slice(0, start) + insertion + editContent.slice(end);
+                    setEditContent(next);
+                    requestAnimationFrame(() => {
+                      ta.focus();
+                      ta.selectionStart = ta.selectionEnd = start + insertion.length;
+                    });
+                  } else {
+                    setEditContent(editContent + insertion);
+                  }
+                }
+              } catch (err) {
+                console.error('[whiteboard] drop upload failed', err);
+                alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }}
+        >
           <textarea
             ref={textareaRef}
             value={editContent}
@@ -1081,6 +1147,7 @@ function NoteEditor({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              ...attachmentMarkdownComponents,
               a: ({ href, children, ...props }) => {
                 if (href?.startsWith('wikilink://')) {
                   const target = decodeURIComponent(href.replace('wikilink://', ''));
