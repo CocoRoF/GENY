@@ -14,7 +14,7 @@ import type {
 // scope can render the InteractionEvent stream + dms/ index next to
 // the existing notes editor / graph / search views. The tab is
 // session-only (irrelevant on user/curator scope).
-export type ViewMode = 'editor' | 'graph' | 'search' | 'conversation';
+export type ViewMode = 'editor' | 'graph' | 'search' | 'conversation' | 'inbox';
 export type SidebarPanel = 'files' | 'tags' | 'backlinks';
 
 export interface OpsidianState {
