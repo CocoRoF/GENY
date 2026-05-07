@@ -69,14 +69,25 @@ export default function CaptureToolbar({
       style={{
         display: 'flex',
         flexWrap: 'wrap',
-        gap: 6,
-        padding: '6px 8px',
-        borderTop: '1px solid var(--obs-border, #2c2c2e)',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 20px',
         borderBottom: '1px solid var(--obs-border, #2c2c2e)',
         background: 'var(--obs-bg-secondary, rgba(255,255,255,0.02))',
       }}
       data-whiteboard-slot="capture-toolbar"
     >
+      <span
+        style={{
+          fontSize: 11,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+          color: 'var(--obs-text-muted, #8e8e93)',
+          marginRight: 4,
+        }}
+      >
+        Capture
+      </span>
       {sources.map((source) => (
         <CaptureButton
           key={source.id}
@@ -115,7 +126,7 @@ function CaptureButton({
     }
   };
 
-  const icon = source.icon ?? FALLBACK_ICONS[source.id] ?? <Upload size={14} />;
+  const icon = source.icon ?? FALLBACK_ICONS[source.id] ?? <Upload size={15} />;
 
   return (
     <button
@@ -126,10 +137,11 @@ function CaptureButton({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 6,
-        padding: '4px 10px',
-        fontSize: 12,
-        borderRadius: 6,
+        gap: 7,
+        padding: '6px 12px',
+        fontSize: 13,
+        fontWeight: 500,
+        borderRadius: 7,
         border: error
           ? '1px solid #ef4444'
           : '1px solid var(--obs-border, #2c2c2e)',
@@ -141,7 +153,7 @@ function CaptureButton({
         opacity: running ? 0.7 : 1,
       }}
     >
-      {running ? <Loader2 size={14} className="animate-spin" /> : icon}
+      {running ? <Loader2 size={15} className="animate-spin" /> : icon}
       <span>{source.label}</span>
     </button>
   );
