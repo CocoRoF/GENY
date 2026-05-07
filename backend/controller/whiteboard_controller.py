@@ -609,6 +609,18 @@ async def share_to_spotlight(
         note_kind=payload.note_kind,
         metadata=payload.metadata,
     )
+    # Whiteboard P2b — fire one [USER_SHARED] trigger so the VTuber
+    # acknowledges the share immediately. Best-effort: a trigger
+    # failure never breaks the share itself; the user still sees
+    # success and the SpotlightContextBlock will pick the item up
+    # on the next turn either way.
+    try:
+        from service.whiteboard.user_shared_trigger import (
+            fire_user_shared_trigger_async,
+        )
+        fire_user_shared_trigger_async(item)
+    except Exception:  # noqa: BLE001
+        logger.debug("USER_SHARED dispatch failed", exc_info=True)
     return {"item": item.to_dict()}
 
 

@@ -2070,6 +2070,20 @@ class AgentSession:
         ):
             _tail_blocks = list(_tail_blocks) + [HostMemoryToolsBlock()]
 
+        # Whiteboard P2b — inject the SpotlightContextBlock so every
+        # session sees the user's active spotlight items at prompt
+        # build time. Empty-render when no spotlights active, so the
+        # block costs nothing for sessions that never use the feature.
+        # Idempotent — never appended twice.
+        try:
+            from service.whiteboard.spotlight_block import SpotlightContextBlock
+        except Exception:  # noqa: BLE001
+            SpotlightContextBlock = None  # type: ignore[assignment]
+        if SpotlightContextBlock is not None and not any(
+            getattr(b, "name", "") == "whiteboard_spotlight" for b in _tail_blocks
+        ):
+            _tail_blocks = list(_tail_blocks) + [SpotlightContextBlock()]
+
         if self._persona_provider is not None:
             from service.persona import DynamicPersonaSystemBuilder
             system_builder: Any = DynamicPersonaSystemBuilder(
