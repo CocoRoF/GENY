@@ -49,6 +49,52 @@ class UserOpsidianManager:
         from service.utils.platform import DEFAULT_STORAGE_ROOT
         return DEFAULT_STORAGE_ROOT
 
+    # ── Whiteboard storage helpers ─────────────────────────────────
+    # These are deliberately thin wrappers around
+    # ``service.whiteboard.attachments`` so callers (controllers,
+    # ingestion endpoints, future organisers) don't need to know the
+    # vault layout themselves.
+
+    @property
+    def vault_root(self) -> str:
+        """Absolute path to the per-user vault directory."""
+        return self.memory_dir
+
+    def attachments_dir(self):
+        from service.whiteboard.attachments import attachments_dir
+        return attachments_dir(self.memory_dir)
+
+    def save_attachment(
+        self,
+        data: bytes,
+        *,
+        suggested_name: Optional[str] = None,
+        default_ext: str = "bin",
+    ) -> str:
+        from service.whiteboard.attachments import save_attachment
+        return save_attachment(
+            self.memory_dir,
+            data,
+            suggested_name=suggested_name,
+            default_ext=default_ext,
+        )
+
+    def read_attachment(self, relative_path: str) -> Optional[bytes]:
+        from service.whiteboard.attachments import read_attachment
+        return read_attachment(self.memory_dir, relative_path)
+
+    def list_attachments(self) -> List[str]:
+        from service.whiteboard.attachments import list_attachments
+        return list(list_attachments(self.memory_dir))
+
+    def delete_attachment(self, relative_path: str) -> bool:
+        from service.whiteboard.attachments import delete_attachment
+        return delete_attachment(self.memory_dir, relative_path)
+
+    def append_capture_log(self, entry: Dict[str, Any]) -> None:
+        from service.whiteboard.attachments import append_capture_log
+        append_capture_log(self.memory_dir, entry)
+
     def _initialize(self):
         """Build the per-user single-tenant `MemoryProvider`."""
         try:
