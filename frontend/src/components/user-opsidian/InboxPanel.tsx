@@ -137,6 +137,32 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
     [],
   );
 
+  // Click-to-browse — same code path as the toolbar's `file_drop`
+  // capture source, but invoked directly from the empty-state hero.
+  const handleBrowseClick = useCallback(async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = false;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      document.body.removeChild(input);
+      if (!file) return;
+      try {
+        await uploadCaptureFile(file, { source: 'file_drop' });
+        setInternalTick((n) => n + 1);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    });
+    document.body.appendChild(input);
+    input.click();
+  }, []);
+
+  const isEmpty = !loading && sortedItems.length === 0 && !error;
+
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
@@ -148,15 +174,24 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          padding: '12px 16px',
+          gap: 10,
+          padding: '14px 20px',
           borderBottom: '1px solid var(--obs-border, #2c2c2e)',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--obs-text, #d1d1d6)' }}>
-          📥 Inbox
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--obs-text, #d1d1d6)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span aria-hidden style={{ fontSize: 18 }}>📥</span>
+          Inbox
         </h2>
-        <span style={{ fontSize: 12, color: 'var(--obs-text-muted, #8e8e93)' }}>
+        <span
+          style={{
+            fontSize: 12,
+            color: 'var(--obs-text-muted, #8e8e93)',
+            padding: '2px 8px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+          }}
+        >
           {sortedItems.length} {sortedItems.length === 1 ? 'capture' : 'captures'}
         </span>
       </div>
@@ -165,11 +200,17 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
         style={{
           flex: 1,
           overflow: 'auto',
-          padding: 16,
+          padding: 20,
           position: 'relative',
-          outline: dragActive ? '2px dashed #10b981' : 'none',
+          // Only show a panel-wide outline while dragging AND there
+          // is already content. The empty state hero below is its
+          // own full-size dropzone and renders its own dragActive
+          // visual — a panel-wide outline on top would look stacked.
+          outline:
+            dragActive && !isEmpty ? '2px dashed #10b981' : 'none',
           outlineOffset: -8,
-          background: dragActive ? 'rgba(16,185,129,0.04)' : undefined,
+          background:
+            dragActive && !isEmpty ? 'rgba(16,185,129,0.04)' : undefined,
           transition: 'background 120ms',
         }}
       >
@@ -192,23 +233,74 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
             {error}
           </div>
         )}
-        {!loading && sortedItems.length === 0 && !error && (
-          <div
+        {isEmpty && (
+          <button
+            type="button"
+            onClick={handleBrowseClick}
             style={{
-              padding: '24px 12px',
+              // Take the entire remaining panel height so the
+              // dropzone affordance is the primary call-to-action.
+              minHeight: 'min(calc(100vh - 240px), 520px)',
+              width: '100%',
+              padding: 32,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 18,
               textAlign: 'center',
-              color: 'var(--obs-text-muted, #8e8e93)',
-              fontSize: 13,
-              border: '1px dashed var(--obs-border, #2c2c2e)',
-              borderRadius: 8,
+              borderRadius: 14,
+              border: dragActive
+                ? '2px dashed #10b981'
+                : '2px dashed rgba(16,185,129,0.45)',
+              background: dragActive
+                ? 'rgba(16,185,129,0.10)'
+                : 'rgba(16,185,129,0.025)',
+              color: 'var(--obs-text, #d1d1d6)',
+              cursor: 'pointer',
+              transition:
+                'background 120ms, border-color 120ms, transform 80ms',
+              fontFamily: 'inherit',
             }}
           >
-            <div style={{ marginBottom: 8 }}>
-              <Upload size={28} />
+            <div
+              style={{
+                width: 88,
+                height: 88,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(16,185,129,0.12)',
+                color: '#10b981',
+                transform: dragActive ? 'scale(1.08)' : 'scale(1)',
+                transition: 'transform 120ms',
+              }}
+            >
+              <Upload size={42} />
             </div>
-            No captures yet. Drop a file, paste an image, or use the
-            <strong> Capture </strong> buttons above.
-          </div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: 'var(--obs-text, #d1d1d6)',
+              }}
+            >
+              {dragActive ? 'Drop to upload' : 'Drop a file here'}
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                lineHeight: 1.6,
+                color: 'var(--obs-text-muted, #8e8e93)',
+                maxWidth: 460,
+              }}
+            >
+              or click anywhere in this area to pick one. You can also
+              paste an image, or use the <strong>Upload</strong> button
+              above.
+            </div>
+          </button>
         )}
         <div
           style={{
