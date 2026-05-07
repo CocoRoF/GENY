@@ -12,7 +12,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Clock, Image as ImageIcon, Trash2, Type, Upload } from 'lucide-react';
 import {
   whiteboardApi,
@@ -29,7 +29,7 @@ export interface InboxPanelProps {
   sessionId?: string | null;
 }
 
-const TYPE_ICON: Record<string, JSX.Element> = {
+const TYPE_ICON: Record<string, ReactNode> = {
   screenshot: <ImageIcon size={12} />,
   image: <ImageIcon size={12} />,
   text: <Type size={12} />,
