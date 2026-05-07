@@ -24,6 +24,7 @@ from .spotlight_context import (
     PERSONA_GUIDANCE as SPOTLIGHT_PERSONA_GUIDANCE,
     render_spotlight_section,
 )
+from .vision_capability import is_vision_capable
 
 logger = getLogger(__name__)
 
@@ -44,8 +45,18 @@ class SpotlightContextBlock(PromptBlock):
         session_id = getattr(state, "session_id", "") or ""
         if not session_id:
             return ""
+        # Vision branching (P3) — skip image content-block emission
+        # for models we can't confidently say accept images. The text
+        # block always renders, so non-vision models still see "the
+        # user shared X" — they just don't get the bytes.
         try:
-            result = render_spotlight_section(session_id)
+            vision_ok = is_vision_capable(getattr(state, "model", None))
+        except Exception:  # noqa: BLE001
+            vision_ok = False
+        try:
+            result = render_spotlight_section(
+                session_id, vision_capable=vision_ok
+            )
         except Exception:  # noqa: BLE001
             logger.debug("SpotlightContextBlock render failed", exc_info=True)
             return ""
