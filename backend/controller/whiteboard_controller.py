@@ -259,6 +259,16 @@ def _persist_capture(
     event.metadata.setdefault("draft_note", draft_filename)
     if attachments_meta:
         event.metadata.setdefault("attachments", attachments_meta)
+
+    # P4 — fire the post-capture hook for this CaptureType (e.g.
+    # the `_describe_image_hook` that captions screenshots). Best-
+    # effort: a missing event loop or hook failure never blocks the
+    # capture itself.
+    try:
+        from service.whiteboard.post_capture_hook import fire_and_forget
+        fire_and_forget(event, draft_filename)
+    except Exception:  # noqa: BLE001
+        logger.debug("post-capture hook dispatch failed", exc_info=True)
     return event
 
 
