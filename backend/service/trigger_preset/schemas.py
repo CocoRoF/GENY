@@ -1,33 +1,27 @@
 """Pydantic schemas for Trigger Presets.
 
-A Trigger Preset replaces the hard-coded thinking-trigger ladder
-(:mod:`service.vtuber.thinking_trigger`) with a configurable bundle that
-can be swapped per VTuber session. The shape mirrors the *Environment*
-preset surface (CRUD-friendly, JSON-per-id on disk) so the same UI
-patterns that manage env presets can manage trigger presets.
+Cycle 20260507 redesign — collapsed the previous "phases × categories"
+two-tier model into a single tier:
 
-### Runtime semantics
+  Category  =  "발화 상황" — when this fires (conditions) + which
+                prompts are in this situation (with sub-weights).
+  Prompt    =  natural-language content only. The system generates
+                the [TRIGGER:<id>] / [autonomous_signal: …] tags at
+                fire time so operators never write them by hand.
 
-When a VTuber session has a preset attached the trigger service:
+Runtime semantics::
 
-1. Reads ``timing`` to drive idle thresholds + adaptive backoff.
-2. Picks the *phase* whose ``[min_consecutive, max_consecutive]`` range
-   covers the session's consecutive-trigger count.
-3. Filters that phase's ``events`` by each linked category's
-   ``conditions`` (sub-worker busy/idle, time-window, …), drops events
-   whose conditions don't hold *now*, normalises remaining ``weight``
-   values to 100, and runs a single roulette roll.
-4. Pulls a random prompt from the chosen category's
-   ``prompts[locale]``; falls back to ``"en"`` if the active locale
-   has no entries.
+  ① find every Category whose conditions hold under the current
+     scenario (consec count, sub-worker state, time window, cooldown)
+  ② weighted roulette across matching categories (Category.weight)
+     to pick a single situation
+  ③ weighted roulette across that category's prompts
+     (TriggerPromptVariant.weight) to pick the exact wording
+  ④ render: ``[KIND_TRIGGER:cat_id] [autonomous_signal: …] {content}``
 
-### Extensibility
-
-Both ``phases`` and ``categories`` are free lists — operators add their
-own entries (custom phases, custom categories, extra prompt variants)
-without code changes. ``kind='thinking'|'activity'`` controls the
-``[THINKING_TRIGGER]`` / ``[ACTIVITY_TRIGGER]`` family tag, which the
-agent's reflection-metadata builder reads downstream.
+This collapses the old (phase, category, event) triple into a flat
+list of categories with consec range as just-another-condition, which
+is what operators want when authoring a preset.
 """
 
 from __future__ import annotations
@@ -44,8 +38,7 @@ class TriggerTiming(BaseModel):
     """Idle-window timing knobs for the trigger loop.
 
     Defaults match the historical hardcoded constants in
-    :mod:`service.vtuber.thinking_trigger` — a preset that is left
-    untouched on save behaves identically to the no-preset path.
+    :mod:`service.vtuber.thinking_trigger`.
     """
 
     base_idle_seconds: float = Field(120.0, ge=5.0)
@@ -76,132 +69,134 @@ TriggerKind = Literal["thinking", "activity"]
 TimeWindow = Literal["morning", "afternoon", "evening", "night"]
 
 
-class CategoryConditions(BaseModel):
-    """Optional gates evaluated at fire-time before the roulette pick.
+class TriggerPromptVariant(BaseModel):
+    """One natural-language prompt inside a category.
 
-    All fields are advisory — leaving every gate empty keeps the
-    category eligible whenever its phase is active. The runtime
-    evaluates each gate in order and drops the event entry as soon as
-    any gate fails for the current session/clock.
+    The runtime picks one variant per fire via weighted random over
+    ``weight``; weights are *within-category* (a separate roulette runs
+    across categories first).
+
+    ``content`` is keyed by locale (``en``, ``ko``, …). Each value is
+    the **raw natural language**: no tag prefixes, no ``autonomous_signal``,
+    no metadata. Those are auto-generated at fire time from the parent
+    category's metadata so the operator only has to write words.
     """
 
-    requires_sub_worker_busy: bool = False
-    """Only fire while the linked Sub-Worker session is executing."""
-
-    requires_sub_worker_idle: bool = False
-    """Only fire while the linked Sub-Worker is idle (and exists)."""
-
-    time_window: Optional[TimeWindow] = None
-    """Fire only when KST hour matches the named window."""
-
-    min_consecutive: Optional[int] = Field(None, ge=0)
-    """Floor on the session's consecutive-trigger count."""
-
-    max_consecutive: Optional[int] = Field(None, ge=0)
-    """Ceiling on the session's consecutive-trigger count."""
-
-
-class TriggerCategory(BaseModel):
-    """One firable bucket — a labelled tag + locale-specific prompts."""
-
-    id: str = Field(..., min_length=1, max_length=64)
-    label: str = Field("", max_length=120)
-    kind: TriggerKind = "thinking"
-    conditions: CategoryConditions = Field(default_factory=CategoryConditions)
-    cooldown_seconds: float = Field(0.0, ge=0.0)
-    prompts: Dict[str, List[str]] = Field(default_factory=dict)
+    weight: float = Field(1.0, ge=0.0)
+    content: Dict[str, str] = Field(
+        default_factory=dict,
+        description="locale → natural-language text",
+    )
 
     @model_validator(mode="after")
-    def _ensure_locale_lists(self) -> "TriggerCategory":
-        # Coerce single-string locales into single-element lists so the
-        # FE can post {"en": "foo"} for trivial single-prompt cases.
-        clean: Dict[str, List[str]] = {}
-        for locale, value in self.prompts.items():
-            if isinstance(value, str):
-                clean[locale] = [value]
-            elif isinstance(value, list):
-                clean[locale] = [str(v) for v in value if str(v).strip()]
-            else:
-                raise ValueError(
-                    f"prompts[{locale!r}] must be a string or list of strings"
-                )
-        self.prompts = clean
+    def _trim_content(self) -> "TriggerPromptVariant":
+        # Coerce values to strings; drop blank locales.
+        clean: Dict[str, str] = {}
+        for locale, value in self.content.items():
+            text = str(value).strip()
+            if text:
+                clean[locale] = text
+        self.content = clean
         return self
 
 
-class PhaseEvent(BaseModel):
-    """One slot in a phase's roulette table."""
+class TriggerCategory(BaseModel):
+    """One firable situation.
 
-    category_id: str = Field(..., min_length=1)
-    weight: float = Field(1.0, ge=0.0)
+    A category bundles three things:
 
-
-class TriggerPhase(BaseModel):
-    """A consecutive-count bracket plus a weighted event list.
-
-    ``max_consecutive=None`` means "and above" — the open-ended top
-    bracket. Phases are matched in list order with the first range
-    covering the session's count winning, so place narrower ranges
-    earlier. (Validation also runs an order/overlap check.)
+      • **Identity** — id (used in the auto-generated tag), label, kind
+      • **Conditions** — when this situation applies. consec range,
+        sub-worker state, time window, per-category cooldown. All
+        optional; absence = "no restriction on this axis".
+      • **Prompts** — natural-language variants. The runtime renders
+        ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}`` using
+        the category's metadata, so prompt content is operator-friendly
+        plain text.
     """
 
+    # ── Identity ──────────────────────────────────────────────
     id: str = Field(..., min_length=1, max_length=64)
     label: str = Field("", max_length=120)
-    min_consecutive: int = Field(..., ge=0)
-    max_consecutive: Optional[int] = Field(None, ge=0)
-    events: List[PhaseEvent] = Field(default_factory=list)
+    kind: TriggerKind = "thinking"
+
+    # ── Category-level weight ─────────────────────────────────
+    # Drives stage-1 roulette across matching categories.
+    weight: float = Field(1.0, ge=0.0)
+
+    # ── Conditions ────────────────────────────────────────────
+    consec_min: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Lower bound on the session's consecutive-trigger count. "
+            "Default 0 = no lower bound."
+        ),
+    )
+    consec_max: Optional[int] = Field(
+        None,
+        ge=0,
+        description=(
+            "Upper bound on the consecutive-trigger count. "
+            "``None`` = no upper bound (open-ended)."
+        ),
+    )
+    requires_sub_worker_busy: bool = False
+    requires_sub_worker_idle: bool = False
+    time_window: Optional[TimeWindow] = None
+    cooldown_seconds: float = Field(0.0, ge=0.0)
+
+    # ── Output formatting ─────────────────────────────────────
+    autonomous_signal: str = Field(
+        "",
+        description=(
+            "Optional content to inject as ``[autonomous_signal: …]``. "
+            "Set to empty string to omit. Mostly an internal hint for "
+            "the agent — operators rarely need to touch this."
+        ),
+    )
+
+    # ── Prompts ───────────────────────────────────────────────
+    prompts: List[TriggerPromptVariant] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _enforce_max_ge_min(self) -> "TriggerPhase":
+    def _validate_consec_range(self) -> "TriggerCategory":
         if (
-            self.max_consecutive is not None
-            and self.max_consecutive < self.min_consecutive
+            self.consec_max is not None
+            and self.consec_max < self.consec_min
         ):
             raise ValueError(
-                f"phase {self.id!r}: max_consecutive "
-                f"({self.max_consecutive}) < min_consecutive "
-                f"({self.min_consecutive})"
+                f"category {self.id!r}: consec_max ({self.consec_max}) "
+                f"< consec_min ({self.consec_min})"
             )
         return self
 
 
-# ── Manifest (full preset payload) ────────────────────────────────
+# ── Manifest ──────────────────────────────────────────────────────
 
 
 class TriggerPresetManifest(BaseModel):
-    """Full body of a trigger preset (everything except outer metadata).
+    """Full body of a trigger preset.
 
-    The same model is used both as request payload (PATCH/PUT) and as
-    the on-disk dict — controllers serialise via ``model_dump`` and
-    re-validate on read.
+    Cycle 20260507 — phases removed. consec range now lives on each
+    category as a regular condition. The runtime fires by:
+
+      1. matching → all categories whose conditions hold
+      2. category roulette by ``weight``
+      3. prompt roulette by per-prompt ``weight`` inside the picked cat
+      4. render with auto-generated tag prefix
     """
 
     enabled: bool = True
     timing: TriggerTiming = Field(default_factory=TriggerTiming)
     time_boundaries: TimeBoundaries = Field(default_factory=TimeBoundaries)
-    phases: List[TriggerPhase] = Field(default_factory=list)
     categories: List[TriggerCategory] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_internal_consistency(self) -> "TriggerPresetManifest":
-        # Unique ids
-        cat_ids = [c.id for c in self.categories]
-        if len(cat_ids) != len(set(cat_ids)):
+    def _validate_unique_ids(self) -> "TriggerPresetManifest":
+        ids = [c.id for c in self.categories]
+        if len(ids) != len(set(ids)):
             raise ValueError("category ids must be unique")
-        phase_ids = [p.id for p in self.phases]
-        if len(phase_ids) != len(set(phase_ids)):
-            raise ValueError("phase ids must be unique")
-
-        # Every event must reference a known category
-        known = set(cat_ids)
-        for phase in self.phases:
-            for ev in phase.events:
-                if ev.category_id not in known:
-                    raise ValueError(
-                        f"phase {phase.id!r} references unknown "
-                        f"category_id={ev.category_id!r}"
-                    )
-
         return self
 
 
@@ -209,20 +204,7 @@ class TriggerPresetManifest(BaseModel):
 
 
 class TriggerPresetRecord(BaseModel):
-    """The full on-disk record for one preset.
-
-    JSON layout::
-
-        {
-          "id": "ab12...",
-          "name": "내 VTuber 기본",
-          "description": "...",
-          "tags": ["preset"],
-          "created_at": "2026-05-06T...",
-          "updated_at": "2026-05-06T...",
-          "manifest": { ...TriggerPresetManifest... }
-        }
-    """
+    """The full on-disk record for one preset."""
 
     id: str
     name: str
@@ -237,15 +219,6 @@ class TriggerPresetRecord(BaseModel):
 
 
 class CreateTriggerPresetRequest(BaseModel):
-    """``POST /api/trigger-presets`` payload.
-
-    ``manifest`` is optional; when omitted the service seeds a fresh
-    record from :func:`service.trigger_preset.defaults.default_manifest`
-    so the FE can hand the operator a working baseline immediately.
-    ``clone_from`` deep-copies an existing preset's manifest under a
-    new id (mirrors environment duplicate semantics).
-    """
-
     name: str = Field(..., min_length=1, max_length=120)
     description: str = ""
     tags: List[str] = Field(default_factory=list)
@@ -265,16 +238,12 @@ class CreateTriggerPresetRequest(BaseModel):
 
 
 class UpdateTriggerPresetRequest(BaseModel):
-    """``PATCH /api/trigger-presets/{id}`` — top-level metadata only."""
-
     name: Optional[str] = Field(None, min_length=1, max_length=120)
     description: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
 class ReplaceManifestRequest(BaseModel):
-    """``PUT /api/trigger-presets/{id}/manifest`` — full body replacement."""
-
     manifest: TriggerPresetManifest
 
 
@@ -283,8 +252,6 @@ class DuplicateTriggerPresetRequest(BaseModel):
 
 
 class TriggerPresetSummaryResponse(BaseModel):
-    """List-view summary card."""
-
     id: str
     name: str
     description: str
@@ -292,8 +259,10 @@ class TriggerPresetSummaryResponse(BaseModel):
     created_at: str
     updated_at: str
     enabled: bool
-    phase_count: int
     category_count: int
+    # Total number of prompt variants across all categories — a quick
+    # signal of "how rich is this preset" for the list view.
+    prompt_count: int
 
 
 class TriggerPresetListResponse(BaseModel):
@@ -314,17 +283,25 @@ class CreateTriggerPresetResponse(BaseModel):
     id: str
 
 
+# ── Backwards-compatibility aliases ───────────────────────────────
+# Old (phase × category × event) callers may still import these
+# names; we re-export the new TriggerCategory under the conditions
+# name so legacy controllers don't break during the FE migration.
+# Unused once the FE catches up — flagged for removal next cycle.
+
+CategoryConditions = TriggerCategory  # legacy import alias
+TriggerPhase = TriggerCategory  # ditto
+
+
 __all__ = [
-    "CategoryConditions",
-    "PhaseEvent",
     "TimeBoundaries",
+    "TimeWindow",
     "TriggerCategory",
     "TriggerKind",
-    "TriggerPhase",
     "TriggerPresetManifest",
     "TriggerPresetRecord",
+    "TriggerPromptVariant",
     "TriggerTiming",
-    "TimeWindow",
     # Controller
     "CreateTriggerPresetRequest",
     "CreateTriggerPresetResponse",
@@ -334,4 +311,33 @@ __all__ = [
     "TriggerPresetListResponse",
     "TriggerPresetSummaryResponse",
     "UpdateTriggerPresetRequest",
+    # Legacy aliases (delete next cycle)
+    "CategoryConditions",
+    "TriggerPhase",
 ]
+
+
+# ── Helpers ───────────────────────────────────────────────────────
+
+
+def render_prompt(category: TriggerCategory, content: str) -> str:
+    """Render a fully-formed prompt string from a category + content.
+
+    The runtime calls this *exactly once* per fire. Operators don't
+    have to think about the tag format — only the natural language —
+    because every prompt that goes out is constructed here::
+
+        [{KIND}_TRIGGER:{cat.id}] [autonomous_signal: {signal}] {content}
+
+    The ``autonomous_signal`` chunk is omitted when the category leaves
+    that field empty, matching the historical "fun_*" / "activity_*"
+    prompt shape.
+    """
+    kind_token = "ACTIVITY_TRIGGER" if category.kind == "activity" else "THINKING_TRIGGER"
+    head = f"[{kind_token}:{category.id}]"
+    parts: List[str] = [head]
+    signal = (category.autonomous_signal or "").strip()
+    if signal:
+        parts.append(f"[autonomous_signal: {signal}]")
+    parts.append(content.strip())
+    return " ".join(parts)

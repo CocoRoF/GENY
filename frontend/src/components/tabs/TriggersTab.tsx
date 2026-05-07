@@ -307,11 +307,11 @@ function PresetCard({
       description={summary.description || ' '}
       badges={[
         {
-          label: `${summary.phase_count} phase`,
+          label: `${summary.category_count} 상황`,
           tone: 'info',
         },
         {
-          label: `${summary.category_count} category`,
+          label: `${summary.prompt_count} 프롬프트`,
           tone: 'neutral',
         },
         ...(summary.enabled

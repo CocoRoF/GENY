@@ -32,6 +32,7 @@ import {
 } from 'react';
 import {
   Clock,
+  MessageSquare,
   Save,
   Sun,
   Tag,
@@ -41,7 +42,6 @@ import {
 import { RegistryFormShell } from '@/components/env_management/registry';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
 import type {
-  CategoryConditions,
   TriggerKind,
   TriggerPresetDetail,
   TriggerPresetManifest,
@@ -52,12 +52,12 @@ import type {
 import TriggerSectionBar, {
   type TriggerSectionDef,
 } from './TriggerSectionBar';
-import TriggersSection from './TriggersSection';
+import CategoriesSection from './CategoriesSection';
 import { currentTimeWindow, type RuntimeScenario } from './triggerSimulator';
 
 // ── Section identifiers ──────────────────────────────────────────
 
-type SectionId = 'metadata' | 'timing' | 'time_boundaries' | 'triggers';
+type SectionId = 'metadata' | 'timing' | 'time_boundaries' | 'categories';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -77,7 +77,6 @@ function emptyManifest(): TriggerPresetManifest {
       evening_start: 18,
       night_start: 22,
     },
-    phases: [],
     categories: [],
   };
 }
@@ -185,23 +184,19 @@ export default function TriggerPresetEditor({
   );
 
   const validation = useMemo(() => {
-    const known = new Set(manifest.categories.map((c) => c.id));
-    const orphanRefs: string[] = [];
-    for (const p of manifest.phases) {
-      for (const ev of p.events) {
-        if (!known.has(ev.category_id)) orphanRefs.push(ev.category_id);
-      }
-    }
+    const noPrompts = manifest.categories.every(
+      (c) => c.prompts.length === 0,
+    );
+    const dupIds =
+      manifest.categories.length !==
+      new Set(manifest.categories.map((c) => c.id)).size;
     return {
       metadata: !name.trim(),
       timing:
         manifest.timing.base_idle_seconds <= 0 ||
         manifest.timing.max_idle_seconds < manifest.timing.base_idle_seconds,
       time_boundaries: false,
-      triggers:
-        manifest.phases.length === 0 ||
-        orphanRefs.length > 0 ||
-        manifest.phases.every((p) => p.events.length === 0),
+      categories: manifest.categories.length === 0 || noPrompts || dupIds,
     };
   }, [manifest, name]);
 
@@ -252,12 +247,11 @@ export default function TriggerPresetEditor({
 
   // ── Section definitions for the top bar ───────────────────────
 
-  const triggerCount = useMemo(() => {
-    // Count distinct trigger definitions (categories) — that's the
-    // operator-facing notion. Phase counts are an internal detail
-    // visible only inside the trigger section.
-    return manifest.categories.length;
-  }, [manifest.categories]);
+  const categoryCount = manifest.categories.length;
+  const promptCount = useMemo(
+    () => manifest.categories.reduce((s, c) => s + c.prompts.length, 0),
+    [manifest.categories],
+  );
 
   const sections: TriggerSectionDef<SectionId>[] = useMemo(
     () => [
@@ -282,15 +276,15 @@ export default function TriggerPresetEditor({
         hint: '아침 / 오후 / 저녁 / 밤 시작 시각',
       },
       {
-        id: 'triggers',
-        label: '트리거',
-        icon: Zap,
-        hint: '상황별 발화 트리거 — 가중치 / 조건 / 프롬프트',
-        badge: `${triggerCount}개`,
-        hasIssue: validation.triggers,
+        id: 'categories',
+        label: '카테고리',
+        icon: MessageSquare,
+        hint: '발화 상황 — 조건 + 프롬프트. 한 카드에서 모든 게 편집됩니다.',
+        badge: `${categoryCount}개 · ${promptCount}프롬프트`,
+        hasIssue: validation.categories,
       },
     ],
-    [triggerCount, validation.metadata, validation.timing, validation.triggers],
+    [categoryCount, promptCount, validation.metadata, validation.timing, validation.categories],
   );
 
   const activeSection = sections.find((s) => s.id === section) ?? sections[0];
@@ -383,8 +377,8 @@ export default function TriggerPresetEditor({
         />
       )}
 
-      {section === 'triggers' && (
-        <TriggersSection
+      {section === 'categories' && (
+        <CategoriesSection
           manifest={manifest}
           scenario={scenario}
           onScenarioChange={setScenario}
@@ -718,4 +712,4 @@ function HourField({
 }
 
 // Re-export types for callers
-export type { CategoryConditions, TimeWindow, TriggerKind };
+export type { TimeWindow, TriggerKind };

@@ -1,19 +1,26 @@
 /**
  * Trigger preset runtime simulator — pure helpers shared by the
- * editor's phase view + scenario bar.
+ * editor's category view + scenario bar.
  *
- * This is the single source of truth for "what would fire under
- * scenario X?" and is kept in *exact* lockstep with the backend's
- * :func:`_category_eligible` / :func:`_roulette` so the operator's
- * preview matches the live runtime decision.
+ * This is the single source of truth for "what fires under scenario
+ * X?" and is kept in *exact* lockstep with the backend's
+ * :func:`_category_eligible` + two-stage roulette in
+ * :mod:`service.vtuber.thinking_trigger`.
+ *
+ * Two-stage runtime (categories-only schema, cycle 20260507):
+ *
+ *   ① Find every Category whose conditions hold under the scenario
+ *      (consec range + sub-worker state + time window + cooldown).
+ *   ② Stage-1 roulette across matching categories by ``Category.weight``
+ *      → one situation wins.
+ *   ③ Stage-2 roulette across that category's prompts by per-prompt
+ *      ``weight`` → one wording wins.
+ *   ④ Render: ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}``
  */
 
 import type {
-  CategoryConditions,
-  PhaseEvent,
   TimeWindow,
   TriggerCategory,
-  TriggerPhase,
   TriggerPresetManifest,
 } from '@/types/triggerPreset';
 
@@ -22,52 +29,50 @@ export type SubWorkerState = 'busy' | 'idle' | 'unlinked';
 
 /** Holds every input the runtime's condition gate reads. */
 export interface RuntimeScenario {
-  /** Consecutive-trigger count for this session. Drives phase pick + min/max gates. */
   consecutive: number;
-  /** Linked Sub-Worker state. */
   subWorker: SubWorkerState;
-  /** Active time window (mapped from boundaries elsewhere). */
   timeWindow: TimeWindow;
   /**
-   * Whether to honour per-category cooldown gates. Off in the editor by
-   * default — the runtime cooldown depends on per-session fire history,
-   * not anything the operator can preview deterministically.
+   * Whether to honour per-category cooldown gates. Off in the editor
+   * by default — the runtime cooldown depends on per-session fire
+   * history, not anything the operator can preview deterministically.
    */
   honourCooldowns: boolean;
 }
 
 export interface BlockedReason {
   code:
+    | 'consec_below'
+    | 'consec_above'
     | 'sub_worker_busy_required'
     | 'sub_worker_idle_required'
     | 'wrong_time_window'
-    | 'below_min_consecutive'
-    | 'above_max_consecutive'
     | 'cooldown'
-    | 'unknown_category';
-  /** Korean-localised explanation for the chip / row. */
+    | 'no_prompts'
+    | 'zero_weight';
   message: string;
 }
 
-export interface SimulatedEvent {
-  event: PhaseEvent;
-  category: TriggerCategory | null;
-  /** When non-null, this event is filtered out of the roulette. */
+export interface SimulatedCategory {
+  category: TriggerCategory;
+  /** When non-null, this category is filtered out. */
   blocked: BlockedReason | null;
-  /** Probability under the current scenario. 0 if blocked. */
+  /**
+   * Probability under the current scenario, expressed as a percentage.
+   * 0 if blocked. Sum across non-blocked categories is 100.
+   */
   effectivePct: number;
 }
 
-export interface PhaseSimulation {
-  phase: TriggerPhase;
-  /** True when this phase's range covers the scenario's consecutive count. */
-  matchesScenario: boolean;
-  events: SimulatedEvent[];
-  /** Sum of weights of events that survived the filter (drives normalisation). */
-  effectiveTotalWeight: number;
+export interface ScenarioSimulation {
+  /** Every category, ordered as in the manifest, with eligibility. */
+  categories: SimulatedCategory[];
+  /** Sum of weights of surviving categories. */
+  totalEligibleWeight: number;
 }
 
-/** Map an hour-of-day to a TimeWindow given the manifest's boundaries. */
+// ── Helpers ──────────────────────────────────────────────────────
+
 export function timeWindowForHour(
   hour: number,
   bounds: TriggerPresetManifest['time_boundaries'],
@@ -84,57 +89,50 @@ export function timeWindowForHour(
   return 'night';
 }
 
-/** Map "current KST hour" via the manifest. */
 export function currentTimeWindow(
   manifest: TriggerPresetManifest,
   nowDate: Date = new Date(),
 ): TimeWindow {
-  // Approximate KST as UTC+9 — the runtime uses ``service.utils.utils.now_kst``
-  // which is real KST. For the editor preview the small drift across DST
-  // borders (none in KR) is irrelevant.
   const utcHour = nowDate.getUTCHours();
   const kstHour = (utcHour + 9) % 24;
   return timeWindowForHour(kstHour, manifest.time_boundaries);
 }
 
-/** First phase whose [min, max] range covers ``count``. Mirrors backend. */
-export function selectPhase(
-  manifest: TriggerPresetManifest,
-  count: number,
-): TriggerPhase | null {
-  for (const phase of manifest.phases) {
-    if (count < phase.min_consecutive) continue;
-    if (
-      phase.max_consecutive !== null &&
-      phase.max_consecutive !== undefined &&
-      count > phase.max_consecutive
-    ) {
-      continue;
-    }
-    return phase;
-  }
-  return null;
-}
-
 /**
  * Evaluate one category's condition gate against the scenario.
- *
- * Mirrors :func:`service.vtuber.thinking_trigger._category_eligible`
- * with one editor-side caveat: per-category cooldown is opt-in via
- * ``honourCooldowns`` because the operator can't reasonably simulate
- * runtime cooldown windows from inside the editor.
+ * Mirrors :func:`service.vtuber.thinking_trigger._category_eligible`.
+ * Cooldown is intentionally ignored unless ``honourCooldowns`` is
+ * true — see :class:`RuntimeScenario`.
  */
 export function evaluateConditions(
-  conditions: CategoryConditions,
+  category: TriggerCategory,
   scenario: RuntimeScenario,
 ): BlockedReason | null {
-  if (conditions.requires_sub_worker_busy && scenario.subWorker !== 'busy') {
+  if (scenario.consecutive < category.consec_min) {
+    return {
+      code: 'consec_below',
+      message: `최소 연속 트리거 ${category.consec_min}회 필요 (현재 ${scenario.consecutive}회)`,
+    };
+  }
+  if (
+    category.consec_max !== null &&
+    scenario.consecutive > category.consec_max
+  ) {
+    return {
+      code: 'consec_above',
+      message: `최대 연속 트리거 ${category.consec_max}회 초과 (현재 ${scenario.consecutive}회)`,
+    };
+  }
+  if (
+    category.requires_sub_worker_busy &&
+    scenario.subWorker !== 'busy'
+  ) {
     return {
       code: 'sub_worker_busy_required',
       message: 'Sub-Worker가 작업 중일 때만 발사',
     };
   }
-  if (conditions.requires_sub_worker_idle) {
+  if (category.requires_sub_worker_idle) {
     if (scenario.subWorker !== 'idle') {
       return {
         code: 'sub_worker_idle_required',
@@ -146,33 +144,12 @@ export function evaluateConditions(
     }
   }
   if (
-    conditions.time_window !== null &&
-    conditions.time_window !== undefined &&
-    conditions.time_window !== scenario.timeWindow
+    category.time_window !== null &&
+    category.time_window !== scenario.timeWindow
   ) {
     return {
       code: 'wrong_time_window',
-      message: `${conditions.time_window} 시간대에만 발사 (현재: ${scenario.timeWindow})`,
-    };
-  }
-  if (
-    conditions.min_consecutive !== null &&
-    conditions.min_consecutive !== undefined &&
-    scenario.consecutive < conditions.min_consecutive
-  ) {
-    return {
-      code: 'below_min_consecutive',
-      message: `최소 연속 트리거 ${conditions.min_consecutive}회 필요`,
-    };
-  }
-  if (
-    conditions.max_consecutive !== null &&
-    conditions.max_consecutive !== undefined &&
-    scenario.consecutive > conditions.max_consecutive
-  ) {
-    return {
-      code: 'above_max_consecutive',
-      message: `최대 연속 트리거 ${conditions.max_consecutive}회 초과`,
+      message: `${category.time_window} 시간대에만 발사 (현재: ${scenario.timeWindow})`,
     };
   }
   return null;
@@ -183,23 +160,33 @@ export function describeConditions(
   category: TriggerCategory,
 ): { label: string; tone: 'info' | 'warn' | 'neutral' }[] {
   const out: { label: string; tone: 'info' | 'warn' | 'neutral' }[] = [];
-  const c = category.conditions;
-  if (c.requires_sub_worker_busy) {
+
+  if (category.consec_min > 0 || category.consec_max !== null) {
+    const min = category.consec_min;
+    const max = category.consec_max;
+    let label: string;
+    if (min === max) {
+      label = `consec = ${min}`;
+    } else if (max === null) {
+      label = `consec ≥ ${min}`;
+    } else if (min === 0) {
+      label = `consec ≤ ${max}`;
+    } else {
+      label = `consec ${min}~${max}`;
+    }
+    out.push({ label, tone: 'info' });
+  }
+
+  if (category.requires_sub_worker_busy) {
     out.push({ label: 'Sub-Worker busy', tone: 'warn' });
   }
-  if (c.requires_sub_worker_idle) {
+  if (category.requires_sub_worker_idle) {
     out.push({ label: 'Sub-Worker idle', tone: 'warn' });
   }
-  if (c.time_window) {
-    out.push({ label: `${c.time_window} 시간대`, tone: 'info' });
+  if (category.time_window) {
+    out.push({ label: `${category.time_window} 시간대`, tone: 'info' });
   }
-  if (typeof c.min_consecutive === 'number') {
-    out.push({ label: `consec ≥ ${c.min_consecutive}`, tone: 'info' });
-  }
-  if (typeof c.max_consecutive === 'number') {
-    out.push({ label: `consec ≤ ${c.max_consecutive}`, tone: 'info' });
-  }
-  if (category.cooldown_seconds && category.cooldown_seconds > 0) {
+  if (category.cooldown_seconds > 0) {
     out.push({
       label: `쿨다운 ${category.cooldown_seconds}s`,
       tone: 'neutral',
@@ -209,97 +196,74 @@ export function describeConditions(
 }
 
 /**
- * Run one phase against the scenario and produce the per-event
+ * Run all categories against a scenario and produce per-category
  * effective probabilities.
  *
- * Computation:
- *
- *   1. For each event, look up the category. Missing → block.
- *   2. Drop events whose conditions don't pass the scenario.
- *   3. Sum the surviving weights → ``effectiveTotalWeight``.
- *   4. Each surviving event's pct = weight / total * 100.
- *   5. Blocked events return pct = 0 with a reason.
+ *   1. Mark each category eligible / blocked via ``evaluateConditions``.
+ *   2. Drop empty-prompt categories (eligible-but-no-output).
+ *   3. Sum surviving weights → ``totalEligibleWeight``.
+ *   4. Each surviving category's pct = weight / total * 100.
  */
-export function simulatePhase(
-  phase: TriggerPhase,
+export function simulate(
   manifest: TriggerPresetManifest,
   scenario: RuntimeScenario,
-): PhaseSimulation {
-  const cats = new Map(manifest.categories.map((c) => [c.id, c]));
-
-  // First pass: classify each event.
-  const draft: SimulatedEvent[] = phase.events.map((ev) => {
-    const cat = cats.get(ev.category_id) ?? null;
-    if (!cat) {
+): ScenarioSimulation {
+  const draft: SimulatedCategory[] = manifest.categories.map((cat) => {
+    if (cat.weight <= 0) {
       return {
-        event: ev,
-        category: null,
-        blocked: {
-          code: 'unknown_category',
-          message: '존재하지 않는 카테고리',
-        },
-        effectivePct: 0,
-      };
-    }
-    if (ev.weight <= 0) {
-      return {
-        event: ev,
         category: cat,
-        blocked: { code: 'cooldown', message: '가중치가 0 — 추첨 제외' },
+        blocked: { code: 'zero_weight', message: '카테고리 가중치 0' },
         effectivePct: 0,
       };
     }
-    const blocked = evaluateConditions(cat.conditions, scenario);
+    if (cat.prompts.length === 0) {
+      return {
+        category: cat,
+        blocked: { code: 'no_prompts', message: '프롬프트가 비어있음' },
+        effectivePct: 0,
+      };
+    }
+    const blocked = evaluateConditions(cat, scenario);
     return {
-      event: ev,
       category: cat,
       blocked,
       effectivePct: 0,
     };
   });
 
-  // Second pass: normalise surviving weights.
   const surviving = draft.filter((d) => d.blocked === null);
-  const total = surviving.reduce((sum, d) => sum + d.event.weight, 0);
+  const total = surviving.reduce((sum, d) => sum + d.category.weight, 0);
   if (total > 0) {
     for (const d of surviving) {
-      d.effectivePct = (d.event.weight / total) * 100;
+      d.effectivePct = (d.category.weight / total) * 100;
     }
   }
 
-  const range = phase;
-  const matches =
-    scenario.consecutive >= range.min_consecutive &&
-    (range.max_consecutive === null ||
-      range.max_consecutive === undefined ||
-      scenario.consecutive <= range.max_consecutive);
-
   return {
-    phase,
-    matchesScenario: matches,
-    events: draft,
-    effectiveTotalWeight: total,
+    categories: draft,
+    totalEligibleWeight: total,
   };
 }
 
-/** Compute reverse references: which phases use each category, with weight. */
-export function categoryReferences(
-  manifest: TriggerPresetManifest,
-): Map<string, { phaseId: string; phaseLabel: string; weight: number }[]> {
-  const out = new Map<
-    string,
-    { phaseId: string; phaseLabel: string; weight: number }[]
-  >();
-  for (const phase of manifest.phases) {
-    for (const ev of phase.events) {
-      const list = out.get(ev.category_id) ?? [];
-      list.push({
-        phaseId: phase.id,
-        phaseLabel: phase.label || phase.id,
-        weight: ev.weight,
-      });
-      out.set(ev.category_id, list);
-    }
+/**
+ * Construct the final-rendered prompt string the runtime would send.
+ * Pure mirror of :func:`service.trigger_preset.schemas.render_prompt`.
+ *
+ * Used in the editor for the "이 트리거가 발사되면 이렇게 보내집니다"
+ * preview chip on each prompt row.
+ */
+export function renderPrompt(
+  category: TriggerCategory,
+  content: string,
+): string {
+  const tagToken =
+    category.kind === 'activity' ? 'ACTIVITY_TRIGGER' : 'THINKING_TRIGGER';
+  const head = `[${tagToken}:${category.id}]`;
+  const parts: string[] = [head];
+  const signal = (category.autonomous_signal || '').trim();
+  if (signal) {
+    parts.push(`[autonomous_signal: ${signal}]`);
   }
-  return out;
+  parts.push(content.trim());
+  return parts.join(' ');
 }

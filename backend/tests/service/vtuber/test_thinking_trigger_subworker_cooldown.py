@@ -4,13 +4,21 @@ Pins the per-VTuber rate-limit on
 ``[THINKING_TRIGGER:sub_worker_working]``: a long-running Sub-Worker
 turn must not make the VTuber loop the same "still busy" line every
 tick. After the first fire, subsequent ticks within the cooldown
-window fall through to the regular probability ladder.
+window fall through to the regular roulette.
 
-Cycle 20260506 — refactored to address the trigger-preset overhaul:
-the cooldown now lives on :class:`TriggerCategory.cooldown_seconds`
-inside the bundled default manifest, and per-session cooldown state
-is tracked under :pyattr:`ThinkingTriggerService._last_category_fire`.
-The contract is unchanged; only the internals were renamed.
+Cycle 20260507 — refactored for the categories-only schema:
+
+  • Phases are gone; consec range is just a condition on each
+    category. The cooldown lives on
+    :pyattr:`TriggerCategory.cooldown_seconds` and per-session fire
+    times under :pyattr:`ThinkingTriggerService._last_category_fire`.
+  • The runtime is now a two-stage roulette (category → prompt). To
+    make the test deterministic we monkey-patch ``random.random`` to
+    a value that always picks the *first* eligible candidate at each
+    stage; ``sub_worker_working`` carries the dominant
+    ``weight=1000.0`` in the bundled defaults, so the first stage
+    will pick it whenever its conditions hold and its cooldown is
+    clear.
 """
 
 from __future__ import annotations
@@ -54,16 +62,22 @@ def with_busy_sub_worker(monkeypatch):
 
 @pytest.fixture
 def force_smallest_roll(monkeypatch):
-    """Pin ``random.random`` to ~0 so the roulette deterministically
-    picks the first eligible event in the phase's event list.
+    """Force the two-stage roulette to pick the *heaviest* item per stage.
 
-    The default first_idle_phase event order starts with
-    ``sub_worker_working`` (weight 1000) — when busy + cooldown clear,
-    that entry wins. When cooldown filters it out, the next eligible
-    in the list (the first ``fun_*`` / ``time_*`` / idle_stage entry
-    that passes its conditions) wins instead.
+    The cooldown semantics we want to pin are categorical ("when busy
+    and cooldown clear, sub_worker_working dominates"; "while in
+    cooldown, sub_worker_working is filtered out"). Probabilistic
+    runtime makes a literal first-tick assertion brittle, so we
+    monkey-patch :func:`_weighted_pick` to deterministically pick the
+    highest-weight survivor — same intent, no flakes.
     """
-    monkeypatch.setattr(tt.random, "random", lambda: 0.0)
+
+    def heaviest(items):
+        if not items:
+            return None
+        return max(items, key=lambda pair: pair[0])[1]
+
+    monkeypatch.setattr(tt, "_weighted_pick", heaviest)
 
 
 def _is_executing_busy(session_id: str) -> bool:
@@ -91,8 +105,6 @@ def test_second_fire_within_cooldown_falls_through(
     assert first is not None
     assert "[THINKING_TRIGGER:sub_worker_working]" in first
 
-    # Within cooldown — must fall through to a non-sub_worker_working
-    # category (the next eligible event in the phase's roulette).
     second = svc._build_trigger_prompt("vtuber-1", _is_executing_busy)
     assert second is not None
     assert "[THINKING_TRIGGER:sub_worker_working]" not in second
@@ -107,7 +119,6 @@ def test_after_cooldown_fires_again(
     assert first is not None
     assert "[THINKING_TRIGGER:sub_worker_working]" in first
 
-    # Pretend the cooldown window already elapsed for this category.
     svc._last_category_fire["vtuber-1"]["sub_worker_working"] = (
         time.time() - _SUB_WORKER_WORKING_COOLDOWN_SECONDS - 1.0
     )
