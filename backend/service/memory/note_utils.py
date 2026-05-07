@@ -49,6 +49,7 @@ VALID_CATEGORIES = {
     "daily", "topics", "projects", "insights",
     "dms", "conversations", "compactions",
     "executions",
+    "inbox",  # whiteboard P0 — raw captures awaiting refinement
     "root",
 }
 
