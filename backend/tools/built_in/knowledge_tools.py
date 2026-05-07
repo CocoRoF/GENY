@@ -163,6 +163,75 @@ def _ok(data) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
+# ── ViewLedger decoration (whiteboard P2a) ───────────────────────────
+
+
+def _maybe_decorate_results(
+    session_id: str,
+    *,
+    items: List[Dict[str, Any]],
+    event: str,
+    field: str = "filename",
+) -> List[Dict[str, Any]]:
+    """Annotate each item with ``_view`` and record one event per item.
+
+    Best-effort: any failure inside the ledger path is logged at debug
+    and the items are returned untouched. The agent's hot path must
+    never be broken by a missing ViewLedger.
+    """
+    try:
+        from service.whiteboard.agent_resolver import resolve_user_and_agent
+        from service.whiteboard.view_ledger import get_view_ledger
+    except Exception:  # noqa: BLE001
+        return items
+    try:
+        username, agent_id = resolve_user_and_agent(session_id)
+    except Exception:  # noqa: BLE001
+        return items
+    if not username or not agent_id:
+        return items
+    try:
+        ledger = get_view_ledger(username, agent_id)
+        ledger.decorate(items, field=field)
+        for item in items:
+            note_id = item.get(field)
+            if note_id:
+                ledger.record(str(note_id), event, context=f"session:{session_id}")
+    except Exception:  # noqa: BLE001
+        logger.debug("ViewLedger decoration failed", exc_info=True)
+    return items
+
+
+def _maybe_decorate_single(
+    session_id: str,
+    *,
+    item: Dict[str, Any],
+    event: str,
+    field: str = "filename",
+) -> Dict[str, Any]:
+    """Decorate a single dict (used by `knowledge_read`)."""
+    try:
+        from service.whiteboard.agent_resolver import resolve_user_and_agent
+        from service.whiteboard.view_ledger import get_view_ledger
+    except Exception:  # noqa: BLE001
+        return item
+    try:
+        username, agent_id = resolve_user_and_agent(session_id)
+    except Exception:  # noqa: BLE001
+        return item
+    if not username or not agent_id:
+        return item
+    try:
+        ledger = get_view_ledger(username, agent_id)
+        note_id = item.get(field)
+        if note_id:
+            item["_view"] = ledger.view_meta(str(note_id))
+            ledger.record(str(note_id), event, context=f"session:{session_id}")
+    except Exception:  # noqa: BLE001
+        logger.debug("ViewLedger decoration (single) failed", exc_info=True)
+    return item
+
+
 # ============================================================================
 # Knowledge Search Tool
 # ============================================================================
@@ -230,6 +299,9 @@ class KnowledgeSearchTool(BaseTool):
                     provider_results[0]["score"] if provider_results else None
                 ),
             )
+            _maybe_decorate_results(
+                session_id, items=provider_results, event="searched"
+            )
             return _ok({
                 "query": query,
                 "total": len(provider_results),
@@ -263,6 +335,7 @@ class KnowledgeSearchTool(BaseTool):
             hits=len(items),
             top_score=items[0]["score"] if items else None,
         )
+        _maybe_decorate_results(session_id, items=items, event="searched")
         return _ok({
             "query": query,
             "total": len(items),
@@ -366,6 +439,10 @@ class KnowledgeReadTool(BaseTool):
             message=f"knowledge_read: {filename} ({body_chars} chars)",
             extra={"chars": body_chars, "filename": filename},
         )
+        # Ensure the note dict has a ``filename`` key for the ledger
+        # decoration; some read paths only return body+metadata.
+        note.setdefault("filename", filename)
+        _maybe_decorate_single(session_id, item=note, event="read")
         return _ok(note)
 
     async def arun(self, session_id: str, filename: str) -> str:
@@ -393,6 +470,10 @@ class KnowledgeReadTool(BaseTool):
             message=f"knowledge_read: {filename} ({body_chars} chars)",
             extra={"chars": body_chars, "filename": filename},
         )
+        # Ensure the note dict has a ``filename`` key for the ledger
+        # decoration; some read paths only return body+metadata.
+        note.setdefault("filename", filename)
+        _maybe_decorate_single(session_id, item=note, event="read")
         return _ok(note)
 
 
@@ -452,6 +533,7 @@ class KnowledgeListTool(BaseTool):
                 "count": len(notes),
             },
         )
+        _maybe_decorate_results(session_id, items=list(notes), event="listed")
         return _ok({
             "total": len(notes),
             "filters": {"category": category or None, "tag": tag or None},
@@ -494,6 +576,7 @@ class KnowledgeListTool(BaseTool):
                 "count": len(notes),
             },
         )
+        _maybe_decorate_results(session_id, items=list(notes), event="listed")
         return _ok({
             "total": len(notes),
             "filters": {"category": category or None, "tag": tag or None},
