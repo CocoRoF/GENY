@@ -664,3 +664,107 @@ async def unshare_spotlight(
     if not removed:
         raise HTTPException(status_code=404, detail="spotlight item not found")
     return {"removed": True, "item_id": item_id}
+
+
+# ── Organizer (Phase 5) ──────────────────────────────────────────────
+
+
+class OrganizerRunRequest(BaseModel):
+    strategies: Optional[List[str]] = Field(
+        None, description="Subset of ORGANIZER_REGISTRY names; None = all"
+    )
+
+
+@router.post("/organizer/run")
+async def organizer_run(
+    payload: OrganizerRunRequest,
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Run the registered organizer strategies once and return the
+    active suggestion list. Idempotent — repeated runs only add new
+    suggestions (existing ones are deduped on strategy + filenames).
+    """
+    from service.whiteboard.organizer import (
+        run_organizer_for_user,
+    )
+
+    username = auth.get("sub", "anonymous")
+    suggestions = run_organizer_for_user(
+        username, strategy_names=payload.strategies
+    )
+    return {
+        "total": len(suggestions),
+        "suggestions": [s.to_dict() for s in suggestions],
+    }
+
+
+@router.get("/organizer/suggestions")
+async def organizer_list(
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    from service.memory.user_opsidian import get_user_opsidian_manager
+    from service.whiteboard.organizer import list_active_suggestions
+
+    username = auth.get("sub", "anonymous")
+    mgr = get_user_opsidian_manager(username)
+    items = list_active_suggestions(mgr.vault_root)
+    return {
+        "total": len(items),
+        "suggestions": [s.to_dict() for s in items],
+    }
+
+
+class OrganizerDecisionRequest(BaseModel):
+    cooldown_days: int = Field(30, ge=0, le=365)
+
+
+@router.post("/organizer/suggestions/{suggestion_id}/accept")
+async def organizer_accept(
+    suggestion_id: str,
+    payload: OrganizerDecisionRequest = OrganizerDecisionRequest(),
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Mark a suggestion as accepted.
+
+    Phase 5 records the decision in the suggestion log; the actual
+    *application* of the proposed action (group / merge / promote /
+    archive) is intentionally a follow-up so the user has time to
+    review the suggestion details first. The returned record carries
+    the action so a future endpoint can replay it.
+    """
+    from service.memory.user_opsidian import get_user_opsidian_manager
+    from service.whiteboard.organizer import update_status
+
+    username = auth.get("sub", "anonymous")
+    mgr = get_user_opsidian_manager(username)
+    record = update_status(
+        mgr.vault_root,
+        suggestion_id,
+        status="accepted",
+        cooldown_days=payload.cooldown_days,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    return {"suggestion": record.to_dict()}
+
+
+@router.post("/organizer/suggestions/{suggestion_id}/reject")
+async def organizer_reject(
+    suggestion_id: str,
+    payload: OrganizerDecisionRequest = OrganizerDecisionRequest(),
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    from service.memory.user_opsidian import get_user_opsidian_manager
+    from service.whiteboard.organizer import update_status
+
+    username = auth.get("sub", "anonymous")
+    mgr = get_user_opsidian_manager(username)
+    record = update_status(
+        mgr.vault_root,
+        suggestion_id,
+        status="rejected",
+        cooldown_days=max(payload.cooldown_days, 30),
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    return {"suggestion": record.to_dict()}

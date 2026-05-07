@@ -2698,4 +2698,56 @@ export const whiteboardApi = {
     const qs = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
     return apiCall<WhiteboardViewStats>(`/api/opsidian/views/stats${qs}`);
   },
+
+  /** POST /api/opsidian/organizer/run — fire the organizer once. */
+  organizerRun: (strategies?: string[]) =>
+    apiCall<{ total: number; suggestions: WhiteboardOrganizerSuggestion[] }>(
+      '/api/opsidian/organizer/run',
+      {
+        method: 'POST',
+        body: JSON.stringify({ strategies: strategies ?? null }),
+      },
+    ),
+
+  /** GET /api/opsidian/organizer/suggestions — active list. */
+  organizerList: () =>
+    apiCall<{ total: number; suggestions: WhiteboardOrganizerSuggestion[] }>(
+      '/api/opsidian/organizer/suggestions',
+    ),
+
+  /** POST /api/opsidian/organizer/suggestions/{id}/accept */
+  organizerAccept: (suggestionId: string, cooldownDays = 30) =>
+    apiCall<{ suggestion: WhiteboardOrganizerSuggestion }>(
+      `/api/opsidian/organizer/suggestions/${encodeURIComponent(suggestionId)}/accept`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ cooldown_days: cooldownDays }),
+      },
+    ),
+
+  /** POST /api/opsidian/organizer/suggestions/{id}/reject */
+  organizerReject: (suggestionId: string, cooldownDays = 30) =>
+    apiCall<{ suggestion: WhiteboardOrganizerSuggestion }>(
+      `/api/opsidian/organizer/suggestions/${encodeURIComponent(suggestionId)}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ cooldown_days: cooldownDays }),
+      },
+    ),
 };
+
+export interface WhiteboardOrganizerSuggestion {
+  suggestion_id: string;
+  kind: 'cluster' | 'duplicate' | 'topic_promotion' | 'stale_unseen' | string;
+  note_filenames: string[];
+  proposed_label: string;
+  proposed_action: 'group' | 'merge' | 'promote_to_library' | 'archive' | 'tag' | string;
+  confidence: number;
+  rationale: string;
+  strategy_name: string;
+  status: 'active' | 'accepted' | 'rejected' | 'snoozed' | string;
+  created_at: string;
+  decided_at: string | null;
+  cooldown_until: string | null;
+  extra: Record<string, unknown>;
+}
