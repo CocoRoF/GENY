@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { userOpsidianApi, curatedKnowledgeApi } from '@/lib/api';
+import { userOpsidianApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import RightPanel from '../opsidian/RightPanel';
@@ -38,7 +38,6 @@ import {
   Edit3,
   Loader2,
   Sparkles,
-  CheckCircle,
   Copy,
 } from 'lucide-react';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
@@ -49,6 +48,7 @@ import {
   preprocessAttachmentEmbeds,
 } from './AttachmentEmbed';
 import { uploadCaptureFile } from '@/lib/captureSources';
+import ShareWithVTuberMenu from './ShareWithVTuberMenu';
 import { useOpsidianShortcuts } from '../opsidian/useOpsidianShortcuts';
 import MarkdownToolbar, { useMarkdownEditorKeys } from '../opsidian/MarkdownToolbar';
 import QuickSwitcher from '../opsidian/QuickSwitcher';
@@ -739,10 +739,11 @@ function NoteEditor({
   const [editImportance, setEditImportance] = useState('');
   const [editTagsList, setEditTagsList] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [curating, setCurating] = useState(false);
-  const [curateMsg, setCurateMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showEditorWikilink, setShowEditorWikilink] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ShareWithVTuberMenu (P2a) owns its own toast — no top-level
+  // curate-message state needed here any more.
 
   // All existing tags for autocomplete
   const allTags = useMemo(() => {
@@ -750,37 +751,6 @@ function NoteEditor({
     Object.values(allFiles).forEach(f => f.tags.forEach(t => tagSet.add(t)));
     return Array.from(tagSet).sort();
   }, [allFiles]);
-
-  const handleCurate = async () => {
-    if (!selectedFile || curating) return;
-    setCurating(true);
-    setCurateMsg(null);
-    try {
-      const result = await curatedKnowledgeApi.curateNote({
-        source_filename: selectedFile,
-        use_llm: true,
-      });
-      if (result.success) {
-        setCurateMsg({
-          type: 'success',
-          text: t('opsidian.curateSuccess'),
-        });
-      } else {
-        setCurateMsg({ type: 'error', text: result.reason || t('opsidian.curateFailed') });
-      }
-    } catch (e: any) {
-      setCurateMsg({ type: 'error', text: e.message || t('opsidian.curateFailed') });
-    } finally {
-      setCurating(false);
-    }
-  };
-
-  useEffect(() => {
-    if (curateMsg) {
-      const timer = setTimeout(() => setCurateMsg(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [curateMsg]);
 
   useEffect(() => {
     if (fileDetail) {
@@ -1086,34 +1056,9 @@ function NoteEditor({
           </span>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {curateMsg && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
-              fontSize: 11, borderRadius: 4,
-              background: curateMsg.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-              color: curateMsg.type === 'success' ? '#10b981' : '#ef4444',
-            }}>
-              {curateMsg.type === 'success' && <CheckCircle size={11} />}
-              {curateMsg.text}
-            </span>
+          {selectedFile && (
+            <ShareWithVTuberMenu filename={selectedFile} />
           )}
-          <button
-            onClick={handleCurate}
-            disabled={curating}
-            title={t('opsidian.curateNote')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px',
-              fontSize: 12, fontWeight: 500,
-              background: curating ? 'rgba(245,158,11,0.05)' : 'rgba(245,158,11,0.1)',
-              color: '#f59e0b',
-              border: '1px solid rgba(245,158,11,0.3)',
-              borderRadius: 5, cursor: curating ? 'not-allowed' : 'pointer',
-              opacity: curating ? 0.7 : 1,
-            }}
-          >
-            {curating ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
-            {curating ? t('opsidian.curating') : t('opsidian.curate')}
-          </button>
           <button
             onClick={handleStartEdit}
             style={{

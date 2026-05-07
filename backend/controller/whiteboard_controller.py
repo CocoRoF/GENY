@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -43,6 +43,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
+from service.whiteboard.spotlight_store import (
+    DEFAULT_TTL_MINUTES,
+    get_spotlight_store,
+)
 from service.whiteboard.types import (
     CaptureEvent,
     CapturePayload,
@@ -496,3 +500,120 @@ async def get_view_stats(
     username = auth.get("sub", "anonymous")
     ledger = get_view_ledger(username, agent_id)
     return ledger.stats()
+
+
+# ── Spotlight (Phase 2a) ──────────────────────────────────────────────
+
+
+class SpotlightShareRequest(BaseModel):
+    """Spotlight-mode share only.
+
+    For Library mode (long-term curated promotion) use the existing
+    ``POST /api/curated/curate`` — Spotlight and Library are separate
+    lifecycles per docs §4. The frontend can call both endpoints in
+    sequence to express "share with both".
+    """
+
+    source_filename: str = Field(..., description="Note in user vault or curated knowledge")
+    session_id: Optional[str] = None
+    title: Optional[str] = None
+    excerpt: Optional[str] = None
+    attachments: List[str] = Field(default_factory=list)
+    ttl_minutes: int = Field(DEFAULT_TTL_MINUTES, ge=1, le=720)
+    pinned: bool = False
+    note_kind: str = Field("user", description="'user' | 'curated'")
+    capture_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _excerpt_from_note(username: str, source_filename: str, kind: str) -> Tuple[str, str, List[str]]:
+    """Pull a (title, excerpt, attachments) tuple for the given note."""
+    try:
+        if kind == "curated":
+            from service.memory.curated_knowledge import get_curated_knowledge_manager
+            mgr = get_curated_knowledge_manager(username)
+        else:
+            from service.memory.user_opsidian import get_user_opsidian_manager
+            mgr = get_user_opsidian_manager(username)
+        note = mgr.read_note(source_filename) or {}
+    except Exception:  # noqa: BLE001
+        note = {}
+    title = str(note.get("title") or source_filename)
+    body = str(note.get("body") or "")
+    excerpt = body.strip()[:400]
+    # Pull `![[…]]` wikilink-attachments out of the body so the
+    # spotlight item carries the same media references as the source.
+    import re as _re
+    attachments: List[str] = []
+    for m in _re.finditer(r"!\[\[([^\]|]+)", body):
+        attachments.append(m.group(1).strip())
+    return (title, excerpt, attachments)
+
+
+@router.post("/spotlight")
+async def share_to_spotlight(
+    payload: SpotlightShareRequest,
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Stage a Spotlight item — VTuber sees it on the next prompt build.
+
+    Library-mode (long-term curated promotion) is a separate endpoint
+    by design (different lifecycle, different storage). The frontend
+    is expected to call ``POST /api/curated/curate`` for that.
+    """
+    username = auth.get("sub", "anonymous")
+
+    title, excerpt, atts = _excerpt_from_note(
+        username, payload.source_filename, payload.note_kind
+    )
+    title = (payload.title or title).strip()
+    excerpt = (payload.excerpt or excerpt).strip()
+    attachments = payload.attachments or atts
+
+    store = get_spotlight_store()
+    item = store.add(
+        user_id=username,
+        session_id=payload.session_id,
+        source_filename=payload.source_filename,
+        title=title,
+        excerpt=excerpt,
+        attachments=attachments,
+        ttl_minutes=payload.ttl_minutes,
+        pinned=payload.pinned,
+        capture_id=payload.capture_id,
+        note_kind=payload.note_kind,
+        metadata=payload.metadata,
+    )
+    return {"item": item.to_dict()}
+
+
+@router.get("/spotlight")
+async def list_spotlight(
+    session_id: Optional[str] = None,
+    include_expired: bool = False,
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    username = auth.get("sub", "anonymous")
+    store = get_spotlight_store()
+    items = store.list(
+        user_id=username,
+        session_id=session_id,
+        include_expired=include_expired,
+    )
+    return {
+        "items": [item.to_dict() for item in items],
+        "total": len(items),
+    }
+
+
+@router.delete("/spotlight/{item_id}")
+async def unshare_spotlight(
+    item_id: str,
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    username = auth.get("sub", "anonymous")
+    store = get_spotlight_store()
+    removed = store.remove(user_id=username, item_id=item_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="spotlight item not found")
+    return {"removed": True, "item_id": item_id}
