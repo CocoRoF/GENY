@@ -45,6 +45,8 @@ export interface CategoriesSectionProps {
       | TriggerPresetManifest
       | ((prev: TriggerPresetManifest) => TriggerPresetManifest),
   ) => void;
+  /** Click-through to the prompts library section. */
+  onJumpToPrompts?: () => void;
 }
 
 export default function CategoriesSection({
@@ -52,6 +54,7 @@ export default function CategoriesSection({
   scenario,
   onScenarioChange,
   onManifestUpdate,
+  onJumpToPrompts,
 }: CategoriesSectionProps) {
   const [blockedOpen, setBlockedOpen] = useState(false);
   const [recentlyAddedId, setRecentlyAddedId] = useState<string | null>(null);
@@ -119,7 +122,7 @@ export default function CategoriesSection({
           time_window: null,
           cooldown_seconds: 0,
           autonomous_signal: '',
-          prompts: [{ weight: 1, content: { en: '', ko: '' } }],
+          prompt_refs: [],
         },
       ],
     }));
@@ -195,11 +198,13 @@ export default function CategoriesSection({
             <CategoryCard
               key={sim.category.id}
               category={sim.category}
+              promptLibrary={manifest.prompts}
               blocked={null}
               effectivePct={sim.effectivePct}
               defaultExpanded={recentlyAddedId === sim.category.id}
               onPatch={(patch) => updateCategory(sim.category.id, patch)}
               onDelete={() => removeCategory(sim.category.id)}
+              onJumpToPrompts={onJumpToPrompts}
             />
           ))
         )}
@@ -231,11 +236,13 @@ export default function CategoriesSection({
               <CategoryCard
                 key={sim.category.id}
                 category={sim.category}
+                promptLibrary={manifest.prompts}
                 blocked={sim.blocked}
                 effectivePct={0}
                 defaultExpanded={recentlyAddedId === sim.category.id}
                 onPatch={(patch) => updateCategory(sim.category.id, patch)}
                 onDelete={() => removeCategory(sim.category.id)}
+                onJumpToPrompts={onJumpToPrompts}
               />
             ))}
         </section>

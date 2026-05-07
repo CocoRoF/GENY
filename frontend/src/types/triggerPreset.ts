@@ -2,14 +2,11 @@
  * Trigger Preset types — mirror of the backend Pydantic models in
  * ``service/trigger_preset/schemas.py``.
  *
- * Cycle 20260507 redesign:
+ * Two-tier model:
  *
- *   • Phases removed. consec range now lives on each category as a
- *     plain condition (``consec_min`` / ``consec_max``).
- *   • Prompts are embedded inside categories with their own weights.
- *   • The ``[KIND_TRIGGER:id] [autonomous_signal: …]`` prefix is no
- *     longer baked into prompt content — the server renders it at
- *     fire time from the category's metadata.
+ *   • ``prompts`` — top-level library of natural-language texts.
+ *   • ``categories`` — situations that reference prompts via id +
+ *     per-reference weight.
  */
 
 export type TriggerKind = 'thinking' | 'activity';
@@ -31,16 +28,23 @@ export interface TimeBoundaries {
 }
 
 /**
- * One natural-language prompt variant inside a category.
+ * Reusable natural-language prompt. Lives in the manifest's top-level
+ * library; categories link to them via :class:`PromptRef`.
  *
  * ``content`` keys are locale codes (``en``, ``ko``, …); each value
- * is the **raw natural language** — no ``[THINKING_TRIGGER:…]`` tag,
- * no ``[autonomous_signal: …]`` prefix. The server constructs those
- * from the parent category's metadata at fire time.
+ * is the **raw natural language** — the system adds tag prefixes at
+ * fire time.
  */
-export interface TriggerPromptVariant {
-  weight: number;
+export interface TriggerPrompt {
+  id: string;
+  label: string;
   content: Record<string, string>;
+  tags: string[];
+}
+
+export interface PromptRef {
+  prompt_id: string;
+  weight: number;
 }
 
 export interface TriggerCategory {
@@ -49,7 +53,6 @@ export interface TriggerCategory {
   kind: TriggerKind;
   weight: number;
 
-  // Conditions (when this situation applies)
   consec_min: number;
   consec_max: number | null;
   requires_sub_worker_busy: boolean;
@@ -60,13 +63,14 @@ export interface TriggerCategory {
   /** Free-form ``[autonomous_signal: <here>]`` payload. Empty = omit. */
   autonomous_signal: string;
 
-  prompts: TriggerPromptVariant[];
+  prompt_refs: PromptRef[];
 }
 
 export interface TriggerPresetManifest {
   enabled: boolean;
   timing: TriggerTiming;
   time_boundaries: TimeBoundaries;
+  prompts: TriggerPrompt[];
   categories: TriggerCategory[];
 }
 

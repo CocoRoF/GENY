@@ -42,9 +42,10 @@ from typing import Dict, List, Optional, Set, Tuple
 from service.tick import TickEngine, TickSpec
 from service.trigger_preset.defaults import default_manifest
 from service.trigger_preset.schemas import (
+    PromptRef,
     TriggerCategory,
     TriggerPresetManifest,
-    TriggerPromptVariant,
+    TriggerPrompt,
     render_prompt,
 )
 
@@ -568,6 +569,11 @@ class ThinkingTriggerService:
         now = time.time()
         last_fires = self._last_category_fire.setdefault(session_id, {})
 
+        # Build a prompt-id index once for stage-2 lookups.
+        prompt_index: Dict[str, TriggerPrompt] = {
+            p.id: p for p in manifest.prompts
+        }
+
         eligible: List[Tuple[float, TriggerCategory]] = []
         for cat in manifest.categories:
             if not _category_eligible(
@@ -582,7 +588,14 @@ class ThinkingTriggerService:
                 continue
             if cat.weight <= 0:
                 continue
-            if not cat.prompts:
+            # Skip categories that reference nothing or whose every
+            # prompt_ref points at a deleted prompt.
+            usable_refs = [
+                r
+                for r in cat.prompt_refs
+                if r.weight > 0 and r.prompt_id in prompt_index
+            ]
+            if not usable_refs:
                 continue
             eligible.append((cat.weight, cat))
 
@@ -591,22 +604,32 @@ class ThinkingTriggerService:
             return None
         assert isinstance(chosen_category, TriggerCategory)
 
-        # Stage 2: pick a prompt within the chosen category.
-        prompt_pool: List[Tuple[float, TriggerPromptVariant]] = [
-            (p.weight, p) for p in chosen_category.prompts if p.weight > 0
+        # Stage 2: roulette across the chosen category's prompt_refs.
+        ref_pool: List[Tuple[float, PromptRef]] = [
+            (r.weight, r)
+            for r in chosen_category.prompt_refs
+            if r.weight > 0 and r.prompt_id in prompt_index
         ]
-        if not prompt_pool:
-            # Degenerate: every prompt zero-weighted. Fall back to uniform.
-            prompt_pool = [(1.0, p) for p in chosen_category.prompts]
-        chosen_prompt = _weighted_pick(prompt_pool)
-        if chosen_prompt is None:
+        if not ref_pool:
+            # Degenerate fallback: any non-zero ref, uniform weight.
+            ref_pool = [
+                (1.0, r)
+                for r in chosen_category.prompt_refs
+                if r.prompt_id in prompt_index
+            ]
+        chosen_ref = _weighted_pick(ref_pool)
+        if chosen_ref is None:
             return None
-        assert isinstance(chosen_prompt, TriggerPromptVariant)
+        assert isinstance(chosen_ref, PromptRef)
+
+        prompt = prompt_index.get(chosen_ref.prompt_id)
+        if prompt is None:
+            return None
 
         content = (
-            chosen_prompt.content.get(locale)
-            or chosen_prompt.content.get("en")
-            or next(iter(chosen_prompt.content.values()), "")
+            prompt.content.get(locale)
+            or prompt.content.get("en")
+            or next(iter(prompt.content.values()), "")
         )
         if not content.strip():
             return None

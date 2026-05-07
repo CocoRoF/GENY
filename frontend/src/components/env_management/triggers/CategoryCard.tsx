@@ -5,25 +5,20 @@
  *
  * Each card represents *one situation* (= category). It owns:
  *
- *   • Identity:  label, kind (thinking/activity), id (auto-generated)
- *   • Conditions: when this situation applies — consec range, Sub-Worker
- *                 state, time window, cooldown.
- *   • Weight:     how often this situation gets picked when multiple
- *                 situations match the current scenario (stage-1
- *                 roulette). Effective percentage under the active
- *                 scenario is shown next to it.
- *   • Prompts:    natural-language variants the agent might say when
- *                 this situation fires. Each variant has a sub-weight
- *                 (within-category roulette).
+ *   • Identity:       label, kind (thinking/activity), id (auto)
+ *   • Conditions:     when this situation applies — consec range,
+ *                     Sub-Worker state, time window, cooldown.
+ *   • Weight:         how often this situation is picked when
+ *                     multiple situations match (stage-1 roulette).
+ *                     Effective % under the active scenario shown next
+ *                     to it.
+ *   • Prompt refs:    list of prompts (from the library) that this
+ *                     situation can fire, each with a per-reference
+ *                     weight (stage-2 roulette).
  *
- * The collapsed row shows the bare minimum: name, kind chip, condition
- * chips, situation weight, effective %. Click anywhere to expand and
- * edit everything inline.
- *
- * The "[THINKING_TRIGGER:id] [autonomous_signal: …]" tag prefix is
- * **never typed by the operator**. A small live preview shows what the
- * runtime will actually send for each prompt, generated from category
- * metadata.
+ * Prompt content is NOT edited here — only references. Editing the
+ * prompt text happens in the "프롬프트" library section, and changes
+ * propagate automatically to every situation that references it.
  */
 
 import { useState } from 'react';
@@ -40,7 +35,8 @@ import type {
   TimeWindow,
   TriggerCategory,
   TriggerKind,
-  TriggerPromptVariant,
+  TriggerPrompt,
+  PromptRef,
 } from '@/types/triggerPreset';
 import {
   describeConditions,
@@ -50,8 +46,6 @@ import {
 
 const INPUT_SM =
   'h-8 px-2.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/60';
-const TEXTAREA =
-  'w-full px-2.5 py-1.5 rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.875rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/60 resize-y';
 const ICON_BTN =
   'inline-flex items-center justify-center w-7 h-7 rounded text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors';
 
@@ -65,22 +59,27 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow | ''; label: string }[] = [
 
 export interface CategoryCardProps {
   category: TriggerCategory;
+  /** Full prompt library — used to render labels + previews + the picker. */
+  promptLibrary: TriggerPrompt[];
   blocked: BlockedReason | null;
   effectivePct: number;
-  /** Forced-expand control (e.g., when newly created). */
   defaultExpanded?: boolean;
 
   onPatch: (patch: Partial<TriggerCategory>) => void;
   onDelete: () => void;
+  /** Jump to the prompts library section (e.g. for editing wording). */
+  onJumpToPrompts?: () => void;
 }
 
 export default function CategoryCard({
   category,
+  promptLibrary,
   blocked,
   effectivePct,
   defaultExpanded = false,
   onPatch,
   onDelete,
+  onJumpToPrompts,
 }: CategoryCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -123,7 +122,7 @@ export default function CategoryCard({
               {category.kind}
             </span>
             <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] tabular-nums">
-              {category.prompts.length}개 프롬프트
+              {category.prompt_refs.length}개 프롬프트 참조
             </span>
           </div>
 
@@ -215,7 +214,12 @@ export default function CategoryCard({
         <div className="border-t border-[hsl(var(--border))] p-4 flex flex-col gap-5">
           <IdentityRow category={category} onPatch={onPatch} />
           <ConditionsBlock category={category} onPatch={onPatch} />
-          <PromptsBlock category={category} onPatch={onPatch} />
+          <PromptRefsBlock
+            category={category}
+            promptLibrary={promptLibrary}
+            onPatch={onPatch}
+            onJumpToPrompts={onJumpToPrompts}
+          />
           <AdvancedBlock category={category} onPatch={onPatch} />
         </div>
       )}
@@ -287,7 +291,6 @@ function ConditionsBlock({
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Consec range */}
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
             연속 트리거 횟수 (consec)
@@ -327,14 +330,8 @@ function ConditionsBlock({
               회
             </span>
           </div>
-          <p className="text-[0.65rem] text-[hsl(var(--muted-foreground))]">
-            {category.consec_min === 0 && category.consec_max === null
-              ? '제한 없음 — 모든 횟수에서 후보'
-              : `이 범위의 침묵에서만 후보 (예: 첫 침묵=0~0, 지속=1~3)`}
-          </p>
         </div>
 
-        {/* Sub-Worker mode */}
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
             Sub-Worker 상태
@@ -365,7 +362,6 @@ function ConditionsBlock({
           </div>
         </div>
 
-        {/* Time window */}
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
             시간대
@@ -387,7 +383,6 @@ function ConditionsBlock({
           </select>
         </div>
 
-        {/* Cooldown */}
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
             쿨다운 (초)
@@ -403,111 +398,159 @@ function ConditionsBlock({
             }}
             className={INPUT_SM}
           />
-          <p className="text-[0.65rem] text-[hsl(var(--muted-foreground))]">
-            한 번 발사된 후 이 시간 동안은 같은 상황이 다시 후보가 되지 않습니다.
-          </p>
         </div>
       </div>
     </section>
   );
 }
 
-// ── Prompts ─────────────────────────────────────────────────────
+// ── Prompt refs ────────────────────────────────────────────────
 
-function PromptsBlock({
+function PromptRefsBlock({
   category,
+  promptLibrary,
   onPatch,
+  onJumpToPrompts,
 }: {
   category: TriggerCategory;
+  promptLibrary: TriggerPrompt[];
   onPatch: (patch: Partial<TriggerCategory>) => void;
+  onJumpToPrompts?: () => void;
 }) {
-  const setPrompts = (next: TriggerPromptVariant[]) => {
-    onPatch({ prompts: next });
-  };
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  const addPrompt = () => {
-    setPrompts([
-      ...category.prompts,
-      { weight: 1, content: { en: '', ko: '' } },
-    ]);
-  };
+  const promptIndex = new Map(promptLibrary.map((p) => [p.id, p]));
+  const referencedIds = new Set(category.prompt_refs.map((r) => r.prompt_id));
+  const attachable = promptLibrary.filter((p) => !referencedIds.has(p.id));
 
-  const removePrompt = (idx: number) => {
-    setPrompts(category.prompts.filter((_, i) => i !== idx));
-  };
-
-  const updatePrompt = (idx: number, patch: Partial<TriggerPromptVariant>) => {
-    setPrompts(
-      category.prompts.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
-    );
-  };
-
-  const setLocaleContent = (idx: number, locale: string, text: string) => {
-    const current = category.prompts[idx];
-    if (!current) return;
-    const nextContent = { ...current.content, [locale]: text };
-    updatePrompt(idx, { content: nextContent });
-  };
-
-  const totalWeight = category.prompts.reduce(
-    (s, p) => s + Math.max(0, p.weight),
+  const totalWeight = category.prompt_refs.reduce(
+    (s, r) => s + Math.max(0, r.weight),
     0,
   );
 
+  const setRefs = (next: PromptRef[]) => {
+    onPatch({ prompt_refs: next });
+  };
+
+  const updateRef = (idx: number, patch: Partial<PromptRef>) => {
+    setRefs(
+      category.prompt_refs.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
+    );
+  };
+
+  const removeRef = (idx: number) => {
+    setRefs(category.prompt_refs.filter((_, i) => i !== idx));
+  };
+
+  const attachPrompt = (promptId: string) => {
+    if (!promptId || referencedIds.has(promptId)) return;
+    setRefs([...category.prompt_refs, { prompt_id: promptId, weight: 1 }]);
+    setPickerOpen(false);
+  };
+
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <SectionLabel>이 상황에서 어떤 말을 하나요? (프롬프트)</SectionLabel>
-        <button
-          type="button"
-          onClick={addPrompt}
-          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-[hsl(var(--border))] text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
-        >
-          <Plus className="w-3 h-3" />
-          프롬프트 변형 추가
-        </button>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <SectionLabel>이 상황에서 어떤 말을 하나요? (프롬프트 참조)</SectionLabel>
+        <div className="flex items-center gap-1.5">
+          {onJumpToPrompts && (
+            <button
+              type="button"
+              onClick={onJumpToPrompts}
+              className="text-[0.7rem] text-violet-600 dark:text-violet-300 hover:underline"
+            >
+              프롬프트 라이브러리 편집 →
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-[hsl(var(--border))] text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+            disabled={attachable.length === 0}
+            title={
+              attachable.length === 0
+                ? '연결할 프롬프트가 없어요. 라이브러리에서 먼저 추가하세요.'
+                : '라이브러리에서 프롬프트 연결'
+            }
+          >
+            <Plus className="w-3 h-3" />
+            프롬프트 연결
+          </button>
+        </div>
       </div>
 
       <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] -mt-1">
-        이 상황이 선택되면 아래 변형 중 하나가 가중치에 따라 무작위로 발사됩니다.
-        자연어만 적으세요 — 시스템 태그는 자동으로 붙습니다.
+        이 상황이 선택되면 아래 프롬프트 중 하나가 가중치에 따라 무작위로
+        발사됩니다. 같은 프롬프트를 다른 상황에서도 다른 가중치로 쓸 수 있어요.
       </p>
 
-      {category.prompts.length === 0 ? (
+      {pickerOpen && (
+        <div className="rounded-md border border-violet-500/30 bg-violet-500/5 p-2 flex flex-col gap-1 max-h-60 overflow-y-auto">
+          {attachable.length === 0 ? (
+            <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))] py-2 text-center">
+              연결할 프롬프트가 없어요. 라이브러리에서 먼저 추가하세요.
+            </span>
+          ) : (
+            attachable.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => attachPrompt(p.id)}
+                className="text-left rounded px-2 py-1.5 hover:bg-violet-500/10 flex flex-col gap-0.5"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+                    {p.label || p.id}
+                  </span>
+                  <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))] font-mono">
+                    {p.id}
+                  </span>
+                </div>
+                <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-1">
+                  {p.content['ko'] || p.content['en'] || '(빈 프롬프트)'}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {category.prompt_refs.length === 0 ? (
         <div className="rounded-md border border-dashed border-[hsl(var(--border))] px-4 py-6 text-center text-[0.75rem] text-[hsl(var(--muted-foreground))]">
-          프롬프트가 없으면 이 상황은 발화하지 않습니다.{' '}
+          아직 연결된 프롬프트가 없어요.{' '}
           <button
             type="button"
-            onClick={addPrompt}
+            onClick={() => setPickerOpen(true)}
             className="text-violet-600 dark:text-violet-300 underline"
           >
-            첫 프롬프트 추가
+            프롬프트 연결
           </button>
+          {' '}을 누르세요.
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {category.prompts.map((prompt, idx) => {
-            const promptShare =
+        <div className="rounded-md border border-[hsl(var(--border))] divide-y divide-[hsl(var(--border))]">
+          <div className="grid grid-cols-[1fr_120px_70px_28px] items-center gap-2 px-3 py-1.5 text-[0.65rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-semibold bg-[hsl(var(--muted)/0.4)]">
+            <span>프롬프트</span>
+            <span className="text-right">참조 가중치</span>
+            <span className="text-right">비율</span>
+            <span />
+          </div>
+          {category.prompt_refs.map((ref, idx) => {
+            const prompt = promptIndex.get(ref.prompt_id);
+            const share =
               totalWeight > 0
-                ? (Math.max(0, prompt.weight) / totalWeight) * 100
+                ? (Math.max(0, ref.weight) / totalWeight) * 100
                 : 0;
             return (
-              <PromptVariantEditor
-                key={idx}
-                index={idx}
-                prompt={prompt}
+              <PromptRefRow
+                key={`${ref.prompt_id}-${idx}`}
                 category={category}
-                share={promptShare}
-                onWeight={(w) => updatePrompt(idx, { weight: w })}
-                onLocale={(locale, text) =>
-                  setLocaleContent(idx, locale, text)
-                }
-                onRemoveLocale={(locale) => {
-                  const next = { ...prompt.content };
-                  delete next[locale];
-                  updatePrompt(idx, { content: next });
-                }}
-                onRemove={() => removePrompt(idx)}
+                prompt={prompt ?? null}
+                promptId={ref.prompt_id}
+                weight={ref.weight}
+                share={share}
+                onWeight={(w) => updateRef(idx, { weight: w })}
+                onRemove={() => removeRef(idx)}
               />
             );
           })}
@@ -517,144 +560,95 @@ function PromptsBlock({
   );
 }
 
-function PromptVariantEditor({
-  index,
-  prompt,
+function PromptRefRow({
   category,
+  prompt,
+  promptId,
+  weight,
   share,
   onWeight,
-  onLocale,
-  onRemoveLocale,
   onRemove,
 }: {
-  index: number;
-  prompt: TriggerPromptVariant;
   category: TriggerCategory;
+  prompt: TriggerPrompt | null;
+  promptId: string;
+  weight: number;
   share: number;
   onWeight: (w: number) => void;
-  onLocale: (locale: string, text: string) => void;
-  onRemoveLocale: (locale: string) => void;
   onRemove: () => void;
 }) {
-  const [newLocale, setNewLocale] = useState('');
-  const locales = Object.keys(prompt.content);
-  // Always show en + ko as canonical surfaces
-  const surfaceLocales = Array.from(new Set(['en', 'ko', ...locales]));
-
-  const previewLocale =
-    prompt.content['ko'] || prompt.content['en'] || prompt.content[locales[0]] || '';
-
-  const addLocale = () => {
-    const trimmed = newLocale.trim().toLowerCase();
-    if (!trimmed || prompt.content[trimmed] !== undefined) return;
-    onLocale(trimmed, '');
-    setNewLocale('');
-  };
+  const [showPreview, setShowPreview] = useState(false);
+  const previewLocale = prompt
+    ? prompt.content['ko'] ||
+      prompt.content['en'] ||
+      Object.values(prompt.content)[0] ||
+      ''
+    : '';
 
   return (
-    <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[hsl(var(--border))]">
-        <span className="text-[0.7rem] font-semibold text-[hsl(var(--foreground))]">
-          변형 #{index + 1}
-        </span>
-        <div className="flex items-center gap-2">
-          <div className="flex flex-col items-end">
-            <label className="text-[0.6rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-              가중치
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={prompt.weight}
-                min={0}
-                step={1}
-                onChange={(e) => {
-                  const n = Math.max(0, Number(e.target.value));
-                  if (Number.isFinite(n)) onWeight(n);
-                }}
-                className={`${INPUT_SM} w-20 text-right tabular-nums h-7`}
-              />
-              <span className="text-[0.7rem] text-violet-700 dark:text-violet-300 tabular-nums w-12 text-right">
-                {share.toFixed(0)}%
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            className={`${ICON_BTN} hover:!text-red-500 hover:!bg-red-500/10`}
-            title="변형 제거"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+    <div className="grid grid-cols-[1fr_120px_70px_28px] items-start gap-2 px-3 py-2.5">
+      <div className="min-w-0 flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))] truncate">
+            {prompt?.label || promptId}
+          </span>
+          <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))] font-mono">
+            {promptId}
+          </span>
+          {!prompt && (
+            <span className="text-[0.65rem] text-amber-600">
+              (라이브러리에 없음)
+            </span>
+          )}
         </div>
-      </div>
-
-      <div className="p-3 flex flex-col gap-2.5">
-        {surfaceLocales.map((locale) => {
-          const text = prompt.content[locale] ?? '';
-          const isCanonical = locale === 'en' || locale === 'ko';
-          return (
-            <div key={locale} className="flex items-start gap-2">
-              <div className="flex flex-col items-center gap-0.5 pt-1.5 min-w-[44px]">
-                <span className="text-[0.6875rem] uppercase tracking-wider font-semibold text-[hsl(var(--muted-foreground))]">
-                  {locale}
-                </span>
-                {!isCanonical && (
-                  <button
-                    type="button"
-                    onClick={() => onRemoveLocale(locale)}
-                    className="text-[0.6rem] text-[hsl(var(--muted-foreground))] hover:text-red-500"
-                    title={`${locale} 로케일 제거`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-              <textarea
-                value={text}
-                onChange={(e) => onLocale(locale, e.target.value)}
-                rows={2}
-                placeholder={
-                  locale === 'ko'
-                    ? '예: 잠깐 조용해졌다. 내 내부 인식이 최근 대화 흐름을 감지하고 있다.'
-                    : 'e.g., A brief silence has settled. My internal awareness notices recent conversation threads still in context.'
-                }
-                className={TEXTAREA}
-              />
-            </div>
-          );
-        })}
-
-        <div className="flex items-center gap-1.5 pt-1">
-          <input
-            type="text"
-            value={newLocale}
-            onChange={(e) => setNewLocale(e.target.value)}
-            placeholder="새 로케일 코드 (예: ja)"
-            className={`${INPUT_SM} w-40 text-[0.7rem] h-7`}
-          />
-          <button
-            type="button"
-            onClick={addLocale}
-            className="h-7 px-2 rounded text-[0.7rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]"
-          >
-            로케일 추가
-          </button>
-        </div>
-
-        {/* Live preview of the rendered prompt */}
         {previewLocale && (
-          <div className="rounded border border-violet-500/20 bg-violet-500/5 px-3 py-2 mt-1">
-            <div className="text-[0.625rem] uppercase tracking-wider text-violet-700 dark:text-violet-300 font-semibold mb-1">
-              실제 발사되는 형태 (시스템 자동 생성)
+          <button
+            type="button"
+            onClick={() => setShowPreview((v) => !v)}
+            className="text-[0.7rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] text-left line-clamp-1"
+            title={showPreview ? '미리보기 숨기기' : '실제 발사 형태 미리보기'}
+          >
+            {previewLocale}
+          </button>
+        )}
+        {showPreview && prompt && (
+          <div className="rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1.5 mt-1">
+            <div className="text-[0.6rem] uppercase tracking-wider text-violet-700 dark:text-violet-300 font-semibold mb-0.5">
+              실제 발사 형태
             </div>
-            <div className="text-[0.7rem] font-mono text-[hsl(var(--foreground))] leading-relaxed break-words">
+            <div className="text-[0.7rem] font-mono leading-relaxed break-words">
               {renderPrompt(category, previewLocale)}
             </div>
           </div>
         )}
       </div>
+
+      <div className="flex justify-end pt-0.5">
+        <input
+          type="number"
+          value={weight}
+          min={0}
+          step={1}
+          onChange={(e) => {
+            const n = Math.max(0, Number(e.target.value));
+            if (Number.isFinite(n)) onWeight(n);
+          }}
+          className={`${INPUT_SM} w-24 text-right tabular-nums h-7`}
+        />
+      </div>
+      <div className="text-right pt-1.5 tabular-nums">
+        <span className="text-[0.75rem] text-violet-700 dark:text-violet-300 font-medium">
+          {share.toFixed(0)}%
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        className={`${ICON_BTN} hover:!text-red-500 hover:!bg-red-500/10`}
+        title="참조 해제"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }

@@ -32,6 +32,7 @@ import {
 } from 'react';
 import {
   Clock,
+  FileText,
   MessageSquare,
   Save,
   Sun,
@@ -53,11 +54,17 @@ import TriggerSectionBar, {
   type TriggerSectionDef,
 } from './TriggerSectionBar';
 import CategoriesSection from './CategoriesSection';
+import PromptsSection from './PromptsSection';
 import { currentTimeWindow, type RuntimeScenario } from './triggerSimulator';
 
 // ── Section identifiers ──────────────────────────────────────────
 
-type SectionId = 'metadata' | 'timing' | 'time_boundaries' | 'categories';
+type SectionId =
+  | 'metadata'
+  | 'timing'
+  | 'time_boundaries'
+  | 'prompts'
+  | 'categories';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -77,6 +84,7 @@ function emptyManifest(): TriggerPresetManifest {
       evening_start: 18,
       night_start: 22,
     },
+    prompts: [],
     categories: [],
   };
 }
@@ -184,19 +192,31 @@ export default function TriggerPresetEditor({
   );
 
   const validation = useMemo(() => {
-    const noPrompts = manifest.categories.every(
-      (c) => c.prompts.length === 0,
+    const promptIds = new Set(manifest.prompts.map((p) => p.id));
+    const orphanRefs = manifest.categories.some((c) =>
+      c.prompt_refs.some((r) => !promptIds.has(r.prompt_id)),
     );
-    const dupIds =
+    const noRefs = manifest.categories.every(
+      (c) => c.prompt_refs.length === 0,
+    );
+    const dupCatIds =
       manifest.categories.length !==
       new Set(manifest.categories.map((c) => c.id)).size;
+    const dupPromptIds =
+      manifest.prompts.length !==
+      new Set(manifest.prompts.map((p) => p.id)).size;
     return {
       metadata: !name.trim(),
       timing:
         manifest.timing.base_idle_seconds <= 0 ||
         manifest.timing.max_idle_seconds < manifest.timing.base_idle_seconds,
       time_boundaries: false,
-      categories: manifest.categories.length === 0 || noPrompts || dupIds,
+      prompts: manifest.prompts.length === 0 || dupPromptIds,
+      categories:
+        manifest.categories.length === 0 ||
+        noRefs ||
+        dupCatIds ||
+        orphanRefs,
     };
   }, [manifest, name]);
 
@@ -248,10 +268,7 @@ export default function TriggerPresetEditor({
   // ── Section definitions for the top bar ───────────────────────
 
   const categoryCount = manifest.categories.length;
-  const promptCount = useMemo(
-    () => manifest.categories.reduce((s, c) => s + c.prompts.length, 0),
-    [manifest.categories],
-  );
+  const promptCount = manifest.prompts.length;
 
   const sections: TriggerSectionDef<SectionId>[] = useMemo(
     () => [
@@ -276,15 +293,30 @@ export default function TriggerPresetEditor({
         hint: '아침 / 오후 / 저녁 / 밤 시작 시각',
       },
       {
+        id: 'prompts',
+        label: '프롬프트',
+        icon: FileText,
+        hint: '재사용 가능한 자연어 프롬프트 라이브러리',
+        badge: `${promptCount}개`,
+        hasIssue: validation.prompts,
+      },
+      {
         id: 'categories',
-        label: '카테고리',
+        label: '상황',
         icon: MessageSquare,
-        hint: '발화 상황 — 조건 + 프롬프트. 한 카드에서 모든 게 편집됩니다.',
-        badge: `${categoryCount}개 · ${promptCount}프롬프트`,
+        hint: '발화 상황 — 조건 + 어느 프롬프트를 어떤 가중치로 참조',
+        badge: `${categoryCount}개`,
         hasIssue: validation.categories,
       },
     ],
-    [categoryCount, promptCount, validation.metadata, validation.timing, validation.categories],
+    [
+      categoryCount,
+      promptCount,
+      validation.metadata,
+      validation.timing,
+      validation.prompts,
+      validation.categories,
+    ],
   );
 
   const activeSection = sections.find((s) => s.id === section) ?? sections[0];
@@ -377,12 +409,20 @@ export default function TriggerPresetEditor({
         />
       )}
 
+      {section === 'prompts' && (
+        <PromptsSection
+          manifest={manifest}
+          onManifestUpdate={updateManifest}
+        />
+      )}
+
       {section === 'categories' && (
         <CategoriesSection
           manifest={manifest}
           scenario={scenario}
           onScenarioChange={setScenario}
           onManifestUpdate={updateManifest}
+          onJumpToPrompts={() => setSection('prompts')}
         />
       )}
     </RegistryFormShell>

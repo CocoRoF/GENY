@@ -2,41 +2,35 @@
  * Trigger preset runtime simulator — pure helpers shared by the
  * editor's category view + scenario bar.
  *
- * This is the single source of truth for "what fires under scenario
- * X?" and is kept in *exact* lockstep with the backend's
- * :func:`_category_eligible` + two-stage roulette in
+ * Lockstep with the backend's :func:`_category_eligible` + two-stage
+ * roulette + prompt-library resolution in
  * :mod:`service.vtuber.thinking_trigger`.
  *
- * Two-stage runtime (categories-only schema, cycle 20260507):
+ * Two-stage runtime (two-tier schema, cycle 20260507):
  *
  *   ① Find every Category whose conditions hold under the scenario
  *      (consec range + sub-worker state + time window + cooldown).
  *   ② Stage-1 roulette across matching categories by ``Category.weight``
  *      → one situation wins.
- *   ③ Stage-2 roulette across that category's prompts by per-prompt
- *      ``weight`` → one wording wins.
- *   ④ Render: ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}``
+ *   ③ Stage-2 roulette across that category's ``prompt_refs`` → one
+ *      prompt id wins.
+ *   ④ Resolve the id against the manifest's prompt library and render:
+ *      ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}``
  */
 
 import type {
   TimeWindow,
   TriggerCategory,
   TriggerPresetManifest,
+  TriggerPrompt,
 } from '@/types/triggerPreset';
 
-/** Possible Sub-Worker states for the scenario picker. */
 export type SubWorkerState = 'busy' | 'idle' | 'unlinked';
 
-/** Holds every input the runtime's condition gate reads. */
 export interface RuntimeScenario {
   consecutive: number;
   subWorker: SubWorkerState;
   timeWindow: TimeWindow;
-  /**
-   * Whether to honour per-category cooldown gates. Off in the editor
-   * by default — the runtime cooldown depends on per-session fire
-   * history, not anything the operator can preview deterministically.
-   */
   honourCooldowns: boolean;
 }
 
@@ -48,26 +42,20 @@ export interface BlockedReason {
     | 'sub_worker_idle_required'
     | 'wrong_time_window'
     | 'cooldown'
-    | 'no_prompts'
+    | 'no_prompt_refs'
+    | 'no_resolvable_prompts'
     | 'zero_weight';
   message: string;
 }
 
 export interface SimulatedCategory {
   category: TriggerCategory;
-  /** When non-null, this category is filtered out. */
   blocked: BlockedReason | null;
-  /**
-   * Probability under the current scenario, expressed as a percentage.
-   * 0 if blocked. Sum across non-blocked categories is 100.
-   */
   effectivePct: number;
 }
 
 export interface ScenarioSimulation {
-  /** Every category, ordered as in the manifest, with eligibility. */
   categories: SimulatedCategory[];
-  /** Sum of weights of surviving categories. */
   totalEligibleWeight: number;
 }
 
@@ -98,12 +86,6 @@ export function currentTimeWindow(
   return timeWindowForHour(kstHour, manifest.time_boundaries);
 }
 
-/**
- * Evaluate one category's condition gate against the scenario.
- * Mirrors :func:`service.vtuber.thinking_trigger._category_eligible`.
- * Cooldown is intentionally ignored unless ``honourCooldowns`` is
- * true — see :class:`RuntimeScenario`.
- */
 export function evaluateConditions(
   category: TriggerCategory,
   scenario: RuntimeScenario,
@@ -155,7 +137,6 @@ export function evaluateConditions(
   return null;
 }
 
-/** Render condition chips for a category in priority order. */
 export function describeConditions(
   category: TriggerCategory,
 ): { label: string; tone: 'info' | 'warn' | 'neutral' }[] {
@@ -197,17 +178,16 @@ export function describeConditions(
 
 /**
  * Run all categories against a scenario and produce per-category
- * effective probabilities.
- *
- *   1. Mark each category eligible / blocked via ``evaluateConditions``.
- *   2. Drop empty-prompt categories (eligible-but-no-output).
- *   3. Sum surviving weights → ``totalEligibleWeight``.
- *   4. Each surviving category's pct = weight / total * 100.
+ * effective probabilities. Categories whose ``prompt_refs`` resolve
+ * to no available prompts are blocked with ``no_resolvable_prompts``
+ * (matches the backend's safety filter).
  */
 export function simulate(
   manifest: TriggerPresetManifest,
   scenario: RuntimeScenario,
 ): ScenarioSimulation {
+  const promptIds = new Set(manifest.prompts.map((p) => p.id));
+
   const draft: SimulatedCategory[] = manifest.categories.map((cat) => {
     if (cat.weight <= 0) {
       return {
@@ -216,19 +196,31 @@ export function simulate(
         effectivePct: 0,
       };
     }
-    if (cat.prompts.length === 0) {
+    if (cat.prompt_refs.length === 0) {
       return {
         category: cat,
-        blocked: { code: 'no_prompts', message: '프롬프트가 비어있음' },
+        blocked: {
+          code: 'no_prompt_refs',
+          message: '연결된 프롬프트 없음',
+        },
+        effectivePct: 0,
+      };
+    }
+    const resolved = cat.prompt_refs.filter(
+      (r) => r.weight > 0 && promptIds.has(r.prompt_id),
+    );
+    if (resolved.length === 0) {
+      return {
+        category: cat,
+        blocked: {
+          code: 'no_resolvable_prompts',
+          message: '연결된 프롬프트가 라이브러리에 없거나 가중치 0',
+        },
         effectivePct: 0,
       };
     }
     const blocked = evaluateConditions(cat, scenario);
-    return {
-      category: cat,
-      blocked,
-      effectivePct: 0,
-    };
+    return { category: cat, blocked, effectivePct: 0 };
   });
 
   const surviving = draft.filter((d) => d.blocked === null);
@@ -239,19 +231,10 @@ export function simulate(
     }
   }
 
-  return {
-    categories: draft,
-    totalEligibleWeight: total,
-  };
+  return { categories: draft, totalEligibleWeight: total };
 }
 
-/**
- * Construct the final-rendered prompt string the runtime would send.
- * Pure mirror of :func:`service.trigger_preset.schemas.render_prompt`.
- *
- * Used in the editor for the "이 트리거가 발사되면 이렇게 보내집니다"
- * preview chip on each prompt row.
- */
+/** Construct the final-rendered prompt string the runtime would send. */
 export function renderPrompt(
   category: TriggerCategory,
   content: string,
@@ -267,3 +250,32 @@ export function renderPrompt(
   parts.push(content.trim());
   return parts.join(' ');
 }
+
+// ── Reverse references — for the prompt library view ─────────────
+
+export interface PromptUsage {
+  categoryId: string;
+  categoryLabel: string;
+  weight: number;
+}
+
+/** Map of ``prompt_id → list of categories referencing it``. */
+export function promptUsageMap(
+  manifest: TriggerPresetManifest,
+): Map<string, PromptUsage[]> {
+  const out = new Map<string, PromptUsage[]>();
+  for (const cat of manifest.categories) {
+    for (const ref of cat.prompt_refs) {
+      const list = out.get(ref.prompt_id) ?? [];
+      list.push({
+        categoryId: cat.id,
+        categoryLabel: cat.label || cat.id,
+        weight: ref.weight,
+      });
+      out.set(ref.prompt_id, list);
+    }
+  }
+  return out;
+}
+
+export type { TriggerPrompt };

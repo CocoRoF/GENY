@@ -152,9 +152,6 @@ class TriggerPresetService:
 
     @staticmethod
     def _summarize(record: TriggerPresetRecord) -> Dict[str, Any]:
-        prompt_count = sum(
-            len(c.prompts) for c in record.manifest.categories
-        )
         return {
             "id": record.id,
             "name": record.name,
@@ -164,7 +161,7 @@ class TriggerPresetService:
             "updated_at": record.updated_at,
             "enabled": record.manifest.enabled,
             "category_count": len(record.manifest.categories),
-            "prompt_count": prompt_count,
+            "prompt_count": len(record.manifest.prompts),
         }
 
     # ── Write API ─────────────────────────────────────────────

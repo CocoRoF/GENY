@@ -1,27 +1,28 @@
 """Pydantic schemas for Trigger Presets.
 
-Cycle 20260507 redesign — collapsed the previous "phases × categories"
-two-tier model into a single tier:
+Cycle 20260507 redesign — promotes prompts to a top-level reusable
+library so the editor can present them as a separate workspace from
+situations:
+
+  Prompt    =  natural-language text (re-usable). Just content +
+                identity. No tags, no metadata.
 
   Category  =  "발화 상황" — when this fires (conditions) + which
-                prompts are in this situation (with sub-weights).
-  Prompt    =  natural-language content only. The system generates
-                the [TRIGGER:<id>] / [autonomous_signal: …] tags at
-                fire time so operators never write them by hand.
+                prompts it references (with per-reference weight).
+                One prompt can be referenced by many categories;
+                each reference carries its own weight in that
+                situation.
 
 Runtime semantics::
 
   ① find every Category whose conditions hold under the current
-     scenario (consec count, sub-worker state, time window, cooldown)
+     scenario (consec, sub-worker, time, cooldown)
   ② weighted roulette across matching categories (Category.weight)
      to pick a single situation
-  ③ weighted roulette across that category's prompts
-     (TriggerPromptVariant.weight) to pick the exact wording
-  ④ render: ``[KIND_TRIGGER:cat_id] [autonomous_signal: …] {content}``
-
-This collapses the old (phase, category, event) triple into a flat
-list of categories with consec range as just-another-condition, which
-is what operators want when authoring a preset.
+  ③ weighted roulette across that category's prompt_refs to pick a
+     prompt by id
+  ④ resolve the prompt id against the manifest's prompt library and
+     render: ``[KIND_TRIGGER:cat_id] [autonomous_signal: …] {content}``
 """
 
 from __future__ import annotations
@@ -35,11 +36,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TriggerTiming(BaseModel):
-    """Idle-window timing knobs for the trigger loop.
-
-    Defaults match the historical hardcoded constants in
-    :mod:`service.vtuber.thinking_trigger`.
-    """
+    """Idle-window timing knobs for the trigger loop."""
 
     base_idle_seconds: float = Field(120.0, ge=5.0)
     max_idle_seconds: float = Field(3600.0, ge=5.0)
@@ -69,28 +66,43 @@ TriggerKind = Literal["thinking", "activity"]
 TimeWindow = Literal["morning", "afternoon", "evening", "night"]
 
 
-class TriggerPromptVariant(BaseModel):
-    """One natural-language prompt inside a category.
+# ── Prompt library ────────────────────────────────────────────────
 
-    The runtime picks one variant per fire via weighted random over
-    ``weight``; weights are *within-category* (a separate roulette runs
-    across categories first).
 
-    ``content`` is keyed by locale (``en``, ``ko``, …). Each value is
-    the **raw natural language**: no tag prefixes, no ``autonomous_signal``,
-    no metadata. Those are auto-generated at fire time from the parent
-    category's metadata so the operator only has to write words.
+class TriggerPrompt(BaseModel):
+    """One re-usable natural-language prompt.
+
+    Stored in the manifest's top-level ``prompts`` list and referenced
+    from categories via ``prompt_refs``. Editor surfaces this in the
+    "프롬프트" section so the operator manages prompt content separately
+    from situation logic.
+
+    ``content`` keys are locale codes (``en``, ``ko``, …); each value
+    is the **raw natural language** — no ``[THINKING_TRIGGER:…]`` tag,
+    no ``[autonomous_signal: …]`` prefix. Those are constructed from
+    the parent category's metadata at fire time.
     """
 
-    weight: float = Field(1.0, ge=0.0)
+    id: str = Field(..., min_length=1, max_length=64)
+    label: str = Field(
+        "",
+        max_length=120,
+        description="Optional human-friendly label for the prompt list view.",
+    )
     content: Dict[str, str] = Field(
         default_factory=dict,
         description="locale → natural-language text",
     )
+    tags: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Free-form tags for filtering / organising the prompt "
+            "library. Not consumed by the runtime."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _trim_content(self) -> "TriggerPromptVariant":
-        # Coerce values to strings; drop blank locales.
+    def _trim_content(self) -> "TriggerPrompt":
         clean: Dict[str, str] = {}
         for locale, value in self.content.items():
             text = str(value).strip()
@@ -100,64 +112,57 @@ class TriggerPromptVariant(BaseModel):
         return self
 
 
+class PromptRef(BaseModel):
+    """Reference from a category to a prompt + per-situation weight.
+
+    ``weight`` is the chance of *this* prompt firing within the
+    referencing category once the category is picked (stage-2 of the
+    two-stage roulette). Same prompt referenced by another category
+    can carry a different weight there.
+    """
+
+    prompt_id: str = Field(..., min_length=1, max_length=64)
+    weight: float = Field(1.0, ge=0.0)
+
+
+# ── Category ──────────────────────────────────────────────────────
+
+
 class TriggerCategory(BaseModel):
     """One firable situation.
 
-    A category bundles three things:
+    A category bundles three orthogonal concerns:
 
       • **Identity** — id (used in the auto-generated tag), label, kind
       • **Conditions** — when this situation applies. consec range,
-        sub-worker state, time window, per-category cooldown. All
-        optional; absence = "no restriction on this axis".
-      • **Prompts** — natural-language variants. The runtime renders
-        ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}`` using
-        the category's metadata, so prompt content is operator-friendly
-        plain text.
+        sub-worker state, time window, per-category cooldown.
+      • **Prompt refs** — which prompts in the manifest's library this
+        situation can fire, and at what within-category weight.
     """
 
-    # ── Identity ──────────────────────────────────────────────
     id: str = Field(..., min_length=1, max_length=64)
     label: str = Field("", max_length=120)
     kind: TriggerKind = "thinking"
 
-    # ── Category-level weight ─────────────────────────────────
-    # Drives stage-1 roulette across matching categories.
     weight: float = Field(1.0, ge=0.0)
 
-    # ── Conditions ────────────────────────────────────────────
-    consec_min: int = Field(
-        0,
-        ge=0,
-        description=(
-            "Lower bound on the session's consecutive-trigger count. "
-            "Default 0 = no lower bound."
-        ),
-    )
-    consec_max: Optional[int] = Field(
-        None,
-        ge=0,
-        description=(
-            "Upper bound on the consecutive-trigger count. "
-            "``None`` = no upper bound (open-ended)."
-        ),
-    )
+    consec_min: int = Field(0, ge=0)
+    consec_max: Optional[int] = Field(None, ge=0)
     requires_sub_worker_busy: bool = False
     requires_sub_worker_idle: bool = False
     time_window: Optional[TimeWindow] = None
     cooldown_seconds: float = Field(0.0, ge=0.0)
 
-    # ── Output formatting ─────────────────────────────────────
     autonomous_signal: str = Field(
         "",
         description=(
             "Optional content to inject as ``[autonomous_signal: …]``. "
-            "Set to empty string to omit. Mostly an internal hint for "
-            "the agent — operators rarely need to touch this."
+            "Empty = omit the block. Internal hint for the agent — "
+            "operators rarely need to touch this."
         ),
     )
 
-    # ── Prompts ───────────────────────────────────────────────
-    prompts: List[TriggerPromptVariant] = Field(default_factory=list)
+    prompt_refs: List[PromptRef] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_consec_range(self) -> "TriggerCategory":
@@ -178,25 +183,39 @@ class TriggerCategory(BaseModel):
 class TriggerPresetManifest(BaseModel):
     """Full body of a trigger preset.
 
-    Cycle 20260507 — phases removed. consec range now lives on each
-    category as a regular condition. The runtime fires by:
+    Two-tier model:
 
-      1. matching → all categories whose conditions hold
-      2. category roulette by ``weight``
-      3. prompt roulette by per-prompt ``weight`` inside the picked cat
-      4. render with auto-generated tag prefix
+      • ``prompts`` — top-level library. The editor manages these in
+        the "프롬프트" section.
+      • ``categories`` — situations that reference prompts. The editor
+        manages these in the "상황" section.
     """
 
     enabled: bool = True
     timing: TriggerTiming = Field(default_factory=TriggerTiming)
     time_boundaries: TimeBoundaries = Field(default_factory=TimeBoundaries)
+    prompts: List[TriggerPrompt] = Field(default_factory=list)
     categories: List[TriggerCategory] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_unique_ids(self) -> "TriggerPresetManifest":
-        ids = [c.id for c in self.categories]
-        if len(ids) != len(set(ids)):
+    def _validate(self) -> "TriggerPresetManifest":
+        # Unique ids
+        cat_ids = [c.id for c in self.categories]
+        if len(cat_ids) != len(set(cat_ids)):
             raise ValueError("category ids must be unique")
+        prompt_ids = [p.id for p in self.prompts]
+        if len(prompt_ids) != len(set(prompt_ids)):
+            raise ValueError("prompt ids must be unique")
+
+        # Every prompt_ref must resolve to a known prompt id.
+        known = set(prompt_ids)
+        for cat in self.categories:
+            for ref in cat.prompt_refs:
+                if ref.prompt_id not in known:
+                    raise ValueError(
+                        f"category {cat.id!r} references unknown "
+                        f"prompt_id={ref.prompt_id!r}"
+                    )
         return self
 
 
@@ -204,8 +223,6 @@ class TriggerPresetManifest(BaseModel):
 
 
 class TriggerPresetRecord(BaseModel):
-    """The full on-disk record for one preset."""
-
     id: str
     name: str
     description: str = ""
@@ -223,10 +240,7 @@ class CreateTriggerPresetRequest(BaseModel):
     description: str = ""
     tags: List[str] = Field(default_factory=list)
     manifest: Optional[TriggerPresetManifest] = None
-    clone_from: Optional[str] = Field(
-        None,
-        description="Source preset id — when set, copy that preset's manifest.",
-    )
+    clone_from: Optional[str] = None
 
     @model_validator(mode="after")
     def _exclusive_seed(self) -> "CreateTriggerPresetRequest":
@@ -260,8 +274,6 @@ class TriggerPresetSummaryResponse(BaseModel):
     updated_at: str
     enabled: bool
     category_count: int
-    # Total number of prompt variants across all categories — a quick
-    # signal of "how rich is this preset" for the list view.
     prompt_count: int
 
 
@@ -283,40 +295,6 @@ class CreateTriggerPresetResponse(BaseModel):
     id: str
 
 
-# ── Backwards-compatibility aliases ───────────────────────────────
-# Old (phase × category × event) callers may still import these
-# names; we re-export the new TriggerCategory under the conditions
-# name so legacy controllers don't break during the FE migration.
-# Unused once the FE catches up — flagged for removal next cycle.
-
-CategoryConditions = TriggerCategory  # legacy import alias
-TriggerPhase = TriggerCategory  # ditto
-
-
-__all__ = [
-    "TimeBoundaries",
-    "TimeWindow",
-    "TriggerCategory",
-    "TriggerKind",
-    "TriggerPresetManifest",
-    "TriggerPresetRecord",
-    "TriggerPromptVariant",
-    "TriggerTiming",
-    # Controller
-    "CreateTriggerPresetRequest",
-    "CreateTriggerPresetResponse",
-    "DuplicateTriggerPresetRequest",
-    "ReplaceManifestRequest",
-    "TriggerPresetDetailResponse",
-    "TriggerPresetListResponse",
-    "TriggerPresetSummaryResponse",
-    "UpdateTriggerPresetRequest",
-    # Legacy aliases (delete next cycle)
-    "CategoryConditions",
-    "TriggerPhase",
-]
-
-
 # ── Helpers ───────────────────────────────────────────────────────
 
 
@@ -330,10 +308,11 @@ def render_prompt(category: TriggerCategory, content: str) -> str:
         [{KIND}_TRIGGER:{cat.id}] [autonomous_signal: {signal}] {content}
 
     The ``autonomous_signal`` chunk is omitted when the category leaves
-    that field empty, matching the historical "fun_*" / "activity_*"
-    prompt shape.
+    that field empty.
     """
-    kind_token = "ACTIVITY_TRIGGER" if category.kind == "activity" else "THINKING_TRIGGER"
+    kind_token = (
+        "ACTIVITY_TRIGGER" if category.kind == "activity" else "THINKING_TRIGGER"
+    )
     head = f"[{kind_token}:{category.id}]"
     parts: List[str] = [head]
     signal = (category.autonomous_signal or "").strip()
@@ -341,3 +320,26 @@ def render_prompt(category: TriggerCategory, content: str) -> str:
         parts.append(f"[autonomous_signal: {signal}]")
     parts.append(content.strip())
     return " ".join(parts)
+
+
+__all__ = [
+    "PromptRef",
+    "TimeBoundaries",
+    "TimeWindow",
+    "TriggerCategory",
+    "TriggerKind",
+    "TriggerPresetManifest",
+    "TriggerPresetRecord",
+    "TriggerPrompt",
+    "TriggerTiming",
+    # Controller
+    "CreateTriggerPresetRequest",
+    "CreateTriggerPresetResponse",
+    "DuplicateTriggerPresetRequest",
+    "ReplaceManifestRequest",
+    "TriggerPresetDetailResponse",
+    "TriggerPresetListResponse",
+    "TriggerPresetSummaryResponse",
+    "UpdateTriggerPresetRequest",
+    "render_prompt",
+]
