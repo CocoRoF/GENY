@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Camera, Clipboard, Loader2, Pencil, Upload } from 'lucide-react';
 import {
   listCaptureSources,
@@ -19,7 +19,7 @@ import {
 } from '@/lib/captureSources';
 import type { WhiteboardCaptureCreatedResponse } from '@/lib/api';
 
-const FALLBACK_ICONS: Record<string, JSX.Element> = {
+const FALLBACK_ICONS: Record<string, ReactNode> = {
   file_drop: <Upload size={14} />,
   screen_capture: <Camera size={14} />,
   clipboard_paste: <Clipboard size={14} />,
