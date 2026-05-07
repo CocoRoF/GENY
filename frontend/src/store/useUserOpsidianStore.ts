@@ -7,7 +7,8 @@ import type {
   MemoryGraphEdge,
 } from '@/types';
 
-export type ViewMode = 'editor' | 'graph' | 'search';
+// 'inbox' is the whiteboard P1 raw-captures view.
+export type ViewMode = 'editor' | 'graph' | 'search' | 'inbox';
 export type SidebarPanel = 'files' | 'tags' | 'backlinks';
 
 export interface UserOpsidianState {
