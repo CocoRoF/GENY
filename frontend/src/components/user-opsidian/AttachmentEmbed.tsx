@@ -12,6 +12,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import type { Components } from 'react-markdown';
 import { whiteboardApi } from '@/lib/api';
 
 export type AttachmentRenderer = (props: {
@@ -148,15 +149,29 @@ export function preprocessAttachmentEmbeds(body: string): string {
  * the `attachment://` marker emitted by {@link preprocessAttachmentEmbeds}
  * and renders an {@link AttachmentEmbed}.  Spread alongside any other
  * custom components.
+ *
+ * Typed with the exact `Components['img']` callback shape from
+ * react-markdown so the host's `<ReactMarkdown components={...}>`
+ * accepts it without an unsafe cast. Note that ReactMarkdown widens
+ * `src` to `string | Blob | undefined`, so we narrow defensively
+ * before using it.
  */
-export const attachmentMarkdownComponents = {
-  img: (props: React.ImgHTMLAttributes<HTMLImageElement> & { src?: string; alt?: string }) => {
-    const { src, alt } = props;
-    if (typeof src === 'string' && src.startsWith('attachment://')) {
-      const path = decodeURIComponent(src.replace('attachment://', ''));
-      return <AttachmentEmbed path={path} alt={alt ?? null} />;
+export const attachmentMarkdownComponents: Pick<Components, 'img'> = {
+  img: ({ src, alt }) => {
+    const safeSrc =
+      typeof src === 'string' && src.length > 0 ? src : undefined;
+    const safeAlt = typeof alt === 'string' ? alt : undefined;
+    if (safeSrc && safeSrc.startsWith('attachment://')) {
+      const path = decodeURIComponent(safeSrc.replace('attachment://', ''));
+      return <AttachmentEmbed path={path} alt={safeAlt ?? null} />;
     }
     // Plain markdown image — fall through to a sane default.
-    return <img {...props} style={{ maxWidth: '100%', borderRadius: 6 }} />;
+    return (
+      <img
+        src={safeSrc}
+        alt={safeAlt}
+        style={{ maxWidth: '100%', borderRadius: 6 }}
+      />
+    );
   },
 };
