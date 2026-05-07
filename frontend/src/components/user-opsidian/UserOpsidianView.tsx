@@ -45,6 +45,7 @@ import CurationSettingsPanel from './CurationSettingsPanel';
 import InboxPanel from './InboxPanel';
 import {
   attachmentMarkdownComponents,
+  attachmentUrlTransform,
   preprocessAttachmentEmbeds,
 } from './AttachmentEmbed';
 import { uploadCaptureFile } from '@/lib/captureSources';
@@ -1091,6 +1092,7 @@ function NoteEditor({
         <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--obs-text)' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
+            urlTransform={attachmentUrlTransform}
             components={{
               ...attachmentMarkdownComponents,
               a: ({ href, children, ...props }) => {

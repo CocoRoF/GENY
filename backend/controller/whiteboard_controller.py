@@ -221,12 +221,19 @@ def _persist_capture(
     # Persist as a markdown note in the inbox/ category. We use the
     # standard UserOpsidianManager.write_note path so the resulting
     # file participates in the regular index/search/graph paths.
+    #
+    # No auto-applied tags or low-importance flag here: the inbox
+    # category itself already conveys "raw capture", and forcing
+    # `capture` / `unrefined` chips on every note added visual noise
+    # to the editor without giving the user any new affordance.
+    # `source` carries the originating capture source for filtering
+    # later (e.g. "capture:screen_capture" vs "capture:clipboard_paste").
     draft_filename = mgr.write_note(
         title=title,
         content=body,
         category="inbox",
-        tags=["capture", "unrefined"],
-        importance="low",
+        tags=[],
+        importance="medium",
         source=f"capture:{event.source}",
     )
     if not draft_filename:
@@ -432,11 +439,12 @@ async def delete_capture(
     capture_id: str,
     auth: dict = Depends(_resolve_user_for_capture),
 ) -> Dict[str, Any]:
-    """Delete a capture's draft note and any owned attachment.
+    """Delete a capture's draft note, attachment, and audit-log entry.
 
     Looks up the capture in the audit log to find the draft note and
-    attachment. Returns the cleanup result so callers can verify each
-    deletion succeeded independently.
+    attachment, deletes both, and rewrites the JSONL log without that
+    entry so subsequent ``GET /captures`` calls don't keep showing the
+    discarded card.
     """
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
@@ -444,18 +452,24 @@ async def delete_capture(
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="capture not found")
 
+    kept_lines: List[str] = []
     found: Optional[Dict[str, Any]] = None
     try:
         for line in log_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
+            stripped = line.strip()
+            if not stripped:
                 continue
             try:
-                row = json.loads(line)
+                row = json.loads(stripped)
             except (ValueError, json.JSONDecodeError):
+                # Preserve malformed lines unchanged so we don't lose
+                # data on a third-party-edit accident.
+                kept_lines.append(line)
                 continue
             if row.get("capture_id") == capture_id:
                 found = row
+                continue  # drop this entry from the rewrite
+            kept_lines.append(line)
     except OSError as exc:
         raise HTTPException(status_code=500, detail="capture log unreadable") from exc
 
@@ -473,6 +487,17 @@ async def delete_capture(
     attachment_path = found.get("attachment_path")
     if attachment_path:
         attachment_deleted = mgr.delete_attachment(attachment_path)
+
+    # Rewrite the audit log without the deleted entry. Best-effort —
+    # if disk write fails we still report the in-memory deletes; the
+    # next reload will re-show the card but the binary itself is gone.
+    try:
+        log_path.write_text(
+            ("\n".join(kept_lines) + ("\n" if kept_lines else "")),
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("delete_capture: failed to rewrite captures log", exc_info=True)
 
     return {
         "capture_id": capture_id,

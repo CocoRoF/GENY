@@ -12,7 +12,11 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import type { Components } from 'react-markdown';
+import {
+  defaultUrlTransform,
+  type Components,
+  type UrlTransform,
+} from 'react-markdown';
 import { whiteboardApi } from '@/lib/api';
 
 export type AttachmentRenderer = (props: {
@@ -143,6 +147,20 @@ export function preprocessAttachmentEmbeds(body: string): string {
     },
   );
 }
+
+/**
+ * `urlTransform` for ReactMarkdown that lets our `attachment://`
+ * scheme survive the default sanitiser.
+ *
+ * react-markdown's default rejects any unknown protocol (replacing
+ * the URL with `""`), which is why a plain `<ReactMarkdown>` would
+ * render `<img src="">` for our attachment embeds. Whitelist the
+ * one protocol we own and delegate everything else to the default.
+ */
+export const attachmentUrlTransform: UrlTransform = (url) => {
+  if (typeof url === 'string' && url.startsWith('attachment://')) return url;
+  return defaultUrlTransform(url);
+};
 
 /**
  * Convenience: a `components` partial for ReactMarkdown that detects

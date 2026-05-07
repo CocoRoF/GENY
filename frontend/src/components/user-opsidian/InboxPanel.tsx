@@ -18,6 +18,7 @@ import {
   whiteboardApi,
   type WhiteboardCaptureLogEntry,
 } from '@/lib/api';
+import { uploadCaptureFile } from '@/lib/captureSources';
 import SuggestionsBar from './SuggestionsBar';
 import CaptureToolbar from './CaptureToolbar';
 
@@ -93,8 +94,56 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
     return [...items].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
   }, [items]);
 
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      e.preventDefault();
+      setDragActive(false);
+      if (files.length === 0) return;
+      for (const file of files) {
+        try {
+          await uploadCaptureFile(file, { source: 'file_drop' });
+        } catch (err) {
+          console.error('[whiteboard] inbox drop upload failed', err);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+      setInternalTick((n) => n + 1);
+    },
+    [],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (!dragActive) setDragActive(true);
+      }
+    },
+    [dragActive],
+  );
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      // Only clear when the cursor exits the panel itself, not just
+      // a child node. relatedTarget === null when dropping outside.
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+        setDragActive(false);
+      }
+    },
+    [],
+  );
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div
         style={{
           display: 'flex',
@@ -112,7 +161,18 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
         </span>
       </div>
       <CaptureToolbar sessionId={sessionId} onCaptured={onCaptured} />
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div
+        style={{
+          flex: 1,
+          overflow: 'auto',
+          padding: 16,
+          position: 'relative',
+          outline: dragActive ? '2px dashed #10b981' : 'none',
+          outlineOffset: -8,
+          background: dragActive ? 'rgba(16,185,129,0.04)' : undefined,
+          transition: 'background 120ms',
+        }}
+      >
         <SuggestionsBar />
         {loading && (
           <div style={{ color: 'var(--obs-text-muted, #8e8e93)', fontSize: 13 }}>Loading…</div>
