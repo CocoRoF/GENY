@@ -106,9 +106,10 @@ export async function uploadCaptureFile(
   });
 }
 
-// ── Built-in source: file_drop / file_pick ───────────────────────────
-// Implementation lives here so it loads with the registry and is
-// always available; UI components only import the registry.
+// ── Built-in sources (Phase 1 + Phase 3) ─────────────────────────────
+// Implementations live here so they load with the registry and are
+// always available; UI components only import the registry. New
+// sources register one block here — the toolbar picks them up.
 
 let _builtinsRegistered = false;
 
@@ -116,16 +117,41 @@ export function registerBuiltinCaptureSources(): void {
   if (_builtinsRegistered) return;
   _builtinsRegistered = true;
 
+  // P1 — file picker / drag-drop fallback.
   registerCaptureSource({
     id: 'file_drop',
     label: 'Upload',
-    icon: null, // CaptureToolbar provides its own icon when icon is null
+    icon: null,
     order: 50,
     run: async (ctx) => {
       const file = await pickFile();
       if (!file) return null;
       return uploadCaptureFile(file, { source: 'file_drop', ctx });
     },
+  });
+
+  // P3 — clipboard paste (image OR text).
+  registerCaptureSource({
+    id: 'clipboard_paste',
+    label: 'Paste',
+    icon: null,
+    order: 60,
+    isAvailable: () =>
+      typeof navigator !== 'undefined' &&
+      typeof navigator.clipboard?.read === 'function',
+    run: async (ctx) => grabClipboard(ctx),
+  });
+
+  // P3 — screen capture via getDisplayMedia.
+  registerCaptureSource({
+    id: 'screen_capture',
+    label: 'Screen',
+    icon: null,
+    order: 70,
+    isAvailable: () =>
+      typeof navigator !== 'undefined' &&
+      typeof navigator.mediaDevices?.getDisplayMedia === 'function',
+    run: async (ctx) => grabScreen(ctx),
   });
 }
 
@@ -149,4 +175,107 @@ async function pickFile(): Promise<File | null> {
     document.body.appendChild(input);
     input.click();
   });
+}
+
+// ── clipboard_paste ──────────────────────────────────────────────────
+
+
+async function grabClipboard(
+  ctx: CaptureContext,
+): Promise<WhiteboardCaptureCreatedResponse | null> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.read) {
+    throw new Error('Clipboard read not supported in this browser');
+  }
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    // Image variant first — most useful.
+    const imageType = item.types.find((t) => t.startsWith('image/'));
+    if (imageType) {
+      const blob = await item.getType(imageType);
+      const ext = imageType.split('/')[1] ?? 'png';
+      const file = new File([blob], `clipboard.${ext}`, { type: imageType });
+      return uploadCaptureFile(file, {
+        type: 'image',
+        source: 'clipboard_paste',
+        ctx,
+      });
+    }
+  }
+  // Fallback: plain text via the JSON capture endpoint.
+  for (const item of items) {
+    const textType = item.types.find((t) => t === 'text/plain');
+    if (textType) {
+      const blob = await item.getType(textType);
+      const text = await blob.text();
+      if (!text.trim()) continue;
+      return whiteboardApi.createCapture({
+        type: 'text',
+        source: 'clipboard_paste',
+        payload: { inline_text: text },
+        session_id: ctx.sessionId ?? null,
+        metadata: { hint: ctx.hint ?? null },
+      });
+    }
+  }
+  return null;
+}
+
+// ── screen_capture ──────────────────────────────────────────────────
+
+
+async function grabScreen(
+  ctx: CaptureContext,
+): Promise<WhiteboardCaptureCreatedResponse | null> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.mediaDevices?.getDisplayMedia
+  ) {
+    throw new Error('Screen capture not supported in this browser');
+  }
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: { displaySurface: 'monitor' } as MediaTrackConstraints,
+    audio: false,
+  });
+  try {
+    const blob = await captureFirstFrame(stream);
+    if (!blob) return null;
+    const file = new File([blob], 'screen.png', { type: 'image/png' });
+    return uploadCaptureFile(file, {
+      type: 'screenshot',
+      source: 'screen_capture',
+      ctx,
+    });
+  } finally {
+    // Always release the screen-share track immediately — leaving
+    // the indicator on after we've grabbed one frame is creepy UX.
+    stream.getTracks().forEach((t) => t.stop());
+  }
+}
+
+async function captureFirstFrame(stream: MediaStream): Promise<Blob | null> {
+  const track = stream.getVideoTracks()[0];
+  if (!track) return null;
+
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.muted = true;
+  video.playsInline = true;
+  await video.play();
+
+  // One animation frame is enough to ensure the first frame is
+  // composited; ``HTMLVideoElement`` is ready to draw immediately
+  // after ``play()`` resolves but the canvas would otherwise see
+  // a black frame on some browsers.
+  await new Promise((r) => requestAnimationFrame(r));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx2d = canvas.getContext('2d');
+  if (!ctx2d) return null;
+  ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  return new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((blob) => resolve(blob), 'image/png', 0.95),
+  );
 }
