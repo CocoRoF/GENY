@@ -48,6 +48,7 @@ BLOG_AGENT_MODEL_OPTIONS: List[Dict[str, str]] = [
 BLOG_AGENT_PROMPT_MODE_OPTIONS: List[Dict[str, str]] = [
     {"value": "persona", "label": "Persona (25세 카주얼 블로거 · default)"},
     {"value": "research", "label": "Research (진지 정보·사실 서술)"},
+    {"value": "explorer", "label": "Explorer (탐색 도우미 · read 도구 우선)"},
 ]
 
 

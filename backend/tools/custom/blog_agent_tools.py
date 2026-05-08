@@ -94,7 +94,7 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-_VALID_PROMPT_MODES = ("persona", "research")
+_VALID_PROMPT_MODES = ("persona", "research", "explorer")
 
 
 def _normalize_prompt_mode(mode: str) -> str:
@@ -238,10 +238,13 @@ class BlogAgentDelegateTool(BaseTool):
         "blog_agent_status(task_id) 로 확인한다. 작업 완료 시 결과는 "
         "자동으로 inbox 에 도착해 paraphrase 된다 — 이 도구의 반환값을 "
         "사용자에게 그대로 노출하지 마라. 같은 turn 에서 두 번 호출 금지. "
-        "prompt_mode 로 voice (persona | research) 를, model 로 블로그 측 "
-        "사용 모델 (claude-* / gpt-*) 을 호출별로 override 할 수 있다 — "
-        "미지정이면 BlogAgentConfig 의 default 값이 적용. 재사용 세션이고 "
-        "값이 다르면 호출 직전 PATCH 로 동기화한다."
+        "prompt_mode 로 voice 를, model 로 블로그 측 사용 모델 (claude-* / "
+        "gpt-*) 을 호출별로 override 할 수 있다. prompt_mode 옵션: "
+        "persona = 25세 카주얼 블로거 (글쓰기 default), research = 진지·정보 "
+        "톤 (글쓰기), explorer = 글쓰기 voice 가 아닌 탐색 도우미 (이미 있는 "
+        "글·태그·카테고리 빠르게 찾고 정리). 미지정이면 BlogAgentConfig 의 "
+        "default 값이 적용. 재사용 세션이고 값이 다르면 호출 직전 PATCH 로 "
+        "동기화한다."
     )
     CAPABILITIES = _DELEGATE
 
