@@ -86,8 +86,15 @@ class LTMConfig(BaseConfig):
     auto_curation_last_run: str = ""
 
     # ── User Opsidian Read Access ──
-    user_opsidian_index_enabled: bool = False
-    user_opsidian_raw_read_enabled: bool = False
+    # Default to True so the agent can browse / read the *user's own*
+    # personal vault out of the box. The data belongs to the user, the
+    # agent runs on the user's behalf, and gating it default-off only
+    # produced confusing "User Opsidian index access is not enabled"
+    # responses when the user shared notes via the whiteboard. Hosts
+    # that need stricter privacy can flip these back to False in
+    # settings.json.
+    user_opsidian_index_enabled: bool = True
+    user_opsidian_raw_read_enabled: bool = True
 
     # ── Env mapping (for optional .env fallback) ──
     _ENV_MAP = {

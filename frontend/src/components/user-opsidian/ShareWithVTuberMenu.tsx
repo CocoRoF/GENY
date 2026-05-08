@@ -247,9 +247,17 @@ export default function ShareWithVTuberMenu({
         disabled={disabled || isBusy}
         title="Share with VTuber"
         style={{
+          // Match the sibling Edit / Delete buttons exactly so the
+          // baseline aligns: display:flex + 5x12 padding + fontSize 12 +
+          // 1px border + 5px radius. Anything else makes the box
+          // height drift by ~1–2 px and the row looks messy.
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
           padding: '5px 12px',
           fontSize: 12,
           fontWeight: 500,
+          lineHeight: 1.2,
           background: 'var(--obs-button-bg, rgba(127,127,127,0.08))',
           color: 'var(--obs-text, inherit)',
           border: '1px solid var(--obs-border, rgba(127,127,127,0.25))',

@@ -799,6 +799,141 @@ class OpsidianReadTool(BaseTool):
 
 
 # ============================================================================
+# Opsidian Search Tool — keyword search of the user's vault
+# ============================================================================
+
+
+class OpsidianSearchTool(BaseTool):
+    """Keyword-search the user's personal Opsidian vault.
+
+    Filling the gap between ``opsidian_browse`` (lists every note,
+    no scoring) and ``opsidian_read`` (needs an exact filename).
+    The agent rarely knows the filename, so without a search tool
+    every "look at my notes about X" turn devolved into a list +
+    repeated read loop. ``UserOpsidianManager.search`` already
+    implements the keyword scoring (title 2x, body 1x, tag 0.5x),
+    we just expose it.
+    """
+
+    name = "opsidian_search"
+    description = (
+        "Search the user's personal Opsidian vault by keyword. "
+        "Returns the most relevant notes with title, category, "
+        "tags, score, and a short snippet. Use this BEFORE "
+        "opsidian_read when you don't already know the filename."
+    )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
+
+    def run(
+        self,
+        session_id: str,
+        query: str,
+        max_results: int = 5,
+    ) -> str:
+        """Keyword-search User Opsidian.
+
+        Args:
+            session_id: Your session ID.
+            query: Search query — keyword, phrase, or question.
+            max_results: Maximum results to return (default: 5).
+        """
+        config = _get_ltm_config()
+        if config is None or not config.user_opsidian_index_enabled:
+            return _error("User Opsidian index access is not enabled")
+        _, opsidian = _get_context_managers(session_id)
+        if opsidian is None:
+            return _error("User Opsidian manager not available")
+        if not query or not query.strip():
+            return _error("query is required")
+
+        results = opsidian.search(query, max_results=max_results)
+        items = [
+            {
+                "filename": r.get("filename"),
+                "title": r.get("title"),
+                "category": r.get("category"),
+                "tags": r.get("tags"),
+                "importance": r.get("importance"),
+                "score": round(float(r.get("score", 0) or 0), 4),
+                "snippet": (r.get("snippet") or "")[:500],
+            }
+            for r in results
+        ]
+        _log_knowledge_event(
+            session_id,
+            event_type="opsidian_search",
+            source="Opsidian",
+            engine="legacy.keyword",
+            message=(
+                f"opsidian_search: '{query[:60]}' → {len(items)} hits"
+            ),
+            hits=len(items),
+            top_score=items[0]["score"] if items else None,
+        )
+        # Decorate with ViewLedger so repeated searches surface
+        # "previously seen" hints just like knowledge_search does.
+        _maybe_decorate_results(session_id, items=items, event="searched")
+        return _ok({
+            "query": query,
+            "total": len(items),
+            "results": items,
+            "engine": "opsidian.keyword",
+        })
+
+    async def arun(
+        self,
+        session_id: str,
+        query: str,
+        max_results: int = 5,
+    ) -> str:
+        config = _get_ltm_config()
+        if config is None or not config.user_opsidian_index_enabled:
+            return _error("User Opsidian index access is not enabled")
+        _, opsidian = _get_context_managers(session_id)
+        if opsidian is None:
+            return _error("User Opsidian manager not available")
+        if not query or not query.strip():
+            return _error("query is required")
+
+        asearch = getattr(opsidian, "asearch", None)
+        results = (
+            await asearch(query, max_results=max_results)
+            if callable(asearch)
+            else opsidian.search(query, max_results=max_results)
+        )
+        items = [
+            {
+                "filename": r.get("filename"),
+                "title": r.get("title"),
+                "category": r.get("category"),
+                "tags": r.get("tags"),
+                "importance": r.get("importance"),
+                "score": round(float(r.get("score", 0) or 0), 4),
+                "snippet": (r.get("snippet") or "")[:500],
+            }
+            for r in results
+        ]
+        _log_knowledge_event(
+            session_id,
+            event_type="opsidian_search",
+            source="Opsidian",
+            engine="legacy.keyword",
+            message=(
+                f"opsidian_search: '{query[:60]}' → {len(items)} hits"
+            ),
+            hits=len(items),
+            top_score=items[0]["score"] if items else None,
+        )
+        _maybe_decorate_results(session_id, items=items, event="searched")
+        return _ok({
+            "query": query,
+            "total": len(items),
+            "results": items,
+            "engine": "opsidian.keyword",
+        })
+
+
+# ============================================================================
 # Explicit TOOLS list for ToolLoader
 # ============================================================================
 
@@ -809,4 +944,5 @@ TOOLS = [
     KnowledgePromoteTool(),
     OpsidianBrowseTool(),
     OpsidianReadTool(),
+    OpsidianSearchTool(),
 ]
