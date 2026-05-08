@@ -221,11 +221,48 @@ class AsyncBlogAgentClient:
         *,
         title: str = "",
         model: Optional[str] = None,
+        prompt_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         cfg = self._resolve_cfg()
-        body = {"title": title, "model": model or cfg.default_model}
+        body: Dict[str, Any] = {
+            "title": title,
+            "model": model or cfg.default_model,
+            "prompt_mode": (
+                prompt_mode
+                or getattr(cfg, "default_prompt_mode", None)
+                or "persona"
+            ),
+        }
         return await self._request_json(
             "POST", "/api/v1/agent/external/sessions", body=body,
+        )
+
+    async def update_session(
+        self,
+        session_uid: str,
+        *,
+        title: Optional[str] = None,
+        model: Optional[str] = None,
+        prompt_mode: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """기존 세션의 메타 (title) / 모델 / voice mode 변경.
+
+        blog 측은 진행 중 turn 이 있으면 model / prompt_mode 변경에 409 를 반환.
+        호출자는 이 경우 cancel 후 재시도하거나 다음 turn 까지 기다려야 함.
+        """
+        body: Dict[str, Any] = {}
+        if title is not None:
+            body["title"] = title
+        if model is not None:
+            body["model"] = model
+        if prompt_mode is not None:
+            body["prompt_mode"] = prompt_mode
+        if not body:
+            return await self.get_session(session_uid)
+        return await self._request_json(
+            "PATCH",
+            f"/api/v1/agent/external/sessions/{session_uid}",
+            body=body,
         )
 
     async def list_sessions(self, limit: int = 200) -> List[Dict[str, Any]]:

@@ -94,17 +94,35 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+_VALID_PROMPT_MODES = ("persona", "research")
+
+
+def _normalize_prompt_mode(mode: str) -> str:
+    """blog 측 normalize_prompt_mode 와 동일 룰 — 알 수 없는 값은 persona."""
+    if not mode:
+        return "persona"
+    m = mode.strip().lower()
+    return m if m in _VALID_PROMPT_MODES else "persona"
+
+
 async def _ensure_blog_session_uid(
     *,
     geny_session_id: str,
     title_hint: str,
     reuse: bool,
+    prompt_mode: str,
+    model: str,
 ) -> str:
     """이 Geny 세션과 매핑된 blog_session_uid 를 보장.
 
     매핑은 AgentSession 인스턴스에 ``_blog_session_uid`` 속성으로 보관
     (in-memory). 재시작 시 손실되지만 블로그 세션 자체는 살아있으므로
     필요하면 LLM 이 list_sessions 로 다시 확인 가능 — 본 v1 의 trade-off.
+
+    재사용 경로: 기존 세션이 있더라도 호출자가 prompt_mode / model 을 명시했고
+    현재 세션의 값과 다르면 PATCH 로 동기화. 진행 중 turn 이 있으면 blog 측이
+    409 를 반환 — 그 경우 위쪽 try/except 가 BlogAgentHTTPError 로 받아 호출자
+    에 전달.
     """
     from service.executor import get_agent_session_manager
     from service.blog_agent.client import AsyncBlogAgentClient
@@ -113,10 +131,35 @@ async def _ensure_blog_session_uid(
     if reuse and agent is not None:
         existing = getattr(agent, "_blog_session_uid", None)
         if existing:
+            # 재사용 — 호출자가 명시한 prompt_mode / model 이 현재 세션과 다르면
+            # PATCH 로 동기화. 둘 중 하나라도 명시 안 된 (cfg default 사용) 호출
+            # 에서는 PATCH 하지 않음 — "재사용 세션은 그 세션의 설정 그대로" 가
+            # 더 직관적.
+            try:
+                async with AsyncBlogAgentClient() as client:
+                    cur = await client.get_session(existing, include_messages=False)
+                    cur_session = (cur or {}).get("session") or cur or {}
+                    patch_kwargs: Dict[str, Any] = {}
+                    if prompt_mode and cur_session.get("prompt_mode") != prompt_mode:
+                        patch_kwargs["prompt_mode"] = prompt_mode
+                    if model and cur_session.get("model") != model:
+                        patch_kwargs["model"] = model
+                    if patch_kwargs:
+                        await client.update_session(existing, **patch_kwargs)
+            except Exception:
+                # PATCH 실패는 위임 자체를 막지 않음 — 기존 세션 설정으로 진행.
+                logger.debug(
+                    "blog session sync (PATCH) failed — proceeding with existing settings",
+                    exc_info=True,
+                )
             return existing
 
     async with AsyncBlogAgentClient() as client:
-        row = await client.create_session(title=title_hint or "Geny delegation")
+        row = await client.create_session(
+            title=title_hint or "Geny delegation",
+            model=model or None,
+            prompt_mode=prompt_mode or None,
+        )
     blog_uid = row["session_uid"]
     if agent is not None:
         try:
@@ -194,7 +237,11 @@ class BlogAgentDelegateTool(BaseTool):
         "정도로 알리고 너의 turn 을 종료해라. 진행 상황을 사용자가 물으면 "
         "blog_agent_status(task_id) 로 확인한다. 작업 완료 시 결과는 "
         "자동으로 inbox 에 도착해 paraphrase 된다 — 이 도구의 반환값을 "
-        "사용자에게 그대로 노출하지 마라. 같은 turn 에서 두 번 호출 금지."
+        "사용자에게 그대로 노출하지 마라. 같은 turn 에서 두 번 호출 금지. "
+        "prompt_mode 로 voice (persona | research) 를, model 로 블로그 측 "
+        "사용 모델 (claude-* / gpt-*) 을 호출별로 override 할 수 있다 — "
+        "미지정이면 BlogAgentConfig 의 default 값이 적용. 재사용 세션이고 "
+        "값이 다르면 호출 직전 PATCH 로 동기화한다."
     )
     CAPABILITIES = _DELEGATE
 
@@ -204,12 +251,16 @@ class BlogAgentDelegateTool(BaseTool):
         task: str,
         task_summary: str = "",
         reuse_session: bool = True,
+        prompt_mode: str = "",
+        model: str = "",
     ) -> str:
         return _run_async(self.arun(
             session_id=session_id,
             task=task,
             task_summary=task_summary,
             reuse_session=reuse_session,
+            prompt_mode=prompt_mode,
+            model=model,
         ))
 
     async def arun(
@@ -218,6 +269,8 @@ class BlogAgentDelegateTool(BaseTool):
         task: str,
         task_summary: str = "",
         reuse_session: bool = True,
+        prompt_mode: str = "",
+        model: str = "",
     ) -> str:
         """위임 시작.
 
@@ -226,6 +279,10 @@ class BlogAgentDelegateTool(BaseTool):
             task: 블로그 AI 에게 전달할 한국어 지시문 (카테고리/태그/스타일 포함).
             task_summary: 사용자에게 들려줄 한 줄 요약 (5단어 이내 권장).
             reuse_session: True 면 이 Geny 세션의 기존 blog_session 재사용.
+            prompt_mode: "persona" | "research" — voice 명시. 빈 문자열이면
+                BlogAgentConfig.default_prompt_mode 적용.
+            model: blog 측 모델 ID 명시 ("claude-sonnet-4-6", "gpt-5.4" 등).
+                빈 문자열이면 BlogAgentConfig.default_model 적용.
         """
         gate = _check_enabled()
         if gate is not None:
@@ -234,6 +291,18 @@ class BlogAgentDelegateTool(BaseTool):
             return _err("task must be non-empty")
 
         cfg = _config()
+
+        # 호출별 prompt_mode / model 정규화 — 빈 값이면 cfg default 사용.
+        # prompt_mode 는 화이트리스트 검사 (잘못된 값은 persona 로 fallback).
+        # model 은 자유 문자열 (blog 측이 검증).
+        resolved_prompt_mode = _normalize_prompt_mode(
+            prompt_mode or getattr(cfg, "default_prompt_mode", "persona") or "persona",
+        )
+        resolved_model = (
+            (model or "").strip()
+            or (getattr(cfg, "default_model", "") or "").strip()
+            or "claude-sonnet-4-6"
+        )
 
         # 동시 위임 상한 검사
         from service.blog_agent.registry import get_blog_task_registry
@@ -251,6 +320,8 @@ class BlogAgentDelegateTool(BaseTool):
                 geny_session_id=session_id,
                 title_hint=task_summary or task[:60],
                 reuse=reuse_session,
+                prompt_mode=resolved_prompt_mode,
+                model=resolved_model,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("blog_agent_delegate session setup failed")
@@ -296,6 +367,8 @@ class BlogAgentDelegateTool(BaseTool):
             "blog_session_uid": blog_uid,
             "task_summary": state.task_summary,
             "status": state.status,
+            "prompt_mode": resolved_prompt_mode,
+            "model": resolved_model,
             "message": (
                 "작업을 시작했습니다. 사용자에게 '맡겼어, 잠깐만' 정도로 "
                 "알리고 너의 turn 을 종료하세요. 결과는 자동으로 도착합니다."

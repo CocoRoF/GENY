@@ -36,6 +36,18 @@ BLOG_AGENT_MODEL_OPTIONS: List[Dict[str, str]] = [
     {"value": "claude-opus-4-7", "label": "Claude Opus 4.7 (최고 추론력)"},
     {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (균형 · 권장)"},
     {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (빠르고 저렴)"},
+    {"value": "gpt-5.5", "label": "OpenAI GPT-5.5 (다른 문체)"},
+    {"value": "gpt-5.4", "label": "OpenAI GPT-5.4 (균형)"},
+    {"value": "gpt-5.4-mini", "label": "OpenAI GPT-5.4 mini (저렴)"},
+]
+
+
+# ─── 블로그 측 prompt voice mode ───────────────────────
+# blog backend 의 ``PROMPT_MODES`` (system_prompt.py) 와 1:1 동기화.
+# 새 mode 가 blog 에 추가되면 이 리스트도 갱신.
+BLOG_AGENT_PROMPT_MODE_OPTIONS: List[Dict[str, str]] = [
+    {"value": "persona", "label": "Persona (25세 카주얼 블로거 · default)"},
+    {"value": "research", "label": "Research (진지 정보·사실 서술)"},
 ]
 
 
@@ -47,6 +59,9 @@ class BlogAgentConfig(BaseConfig):
     base_url: str = "https://hrletsgo.me"
     api_key: str = ""
     default_model: str = "claude-sonnet-4-6"
+    # 블로그 system_prompt voice mode — 새 세션 / 미지정 호출에 적용.
+    # delegate 도구 호출자가 prompt_mode 인자를 명시하면 그 값이 우선.
+    default_prompt_mode: str = "persona"
     default_timeout_s: float = 600.0
     pump_idle_grace_s: float = 30.0
     enabled: bool = False
@@ -57,6 +72,7 @@ class BlogAgentConfig(BaseConfig):
         "base_url": "BLOG_AGENT_BASE_URL",
         "api_key": "BLOG_AGENT_API_KEY",
         "default_model": "BLOG_AGENT_DEFAULT_MODEL",
+        "default_prompt_mode": "BLOG_AGENT_DEFAULT_PROMPT_MODE",
         "default_timeout_s": "BLOG_AGENT_DEFAULT_TIMEOUT_S",
         "pump_idle_grace_s": "BLOG_AGENT_PUMP_IDLE_GRACE_S",
         "enabled": "BLOG_AGENT_ENABLED",
@@ -120,6 +136,14 @@ class BlogAgentConfig(BaseConfig):
                     "default_model": {
                         "label": "기본 모델",
                         "description": "위임 시 블로그 SDK 가 사용할 모델",
+                    },
+                    "default_prompt_mode": {
+                        "label": "기본 Voice",
+                        "description": (
+                            "위임 시 블로그 system_prompt 의 voice mode. "
+                            "persona = 25세 카주얼 블로거, research = 진지 정보 톤. "
+                            "delegate 도구 호출자가 명시하면 그 값이 우선."
+                        ),
                     },
                     "default_timeout_s": {
                         "label": "Stream 타임아웃 (초)",
@@ -198,6 +222,19 @@ class BlogAgentConfig(BaseConfig):
                 options=BLOG_AGENT_MODEL_OPTIONS,
                 group="behavior",
                 apply_change=env_sync("BLOG_AGENT_DEFAULT_MODEL"),
+            ),
+            ConfigField(
+                name="default_prompt_mode",
+                field_type=FieldType.SELECT,
+                label="기본 Voice",
+                description=(
+                    "위임 시 블로그 system_prompt 의 voice mode. delegate 도구 "
+                    "호출자가 prompt_mode 인자를 명시하지 않으면 이 값이 적용. "
+                    "persona = 25세 카주얼 블로거, research = 진지 정보 톤."
+                ),
+                options=BLOG_AGENT_PROMPT_MODE_OPTIONS,
+                group="behavior",
+                apply_change=env_sync("BLOG_AGENT_DEFAULT_PROMPT_MODE"),
             ),
             ConfigField(
                 name="default_timeout_s",
