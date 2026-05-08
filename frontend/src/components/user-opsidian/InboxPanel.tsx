@@ -13,7 +13,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Clock, Image as ImageIcon, Trash2, Type, Upload } from 'lucide-react';
+import { Clock, Image as ImageIcon, Loader2, Trash2, Type, Upload } from 'lucide-react';
 import {
   whiteboardApi,
   type WhiteboardCaptureLogEntry,
@@ -137,6 +137,26 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
     [],
   );
 
+  // ── Organize-now trigger (was inside SuggestionsBar empty state) ──
+
+  const [organizing, setOrganizing] = useState(false);
+  const [organizeError, setOrganizeError] = useState<string | null>(null);
+  const [suggestionsTick, setSuggestionsTick] = useState(0);
+
+  const handleOrganizeClick = useCallback(async () => {
+    if (organizing) return;
+    setOrganizing(true);
+    setOrganizeError(null);
+    try {
+      await whiteboardApi.organizerRun();
+      setSuggestionsTick((n) => n + 1);
+    } catch (e) {
+      setOrganizeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOrganizing(false);
+    }
+  }, [organizing]);
+
   // Click-to-browse — same code path as the toolbar's `file_drop`
   // capture source, but invoked directly from the empty-state hero.
   const handleBrowseClick = useCallback(async () => {
@@ -175,27 +195,68 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          padding: '14px 20px',
+          padding: '12px 20px',
           borderBottom: '1px solid var(--obs-border, #2c2c2e)',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--obs-text, #d1d1d6)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span aria-hidden style={{ fontSize: 18 }}>📥</span>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 17,
+            fontWeight: 600,
+            color: 'var(--obs-text, #d1d1d6)',
+          }}
+        >
           Inbox
         </h2>
         <span
           style={{
             fontSize: 12,
             color: 'var(--obs-text-muted, #8e8e93)',
-            padding: '2px 8px',
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.04)',
           }}
         >
           {sortedItems.length} {sortedItems.length === 1 ? 'capture' : 'captures'}
         </span>
+
+        {/* Right cluster: Organize + capture sources, all on one row. */}
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleOrganizeClick}
+            disabled={organizing}
+            title={organizeError ?? 'Re-scan whiteboard for groupings, dupes, promotions'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              fontSize: 13,
+              fontWeight: 500,
+              borderRadius: 7,
+              border: organizeError
+                ? '1px solid #ef4444'
+                : '1px solid var(--obs-border, #2c2c2e)',
+              background: organizeError
+                ? 'rgba(239,68,68,0.08)'
+                : 'var(--obs-bg, rgba(255,255,255,0.04))',
+              color: organizeError ? '#ef4444' : 'var(--obs-text, #d1d1d6)',
+              cursor: organizing ? 'not-allowed' : 'pointer',
+              opacity: organizing ? 0.7 : 1,
+            }}
+          >
+            {organizing ? <Loader2 size={14} className="spin" /> : null}
+            <span>{organizing ? 'Organizing…' : 'Organize'}</span>
+          </button>
+          <CaptureToolbar inline sessionId={sessionId} onCaptured={onCaptured} />
+        </div>
       </div>
-      <CaptureToolbar sessionId={sessionId} onCaptured={onCaptured} />
       <div
         style={{
           flex: 1,
@@ -214,7 +275,7 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
           transition: 'background 120ms',
         }}
       >
-        <SuggestionsBar />
+        <SuggestionsBar refreshTick={suggestionsTick} />
         {loading && (
           <div style={{ color: 'var(--obs-text-muted, #8e8e93)', fontSize: 13 }}>Loading…</div>
         )}
