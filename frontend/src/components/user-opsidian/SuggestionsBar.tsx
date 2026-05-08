@@ -112,39 +112,11 @@ export default function SuggestionsBar({ refreshTick = 0 }: SuggestionsBarProps)
 
   const visible = useMemo(() => items.slice(0, 3), [items]);
 
-  // Hide the entire bar when nothing is active AND we're not loading
-  // — keeps the Inbox clean when there's no organiser noise.
-  if (!loading && visible.length === 0) {
-    return (
-      <div data-whiteboard-slot="suggestions-bar" style={{ marginBottom: 8 }}>
-        <button
-          type="button"
-          onClick={handleRun}
-          disabled={running}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            fontSize: 12,
-            border: '1px solid var(--obs-border, #2c2c2e)',
-            borderRadius: 6,
-            background: 'transparent',
-            color: 'var(--obs-text-muted, #8e8e93)',
-            cursor: running ? 'not-allowed' : 'pointer',
-            opacity: running ? 0.7 : 1,
-          }}
-        >
-          {running ? <Loader2 size={12} className="spin" /> : <Wand2 size={12} />}
-          {running ? 'Analysing…' : '✨ Organize now'}
-        </button>
-        {error && (
-          <span style={{ marginLeft: 8, fontSize: 12, color: '#ef4444' }}>
-            {error}
-          </span>
-        )}
-      </div>
-    );
+  // Empty + idle: render nothing. The "Organize now" trigger lives
+  // in the InboxPanel header now (single-row chrome), so a separate
+  // affordance here would just duplicate it.
+  if (!loading && visible.length === 0 && !error) {
+    return <div data-whiteboard-slot="suggestions-bar" hidden />;
   }
 
   return (

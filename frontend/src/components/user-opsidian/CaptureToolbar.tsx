@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Camera, Clipboard, Loader2, Pencil, Upload } from 'lucide-react';
 import {
   listCaptureSources,
@@ -31,12 +31,17 @@ export interface CaptureToolbarProps {
   /** Called whenever a capture source completes successfully. */
   onCaptured?: (response: WhiteboardCaptureCreatedResponse) => void;
   className?: string;
+  /** When true, render a slim inline cluster suitable for headers
+   *  (no border, no eyebrow, no padding). When false / undefined,
+   *  render the standalone toolbar block (legacy). */
+  inline?: boolean;
 }
 
 export default function CaptureToolbar({
   sessionId,
   onCaptured,
   className,
+  inline = false,
 }: CaptureToolbarProps) {
   // Built-ins are registered on first render (idempotent).
   useEffect(() => {
@@ -63,10 +68,14 @@ export default function CaptureToolbar({
     return null;
   }
 
-  return (
-    <div
-      className={className}
-      style={{
+  const containerStyle: React.CSSProperties = inline
+    ? {
+        display: 'inline-flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 6,
+      }
+    : {
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'center',
@@ -74,20 +83,14 @@ export default function CaptureToolbar({
         padding: '10px 20px',
         borderBottom: '1px solid var(--obs-border, #2c2c2e)',
         background: 'var(--obs-bg-secondary, rgba(255,255,255,0.02))',
-      }}
+      };
+
+  return (
+    <div
+      className={className}
+      style={containerStyle}
       data-whiteboard-slot="capture-toolbar"
     >
-      <span
-        style={{
-          fontSize: 11,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-          color: 'var(--obs-text-muted, #8e8e93)',
-          marginRight: 4,
-        }}
-      >
-        Capture
-      </span>
       {sources.map((source) => (
         <CaptureButton
           key={source.id}
