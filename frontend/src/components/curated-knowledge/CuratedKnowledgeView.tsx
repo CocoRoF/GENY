@@ -34,6 +34,11 @@ import {
   Copy,
 } from 'lucide-react';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
+import {
+  attachmentMarkdownComponents,
+  attachmentUrlTransform,
+  preprocessAttachmentEmbeds,
+} from '../user-opsidian/AttachmentEmbed';
 import { useOpsidianShortcuts } from '../opsidian/useOpsidianShortcuts';
 import MarkdownToolbar, { useMarkdownEditorKeys } from '../opsidian/MarkdownToolbar';
 import QuickSwitcher from '../opsidian/QuickSwitcher';
@@ -781,8 +786,11 @@ function CuratedNoteEditor({
   const meta = fileDetail.metadata || {};
   const body = fileDetail.body ?? '';
 
-  // Process wikilinks for markdown rendering
-  const processedBody = body.replace(
+  // Pre-process attachment embeds (`![[file.png]]` → markdown image
+  // with attachment:// scheme) BEFORE the wikilink rewrite so the
+  // leading `!` is consumed first. Same pipeline as User Opsidian.
+  const bodyWithAttachments = preprocessAttachmentEmbeds(body);
+  const processedBody = bodyWithAttachments.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_match: string, target: string, alias: string) => {
       const display = alias || target;
@@ -1007,7 +1015,9 @@ function CuratedNoteEditor({
         <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--obs-text)' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
+            urlTransform={attachmentUrlTransform}
             components={{
+              ...attachmentMarkdownComponents,
               a: ({ href, children, ...props }) => {
                 if (href?.startsWith('wikilink://')) {
                   const target = decodeURIComponent(href.replace('wikilink://', ''));
