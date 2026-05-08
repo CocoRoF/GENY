@@ -97,17 +97,40 @@ class SpotlightStore:
         session_id: Optional[str] = None,
         include_expired: bool = False,
     ) -> List[SpotlightItem]:
-        """Return active spotlight items for ``(user_id, session_id)``.
+        """Return active spotlight items visible to ``(user_id, session_id)``.
 
-        Pass ``session_id=None`` to read user-wide items only;
-        callers that want both should call twice and merge.
+        Merge semantics:
+          * ``session_id`` is None → user-wide bucket only.
+          * ``session_id`` is set → merge user-wide AND that session's
+            bucket. This is the right shape for VTuber prompt builds:
+            a note shared from the inbox UI (no active session in
+            scope) ends up in the user-wide bucket, and every running
+            session for that user picks it up automatically.
+
+        Newer items are returned later — callers that want
+        newest-first should reverse the result.
         """
+        keys: List[Tuple[str, Optional[str]]] = [(user_id, None)]
+        if session_id is not None and session_id != "":
+            keys.append((user_id, session_id))
         with self._lock:
-            bucket = list(self._items.get((user_id, session_id), ()))
+            bucket: List[SpotlightItem] = []
+            for key in keys:
+                bucket.extend(self._items.get(key, ()))
+        # Stable de-dup on item_id in case the same item somehow lands
+        # in both buckets (defence in depth — current writers don't).
+        seen_ids: set[str] = set()
+        deduped: List[SpotlightItem] = []
+        for item in bucket:
+            if item.item_id in seen_ids:
+                continue
+            seen_ids.add(item.item_id)
+            deduped.append(item)
+        deduped.sort(key=lambda i: i.created_at)
         if include_expired:
-            return bucket
+            return deduped
         now = _utc_now()
-        return [item for item in bucket if not item.is_expired(now)]
+        return [item for item in deduped if not item.is_expired(now)]
 
     def get(self, *, user_id: str, item_id: str) -> Optional[SpotlightItem]:
         with self._lock:

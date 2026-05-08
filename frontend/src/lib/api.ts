@@ -2699,6 +2699,38 @@ export const whiteboardApi = {
     return apiCall<WhiteboardViewStats>(`/api/opsidian/views/stats${qs}`);
   },
 
+  /** POST /api/opsidian/library — explicit Library share (no quality gate). */
+  shareToLibrary: (data: {
+    source_filename: string;
+    note_kind?: 'user' | 'curated';
+    extra_tags?: string[];
+  }) =>
+    apiCall<{ success: boolean; curated_filename: string; title: string; category: string }>(
+      '/api/opsidian/library',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  /** POST /api/opsidian/spotlight — Spotlight-mode share. */
+  shareToSpotlight: (data: {
+    source_filename: string;
+    session_id?: string | null;
+    title?: string | null;
+    excerpt?: string | null;
+    note_kind?: 'user' | 'curated';
+    ttl_minutes?: number;
+    pinned?: boolean;
+  }) =>
+    apiCall<{ item: Record<string, unknown> }>(
+      '/api/opsidian/spotlight',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
   /** POST /api/opsidian/organizer/run — fire the organizer once. */
   organizerRun: (strategies?: string[]) =>
     apiCall<{ total: number; suggestions: WhiteboardOrganizerSuggestion[] }>(

@@ -666,6 +666,100 @@ async def unshare_spotlight(
     return {"removed": True, "item_id": item_id}
 
 
+# ── Library — explicit user share (no quality gate) ─────────────────
+
+
+class LibraryShareRequest(BaseModel):
+    """Force-promote a User Opsidian note into Curated Knowledge.
+
+    This bypasses the CurationEngine's quality threshold because the
+    user is *explicitly* asking to share. The auto-curation pipeline
+    (POST /api/curated/curate) keeps its threshold for *automated*
+    promotion; this endpoint is for the "Share with VTuber → Library"
+    button only.
+    """
+
+    source_filename: str
+    note_kind: str = Field("user", description="'user' | 'curated'")
+    extra_tags: List[str] = Field(default_factory=list)
+
+
+@router.post("/library")
+async def share_to_library(
+    payload: LibraryShareRequest,
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Copy a note into Curated Knowledge directly.
+
+    Reads the note from the user's vault, writes it through
+    `CuratedKnowledgeManager.write_note`, and returns the resulting
+    curated filename. No quality scoring, no LLM analysis — the
+    user already decided.
+    """
+    username = auth.get("sub", "anonymous")
+
+    # Load source note from User Opsidian.
+    try:
+        from service.memory.user_opsidian import get_user_opsidian_manager
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"opsidian unavailable: {exc}") from exc
+    user_mgr = get_user_opsidian_manager(username)
+    note = user_mgr.read_note(payload.source_filename)
+    if note is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"source note not found: {payload.source_filename}",
+        )
+
+    metadata = note.get("metadata") or {}
+    title = str(note.get("title") or metadata.get("title") or payload.source_filename)
+    body = str(note.get("body") or "")
+    raw_tags = metadata.get("tags") or []
+    tags = list({*[str(t) for t in raw_tags], *[str(t) for t in payload.extra_tags]})
+    importance = str(metadata.get("importance") or "medium")
+
+    # Promote into Curated.
+    try:
+        from service.memory.curated_knowledge import (
+            get_curated_knowledge_manager,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"curated unavailable: {exc}") from exc
+    curated_mgr = get_curated_knowledge_manager(username)
+    if curated_mgr is None:
+        raise HTTPException(status_code=503, detail="curated knowledge not initialised")
+
+    # Pick a sensible curated category. ``inbox`` doesn't exist on
+    # the curated side — coerce to ``topics`` so the note is
+    # findable via knowledge_search.
+    raw_category = str(metadata.get("category") or "topics")
+    if raw_category in ("inbox", "root", "daily"):
+        raw_category = "topics"
+
+    try:
+        curated_filename = curated_mgr.write_note(
+            title=title,
+            content=body,
+            category=raw_category,
+            tags=tags,
+            importance=importance,
+            source=f"share:user_library:{payload.source_filename}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("library share write failed", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"write failed: {exc}") from exc
+
+    if not curated_filename:
+        raise HTTPException(status_code=500, detail="write returned empty filename")
+
+    return {
+        "success": True,
+        "curated_filename": curated_filename,
+        "title": title,
+        "category": raw_category,
+    }
+
+
 # ── Organizer (Phase 5) ──────────────────────────────────────────────
 
 

@@ -98,6 +98,71 @@ def test_max_per_session_evicts_oldest_unpinned(store: SpotlightStore) -> None:
     assert any(item.item_id == pinned.item_id for item in items)
 
 
+def test_list_merges_user_wide_and_session_specific(store: SpotlightStore) -> None:
+    """When ``session_id`` is set, the user-wide bucket is merged in.
+
+    This is the invariant that lets a note shared from the inbox UI
+    (no active session) reach the VTuber's prompt build for any
+    running session: the user-wide bucket is always visible.
+    """
+    user_wide = store.add(
+        user_id="alice",
+        session_id=None,
+        source_filename="topics/global.md",
+        title="Global",
+        excerpt="",
+    )
+    session_only = store.add(
+        user_id="alice",
+        session_id="sess-1",
+        source_filename="topics/local.md",
+        title="Local",
+        excerpt="",
+    )
+    out = store.list(user_id="alice", session_id="sess-1")
+    ids = {item.item_id for item in out}
+    assert user_wide.item_id in ids
+    assert session_only.item_id in ids
+
+
+def test_list_user_wide_only_when_session_id_none(store: SpotlightStore) -> None:
+    store.add(
+        user_id="alice",
+        session_id=None,
+        source_filename="g.md",
+        title="G",
+        excerpt="",
+    )
+    store.add(
+        user_id="alice",
+        session_id="sess-1",
+        source_filename="s.md",
+        title="S",
+        excerpt="",
+    )
+    out = store.list(user_id="alice", session_id=None)
+    assert len(out) == 1
+    assert out[0].source_filename == "g.md"
+
+
+def test_list_dedupes_by_item_id(store: SpotlightStore) -> None:
+    # Defence-in-depth — same item_id must not show twice if a future
+    # writer accidentally lands the same item in both buckets.
+    item = store.add(
+        user_id="alice",
+        session_id=None,
+        source_filename="x.md",
+        title="X",
+        excerpt="",
+    )
+    # Hand-craft a second insertion of the same item_id into the
+    # session bucket via the internal dict.
+    with store._lock:  # noqa: SLF001
+        store._items[("alice", "sess-1")] = [item]  # noqa: SLF001
+    out = store.list(user_id="alice", session_id="sess-1")
+    assert len([i for i in out if i.item_id == item.item_id]) == 1
+
+
 def test_expire_due_removes_only_expired(store: SpotlightStore) -> None:
     fresh = store.add(
         user_id="alice", session_id="s", source_filename="f.md", title="F", excerpt=""
