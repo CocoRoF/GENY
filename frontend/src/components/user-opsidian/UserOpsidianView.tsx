@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useAppStore } from '@/store/useAppStore';
 import { userOpsidianApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useHubMode } from '@/components/OpsidianHubContext';
@@ -743,6 +744,11 @@ function NoteEditor({
   const [showEditorWikilink, setShowEditorWikilink] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Active vtuber session (when user got here from a session). Used
+  // by ShareWithVTuberMenu so Spotlight items land in the right
+  // bucket and the [USER_SHARED] trigger fires for that session.
+  const activeSessionId = useAppStore((s) => s.selectedSessionId);
+
   // ShareWithVTuberMenu (P2a) owns its own toast — no top-level
   // curate-message state needed here any more.
 
@@ -1058,7 +1064,10 @@ function NoteEditor({
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           {selectedFile && (
-            <ShareWithVTuberMenu filename={selectedFile} />
+            <ShareWithVTuberMenu
+              filename={selectedFile}
+              sessionId={activeSessionId}
+            />
           )}
           <button
             onClick={handleStartEdit}
