@@ -45,11 +45,36 @@ export interface CaptureSource {
 
 const _registry = new Map<string, CaptureSource>();
 
+// Tiny pub-sub so consumers (CaptureToolbar) can re-render when
+// a source registers AFTER mount — the previous "single setTimeout
+// after mount" hack only caught sources registered within ~50 ms.
+type RegistryListener = () => void;
+const _listeners = new Set<RegistryListener>();
+
+function _emit(): void {
+  for (const fn of Array.from(_listeners)) {
+    try {
+      fn();
+    } catch {
+      /* listener errors are not our problem */
+    }
+  }
+}
+
+export function onCaptureSourcesChange(listener: RegistryListener): () => void {
+  _listeners.add(listener);
+  return () => {
+    _listeners.delete(listener);
+  };
+}
+
 export function registerCaptureSource(source: CaptureSource): () => void {
   if (!source.id) throw new Error('CaptureSource.id is required');
   _registry.set(source.id, source);
+  _emit();
   return () => {
     _registry.delete(source.id);
+    _emit();
   };
 }
 
@@ -217,7 +242,13 @@ async function grabClipboard(
       });
     }
   }
-  return null;
+  // Reaching here means the clipboard exists but has nothing we can
+  // capture — neither an image nor non-empty text. Throw so the
+  // toolbar surfaces an explicit error instead of silently swallowing
+  // the click (the previous null-return path looked like success).
+  throw new Error(
+    'Clipboard is empty (no image or text to capture)',
+  );
 }
 
 // ── screen_capture ──────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Camera, Clipboard, Loader2, Pencil, Upload } from 'lucide-react';
 import {
   listCaptureSources,
+  onCaptureSourcesChange,
   registerBuiltinCaptureSources,
   type CaptureContext,
   type CaptureSource,
@@ -49,14 +50,13 @@ export default function CaptureToolbar({
   }, []);
 
   const [tick, setTick] = useState(0);
-  // The registry is mutable — re-list when other components register
-  // new sources at module load. Cheap because it's a Map snapshot.
+  // The registry is mutable — re-list whenever a (un)registration
+  // fires the `onCaptureSourcesChange` emitter. This replaces the
+  // previous "single setTimeout 50ms after mount" hack which only
+  // caught sources registered within that one window.
   const sources = useMemo(() => listCaptureSources(), [tick]);
   useEffect(() => {
-    // No event bus yet — bump tick once on mount so newly registered
-    // sources after the first render still appear.
-    const id = window.setTimeout(() => setTick((n) => n + 1), 50);
-    return () => window.clearTimeout(id);
+    return onCaptureSourcesChange(() => setTick((n) => n + 1));
   }, []);
 
   const ctx: CaptureContext = useMemo(
@@ -156,7 +156,7 @@ function CaptureButton({
         opacity: running ? 0.7 : 1,
       }}
     >
-      {running ? <Loader2 size={15} className="animate-spin" /> : icon}
+      {running ? <Loader2 size={15} className="spin" /> : icon}
       <span>{source.label}</span>
     </button>
   );

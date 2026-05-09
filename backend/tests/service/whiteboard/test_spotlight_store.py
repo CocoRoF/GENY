@@ -98,6 +98,26 @@ def test_max_per_session_evicts_oldest_unpinned(store: SpotlightStore) -> None:
     assert any(item.item_id == pinned.item_id for item in items)
 
 
+def test_eviction_keeps_pinned_only_when_all_pinned(store: SpotlightStore) -> None:
+    """If every existing item is pinned, the eviction loop must not
+    spin forever and must still allow the new add (the bucket can
+    legally exceed MAX in this corner case — that's pinned semantics)."""
+    for i in range(MAX_PER_SESSION + 2):
+        store.add(
+            user_id="alice",
+            session_id="s",
+            source_filename=f"p{i}.md",
+            title=f"P{i}",
+            excerpt="",
+            pinned=True,
+        )
+    items = store.list(user_id="alice", session_id="s", include_expired=True)
+    # All pinned → cap can't shed any of them, so we end up with
+    # MAX_PER_SESSION + 2. The important assertion is "doesn't hang".
+    assert len(items) == MAX_PER_SESSION + 2
+    assert all(item.pinned for item in items)
+
+
 def test_list_merges_user_wide_and_session_specific(store: SpotlightStore) -> None:
     """When ``session_id`` is set, the user-wide bucket is merged in.
 

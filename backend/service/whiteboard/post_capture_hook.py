@@ -114,12 +114,17 @@ def fire_and_forget(
     Returns the created task (mainly for tests). Returns ``None``
     when called from a sync context with no running loop — the
     capture path stays best-effort and never blocks on a hook.
+
+    The Task handle is held by the shared ``_task_tracker`` until it
+    completes so the GC can't reap a hook mid-flight (CPython only
+    keeps weak refs to event-loop tasks).
     """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-    return loop.create_task(dispatch_post_capture(event, draft_note_filename))
+    from ._task_tracker import schedule
+
+    return schedule(
+        dispatch_post_capture(event, draft_note_filename),
+        name=f"whiteboard.post_capture[{event.type}:{event.capture_id[:8]}]",
+    )
 
 
 # ── Built-in hooks ───────────────────────────────────────────────────

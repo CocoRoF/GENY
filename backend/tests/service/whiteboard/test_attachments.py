@@ -81,6 +81,23 @@ def test_delete_attachment_rejects_traversal(vault: str) -> None:
     assert sentinel.exists()
 
 
+def test_delete_attachment_rejects_doubled_traversal(vault: str) -> None:
+    """`../../etc/passwd`-style payloads must not slip past the
+    canonical containment check even when nested several levels deep."""
+    grandparent = Path(vault).parent.parent
+    sentinel = grandparent / "totp"
+    sentinel.write_bytes(b"top-secret")
+    assert delete_attachment(vault, "../../totp") is False
+    assert sentinel.exists()
+
+
+def test_read_attachment_rejects_doubled_traversal(vault: str) -> None:
+    grandparent = Path(vault).parent.parent
+    sentinel = grandparent / "totp2"
+    sentinel.write_bytes(b"top-secret")
+    assert read_attachment(vault, "../../totp2") is None
+
+
 def test_list_attachments_orders_results(vault: str) -> None:
     save_attachment(vault, b"1", suggested_name="b.png")
     save_attachment(vault, b"2", suggested_name="a.png")

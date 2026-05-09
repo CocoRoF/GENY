@@ -125,27 +125,52 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_CONTENT_TYPE_TO_EXT: Dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "video/webm": "webm",
+    "video/mp4": "mp4",
+    "application/pdf": "pdf",
+    "text/plain": "txt",
+    "application/json": "json",
+    "application/octet-stream": "bin",  # generic binaries OK
+}
+
+# Hard ceiling for a single multipart capture upload. Big enough to
+# fit a 4K screenshot, an audio memo, or a small PDF; small enough
+# to keep an accidental drag-drop or malicious request from OOMing
+# the worker. Override via env if a host genuinely needs more.
+_MAX_UPLOAD_BYTES = int(os.environ.get("GENY_WHITEBOARD_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+
+
 def _ext_for_content_type(content_type: Optional[str], fallback: str = "bin") -> str:
     if not content_type:
         return fallback
     primary = content_type.split(";")[0].strip().lower()
-    mapping = {
-        "image/png": "png",
-        "image/jpeg": "jpg",
-        "image/jpg": "jpg",
-        "image/webp": "webp",
-        "image/gif": "gif",
-        "audio/webm": "webm",
-        "audio/ogg": "ogg",
-        "audio/mpeg": "mp3",
-        "audio/mp4": "m4a",
-        "video/webm": "webm",
-        "video/mp4": "mp4",
-        "application/pdf": "pdf",
-        "text/plain": "txt",
-        "application/json": "json",
-    }
-    return mapping.get(primary, fallback)
+    return _CONTENT_TYPE_TO_EXT.get(primary, fallback)
+
+
+def _is_allowed_content_type(content_type: Optional[str]) -> bool:
+    """Hard allow-list for capture uploads.
+
+    Anything outside ``_CONTENT_TYPE_TO_EXT`` is rejected. This stops
+    a hostile client from posting executable binaries / shell scripts
+    to the user's vault under an accidental MIME label. Empty /
+    missing content_type is treated as ``application/octet-stream``
+    (allowed) so plain ``file_drop`` of unlabelled binaries still
+    works for the user's own data.
+    """
+    if not content_type:
+        return True
+    primary = content_type.split(";")[0].strip().lower()
+    return primary in _CONTENT_TYPE_TO_EXT
 
 
 def _default_title_for(capture_type: str, *, when: Optional[datetime] = None) -> str:
@@ -343,7 +368,23 @@ async def create_capture_upload(
     inline_text: Optional[str] = Form(None),
     auth: dict = Depends(_resolve_user_for_capture),
 ):
-    """Multipart capture ingest (binary attachment + metadata)."""
+    """Multipart capture ingest (binary attachment + metadata).
+
+    Hard guards on the upload boundary:
+
+      * MIME allow-list (``_is_allowed_content_type``) — reject
+        anything we don't already know how to extension-map.
+      * Size ceiling (``_MAX_UPLOAD_BYTES``, default 25 MB) enforced
+        by streaming into a bounded buffer; the request returns 413
+        the moment the body exceeds the limit instead of OOMing
+        the worker by buffering a 4 GB file in memory.
+    """
+    if not _is_allowed_content_type(file.content_type):
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported content type: {file.content_type!r}",
+        )
+
     username = auth.get("sub", "anonymous")
     parsed_metadata: Dict[str, Any] = {}
     if metadata_json:
@@ -354,7 +395,26 @@ async def create_capture_upload(
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail=f"invalid metadata_json: {exc}") from exc
 
-    data = await file.read()
+    # Stream-read with a hard cap. ``UploadFile.read(n)`` returns
+    # at most n bytes; we keep reading until either the source is
+    # drained (small file → fits) or we'd exceed the limit (return
+    # 413 immediately, no buffer escalation).
+    chunks: List[bytes] = []
+    received = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        received += len(chunk)
+        if received > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"upload exceeds limit of {_MAX_UPLOAD_BYTES} bytes"
+                ),
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     if not data:
         raise HTTPException(status_code=400, detail="uploaded file is empty")
 
@@ -426,19 +486,49 @@ async def download_attachment(
     rel_path: str,
     auth: dict = Depends(_resolve_user_for_capture),
 ):
-    """Stream a previously stored attachment."""
+    """Stream a previously stored attachment.
+
+    Hardened path-traversal handling:
+
+      1. Reject any request whose ``rel_path`` contains a ``..``
+         segment, a NUL byte, or an absolute path leading slash.
+         This catches obvious payloads before we touch the FS at all.
+      2. Resolve BOTH ``base_attachments_dir`` and ``target`` via
+         ``Path.resolve()`` so symlinks inside or above the vault
+         can't expand the escape window after the syntactic check.
+      3. Use the resolved ``base / "_attachments"`` (NOT the raw
+         vault root) as the containment check via
+         ``target.relative_to(...)``. The previous code mixed
+         resolved vs unresolved paths, which is the classic
+         path-confusion footgun.
+    """
+    if not rel_path or "\x00" in rel_path:
+        raise HTTPException(status_code=400, detail="invalid attachment path")
+    # Forbid traversal segments before any FS work.
+    cleaned = rel_path.replace("\\", "/").lstrip("/")
+    if any(seg in ("", "..") for seg in cleaned.split("/")):
+        raise HTTPException(status_code=400, detail="invalid attachment path")
+
     username = auth.get("sub", "anonymous")
     mgr = _get_manager(username)
-    if rel_path.startswith("_attachments/"):
-        target_rel = rel_path
+    if cleaned.startswith("_attachments/"):
+        target_rel = cleaned
     else:
-        target_rel = f"_attachments/{rel_path.lstrip('/')}"
-    base = Path(mgr.vault_root).resolve()
-    target = (Path(mgr.vault_root) / target_rel).resolve()
+        target_rel = f"_attachments/{cleaned}"
+
     try:
-        target.relative_to(base / "_attachments")
+        attachments_base = (Path(mgr.vault_root) / "_attachments").resolve()
+        target = (Path(mgr.vault_root) / target_rel).resolve()
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="invalid attachment path")
+
+    # `relative_to` raises ValueError if `target` isn't inside the
+    # resolved attachments dir — the canonical containment check.
+    try:
+        target.relative_to(attachments_base)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid attachment path")
+
     if not target.is_file():
         raise HTTPException(status_code=404, detail="attachment not found")
     return FileResponse(path=str(target))
