@@ -813,6 +813,13 @@ class OpsidianSearchTool(BaseTool):
     repeated read loop. ``UserOpsidianManager.search`` already
     implements the keyword scoring (title 2x, body 1x, tag 0.5x),
     we just expose it.
+
+    Performance guard: ``UserOpsidianManager.search`` does an N+1
+    read (list every note, fetch every body) so we cap the vault
+    size per call via ``GENY_WHITEBOARD_OPSIDIAN_SEARCH_MAX_NOTES``
+    (default 500). Above the cap we return an empty result + a
+    ``warning`` field steering the agent to ``opsidian_browse``
+    with a category/tag filter instead of a free-text search.
     """
 
     name = "opsidian_search"
@@ -820,7 +827,10 @@ class OpsidianSearchTool(BaseTool):
         "Search the user's personal Opsidian vault by keyword. "
         "Returns the most relevant notes with title, category, "
         "tags, score, and a short snippet. Use this BEFORE "
-        "opsidian_read when you don't already know the filename."
+        "opsidian_read when you don't already know the filename. "
+        "For very large vaults (>500 notes) the response includes "
+        "a warning telling you to fall back to opsidian_browse "
+        "with a category or tag filter."
     )
     CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
@@ -845,6 +855,13 @@ class OpsidianSearchTool(BaseTool):
             return _error("User Opsidian manager not available")
         if not query or not query.strip():
             return _error("query is required")
+
+        warning = self._size_guard(opsidian)
+        if warning is not None:
+            return _ok({
+                "query": query, "total": 0, "results": [],
+                "engine": "opsidian.keyword", "warning": warning,
+            })
 
         results = opsidian.search(query, max_results=max_results)
         items = [
@@ -895,6 +912,13 @@ class OpsidianSearchTool(BaseTool):
         if not query or not query.strip():
             return _error("query is required")
 
+        warning = await self._asize_guard(opsidian)
+        if warning is not None:
+            return _ok({
+                "query": query, "total": 0, "results": [],
+                "engine": "opsidian.keyword", "warning": warning,
+            })
+
         asearch = getattr(opsidian, "asearch", None)
         results = (
             await asearch(query, max_results=max_results)
@@ -931,6 +955,62 @@ class OpsidianSearchTool(BaseTool):
             "results": items,
             "engine": "opsidian.keyword",
         })
+
+    # ── Size guard helpers ───────────────────────────────────────
+
+    @staticmethod
+    def _max_notes() -> int:
+        import os as _os
+        try:
+            return int(
+                _os.environ.get(
+                    "GENY_WHITEBOARD_OPSIDIAN_SEARCH_MAX_NOTES", "500"
+                )
+            )
+        except ValueError:
+            return 500
+
+    def _size_guard(self, opsidian: Any) -> Optional[str]:
+        """Return a ``warning`` string when the vault is too large
+        to scan safely on this turn; ``None`` means proceed.
+
+        ``UserOpsidianManager.search`` reads every note's body to
+        score it (an N+1 fetch). For huge vaults that's too slow on
+        the agent's hot path, so we short-circuit with a clear
+        warning that the agent can relay to the user.
+        """
+        try:
+            notes = opsidian.list_notes()
+        except Exception:  # noqa: BLE001
+            return None  # let the underlying search raise normally
+        cap = self._max_notes()
+        if len(notes) > cap:
+            return (
+                f"Vault has {len(notes)} notes; opsidian_search caps "
+                f"out at {cap} for performance. Use opsidian_browse "
+                f"with a category or tag filter to narrow the scope, "
+                f"then opsidian_read on the result you want."
+            )
+        return None
+
+    async def _asize_guard(self, opsidian: Any) -> Optional[str]:
+        """Async sibling of :meth:`_size_guard`."""
+        alist = getattr(opsidian, "alist_notes", None)
+        try:
+            notes = (
+                await alist() if callable(alist) else opsidian.list_notes()
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        cap = self._max_notes()
+        if len(notes) > cap:
+            return (
+                f"Vault has {len(notes)} notes; opsidian_search caps "
+                f"out at {cap} for performance. Use opsidian_browse "
+                f"with a category or tag filter to narrow the scope, "
+                f"then opsidian_read on the result you want."
+            )
+        return None
 
 
 # ============================================================================

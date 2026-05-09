@@ -509,15 +509,30 @@ ORGANIZER_REGISTRY: Dict[str, OrganizerStrategy] = {
 
 _SUGGESTION_LOG = "_organizer_suggestions.jsonl"
 
-_store_lock = threading.Lock()
+# Per-vault lock so concurrent accept / reject / scheduled re-runs on
+# the SAME vault don't overlap their read-modify-write of the JSONL.
+# Different vaults are unrelated and don't contend.
+_vault_locks: Dict[str, threading.Lock] = {}
+_vault_locks_guard = threading.Lock()
+
+
+def _lock_for(vault_root: str) -> threading.Lock:
+    with _vault_locks_guard:
+        existing = _vault_locks.get(vault_root)
+        if existing is not None:
+            return existing
+        lock = threading.Lock()
+        _vault_locks[vault_root] = lock
+        return lock
 
 
 def _suggestions_path(vault_root: str) -> Path:
     return Path(vault_root) / _SUGGESTION_LOG
 
 
-def load_suggestions(vault_root: str) -> List[OrganizationSuggestion]:
-    """Read every persisted suggestion. Newest last; caller filters."""
+def _load_suggestions_unlocked(vault_root: str) -> List[OrganizationSuggestion]:
+    """Read every persisted suggestion. Caller is responsible for the
+    per-vault lock — public ``load_suggestions`` wraps this."""
     path = _suggestions_path(vault_root)
     if not path.exists():
         return []
@@ -540,23 +555,37 @@ def load_suggestions(vault_root: str) -> List[OrganizationSuggestion]:
     return out
 
 
-def _write_all(vault_root: str, items: Iterable[OrganizationSuggestion]) -> None:
+def load_suggestions(vault_root: str) -> List[OrganizationSuggestion]:
+    """Read every persisted suggestion. Newest last; caller filters.
+
+    Holds the per-vault lock so a concurrent rewrite (from
+    ``add_suggestions`` / ``update_status``) can't surface a torn
+    file mid-load.
+    """
+    with _lock_for(vault_root):
+        return _load_suggestions_unlocked(vault_root)
+
+
+def _write_all_unlocked(
+    vault_root: str, items: Iterable[OrganizationSuggestion]
+) -> None:
+    """Caller holds the per-vault lock."""
     path = _suggestions_path(vault_root)
-    with _store_lock:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w", encoding="utf-8") as handle:
-                for s in items:
-                    handle.write(json.dumps(s.to_dict(), ensure_ascii=False) + "\n")
-        except OSError:
-            logger.warning("organizer: failed to write suggestion log", exc_info=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for s in items:
+                handle.write(json.dumps(s.to_dict(), ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("organizer: failed to write suggestion log", exc_info=True)
 
 
 def list_active_suggestions(vault_root: str) -> List[OrganizationSuggestion]:
     """Active = status == "active" AND cooldown not in force.
 
     Suggestions older than 30 days are dropped silently regardless of
-    status, so the log doesn't grow unbounded.
+    status, so the log doesn't grow unbounded. Read-only — no need
+    for the write lock.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     out: List[OrganizationSuggestion] = []
@@ -589,32 +618,41 @@ def list_active_suggestions(vault_root: str) -> List[OrganizationSuggestion]:
 def add_suggestions(
     vault_root: str, fresh: Iterable[OrganizationSuggestion]
 ) -> int:
-    """Append ``fresh`` suggestions, deduping against active ones.
+    """Append ``fresh`` suggestions, deduping against active and
+    rejected entries.
 
     Dedup key: ``(strategy_name, sorted note_filenames)`` — replaying
     the same proposal doesn't pile up multiple cards.
+
+    The whole read-modify-write happens under the per-vault lock so
+    a concurrent ``update_status`` can't lose a decision via a
+    torn-rewrite race.
     """
-    existing = load_suggestions(vault_root)
-    active_keys = {
-        (s.strategy_name, tuple(sorted(s.note_filenames)))
-        for s in existing
-        if s.status == "active"
-    }
-    rejected_keys = {
-        (s.strategy_name, tuple(sorted(s.note_filenames)))
-        for s in existing
-        if s.status == "rejected"
-    }
-    added = 0
-    next_log = list(existing)
-    for s in fresh:
-        key = (s.strategy_name, tuple(sorted(s.note_filenames)))
-        if key in active_keys or key in rejected_keys:
-            continue
-        next_log.append(s)
-        added += 1
-    if added:
-        _write_all(vault_root, next_log)
+    fresh_list = list(fresh)
+    if not fresh_list:
+        return 0
+    with _lock_for(vault_root):
+        existing = _load_suggestions_unlocked(vault_root)
+        active_keys = {
+            (s.strategy_name, tuple(sorted(s.note_filenames)))
+            for s in existing
+            if s.status == "active"
+        }
+        rejected_keys = {
+            (s.strategy_name, tuple(sorted(s.note_filenames)))
+            for s in existing
+            if s.status == "rejected"
+        }
+        added = 0
+        next_log = list(existing)
+        for s in fresh_list:
+            key = (s.strategy_name, tuple(sorted(s.note_filenames)))
+            if key in active_keys or key in rejected_keys:
+                continue
+            next_log.append(s)
+            added += 1
+        if added:
+            _write_all_unlocked(vault_root, next_log)
     return added
 
 
@@ -625,19 +663,26 @@ def update_status(
     status: SuggestionStatus,
     cooldown_days: Optional[int] = None,
 ) -> Optional[OrganizationSuggestion]:
-    items = load_suggestions(vault_root)
-    found: Optional[OrganizationSuggestion] = None
+    """Atomically flip ``suggestion_id`` to ``status``.
+
+    Holds the per-vault lock for the full read-modify-write so two
+    concurrent users (or a manual decision overlapping a scheduled
+    re-run) can't lose each other's edits.
+    """
     now = datetime.now(timezone.utc)
-    for s in items:
-        if s.suggestion_id == suggestion_id:
-            s.status = status
-            s.decided_at = now.isoformat()
-            if cooldown_days:
-                s.cooldown_until = (now + timedelta(days=cooldown_days)).isoformat()
-            found = s
-            break
-    if found is not None:
-        _write_all(vault_root, items)
+    with _lock_for(vault_root):
+        items = _load_suggestions_unlocked(vault_root)
+        found: Optional[OrganizationSuggestion] = None
+        for s in items:
+            if s.suggestion_id == suggestion_id:
+                s.status = status
+                s.decided_at = now.isoformat()
+                if cooldown_days:
+                    s.cooldown_until = (now + timedelta(days=cooldown_days)).isoformat()
+                found = s
+                break
+        if found is not None:
+            _write_all_unlocked(vault_root, items)
     return found
 
 

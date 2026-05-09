@@ -149,8 +149,9 @@ def test_stale_unseen_finds_old_unseen_notes() -> None:
 
 
 def _make_suggestion(strategy_name: str = "embedding_cluster", *, files: list[str]) -> OrganizationSuggestion:
+    import uuid
     return OrganizationSuggestion(
-        suggestion_id="x",  # overwritten on add
+        suggestion_id=uuid.uuid4().hex,
         kind="cluster",
         note_filenames=list(files),
         proposed_label="API",
@@ -205,3 +206,35 @@ def test_load_skips_malformed_lines(tmp_path: Path) -> None:
     # loader catches and skips. Result: empty list.
     out = load_suggestions(str(tmp_path))
     assert out == []
+
+
+def test_concurrent_updates_do_not_lose_decisions(tmp_path: Path) -> None:
+    """Two concurrent ``update_status`` calls on different suggestions
+    must both persist. The previous read-modify-write split (lock only
+    around the final write) could lose one of them when both threads
+    read the same snapshot before either wrote."""
+    import threading
+
+    vault = str(tmp_path)
+    s1 = _make_suggestion(files=["a.md"])
+    s2 = _make_suggestion(strategy_name="near_duplicate", files=["b.md"])
+    add_suggestions(vault, [s1, s2])
+    [a, b] = list_active_suggestions(vault)
+
+    barrier = threading.Barrier(2)
+    results: list = []
+
+    def _accept(target_id: str, status: str) -> None:
+        barrier.wait()  # release both threads at the same instant
+        rec = update_status(vault, target_id, status=status)
+        results.append(rec)
+
+    t1 = threading.Thread(target=_accept, args=(a.suggestion_id, "accepted"))
+    t2 = threading.Thread(target=_accept, args=(b.suggestion_id, "rejected"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert all(r is not None for r in results)
+    persisted = {s.suggestion_id: s.status for s in load_suggestions(vault)}
+    assert persisted[a.suggestion_id] == "accepted"
+    assert persisted[b.suggestion_id] == "rejected"

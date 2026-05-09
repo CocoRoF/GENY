@@ -82,12 +82,22 @@ class SpotlightStore:
         with self._lock:
             bucket = self._items.setdefault(key, [])
             bucket.append(item)
-            # Drop the oldest non-pinned item if we are over the cap.
-            if len(bucket) > MAX_PER_SESSION:
+            # Drop the oldest non-pinned items until we're back under
+            # the cap. ``while`` (not ``if``) so a bucket that briefly
+            # holds more than MAX_PER_SESSION + 1 — e.g. due to a
+            # batch import path that calls ``add`` many times in a
+            # tight loop — converges in one pass instead of leaking
+            # items above the cap.
+            while len(bucket) > MAX_PER_SESSION:
+                evicted = False
                 for i, existing in enumerate(bucket):
                     if not existing.pinned:
                         bucket.pop(i)
+                        evicted = True
                         break
+                if not evicted:
+                    # Every item is pinned — nothing more to evict.
+                    break
         return item
 
     def list(

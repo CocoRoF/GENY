@@ -264,7 +264,7 @@ export default function UserOpsidianView() {
     return (
       <div className="opsidian-root" style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: 'var(--obs-text-muted)' }}>
-          <Loader2 size={32} className="animate-spin" style={{ marginBottom: 12, color: 'var(--obs-purple)' }} />
+          <Loader2 size={32} className="spin" style={{ marginBottom: 12, color: 'var(--obs-purple)' }} />
           <p style={{ fontSize: 14 }}>{t('common.loading')}</p>
         </div>
       </div>

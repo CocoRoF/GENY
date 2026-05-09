@@ -61,27 +61,24 @@ def fire_user_shared_trigger_async(
     """Schedule the [USER_SHARED] trigger as a background task.
 
     Returns the created task (mainly for tests). Returns ``None`` when
-    the call is made outside an asyncio loop or the resolver cannot
-    derive a session — both are silent no-ops because the trigger is
-    a "nice to have" on top of the per-turn SpotlightContextBlock.
+    the call is made outside an asyncio loop or the spotlight has no
+    session id — both are silent no-ops because the trigger is a
+    "nice to have" on top of the per-turn SpotlightContextBlock.
+
+    The Task handle is held by ``_task_tracker`` until it completes
+    so the event-loop GC can't reap it before the trigger finishes.
     """
     if not item.session_id:
         # Spotlight is only useful when bound to a live session. The
         # SpotlightContextBlock still works for user-wide items at
         # whatever session the user opens next.
         return None
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # Called from a sync context with no loop — let the caller
-        # decide whether to spin one up. We don't want to start a
-        # fresh loop here and risk leaking it.
-        logger.debug(
-            "fire_user_shared_trigger: no running loop, skipping",
-            exc_info=False,
-        )
-        return None
-    return loop.create_task(_run_trigger_safely(item))
+    from ._task_tracker import schedule
+
+    return schedule(
+        _run_trigger_safely(item),
+        name=f"whiteboard.user_shared[{item.session_id[:8]}:{item.item_id[:8]}]",
+    )
 
 
 async def _run_trigger_safely(item: SpotlightItem) -> None:
