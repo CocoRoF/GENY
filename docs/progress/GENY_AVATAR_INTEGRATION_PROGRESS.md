@@ -259,3 +259,42 @@ docker compose -f docker-compose.dev.yml build avatar-editor
 - **runtime enum 검증 X**: `"live2d"` / `"spine"` 외의 값을 받으면 그냥 reject 안 하고 entry 유지. Phase C 후속에서 install endpoint 가 accepted set 검증.
 
 **다음**: C.2 — baked-imports controller (list / delete pending zip).
+
+### C.2 — baked-imports controller (list + delete)
+
+avatar-editor 가 공유 volume 에 떨어뜨린 zip 들의 inbox view. install (다음 sprint) 의 직전 단계 — 사용자가 무엇이 들어왔는지 보고 잘못 보낸 건 미리 버릴 수 있게.
+
+**변경**:
+
+- `backend/controller/vtuber_baked_imports_controller.py` (신규)
+  - `GET /api/vtuber/baked-imports/list` — `GENY_BAKED_IMPORTS_DIR` (default `/data/baked-imports`) 의 `.zip` 들 enumerate.
+    - 각 entry: `filename`, `size_bytes`, `modified_iso` (UTC), `runtime`, `suggested_name`, `schema_version`.
+    - 후자 3개는 zip 안의 `avatar-editor.json` 을 read-only peek 해서 채움 (없으면 None — 견고).
+    - mtime 내림차순 정렬 (최근 것 위).
+  - `DELETE /api/vtuber/baked-imports/{filename}` — 단일 zip 삭제.
+    - `_is_safe_filename()` — `..`, `/`, `\`, `\0`, leading dot, 공백 전부 reject (path traversal 방지).
+    - `.zip` 확장자 강제.
+    - read-only mount (compose 의 `:ro`) 일 때 친절한 에러 메시지.
+- `backend/main.py`
+  - `from controller.vtuber_baked_imports_controller import router as vtuber_baked_imports_router` (신규 import).
+  - `app.include_router(vtuber_baked_imports_router)` 추가 (vtuber_router 직후).
+
+**검증**:
+
+- 격리 smoke test (venv python):
+  - 임시 inbox + 합성 zip (`avatar-editor.json` 포함 metadata)
+  - list → entry 의 runtime/suggested_name/schema_version 정확.
+  - 5개 unsafe filename (`../etc/passwd`, `/abs/path`, `..`, `.hidden.zip`, ``) 모두 400 reject.
+  - delete → 파일 사라지고 list 비어있음.
+- 라우터 inspect: `[({'GET'}, '/api/vtuber/baked-imports/list'), ({'DELETE'}, '/api/vtuber/baked-imports/{filename}')]` 정확.
+- `main.py` 의 `app.routes` 에 라우터 통합되는 것은 docker 컨테이너 내 검증이 자연스러움 (venv 의 jinja2 미설치로 로컬 import 부분 실패 — 무관).
+
+**의도적 한계**:
+
+- **install endpoint 분리**: list/delete 만. 실제 install (unzip + register) 은 C.3.
+- **inbox watch 안 함**: poll 모델 — 사용자가 새로고침. inotify / sse 같은 push 는 후속.
+- **zip peek 깊이 얕음**: `avatar-editor.json` 만 읽음. atlas 미리보기 / 썸네일 추출은 install 단계 또는 후속.
+- **여러 inbox 디렉터리 X**: 하나의 env (`GENY_BAKED_IMPORTS_DIR`) 만. 다중 source 시나리오 없음.
+- **delete bulk X**: 한 번에 하나씩만. UI 에서 loop 으로 충분.
+
+**다음**: C.3 — `POST /api/vtuber/baked-imports/install` — unzip → static/{live2d,spine}-models/ → model_registry append (자동 `(Editor)` suffix).
