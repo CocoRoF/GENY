@@ -595,3 +595,54 @@ Phase D 끝 — frontend 가 Live2D / Spine 모두 렌더 가능, baked import �
 ## 다음 — Phase E — 검증 + 폴리시
 
 E.1 e2e 수동 테스트 → E.2 회귀 (기존 mao_pro 등 무손상) → E.3 progress doc 정리 → E.4 README 갱신.
+
+---
+
+## Phase G — animationConfig (schemaVersion 2) 적용
+
+geny-avatar v0.3.0 의 Phase 8 (Animation tab) 가 baked zip 에 `avatar-editor.json` schemaVersion 2 + animationConfig 를 emit 하도록 갱신됨. Geny 측은 이 메타를 받아서 자동으로 `model_registry.json` 에 정확한 값으로 install.
+
+**변경**:
+
+- `vendor/geny-avatar` submodule pin v0.2.4 → v0.3.0 (Phase 8 전체 + animation tab UI 코드 들어옴).
+- `README.md` 의 pinned version 표기 v0.2.4 → v0.3.0.
+- `backend/controller/vtuber_baked_imports_controller.py` 의 `install_baked_import`:
+  - `schema_version` 추출. `> 2` 이면 명시적 reject ("Geny 업그레이드 필요" 한국어).
+  - `animationConfig` 가 있으면:
+    - `display.kScale / initialXshift / initialYshift` → Live2dModelInfo 동일 필드.
+    - `idleMotionGroupName` → 동일.
+    - **emotionMap (NAME → INDEX 변환)**: 추출된 model3.json 을 파싱해서 `Expressions[i].Name` 순서를 인덱스로 매핑. NAME 매칭 실패 시 warning 로그 + 매핑 누락 (미매핑 emotion 은 무시 — 모델의 다른 expression 영향 X).
+    - **tapMotions**: geny-avatar 의 `{ HitArea: {group, index} }` → Geny 의 `{ HitArea: { [group]: index } }` 형식 변환.
+  - schemaVersion 1 (기존 zip) → 디폴트값 그대로 (현재 동작 그대로 보존).
+
+**검증**:
+
+격리 smoke test (`/tmp/smoke_install_v2.py`):
+- schemaVersion 2 zip + 6 expressions (`black, red, shock, shou, shuiyin, tang`) + emotionMap `{joy: "red", anger: "black", surprise: "shock", neutral: "tang"}` →
+  - install 후 Live2dModelInfo.emotionMap = `{joy: 1, anger: 0, surprise: 2, neutral: 5}` ✓
+  - kScale = 0.92, shift -10/5, idleMotionGroupName = "Idle" ✓
+  - tapMotions = `{HitAreaHead: {Idle: 0}}` ✓
+- schemaVersion 3 zip → HTTPException 400, 한국어 메시지 ✓
+- schemaVersion 1 zip → 디폴트값 (kScale 0.7, emotionMap {neutral:0}) ✓
+
+**의도적 한계**:
+
+- **유효하지 않은 emotion key 무시**: 사용자가 GoEmotions 외 키 (예: `xyz`) 매핑하면 install 후 그대로 emotionMap 에 들어감. Live2dModelInfo 가 reject 안 함 — VTuber lipsync 가 `xyz` 요청 시 fallback 처리.
+- **multi-motion 한 hit area X**: geny-avatar 가 단일 매핑만 emit. Geny 의 `{HitArea: {group: index}}` 도 Python dict 라 single-key. 다중 매핑 필요 시 schemaVersion 3 + UI 양쪽 손봐야 함.
+- **rebuild 필수**: backend 코드 변경이라 `docker compose ... up -d --build backend` 필요. submodule pin 변경 (Phase 8 코드) 은 avatar-editor 빌드 영향.
+
+**서버 측 1회 명령**:
+
+```bash
+cd /home/hrjang/docker_web/Geny
+git pull
+git submodule update --recursive   # vendor/geny-avatar 가 v0.3.0 으로 동기화
+
+# avatar-editor + backend 둘 다 rebuild
+sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor backend
+```
+
+빌드 끝나고 (~5분):
+- `https://geny-x.hrletsgo.me/avatar-editor/edit/<id>?tab=animation` → 새 Animation 탭
+- ellen_joe 같은 풍부한 puppet → motion ▶ + expression ▶ + emotion 매핑 매트릭스
+- "send to Geny" → install → Geny 의 model selector 에 `(Editor)` 등장 + 매핑한 emotion / kScale 그대로 적용

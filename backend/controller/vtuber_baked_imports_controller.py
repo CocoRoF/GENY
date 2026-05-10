@@ -349,18 +349,89 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         f"— imported from avatar-editor on {ts}"
     ).strip()
 
+    # ── Phase G — apply animationConfig from schemaVersion 2 zips ──
+    # geny-avatar v0.3.0+ writes an animationConfig block into
+    # avatar-editor.json (display tuning + idle group + emotionMap by
+    # NAME + tapMotions). Older zips (schemaVersion 1) lack the block
+    # and we keep the current defaults as a safe fallback.
+    schema_version = int(meta.get("schemaVersion") or meta.get("schema_version") or 1)
+    if schema_version > 2:
+        # Geny doesn't know how to interpret newer schemas; refuse with a
+        # clear message rather than silently ignoring the new fields.
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(
+            400,
+            (
+                f"avatar-editor.json schemaVersion={schema_version} 은 본 Geny 가 지원하지 "
+                "않습니다. Geny 업그레이드가 필요합니다."
+            ),
+        )
+    anim_cfg = meta.get("animationConfig") or {}
+    display_cfg = anim_cfg.get("display") or {}
+    k_scale = float(display_cfg.get("kScale") or 0.7)
+    x_shift = float(display_cfg.get("initialXshift") or 0)
+    y_shift = float(display_cfg.get("initialYshift") or 0)
+    idle_group = anim_cfg.get("idleMotionGroupName") or "Idle"
+    emotion_map_named: dict[str, str] = anim_cfg.get("emotionMap") or {}
+    tap_motions_flat: dict[str, dict[str, Any]] = anim_cfg.get("tapMotions") or {}
+
+    # Translate emotionMap from NAME (geny-avatar's editor surface) to
+    # INDEX (Geny's existing model_registry shape). For Live2D we parse
+    # the extracted model3.json and look up Expressions by Name. For
+    # Spine or any other case where we can't resolve the index, we
+    # drop the mapping silently — Geny's lipsync layer just falls back
+    # to the default expression.
+    emotion_map: dict[str, int] = {}
+    if runtime == "live2d" and emotion_map_named:
+        try:
+            with open(entry, "r", encoding="utf-8") as f:
+                model3 = _json.load(f)
+            expressions = (
+                (model3.get("FileReferences") or {}).get("Expressions") or []
+            )
+            name_to_index = {
+                (e.get("Name") or ""): i for i, e in enumerate(expressions)
+            }
+            for emo, exp_name in emotion_map_named.items():
+                if exp_name in name_to_index:
+                    emotion_map[emo] = name_to_index[exp_name]
+                else:
+                    logger.warning(
+                        f"[baked-imports] emotionMap[{emo}]={exp_name!r} not found in {entry.name}"
+                    )
+        except Exception as e:
+            logger.warning(f"[baked-imports] emotionMap translate failed: {e}")
+    if not emotion_map:
+        # Match the current default so VTuber's lipsync engine has at
+        # least a neutral entry to fall back on.
+        emotion_map = {"neutral": 0}
+
+    # tapMotions in geny-avatar is `{ HitArea: {group, index} }`. Geny's
+    # existing format nests as `{ HitArea: { groupName: index } }`. The
+    # naive translation is `{ [group]: index }` and that matches
+    # mao_pro / hiyori_pro entries in the current registry.
+    tap_motions: dict[str, dict[str, int]] = {}
+    for hit_area, choice in tap_motions_flat.items():
+        if not isinstance(choice, dict):
+            continue
+        group = choice.get("group")
+        index = choice.get("index")
+        if group is None or index is None:
+            continue
+        tap_motions[hit_area] = {str(group): int(index)}
+
     info = Live2dModelInfo(
         name=model_name,
         display_name=final_display,
         description=description,
         url=f"{url_prefix}/{rel_entry}",
         thumbnail=None,
-        kScale=0.7,
-        initialXshift=0,
-        initialYshift=0,
-        idleMotionGroupName="Idle",
-        emotionMap={"neutral": 0},
-        tapMotions={},
+        kScale=k_scale,
+        initialXshift=x_shift,
+        initialYshift=y_shift,
+        idleMotionGroupName=idle_group,
+        emotionMap=emotion_map,
+        tapMotions=tap_motions,
         runtime=runtime,
         atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
     )
