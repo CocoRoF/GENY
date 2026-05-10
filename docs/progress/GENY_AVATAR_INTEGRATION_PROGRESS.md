@@ -124,3 +124,42 @@ prod 변형들이 nginx 뒤에서 `/avatar-editor` prefix 로 mount 되도록 �
 - **B.5 까지 nginx 라우팅 X**: prod 변형은 service 가 떠도 외부에서 접근 안 됨 (nginx 의 location 블록이 없으니). B.5 (다음) 가 그걸 추가하면 비로소 end-to-end 동작.
 
 **다음**: B.5 — `nginx/nginx.conf` 에 `/avatar-editor/` location 블록 추가.
+
+### B.5 — nginx `/avatar-editor/` 리버스 프록시
+
+prod 변형의 마지막 퍼즐. avatar-editor 가 docker 내부 (geny-net-prod) 에서 떠 있어도, nginx 의 location 블록 없이는 외부에서 접근 불가. 이걸 추가하면 사용자가 동일 origin (`http://geny/avatar-editor/`) 으로 진입.
+
+**변경**:
+
+- `nginx/nginx.conf`
+  - 새 upstream: `upstream avatar_editor { server avatar-editor:3000; }`
+  - 새 location 블록 (catch-all `location /` 직전):
+    ```
+    location /avatar-editor/ {
+        proxy_pass http://avatar_editor;   # NO trailing slash → preserves URI
+        ...
+        client_max_body_size 100m;          # baked zip POST 여유
+        proxy_set_header Upgrade ...;
+        proxy_read_timeout 60s;
+    }
+    ```
+
+**핵심 디테일**:
+
+- `proxy_pass http://avatar_editor;` — trailing slash **없음**. 이게 핵심. avatar-editor 는 `NEXT_PUBLIC_BASE_PATH=/avatar-editor` 로 빌드되어 upstream 자체가 `/avatar-editor/...` URI 를 기대. trailing slash 가 있으면 nginx 가 prefix 를 자동으로 strip → upstream 이 `/...` (root) 으로 받음 → 404.
+- `client_max_body_size 100m`: 글로벌 50m 보다 큼. baked atlas zip 이 30~50MB 일 수 있어 `/api/send-to-geny` POST 에 여유.
+- `proxy_read_timeout 60s`: standalone 첫 부팅이 5~10s. 디폴트 60s 내라서 명시 안 해도 되지만 명시적으로 둠.
+- WebSocket upgrade headers: Next.js prod 가 일반적으로 안 쓰지만 future-proofing.
+
+**검증**:
+
+- `docker compose -f docker-compose.prod{,-core}.yml config --quiet` 통과 (nginx volume mount 정상 인식).
+- `nginx -t` 직접 검증은 docker socket 제약으로 불가. 사용자가 로컬에서 `docker compose -f docker-compose.prod.yml up nginx avatar-editor backend frontend postgres` 로 띄워서 `curl http://localhost:58443/avatar-editor/` 200 응답 확인 권장.
+
+**의도적 한계**:
+
+- **`/avatar-editor` (no trailing slash) → 308 redirect**: nginx 디폴트 동작. `/avatar-editor/` 로 redirect 해주면 충분 (Next.js 와도 정합).
+- **dev / dev-core nginx 미배포**: dev 변형은 nginx service 자체가 없어서 (B.2/B.3) avatar-editor 가 host port 3001 직접. 본 nginx.conf 변경은 prod 만 영향.
+- **HTTPS 미적용**: nginx 가 80 만 listen. TLS 는 Geny 의 별도 책임 (외부 LB / cloudflare 등). 본 통합 sprint 범위 X.
+
+**다음**: B.6 — README 업데이트 (avatar-editor service 셋업 + submodule init 가이드).
