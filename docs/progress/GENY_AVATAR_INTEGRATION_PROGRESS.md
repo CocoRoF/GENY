@@ -205,6 +205,28 @@ Phase B 완료 — infra 측면의 모든 wiring 끝. 이제 backend 가 공유 
 
 ---
 
+## 사용자 보고 — `docker compose build` 실패 (Pixi v8 SSR navigator)
+
+Phase B 완료 후 사용자가 `docker compose -f docker-compose.dev.yml up --build` 실행 시 `avatar-editor` 의 builder stage 가 `/poc/spine` 정적 prerender 단계에서 `ReferenceError: navigator is not defined` 로 죽음.
+
+**원인**: A.1 의 Dockerfile 이 `node:20-alpine` 사용. Pixi v8 가 module init 에 `globalThis.navigator.userAgent` 를 read 하는데, 이 글로벌은 Node 21+ 부터 추가됨. 내 로컬 host (Node 24) 에서 `pnpm build` 통과해서 발견 못 했음.
+
+**조치**:
+
+- geny-avatar 측에서 [v0.2.2 hotfix](https://github.com/CocoRoF/geny-avatar/releases/tag/v0.2.2) → 3 stage 모두 `node:22-alpine` (LTS) 으로 bump + 향후 누군가 다시 20 으로 내리지 않도록 코멘트.
+- Geny 측 submodule pin: `vendor/geny-avatar` v0.2.1 → v0.2.2.
+- `README.md` 의 pinned version 표기도 `v0.2.2` 로 갱신.
+
+**검증 (사용자 측 권장)**:
+
+```bash
+git submodule update --init --recursive
+docker compose -f docker-compose.dev.yml build avatar-editor
+# → /poc/spine prerender 통과해야 정상
+```
+
+---
+
 ## 다음 — Phase C — backend import 흐름
 
 C.1 model_registry 마이그레이션 (entries 에 `runtime` 필드 추가) → C.2 baked-imports controller (list / delete) → C.3 install endpoint → C.4 spine-models 정적 dir → C.5 list endpoint 확장.
