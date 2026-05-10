@@ -227,6 +227,35 @@ docker compose -f docker-compose.dev.yml build avatar-editor
 
 ---
 
-## 다음 — Phase C — backend import 흐름
+## Phase C — backend import 흐름
 
-C.1 model_registry 마이그레이션 (entries 에 `runtime` 필드 추가) → C.2 baked-imports controller (list / delete) → C.3 install endpoint → C.4 spine-models 정적 dir → C.5 list endpoint 확장.
+### C.1 — model_registry 마이그레이션 (`runtime` 필드)
+
+베이크된 puppet 이 Live2D 일 수도 Spine 일 수도 있어, 모든 엔트리가 어느 런타임용인지 self-describe 해야 함. 기존 9개 모델 (전부 Live2D) 무손상 전환 + 신규 코드 패스가 새 필드 의식.
+
+**변경**:
+
+- `backend/static/live2d-models/model_registry.json`
+  - top-level `"schema_version": 2` 추가 (이전 = implicit v1).
+  - 9 엔트리 각각에 `"runtime": "live2d"` 추가.
+  - 다른 필드 / 순서 / 한국어 인코딩 무손상.
+- `backend/service/vtuber/live2d_model_manager.py`
+  - `Live2dModelInfo` 에 `runtime: str = "live2d"` + `atlas_url: Optional[str] = None` 두 필드 추가 (둘 다 디폴트 → 기존 호출 무손상).
+  - `to_dict()` 가 두 신규 필드 포함.
+  - `_load_registry()` 가 `model_data.get("runtime", "live2d")` 로 pre-v2 fallback. log 가 `[live2d]` chip 표기.
+  - 클래스 docstring — 이름은 historical 이고 이제 Spine 도 같이 관리한다는 점 명시. rename 보류 사유도 (~10 호출처 ripple, 본 PR 의 blocker 아님).
+- `Live2dModelInfo` docstring — schema_version 의미 + pre-v2 동작 명시.
+
+**검증**:
+
+- 격리 smoke test: `python3 -c "from service.vtuber.live2d_model_manager import Live2dModelManager; ..."` → 9 entries load, runtime/atlas 필드 정확, to_dict 키 17개 (이전 13 + runtime + atlas_url + ...).
+- 기존 호출 사이트 (`request.app.state.live2d_model_manager`) 인터페이스 무변경 → 회귀 가능성 낮음.
+
+**의도적 한계**:
+
+- **클래스 / 매니저 변수명 rename X**: `live2d_model_manager` 가 9개 호출 사이트. 본 sprint 는 데이터 모델 변경만, 명명은 후속 (필요 시 D phase 에서 한 번에).
+- **frontend 미반영**: API 가 새 필드 보내지만 frontend 가 아직 안 읽음. Phase D 에서 dispatcher (`AvatarCanvas`) 가 이 필드 기준으로 SpineCanvas vs Live2DCanvas 선택.
+- **migration script X**: 영구 `model_registry.json` 한 번 수정 + 코드의 fallback 으로 충분. 9개 엔트리 한 번 손볼 일.
+- **runtime enum 검증 X**: `"live2d"` / `"spine"` 외의 값을 받으면 그냥 reject 안 하고 entry 유지. Phase C 후속에서 install endpoint 가 accepted set 검증.
+
+**다음**: C.2 — baked-imports controller (list / delete pending zip).

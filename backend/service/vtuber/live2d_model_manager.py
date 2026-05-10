@@ -16,7 +16,18 @@ logger = getLogger(__name__)
 
 @dataclass
 class Live2dModelInfo:
-    """Metadata for a single Live2D model."""
+    """Metadata for a single avatar model.
+
+    Despite the historical class name, an entry here can describe either
+    a Live2D Cubism puppet or a Spine puppet — the `runtime` field tells
+    consumers which renderer to use. Class rename is deferred to keep
+    this PR small; the manager docstring covers the wider role.
+
+    Schema versioning lives at the top level of model_registry.json
+    (`schema_version`), bumped to 2 when `runtime` was introduced.
+    Pre-v2 registries had no `runtime` field — we treat them as
+    Live2D-only on load.
+    """
     name: str
     display_name: str
     description: str
@@ -30,6 +41,10 @@ class Live2dModelInfo:
     tapMotions: Dict[str, Dict[str, int]]
     emotionMotionMap: Dict[str, str] = field(default_factory=dict)
     hiddenParts: List[str] = field(default_factory=list)
+    runtime: str = "live2d"
+    # Spine-specific: the .atlas file URL (sibling of the .skel/.json).
+    # Live2D entries leave this None.
+    atlas_url: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -46,16 +61,24 @@ class Live2dModelInfo:
             "tapMotions": self.tapMotions,
             "emotionMotionMap": self.emotionMotionMap,
             "hiddenParts": self.hiddenParts,
+            "runtime": self.runtime,
+            "atlas_url": self.atlas_url,
         }
 
 
 class Live2dModelManager:
     """
-    Manages Live2D model registry and agent-model assignments.
+    Manages the avatar model registry and agent-model assignments.
 
-    Reads model_registry.json from the given directory,
-    provides model lookup, and tracks which agent session
-    uses which model.
+    Originally Live2D-only (hence the class name); since the geny-avatar
+    integration introduced `runtime` on each entry, this also manages
+    Spine puppets in the same registry. Frontend dispatches the right
+    renderer based on `entry.runtime`. Class rename is deferred — every
+    consumer references `request.app.state.live2d_model_manager`, and a
+    rename touches ~10 sites that aren't blockers for current work.
+
+    Reads model_registry.json from the given directory, provides model
+    lookup, and tracks which agent session uses which model.
     """
 
     def __init__(self, models_dir: str):
@@ -76,6 +99,7 @@ class Live2dModelManager:
             with open(self._registry_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            schema_version = data.get("schema_version", 1)
             for model_data in data.get("models", []):
                 info = Live2dModelInfo(
                     name=model_data["name"],
@@ -91,15 +115,22 @@ class Live2dModelManager:
                     tapMotions=model_data.get("tapMotions", {}),
                     emotionMotionMap=model_data.get("emotionMotionMap", {}),
                     hiddenParts=model_data.get("hiddenParts", []),
+                    # Pre-v2 registries had no runtime field — fall back to
+                    # live2d so old hand-crafted JSONs still load.
+                    runtime=model_data.get("runtime", "live2d"),
+                    atlas_url=model_data.get("atlas_url"),
                 )
                 self._models[info.name] = info
 
             self._default_model = data.get("default_model", "")
             self._agent_assignments = data.get("agent_model_assignments", {})
 
-            logger.info(f"Loaded {len(self._models)} Live2D models from registry")
-            for name in self._models:
-                logger.info(f"  - {name}: {self._models[name].display_name}")
+            logger.info(
+                f"Loaded {len(self._models)} avatar models from registry "
+                f"(schema_version={schema_version})"
+            )
+            for name, info in self._models.items():
+                logger.info(f"  - {name} [{info.runtime}]: {info.display_name}")
 
         except Exception as e:
             logger.error(f"Failed to load model registry: {e}")

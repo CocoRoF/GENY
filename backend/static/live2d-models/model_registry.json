@@ -1,4 +1,5 @@
 {
+  "schema_version": 2,
   "models": [
     {
       "name": "mao_pro",
@@ -21,9 +22,14 @@
         "surprise": 3
       },
       "tapMotions": {
-        "HitAreaHead": { "": 1 },
-        "HitAreaBody": { "": 1 }
-      }
+        "HitAreaHead": {
+          "": 1
+        },
+        "HitAreaBody": {
+          "": 1
+        }
+      },
+      "runtime": "live2d"
     },
     {
       "name": "shizuku",
@@ -38,7 +44,8 @@
       "emotionMap": {
         "neutral": 0
       },
-      "tapMotions": {}
+      "tapMotions": {},
+      "runtime": "live2d"
     },
     {
       "name": "hiyori_pro",
@@ -60,9 +67,14 @@
         "disgust": 0
       },
       "tapMotions": {
-        "HitAreaBody": { "Tap": 0 },
-        "HitAreaHead": { "Tap": 1 }
-      }
+        "HitAreaBody": {
+          "Tap": 0
+        },
+        "HitAreaHead": {
+          "Tap": 1
+        }
+      },
+      "runtime": "live2d"
     },
     {
       "name": "hiyori_free",
@@ -78,9 +90,14 @@
         "neutral": 0
       },
       "tapMotions": {
-        "HitAreaBody": { "Tap@Body": 0 },
-        "HitAreaHead": { "Tap": 0 }
-      }
+        "HitAreaBody": {
+          "Tap@Body": 0
+        },
+        "HitAreaHead": {
+          "Tap": 0
+        }
+      },
+      "runtime": "live2d"
     },
     {
       "name": "huohuo",
@@ -102,9 +119,14 @@
         "disgust": 0
       },
       "tapMotions": {
-        "HitAreaHead": { "Tap": 0 },
-        "HitAreaBody": { "Tap": 1 }
-      }
+        "HitAreaHead": {
+          "Tap": 0
+        },
+        "HitAreaBody": {
+          "Tap": 1
+        }
+      },
+      "runtime": "live2d"
     },
     {
       "name": "ruan_mei",
@@ -119,7 +141,8 @@
       "emotionMap": {
         "neutral": 0
       },
-      "tapMotions": {}
+      "tapMotions": {},
+      "runtime": "live2d"
     },
     {
       "name": "frieren",
@@ -134,7 +157,8 @@
       "emotionMap": {
         "neutral": 0
       },
-      "tapMotions": {}
+      "tapMotions": {},
+      "runtime": "live2d"
     },
     {
       "name": "ellen_joe",
@@ -156,7 +180,10 @@
         "disgust": 0
       },
       "tapMotions": {},
-      "hiddenParts": ["Part17"]
+      "hiddenParts": [
+        "Part17"
+      ],
+      "runtime": "live2d"
     },
     {
       "name": "changli",
@@ -178,7 +205,10 @@
         "fear": 1
       },
       "tapMotions": {},
-      "hiddenParts": ["Part53"]
+      "hiddenParts": [
+        "Part53"
+      ],
+      "runtime": "live2d"
     }
   ],
   "default_model": "mao_pro",
