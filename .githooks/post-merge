@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs after every successful `git pull` / `git merge`.
+#
+# Why: vendor/geny-avatar tracks origin/main (see .gitmodules `branch = main`).
+# Plain `git pull` only runs `git submodule update`, which checks out the
+# commit recorded in this repo's index — not upstream main. We want the
+# server to roll with whatever geny-avatar's main is right now without a
+# pointer-bump dance, so we fast-forward the submodule worktree here.
+#
+# Enable per clone (one-time):
+#   git config core.hooksPath .githooks
+
+set -e
+
+git submodule update --init --recursive --remote

@@ -172,13 +172,19 @@ geny/
 
 Geny ships with a separate Next.js puppet-editor service ([geny-avatar](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. It lets you upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and **send a baked model directly into Geny's VTuber library** — appears with the suffix `(Editor)` so it doesn't clash with the bundled Hiyori / Mao Pro / etc.
 
-**Tracking strategy**: `vendor/geny-avatar` tracks `main` (see `.gitmodules` `branch = main`). The recorded pointer in this repo is a **floor**, not a fixed pin — the deploy helper [`scripts/deploy-update.sh`](scripts/deploy-update.sh) runs `git submodule update --remote` so the server always rolls with the latest geny-avatar main. To lock a release, commit the submodule pointer normally.
+**Tracking strategy**: `vendor/geny-avatar` tracks `main` (see `.gitmodules` `branch = main`). The recorded pointer in this repo is a **floor**, not a fixed pin. A versioned `post-merge` hook ([`.githooks/post-merge`](.githooks/post-merge)) fast-forwards the submodule worktree to upstream main on every `git pull`, so the server always rolls with the latest geny-avatar main without a pointer-bump dance. To lock a release, commit the submodule pointer normally.
 
-**Server update — one command**:
+**One-time setup per clone** (point git at the versioned hooks dir):
 
 ```bash
-sudo bash scripts/deploy-update.sh
-# git pull → submodule update --remote → docker compose up -d --build
+git config core.hooksPath .githooks
+```
+
+**Server update**:
+
+```bash
+git pull                                  # post-merge hook fast-forwards vendor/geny-avatar
+docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor backend
 ```
 
 **Topology**:
