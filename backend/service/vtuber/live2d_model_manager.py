@@ -45,6 +45,12 @@ class Live2dModelInfo:
     # Spine-specific: the .atlas file URL (sibling of the .skel/.json).
     # Live2D entries leave this None.
     atlas_url: Optional[str] = None
+    # Stable identifier from geny-avatar's IndexedDB (e.g. "avt_xxx").
+    # Used by the library-sync endpoint to dedupe: a re-sync of the
+    # same puppet replaces this entry instead of accumulating
+    # "(Editor 2)" / "(Editor 3)" duplicates. Hand-installed models
+    # without a sidecar leave this None.
+    puppet_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +69,7 @@ class Live2dModelInfo:
             "hiddenParts": self.hiddenParts,
             "runtime": self.runtime,
             "atlas_url": self.atlas_url,
+            "puppet_id": self.puppet_id,
         }
 
 
@@ -119,6 +126,7 @@ class Live2dModelManager:
                     # live2d so old hand-crafted JSONs still load.
                     runtime=model_data.get("runtime", "live2d"),
                     atlas_url=model_data.get("atlas_url"),
+                    puppet_id=model_data.get("puppet_id"),
                 )
                 self._models[info.name] = info
 
@@ -150,6 +158,21 @@ class Live2dModelManager:
     def get_model(self, name: str) -> Optional[Live2dModelInfo]:
         """Get model info by name."""
         return self._models.get(name)
+
+    def find_by_puppet_id(self, puppet_id: str) -> Optional[Live2dModelInfo]:
+        """Find an existing registry entry by its source-of-truth puppet ID.
+
+        Used by the library-sync flow to detect re-uploads of the same
+        geny-avatar puppet so we replace the registry entry instead of
+        appending a fresh one. Returns None if no entry has matching
+        puppet_id (covers hand-installed models which never carried one).
+        """
+        if not puppet_id:
+            return None
+        for info in self._models.values():
+            if info.puppet_id == puppet_id:
+                return info
+        return None
 
     def get_default_model(self) -> Optional[Live2dModelInfo]:
         """Get the default model."""

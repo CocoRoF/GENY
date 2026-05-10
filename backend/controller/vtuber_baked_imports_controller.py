@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from logging import getLogger
 
@@ -172,6 +172,27 @@ class InstallRequest(BaseModel):
     replace_existing: bool = False
 
 
+def _drop_model_with_dir(manager, info, models_root: Path) -> None:
+    """Remove a registry entry and its extracted directory.
+
+    Mirrors the cleanup the install flow does inline for `(Editor)` name
+    collisions; pulled out so the library-sync flow can call it when
+    replacing by puppet_id.
+    """
+    url_parts = (info.url or "").lstrip("/").split("/")
+    if len(url_parts) >= 3 and url_parts[0] == "static":
+        root_lookup = {
+            "live2d-models": _live2d_models_root(),
+            "spine-models": _spine_models_root(),
+        }
+        base_root = root_lookup.get(url_parts[1])
+        if base_root is not None:
+            target = base_root / url_parts[2]
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+    manager.remove_model(info.name)
+
+
 # Where extracted models land. Both directories are docker-mounted
 # under FastAPI's StaticFiles (see main.py).
 def _live2d_models_root() -> Path:
@@ -276,6 +297,12 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         (meta.get("puppet", {}) or {}).get("name") or meta.get("name") or src.stem
     )
     suggested_version = (meta.get("puppet", {}) or {}).get("version") or ""
+    # Stable IndexedDB id from geny-avatar; None for hand-built zips. Used
+    # to dedupe re-syncs of the same puppet (sync push or repeated install
+    # of an updated bake) — the matching prior entry is dropped before
+    # this one lands, regardless of the display-name-based replacement
+    # rule below.
+    puppet_id: Optional[str] = (meta.get("puppet", {}) or {}).get("id") or None
 
     # ── Compute target directory + slugged model name ──────────────
     # Use microsecond precision so back-to-back installs of the same
@@ -346,12 +373,33 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
     manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
     base_display = req.display_name_override or suggested_name
 
+    replaced: list[dict[str, str]] = []
+
+    # Always replace by puppet_id when the zip carries one. This is the
+    # source-of-truth identity for geny-avatar puppets — re-installs of
+    # the same puppet (whether from `Send to Geny` or from auto-sync)
+    # should swap in place rather than append duplicates. Skipped for
+    # legacy zips that have no id (those still rely on the display-name
+    # replacement opt-in below).
+    if puppet_id:
+        prior_by_id = manager.find_by_puppet_id(puppet_id)
+        if prior_by_id is not None:
+            _drop_model_with_dir(manager, prior_by_id, models_root)
+            replaced.append({
+                "name": prior_by_id.name,
+                "display_name": prior_by_id.display_name,
+                "matched_by": "puppet_id",
+            })
+            logger.info(
+                f"[install] dropped prior entry {prior_by_id.name!r} matching "
+                f"puppet_id={puppet_id!r}"
+            )
+
     # Optional: clear out prior `(Editor)` entries that share this base
     # before computing the new entry's display name. This is the iter-
     # in-place workflow — user keeps re-baking the same puppet and
     # wants the registry to stay tidy instead of accumulating
     # `(Editor 2)`, `(Editor 3)`, ... copies.
-    replaced: list[dict[str, str]] = []
     if req.replace_existing:
         pattern_base = f"{base_display} (Editor"
         prior = [
@@ -359,25 +407,15 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             if m.display_name.startswith(pattern_base)
         ]
         for old in prior:
-            url_parts = old.url.lstrip("/").split("/")
-            # Expected layout: static / <runtime>-models / <model_dir> / ...
-            if len(url_parts) >= 3 and url_parts[0] == "static":
-                root_lookup = {
-                    "live2d-models": _live2d_models_root(),
-                    "spine-models": _spine_models_root(),
-                }
-                base_root = root_lookup.get(url_parts[1])
-                if base_root is not None:
-                    target = base_root / url_parts[2]
-                    if target.exists():
-                        # ignore_errors keeps the registry consistent even if
-                        # the on-disk dir was already pruned out-of-band.
-                        shutil.rmtree(target, ignore_errors=True)
-            manager.remove_model(old.name)
-            replaced.append({"name": old.name, "display_name": old.display_name})
-        if replaced:
+            _drop_model_with_dir(manager, old, models_root)
+            replaced.append({
+                "name": old.name,
+                "display_name": old.display_name,
+                "matched_by": "display_name",
+            })
+        if prior:
             logger.info(
-                f"[install] replace_existing pruned {len(replaced)} prior entries "
+                f"[install] replace_existing pruned {len(prior)} prior entries "
                 f"matching base={base_display!r}"
             )
 
@@ -595,6 +633,7 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         emotionMotionMap=emotion_motion_map,
         runtime=runtime,
         atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
+        puppet_id=puppet_id,
     )
     try:
         manager.add_model(info)
@@ -625,3 +664,175 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         f"[baked-imports] installed {req.filename} → {model_name} [{runtime}] · {final_display}"
     )
     return {"status": "ok", "model": info.to_dict(), "replaced": replaced}
+
+
+# ── Library sync (geny-avatar pushes the puppet's baked zip directly) ──
+#
+# The library-sync flow lets geny-avatar treat its IndexedDB library as
+# the source of truth: every meaningful save in the editor pushes the
+# fresh baked zip to Geny, and Geny replaces the previous registry entry
+# in place using the puppet's stable IndexedDB id. End users never have
+# to think about a separate "Send to Geny" step — the library entry IS
+# the Geny entry.
+#
+# Endpoints intentionally live on a separate router prefix from the
+# inbox-driven `baked-imports/install` flow above so client code can
+# tell them apart in logs / metrics; they share the same install logic
+# under the hood (a sync-pushed zip lands in the inbox first, then
+# `install_baked_import` runs against it with `replace_existing=True`).
+
+library_router = APIRouter(prefix="/api/vtuber/library", tags=["vtuber"])
+
+
+@library_router.post("/sync")
+async def library_sync(
+    request: Request,
+    zip: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Receive a baked puppet zip from geny-avatar and install it,
+    replacing any existing registry entry that shares the same puppet
+    id from `avatar-editor.json`.
+
+    Differences from `/api/vtuber/baked-imports/install`:
+      * Zip arrives as a multipart upload (no need for a prior drop into
+        the shared volume).
+      * Always replaces by puppet_id; no need for the caller to pass an
+        explicit `replace_existing` flag — re-sync semantics are the
+        whole point of this endpoint.
+      * `installed/<filename>.zip` is keyed by puppet id, not timestamp,
+        so the inbox stays bounded as the user iterates on a puppet.
+    """
+    inbox = _inbox_dir()
+    try:
+        inbox.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(500, f"inbox create failed: {e}") from e
+
+    # Read into a temp file in the inbox so the existing install flow
+    # (which expects a Path on disk) works without further plumbing.
+    # We deliberately stream rather than `.read()` the whole upload to
+    # keep memory bounded for large bakes.
+    body = await zip.read()
+    if not body:
+        raise HTTPException(400, "empty zip upload")
+
+    # Peek the metadata before naming the file — we want the on-disk
+    # filename to encode puppet_id so re-syncs overwrite cleanly.
+    import io
+    try:
+        with zipfile.ZipFile(io.BytesIO(body), "r") as zf:
+            meta: dict[str, Any] = {}
+            for candidate in ("avatar-editor.json", "avatar.json"):
+                if candidate in zf.namelist():
+                    with zf.open(candidate) as f:
+                        meta = _json.loads(f.read().decode("utf-8"))
+                    break
+    except (zipfile.BadZipFile, ValueError) as e:
+        raise HTTPException(400, f"invalid zip upload: {e}") from e
+
+    puppet_meta = meta.get("puppet") or {}
+    puppet_id_val = puppet_meta.get("id") or ""
+    puppet_name_val = puppet_meta.get("name") or "puppet"
+    if not puppet_id_val:
+        # Library sync depends on stable id-based dedup; reject zips
+        # without one rather than silently appending duplicates that
+        # the caller can never overwrite.
+        raise HTTPException(
+            400,
+            "avatar-editor.json puppet.id is missing — re-export from a "
+            "geny-avatar version that includes puppet.id in the sidecar.",
+        )
+
+    # Stable filename keyed by puppet id. A re-sync of the same puppet
+    # overwrites this file in place, and `installed/<filename>` likewise.
+    safe_id = _slugify(puppet_id_val)[:48] or "puppet"
+    on_disk_name = f"sync_{safe_id}.zip"
+    target = inbox / on_disk_name
+
+    try:
+        target.write_bytes(body)
+    except OSError as e:
+        raise HTTPException(500, f"inbox write failed: {e}") from e
+
+    logger.info(
+        f"[library-sync] received {len(body)} bytes for puppet "
+        f"id={puppet_id_val!r} name={puppet_name_val!r} → {on_disk_name}"
+    )
+
+    # Reuse the install flow. `replace_existing=True` covers display-name
+    # iteration, and the puppet-id-based replacement (added in the
+    # install body itself) handles cross-iteration dedup.
+    install_req = InstallRequest(
+        filename=on_disk_name,
+        replace_existing=True,
+        display_name_override=None,
+    )
+    return await install_baked_import(install_req, request)
+
+
+@library_router.delete("/{puppet_id}")
+async def library_delete(puppet_id: str, request: Request) -> dict[str, Any]:
+    """Drop a registry entry by its source-of-truth puppet id.
+
+    Mirrors geny-avatar's IndexedDB delete — when the user removes a
+    puppet from their editor library, the same id is removed from
+    Geny so the assignable-models list stays in sync.
+
+    404 when no entry has the given id; that's the expected state when
+    the puppet was never synced (or was already cleaned up by a prior
+    delete) and the caller can safely ignore it.
+    """
+    if not puppet_id or not puppet_id.strip():
+        raise HTTPException(400, "puppet_id is required")
+    manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
+    info = manager.find_by_puppet_id(puppet_id)
+    if info is None:
+        raise HTTPException(404, f"no registry entry with puppet_id={puppet_id!r}")
+
+    # Determine the on-disk root from the info.url. Same shape as the
+    # `_drop_model_with_dir` helper above.
+    url_parts = (info.url or "").lstrip("/").split("/")
+    models_root: Optional[Path] = None
+    if len(url_parts) >= 3 and url_parts[0] == "static":
+        if url_parts[1] == "live2d-models":
+            models_root = _live2d_models_root()
+        elif url_parts[1] == "spine-models":
+            models_root = _spine_models_root()
+    if models_root is None:
+        # Fall back to dropping the registry entry only — the caller
+        # can clean up disk manually if needed.
+        logger.warning(
+            f"[library-delete] {info.name} has unrecognized url={info.url!r}; "
+            f"removing registry entry but leaving on-disk dir alone"
+        )
+        manager.remove_model(info.name)
+    else:
+        _drop_model_with_dir(manager, info, models_root)
+
+    # Best-effort: also drop the cached inbox zip so a fresh sync push
+    # for this puppet starts from a clean slate.
+    safe_id = _slugify(puppet_id)[:48] or "puppet"
+    for candidate in (
+        _inbox_dir() / f"sync_{safe_id}.zip",
+        _inbox_dir() / "installed" / f"sync_{safe_id}.zip",
+    ):
+        try:
+            if candidate.exists():
+                candidate.unlink()
+        except OSError as e:
+            logger.warning(
+                f"[library-delete] failed to clean inbox cache {candidate}: {e}"
+            )
+
+    logger.info(
+        f"[library-delete] removed {info.name!r} (display={info.display_name!r}, "
+        f"puppet_id={puppet_id!r})"
+    )
+    return {
+        "status": "ok",
+        "removed": {
+            "name": info.name,
+            "display_name": info.display_name,
+            "puppet_id": puppet_id,
+        },
+    }

@@ -61,7 +61,8 @@ from controller.catalog_controller import router as catalog_router
 from controller.vtuber_controller import router as vtuber_router
 from controller.vtuber_baked_imports_controller import (
     router as vtuber_baked_imports_router,
-)  # geny-avatar integration (Phase C)
+    library_router as vtuber_library_router,
+)  # geny-avatar integration (Phase C + library auto-sync)
 from controller.tts_controller import router as tts_router
 from controller.auth_controller import router as auth_router
 from controller.user_opsidian_controller import router as user_opsidian_router
@@ -687,6 +688,7 @@ app.include_router(trigger_preset_router)  # Trigger Preset CRUD (cycle 20260506
 app.include_router(catalog_router)  # Stage/Artifact catalog API (Phase 3)
 app.include_router(vtuber_router)  # VTuber Live2D API
 app.include_router(vtuber_baked_imports_router)  # geny-avatar baked-zip inbox (Phase C)
+app.include_router(vtuber_library_router)  # geny-avatar library auto-sync (push/remove by puppet id)
 app.include_router(tts_router)  # TTS (Text-to-Speech) API
 app.include_router(user_opsidian_router)  # User Opsidian (personal knowledge vault)
 app.include_router(curated_knowledge_router)  # Curated Knowledge (refined knowledge layer)
