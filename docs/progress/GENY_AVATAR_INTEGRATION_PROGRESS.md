@@ -419,6 +419,31 @@ Plan 의 5 sprint (C.1~C.5) → 실제 3 sprint (C.1, C.2, C.3) 로 정리됨. C
 
 ---
 
-## 다음 — Phase D — frontend renderer
+## Phase D — frontend renderer
 
-D.1 (spine-pixi for Pixi v7) → D.2 SpineCanvas → D.3 AvatarCanvas dispatcher → D.4 useVTuberStore runtime 필드 → D.5 VTuberPanel UI → D.6 BakedImportsModal → D.7 호출처 교체.
+### D.1 — `@esotericsoftware/spine-pixi-v7` 추가
+
+Geny frontend 가 Pixi 7.4.3 stuck — geny-avatar 레포의 spine-pixi-v8 와 분리. 같은 호스트에서 두 앱이 origin context 분리라 충돌 없음 (plan 6.1).
+
+**변경**:
+
+- `frontend/package.json` — `"@esotericsoftware/spine-pixi-v7": "^4.2.114"` 추가.
+- `frontend/package-lock.json` — npm 자동 갱신.
+
+**디테일**:
+
+- 처음 `@esotericsoftware/spine-pixi` (suffix 없음, `^4.2.62`) 로 install → npm 가 deprecation warning 띄움 ("Switch to @esotericsoftware/spine-pixi-v7"). 즉시 uninstall + 재설치.
+- v7 패키지의 peer deps: `@pixi/{core,mesh,text,assets,display,graphics,events}: ^7.2.4` — 우리 `pixi.js@7.4.3` 이 모두 만족.
+- 기존 `pixi-live2d-display@0.5.0-beta` 와 peer dep 충돌 없음 (둘 다 v7).
+
+**검증**:
+
+- `npx tsc --noEmit` — 기존 vitest 누락 에러 1개 외 신규 에러 없음.
+- `node_modules/@esotericsoftware/spine-pixi-v7/dist/` 정상 install.
+
+**의도적 한계**:
+
+- **runtime 시점 통합 X**: 이번 sprint 는 dependency 추가만. SpineCanvas 컴포넌트는 D.2.
+- **devDeps 추가 X**: spine 자체는 production deps 에 들어감 (런타임 필요).
+
+**다음**: D.2 — `components/avatar/SpineCanvas.tsx` 신규 (Live2DCanvas API 미러링).
