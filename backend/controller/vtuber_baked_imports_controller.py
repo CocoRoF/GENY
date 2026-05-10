@@ -432,9 +432,20 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             expressions = (
                 (model3.get("FileReferences") or {}).get("Expressions") or []
             )
-            motion_groups = list(
-                (model3.get("FileReferences") or {}).get("Motions") or {}
-            )
+            # Filter out empty/whitespace group names — pixi-live2d-display
+            # silently rejects motion() calls when the group string is empty
+            # (the user-visible bug: motion(, 0) returns false). Some puppet
+            # exports leave the group key blank when the source bundle's
+            # group classification was lost; we don't want those names
+            # leaking into the registry's emotionMotionMap.
+            raw_groups = (model3.get("FileReferences") or {}).get("Motions") or {}
+            motion_groups = [g for g in raw_groups.keys() if g and g.strip()]
+            if len(motion_groups) != len(raw_groups):
+                logger.warning(
+                    f"[baked-imports] {entry.name} has "
+                    f"{len(raw_groups) - len(motion_groups)} empty motion group "
+                    f"name(s) — filtered out. Raw groups: {list(raw_groups.keys())!r}"
+                )
             name_to_index = {
                 (e.get("Name") or ""): i for i, e in enumerate(expressions)
             }

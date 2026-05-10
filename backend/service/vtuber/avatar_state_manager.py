@@ -80,17 +80,29 @@ class AvatarStateManager:
         self._session_idle_groups[session_id] = idle_group
 
     def resolve_motion_for_emotion(self, session_id: str, emotion: str) -> str:
-        """Resolve motion group for an emotion, checking per-session override first."""
+        """Resolve motion group for an emotion, checking per-session override first.
+
+        Always returns a non-empty group name. An empty / falsy value
+        downstream causes pixi-live2d-display's motion() to silently
+        reject the call (group missing → no motion plays, model freezes
+        between idle ticks), so each lookup falls through to the next
+        viable source rather than letting a blank propagate.
+        """
         custom = self._session_motion_maps.get(session_id)
-        if custom and emotion in custom:
-            return custom[emotion]
+        if custom:
+            candidate = custom.get(emotion, "")
+            if candidate and candidate.strip():
+                return candidate
         fallback = _DEFAULT_EMOTION_MOTION.get(emotion, "Idle")
         # Substitute the puppet's actual idle group name for the literal
         # "Idle" placeholder — only the placeholder, not arbitrary group
         # names from a custom session mapping (which the user explicitly
         # picked above).
         if fallback == "Idle":
-            return self._session_idle_groups.get(session_id, "Idle")
+            session_idle = self._session_idle_groups.get(session_id, "")
+            if session_idle and session_idle.strip():
+                return session_idle
+            return "Idle"
         return fallback
 
     def get_state(self, session_id: str) -> AvatarState:
@@ -132,8 +144,15 @@ class AvatarStateManager:
         # unless the caller supplied one. The previous group's index is
         # likely out of range in the new group (e.g., switching from a
         # 6-entry "TapBody" to a 2-entry "Idle"), which makes pixi-live2d
-        # silently fail to start the motion.
-        if effective_group is not None and effective_group != state.motion_group:
+        # silently fail to start the motion. Empty/whitespace group names
+        # are dropped here too — they only ever appear when an upstream
+        # registry entry has a malformed mapping and would silently break
+        # motion playback if forwarded to the client.
+        if (
+            effective_group is not None
+            and effective_group.strip()
+            and effective_group != state.motion_group
+        ):
             state.motion_group = effective_group
             state.motion_index = motion_index if motion_index is not None else 0
         elif motion_index is not None:

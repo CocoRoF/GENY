@@ -517,15 +517,19 @@ export default function Live2DCanvas({
         console.debug(`[Live2DCanvas] expression(${avatarState.expression_index}) threw:`, err);
       });
 
-    // Apply motion (skip idle triggers — idle loops automatically)
-    if (avatarState.trigger !== 'system') {
+    // Apply motion (skip idle triggers — idle loops automatically).
+    // Also skip when motion_group is empty/blank: a blank string is the
+    // backend's signal that no valid emotion→group mapping exists for
+    // this puppet, and pixi-live2d-display would silently reject it.
+    const motionGroup = avatarState.motion_group?.trim();
+    if (avatarState.trigger !== 'system' && motionGroup) {
       Promise.resolve(
-        live2dModel.motion(avatarState.motion_group, avatarState.motion_index),
+        live2dModel.motion(motionGroup, avatarState.motion_index),
       )
         .then((ok: unknown) => {
           if (ok === false) {
             console.debug(
-              `[Live2DCanvas] motion(${avatarState.motion_group}, ${avatarState.motion_index}) ` +
+              `[Live2DCanvas] motion(${motionGroup}, ${avatarState.motion_index}) ` +
               `returned false (emotion=${avatarState.emotion}); group missing, ` +
               `index out of range, or rejected by priority`,
             );
@@ -533,10 +537,16 @@ export default function Live2DCanvas({
         })
         .catch((err: unknown) => {
           console.debug(
-            `[Live2DCanvas] motion(${avatarState.motion_group}, ${avatarState.motion_index}) threw:`,
+            `[Live2DCanvas] motion(${motionGroup}, ${avatarState.motion_index}) threw:`,
             err,
           );
         });
+    } else if (avatarState.trigger !== 'system' && !motionGroup) {
+      console.debug(
+        `[Live2DCanvas] skipped motion call: empty motion_group ` +
+          `(emotion=${avatarState.emotion}, trigger=${avatarState.trigger}). ` +
+          `Re-install puppet so backend's auto-derived emotionMotionMap is populated.`,
+      );
     }
 
     // Schedule beat sync pulse on emotion changes (gives liveliness to state transitions)
