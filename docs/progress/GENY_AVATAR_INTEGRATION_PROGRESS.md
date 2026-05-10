@@ -73,3 +73,22 @@
 - **submodule 미초기화 시 build 실패**: 사용자가 `git submodule update --init --recursive` 누락하면 `./vendor/geny-avatar` 가 빈 dir → docker build 가 Dockerfile 못 찾음 → 명시적 에러. 이건 의도 — silent fallback 보다 명확한 실패가 좋음. README (B.6) 에 대처 가이드.
 
 **다음**: B.3 — `docker-compose.dev.yml` 에 동일 패턴 적용 (단, dev 는 hot-reload 가 의미 있는지 별도 결정).
+
+### B.3 — `docker-compose.dev.yml`
+
+dev compose 도 동일한 standalone 빌드를 그대로 사용. **hot-reload 안 함** — `vendor/geny-avatar` 는 pinned submodule 이라 사용자가 dev 모드에서 그 안을 직접 편집할 일이 없음 (편집한다면 geny-avatar 레포 자체에서 해야 함). 컨테이너 / 볼륨 이름은 `-dev` 접미사로 standalone 과 병행 실행 가능.
+
+**변경**:
+
+- `avatar-editor` service block 신규 (B.2 와 거의 동일, container_name `geny-avatar-editor-dev` + volume `geny-baked-exports-dev` + network `geny-net-dev`).
+- `backend` 의 volumes 에 `geny-baked-exports-dev:/data/baked-imports:ro` 추가.
+- top-level volumes 에 `geny-baked-exports-dev`.
+
+**검증**: `docker compose -f docker-compose.dev.yml config --quiet` 통과.
+
+**의도적 한계**:
+
+- **hot-reload X**: 위 설명. 사용자가 geny-avatar 측을 디벨롭하려면 별도로 `cd vendor/geny-avatar && pnpm dev` 로 띄우고 (host 의 다른 port), Geny 의 dev compose 의 avatar-editor 는 끄거나 ignore. 굳이 docker 안에서 hot-reload 시뮬레이션 필요시 후속.
+- **dev 와 standalone 의 host port 같음**: 둘 다 `${AVATAR_EDITOR_PORT:-3001}:3000`. 동시에 띄우면 포트 충돌. dev/prod 동시 실행은 일반적이지 않으니 OK — 필요 시 user 가 env 로 override.
+
+**다음**: B.4 — `docker-compose.dev-core.yml` + `docker-compose.prod.yml` + `docker-compose.prod-core.yml` 3 파일 동시 적용.

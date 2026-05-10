@@ -78,6 +78,9 @@ services:
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./backend:/app
+      # Baked puppet zips dropped here by avatar-editor (RO read side).
+      # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
+      - geny-baked-exports-dev:/data/baked-imports:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -219,6 +222,37 @@ services:
     networks:
       - geny-net-dev
 
+  # ── Avatar Editor (geny-avatar submodule, Next.js) — Dev Mode ─────
+  # Same standalone build as the standalone-full compose (no hot-reload
+  # of vendor/geny-avatar — it's a pinned submodule, not local source).
+  # Container/volume names suffixed with -dev for parallel dev/prod runs.
+  avatar-editor:
+    build:
+      context: ./vendor/geny-avatar
+      dockerfile: Dockerfile
+    container_name: geny-avatar-editor-dev
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${AVATAR_EDITOR_PORT:-3001}:3000"
+    environment:
+      - NEXT_PUBLIC_BASE_PATH=
+      - NEXT_PUBLIC_GENY_HOST=true
+      - GENY_BAKED_EXPORTS_DIR=/exports
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NODE_ENV=production
+    volumes:
+      - geny-baked-exports-dev:/exports
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - geny-net-dev
+
 networks:
   geny-net-dev:
     driver: bridge
@@ -227,4 +261,7 @@ volumes:
   geny-pgdata-dev:
     driver: local
   geny-omnivoice-models-dev:
+    driver: local
+  # Shared between avatar-editor (rw) and backend (ro) — dev variant.
+  geny-baked-exports-dev:
     driver: local
