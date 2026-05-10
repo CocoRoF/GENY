@@ -6,11 +6,12 @@ import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Inbox } from 'lucide-react';
 import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
+import BakedImportsModal from '@/components/avatar/BakedImportsModal';
 
 const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
@@ -54,6 +55,7 @@ export default function VTuberTab() {
 
   const [logsOpen, setLogsOpen] = useState(false);
   const [logHeight, setLogHeight] = useState(DEFAULT_LOG_HEIGHT);
+  const [bakedImportsOpen, setBakedImportsOpen] = useState(false);
   const draggingRef = useRef(false);
   const startYRef = useRef(0);
   const startHeightRef = useRef(0);
@@ -141,10 +143,23 @@ export default function VTuberTab() {
             </option>
             {models.map((m) => (
               <option key={m.name} value={m.name}>
-                {m.display_name}
+                [{m.runtime ?? 'live2d'}] {m.display_name}
               </option>
             ))}
           </select>
+
+          {/* Avatar import button — opens the baked-puppet inbox modal.
+              Lives next to the model selector since "import" produces a
+              new entry in this same dropdown after install. */}
+          <button
+            type="button"
+            onClick={() => setBakedImportsOpen(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[0.6875rem] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] cursor-pointer transition-colors"
+            title="Avatar Editor 에서 보낸 baked puppet 가져오기"
+          >
+            <Inbox size={11} />
+            가져오기
+          </button>
         </div>
 
         {/* Emotion tester */}
@@ -285,6 +300,11 @@ export default function VTuberTab() {
           </div>
         </>
       )}
+
+      <BakedImportsModal
+        open={bakedImportsOpen}
+        onClose={() => setBakedImportsOpen(false)}
+      />
     </div>
   );
 }

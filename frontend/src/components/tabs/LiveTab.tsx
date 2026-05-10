@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { Inbox } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
+import BakedImportsModal from '@/components/avatar/BakedImportsModal';
 
 const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
@@ -41,6 +43,7 @@ export default function LiveTab() {
   const assignedModelName = assignments[sessionId];
   const currentState = avatarStates[sessionId];
   const assignedModel = getModelForSession(sessionId);
+  const [bakedImportsOpen, setBakedImportsOpen] = useState(false);
 
   // Load models on mount
   useEffect(() => {
@@ -94,10 +97,22 @@ export default function LiveTab() {
             </option>
             {models.map((m) => (
               <option key={m.name} value={m.name}>
-                {m.display_name}
+                [{m.runtime ?? 'live2d'}] {m.display_name}
               </option>
             ))}
           </select>
+
+          {/* Avatar import button — shared with VTuberTab. Opens the
+              baked-puppet inbox modal (geny-avatar integration). */}
+          <button
+            type="button"
+            onClick={() => setBakedImportsOpen(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[0.6875rem] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] cursor-pointer transition-colors"
+            title="Avatar Editor 에서 보낸 baked puppet 가져오기"
+          >
+            <Inbox size={11} />
+            가져오기
+          </button>
         </div>
 
         {/* Emotion tester */}
@@ -150,6 +165,11 @@ export default function LiveTab() {
           </div>
         )}
       </div>
+
+      <BakedImportsModal
+        open={bakedImportsOpen}
+        onClose={() => setBakedImportsOpen(false)}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, Code2, User, BookOpen, AudioLines, LogIn, LogOut, Brain, Layers } from 'lucide-react';
+import { Menu, Sun, Moon, Code2, User, BookOpen, AudioLines, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 
@@ -94,6 +94,20 @@ export default function Header() {
         >
           <AudioLines size={14} />
         </Link>
+
+        {/* ── Avatar Editor Button — opens the geny-avatar service in a
+             new tab. /avatar-editor is nginx-proxied to a separate
+             Next.js app (not an internal route), so use a plain <a>
+             with target="_blank" instead of next/link. */}
+        <a
+          href="/avatar-editor/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          title="Avatar Editor — Spine/Cubism puppet 편집"
+        >
+          <Palette size={14} />
+        </a>
 
         {/* ── Environment Management Page — hidden on mobile, dev only ── */}
         {devMode && (
