@@ -447,3 +447,36 @@ Geny frontend 가 Pixi 7.4.3 stuck — geny-avatar 레포의 spine-pixi-v8 와 �
 - **devDeps 추가 X**: spine 자체는 production deps 에 들어감 (런타임 필요).
 
 **다음**: D.2 — `components/avatar/SpineCanvas.tsx` 신규 (Live2DCanvas API 미러링).
+
+### D.2 — `SpineCanvas.tsx` + `Live2dModelInfo` runtime/atlas_url 필드
+
+기존 `Live2DCanvas` 와 같은 자리에 들어가는 read-only Spine 뷰어. plan 6.4 의 의도적 한계 그대로 — viewport pan/zoom + idle 자동재생까지만, lipsync/expression/beat sync 같은 고급 통합은 후속.
+
+**변경**:
+
+- `frontend/src/types/index.ts` — `Live2dModelInfo` 에 `runtime?: 'live2d' | 'spine'` + `atlas_url?: string | null` 추가. C.1 의 백엔드 변경과 매치. `undefined` 면 live2d 로 fallback.
+- `frontend/src/components/avatar/SpineCanvas.tsx` (신규)
+  - props `{ url, atlas, kScale?, animation?, className?, interactive?, background?, backgroundAlpha? }`. plan 의 명세 대로 — sessionId 기반 X (D.3 dispatcher 가 model 조회 책임).
+  - mount: `Assets.add({alias, src})` × 2 → `Assets.load([...])` → `Spine.from({skeleton: alias, atlas: alias})` → `app.stage.addChild(spine)`.
+    - alias 는 mount-scoped sequence (`spine-canvas:<n>:skel|atlas`) — 재마운트 시 stale cache 충돌 회피.
+  - fit-to-canvas: `min(scaleX, scaleY) * kScale` (`skeletonData.width|height` 기준).
+  - animation 선택: prop > `/idle/i` regex match > animation[0] > 경고 로그.
+  - **viewport**: `Live2DCanvas` 의 wheel zoom + drag pan 패턴 그대로 포팅. model offset (initialXshift/Yshift) 만 제거 — Spine 은 skeleton 자체가 origin 정의.
+  - resize observer: 컨테이너 dim 변경 시 `app.renderer.resize()` + base scale 재계산.
+  - generation counter (`genRef`) + cancellation guard — Live2DCanvas 의 strict-mode race 방지 패턴 동일.
+  - cleanup: `spine.destroy()` + `app.destroy(true, {children: true})`.
+
+**검증**:
+
+- `npx tsc --noEmit` — vitest pre-existing 외 신규 에러 없음.
+- API 검증: `Spine.from()` 의 `SpineFromOptions` 타입에 `skeleton: string` (asset 별칭, URL 직접 X) 명시. geny-avatar 의 SpineAdapter 패턴 (`Assets.add`+`load`+`Spine.from(alias)`) 그대로 따름.
+- 실제 렌더 검증은 D.3 (dispatcher) + D.7 (호출처 교체) 후 사용자 시각 검증.
+
+**의도적 한계**:
+
+- **lipsync / motion pipeline X**: Live2D 의 parameters 와 Spine 의 bone 시스템이 비대칭. Spine 의 lipsync 는 별도 추적 (입 vertices 를 가진 slot 직접 조작) 필요 — V1 범위 밖.
+- **emotion blend X**: Spine 은 animation 트랙 mixing 으로 표현 — Live2D 의 expression Add/Multiply 와 다른 모델. 후속 sprint 에서 별도 통합.
+- **interactive tap motion X**: 일단 viewport drag/zoom 만. tap motion 은 hit-area 정의가 puppet 별로 달라 별도 메타데이터 필요.
+- **Spine asset alias 누수**: mount 마다 alias 가 늘어 `Assets` 캐시에 쌓일 수 있음. 일반 사용에서 문제 X (puppet 전환 빈도 낮음). 필요 시 `Assets.unload(alias)` 추가.
+
+**다음**: D.3 — `AvatarCanvas.tsx` dispatcher (sessionId → store → runtime 분기).

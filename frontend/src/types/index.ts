@@ -803,6 +803,14 @@ export interface Live2dModelInfo {
   emotionMap: Record<string, number>;
   tapMotions: Record<string, Record<string, number>>;
   hiddenParts?: string[];
+  // Phase C.1 (geny-avatar integration): the backend now tags every
+  // entry with `runtime` so the frontend dispatcher can route to the
+  // right canvas. Pre-v2 registries (no runtime field) fall back to
+  // "live2d" on the backend, so undefined here means "treat as live2d".
+  runtime?: 'live2d' | 'spine';
+  // Spine-only: URL of the .atlas sibling of `url` (.skel/.json).
+  // Live2D entries leave this null/undefined.
+  atlas_url?: string | null;
 }
 
 export interface AvatarState {
