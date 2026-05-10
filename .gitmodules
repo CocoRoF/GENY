@@ -4,3 +4,8 @@
 [submodule "vendor/geny-avatar"]
 	path = vendor/geny-avatar
 	url = https://github.com/CocoRoF/geny-avatar
+	# Track upstream main. With this set, `git submodule update --remote`
+	# fast-forwards the worktree to origin/main without a Geny pointer
+	# bump — the deploy script uses --remote so the server always rolls
+	# with the latest geny-avatar.
+	branch = main
