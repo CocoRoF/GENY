@@ -142,6 +142,11 @@ services:
       - NEXT_PUBLIC_BASE_PATH=/avatar-editor
       - NEXT_PUBLIC_GENY_HOST=true
       - GENY_BAKED_EXPORTS_DIR=/exports
+      # Server-to-server URL the avatar-editor's Next.js API routes use
+      # to forward library sync (POST /api/library/sync) and remove
+      # (DELETE /api/library/{id}) to Geny's FastAPI backend. Resolved
+      # via docker's internal DNS; never reaches the browser.
+      - GENY_BACKEND_URL=http://backend:8000
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - NODE_ENV=production

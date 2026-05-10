@@ -242,9 +242,13 @@ services:
       # Standalone compose has no reverse proxy → avatar-editor served
       # at root, so basePath stays empty (Next.js falls back to "/" routes).
       - NEXT_PUBLIC_BASE_PATH=
-      # Enables the "send to Geny" button + the /api/send-to-geny route.
+      # Enables Geny library auto-sync (lib/sync/genySync) + the
+      # /api/library/sync proxy route. Browser-visible flag.
       - NEXT_PUBLIC_GENY_HOST=true
       - GENY_BAKED_EXPORTS_DIR=/exports
+      # Server-to-server URL the avatar-editor's Next.js API routes use
+      # to forward library sync to Geny's FastAPI backend.
+      - GENY_BACKEND_URL=http://backend:8000
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - NODE_ENV=production
