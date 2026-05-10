@@ -635,9 +635,57 @@ geny-avatar : Phase A 9 sprint + Phase 8 9 sprint + post-Phase 8 viewport + Phas
 
 후속으로 분리:
 - Spine 의 lipsync / emotion blend / hit-area
-- (Editor) 자산 덮어쓰기 옵션
+- ~~(Editor) 자산 덮어쓰기 옵션~~ → 아래 항목으로 즉시 처리.
 - schemaVersion 3+ 의 다중 매핑 hit-area
 - Geny 프론트 Pixi v8 업그레이드
+
+---
+
+## 2026-05-10 — (Editor) 자산 덮어쓰기 옵션
+
+V1 후속 list 의 첫 번째 항목 처리. 사용자가 같은 puppet 을 반복 import 할 때 `(Editor 2)`, `(Editor 3)` 누적되는 UX 마찰을 BakedImportsModal 의 카드별 toggle 로 해소.
+
+**변경 surface**:
+
+- `backend/service/vtuber/live2d_model_manager.py`
+  - `remove_model(name, *, persist=True) -> bool` — in-memory dict + agent assignment 정리 + 디스크 mirror.
+  - `_persist_remove(name)` — registry rmw 로 해당 entry + agent_model_assignments 의 매핑 둘 다 삭제.
+- `backend/controller/vtuber_baked_imports_controller.py`
+  - `InstallRequest.replace_existing: bool = False` (default 호환).
+  - install 본문 — `manager.list_models()` 에서 `display_name.startswith(f"{base} (Editor")` 로 매칭, 각 매치 entry 의 `url` 에서 on-disk 디렉터리 (`static/<runtime>-models/<dir>`) 추출 → `shutil.rmtree` (ignore_errors=True) + `manager.remove_model`. 이후 `_next_unique_display_name` 가 새 entry 에 깔끔한 `(Editor)` 슬롯 부여.
+  - install 응답에 `replaced: [{name, display_name}]` 항상 포함 (flag off 면 빈 배열).
+- `frontend/src/lib/api.ts`
+  - `installBakedImport(filename, displayNameOverride?, replaceExisting=false)` — body 에 `replace_existing` 추가, 응답 타입에 `replaced` 추가.
+- `frontend/src/components/avatar/BakedImportsModal.tsx`
+  - per-card `replaceMap: Record<string, boolean>` state + 카드 안 체크박스 ("기존 (Editor) 덮어쓰기").
+  - install 시 그 카드의 toggle 값을 API 에 전달.
+  - 성공 toast 에 `replaced` 개수 + display_name 리스트 노출 (예: "설치 완료: ellen (Editor) (기존 3개 entries 정리됨: ellen (Editor 2), ellen (Editor 3), ellen (Editor))").
+
+**검증**:
+
+격리 smoke test (`/tmp/smoke_replace_existing.py`):
+
+- 같은 puppet 3 회 install (flag off) → `(Editor)` / `(Editor 2)` / `(Editor 3)` 누적 ✓
+- 4 회차 `replace_existing=True` → prior 3 모두 제거 + 새 entry 가 깔끔한 `(Editor)` 슬롯 ✓
+- registry 디스크에 1 entry 만 남음 (재읽기로 확인) ✓
+- on-disk model dirs 도 1 개만 남음 (rmtree 적용) ✓
+- 5 회차 flag off → `(Editor 2)` 로 다시 누적 동작 (옵션이 default 아님) ✓
+- frontend `npx tsc --noEmit` 통과 (vitest 미설치 pre-existing 1건 외 신규 에러 없음).
+
+**의도적 한계**:
+
+- **base display name 매칭 only**: `display_name_override` 로 다른 base 를 명시한 경우는 그 override 가 매칭의 base 가 됨. 일반 사용에는 자연스러움.
+- **agent assignment cascade silent**: 삭제된 모델에 assign 되어있던 session 은 다음 `get_agent_model()` 에서 None 반환 → caller 가 default 로 fallback. 명시적 알림 X (가끔 마주치는 hobby 사용 가정).
+- **bulk delete confirmation X**: 카드별 토글 + UI 에 "기존 (Editor) 덮어쓰기" 라벨 + tooltip. 추가 confirm dialog 안 띄움 — 사용자가 능동적으로 체크해야 발동.
+- **rebuild 필요**: backend + frontend 양쪽 코드 변경. `docker compose ... up -d --build backend frontend` 필요.
+
+**서버 적용**:
+
+```bash
+git pull   # post-merge hook 가 vendor 자동 fast-forward
+sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build backend frontend
+# avatar-editor 는 본 변경 무관 — rebuild 불필요
+```
 
 ---
 

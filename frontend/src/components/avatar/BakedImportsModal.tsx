@@ -37,6 +37,10 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Per-card "replace existing (Editor) entries" toggle. Keyed by
+  // filename so each card tracks its own checkbox state independently.
+  // Cleared on modal open.
+  const [replaceMap, setReplaceMap] = useState<Record<string, boolean>>({});
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -53,6 +57,7 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
     setInfo(null);
     setError(null);
     setEntries(null);
+    setReplaceMap({});
     refresh();
   }, [open, refresh]);
 
@@ -70,9 +75,16 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
     setBusy(filename);
     setError(null);
     setInfo(null);
+    const replaceExisting = replaceMap[filename] ?? false;
     try {
-      const r = await vtuberApi.installBakedImport(filename);
-      setInfo(`설치 완료: ${r.model.display_name}`);
+      const r = await vtuberApi.installBakedImport(filename, undefined, replaceExisting);
+      const replacedNote =
+        r.replaced.length > 0
+          ? ` (기존 ${r.replaced.length}개 entries 정리됨: ${r.replaced
+              .map((x) => x.display_name)
+              .join(', ')})`
+          : '';
+      setInfo(`설치 완료: ${r.model.display_name}${replacedNote}`);
       // Refresh both — the inbox loses the entry (zip moved to
       // installed/) and the model list gains a new (Editor) suffix.
       await Promise.all([refresh(), fetchModels()]);
@@ -192,7 +204,7 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
                   <div className="mt-1 truncate font-mono text-[10px] text-[var(--text-muted)]">
                     {e.filename} · {(e.size_bytes / 1024 / 1024).toFixed(1)} MB
                   </div>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => void handleInstall(e.filename)}
@@ -211,6 +223,24 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
                       <Trash2 size={11} />
                       delete
                     </button>
+                    <label
+                      className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                      title="기존에 같은 이름으로 install 된 (Editor) 항목들을 모두 삭제하고 새로 설치"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={replaceMap[e.filename] ?? false}
+                        onChange={(ev) =>
+                          setReplaceMap((prev) => ({
+                            ...prev,
+                            [e.filename]: ev.target.checked,
+                          }))
+                        }
+                        disabled={busy === e.filename}
+                        className="h-3 w-3 cursor-pointer accent-[var(--primary-color)]"
+                      />
+                      기존 (Editor) 덮어쓰기
+                    </label>
                   </div>
                 </li>
               ))}

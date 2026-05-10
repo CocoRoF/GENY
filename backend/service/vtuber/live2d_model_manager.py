@@ -227,3 +227,43 @@ class Live2dModelManager:
         logger.info(
             f"[model_registry] appended {info.name} [{info.runtime}] · {info.display_name}"
         )
+
+    def remove_model(self, name: str, *, persist: bool = True) -> bool:
+        """Drop a model entry by `name`. Returns True if it existed.
+
+        Used by the baked-imports install endpoint when `replace_existing`
+        is requested — prior `(Editor)` entries with the same suggested
+        name are pruned before the new install lands so the user doesn't
+        end up with `(Editor 2)` / `(Editor 3)` clutter from iterations.
+
+        Also drops any agent assignments pointing at this model — those
+        sessions fall back to whatever the next get_agent_model() does
+        (typically returns None and the caller picks a default).
+        """
+        if name not in self._models:
+            return False
+        self._models.pop(name)
+        self._agent_assignments = {
+            sid: m for sid, m in self._agent_assignments.items() if m != name
+        }
+        if persist:
+            self._persist_remove(name)
+        return True
+
+    def _persist_remove(self, name: str) -> None:
+        """Mirror remove_model() onto disk — drop the entry from `models`
+        and any `agent_model_assignments` keyed at it."""
+        if not self._registry_path.exists():
+            return
+        with open(self._registry_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        models = [m for m in data.get("models", []) if m.get("name") != name]
+        data["models"] = models
+        assignments = data.get("agent_model_assignments", {}) or {}
+        data["agent_model_assignments"] = {
+            sid: m for sid, m in assignments.items() if m != name
+        }
+        with open(self._registry_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        logger.info(f"[model_registry] removed {name}")

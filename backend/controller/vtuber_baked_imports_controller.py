@@ -164,6 +164,12 @@ class InstallRequest(BaseModel):
     # original name from avatar-editor.json with " (Editor)" appended
     # (and " (Editor 2)" / " (Editor 3)" on collision).
     display_name_override: Optional[str] = None
+    # When True, prior `(Editor)` / `(Editor N)` entries with the same
+    # base display name are removed (registry + on-disk dirs) before this
+    # install lands. Lets the user iterate on a puppet without piling up
+    # `(Editor 2)`, `(Editor 3)`, ... copies. Default False preserves the
+    # original additive behavior (caller has to opt in).
+    replace_existing: bool = False
 
 
 # Where extracted models land. Both directories are docker-mounted
@@ -338,8 +344,44 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
 
     # ── Build the registry entry ───────────────────────────────────
     manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
-    existing_display_names = {m.display_name for m in manager.list_models()}
     base_display = req.display_name_override or suggested_name
+
+    # Optional: clear out prior `(Editor)` entries that share this base
+    # before computing the new entry's display name. This is the iter-
+    # in-place workflow — user keeps re-baking the same puppet and
+    # wants the registry to stay tidy instead of accumulating
+    # `(Editor 2)`, `(Editor 3)`, ... copies.
+    replaced: list[dict[str, str]] = []
+    if req.replace_existing:
+        pattern_base = f"{base_display} (Editor"
+        prior = [
+            m for m in manager.list_models()
+            if m.display_name.startswith(pattern_base)
+        ]
+        for old in prior:
+            url_parts = old.url.lstrip("/").split("/")
+            # Expected layout: static / <runtime>-models / <model_dir> / ...
+            if len(url_parts) >= 3 and url_parts[0] == "static":
+                root_lookup = {
+                    "live2d-models": _live2d_models_root(),
+                    "spine-models": _spine_models_root(),
+                }
+                base_root = root_lookup.get(url_parts[1])
+                if base_root is not None:
+                    target = base_root / url_parts[2]
+                    if target.exists():
+                        # ignore_errors keeps the registry consistent even if
+                        # the on-disk dir was already pruned out-of-band.
+                        shutil.rmtree(target, ignore_errors=True)
+            manager.remove_model(old.name)
+            replaced.append({"name": old.name, "display_name": old.display_name})
+        if replaced:
+            logger.info(
+                f"[install] replace_existing pruned {len(replaced)} prior entries "
+                f"matching base={base_display!r}"
+            )
+
+    existing_display_names = {m.display_name for m in manager.list_models()}
     final_display = _next_unique_display_name(base_display, existing_display_names)
 
     rel_entry = entry.relative_to(models_root).as_posix()
@@ -457,9 +499,10 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             "status": "ok",
             "warning": f"zip move to installed/ failed: {e}",
             "model": info.to_dict(),
+            "replaced": replaced,
         }
 
     logger.info(
         f"[baked-imports] installed {req.filename} → {model_name} [{runtime}] · {final_display}"
     )
-    return {"status": "ok", "model": info.to_dict()}
+    return {"status": "ok", "model": info.to_dict(), "replaced": replaced}
