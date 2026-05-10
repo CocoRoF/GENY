@@ -2,9 +2,10 @@
 
 > Geny 의 VTuber 라인업에 외부 hobby 프로젝트인 [geny-avatar](https://github.com/CocoRoF/geny-avatar) 의 puppet 편집 능력을 결합한다. 두 레포는 영구 분리 — geny-avatar 는 자체 속도로 발전하고, Geny 는 명시적인 commit pin 으로 통합한다.
 >
-> **상태**: 계획 (구현 전).
+> **상태**: V1 완료 (Phase A~D + Phase G + Phase E sign-off, 2026-05-10).
 > **저자**: 2026-05-10
 > **결정 결과 (사용자 확인됨)**: git submodule · nginx /avatar-editor · shared docker volume · Pixi-v8 vs v7 분리 (아래 위험 섹션 참조)
+> **진행 기록**: [`docs/progress/GENY_AVATAR_INTEGRATION_PROGRESS.md`](../progress/GENY_AVATAR_INTEGRATION_PROGRESS.md) — sprint 별 산출과 사용자 보고 hotfix 까지 시간순.
 
 ---
 
@@ -378,11 +379,31 @@ docker compose -f docker-compose.dev.yml up --build
 
 ---
 
-## 8. 다음 단계
+## 8. 진행 결산 (V1 완료)
 
-1. 본 plan 의 사용자 검토 + 승인.
-2. **Phase A 부터 시작** (geny-avatar 레포). A.1~A.5 atomic PR 5개. 각 PR 후 사용자 검증.
-3. Phase A 끝나고 geny-avatar 에 tag → Geny Phase B 진입.
-4. 이후 B → C → D → E 순. 각 sprint 가 atomic PR.
+본 plan 은 5/10 한 세션에 걸쳐 전 phase 완료. 실제 PR 합산은 27개 atomic 목표보다 적음 — 일부 sprint 가 자연스럽게 흡수됨 (C.4/C.5 → C.3, D.4/D.7 → D.5, E.1/E.2 → 코드 audit 으로 대체):
 
-전체 예상 PR 수: A 5개 + B 6개 + C 5개 + D 7개 + E 4개 = **27 atomic PR**. (작은 PR 위주 — 각 PR 의 시각 검증이 다음 진입 조건.)
+| Phase | 계획 | 실제 산출 | 종결 commit / tag |
+|---|---|---|---|
+| A | A.1~A.5 (geny-avatar repo) | 5 sprint + A.6/A.7/A.8/A.9 hotfix | geny-avatar v0.2.0 → v0.2.4 → v0.3.x |
+| B | B.1~B.6 (infra) | 6 sprint | nginx prod 라우팅 + 5 compose + submodule pin |
+| C | C.1~C.5 (backend import) | 3 sprint (C.4/C.5 흡수) + Phase G (animationConfig schemaVersion 2 NAME→INDEX) | install endpoint + spine static + emotionMap translate |
+| D | D.1~D.7 (frontend renderer) | 5 sprint (D.4/D.7 흡수) | spine-pixi-v7 + SpineCanvas + AvatarCanvas + BakedImportsModal |
+| E | E.1~E.4 (검증 + 폴리시) | 코드 audit (E.1/E.2 대체) + 본 문서 갱신 (E.3) + README freshness pass (E.4) | 본 sign-off |
+
+**계획 외 추가 작업** (사용자 보고 / 발견 시점에 끼어든 것):
+
+- nginx 13일째 reload 안 됨 + redirect loop hotfix
+- Pixi v8 SSR navigator 부재 (`node:20-alpine` → `:22-alpine`)
+- 업로드 puppet 에서 expression preview silent fail (`rewriteLive2DManifest` Expressions 누락)
+- post-merge hook 도입 (배포 스크립트 폐기, plain `git pull` 로 vendor 자동 fast-forward)
+
+## 9. V1 이후 (별도 추적)
+
+본 통합 V1 의 의도적 한계 (plan 6.x) 중 후속 sprint 가 필요한 항목:
+
+- **Spine 의 lipsync / emotion blend**: 현재 SpineCanvas 는 idle + viewport 만. Live2D 의 expression Add/Multiply 와 다른 모델이라 별도 통합.
+- **Spine 의 hit-area tap motion**: 현재 viewport drag/zoom 만.
+- **(Editor) 자산의 덮어쓰기 옵션**: 현재 매번 `(Editor 2)`, `(Editor 3)` 누적. UI 에서 덮어쓰기 토글.
+- **schemaVersion 3+**: 현재 `2` 까지만. 다중 매핑 hit-area / 기타 필드 확장 시 양쪽 레포 동시 갱신.
+- **Pixi v8 으로 Geny 프론트 업그레이드**: `pixi-live2d-display` 의 v8 호환성 (currently beta) 검증 후 별건 phase.
