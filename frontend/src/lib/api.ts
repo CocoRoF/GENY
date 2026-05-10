@@ -2085,18 +2085,30 @@ export const vtuberApi = {
       }>;
     }>('/api/vtuber/baked-imports/list'),
 
-  /** POST /api/vtuber/baked-imports/install — unpack + register a zip. */
-  installBakedImport: (filename: string, displayNameOverride?: string) =>
-    apiCall<{ status: string; warning?: string; model: Live2dModelInfo }>(
-      '/api/vtuber/baked-imports/install',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          filename,
-          display_name_override: displayNameOverride,
-        }),
-      },
-    ),
+  /** POST /api/vtuber/baked-imports/install — unpack + register a zip.
+   *  When `replaceExisting` is true, prior `(Editor)` / `(Editor N)`
+   *  registry entries with the same base display name are pruned
+   *  before this install lands; the new entry then takes the clean
+   *  `(Editor)` slot. The response's `replaced` array lists what was
+   *  removed so the caller can surface it. */
+  installBakedImport: (
+    filename: string,
+    displayNameOverride?: string,
+    replaceExisting = false,
+  ) =>
+    apiCall<{
+      status: string;
+      warning?: string;
+      model: Live2dModelInfo;
+      replaced: Array<{ name: string; display_name: string }>;
+    }>('/api/vtuber/baked-imports/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        filename,
+        display_name_override: displayNameOverride,
+        replace_existing: replaceExisting,
+      }),
+    }),
 
   /** DELETE /api/vtuber/baked-imports/{filename} — discard a pending zip. */
   deleteBakedImport: (filename: string) =>

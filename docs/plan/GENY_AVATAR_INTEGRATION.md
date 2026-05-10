@@ -404,6 +404,6 @@ docker compose -f docker-compose.dev.yml up --build
 
 - **Spine 의 lipsync / emotion blend**: 현재 SpineCanvas 는 idle + viewport 만. Live2D 의 expression Add/Multiply 와 다른 모델이라 별도 통합.
 - **Spine 의 hit-area tap motion**: 현재 viewport drag/zoom 만.
-- **(Editor) 자산의 덮어쓰기 옵션**: 현재 매번 `(Editor 2)`, `(Editor 3)` 누적. UI 에서 덮어쓰기 토글.
+- ✅ **(Editor) 자산의 덮어쓰기 옵션** — 2026-05-10 완료. BakedImportsModal 에 per-card 체크박스 + backend `replace_existing` flag. 기존 `<base> (Editor*)` entries 매칭 → on-disk 디렉터리 삭제 + registry 정리 → 신규는 깔끔한 `(Editor)` 슬롯 차지.
 - **schemaVersion 3+**: 현재 `2` 까지만. 다중 매핑 hit-area / 기타 필드 확장 시 양쪽 레포 동시 갱신.
 - **Pixi v8 으로 Geny 프론트 업그레이드**: `pixi-live2d-display` 의 v8 호환성 (currently beta) 검증 후 별건 phase.
