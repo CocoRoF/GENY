@@ -2066,6 +2066,45 @@ export const vtuberApi = {
       { method: 'POST', body: JSON.stringify({ emotion, intensity, transition_ms: transitionMs }) },
     ),
 
+  // ── Baked-imports inbox (geny-avatar integration, Phase C) ────
+  // Pending zip files written by avatar-editor's "send to Geny" land
+  // in a shared docker volume; backend exposes list/install/delete.
+
+  /** GET /api/vtuber/baked-imports/list — pending zips in the inbox. */
+  listBakedImports: () =>
+    apiCall<{
+      inbox: string;
+      exists: boolean;
+      entries: Array<{
+        filename: string;
+        size_bytes: number;
+        modified_iso: string;
+        runtime: string | null;
+        suggested_name: string | null;
+        schema_version: number | null;
+      }>;
+    }>('/api/vtuber/baked-imports/list'),
+
+  /** POST /api/vtuber/baked-imports/install — unpack + register a zip. */
+  installBakedImport: (filename: string, displayNameOverride?: string) =>
+    apiCall<{ status: string; warning?: string; model: Live2dModelInfo }>(
+      '/api/vtuber/baked-imports/install',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          filename,
+          display_name_override: displayNameOverride,
+        }),
+      },
+    ),
+
+  /** DELETE /api/vtuber/baked-imports/{filename} — discard a pending zip. */
+  deleteBakedImport: (filename: string) =>
+    apiCall<{ status: string; deleted: string }>(
+      `/api/vtuber/baked-imports/${encodeURIComponent(filename)}`,
+      { method: 'DELETE' },
+    ),
+
   /**
    * Subscribe to avatar state changes via WebSocket.
    */

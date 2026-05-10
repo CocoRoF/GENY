@@ -540,3 +540,58 @@ D.4 가 검증만이라 D.5 와 D.7 묶어서 한 번에 처리.
 - **Live2DCanvas 자체 미제거**: AvatarCanvas dispatcher 가 여전히 import 사용. 추후 Live2D-specific 진입점이 사라지지 않는 한 유지.
 
 **다음**: D.6 — BakedImportsModal (Phase C 의 list/install/delete API 호출 UI).
+
+### D.6 — BakedImportsModal + VTuberPanel 진입점
+
+avatar-editor 의 "send to Geny" → 공유 volume → backend C.2/C.3 endpoint → **이 modal 에서 사용자가 install/delete** → VTuberPanel 의 모델 list 에 즉시 등장. Phase D 마지막 sprint.
+
+**변경**:
+
+- `frontend/src/lib/api.ts` — `vtuberApi` 에 3개 메서드 추가:
+  - `listBakedImports()` → `{inbox, exists, entries[]}` (각 entry: filename / size / modified / runtime / suggested_name / schema_version).
+  - `installBakedImport(filename, displayNameOverride?)` → `{status, warning?, model}`.
+  - `deleteBakedImport(filename)` → `{status, deleted}`.
+- `frontend/src/components/avatar/BakedImportsModal.tsx` (신규)
+  - portal-based modal, backdrop click + Esc 로 닫기.
+  - 마운트 시 `vtuberApi.listBakedImports()` → 카드 grid 로 entries 렌더.
+  - 카드: `[runtime]` chip + `suggested_name` + 상대 시간 + filename/size + install/delete 버튼.
+  - install 버튼: `installBakedImport` → 성공 시 inbox + `fetchModels` 동시 refresh → 새 entry 가 모델 list 에 `(Editor)` 접미로 즉시 등장.
+  - delete 버튼: confirm 후 `deleteBakedImport` → inbox refresh.
+  - 빈 상태: "Avatar Editor 열기" 링크 (`/avatar-editor/` 새 탭).
+  - footer: 같은 링크 + "install 후 (Editor) 접미로 등장" 안내.
+- `frontend/src/components/live2d/VTuberPanel.tsx`
+  - 모달 open state + 새 진입 버튼 ("가져오기", `Inbox` 아이콘).
+  - emotion 배지 옆 / 모델 selector 직후 — 컨트롤 바 안에서 작은 chip 형태.
+  - `<BakedImportsModal>` 컴포넌트 mount.
+
+**검증**:
+
+- `npx tsc --noEmit` — 신규 에러 없음.
+- 동작 시각 검증은 Phase E (사용자 환경 e2e).
+
+**의도적 한계**:
+
+- **하나씩 install**: bulk install 안 함. UI 상 한 번에 하나만 처리. 일반 사용 시나리오에 충분.
+- **install 진행 spinner / 재시도 X**: 한 번 실패하면 사용자가 다시 클릭. 백엔드 install 이 일반적으로 1~2초 (unzip + 작은 파일 복사) 라 무겁게 만들 이유 없음.
+- **schema_version mismatch warning X**: 향후 geny-avatar 의 export schema 가 진화하면 v1 vs v2 mixing 발생 가능. 현재 v1 만이라 단순 reject. 미래 sprint.
+- **`(Editor)` 시각 강조 추가 X**: D.5 의 dropdown chip 으로 충분. 별도 색상 강조는 디자인 polish.
+
+## Phase D 종합 (7 sprint)
+
+| Sprint | 산출 |
+|---|---|
+| D.1 | `@esotericsoftware/spine-pixi-v7` 추가 |
+| D.2 | SpineCanvas + Live2dModelInfo 타입 확장 (runtime/atlas_url) |
+| D.3 | AvatarCanvas dispatcher (sessionId → store → runtime) |
+| D.4 | 검증만 (zustand reactive selector 자동 hydrate) |
+| D.5 | VTuberPanel runtime chip + 4 호출처 일괄 교체 (D.7 흡수) |
+| D.7 | (위 D.5 와 통합) |
+| D.6 | BakedImportsModal + api 메서드 + VTuberPanel 진입점 |
+
+Phase D 끝 — frontend 가 Live2D / Spine 모두 렌더 가능, baked import 사용자 흐름 완성.
+
+---
+
+## 다음 — Phase E — 검증 + 폴리시
+
+E.1 e2e 수동 테스트 → E.2 회귀 (기존 mao_pro 등 무손상) → E.3 progress doc 정리 → E.4 README 갱신.
