@@ -378,6 +378,41 @@ sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d avatar-
 
 3) 후 약 30s 내 `docker ps` 가 `(healthy)` 로 전환 + `https://geny-x.hrletsgo.me/avatar-editor` (slash 없어도) → 301 → 정상 home.
 
+### 후속 — redirect loop (1차 fix 직후)
+
+위 fix 적용 후 사용자가 다시 접속 → 이번엔 redirect loop:
+
+```
+GET /avatar-editor       → 301 Location: /avatar-editor/   (우리 nginx)
+GET /avatar-editor/      → 308 Location: /avatar-editor    (Next.js)
+GET /avatar-editor       → 301 ...   (반복)
+```
+
+원인: Next.js 의 default `trailingSlash: false` 가 `/avatar-editor/` 를 정규형 `/avatar-editor` 로 308 redirect. 내가 추가한 nginx 의 반대 방향 301 redirect 와 정확히 충돌해서 무한 루프.
+
+조치:
+- `nginx/nginx.conf` 의 `location = /avatar-editor` 301 redirect 블록 **삭제**.
+- `location /avatar-editor/` (trailing slash 강제) → `location ^~ /avatar-editor` (slash 무관 prefix). 두 form 모두 upstream 으로 forward → Next.js 가 canonical URL 결정 권한 보유.
+
+```diff
+-    location = /avatar-editor {
+-        return 301 /avatar-editor/;
+-    }
+-    location /avatar-editor/ {
++    location ^~ /avatar-editor {
+         proxy_pass http://avatar_editor;
+         ...
+     }
+```
+
+사용자 측 1회 명령:
+
+```bash
+git pull
+sudo docker exec geny-nginx-prod nginx -t
+sudo docker exec geny-nginx-prod nginx -s reload
+```
+
 ### Phase C 결산
 
 Plan 의 5 sprint (C.1~C.5) → 실제 3 sprint (C.1, C.2, C.3) 로 정리됨. C.4 (spine 정적 dir) 와 C.5 (vtuber list runtime 노출) 는 C.3 / C.1 에 자연스럽게 흡수.
