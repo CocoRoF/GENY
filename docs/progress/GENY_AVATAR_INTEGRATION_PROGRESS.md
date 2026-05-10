@@ -646,3 +646,35 @@ sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build
 - `https://geny-x.hrletsgo.me/avatar-editor/edit/<id>?tab=animation` → 새 Animation 탭
 - ellen_joe 같은 풍부한 puppet → motion ▶ + expression ▶ + emotion 매핑 매트릭스
 - "send to Geny" → install → Geny 의 model selector 에 `(Editor)` 등장 + 매핑한 emotion / kScale 그대로 적용
+
+---
+
+## 2026-05-10 — Expression preview blob URL fix (geny-avatar v0.3.2)
+
+사용자 보고: 에디터 Animation 탭의 Expressions 섹션에서 ▶ preview 가 silent no-op → 어떤 expression 이 어떤 표정인지 시각 확인 불가 → emotion 매핑 결정 불가능. Geny 측 install / NAME→INDEX 변환 / runtime trigger 는 모두 정상이었음 — 문제는 에디터 자체.
+
+**근본 원인** (geny-avatar 측):
+
+[`lib/upload/rewrite.ts`](../../vendor/geny-avatar/lib/upload/rewrite.ts) 의 `rewriteLive2DManifest` 가 `FileReferences.Moc/Textures/Physics/Pose/UserData/DisplayInfo/Motions` 는 blob URL 로 rewrite 하지만 `FileReferences.Expressions[i].File` 만 누락. 업로드 puppet 의 manifest 는 blob: URL 이고 blob URL 은 디렉토리 의미가 없어 엔진이 상대경로 (`expressions/F01.exp3.json`) 를 fetch 못함 → `setExpression` 이 silent fail. 내장 puppet (HTTP manifest) 은 영향 X.
+
+**변경**:
+
+- vendor/geny-avatar 의 `rewriteLive2DManifest` 에 Expressions 분기 추가 (Motions 와 동일 패턴). v0.3.1 → v0.3.2.
+- Geny 측 코드 변경 없음. install / translate / runtime 흐름 그대로.
+
+**서버 적용**:
+
+```bash
+cd /home/hrjang/docker_web/Geny
+git pull   # 이 progress doc 갱신을 가져옴 → post-merge hook 발동 → vendor/geny-avatar 가 origin/main HEAD 로 fast-forward
+sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor
+# backend rebuild 불필요 — fix 는 frontend (avatar-editor) 한정
+```
+
+(post-merge hook 미설치 clone 이면 한 번 `git config core.hooksPath .githooks` 추가)
+
+**검증**:
+
+- 업로드 puppet 으로 editor 진입 → Animation 탭 → Expressions ▶ 클릭 → 표정 즉시 변화
+- emotion dropdown 에서 expression NAME 선택 → 자동 preview 동작 → 매핑 결정 가능
+- "send to Geny" → install → `/api/vtuber/models` 의 emotionMap 이 INDEX 로 정상 들어옴 (이쪽은 원래 정상이었음)
