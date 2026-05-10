@@ -1,31 +1,34 @@
 """
 VTuber Baked Imports Controller
 
-Read-only inbox for baked puppet zips that the avatar-editor service
-drops into the shared docker volume (/data/baked-imports). The user
-sees these as "ready to install" — actual install (unzip + register
-in model_registry) lives in the matching install endpoint (Phase C.3).
+Inbox for baked puppet zips that the avatar-editor service drops into
+the shared docker volume (/data/baked-imports). Three endpoints cover
+the full lifecycle:
 
-Endpoints:
-    GET    /api/vtuber/baked-imports/list
-    DELETE /api/vtuber/baked-imports/{filename}
+    GET    /api/vtuber/baked-imports/list          enumerate pending
+    DELETE /api/vtuber/baked-imports/{filename}    drop a pending zip
+    POST   /api/vtuber/baked-imports/install       unzip + register
 
-The volume is mounted read-only by docker-compose (`:ro`), so deletes
-won't work in the running compose setup — but the operator can mount
-read-write or run delete from the writer side. The endpoint exists so
-the UI can offer "discard" without baking that into a separate ops
-workflow; failure surfaces as a clear error string.
+After a successful install, the source zip is moved to
+`<inbox>/installed/` so it stops showing up in the list. Backend
+mounts the volume read-write (Phase C.3) — earlier docs may have
+shown `:ro` from before the install endpoint existed.
 """
 
+import json as _json
 import os
+import re
+import shutil
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from logging import getLogger
+
+from service.vtuber.live2d_model_manager import Live2dModelInfo
 
 logger = getLogger(__name__)
 
@@ -150,3 +153,242 @@ async def delete_baked_import(filename: str) -> dict[str, Any]:
 
     logger.info(f"[baked-imports] deleted {target}")
     return {"status": "ok", "deleted": filename}
+
+
+# ── Install ────────────────────────────────────────────────────────
+
+
+class InstallRequest(BaseModel):
+    filename: str
+    # Optional display-name override; when omitted we use the puppet's
+    # original name from avatar-editor.json with " (Editor)" appended
+    # (and " (Editor 2)" / " (Editor 3)" on collision).
+    display_name_override: Optional[str] = None
+
+
+# Where extracted models land. Both directories are docker-mounted
+# under FastAPI's StaticFiles (see main.py).
+def _live2d_models_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "static" / "live2d-models"
+
+
+def _spine_models_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "static" / "spine-models"
+
+
+# Names that show up in URLs — keep them ascii-only and filesystem-safe
+# regardless of what the source puppet was called.
+_SLUG_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _slugify(s: str) -> str:
+    cleaned = _SLUG_RE.sub("_", s).strip("_")
+    return cleaned or "puppet"
+
+
+def _next_unique_display_name(
+    base: str, existing: set[str]
+) -> str:
+    """`Hiyori Pro` + existing {`Hiyori Pro (Editor)`, `Hiyori Pro (Editor 2)`}
+    → `Hiyori Pro (Editor 3)`. Stops searching at 999 to avoid runaway."""
+    candidate = f"{base} (Editor)"
+    if candidate not in existing:
+        return candidate
+    for i in range(2, 1000):
+        candidate = f"{base} (Editor {i})"
+        if candidate not in existing:
+            return candidate
+    raise RuntimeError(f"too many Editor copies of {base!r}")
+
+
+def _is_archive_path_safe(member_name: str) -> bool:
+    """Reject zip entries that would escape the destination via .. or
+    absolute paths (a.k.a. zip slip)."""
+    if not member_name or member_name.startswith(("/", "\\")):
+        return False
+    parts = member_name.replace("\\", "/").split("/")
+    if any(p in ("..", "") for p in parts if p):
+        return False
+    return True
+
+
+def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> list[str]:
+    """Extract every member of `zf` under `dest`, refusing zip slip.
+    Returns the list of extracted relative paths."""
+    extracted: list[str] = []
+    for member in zf.infolist():
+        name = member.filename
+        if not _is_archive_path_safe(name):
+            raise HTTPException(400, f"unsafe zip entry: {name!r}")
+        # zipfile.extract is path-traversal-safe by itself in modern
+        # Python (3.6.2+) when given a `path=`, but the explicit guard
+        # above catches obviously-malicious archives earlier with a
+        # nicer error.
+        zf.extract(member, dest)
+        extracted.append(name)
+    return extracted
+
+
+def _resolve_inside(root: Path, files: list[str], suffixes: tuple[str, ...]) -> Optional[Path]:
+    """Find the first extracted file that ends with one of the given
+    suffixes (case-insensitive). Used to locate the model3.json /
+    .skel / .atlas after extraction."""
+    sl = tuple(s.lower() for s in suffixes)
+    for f in files:
+        if f.lower().endswith(sl):
+            candidate = root / f
+            if candidate.exists():
+                return candidate
+    return None
+
+
+@router.post("/install")
+async def install_baked_import(req: InstallRequest, request: Request) -> dict[str, Any]:
+    """Unzip a pending baked puppet, register it in the model registry
+    with an `(Editor)` suffix, and move the source zip into the
+    `installed/` subdirectory of the inbox.
+
+    Returns the new model entry's `name` so the UI can immediately
+    select it on /api/vtuber/models.
+    """
+    if not _is_safe_filename(req.filename):
+        raise HTTPException(400, f"unsafe filename: {req.filename!r}")
+    if not req.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "filename must end in .zip")
+
+    inbox = _inbox_dir()
+    src = inbox / req.filename
+    if not src.exists() or not src.is_file():
+        raise HTTPException(404, f"not found: {req.filename}")
+
+    # ── Read metadata from the zip ─────────────────────────────────
+    meta = _peek_zip_metadata(src)
+    runtime: str = (meta.get("puppet", {}) or {}).get("runtime") or meta.get("runtime") or "live2d"
+    if runtime not in ("live2d", "spine"):
+        raise HTTPException(400, f"unsupported runtime in zip: {runtime!r}")
+    suggested_name = (
+        (meta.get("puppet", {}) or {}).get("name") or meta.get("name") or src.stem
+    )
+    suggested_version = (meta.get("puppet", {}) or {}).get("version") or ""
+
+    # ── Compute target directory + slugged model name ──────────────
+    # Use microsecond precision so back-to-back installs of the same
+    # source puppet don't collide on the timestamp.
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    slug = _slugify(suggested_name)
+    model_name = f"{slug}__editor_{ts}"
+
+    if runtime == "live2d":
+        models_root = _live2d_models_root()
+        url_prefix = "/static/live2d-models"
+    else:
+        models_root = _spine_models_root()
+        url_prefix = "/static/spine-models"
+
+    target_dir = models_root / model_name
+    if target_dir.exists():
+        # Theoretically impossible (timestamp collision down to the
+        # second + slug match) but reject loudly rather than overwrite.
+        raise HTTPException(409, f"target already exists: {target_dir}")
+
+    # ── Extract ────────────────────────────────────────────────────
+    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(src, "r") as zf:
+            extracted = _safe_extract(zf, target_dir)
+    except HTTPException:
+        # Clean up partial extract on a path-traversal reject.
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    except (zipfile.BadZipFile, OSError) as e:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(400, f"zip read failed: {e}") from e
+
+    # ── Locate the runtime entry file ──────────────────────────────
+    # Files that look like model entry points but are actually the
+    # zip's own metadata. Skip them so a Spine fallback to .json
+    # doesn't accidentally pick "avatar-editor.json".
+    META_FILES = {"avatar-editor.json", "avatar.json", "license.md"}
+
+    def _is_meta(p: str) -> bool:
+        return Path(p).name.lower() in META_FILES
+
+    runtime_files = [f for f in extracted if not _is_meta(f)]
+
+    if runtime == "live2d":
+        entry = _resolve_inside(target_dir, runtime_files, (".model3.json",))
+        if not entry:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(400, "no .model3.json in zip — not a Live2D puppet")
+        atlas_path: Optional[Path] = None
+    else:
+        # Spine: prefer .skel (binary export); fall back to .json
+        # (Spine v3 JSON export). Search in two passes so .skel always
+        # wins when both are present.
+        entry = _resolve_inside(target_dir, runtime_files, (".skel",))
+        if not entry:
+            entry = _resolve_inside(target_dir, runtime_files, (".json",))
+        if not entry:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(400, "no .skel/.json in zip — not a Spine puppet")
+        atlas_path = _resolve_inside(target_dir, runtime_files, (".atlas",))
+        if not atlas_path:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(400, "no .atlas in zip — Spine puppet incomplete")
+
+    # ── Build the registry entry ───────────────────────────────────
+    manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
+    existing_display_names = {m.display_name for m in manager.list_models()}
+    base_display = req.display_name_override or suggested_name
+    final_display = _next_unique_display_name(base_display, existing_display_names)
+
+    rel_entry = entry.relative_to(models_root).as_posix()
+    rel_atlas = atlas_path.relative_to(models_root).as_posix() if atlas_path else None
+    description = (
+        f"{suggested_name}{' ' + suggested_version if suggested_version else ''} "
+        f"— imported from avatar-editor on {ts}"
+    ).strip()
+
+    info = Live2dModelInfo(
+        name=model_name,
+        display_name=final_display,
+        description=description,
+        url=f"{url_prefix}/{rel_entry}",
+        thumbnail=None,
+        kScale=0.7,
+        initialXshift=0,
+        initialYshift=0,
+        idleMotionGroupName="Idle",
+        emotionMap={"neutral": 0},
+        tapMotions={},
+        runtime=runtime,
+        atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
+    )
+    try:
+        manager.add_model(info)
+    except Exception as e:
+        # Persistence failed (disk full, permission denied) — roll back
+        # the extracted directory so we don't leave dangling files.
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(500, f"register failed: {e}") from e
+
+    # ── Move source zip to installed/ ───────────────────────────────
+    installed_dir = inbox / "installed"
+    try:
+        installed_dir.mkdir(exist_ok=True)
+        src.replace(installed_dir / src.name)
+    except OSError as e:
+        # Non-fatal — model is already registered. Surface a warning
+        # in the response so the UI can show "installed but couldn't
+        # archive zip" instead of a misleading green tick.
+        logger.warning(f"[baked-imports] post-install zip move failed: {e}")
+        return {
+            "status": "ok",
+            "warning": f"zip move to installed/ failed: {e}",
+            "model": info.to_dict(),
+        }
+
+    logger.info(
+        f"[baked-imports] installed {req.filename} → {model_name} [{runtime}] · {final_display}"
+    )
+    return {"status": "ok", "model": info.to_dict()}

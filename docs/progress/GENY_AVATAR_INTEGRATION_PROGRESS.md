@@ -298,3 +298,49 @@ avatar-editor 가 공유 volume 에 떨어뜨린 zip 들의 inbox view. install 
 - **delete bulk X**: 한 번에 하나씩만. UI 에서 loop 으로 충분.
 
 **다음**: C.3 — `POST /api/vtuber/baked-imports/install` — unzip → static/{live2d,spine}-models/ → model_registry append (자동 `(Editor)` suffix).
+
+### C.3 — install endpoint (+ spine static dir + 5 compose mount flip = C.4 흡수)
+
+baked zip 을 한 번의 클릭으로 `model_registry.json` 에 등록 + 정적 dir 에 펼쳐서 즉시 선택 가능하게. 그 과정에서 두 인접 sprint (C.4 spine 정적 dir / 마운트 모드 변경) 함께 처리.
+
+**변경**:
+
+- `backend/service/vtuber/live2d_model_manager.py`
+  - `reload()` — 디스크에서 다시 읽기, agent_assignments 보존.
+  - `add_model(info, persist=True)` — in-memory 등록 + JSON append (rmw 한 번). 중복 name 시 ValueError.
+  - `_persist_append()` — 부재한 registry 도 v2 minimal doc 으로 부트스트랩.
+- `backend/controller/vtuber_baked_imports_controller.py`
+  - 새 `POST /install` endpoint — `{filename, display_name_override?}`.
+  - **흐름**: filename 안전성 → zip metadata peek → runtime 결정 → target dir 계산 (`<slug>__editor_<ts>`, microsecond ts) → `_safe_extract` (zip slip 방지) → entry 파일 찾기 (live2d=.model3.json, spine=.skel→.json fallback + .atlas 필수) → `_next_unique_display_name` 으로 충돌 회피 → `manager.add_model(info)` → src zip 을 `installed/` 로 move.
+  - 실패 시 partial 상태 rollback (`shutil.rmtree(target_dir)`).
+  - zip move 실패만 non-fatal (warning 응답).
+  - zip 의 metadata 파일 (`avatar-editor.json` / `avatar.json` / `LICENSE.md`) 은 entry 후보에서 제외 (Spine 의 .json fallback 이 metadata 잡지 않도록).
+- 5개 compose 파일 backend mount `:ro` → rw (default). install 후 zip 이동에 write 필요.
+  - `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.dev-core.yml`, `docker-compose.prod.yml`, `docker-compose.prod-core.yml`.
+  - 코멘트도 stale `RO` 제거 + "rw — backend reads + moves to installed/" 로 갱신.
+- `backend/static/spine-models/.gitkeep` (신규) — Spine import 의 install target. main.py 의 기존 `/static` mount 가 자동 커버해서 추가 mount 코드 불필요.
+
+**검증**:
+
+격리 smoke test (venv python, /tmp/smoke_install.py):
+
+- Live2D zip (hiyori_pro) install → 등록 entry 의 `url` 이 정확한 `.model3.json` path. registry 항목 수 +1.
+- Spine zip (spineboy) install → `runtime="spine"`, `url` 이 `.skel`, `atlas_url` 정확히 채워짐.
+- 같은 puppet 두 번째 install → display_name 자동으로 `(Editor 2)`.
+- 악성 zip (`../../../etc/passwd` 멤버) → HTTPException 400 reject + target dir 정리됨.
+- 모든 케이스 후 `installed/` 디렉터리에 원본 zip 존재.
+
+**의도적 한계**:
+
+- **kScale 등 default 값 0.7**: install 한 entry 의 viewport 파라미터는 전부 default. 사용자가 model_registry 직접 편집하거나 별도 UI 로 조정. baked zip 은 이 메타를 안 갖고 있음.
+- **emotionMap default {neutral:0}**: avatar-editor 에서 motion 그룹 표준화 안 한 puppet 은 기본 emotion mapping 만. 사용자가 필요 시 직접 편집.
+- **install 후 자동 assign X**: 새 entry 가 아무 agent session 에도 자동 연결 안 됨. 사용자가 명시적으로 select 해야 함 (UX 디자인 그대로).
+- **Runtime/path validation 보수적**: live2d=.model3.json, spine=.skel 부재 시 immediate 400 + cleanup. 모호한 경우 reject 가 silently misregister 보다 안전.
+- **인증/권한 X**: Geny 의 다른 vtuber endpoint 들과 동일 (단일 운영자 환경). 본 sprint 에서 새 인증 추가 X.
+
+### C.4 / C.5 — 흡수 / 자동 충족
+
+- **C.4 (spine 정적 dir + main mount)**: C.3 에서 같이 처리. 디렉터리만 만들면 main 의 `/static` mount 가 자동 커버.
+- **C.5 (vtuber list endpoint runtime 노출)**: C.1 의 `to_dict()` 에 이미 `runtime` + `atlas_url` 포함됨 — `/api/vtuber/models` 는 변경 없이 새 필드 노출. 별도 sprint 불필요.
+
+**다음**: Phase D — frontend renderer (spine-pixi 추가, AvatarCanvas dispatcher, BakedImportsModal). C.3 의 결과물을 사용자가 UI 에서 보고 install 할 수 있게.

@@ -180,3 +180,50 @@ class Live2dModelManager:
     def get_all_assignments(self) -> Dict[str, str]:
         """Return all agent-model assignments."""
         return dict(self._agent_assignments)
+
+    # ── Mutation (Phase C — geny-avatar baked imports) ──────────────
+
+    def reload(self) -> None:
+        """Re-read model_registry.json from disk. Idempotent — clears
+        and rebuilds the in-memory model dict; agent assignments are
+        preserved (assigned model names that vanished from the registry
+        will resolve to None on next get_agent_model)."""
+        self._models.clear()
+        self._load_registry()
+
+    def add_model(self, info: Live2dModelInfo, *, persist: bool = True) -> None:
+        """Register a new model in-memory; optionally append the entry
+        to model_registry.json so it survives a restart.
+
+        Used by the baked-imports install endpoint after a successful
+        unzip — the new entry shows up immediately on /api/vtuber/models
+        without needing a backend reload.
+
+        Raises ValueError if a model with the same `name` is already
+        registered (caller is responsible for generating unique ids).
+        """
+        if info.name in self._models:
+            raise ValueError(f"model already registered: {info.name}")
+        self._models[info.name] = info
+        if persist:
+            self._persist_append(info)
+
+    def _persist_append(self, info: Live2dModelInfo) -> None:
+        """Read-modify-write the on-disk registry, appending one entry.
+        Keeps existing schema_version + default_model + assignments and
+        the original entries' field order."""
+        if not self._registry_path.exists():
+            # Bootstrap if the file vanished — write a minimal v2 doc.
+            data: dict = {"schema_version": 2, "models": []}
+        else:
+            with open(self._registry_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        data.setdefault("models", []).append(info.to_dict())
+        # ensure_ascii=False keeps Korean descriptions readable on disk;
+        # newline-terminate so editors don't show a "no newline" bar.
+        with open(self._registry_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        logger.info(
+            f"[model_registry] appended {info.name} [{info.runtime}] · {info.display_name}"
+        )

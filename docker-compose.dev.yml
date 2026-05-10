@@ -78,9 +78,9 @@ services:
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./backend:/app
-      # Baked puppet zips dropped here by avatar-editor (RO read side).
-      # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
-      - geny-baked-exports-dev:/data/baked-imports:ro
+      # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
+      # installed/ subdir after install (rw — was :ro before C.3 added install).
+      - geny-baked-exports-dev:/data/baked-imports
     depends_on:
       postgres:
         condition: service_healthy

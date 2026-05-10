@@ -83,10 +83,11 @@ services:
       # Cycle 20260424_3 PR-1: without this volume the folder was ephemeral —
       # every container restart wiped user-uploaded images.
       - geny-uploads:/app/static/uploads
-      # Baked puppet zips dropped here by the avatar-editor service. Read-only —
-      # backend lists pending zips and "installs" them into static/{live2d,spine}-models/.
+      # Baked puppet zips dropped here by the avatar-editor service. Backend
+      # lists pending zips and "installs" them into static/{live2d,spine}-models/,
+      # then moves the consumed zip into installed/ — rw mount required.
       # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
-      - geny-baked-exports:/data/baked-imports:ro
+      - geny-baked-exports:/data/baked-imports
     depends_on:
       postgres:
         condition: service_healthy
