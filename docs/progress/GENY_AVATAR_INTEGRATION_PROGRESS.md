@@ -480,3 +480,33 @@ Geny frontend 가 Pixi 7.4.3 stuck — geny-avatar 레포의 spine-pixi-v8 와 �
 - **Spine asset alias 누수**: mount 마다 alias 가 늘어 `Assets` 캐시에 쌓일 수 있음. 일반 사용에서 문제 X (puppet 전환 빈도 낮음). 필요 시 `Assets.unload(alias)` 추가.
 
 **다음**: D.3 — `AvatarCanvas.tsx` dispatcher (sessionId → store → runtime 분기).
+
+### D.3 — `AvatarCanvas.tsx` dispatcher
+
+기존 `Live2DCanvas` 의 sessionId-based API 를 그대로 받으면서 내부에서 model.runtime 보고 Live2D vs Spine 분기. 호출처는 `<Live2DCanvas sessionId>` → `<AvatarCanvas sessionId>` 한 줄 교체로 끝나야 함 (D.7).
+
+**변경**:
+
+- `frontend/src/components/avatar/AvatarCanvas.tsx` (신규)
+  - props: `Live2DCanvasProps` 와 동일 surface (sessionId, className, interactive, background, backgroundAlpha, enhancedConfig).
+  - `useVTuberStore.getModelForSession(sessionId)` → `model?.runtime ?? 'live2d'` (pre-v2 fallback).
+  - **runtime === 'spine'**:
+    - model 없으면 `loading model…` placeholder.
+    - `atlas_url` 없으면 빨간 `registry entry incomplete` 에러 (정상 import 흐름이면 발생 X).
+    - SpineCanvas 에 `url` (skeleton), `atlas`, `kScale` 등 plain props 로 forward.
+    - `enhancedConfig` 는 Live2D 전용이라 Spine 분기에서는 drop (의도적 — Spine 은 lipsync/expression 다른 모델).
+  - **runtime === 'live2d'** (또는 fallback):
+    - 기존 `Live2DCanvas` 호출 그대로 (props 전달). 회귀 0.
+
+**검증**:
+
+- `npx tsc --noEmit` — 신규 에러 없음.
+- runtime 분기 로직 단순 (4 줄) — 단위 테스트 X. 실제 검증은 D.5/D.7 후 사용자 시각 검증.
+
+**의도적 한계**:
+
+- **enhancedConfig 의 Spine 사양 X**: Live2D 의 enhanced 시스템 (auto blink, eye saccade, beat sync 등) 은 Spine 분기에서 ignore. 향후 Spine 전용 enhanced config 가 필요하면 동일 인터페이스 mirror.
+- **runtime 변경 시 transition X**: model 이 live2d → spine 으로 바뀌면 React reconciliation 으로 두 컴포넌트가 unmount/mount 됨. 부드러운 cross-fade 필요시 별도.
+- **`getModelForSession` selector 의 reactive 의존성**: zustand selector 가 model object 를 리턴 → 매번 새 reference 면 무한 re-render 위험. zustand 의 default `===` 비교는 안전 (model 자체가 store 안에서 stable).
+
+**다음**: D.4 — `useVTuberStore` 의 runtime/atlas_url hydrate 확인 (이미 backend 가 보내고 있음 — 검증만).
