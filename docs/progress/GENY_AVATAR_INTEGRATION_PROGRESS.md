@@ -92,3 +92,35 @@ dev compose 도 동일한 standalone 빌드를 그대로 사용. **hot-reload �
 - **dev 와 standalone 의 host port 같음**: 둘 다 `${AVATAR_EDITOR_PORT:-3001}:3000`. 동시에 띄우면 포트 충돌. dev/prod 동시 실행은 일반적이지 않으니 OK — 필요 시 user 가 env 로 override.
 
 **다음**: B.4 — `docker-compose.dev-core.yml` + `docker-compose.prod.yml` + `docker-compose.prod-core.yml` 3 파일 동시 적용.
+
+### B.4 — dev-core / prod / prod-core 3 compose 파일 + submodule v0.2.1 hotfix
+
+prod 변형들이 nginx 뒤에서 `/avatar-editor` prefix 로 mount 되도록 작성. 작업 중 발견된 A.1 누락 (build args ARG 선언 X) 을 geny-avatar 측 hotfix [v0.2.1](https://github.com/CocoRoF/geny-avatar/releases/tag/v0.2.1) 으로 즉시 해결 + Geny submodule pin 갱신.
+
+**변경**:
+
+- `vendor/geny-avatar` submodule pin: `aa1de59` (v0.2.0) → `8154709` (v0.2.1).
+- `docker-compose.dev-core.yml` — dev 와 동일한 service block (host port 3001, basePath 빈 문자열, `geny-baked-exports-dev` 공유). backend 의 RO mount 추가. 볼륨 정의 추가.
+- `docker-compose.prod.yml` — prod 변형:
+  - `expose: 3000` (host 포트 X — nginx 만 접근).
+  - `build.args.NEXT_PUBLIC_BASE_PATH=/avatar-editor` (build time inline 보장 — v0.2.1 hotfix 의 ARG 가 받아줌).
+  - 환경 변수에도 `NEXT_PUBLIC_BASE_PATH=/avatar-editor` (정합성 — runtime 에 같은 값 보임).
+  - 컨테이너 / 볼륨 이름 `-prod` 접미사.
+  - healthcheck 가 `/avatar-editor/` 로 wget — basePath 가 root 를 404 로 만드므로 prefix 경로로 확인.
+  - nginx 의 `depends_on` 에 `avatar-editor: service_started` 추가.
+- `docker-compose.prod-core.yml` — prod 와 동일.
+
+**검증**:
+
+- `docker compose -f docker-compose.dev-core.yml config --quiet` 통과
+- `docker compose -f docker-compose.prod.yml config --quiet` 통과
+- `docker compose -f docker-compose.prod-core.yml config --quiet` 통과
+- 5 compose 파일 모두 `avatar-editor` service + `geny-baked-exports-{dev,prod}` 볼륨 양면 mount + 적절한 network 정합성.
+
+**의도적 한계**:
+
+- **prod 의 build args 와 environment 중복**: `NEXT_PUBLIC_BASE_PATH` 가 build time 과 runtime 양쪽에 같은 값으로 들어감. build time 만으로 충분하지만 runtime ENV 로도 두는 게 디버깅 시 컨테이너 안에서 echo 확인 가능 — 일치 invariant 만 지키면 됨.
+- **dev / prod healthcheck path 차이**: dev/standalone 은 `/`, prod 는 `/avatar-editor/`. basePath 차이 때문 — 같은 명령으로 통일 못 함. compose 별로 명시.
+- **B.5 까지 nginx 라우팅 X**: prod 변형은 service 가 떠도 외부에서 접근 안 됨 (nginx 의 location 블록이 없으니). B.5 (다음) 가 그걸 추가하면 비로소 end-to-end 동작.
+
+**다음**: B.5 — `nginx/nginx.conf` 에 `/avatar-editor/` location 블록 추가.

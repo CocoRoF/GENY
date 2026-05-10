@@ -89,6 +89,9 @@ services:
       # Chat attachment uploads (cycle 20260424_3 PR-1) — without a named
       # volume here every container restart wiped user-uploaded images.
       - geny-uploads-prod:/app/static/uploads
+      # Baked puppet zips dropped here by avatar-editor (RO read side).
+      # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
+      - geny-baked-exports-prod:/data/baked-imports:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,6 +143,8 @@ services:
         condition: service_started
       backend:
         condition: service_healthy
+      avatar-editor:
+        condition: service_started
     networks:
       - geny-net-prod
 
@@ -248,6 +253,43 @@ services:
     networks:
       - geny-net-prod
 
+  # ── Avatar Editor (geny-avatar submodule, Next.js) — Prod ─────────
+  # In prod, nginx terminates external traffic and proxies the
+  # /avatar-editor/ prefix to this service over the geny-net-prod
+  # network. avatar-editor is therefore internal-only (no host port)
+  # and built with NEXT_PUBLIC_BASE_PATH=/avatar-editor so all routes,
+  # static assets, and apiUrl() fetches resolve under that prefix.
+  avatar-editor:
+    build:
+      context: ./vendor/geny-avatar
+      dockerfile: Dockerfile
+      args:
+        # basePath has to be in scope at next build, not just runtime —
+        # it's inlined into the bundle by the builder stage.
+        NEXT_PUBLIC_BASE_PATH: /avatar-editor
+    container_name: geny-avatar-editor-prod
+    init: true
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NEXT_PUBLIC_BASE_PATH=/avatar-editor
+      - NEXT_PUBLIC_GENY_HOST=true
+      - GENY_BAKED_EXPORTS_DIR=/exports
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NODE_ENV=production
+    volumes:
+      - geny-baked-exports-prod:/exports
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/avatar-editor/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - geny-net-prod
+
 
 networks:
   geny-net-prod:
@@ -263,4 +305,7 @@ volumes:
   geny-uploads-prod:
     driver: local
   geny-omnivoice-models-prod:
+    driver: local
+  # Shared between avatar-editor (rw) and backend (ro) — prod variant.
+  geny-baked-exports-prod:
     driver: local
