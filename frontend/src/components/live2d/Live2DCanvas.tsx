@@ -185,9 +185,20 @@ export default function Live2DCanvas({
       }
 
       // ── Load the Live2D model ──
+      // Passing idleMotionGroup is critical: pixi-live2d-display defaults
+      // motionManager.groups.idle to the literal string "Idle", which is
+      // what its post-motion auto-idle-restart hook (MotionManager.update)
+      // uses to pick the next idle. Custom puppets exported from
+      // geny-avatar often use a different group name (e.g., the puppet's
+      // hashed group id). Without this option, when a NORMAL motion ends
+      // pixi tries `startRandomMotion("Idle", IDLE)` against a group that
+      // doesn't exist → no motion plays → the model freezes mid-pose,
+      // which presents as "the animation only lasted ~0.2s and stopped".
+      const idleGroupName = model.idleMotionGroupName || 'Idle';
       const live2dModel = await Live2DModel.from(model.url, {
         autoHitTest: false,
         autoFocus: false,
+        idleMotionGroup: idleGroupName,
       });
       if (isStale()) {
         live2dModel.destroy();
@@ -232,6 +243,53 @@ export default function Live2DCanvas({
       // ══════════════════════════════════════════════════════════════
 
       const internalModel = live2dModel.internalModel;
+
+      // ── Motion lifecycle diagnostics ──
+      // Surface motion start/finish events so motion duration mismatches
+      // (e.g., motion ends earlier than expected) are visible at the
+      // verbose log level. Pair each motionFinish with its motionStart
+      // to compute and log the actual elapsed playback time.
+      const motionStartTimes = new Map<string, number>();
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const motionMgr = (internalModel as any).motionManager;
+        motionMgr?.on?.(
+          'motionStart',
+          (group: string, index: number) => {
+            const tag = `${group}[${index}]`;
+            motionStartTimes.set(tag, performance.now());
+            console.debug(
+              `[Live2DCanvas] motionStart group=${group} index=${index} ` +
+                `idleGroup=${motionMgr.groups?.idle}`,
+            );
+          },
+        );
+        motionMgr?.on?.('motionFinish', () => {
+          const tags = Array.from(motionStartTimes.keys());
+          const lastTag = tags[tags.length - 1];
+          if (lastTag) {
+            const startedAt = motionStartTimes.get(lastTag);
+            motionStartTimes.delete(lastTag);
+            const elapsedMs = startedAt ? performance.now() - startedAt : -1;
+            console.debug(
+              `[Live2DCanvas] motionFinish ${lastTag} elapsed=${elapsedMs.toFixed(1)}ms`,
+            );
+          } else {
+            console.debug('[Live2DCanvas] motionFinish (no matching motionStart)');
+          }
+        });
+        motionMgr?.on?.(
+          'motionLoadError',
+          (group: string, index: number, err: unknown) => {
+            console.debug(
+              `[Live2DCanvas] motionLoadError group=${group} index=${index}`,
+              err,
+            );
+          },
+        );
+      } catch (err) {
+        console.debug('[Live2DCanvas] failed to attach motion lifecycle listeners', err);
+      }
 
       // ── Resolve hiddenParts IDs → indices (watermark / unwanted part suppression) ──
       // Live2D Parts carry opacity per frame; motions may re-enable them, so we zero
