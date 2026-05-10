@@ -163,3 +163,48 @@ prod 변형의 마지막 퍼즐. avatar-editor 가 docker 내부 (geny-net-prod)
 - **HTTPS 미적용**: nginx 가 80 만 listen. TLS 는 Geny 의 별도 책임 (외부 LB / cloudflare 등). 본 통합 sprint 범위 X.
 
 **다음**: B.6 — README 업데이트 (avatar-editor service 셋업 + submodule init 가이드).
+
+### B.6 — README 통합 가이드
+
+Phase B 마무리. 두 군데 변경:
+
+**변경**:
+
+- `README.md` Installation 섹션의 clone 단계
+  - `git clone ...` → `git clone --recurse-submodules ...`
+  - 이미 clone 한 경우 fallback 으로 `git submodule update --init --recursive` 한 줄.
+- `README.md` Tech Stack 와 Installation 사이에 신규 "Avatar Editor (geny-avatar)" 섹션
+  - 한 단락 요약 (역할, 핵심 가치, `(Editor)` 접미사 비충돌).
+  - **Pinned version** 노트 — 본 레포가 명시적 commit 만 받음 + 갱신 절차.
+  - **Topology** 표 — 5 compose 파일의 접근 경로 정리 (host port 3001 vs nginx /avatar-editor/).
+  - **Data path** 한 줄 — 공유 volume 사양.
+  - **AVATAR_EDITOR_PORT** override 예제.
+  - plan + progress 문서로 외부 링크.
+
+**검증**:
+
+- 마크다운 syntax (표 / 링크 / 코드 블록) 시각 확인.
+
+**의도적 한계**:
+
+- **README 의 "Architecture" 섹션 ASCII diagram 안 갱신**: avatar-editor 가 그림에 안 들어감. plan 문서에 이미 ASCII diagram 있어 중복 회피.
+- **Manual Setup 섹션 무손상**: avatar-editor 는 docker compose 전용 — manual setup 가이드에는 nothing. `cd vendor/geny-avatar && pnpm dev` 는 사용자가 직접.
+
+## Phase B 종합 (6 sprint)
+
+| Sprint | 산출 |
+|---|---|
+| B.1 | `vendor/geny-avatar` submodule pin (v0.2.1 hotfix 후 갱신) |
+| B.2 | `docker-compose.yml` (standalone full, host port) |
+| B.3 | `docker-compose.dev.yml` (dev) |
+| B.4 | `docker-compose.dev-core.yml` + 두 prod 변형 (nginx 뒤 internal) |
+| B.5 | `nginx/nginx.conf` 의 `/avatar-editor/` location |
+| B.6 | README 의 "Avatar Editor (geny-avatar)" 섹션 + clone --recurse-submodules |
+
+Phase B 완료 — infra 측면의 모든 wiring 끝. 이제 backend 가 공유 volume 의 zip 을 읽어서 install 하는 endpoint (Phase C) 와 frontend 의 모델 선택 / 렌더 (Phase D) 가 남음.
+
+---
+
+## 다음 — Phase C — backend import 흐름
+
+C.1 model_registry 마이그레이션 (entries 에 `runtime` 필드 추가) → C.2 baked-imports controller (list / delete) → C.3 install endpoint → C.4 spine-models 정적 dir → C.5 list endpoint 확장.

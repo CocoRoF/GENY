@@ -168,6 +168,32 @@ geny/
 
 ---
 
+## Avatar Editor (geny-avatar)
+
+Geny ships with a separate Next.js puppet-editor service ([geny-avatar](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. It lets you upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and **send a baked model directly into Geny's VTuber library** — appears with the suffix `(Editor)` so it doesn't clash with the bundled Hiyori / Mao Pro / etc.
+
+**Pinned version**: see `git submodule status vendor/geny-avatar` (currently `v0.2.1`). Bumping it requires an explicit `cd vendor/geny-avatar && git fetch --tags && git checkout <tag>` and a Geny-side commit — hobby-paced upstream changes can't break Geny silently.
+
+**Topology**:
+
+| Compose file | Access | Notes |
+|---|---|---|
+| `docker-compose.yml` (standalone) | `http://localhost:3001/` | Direct host port. No nginx. |
+| `docker-compose.dev.yml` / `dev-core` | `http://localhost:3001/` | Same; container names suffixed `-dev`. |
+| `docker-compose.prod.yml` / `prod-core` | `http://<host>:58443/avatar-editor/` | Behind nginx; `NEXT_PUBLIC_BASE_PATH=/avatar-editor` baked at build time. |
+
+**Data path**: editor's "send to Geny" writes a baked zip into the shared Docker volume `geny-baked-exports{,-dev,-prod}` mounted at `/exports` on the editor side and `/data/baked-imports` (read-only) on the backend side. Geny backend's import endpoint (Phase C, in progress) reads from there.
+
+**Override the host port**:
+
+```bash
+AVATAR_EDITOR_PORT=3050 docker compose up --build
+```
+
+Detailed architecture and integration sprints: [`docs/plan/GENY_AVATAR_INTEGRATION.md`](docs/plan/GENY_AVATAR_INTEGRATION.md). Progress log: [`docs/progress/GENY_AVATAR_INTEGRATION_PROGRESS.md`](docs/progress/GENY_AVATAR_INTEGRATION_PROGRESS.md).
+
+---
+
 ## Installation
 
 ### 🐳 Docker (Recommended)
@@ -175,8 +201,11 @@ geny/
 **Prerequisites**: Docker Desktop (or Docker Engine + Docker Compose v2)
 
 ```bash
-# 1. Clone
-git clone https://github.com/<your-org>/geny.git && cd geny
+# 1. Clone (with submodules — pulls geny-licensed-assets and geny-avatar)
+git clone --recurse-submodules https://github.com/<your-org>/geny.git && cd geny
+
+# (Already cloned without --recurse-submodules?)
+# git submodule update --init --recursive
 
 # 2. Configure API keys
 cp backend/.env.example backend/.env
