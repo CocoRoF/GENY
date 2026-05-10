@@ -142,6 +142,10 @@ services:
       # Server-to-server URL the avatar-editor's Next.js API routes use
       # to forward library sync to Geny's FastAPI backend.
       - GENY_BACKEND_URL=http://backend:8000
+      # AI provider keys for the editor's Generate panel.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN:-}
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - NODE_ENV=production

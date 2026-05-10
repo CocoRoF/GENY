@@ -147,6 +147,12 @@ services:
       # (DELETE /api/library/{id}) to Geny's FastAPI backend. Resolved
       # via docker's internal DNS; never reaches the browser.
       - GENY_BACKEND_URL=http://backend:8000
+      # AI provider keys for the editor's Generate panel. Empty
+      # default → provider shows "<KEY> not set" in dropdown. Set in
+      # .env to enable.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN:-}
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - NODE_ENV=production
