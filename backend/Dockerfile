@@ -47,7 +47,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-# Switch to non-root user
-USER geny
+# Why we run as root and not the unprivileged `geny` user we created:
+# the avatar-editor container shares the docker named volume
+# `geny-baked-exports-*` with us — it mounts as /exports there,
+# /data/baked-imports here. avatar-editor runs as root (per its own
+# Dockerfile, for the same reason) and writes baked puppet zips with
+# root:root ownership and 644 perms. To unlink (delete) those files
+# from the directory we need write+execute on the directory itself,
+# which docker creates root:root 755 for fresh named volumes. A
+# UID-1001 process can't delete root-owned files in a root-owned
+# directory, so the library-sync DELETE flow + the manual baked-
+# imports delete UI both hit EACCES.
+#
+# Adding an init container or chown entrypoint just to align UIDs is
+# more moving parts than it's worth for a single-tenant deployment.
+# We keep the geny user defined (legacy CMD layers may switch to it
+# inside containers that don't share the volume) but the production
+# runtime stays as root, matching avatar-editor's stance.
+# USER geny
 
 CMD ["python", "main.py"]

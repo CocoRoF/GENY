@@ -772,67 +772,102 @@ async def library_sync(
 
 @library_router.delete("/{puppet_id}")
 async def library_delete(puppet_id: str, request: Request) -> dict[str, Any]:
-    """Drop a registry entry by its source-of-truth puppet id.
+    """Drop everything tied to a puppet id from Geny.
 
     Mirrors geny-avatar's IndexedDB delete — when the user removes a
-    puppet from their editor library, the same id is removed from
-    Geny so the assignable-models list stays in sync.
+    puppet from their editor library, every trace of it is dropped
+    from Geny too so the assignable-models list, the unsaved-imports
+    inbox and any extracted on-disk model dir all stay in sync.
 
-    404 when no entry has the given id; that's the expected state when
-    the puppet was never synced (or was already cleaned up by a prior
-    delete) and the caller can safely ignore it.
+    Cleanup steps (each step is best-effort and independent — a
+    failure in one doesn't block the others):
+      1. Registry entry whose `puppet_id` matches → drop + on-disk
+         extracted dir under static/<runtime>-models/.
+      2. Inbox + installed/ zips whose avatar-editor.json carries the
+         matching puppet.id → unlink. Catches both the new
+         `sync_<id>.zip` naming and the legacy timestamped names from
+         the old send-to-geny workflow.
+
+    Always returns 200 — the operation is idempotent. The response
+    body lists what was actually removed so the caller can verify.
     """
     if not puppet_id or not puppet_id.strip():
         raise HTTPException(400, "puppet_id is required")
+
+    removed_registry: Optional[dict[str, str]] = None
+    removed_zips: list[str] = []
+    warnings: list[str] = []
+
+    # ── Step 1: registry entry ─────────────────────────────────────
     manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
     info = manager.find_by_puppet_id(puppet_id)
-    if info is None:
-        raise HTTPException(404, f"no registry entry with puppet_id={puppet_id!r}")
-
-    # Determine the on-disk root from the info.url. Same shape as the
-    # `_drop_model_with_dir` helper above.
-    url_parts = (info.url or "").lstrip("/").split("/")
-    models_root: Optional[Path] = None
-    if len(url_parts) >= 3 and url_parts[0] == "static":
-        if url_parts[1] == "live2d-models":
-            models_root = _live2d_models_root()
-        elif url_parts[1] == "spine-models":
-            models_root = _spine_models_root()
-    if models_root is None:
-        # Fall back to dropping the registry entry only — the caller
-        # can clean up disk manually if needed.
-        logger.warning(
-            f"[library-delete] {info.name} has unrecognized url={info.url!r}; "
-            f"removing registry entry but leaving on-disk dir alone"
-        )
-        manager.remove_model(info.name)
-    else:
-        _drop_model_with_dir(manager, info, models_root)
-
-    # Best-effort: also drop the cached inbox zip so a fresh sync push
-    # for this puppet starts from a clean slate.
-    safe_id = _slugify(puppet_id)[:48] or "puppet"
-    for candidate in (
-        _inbox_dir() / f"sync_{safe_id}.zip",
-        _inbox_dir() / "installed" / f"sync_{safe_id}.zip",
-    ):
-        try:
-            if candidate.exists():
-                candidate.unlink()
-        except OSError as e:
+    if info is not None:
+        url_parts = (info.url or "").lstrip("/").split("/")
+        models_root: Optional[Path] = None
+        if len(url_parts) >= 3 and url_parts[0] == "static":
+            if url_parts[1] == "live2d-models":
+                models_root = _live2d_models_root()
+            elif url_parts[1] == "spine-models":
+                models_root = _spine_models_root()
+        if models_root is None:
             logger.warning(
-                f"[library-delete] failed to clean inbox cache {candidate}: {e}"
+                f"[library-delete] {info.name} has unrecognized url={info.url!r}; "
+                f"removing registry entry but leaving on-disk dir alone"
             )
+            manager.remove_model(info.name)
+        else:
+            _drop_model_with_dir(manager, info, models_root)
+        removed_registry = {
+            "name": info.name,
+            "display_name": info.display_name,
+        }
+
+    # ── Step 2: inbox + installed zips with matching puppet.id ────
+    # Walk every .zip in /data/baked-imports + /data/baked-imports/installed.
+    # Peek each zip's avatar-editor.json and unlink anything whose
+    # `puppet.id` matches. This catches both the new sync_<id>.zip
+    # naming and the legacy timestamp-suffixed `name__YYYYMMDD_*.zip`
+    # files that the old send-to-geny workflow dropped — those have
+    # no name-based hint that they belong to this puppet, but the
+    # sidecar inside is the canonical source.
+    inbox = _inbox_dir()
+    candidate_dirs = [inbox]
+    installed_dir = inbox / "installed"
+    if installed_dir.exists():
+        candidate_dirs.append(installed_dir)
+    for d in candidate_dirs:
+        if not d.is_dir():
+            continue
+        try:
+            entries = list(d.iterdir())
+        except OSError as e:
+            warnings.append(f"scan {d}: {e}")
+            continue
+        for f in entries:
+            if not f.is_file() or f.suffix.lower() != ".zip":
+                continue
+            try:
+                meta = _peek_zip_metadata(f)
+            except Exception as e:
+                warnings.append(f"peek {f.name}: {e}")
+                continue
+            zip_puppet_id = (meta.get("puppet") or {}).get("id")
+            if zip_puppet_id != puppet_id:
+                continue
+            try:
+                f.unlink()
+                removed_zips.append(str(f.relative_to(inbox)))
+            except OSError as e:
+                warnings.append(f"unlink {f.name}: {e}")
 
     logger.info(
-        f"[library-delete] removed {info.name!r} (display={info.display_name!r}, "
-        f"puppet_id={puppet_id!r})"
+        f"[library-delete] puppet_id={puppet_id!r}: "
+        f"registry={removed_registry}, zips={removed_zips}, warnings={warnings}"
     )
     return {
         "status": "ok",
-        "removed": {
-            "name": info.name,
-            "display_name": info.display_name,
-            "puppet_id": puppet_id,
-        },
+        "puppet_id": puppet_id,
+        "removed_registry": removed_registry,
+        "removed_zips": removed_zips,
+        "warnings": warnings,
     }
