@@ -135,7 +135,7 @@ export default function Live2DCanvas({
 
       // ── Dynamic import pixi.js and Live2D display ──
       const PIXI = await import('pixi.js');
-      const { Live2DModel } = await import('pixi-live2d-display/cubism4');
+      const { Live2DModel, MotionPriority } = await import('pixi-live2d-display/cubism4');
       Live2DModel.registerTicker(PIXI.Ticker);
       if (isStale()) return;
 
@@ -389,8 +389,13 @@ export default function Live2DCanvas({
       app.ticker.add(onTick);
 
       // ── Start idle motion ──
+      // Use IDLE priority (1) so that subsequent NORMAL emotion motions can
+      // preempt it. Without this, the initial idle plays at NORMAL=2 and any
+      // emotion-driven motion at NORMAL=2 is rejected by MotionState.reserve()
+      // until the idle finishes naturally — which makes emotion motions feel
+      // unresponsive or "cut short".
       try {
-        await live2dModel.motion(model.idleMotionGroupName || 'Idle');
+        await live2dModel.motion(model.idleMotionGroupName || 'Idle', undefined, MotionPriority.IDLE);
       } catch {
         // Idle group might not exist
       }
@@ -438,20 +443,42 @@ export default function Live2DCanvas({
     if (!avatarState || !modelRef.current) return;
     const live2dModel = modelRef.current;
 
-    // Apply expression
-    try {
-      live2dModel.expression(avatarState.expression_index);
-    } catch {
-      // Expression index may be out of range
-    }
+    // Apply expression. expression() is async and silently returns false on
+    // invalid index / already-active; we surface that via console.debug so
+    // emotionMap mis-mapping is visible when debugging.
+    Promise.resolve(live2dModel.expression(avatarState.expression_index))
+      .then((ok: unknown) => {
+        if (ok === false) {
+          console.debug(
+            `[Live2DCanvas] expression(${avatarState.expression_index}) returned false ` +
+            `(emotion=${avatarState.emotion}); index out of range or already active`,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.debug(`[Live2DCanvas] expression(${avatarState.expression_index}) threw:`, err);
+      });
 
     // Apply motion (skip idle triggers — idle loops automatically)
     if (avatarState.trigger !== 'system') {
-      try {
-        live2dModel.motion(avatarState.motion_group, avatarState.motion_index);
-      } catch {
-        // Motion group may not exist
-      }
+      Promise.resolve(
+        live2dModel.motion(avatarState.motion_group, avatarState.motion_index),
+      )
+        .then((ok: unknown) => {
+          if (ok === false) {
+            console.debug(
+              `[Live2DCanvas] motion(${avatarState.motion_group}, ${avatarState.motion_index}) ` +
+              `returned false (emotion=${avatarState.emotion}); group missing, ` +
+              `index out of range, or rejected by priority`,
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          console.debug(
+            `[Live2DCanvas] motion(${avatarState.motion_group}, ${avatarState.motion_index}) threw:`,
+            err,
+          );
+        });
     }
 
     // Schedule beat sync pulse on emotion changes (gives liveliness to state transitions)

@@ -63,17 +63,35 @@ class AvatarStateManager:
         self._states: Dict[str, AvatarState] = {}
         self._subscribers: Dict[str, List[Callable]] = {}
         self._session_motion_maps: Dict[str, Dict[str, str]] = {}
+        # Per-session puppet idle group name. Imported puppets often
+        # don't use "Idle" as the literal group name, so the hardcoded
+        # _DEFAULT_EMOTION_MOTION fallback ("sadness"/"fear"/"neutral" →
+        # "Idle") would silently miss. Tracking the actual idle group
+        # name lets resolve_motion_for_emotion fall back to a group
+        # that exists in the puppet.
+        self._session_idle_groups: Dict[str, str] = {}
 
     def set_emotion_motion_map(self, session_id: str, mapping: Dict[str, str]) -> None:
         """Register a per-session emotion→motion override (from model config)."""
         self._session_motion_maps[session_id] = mapping
+
+    def set_session_idle_group(self, session_id: str, idle_group: str) -> None:
+        """Register the puppet's actual idle group name for fallback use."""
+        self._session_idle_groups[session_id] = idle_group
 
     def resolve_motion_for_emotion(self, session_id: str, emotion: str) -> str:
         """Resolve motion group for an emotion, checking per-session override first."""
         custom = self._session_motion_maps.get(session_id)
         if custom and emotion in custom:
             return custom[emotion]
-        return _DEFAULT_EMOTION_MOTION.get(emotion, "Idle")
+        fallback = _DEFAULT_EMOTION_MOTION.get(emotion, "Idle")
+        # Substitute the puppet's actual idle group name for the literal
+        # "Idle" placeholder — only the placeholder, not arbitrary group
+        # names from a custom session mapping (which the user explicitly
+        # picked above).
+        if fallback == "Idle":
+            return self._session_idle_groups.get(session_id, "Idle")
+        return fallback
 
     def get_state(self, session_id: str) -> AvatarState:
         """Get current avatar state for a session. Creates default if missing."""
@@ -103,15 +121,26 @@ class AvatarStateManager:
 
         if emotion is not None:
             state.emotion = emotion
-            # Auto-resolve motion when emotion changes and no explicit motion given
-            if motion_group is None:
-                state.motion_group = self.resolve_motion_for_emotion(session_id, emotion)
+
+        # Resolve effective motion_group: explicit override wins, otherwise
+        # auto-resolve from emotion when emotion changes.
+        effective_group: Optional[str] = motion_group
+        if effective_group is None and emotion is not None:
+            effective_group = self.resolve_motion_for_emotion(session_id, emotion)
+
+        # Apply motion changes — when the group changes, reset the index
+        # unless the caller supplied one. The previous group's index is
+        # likely out of range in the new group (e.g., switching from a
+        # 6-entry "TapBody" to a 2-entry "Idle"), which makes pixi-live2d
+        # silently fail to start the motion.
+        if effective_group is not None and effective_group != state.motion_group:
+            state.motion_group = effective_group
+            state.motion_index = motion_index if motion_index is not None else 0
+        elif motion_index is not None:
+            state.motion_index = motion_index
+
         if expression_index is not None:
             state.expression_index = expression_index
-        if motion_group is not None:
-            state.motion_group = motion_group
-        if motion_index is not None:
-            state.motion_index = motion_index
 
         state.intensity = intensity
         state.transition_ms = transition_ms
@@ -152,6 +181,7 @@ class AvatarStateManager:
         self._states.pop(session_id, None)
         self._subscribers.pop(session_id, None)
         self._session_motion_maps.pop(session_id, None)
+        self._session_idle_groups.pop(session_id, None)
         logger.debug(f"Avatar state cleaned up for session {session_id}")
 
     def get_all_states(self) -> Dict[str, AvatarState]:

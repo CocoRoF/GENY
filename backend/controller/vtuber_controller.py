@@ -99,10 +99,18 @@ async def assign_model(session_id: str, req: ModelAssignRequest, request: Reques
 
     # Register per-model emotion→motion mapping if available
     model = manager.get_model(req.model_name)
-    if model and model.emotionMotionMap and hasattr(request.app.state, "avatar_state_manager"):
-        request.app.state.avatar_state_manager.set_emotion_motion_map(
-            session_id, model.emotionMotionMap
-        )
+    if model and hasattr(request.app.state, "avatar_state_manager"):
+        state_manager = request.app.state.avatar_state_manager
+        if model.emotionMotionMap:
+            state_manager.set_emotion_motion_map(session_id, model.emotionMotionMap)
+        # Always register the puppet's actual idle group name so the
+        # state manager's fallback can substitute it for the hardcoded
+        # "Idle" placeholder when no explicit emotion→motion mapping
+        # exists for a given emotion.
+        if model.idleMotionGroupName:
+            state_manager.set_session_idle_group(
+                session_id, model.idleMotionGroupName
+            )
 
     # Inject per-model character prompt into VTuber system prompt
     _inject_character_prompt(session_id, req.model_name)

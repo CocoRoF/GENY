@@ -424,23 +424,37 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
     # drop the mapping silently — Geny's lipsync layer just falls back
     # to the default expression.
     emotion_map: dict[str, int] = {}
-    if runtime == "live2d" and emotion_map_named:
+    motion_groups: list[str] = []
+    if runtime == "live2d":
         try:
             with open(entry, "r", encoding="utf-8") as f:
                 model3 = _json.load(f)
             expressions = (
                 (model3.get("FileReferences") or {}).get("Expressions") or []
             )
+            motion_groups = list(
+                (model3.get("FileReferences") or {}).get("Motions") or {}
+            )
             name_to_index = {
                 (e.get("Name") or ""): i for i, e in enumerate(expressions)
             }
+            unmatched: list[str] = []
             for emo, exp_name in emotion_map_named.items():
                 if exp_name in name_to_index:
                     emotion_map[emo] = name_to_index[exp_name]
                 else:
-                    logger.warning(
-                        f"[baked-imports] emotionMap[{emo}]={exp_name!r} not found in {entry.name}"
-                    )
+                    unmatched.append(f"{emo}={exp_name!r}")
+            logger.debug(
+                f"[baked-imports] emotionMap translate: "
+                f"matched={emotion_map}, unmatched={unmatched}, "
+                f"available_expressions={list(name_to_index.keys())}, "
+                f"motion_groups={motion_groups}"
+            )
+            if unmatched:
+                logger.warning(
+                    f"[baked-imports] {len(unmatched)} emotionMap entr(ies) "
+                    f"could not match an expression NAME in {entry.name}: {unmatched}"
+                )
         except Exception as e:
             logger.warning(f"[baked-imports] emotionMap translate failed: {e}")
     if not emotion_map:
@@ -462,6 +476,55 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             continue
         tap_motions[hit_area] = {str(group): int(index)}
 
+    # ── Auto-derive emotionMotionMap from available motion groups ──
+    # geny-avatar exports tapMotions but not emotion→motion mapping.
+    # Without an explicit map, Geny's avatar_state_manager falls back to
+    # a hardcoded {"joy": "TapBody", ...} table — which silently fails
+    # for puppets whose group names differ. Picking from the puppet's
+    # actual groups (idle for passive emotions, the first non-idle group
+    # for active emotions) makes emotion-driven motion changes work even
+    # for custom puppets without manual registry editing.
+    emotion_motion_map: dict[str, str] = {}
+    if runtime == "live2d" and motion_groups:
+        # Use idle_group from anim_cfg if it actually exists in the
+        # puppet's groups; otherwise prefer a group whose name contains
+        # "idle"; otherwise fall back to the first listed group.
+        if idle_group not in motion_groups:
+            idle_group = next(
+                (g for g in motion_groups if "idle" in g.lower()),
+                motion_groups[0],
+            )
+        # Pick an "active" group for high-arousal emotions. Prefer the
+        # Body tap motion's group if the user assigned one — that's the
+        # gesture they explicitly opted into for body taps. Else first
+        # non-idle group. Else fall back to idle (puppet only has one
+        # group, so all emotions look the same — still better than
+        # silently failing).
+        body_tap_group = None
+        for hit_area, choice_map in tap_motions.items():
+            if "body" in hit_area.lower():
+                body_tap_group = next(iter(choice_map.keys()), None)
+                if body_tap_group:
+                    break
+        active_group = body_tap_group or next(
+            (g for g in motion_groups if g != idle_group),
+            idle_group,
+        )
+        emotion_motion_map = {
+            "neutral": idle_group,
+            "sadness": idle_group,
+            "fear": idle_group,
+            "disgust": idle_group,
+            "joy": active_group,
+            "surprise": active_group,
+            "anger": active_group,
+            "smirk": active_group,
+        }
+        logger.debug(
+            f"[baked-imports] auto-derived emotionMotionMap: idle={idle_group}, "
+            f"active={active_group}, map={emotion_motion_map}"
+        )
+
     info = Live2dModelInfo(
         name=model_name,
         display_name=final_display,
@@ -474,6 +537,7 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         idleMotionGroupName=idle_group,
         emotionMap=emotion_map,
         tapMotions=tap_motions,
+        emotionMotionMap=emotion_motion_map,
         runtime=runtime,
         atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
     )
