@@ -592,9 +592,52 @@ Phase D 끝 — frontend 가 Live2D / Spine 모두 렌더 가능, baked import �
 
 ---
 
-## 다음 — Phase E — 검증 + 폴리시
+## Phase E — 검증 + 폴리시 (sign-off, 2026-05-10)
 
-E.1 e2e 수동 테스트 → E.2 회귀 (기존 mao_pro 등 무손상) → E.3 progress doc 정리 → E.4 README 갱신.
+본 통합 V1 의 종결 phase. plan 의 E.1~E.4 를 다음과 같이 수행:
+
+- **E.1 e2e** + **E.2 regression**: 코드 레벨 audit 으로 대체 (운영자 SSH 미보유, prod 서버 직접 검증 불가). install + render 경로를 모든 4 조합 (live2d × bundled, live2d × Editor, spine × Editor, spine × bundled-N/A) 으로 트레이스. 발견 사항: 0 (코드는 모두 정합).
+- **E.3 plan/progress 마감**: plan 의 `상태` 필드 `계획 (구현 전)` → `V1 완료`, Section 8 을 "다음 단계" 에서 "진행 결산" + "V1 이후 후속" 으로 재작성. 본 progress doc 에 Phase E sign-off 섹션 (이 절).
+- **E.4 README freshness**: README 의 "Avatar Editor (geny-avatar)" 섹션이 post-merge hook 도입 후 deploy 흐름과 정합 — 별도 갱신 불필요. pinned-version 기재 방식이 `branch = main` (floor) 으로 이미 일치.
+
+### Audit 결과 요약 (찾으려 했고 깨끗했던 항목)
+
+- Bundled Live2D 9 entries 의 `runtime: "live2d"` 필드 모두 명시. 누락 없음.
+- `Live2dModelInfo.to_dict()` 가 `runtime` + `atlas_url` 둘 다 포함 → `/api/vtuber/models` 응답 일관.
+- 4 호출처 (`VTuberPanel`, `VTuberTab`, `LiveTab`, `MiniAvatar`) 모두 `AvatarCanvas` dispatcher 사용. 직접 `Live2DCanvas` 잔재 없음.
+- BakedImportsModal 의 install / delete / list 전 흐름 와이어링 정상.
+- nginx `^~ /avatar-editor` prefix 매치 + healthcheck 127.0.0.1 (musl IPv6 함정 회피) 정합.
+- 폐기된 `scripts/deploy-update.sh` 잔재 없음 (post-merge hook 가 그 자리).
+
+### V1 종결 chain (Geny + geny-avatar)
+
+```
+Geny  : Phase A 외 27 commit (B 6, C 4-with-G, D 5, deploy hook 1, hotfix 4 + E 본 sign-off)
+        + 5/10 prod 운영 fix (nginx reload, redirect loop, healthcheck, post-merge hook 도입, expression progress note)
+geny-avatar : Phase A 9 sprint + Phase 8 9 sprint + post-Phase 8 viewport + Phase 7 polish
+              + v0.3.2 (rewrite Expressions blob URL fix)
+```
+
+전체 흐름 확인된 사용자 동선:
+
+1. `/avatar-editor/` 진입 → 라이브러리 / 업로드 / 내장 샘플
+2. `/avatar-editor/edit/<id>` → Edit 탭 (decompose / generate / variants / hide)
+3. `?tab=animation` → Animation 탭 (display / motion ▶ / expression ▶ / emotion 매핑 / hit-area)
+4. ExportButton "send to Geny" → 공유 volume 의 inbox
+5. Geny VTuberPanel "가져오기" → BakedImportsModal → install
+6. 모델 dropdown 에 `[live2d]` 또는 `[spine]` 칩 + `(Editor)` 접미로 등장
+7. AvatarCanvas dispatcher → Live2DCanvas / SpineCanvas 자동 선택
+8. lipsync (Live2D 만), emotion → expression (animationConfig 기반), idle motion 정상
+
+이 8 단계가 코드 레벨에서 한 회기 없이 wired. V1 의도와 일치.
+
+### V1 이후 (plan Section 9 참조)
+
+후속으로 분리:
+- Spine 의 lipsync / emotion blend / hit-area
+- (Editor) 자산 덮어쓰기 옵션
+- schemaVersion 3+ 의 다중 매핑 hit-area
+- Geny 프론트 Pixi v8 업그레이드
 
 ---
 

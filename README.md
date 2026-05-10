@@ -195,7 +195,9 @@ docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avat
 | `docker-compose.dev.yml` / `dev-core` | `http://localhost:3001/` | Same; container names suffixed `-dev`. |
 | `docker-compose.prod.yml` / `prod-core` | `http://<host>:58443/avatar-editor/` | Behind nginx; `NEXT_PUBLIC_BASE_PATH=/avatar-editor` baked at build time. |
 
-**Data path**: editor's "send to Geny" writes a baked zip into the shared Docker volume `geny-baked-exports{,-dev,-prod}` mounted at `/exports` on the editor side and `/data/baked-imports` (read-only) on the backend side. Geny backend's import endpoint (Phase C, in progress) reads from there.
+**Data path**: editor's "send to Geny" writes a baked zip into the shared Docker volume `geny-baked-exports{,-dev,-prod}` mounted at `/exports` on the editor side and `/data/baked-imports` on the backend side (read-write — backend moves installed zips into `installed/`). Geny backend's import endpoint reads from there: `POST /api/vtuber/baked-imports/install` unzips, registers in `model_registry.json` with `(Editor)` suffix, and the entry shows up in the model selector on next refresh.
+
+**Editor's Animation tab** (`/avatar-editor/edit/<id>?tab=animation`) — per-puppet display tuning (kScale / shift), idle motion group, motion ▶ preview, emotion → expression NAME mapping, and hit-area motion mapping. The export embeds an `avatar-editor.json` schemaVersion 2 sidecar; Geny's install translates emotion NAMES to indices by parsing `model3.json`'s Expressions array.
 
 **Override the host port**:
 
