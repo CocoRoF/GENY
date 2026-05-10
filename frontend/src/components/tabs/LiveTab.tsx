@@ -6,7 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
 
-const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
+const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
 /**
  * LiveTab — Full session tab for Live2D avatar display.
@@ -138,7 +138,7 @@ export default function LiveTab() {
       {/* ── Canvas Area ── */}
       <div className="flex-1 min-h-0 relative bg-[var(--bg-primary)]">
         {assignedModelName ? (
-          <Live2DCanvas sessionId={sessionId} />
+          <AvatarCanvas sessionId={sessionId} />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
             <svg className="w-16 h-16 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

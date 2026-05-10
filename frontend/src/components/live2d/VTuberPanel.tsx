@@ -5,8 +5,10 @@ import dynamic from 'next/dynamic';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
 
-// Dynamic import — Live2DCanvas uses pixi.js (browser-only)
-const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
+// Dynamic import — AvatarCanvas pulls pixi.js + Spine runtime, both
+// browser-only. AvatarCanvas dispatches between Live2DCanvas and
+// SpineCanvas based on the assigned model's `runtime` field.
+const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
 /**
  * VTuberPanel — wraps Live2DCanvas with model selector, emotion info, and SSE lifecycle.
@@ -92,7 +94,7 @@ export default function VTuberPanel({
             </option>
             {models.map((m) => (
               <option key={m.name} value={m.name}>
-                {m.display_name}
+                [{m.runtime ?? 'live2d'}] {m.display_name}
               </option>
             ))}
           </select>
@@ -109,7 +111,7 @@ export default function VTuberPanel({
       {/* Canvas area */}
       <div className="flex-1 min-h-0 relative bg-[var(--bg-primary)]">
         {assignedModelName ? (
-          <Live2DCanvas sessionId={sessionId} />
+          <AvatarCanvas sessionId={sessionId} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)] text-sm">
             {t('vtuber.noModel') ?? 'No model assigned. Select a model above.'}

@@ -510,3 +510,33 @@ Geny frontend 가 Pixi 7.4.3 stuck — geny-avatar 레포의 spine-pixi-v8 와 �
 - **`getModelForSession` selector 의 reactive 의존성**: zustand selector 가 model object 를 리턴 → 매번 새 reference 면 무한 re-render 위험. zustand 의 default `===` 비교는 안전 (model 자체가 store 안에서 stable).
 
 **다음**: D.4 — `useVTuberStore` 의 runtime/atlas_url hydrate 확인 (이미 backend 가 보내고 있음 — 검증만).
+
+### D.4 — store hydrate (코드 변경 없음, 검증만)
+
+`vtuberApi.listModels()` 가 `Live2dModelInfo[]` 반환. D.2 에서 type 에 `runtime?` + `atlas_url?` 추가했으니 backend 의 C.1 응답이 자동으로 store 에 채워짐. zustand selector (`getModelForSession`) 도 reactive — model 변경 시 AvatarCanvas 가 자연스럽게 re-render. 추가 코드 없음.
+
+### D.5 + D.7 — VTuberPanel runtime chip + 4개 호출처 일괄 교체
+
+D.4 가 검증만이라 D.5 와 D.7 묶어서 한 번에 처리.
+
+**변경**:
+
+- `frontend/src/components/live2d/VTuberPanel.tsx`
+  - dynamic import `Live2DCanvas` → `AvatarCanvas`.
+  - 모델 dropdown `<option>` 에 `[live2d]` / `[spine]` runtime prefix (예: `[live2d] Hiyori Pro` / `[spine] spineboy (Editor)`). `<option>` 안에서 색상/border 같은 styling 안 먹어서 plain text prefix 만.
+  - 사용 사이트 `<Live2DCanvas sessionId>` → `<AvatarCanvas sessionId>` 한 줄.
+- `frontend/src/components/tabs/VTuberTab.tsx` — 같은 pattern.
+- `frontend/src/components/tabs/LiveTab.tsx` — 같은 pattern.
+- `frontend/src/components/live2d/MiniAvatar.tsx` — 같은 pattern (`interactive={false}`, `backgroundAlpha={0}` props 그대로 forward).
+
+**검증**:
+
+- `npx tsc --noEmit` — 신규 에러 없음.
+- `grep -rn '<Live2DCanvas' frontend/src` — AvatarCanvas dispatcher 내부 한 곳만 남음 (의도).
+
+**의도적 한계**:
+
+- **`(Editor)` 시각 강조는 단순**: dropdown `<option>` 의 styling 한계. accent border 같은 디자인은 custom `<div>`-based dropdown 필요 — 본 sprint 범위 밖.
+- **Live2DCanvas 자체 미제거**: AvatarCanvas dispatcher 가 여전히 import 사용. 추후 Live2D-specific 진입점이 사라지지 않는 한 유지.
+
+**다음**: D.6 — BakedImportsModal (Phase C 의 list/install/delete API 호출 UI).

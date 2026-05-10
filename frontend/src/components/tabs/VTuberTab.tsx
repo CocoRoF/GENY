@@ -12,7 +12,7 @@ import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 
-const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
+const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
 /**
  * VTuberTab — Session tab for Live2D avatar display & control.
@@ -225,7 +225,7 @@ export default function VTuberTab() {
         {/* Live2D Canvas */}
         <div className={`relative bg-[var(--bg-primary)] ${isVTuberRole ? 'w-1/2 border-r border-[var(--border-color)]' : 'w-full h-full'}`}>
           {assignedModelName ? (
-            <Live2DCanvas sessionId={sessionId} />
+            <AvatarCanvas sessionId={sessionId} />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
               <svg className="w-16 h-16 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

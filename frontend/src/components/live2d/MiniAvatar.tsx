@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useVTuberStore } from '@/store/useVTuberStore';
 
-const Live2DCanvas = dynamic(() => import('@/components/live2d/Live2DCanvas'), { ssr: false });
+const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 
 /**
  * MiniAvatar — compact Live2D avatar for inline use (chat messages, member lists).
@@ -46,7 +46,7 @@ export default function MiniAvatar({
       className={`rounded-lg overflow-hidden shrink-0 ${className}`}
       style={{ width: size, height: size }}
     >
-      <Live2DCanvas
+      <AvatarCanvas
         sessionId={sessionId}
         interactive={false}
         backgroundAlpha={0}
