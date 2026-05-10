@@ -42,3 +42,34 @@
 - **shallow clone X**: 현재 geny-avatar 가 작아서 (~5MB) full history 그대로. 향후 size 부담 시 shallow 로 전환.
 
 **다음**: B.2 — `docker-compose.yml` 에 `avatar-editor` service block 추가.
+
+### B.2 — `docker-compose.yml` (standalone full)
+
+본 파일은 `nginx` 가 없는 stack — avatar-editor 가 host port 직접 노출 (`AVATAR_EDITOR_PORT` 디폴트 3001).
+
+**변경**:
+
+- `avatar-editor` service block 신규 (line 213 부근)
+  - build context `./vendor/geny-avatar` (B.1 의 submodule path)
+  - port `127.0.0.1:${AVATAR_EDITOR_PORT:-3001}:3000`
+  - env: `NEXT_PUBLIC_BASE_PATH=` (빈 문자열, root mount), `NEXT_PUBLIC_GENY_HOST=true`, `GENY_BAKED_EXPORTS_DIR=/exports`, `PORT=3000`, `HOSTNAME=0.0.0.0`, `NODE_ENV=production`
+  - volume: `geny-baked-exports:/exports` (write side)
+  - healthcheck: `wget --spider http://localhost:3000/` (alpine 이미지의 wget 사용 — geny-avatar 의 standalone 베이스에 curl 없음)
+  - networks: `geny-net`
+  - depends_on 없음 — backend 와 직접 HTTP 통신 안 하고 volume 만 공유.
+- `backend` 서비스의 volumes 에 `geny-baked-exports:/data/baked-imports:ro` 추가 (read side)
+- top-level volumes 에 `geny-baked-exports` 정의
+
+**검증**:
+
+- `docker compose -f docker-compose.yml config --quiet` 정상 (YAML/schema 검증 통과)
+- 파싱된 service 가 의도대로 — port mapping `127.0.0.1:3001:3000`, env 들 정확히 inline, volume mount 양방향 (avatar-editor rw / backend ro).
+- `docker compose up` 자체는 sandbox 환경 제약으로 미실행 — 사용자가 로컬에서 검증 필요.
+
+**의도적 한계**:
+
+- **healthcheck 가 wget**: alpine + Next.js standalone 이미지에 curl 없음. wget --spider 로 root 페이지 GET 요청. /api/health 같은 전용 endpoint geny-avatar 측에 없어 root 사용.
+- **start_period 30s**: standalone server.js 첫 부팅이 5~10s. 30s 면 충분한 마진. 첫 build 가 너무 느리면 늘려야 함.
+- **submodule 미초기화 시 build 실패**: 사용자가 `git submodule update --init --recursive` 누락하면 `./vendor/geny-avatar` 가 빈 dir → docker build 가 Dockerfile 못 찾음 → 명시적 에러. 이건 의도 — silent fallback 보다 명확한 실패가 좋음. README (B.6) 에 대처 가이드.
+
+**다음**: B.3 — `docker-compose.dev.yml` 에 동일 패턴 적용 (단, dev 는 hot-reload 가 의미 있는지 별도 결정).

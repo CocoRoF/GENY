@@ -83,6 +83,10 @@ services:
       # Cycle 20260424_3 PR-1: without this volume the folder was ephemeral —
       # every container restart wiped user-uploaded images.
       - geny-uploads:/app/static/uploads
+      # Baked puppet zips dropped here by the avatar-editor service. Read-only —
+      # backend lists pending zips and "installs" them into static/{live2d,spine}-models/.
+      # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
+      - geny-baked-exports:/data/baked-imports:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -209,6 +213,47 @@ services:
     networks:
       - geny-net
 
+  # ── Avatar Editor (geny-avatar submodule, Next.js) ────────────────
+  # Standalone Next.js app from vendor/geny-avatar (pinned to v0.2.0).
+  # Lets users edit Spine/Cubism puppets in-browser and "Send to Geny"
+  # baked model zips, which land in the geny-baked-exports volume the
+  # backend reads from. Standalone compose has no nginx in front, so
+  # the editor binds directly to a host port (default 3001).
+  #
+  # Build context is the submodule path — fresh clones must run
+  # `git submodule update --init --recursive` first or the build fails.
+  avatar-editor:
+    build:
+      context: ./vendor/geny-avatar
+      dockerfile: Dockerfile
+    container_name: geny-avatar-editor
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${AVATAR_EDITOR_PORT:-3001}:3000"
+    environment:
+      # Standalone compose has no reverse proxy → avatar-editor served
+      # at root, so basePath stays empty (Next.js falls back to "/" routes).
+      - NEXT_PUBLIC_BASE_PATH=
+      # Enables the "send to Geny" button + the /api/send-to-geny route.
+      - NEXT_PUBLIC_GENY_HOST=true
+      - GENY_BAKED_EXPORTS_DIR=/exports
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NODE_ENV=production
+    volumes:
+      # Write side of the shared baked-zip handoff (backend mounts the
+      # same volume read-only at /data/baked-imports).
+      - geny-baked-exports:/exports
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - geny-net
+
 
 networks:
   geny-net:
@@ -224,4 +269,9 @@ volumes:
   geny-uploads:
     driver: local
   geny-omnivoice-models:
+    driver: local
+  # Shared between avatar-editor (rw at /exports) and backend (ro at
+  # /data/baked-imports). Carries baked puppet zips from the editor's
+  # "send to Geny" action to the backend's import flow.
+  geny-baked-exports:
     driver: local
