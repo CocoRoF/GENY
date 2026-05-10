@@ -172,7 +172,7 @@ geny/
 
 Geny ships with a separate Next.js puppet-editor service ([geny-avatar](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. It lets you upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and **send a baked model directly into Geny's VTuber library** — appears with the suffix `(Editor)` so it doesn't clash with the bundled Hiyori / Mao Pro / etc.
 
-**Pinned version**: see `git submodule status vendor/geny-avatar` (currently `v0.2.3`). Bumping it requires an explicit `cd vendor/geny-avatar && git fetch --tags && git checkout <tag>` and a Geny-side commit — hobby-paced upstream changes can't break Geny silently.
+**Pinned version**: see `git submodule status vendor/geny-avatar` (currently `v0.2.4`). Bumping it requires an explicit `cd vendor/geny-avatar && git fetch --tags && git checkout <tag>` and a Geny-side commit — hobby-paced upstream changes can't break Geny silently.
 
 **Topology**:
 
