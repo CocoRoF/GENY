@@ -344,3 +344,46 @@ baked zip 을 한 번의 클릭으로 `model_registry.json` 에 등록 + 정적 
 - **C.5 (vtuber list endpoint runtime 노출)**: C.1 의 `to_dict()` 에 이미 `runtime` + `atlas_url` 포함됨 — `/api/vtuber/models` 는 변경 없이 새 필드 노출. 별도 sprint 불필요.
 
 **다음**: Phase D — frontend renderer (spine-pixi 추가, AvatarCanvas dispatcher, BakedImportsModal). C.3 의 결과물을 사용자가 UI 에서 보고 install 할 수 있게.
+
+## 사용자 보고 — `https://geny-x.hrletsgo.me/avatar-editor` 404
+
+Phase B/C 가 코드 차원에서 끝난 직후 외부 검증 시 404. SSH 진단 (read-only) 으로 두 가지 사실 확정:
+
+1. **nginx 컨테이너가 13일째 reload 안 됨** — `/home/hrjang/docker_web/Geny/nginx/nginx.conf` 의 호스트 파일에는 `/avatar-editor` location 정상 들어있지만 nginx in-memory config 에는 없음. bind mount 가 파일 자체는 동기화하지만 nginx 가 자동 reload 하지 않음. 사용자의 외부 요청이 catch-all `location /` 로 새서 frontend → 404.
+2. **avatar-editor healthcheck `unhealthy` (FailingStreak: 54)** — `wget -q --spider http://localhost:3000/avatar-editor/` 가 alpine musl 의 `localhost` → `::1` (IPv6) resolve 때문에 connection refused. 컨테이너 자체는 0.0.0.0:3000 으로 잘 listen. 본 nginx proxy 와는 무관 (docker DNS 가 IPv4 로 resolve) 이라 외부 접근에 직접 영향 X — 다만 `docker ps` 출력 노이즈 + 향후 upstream healthcheck 도입 시 함정.
+
+추가 발견: 사용자가 `/avatar-editor` (slash 없음) 로 접근. nginx 의 `location /avatar-editor/` 는 trailing slash 가 있는 path 만 매치 → catch-all fallback. 이것도 같이 해결해야 친화적.
+
+### 조치 (commit)
+
+- `nginx/nginx.conf`
+  - `location = /avatar-editor` → `301 /avatar-editor/` redirect (slash 누락 케이스).
+  - 기존 `location /avatar-editor/` 블록 무손상.
+- 5개 compose 파일의 avatar-editor healthcheck `localhost` → `127.0.0.1`. alpine musl 환경에서 IPv6 resolve 함정 회피.
+- 본 progress 섹션.
+
+### 사용자 측 1회 실행 명령
+
+```bash
+cd /home/hrjang/docker_web/Geny
+git pull
+# 1) nginx config syntax 확인
+sudo docker exec geny-nginx-prod nginx -t
+# 2) graceful reload (downtime 없음) — /avatar-editor location 즉시 활성
+sudo docker exec geny-nginx-prod nginx -s reload
+# 3) avatar-editor 의 healthcheck 변경은 compose 변경이라 컨테이너 재생성 필요
+sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d avatar-editor
+# (--build 불필요 — Dockerfile 안 바뀜, healthcheck 만 compose 측 변경)
+```
+
+3) 후 약 30s 내 `docker ps` 가 `(healthy)` 로 전환 + `https://geny-x.hrletsgo.me/avatar-editor` (slash 없어도) → 301 → 정상 home.
+
+### Phase C 결산
+
+Plan 의 5 sprint (C.1~C.5) → 실제 3 sprint (C.1, C.2, C.3) 로 정리됨. C.4 (spine 정적 dir) 와 C.5 (vtuber list runtime 노출) 는 C.3 / C.1 에 자연스럽게 흡수.
+
+---
+
+## 다음 — Phase D — frontend renderer
+
+D.1 (spine-pixi for Pixi v7) → D.2 SpineCanvas → D.3 AvatarCanvas dispatcher → D.4 useVTuberStore runtime 필드 → D.5 VTuberPanel UI → D.6 BakedImportsModal → D.7 호출처 교체.

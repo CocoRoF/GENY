@@ -282,7 +282,7 @@ services:
     volumes:
       - geny-baked-exports-prod:/exports
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/avatar-editor/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/avatar-editor/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

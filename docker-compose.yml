@@ -247,7 +247,7 @@ services:
       # same volume read-only at /data/baked-imports).
       - geny-baked-exports:/exports
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
