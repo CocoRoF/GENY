@@ -27,7 +27,13 @@ class AvatarState:
     emotion: str = "neutral"
     expression_index: int = 0
     motion_group: str = "Idle"
-    motion_index: int = 0
+    # `None` means "let the renderer pick a random motion from the group".
+    # An explicit int comes from tap interactions where the user picked a
+    # specific motion. Emotion-driven changes leave this `None` so the
+    # client cycles through whatever the group has, instead of always
+    # replaying motion[0] (which on some puppets is the 0.1s "twitch"
+    # frame at the start of a walk cycle, not the full walk motion).
+    motion_index: Optional[int] = None
     intensity: float = 1.0
     transition_ms: int = 300
     trigger: str = "system"
@@ -154,7 +160,12 @@ class AvatarStateManager:
             and effective_group != state.motion_group
         ):
             state.motion_group = effective_group
-            state.motion_index = motion_index if motion_index is not None else 0
+            # Leave motion_index as the explicit caller value (or None,
+            # which the client interprets as "pick random in the group").
+            # Defaulting to 0 here would lock every emotion-driven change
+            # onto motion[0] of the group, which often is just the
+            # opening pose of a longer animation.
+            state.motion_index = motion_index
         elif motion_index is not None:
             state.motion_index = motion_index
 

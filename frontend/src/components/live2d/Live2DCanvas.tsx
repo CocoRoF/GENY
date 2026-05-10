@@ -522,14 +522,17 @@ export default function Live2DCanvas({
     // backend's signal that no valid emotion→group mapping exists for
     // this puppet, and pixi-live2d-display would silently reject it.
     const motionGroup = avatarState.motion_group?.trim();
+    // motion_index === null/undefined → let the Live2D engine pick a
+    // random motion from the group (pixi-live2d-display: passing
+    // undefined to motion(group, idx) routes to startRandomMotion).
+    const motionIndex =
+      avatarState.motion_index == null ? undefined : avatarState.motion_index;
     if (avatarState.trigger !== 'system' && motionGroup) {
-      Promise.resolve(
-        live2dModel.motion(motionGroup, avatarState.motion_index),
-      )
+      Promise.resolve(live2dModel.motion(motionGroup, motionIndex))
         .then((ok: unknown) => {
           if (ok === false) {
             console.debug(
-              `[Live2DCanvas] motion(${motionGroup}, ${avatarState.motion_index}) ` +
+              `[Live2DCanvas] motion(${motionGroup}, ${motionIndex ?? 'random'}) ` +
               `returned false (emotion=${avatarState.emotion}); group missing, ` +
               `index out of range, or rejected by priority`,
             );
@@ -537,7 +540,7 @@ export default function Live2DCanvas({
         })
         .catch((err: unknown) => {
           console.debug(
-            `[Live2DCanvas] motion(${motionGroup}, ${avatarState.motion_index}) threw:`,
+            `[Live2DCanvas] motion(${motionGroup}, ${motionIndex ?? 'random'}) threw:`,
             err,
           );
         });

@@ -101,15 +101,50 @@ async def assign_model(session_id: str, req: ModelAssignRequest, request: Reques
     model = manager.get_model(req.model_name)
     if model and hasattr(request.app.state, "avatar_state_manager"):
         state_manager = request.app.state.avatar_state_manager
-        if model.emotionMotionMap:
-            state_manager.set_emotion_motion_map(session_id, model.emotionMotionMap)
         # Always register the puppet's actual idle group name so the
         # state manager's fallback can substitute it for the hardcoded
         # "Idle" placeholder when no explicit emotion→motion mapping
         # exists for a given emotion.
-        if model.idleMotionGroupName:
-            state_manager.set_session_idle_group(
-                session_id, model.idleMotionGroupName
+        idle_group_name = model.idleMotionGroupName or ""
+        if idle_group_name and idle_group_name.strip():
+            state_manager.set_session_idle_group(session_id, idle_group_name)
+        # `model.emotionMotionMap` is "really" populated only if at least
+        # one entry maps to a non-blank group name. Old/legacy installs
+        # baked before the empty-group-key fix (#13) may have stored
+        # `{"joy": "", "anger": "", ...}`, which is non-empty as a dict
+        # but useless at runtime — every emotion would resolve to the
+        # blank string and motion() calls would silently fail.
+        registry_map_usable = bool(model.emotionMotionMap) and any(
+            isinstance(v, str) and v.strip() for v in model.emotionMotionMap.values()
+        )
+        if registry_map_usable:
+            state_manager.set_emotion_motion_map(session_id, model.emotionMotionMap)
+        elif idle_group_name and idle_group_name.strip():
+            # No explicit emotion→motion mapping registered (this is the
+            # case for every existing model_registry.json entry — none of
+            # them carry emotionMotionMap, only freshly baked imports do).
+            # Without one, the state manager would fall through to
+            # `_DEFAULT_EMOTION_MOTION` whose joy/anger/surprise rows
+            # name "TapBody" — a Cubism convention that doesn't hold for
+            # custom puppets that only define an idle group. Routing
+            # everything to the puppet's idle group is a safe default:
+            # the motion always exists and plays, even if the visual
+            # variety is reduced.
+            state_manager.set_emotion_motion_map(
+                session_id,
+                {
+                    emo: idle_group_name
+                    for emo in (
+                        "neutral",
+                        "joy",
+                        "anger",
+                        "disgust",
+                        "fear",
+                        "sadness",
+                        "surprise",
+                        "smirk",
+                    )
+                },
             )
 
     # Inject per-model character prompt into VTuber system prompt

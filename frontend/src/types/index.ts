@@ -818,7 +818,10 @@ export interface AvatarState {
   emotion: string;
   expression_index: number;
   motion_group: string;
-  motion_index: number;
+  // `null` means "the backend left index unspecified — let the Live2D
+  // engine pick a random motion in the group". Explicit numeric values
+  // come from tap interactions or hand-set motion overrides.
+  motion_index: number | null;
   intensity: number;
   transition_ms: number;
   trigger: string;

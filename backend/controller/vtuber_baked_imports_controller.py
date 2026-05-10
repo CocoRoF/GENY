@@ -432,20 +432,64 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             expressions = (
                 (model3.get("FileReferences") or {}).get("Expressions") or []
             )
-            # Filter out empty/whitespace group names — pixi-live2d-display
-            # silently rejects motion() calls when the group string is empty
-            # (the user-visible bug: motion(, 0) returns false). Some puppet
-            # exports leave the group key blank when the source bundle's
-            # group classification was lost; we don't want those names
-            # leaking into the registry's emotionMotionMap.
-            raw_groups = (model3.get("FileReferences") or {}).get("Motions") or {}
-            motion_groups = [g for g in raw_groups.keys() if g and g.strip()]
-            if len(motion_groups) != len(raw_groups):
-                logger.warning(
-                    f"[baked-imports] {entry.name} has "
-                    f"{len(raw_groups) - len(motion_groups)} empty motion group "
-                    f"name(s) — filtered out. Raw groups: {list(raw_groups.keys())!r}"
-                )
+            # Detect and repair empty motion group keys in model3.json.
+            # pixi-live2d-display silently rejects motion("", N) calls (the
+            # user-visible bug: motion never starts because the group key
+            # is blank). Some puppet exports — notably hand-baked ones
+            # where the source Cubism project never assigned motions to a
+            # named group — end up with `FileReferences.Motions = {"": [...]}`.
+            # Rewrite the manifest on disk so subsequent loads see a real
+            # group name, and so the auto-derived emotionMotionMap below
+            # propagates that name instead of an empty string.
+            file_refs = model3.setdefault("FileReferences", {})
+            raw_groups: dict[str, Any] = file_refs.get("Motions") or {}
+            empty_keys = [k for k in raw_groups.keys() if not k or not str(k).strip()]
+            if empty_keys:
+                # Pick a target name. If the user's idleMotionGroupName
+                # is non-blank, reuse that — that's the name geny-avatar
+                # already advertises in the editor UI for this puppet.
+                # Otherwise fall back to "Idle" (Cubism's standard idle
+                # group name; pixi-live2d-display also defaults to it).
+                target = idle_group if idle_group and idle_group.strip() else "Idle"
+                # If `target` already exists as a real group in the
+                # manifest, use a suffixed name to avoid silently merging.
+                non_empty_keys = {k for k in raw_groups.keys() if k and str(k).strip()}
+                if target in non_empty_keys:
+                    target = f"{target}_unnamed"
+                # Merge entries from all empty-keyed groups into `target`.
+                merged_entries: list[Any] = []
+                new_motions: dict[str, Any] = {}
+                for k, v in raw_groups.items():
+                    if not k or not str(k).strip():
+                        if isinstance(v, list):
+                            merged_entries.extend(v)
+                    else:
+                        new_motions[k] = v
+                if merged_entries:
+                    new_motions[target] = merged_entries
+                file_refs["Motions"] = new_motions
+                # Persist the rewrite so the running model3.json on disk
+                # is what pixi-live2d-display fetches at render time.
+                try:
+                    with open(entry, "w", encoding="utf-8") as f:
+                        _json.dump(model3, f, ensure_ascii=False, indent=2)
+                    logger.warning(
+                        f"[baked-imports] {entry.name}: renamed "
+                        f"{len(empty_keys)} empty motion group key(s) → "
+                        f"{target!r}, total {len(merged_entries)} entries merged"
+                    )
+                except OSError as write_err:
+                    logger.warning(
+                        f"[baked-imports] {entry.name}: failed to persist "
+                        f"empty-group-key rename: {write_err}"
+                    )
+                # If our anim_cfg-sourced idle_group was itself empty,
+                # promote it to the new target name so the puppet's idle
+                # registry entry resolves to a real group at runtime.
+                if not idle_group or not idle_group.strip():
+                    idle_group = target
+                raw_groups = new_motions
+            motion_groups = [g for g in raw_groups.keys() if g and str(g).strip()]
             name_to_index = {
                 (e.get("Name") or ""): i for i, e in enumerate(expressions)
             }
