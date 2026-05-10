@@ -664,14 +664,18 @@ sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build
 
 **서버 적용**:
 
+이번 한 번은 post-merge hook 도 처음 들어오는 commit 이라 이 pull 자체에서는 hook 가 동작 안 함 (hook 등록은 `git config core.hooksPath` 가 설정된 후의 다음 pull 부터). 운영자가 한 번 명시적으로 submodule 을 따라잡아야 함:
+
 ```bash
 cd /home/hrjang/docker_web/Geny
-git pull   # 이 progress doc 갱신을 가져옴 → post-merge hook 발동 → vendor/geny-avatar 가 origin/main HEAD 로 fast-forward
+git pull                                       # .githooks/ + 이 progress 갱신을 가져옴
+git config core.hooksPath .githooks            # one-time, 이 clone 한정
+git submodule update --init --recursive --remote   # one-time catch-up (이 pull 에선 hook 가 안 뛰어서)
 sudo docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor
 # backend rebuild 불필요 — fix 는 frontend (avatar-editor) 한정
 ```
 
-(post-merge hook 미설치 clone 이면 한 번 `git config core.hooksPath .githooks` 추가)
+다음 pull 부터는 `git pull` 만으로 hook 가 vendor/geny-avatar 를 fast-forward 함.
 
 **검증**:
 
