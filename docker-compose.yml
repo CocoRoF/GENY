@@ -227,6 +227,12 @@ services:
     build:
       context: ./vendor/geny-avatar
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are inlined at build time; runtime env below is
+        # too late. basePath stays empty (root mount, no nginx); GENY_HOST
+        # enables the "send to Geny" button + /api/send-to-geny route.
+        NEXT_PUBLIC_BASE_PATH: ""
+        NEXT_PUBLIC_GENY_HOST: "true"
     container_name: geny-avatar-editor
     init: true
     restart: unless-stopped

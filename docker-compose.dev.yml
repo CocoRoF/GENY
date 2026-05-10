@@ -230,6 +230,11 @@ services:
     build:
       context: ./vendor/geny-avatar
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* must be passed at build time — see docker-compose.yml
+        # comment for the full reasoning.
+        NEXT_PUBLIC_BASE_PATH: ""
+        NEXT_PUBLIC_GENY_HOST: "true"
     container_name: geny-avatar-editor-dev
     init: true
     restart: unless-stopped

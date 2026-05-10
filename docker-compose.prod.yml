@@ -264,9 +264,13 @@ services:
       context: ./vendor/geny-avatar
       dockerfile: Dockerfile
       args:
-        # basePath has to be in scope at next build, not just runtime —
-        # it's inlined into the bundle by the builder stage.
+        # NEXT_PUBLIC_* are inlined into the JS bundle by next build —
+        # they MUST be passed as build args, not just runtime env, or
+        # the bundle ships with empty values. basePath drives routing,
+        # GENY_HOST gates the "send to Geny" button + /api/send-to-geny
+        # route in the avatar-editor app.
         NEXT_PUBLIC_BASE_PATH: /avatar-editor
+        NEXT_PUBLIC_GENY_HOST: "true"
     container_name: geny-avatar-editor-prod
     init: true
     restart: unless-stopped

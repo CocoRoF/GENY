@@ -129,7 +129,10 @@ services:
       context: ./vendor/geny-avatar
       dockerfile: Dockerfile
       args:
+        # NEXT_PUBLIC_* must be in build args (Next.js inlines them at
+        # build time; runtime env is too late for the standalone bundle).
         NEXT_PUBLIC_BASE_PATH: /avatar-editor
+        NEXT_PUBLIC_GENY_HOST: "true"
     container_name: geny-avatar-editor-prod
     init: true
     restart: unless-stopped
