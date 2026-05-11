@@ -381,9 +381,18 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
     # should swap in place rather than append duplicates. Skipped for
     # legacy zips that have no id (those still rely on the display-name
     # replacement opt-in below).
+    # Remember the previous entry's display name (when the puppet-id
+    # matched a prior install) so the new entry can reuse it. Keeps
+    # display names stable across re-syncs — a user editing avt_B
+    # who saw it as "Hiyori (Editor 2)" yesterday should still see
+    # the same name today, not a renumbered slot that depends on
+    # whichever other puppets happen to exist right now.
+    preferred_display: Optional[str] = None
+
     if puppet_id:
         prior_by_id = manager.find_by_puppet_id(puppet_id)
         if prior_by_id is not None:
+            preferred_display = prior_by_id.display_name
             _drop_model_with_dir(manager, prior_by_id, models_root)
             replaced.append({
                 "name": prior_by_id.name,
@@ -420,7 +429,20 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             )
 
     existing_display_names = {m.display_name for m in manager.list_models()}
-    final_display = _next_unique_display_name(base_display, existing_display_names)
+    # When a previous entry under this puppet_id was just dropped,
+    # prefer its display name first — keeps re-syncs visually stable.
+    # Skip when the puppet's underlying name has actually changed
+    # (e.g., the user renamed it in geny-avatar's library); in that
+    # case fall through to the auto-iterator so the new base name
+    # is honoured.
+    if (
+        preferred_display is not None
+        and preferred_display.startswith(f"{base_display} (Editor")
+        and preferred_display not in existing_display_names
+    ):
+        final_display = preferred_display
+    else:
+        final_display = _next_unique_display_name(base_display, existing_display_names)
 
     rel_entry = entry.relative_to(models_root).as_posix()
     rel_atlas = atlas_path.relative_to(models_root).as_posix() if atlas_path else None
@@ -759,12 +781,20 @@ async def library_sync(
         f"id={puppet_id_val!r} name={puppet_name_val!r} → {on_disk_name}"
     )
 
-    # Reuse the install flow. `replace_existing=True` covers display-name
-    # iteration, and the puppet-id-based replacement (added in the
-    # install body itself) handles cross-iteration dedup.
+    # Reuse the install flow. `replace_existing=False` is deliberate:
+    # the puppet-id-based replacement inside install_baked_import is
+    # the authoritative dedup key for sync (one geny-avatar library
+    # row → one Geny registry entry). The display-name-based pruning
+    # that `replace_existing=True` triggers would also drop *other*
+    # puppets that happen to share a display name — e.g. three
+    # different puppets uploaded with name "Hiyori" would all
+    # collapse into a single "Hiyori (Editor)" entry, with the last
+    # sync silently overwriting the previous two. With it off,
+    # `_next_unique_display_name` appends "(Editor 2)" / "(Editor 3)"
+    # to disambiguate same-name-different-id puppets.
     install_req = InstallRequest(
         filename=on_disk_name,
-        replace_existing=True,
+        replace_existing=False,
         display_name_override=None,
     )
     return await install_baked_import(install_req, request)
