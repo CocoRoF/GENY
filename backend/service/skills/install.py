@@ -49,6 +49,7 @@ _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
     # onto these skills would deadend on tool absence anyway. Gating
     # the Skill itself keeps the slash-command menu honest per role.
     "whiteboard-search": frozenset({"vtuber"}),
+    "whiteboard-react-to-share": frozenset({"vtuber"}),
 }
 
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
