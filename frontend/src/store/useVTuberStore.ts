@@ -106,6 +106,12 @@ interface VTuberState {
   // WebSocket subscriptions (keyed by session_id)
   _subs: Record<string, { close: () => void }>;
 
+  // Singleton SSE subscription for `/api/vtuber/models/stream`.
+  // Established lazily on first fetchModels() and stays open for the
+  // app's lifetime — the dropdown reflects auto-publish renames /
+  // installs / deletes in real time off this stream.
+  _modelsStreamSub: { close: () => void } | null;
+
   // TTS state
   ttsEnabled: boolean;
   ttsSpeaking: Record<string, boolean>;
@@ -146,6 +152,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   avatarStates: {},
   logs: {},
   _subs: {},
+  _modelsStreamSub: null,
   ttsEnabled: true,
   ttsSpeaking: {},
   ttsVolume: 0.7,
@@ -156,6 +163,20 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
       set({ models: res.models, modelsLoaded: true });
     } catch (err) {
       console.error('[VTuber] Failed to fetch models:', err);
+    }
+    // Wire the live model-registry stream on first fetch so subsequent
+    // auto-publish renames / installs / deletes propagate to the
+    // dropdown without the user having to refresh the page. Singleton —
+    // a single SSE connection serves every VTuberPanel mount.
+    if (!get()._modelsStreamSub) {
+      const sub = vtuberApi.subscribeToModelChanges(() => {
+        // Backend signalled a registry change — pull the new list.
+        // Active assignments are keyed by model.name which the backend
+        // preserves across renames, so the dropdown re-renders the new
+        // display_name automatically once `models` updates.
+        void get().fetchModels();
+      });
+      set({ _modelsStreamSub: sub });
     }
   },
 

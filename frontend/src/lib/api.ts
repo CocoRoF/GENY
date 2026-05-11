@@ -2020,6 +2020,83 @@ export const vtuberApi = {
   listModels: () =>
     apiCall<{ models: Live2dModelInfo[] }>('/api/vtuber/models'),
 
+  /** GET /api/vtuber/models/stream — server-sent stream of model
+   *  registry changes. Backend emits a `models_changed` event every
+   *  time a model is added/replaced/removed (auto-publish renames,
+   *  fresh installs, library deletes). Caller refetches `/api/vtuber
+   *  /models` on each event so the dropdown reflects the current
+   *  state without polling. */
+  subscribeToModelChanges: (
+    onChange: () => void,
+  ): { close: () => void } => {
+    const base = getBackendUrl();
+    // EventSource constructor doesn't accept custom headers, so any
+    // auth must be encoded into the URL — but this endpoint mirrors
+    // /api/vtuber/models which is already unauthenticated, so a plain
+    // URL is fine here too. Same-origin in the reverse-proxy setup.
+    const url = `${base}/api/vtuber/models/stream`;
+    let closed = false;
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        es = new EventSource(url);
+      } catch (err) {
+        console.warn('[VTuber] models stream EventSource construct failed:', err);
+        scheduleReconnect();
+        return;
+      }
+      es.onopen = () => {
+        attempts = 0;
+      };
+      es.onmessage = (ev) => {
+        // The backend only emits the `models_changed` event so we
+        // don't bother parsing — every message is a refresh signal.
+        try {
+          onChange();
+        } catch (err) {
+          console.warn('[VTuber] models stream onChange handler threw:', err);
+        }
+        void ev;
+      };
+      es.onerror = () => {
+        // EventSource's default reconnect doesn't back off, and on
+        // some errors it stays in CLOSED forever. Manually back off.
+        try {
+          es?.close();
+        } catch {
+          // ignore
+        }
+        es = null;
+        scheduleReconnect();
+      };
+    };
+
+    const scheduleReconnect = () => {
+      if (closed) return;
+      attempts = Math.min(attempts + 1, 8);
+      const delay = Math.min(500 * 2 ** (attempts - 1), 10_000);
+      reconnectTimer = setTimeout(connect, delay);
+    };
+
+    connect();
+
+    return {
+      close: () => {
+        closed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        try {
+          es?.close();
+        } catch {
+          // ignore
+        }
+      },
+    };
+  },
+
   /** GET /api/vtuber/models/{name} — get single model details */
   getModel: (name: string) =>
     apiCall<Live2dModelInfo>(`/api/vtuber/models/${encodeURIComponent(name)}`),
@@ -2070,7 +2147,11 @@ export const vtuberApi = {
   // Pending zip files written by avatar-editor's "send to Geny" land
   // in a shared docker volume; backend exposes list/install/delete.
 
-  /** GET /api/vtuber/baked-imports/list — pending zips in the inbox. */
+  /** GET /api/vtuber/baked-imports/list — pending zips in the inbox.
+   *  Each entry is flagged `already_installed` so the modal can show
+   *  "already in library" instead of a plain install button — under
+   *  auto-publish, almost every zip in the inbox is already registered
+   *  by the watcher. */
   listBakedImports: () =>
     apiCall<{
       inbox: string;
@@ -2082,6 +2163,9 @@ export const vtuberApi = {
         runtime: string | null;
         suggested_name: string | null;
         schema_version: number | null;
+        puppet_id: string | null;
+        already_installed: boolean;
+        installed_display_name: string | null;
       }>;
     }>('/api/vtuber/baked-imports/list'),
 

@@ -11,8 +11,10 @@ REST API endpoints for:
 Avatar state streaming is handled by ws/avatar_stream.py (WebSocket).
 """
 
+import asyncio
 import json
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from logging import getLogger
@@ -73,6 +75,52 @@ async def list_models(request: Request):
     manager = request.app.state.live2d_model_manager
     models = manager.list_models()
     return {"models": [m.to_dict() for m in models]}
+
+
+@router.get("/models/stream")
+async def stream_models(request: Request) -> StreamingResponse:
+    """Server-sent stream that emits a `models_changed` event every
+    time the model registry mutates. Frontend subscribes once and
+    re-fetches `/api/vtuber/models` on each notification so the
+    dropdown reflects auto-publish renames / installs / deletes
+    without polling.
+
+    Implementation: subscribe a per-connection asyncio.Queue to the
+    manager's listener set, drain it as SSE events. A keepalive
+    comment goes out every 25s so intermediaries (nginx, browsers)
+    don't time out idle connections.
+    """
+    manager = request.app.state.live2d_model_manager
+    queue = manager.subscribe_changes()
+
+    async def gen():
+        # Initial connect frame — comment line, treated as a no-op
+        # event by EventSource. Tells the browser the stream is live
+        # and triggers any onopen handler.
+        yield ": connected\n\n"
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield 'data: {"event":"models_changed"}\n\n'
+                except asyncio.TimeoutError:
+                    # Keepalive comment so connection stays open
+                    # through proxies that drop idle streams.
+                    yield ": keepalive\n\n"
+        finally:
+            manager.unsubscribe_changes(queue)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Nginx-specific; harmless on other proxies.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/models/{name}")

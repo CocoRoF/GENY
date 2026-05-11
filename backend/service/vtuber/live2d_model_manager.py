@@ -5,10 +5,11 @@ Loads model_registry.json, manages available Live2D models,
 and tracks agent-model assignments.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -51,6 +52,13 @@ class Live2dModelInfo:
     # "(Editor 2)" / "(Editor 3)" duplicates. Hand-installed models
     # without a sidecar leave this None.
     puppet_id: Optional[str] = None
+    # mtime (epoch seconds) of the source zip in /data/baked-imports at
+    # the time this entry was last installed. Set when the auto-publish
+    # watcher installs with `keep_source=True`; the watcher uses it to
+    # detect "the zip on disk is newer than what we have registered"
+    # (i.e. the user renamed or re-baked the puppet) and re-install.
+    # Entries from legacy hand-installed paths leave this None.
+    inbox_mtime: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -70,6 +78,7 @@ class Live2dModelInfo:
             "runtime": self.runtime,
             "atlas_url": self.atlas_url,
             "puppet_id": self.puppet_id,
+            "inbox_mtime": self.inbox_mtime,
         }
 
 
@@ -94,6 +103,11 @@ class Live2dModelManager:
         self._models: Dict[str, Live2dModelInfo] = {}
         self._default_model: str = ""
         self._agent_assignments: Dict[str, str] = {}  # session_id → model_name
+        # Change listeners — each entry is an asyncio.Queue the
+        # subscriber drains. Notified on any mutation
+        # (add/replace/remove/reload) so SSE clients can push the new
+        # model list to the browser without polling.
+        self._change_listeners: Set["asyncio.Queue[None]"] = set()
         self._load_registry()
 
     def _load_registry(self):
@@ -127,6 +141,7 @@ class Live2dModelManager:
                     runtime=model_data.get("runtime", "live2d"),
                     atlas_url=model_data.get("atlas_url"),
                     puppet_id=model_data.get("puppet_id"),
+                    inbox_mtime=model_data.get("inbox_mtime"),
                 )
                 self._models[info.name] = info
 
@@ -213,6 +228,41 @@ class Live2dModelManager:
         will resolve to None on next get_agent_model)."""
         self._models.clear()
         self._load_registry()
+        self._notify_change()
+
+    # ── Change notifications (SSE backbone) ─────────────────────────
+
+    def subscribe_changes(self) -> "asyncio.Queue[None]":
+        """Hand back a queue that gets a `None` item every time the
+        registry mutates. Callers must pair this with
+        ``unsubscribe_changes`` (typically in a ``finally:`` block) or
+        the queue stays referenced forever. Queue depth is small
+        because consumers just need a "something changed" edge — the
+        full new model list is fetched separately via the existing
+        ``/api/vtuber/models`` route."""
+        # maxsize=8 is a backpressure cap. If a slow SSE client falls
+        # behind we drop notifications rather than ballooning memory;
+        # the client will catch up on its next refresh.
+        q: "asyncio.Queue[None]" = asyncio.Queue(maxsize=8)
+        self._change_listeners.add(q)
+        return q
+
+    def unsubscribe_changes(self, q: "asyncio.Queue[None]") -> None:
+        self._change_listeners.discard(q)
+
+    def _notify_change(self) -> None:
+        """Wake every subscriber. Best-effort: queues at capacity are
+        skipped (the consumer will get the next edge or the snapshot
+        refresh fires anyway on reconnect)."""
+        for q in list(self._change_listeners):
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                # Listener fell behind — that's OK; the next refresh
+                # the client does will pick up current state.
+                pass
+            except Exception as e:
+                logger.debug(f"[model_registry] notify failed: {e}")
 
     def add_model(self, info: Live2dModelInfo, *, persist: bool = True) -> None:
         """Register a new model in-memory; optionally append the entry
@@ -230,6 +280,54 @@ class Live2dModelManager:
         self._models[info.name] = info
         if persist:
             self._persist_append(info)
+        self._notify_change()
+
+    def replace_model(self, info: Live2dModelInfo, *, persist: bool = True) -> None:
+        """Update an existing entry in place, keyed by `info.name`.
+
+        Why this exists separately from add_model + remove_model: the
+        auto-publish watcher re-installs a puppet on rename / re-bake,
+        and we want to preserve the registry primary key so existing
+        ``agent_model_assignments`` (which map session_id → model.name)
+        keep pointing at the live entry. A remove + add would also
+        prune assignments, kicking active VTuber sessions back to "no
+        model".
+
+        Raises ValueError when the name isn't already registered.
+        """
+        if info.name not in self._models:
+            raise ValueError(f"model not registered: {info.name}")
+        self._models[info.name] = info
+        if persist:
+            self._persist_replace(info)
+        self._notify_change()
+
+    def _persist_replace(self, info: Live2dModelInfo) -> None:
+        """Read-modify-write the on-disk registry: replace the model
+        whose `name` matches `info.name` with the new dict, preserving
+        the surrounding schema_version / default_model / assignments and
+        the relative order of entries."""
+        if not self._registry_path.exists():
+            # No on-disk registry yet — emit the new entry as if appending.
+            data: dict = {"schema_version": 2, "models": [info.to_dict()]}
+        else:
+            with open(self._registry_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            models = data.setdefault("models", [])
+            replaced = False
+            for i, m in enumerate(models):
+                if m.get("name") == info.name:
+                    models[i] = info.to_dict()
+                    replaced = True
+                    break
+            if not replaced:
+                models.append(info.to_dict())
+        with open(self._registry_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        logger.info(
+            f"[model_registry] replaced {info.name} [{info.runtime}] · {info.display_name}"
+        )
 
     def _persist_append(self, info: Live2dModelInfo) -> None:
         """Read-modify-write the on-disk registry, appending one entry.
@@ -271,6 +369,7 @@ class Live2dModelManager:
         }
         if persist:
             self._persist_remove(name)
+        self._notify_change()
         return True
 
     def _persist_remove(self, name: str) -> None:

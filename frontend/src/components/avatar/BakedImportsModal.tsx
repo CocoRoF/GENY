@@ -13,6 +13,9 @@ type BakedEntry = {
   runtime: string | null;
   suggested_name: string | null;
   schema_version: number | null;
+  puppet_id: string | null;
+  already_installed: boolean;
+  installed_display_name: string | null;
 };
 
 interface BakedImportsModalProps {
@@ -204,6 +207,17 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
                   <div className="mt-1 truncate font-mono text-[10px] text-[var(--text-muted)]">
                     {e.filename} · {(e.size_bytes / 1024 / 1024).toFixed(1)} MB
                   </div>
+                  {e.already_installed && (
+                    <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                      이미 라이브러리에 등록됨{' '}
+                      {e.installed_display_name && (
+                        <span className="text-[var(--text-primary)]">
+                          ({e.installed_display_name})
+                        </span>
+                      )}{' '}
+                      — install 을 누르면 새 zip 으로 새로고침
+                    </div>
+                  )}
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -212,7 +226,11 @@ export default function BakedImportsModal({ open, onClose }: BakedImportsModalPr
                       className="inline-flex items-center gap-1 rounded border border-[var(--primary-color)] bg-[rgba(59,130,246,0.08)] px-2 py-0.5 text-[11px] text-[var(--primary-color)] hover:bg-[rgba(59,130,246,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download size={11} />
-                      {busy === e.filename ? '설치 중…' : 'install'}
+                      {busy === e.filename
+                        ? '설치 중…'
+                        : e.already_installed
+                          ? 'refresh'
+                          : 'install'}
                     </button>
                     <button
                       type="button"

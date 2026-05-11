@@ -68,6 +68,16 @@ class BakedImportEntry(BaseModel):
     runtime: Optional[str] = None
     suggested_name: Optional[str] = None
     schema_version: Optional[int] = None
+    # True when the zip's puppet_id already has a registry entry. Lets
+    # the modal show "already in library — installing again will
+    # refresh" instead of a plain "install" button, so the user
+    # doesn't think clicking install adds a duplicate. Auto-publish
+    # zips are almost always already_installed (the watcher installs
+    # them on first sight) — only hand-dropped legacy zips and
+    # in-flight uploads land here as false.
+    puppet_id: Optional[str] = None
+    already_installed: bool = False
+    installed_display_name: Optional[str] = None
 
 
 def _peek_zip_metadata(zip_path: Path) -> dict[str, Any]:
@@ -88,17 +98,21 @@ def _peek_zip_metadata(zip_path: Path) -> dict[str, Any]:
 
 
 @router.get("/list")
-async def list_baked_imports() -> dict[str, Any]:
+async def list_baked_imports(request: Request) -> dict[str, Any]:
     """List all pending baked-puppet zips in the inbox.
 
     Sorted newest-first by mtime so the most recent "send to Geny" lands
-    at the top of the UI list.
+    at the top of the UI list. Each entry is annotated with
+    `already_installed` so the UI can distinguish auto-published puppets
+    (which the watcher has already registered) from legacy zips that
+    still need an explicit install click.
     """
     inbox = _inbox_dir()
     if not inbox.exists():
         # Not an error — empty inbox until avatar-editor first writes.
         return {"inbox": str(inbox), "entries": [], "exists": False}
 
+    manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
     entries: list[BakedImportEntry] = []
     for p in inbox.iterdir():
         if not p.is_file() or p.suffix.lower() != ".zip":
@@ -106,6 +120,8 @@ async def list_baked_imports() -> dict[str, Any]:
         try:
             stat = p.stat()
             meta = _peek_zip_metadata(p)
+            pid = (meta.get("puppet", {}) or {}).get("id") or None
+            existing = manager.find_by_puppet_id(pid) if pid else None
             entries.append(
                 BakedImportEntry(
                     filename=p.name,
@@ -116,6 +132,9 @@ async def list_baked_imports() -> dict[str, Any]:
                     runtime=meta.get("puppet", {}).get("runtime") or meta.get("runtime"),
                     suggested_name=meta.get("puppet", {}).get("name") or meta.get("name"),
                     schema_version=meta.get("schemaVersion") or meta.get("schema_version"),
+                    puppet_id=pid,
+                    already_installed=existing is not None,
+                    installed_display_name=existing.display_name if existing else None,
                 )
             )
         except Exception as e:
@@ -170,14 +189,15 @@ class InstallRequest(BaseModel):
     # `(Editor 2)`, `(Editor 3)`, ... copies. Default False preserves the
     # original additive behavior (caller has to opt in).
     replace_existing: bool = False
-    # When True, the source zip stays in the inbox after install instead
-    # of moving to `installed/`. The auto-publish file watcher uses this
-    # so the inbox stays the source of truth for "what puppets exist in
-    # the library" — if avatar-editor unlinks the zip from /exports, the
-    # next watcher tick sees it missing and drops the registry entry.
-    # HTTP install (manual UI) leaves this False, preserving the legacy
-    # "archive to installed/" behaviour.
-    keep_source: bool = False
+    # When True (the new default under the FS-handoff architecture),
+    # the source zip stays in the inbox after install. The auto-publish
+    # watcher relies on this: the inbox is the source of truth for
+    # "what puppets the user has in their library", and moving the zip
+    # to `installed/` would look like a delete on the next scan and
+    # cause the watcher to unregister the model we just installed.
+    # Set to False only for the legacy "archive consumed zips" workflow
+    # — that path is effectively unused under auto-publish.
+    keep_source: bool = True
 
 
 def _drop_model_with_dir(manager, info, models_root: Path) -> None:
@@ -312,13 +332,6 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
     # rule below.
     puppet_id: Optional[str] = (meta.get("puppet", {}) or {}).get("id") or None
 
-    # ── Compute target directory + slugged model name ──────────────
-    # Use microsecond precision so back-to-back installs of the same
-    # source puppet don't collide on the timestamp.
-    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    slug = _slugify(suggested_name)
-    model_name = f"{slug}__editor_{ts}"
-
     if runtime == "live2d":
         models_root = _live2d_models_root()
         url_prefix = "/static/live2d-models"
@@ -326,11 +339,37 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         models_root = _spine_models_root()
         url_prefix = "/static/spine-models"
 
-    target_dir = models_root / model_name
-    if target_dir.exists():
-        # Theoretically impossible (timestamp collision down to the
-        # second + slug match) but reject loudly rather than overwrite.
-        raise HTTPException(409, f"target already exists: {target_dir}")
+    # Identity-preserving re-install: if this puppet_id is already
+    # registered, reuse its `name` (the registry primary key) and the
+    # extracted-files directory so existing agent_model_assignments
+    # (session_id → model.name) stay valid through renames and re-
+    # bakes. A fresh slug+timestamp would invalidate those assignments
+    # and kick active VTuber sessions back to "no model".
+    manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
+    prior_by_id = manager.find_by_puppet_id(puppet_id) if puppet_id else None
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+
+    if prior_by_id is not None:
+        # Reuse the existing slot. The on-disk directory is wiped + re-
+        # extracted so changed assets actually land; the registry entry
+        # gets `replace_model`'d so display_name and other fields refresh
+        # while keeping the same key.
+        model_name = prior_by_id.name
+        target_dir = models_root / model_name
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+    else:
+        # Fresh install. Use microsecond precision so back-to-back
+        # installs of distinct puppets with the same base name don't
+        # collide on the timestamp.
+        slug = _slugify(suggested_name)
+        model_name = f"{slug}__editor_{ts}"
+        target_dir = models_root / model_name
+        if target_dir.exists():
+            # Theoretically impossible (timestamp collision down to the
+            # microsecond + slug match) but reject loudly rather than
+            # overwrite a directory we didn't expect to find.
+            raise HTTPException(409, f"target already exists: {target_dir}")
 
     # ── Extract ────────────────────────────────────────────────────
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -378,39 +417,28 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             raise HTTPException(400, "no .atlas in zip — Spine puppet incomplete")
 
     # ── Build the registry entry ───────────────────────────────────
-    manager = request.app.state.live2d_model_manager  # type: ignore[attr-defined]
     base_display = req.display_name_override or suggested_name
 
     replaced: list[dict[str, str]] = []
 
-    # Always replace by puppet_id when the zip carries one. This is the
-    # source-of-truth identity for geny-avatar puppets — re-installs of
-    # the same puppet (whether from `Send to Geny` or from auto-sync)
-    # should swap in place rather than append duplicates. Skipped for
-    # legacy zips that have no id (those still rely on the display-name
-    # replacement opt-in below).
-    # Remember the previous entry's display name (when the puppet-id
-    # matched a prior install) so the new entry can reuse it. Keeps
-    # display names stable across re-syncs — a user editing avt_B
-    # who saw it as "Hiyori (Editor 2)" yesterday should still see
-    # the same name today, not a renumbered slot that depends on
-    # whichever other puppets happen to exist right now.
-    preferred_display: Optional[str] = None
-
-    if puppet_id:
-        prior_by_id = manager.find_by_puppet_id(puppet_id)
-        if prior_by_id is not None:
-            preferred_display = prior_by_id.display_name
-            _drop_model_with_dir(manager, prior_by_id, models_root)
-            replaced.append({
-                "name": prior_by_id.name,
-                "display_name": prior_by_id.display_name,
-                "matched_by": "puppet_id",
-            })
-            logger.info(
-                f"[install] dropped prior entry {prior_by_id.name!r} matching "
-                f"puppet_id={puppet_id!r}"
-            )
+    # The prior-by-puppet_id match was already detected up top so we
+    # could reuse its model_name and target_dir. Surface it in the
+    # response for parity with the legacy flow, but don't drop it
+    # here — `manager.replace_model` later swaps the entry in place
+    # (preserves session assignments) instead of remove + add.
+    preferred_display: Optional[str] = (
+        prior_by_id.display_name if prior_by_id is not None else None
+    )
+    if prior_by_id is not None:
+        replaced.append({
+            "name": prior_by_id.name,
+            "display_name": prior_by_id.display_name,
+            "matched_by": "puppet_id",
+        })
+        logger.info(
+            f"[install] re-using entry {prior_by_id.name!r} for "
+            f"puppet_id={puppet_id!r} (rename / re-bake)"
+        )
 
     # Optional: clear out prior `(Editor)` entries that share this base
     # before computing the new entry's display name. This is the iter-
@@ -436,12 +464,19 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
                 f"matching base={base_display!r}"
             )
 
-    existing_display_names = {m.display_name for m in manager.list_models()}
-    # When a previous entry under this puppet_id was just dropped,
-    # prefer its display name first — keeps re-syncs visually stable.
-    # Skip when the puppet's underlying name has actually changed
-    # (e.g., the user renamed it in geny-avatar's library); in that
-    # case fall through to the auto-iterator so the new base name
+    # Exclude the entry being re-installed from the uniqueness set so
+    # we don't have to compete with our own old display name (which
+    # `replace_model` will overwrite anyway).
+    existing_display_names = {
+        m.display_name
+        for m in manager.list_models()
+        if prior_by_id is None or m.name != prior_by_id.name
+    }
+    # When a previous entry under this puppet_id existed, prefer its
+    # display name as long as it still tracks the new base name —
+    # keeps re-syncs visually stable. If the user renamed the puppet
+    # in geny-avatar (base_display no longer matches the prior label
+    # stem), fall through to the auto-iterator so the new base name
     # is honoured.
     if (
         preferred_display is not None
@@ -648,6 +683,17 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
             f"active={active_group}, map={emotion_motion_map}"
         )
 
+    # Record the source zip's mtime when it stays in the inbox — the
+    # auto-publish watcher uses this as the "last installed at" cookie
+    # to spot subsequent rename / re-bake writes and trigger another
+    # install. None when keep_source=False (legacy archive path).
+    inbox_mtime_val: Optional[float] = None
+    if req.keep_source:
+        try:
+            inbox_mtime_val = src.stat().st_mtime
+        except OSError:
+            inbox_mtime_val = None
+
     info = Live2dModelInfo(
         name=model_name,
         display_name=final_display,
@@ -664,9 +710,15 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         runtime=runtime,
         atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
         puppet_id=puppet_id,
+        inbox_mtime=inbox_mtime_val,
     )
     try:
-        manager.add_model(info)
+        if prior_by_id is not None:
+            # Update in place — preserves session assignments keyed at
+            # the (unchanged) model.name.
+            manager.replace_model(info)
+        else:
+            manager.add_model(info)
     except Exception as e:
         # Persistence failed (disk full, permission denied) — roll back
         # the extracted directory so we don't leave dangling files.

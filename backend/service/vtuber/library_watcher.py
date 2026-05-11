@@ -80,24 +80,34 @@ async def _scan_once(app: FastAPI) -> None:
         return
 
     # Collect the inbox-top-level zips paired with their puppet ids
-    # so the two passes below share one stat() + peek per zip.
+    # and on-disk mtime so the two passes below share one stat() +
+    # peek per zip. The mtime drives change detection: avatar-editor's
+    # auto-publish rewrites `<puppet_id>.zip` atomically on every IDB
+    # change, so a newer mtime than the registered entry's
+    # `inbox_mtime` is the signal that the user renamed or re-baked
+    # this puppet and the registry needs to follow.
     try:
-        candidates: list[tuple[Path, Optional[str]]] = []
+        candidates: list[tuple[Path, Optional[str], float]] = []
         for entry in inbox.iterdir():
             if not entry.is_file() or entry.suffix.lower() != ".zip":
                 continue
-            candidates.append((entry, _peek_puppet_id(entry)))
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((entry, _peek_puppet_id(entry), mtime))
     except OSError as e:
         logger.warning(f"[library-watcher] inbox scan failed: {e}")
         return
 
-    inbox_puppet_ids = {pid for _, pid in candidates if pid}
+    inbox_puppet_ids = {pid for _, pid, _ in candidates if pid}
 
-    # Pass 1: install any zip whose puppet.id isn't registered yet.
-    # Use a lazy import to avoid the controller ↔ service circular
-    # import that would otherwise form (controller imports
-    # live2d_model_manager from service; if service imported
-    # controller at module load it would loop).
+    # Pass 1: install any zip whose puppet.id isn't registered yet, or
+    # re-install when the source zip is newer than what we have on
+    # record. Use a lazy import to avoid the controller ↔ service
+    # circular import that would otherwise form (controller imports
+    # live2d_model_manager from service; if service imported controller
+    # at module load it would loop).
     from controller.vtuber_baked_imports_controller import (
         InstallRequest,
         install_baked_import,
@@ -112,11 +122,28 @@ async def _scan_once(app: FastAPI) -> None:
 
     mock_req = _MockRequest(app)
 
-    for zip_path, puppet_id in candidates:
+    # Small epsilon to absorb cross-filesystem mtime granularity
+    # quirks (some FS round to whole seconds). 1ms is well below any
+    # real-world rename interval but big enough to ignore floating
+    # point round-trips through JSON.
+    MTIME_EPSILON_S = 0.001
+
+    for zip_path, puppet_id, mtime in candidates:
         if not puppet_id:
             continue  # legacy / unidentifiable zip — leave alone
-        if manager.find_by_puppet_id(puppet_id) is not None:
-            continue  # already registered
+        prior = manager.find_by_puppet_id(puppet_id)
+        if prior is not None:
+            # Already registered. Only re-install when the zip on disk
+            # has been rewritten since the last install we logged. The
+            # install path will reuse the model.name + extract dir so
+            # existing session assignments keep pointing at the same
+            # entry (display_name and other fields refresh in place).
+            prior_mtime = prior.inbox_mtime
+            if prior_mtime is not None and mtime <= prior_mtime + MTIME_EPSILON_S:
+                continue
+            action = "re-install (mtime change)"
+        else:
+            action = "install (new)"
         try:
             req = InstallRequest(
                 filename=zip_path.name,
@@ -124,13 +151,14 @@ async def _scan_once(app: FastAPI) -> None:
                 keep_source=True,  # don't move; inbox is the source of truth
             )
             result = await install_baked_import(req, mock_req)  # type: ignore[arg-type]
+            model = result.get("model") or {}
             logger.info(
-                f"[library-watcher] auto-installed {zip_path.name} "
-                f"→ {(result.get('model') or {}).get('name')!r}"
+                f"[library-watcher] {action} {zip_path.name} "
+                f"→ name={model.get('name')!r} display={model.get('display_name')!r}"
             )
         except Exception as e:
             logger.warning(
-                f"[library-watcher] auto-install failed for {zip_path.name}: {e}"
+                f"[library-watcher] {action} failed for {zip_path.name}: {e}"
             )
 
     # Pass 2: unregister any model whose source zip is gone from
