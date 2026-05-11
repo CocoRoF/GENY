@@ -22,11 +22,13 @@
 
 ## 문서 인덱스
 
-| 순서 | 문서 | 내용 |
-|---|---|---|
-| 1 | [01_ANALYSIS.md](01_ANALYSIS.md) | 현 상태 분석 — User Opsidian / Curated / VTuber 가 지금 어떻게 작동하는가, 갭 분석 |
-| 2 | [02_ARCHITECTURE.md](02_ARCHITECTURE.md) | 목표 아키텍처 — `CaptureEvent`, Spotlight 모드, PromptBuilder 신규 섹션, 플러그인 표면 |
-| 3 | [03_PLAN.md](03_PLAN.md) | 단계별 실행 계획 — 5 Phase, 각 Phase 의 DoD / 위험 / 트레이드오프 |
+| 순서 | 문서 | 내용 | 상태 |
+|---|---|---|---|
+| 1 | [01_ANALYSIS.md](01_ANALYSIS.md) | 현 상태 분석 — User Opsidian / Curated / VTuber 가 지금 어떻게 작동하는가, 갭 분석 | 작성 완료 |
+| 2 | [02_ARCHITECTURE.md](02_ARCHITECTURE.md) | 목표 아키텍처 — `CaptureEvent`, Spotlight 모드, PromptBuilder 신규 섹션, 플러그인 표면 | 작성 완료 |
+| 3 | [03_PLAN.md](03_PLAN.md) | 단계별 실행 계획 — 5 Phase, 각 Phase 의 DoD / 위험 / 트레이드오프 | 작성 완료 → P0~P5 구현 완료 |
+| 4 | [04_AUDIT.md](04_AUDIT.md) | 구현 후 audit — 에이전트 사용도 / UX 흐름 / 큐레이션 메커니즘 3 영역 점검 결과 | 작성 완료 |
+| 5 | [05_IMPROVEMENT_PLAN.md](05_IMPROVEMENT_PLAN.md) | 04 의 결함을 5 PR (Q1~Q5) 로 묶는 실행 계획 | 작성 완료, 구현 예정 |
 
 ---
 
