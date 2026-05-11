@@ -246,9 +246,6 @@ services:
       # /api/library/sync proxy route. Browser-visible flag.
       - NEXT_PUBLIC_GENY_HOST=true
       - GENY_BAKED_EXPORTS_DIR=/exports
-      # Server-to-server URL the avatar-editor's Next.js API routes use
-      # to forward library sync to Geny's FastAPI backend.
-      - GENY_BACKEND_URL=http://backend:8000
       # AI provider keys for the editor's Generate panel.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

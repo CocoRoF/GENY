@@ -416,6 +416,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"   - Live2D models: {len(live2d_model_manager.models)}")
     logger.info(f"   - Default model: {live2d_model_manager.default_model_name}")
 
+    # Start the auto-publish library watcher. It mirrors the shared
+    # docker volume (avatar-editor writes baked zips here whenever a
+    # library row changes) into the model registry. The task is
+    # cancelled in the shutdown branch below.
+    from service.vtuber.library_watcher import start_library_watcher
+
+    app.state.library_watcher_task = start_library_watcher(app)
+
     # Give agent_executor access to app.state for avatar state emission
     from service.execution.agent_executor import set_app_state
     set_app_state(app.state)
@@ -531,6 +539,18 @@ async def lifespan(app: FastAPI):
 
     print_step_banner("SHUTDOWN", "GENY AGENT SHUTDOWN", "Cleaning up sessions...")
     logger.info("Shutting down Geny Agent")
+
+    # Stop the library watcher first so it can't kick off an install
+    # mid-shutdown. Cancellation propagates via asyncio.CancelledError;
+    # the watcher loop catches it and logs cleanly.
+    watcher_task = getattr(app.state, "library_watcher_task", None)
+    if watcher_task is not None and not watcher_task.done():
+        watcher_task.cancel()
+        try:
+            await watcher_task
+        except (asyncio.CancelledError, Exception) as e:
+            if not isinstance(e, asyncio.CancelledError):
+                logger.warning(f"library_watcher shutdown failed: {e}")
 
     # Stop cron runner before task runner (cron submits to task runner)
     if getattr(app.state, "cron_runner", None) is not None:

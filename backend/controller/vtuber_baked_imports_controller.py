@@ -170,6 +170,14 @@ class InstallRequest(BaseModel):
     # `(Editor 2)`, `(Editor 3)`, ... copies. Default False preserves the
     # original additive behavior (caller has to opt in).
     replace_existing: bool = False
+    # When True, the source zip stays in the inbox after install instead
+    # of moving to `installed/`. The auto-publish file watcher uses this
+    # so the inbox stays the source of truth for "what puppets exist in
+    # the library" — if avatar-editor unlinks the zip from /exports, the
+    # next watcher tick sees it missing and drops the registry entry.
+    # HTTP install (manual UI) leaves this False, preserving the legacy
+    # "archive to installed/" behaviour.
+    keep_source: bool = False
 
 
 def _drop_model_with_dir(manager, info, models_root: Path) -> None:
@@ -666,21 +674,25 @@ async def install_baked_import(req: InstallRequest, request: Request) -> dict[st
         raise HTTPException(500, f"register failed: {e}") from e
 
     # ── Move source zip to installed/ ───────────────────────────────
-    installed_dir = inbox / "installed"
-    try:
-        installed_dir.mkdir(exist_ok=True)
-        src.replace(installed_dir / src.name)
-    except OSError as e:
-        # Non-fatal — model is already registered. Surface a warning
-        # in the response so the UI can show "installed but couldn't
-        # archive zip" instead of a misleading green tick.
-        logger.warning(f"[baked-imports] post-install zip move failed: {e}")
-        return {
-            "status": "ok",
-            "warning": f"zip move to installed/ failed: {e}",
-            "model": info.to_dict(),
-            "replaced": replaced,
-        }
+    # Skipped when `keep_source=True` (auto-publish watcher path) —
+    # the watcher uses the inbox itself as the source of truth, so
+    # moving would falsely look like the puppet was deleted.
+    if not req.keep_source:
+        installed_dir = inbox / "installed"
+        try:
+            installed_dir.mkdir(exist_ok=True)
+            src.replace(installed_dir / src.name)
+        except OSError as e:
+            # Non-fatal — model is already registered. Surface a warning
+            # in the response so the UI can show "installed but couldn't
+            # archive zip" instead of a misleading green tick.
+            logger.warning(f"[baked-imports] post-install zip move failed: {e}")
+            return {
+                "status": "ok",
+                "warning": f"zip move to installed/ failed: {e}",
+                "model": info.to_dict(),
+                "replaced": replaced,
+            }
 
     logger.info(
         f"[baked-imports] installed {req.filename} → {model_name} [{runtime}] · {final_display}"
