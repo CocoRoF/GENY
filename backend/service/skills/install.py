@@ -43,6 +43,12 @@ SKILLS_OPT_IN_ENV = "GENY_ALLOW_USER_SKILLS"
 # keeps the slash-command menu honest for each role.
 _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
     "blog-write": frozenset({"vtuber"}),
+    # Whiteboard skills — VTuber-only. The underlying tools
+    # (opsidian_*, knowledge_*, whiteboard_*) are filtered to the
+    # VTuber roster in `_vtuber_tool_roster`, so a Worker stumbling
+    # onto these skills would deadend on tool absence anyway. Gating
+    # the Skill itself keeps the slash-command menu honest per role.
+    "whiteboard-search": frozenset({"vtuber"}),
 }
 
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
