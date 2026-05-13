@@ -42,8 +42,18 @@ RUN pip install --upgrade pip setuptools wheel
 # vLLM 0.7.3 is the first release with stable whisper task support
 # (per the vLLM docs the user referenced). Pinning exactly so we
 # get the same code path every rebuild.
+#
+# transformers MUST be pinned to a 4.x release: vLLM 0.7.3 leaves
+# the upper bound open, so a fresh build pulls transformers 5.x,
+# whose WhisperTokenizer no longer exposes
+# `all_special_tokens_extended` — vLLM 0.7.3 reads that attribute
+# directly and the engine crashes on first boot. Verified on the
+# prod server: transformers 5.8.1 → AttributeError, 4.48.x → boots.
+# When upgrading vLLM later, re-check transformers compatibility in
+# the same step.
 RUN pip install --no-cache-dir \
         "vllm==0.7.3" \
+        "transformers>=4.48.0,<4.49.0" \
         "librosa==0.10.2.post1" \
         "soundfile==0.12.1"
 
