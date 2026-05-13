@@ -11,6 +11,12 @@ Tools shipped:
     no vision model is available (so the tool always succeeds —
     callers can rely on the result being non-empty).
   - ``whiteboard_extract_links`` — pull URLs out of a note body.
+  - ``whiteboard_transcribe`` — re-run Whisper on an audio attachment
+    that the post-capture hook (W2) either failed on or that the
+    user has explicitly asked to re-transcribe. The PostCaptureHook
+    handles the happy path automatically — this tool exists so the
+    agent has a recovery + retry surface (see ``whiteboard-voice-notes``
+    skill).
 
 Auto-loaded by ToolLoader (``*_tools.py`` pattern).
 
@@ -338,3 +344,150 @@ class WhiteboardExtractLinksTool(BaseTool):
             return _error(f"note not found: {filename}")
         urls = _extract_urls(str(note.get("body") or ""))
         return _ok({"filename": filename, "count": len(urls), "urls": urls})
+
+
+# ── whiteboard_transcribe ────────────────────────────────────────────
+
+
+# Audio MIME prefixes that Whisper accepts via vLLM's librosa decoder.
+# We don't insist on a strict allowlist here — `whisper_client` returns
+# a graceful ``source="unavailable"`` if the bytes can't be decoded, and
+# the tool just surfaces that to the agent.
+_AUDIO_EXT_HINTS = (
+    ".webm",
+    ".ogg",
+    ".oga",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".mp4",
+    ".aac",
+    ".flac",
+)
+
+
+def _looks_like_audio(path: str) -> bool:
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in _AUDIO_EXT_HINTS)
+
+
+async def transcribe_attachment_async(
+    username: str,
+    *,
+    capture_id: Optional[str] = None,
+    attachment_path: Optional[str] = None,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve → fetch → transcribe. Always returns a dict.
+
+    ``source`` is one of:
+      - ``"whisper"`` — vLLM returned text.
+      - ``"unavailable"`` — service down / timeout / non-200.
+      - ``"disabled"`` — WhisperConfig.enabled is False.
+      - ``"not_found"`` — couldn't resolve the attachment.
+
+    The PostCaptureHook (W2) calls the same client on every audio
+    capture and prepends the transcript to the draft note. This tool
+    is the retry / on-demand surface for when:
+
+      * the hook failed (network blip during initial capture), or
+      * the user explicitly asks "transcribe that one again", or
+      * an older audio attachment needs a transcript backfill.
+    """
+    rel = _resolve_attachment_path(
+        username, capture_id=capture_id, attachment_path=attachment_path
+    )
+    if not rel:
+        return {
+            "text": "",
+            "source": "not_found",
+            "reason": "could not resolve capture_id / attachment_path",
+        }
+    if not _looks_like_audio(rel):
+        return {
+            "text": "",
+            "source": "not_found",
+            "reason": f"attachment {rel} doesn't look like audio",
+            "attachment_path": rel,
+        }
+    data = _read_attachment_bytes(username, rel)
+    if data is None:
+        return {
+            "text": "",
+            "source": "not_found",
+            "reason": f"attachment {rel} unavailable",
+            "attachment_path": rel,
+        }
+    try:
+        from service.stt.whisper_client import get_whisper_client
+    except Exception:  # noqa: BLE001
+        return {
+            "text": "",
+            "source": "unavailable",
+            "error": "whisper_client import failed",
+            "attachment_path": rel,
+        }
+    result = await get_whisper_client().atranscribe(
+        data, filename=rel, language=language,
+    )
+    payload: Dict[str, Any] = {
+        "text": result.text,
+        "language": result.language,
+        "duration_seconds": result.duration_seconds,
+        "source": result.source,
+        "attachment_path": rel,
+    }
+    if result.error:
+        payload["error"] = result.error
+    return payload
+
+
+class WhiteboardTranscribeTool(BaseTool):
+    """Re-transcribe a captured audio attachment via Whisper STT."""
+
+    name = "whiteboard_transcribe"
+    description = (
+        "Transcribe a previously captured audio attachment to text "
+        "using Whisper STT. Pass either capture_id (preferred) or "
+        "attachment_path. The PostCaptureHook already auto-transcribes "
+        "fresh audio captures into the inbox draft body — only call "
+        "this tool when (a) the auto-transcript is missing/empty, "
+        "(b) the user asks to re-transcribe, or (c) you're inspecting "
+        "an older audio note. Pass language='ko' / 'en' to force a "
+        "specific language; omit to let Whisper auto-detect (default)."
+    )
+    CAPABILITIES = ToolCapabilities(concurrency_safe=True)
+
+    def run(
+        self,
+        session_id: str,
+        capture_id: str = "",
+        attachment_path: str = "",
+        language: str = "",
+    ) -> str:
+        username = _resolve_username(session_id) or "anonymous"
+        result = _run_async_in_sync_call(
+            transcribe_attachment_async(
+                username,
+                capture_id=capture_id or None,
+                attachment_path=attachment_path or None,
+                language=language or None,
+            )
+        )
+        return _ok(result)
+
+    async def arun(
+        self,
+        session_id: str,
+        capture_id: str = "",
+        attachment_path: str = "",
+        language: str = "",
+    ) -> str:
+        username = _resolve_username(session_id) or "anonymous"
+        result = await transcribe_attachment_async(
+            username,
+            capture_id=capture_id or None,
+            attachment_path=attachment_path or None,
+            language=language or None,
+        )
+        return _ok(result)

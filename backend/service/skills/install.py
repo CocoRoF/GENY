@@ -51,6 +51,11 @@ _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
     "whiteboard-search": frozenset({"vtuber"}),
     "whiteboard-react-to-share": frozenset({"vtuber"}),
     "whiteboard-curate-suggest": frozenset({"vtuber"}),
+    # docs/voice-notes/02_PLAN.md W4 — audio capture skill backed by
+    # whiteboard_transcribe + the WhisperClient pipeline (W1) + the
+    # auto-transcribe PostCaptureHook (W2). VTuber-only so the
+    # slash-command menu doesn't show it for Worker / developer roles.
+    "whiteboard-voice-notes": frozenset({"vtuber"}),
 }
 
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
