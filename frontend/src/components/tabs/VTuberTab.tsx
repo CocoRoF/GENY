@@ -10,6 +10,7 @@ import { Sparkles, Inbox } from 'lucide-react';
 import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
+import STTControls from '@/components/live2d/STTControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 import BakedImportsModal from '@/components/avatar/BakedImportsModal';
 
@@ -227,10 +228,11 @@ export default function VTuberTab() {
           )}
         </div>
 
-        {/* TTS Audio Controls */}
+        {/* TTS + STT Audio Controls */}
         {isVTuberRole && (
-          <div>
+          <div className="flex items-center gap-3">
             <AudioControls sessionId={sessionId} />
+            <STTControls sessionId={sessionId} />
           </div>
         )}
       </div>

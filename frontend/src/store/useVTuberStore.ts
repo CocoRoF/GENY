@@ -117,6 +117,13 @@ interface VTuberState {
   ttsSpeaking: Record<string, boolean>;
   ttsVolume: number;
 
+  // STT (V2 voice-notes follow-up) — when on, the user's mic is
+  // streamed via the VAD recorder into the inbox as audio captures
+  // + auto-spotlighted so the VTuber sees [USER_SHARED] triggers
+  // for each utterance. Default OFF — must be explicitly enabled
+  // per session.
+  sttEnabled: boolean;
+
   // Actions
   fetchModels: () => Promise<void>;
   assignModel: (sessionId: string, modelName: string) => Promise<void>;
@@ -135,6 +142,10 @@ interface VTuberState {
   setTTSVolume: (vol: number) => void;
   speakResponse: (sessionId: string, text: string, emotion: string) => Promise<void>;
   stopSpeaking: (sessionId: string) => void;
+
+  // STT actions
+  toggleSTT: () => void;
+  setSTTEnabled: (enabled: boolean) => void;
 
   // ── Live chat-stream pre-emit TTS ──
   /** 새 유저 메시지 시작 시 호출 — 턴 인덱스 증가 + 이전 턴 잔여 클립 폐기. */
@@ -156,6 +167,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   ttsEnabled: true,
   ttsSpeaking: {},
   ttsVolume: 0.7,
+  sttEnabled: false,  // default OFF — user must opt in per session
 
   fetchModels: async () => {
     try {
@@ -318,6 +330,16 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     const clamped = Math.max(0, Math.min(1, vol));
     set({ ttsVolume: clamped });
     getAudioManager().setVolume(clamped);
+  },
+
+  // ─── STT Actions ───
+
+  toggleSTT: () => {
+    set({ sttEnabled: !get().sttEnabled });
+  },
+
+  setSTTEnabled: (enabled) => {
+    set({ sttEnabled: enabled });
   },
 
   speakResponse: async (sessionId, text, emotion) => {
