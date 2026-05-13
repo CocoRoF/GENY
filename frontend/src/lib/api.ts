@@ -2735,6 +2735,10 @@ export interface WhiteboardCaptureCreatedResponse {
   capture_id: string;
   draft_note_filename: string;
   attachment_path: string | null;
+  /** Set when ``auto_spotlight=true`` was sent on the upload — the
+   *  resulting spotlight item id so the caller knows USER_SHARED
+   *  was queued for this session. Absent on the default path. */
+  spotlight_item_id?: string | null;
 }
 
 export interface WhiteboardCaptureLogEntry {
@@ -2783,6 +2787,12 @@ export const whiteboardApi = {
     metadata?: Record<string, unknown>;
     inlineText?: string | null;
     filename?: string | null;
+    /** V2 voice-notes — when true, the backend awaits the
+     *  post-capture hook synchronously and immediately stages a
+     *  spotlight item + USER_SHARED trigger for the resulting note.
+     *  Used by the VTuber STT mode so each utterance reaches the
+     *  persona without a separate Share-with-VTuber click. */
+    autoSpotlight?: boolean;
   }): Promise<WhiteboardCaptureCreatedResponse> => {
     const form = new FormData();
     form.append('file', params.file, params.filename ?? 'capture.bin');
@@ -2792,6 +2802,7 @@ export const whiteboardApi = {
     if (params.sessionId) form.append('session_id', params.sessionId);
     if (params.inlineText) form.append('inline_text', params.inlineText);
     if (params.metadata) form.append('metadata_json', JSON.stringify(params.metadata));
+    if (params.autoSpotlight) form.append('auto_spotlight', 'true');
 
     const token = getToken();
     const headers: Record<string, string> = {};

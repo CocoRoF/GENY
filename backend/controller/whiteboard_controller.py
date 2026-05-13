@@ -111,6 +111,12 @@ class CaptureCreatedResponse(BaseModel):
     capture_id: str
     draft_note_filename: str
     attachment_path: Optional[str] = None
+    # Set when ``auto_spotlight=true`` was passed on the upload — the
+    # post-capture hook was awaited synchronously, the resulting
+    # spotlight item id is returned so the caller knows the
+    # ``[USER_SHARED]`` trigger has already been queued for this
+    # session. Absent on the default fire-and-forget path.
+    spotlight_item_id: Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -214,6 +220,7 @@ def _persist_capture(
     metadata: Dict[str, Any],
     payload: CapturePayload,
     title_override: Optional[str],
+    run_hook_sync: bool = False,
 ) -> CaptureEvent:
     """Persist the capture to the user's vault and return the event.
 
@@ -289,11 +296,18 @@ def _persist_capture(
     # the `_describe_image_hook` that captions screenshots). Best-
     # effort: a missing event loop or hook failure never blocks the
     # capture itself.
-    try:
-        from service.whiteboard.post_capture_hook import fire_and_forget
-        fire_and_forget(event, draft_filename)
-    except Exception:  # noqa: BLE001
-        logger.debug("post-capture hook dispatch failed", exc_info=True)
+    #
+    # V2 (voice-notes follow-up) — when *run_hook_sync* is True the
+    # caller will dispatch the hook itself (via
+    # :func:`_auto_spotlight_for_event`) and we skip the
+    # fire-and-forget here so the two paths don't race for the same
+    # note body.
+    if not run_hook_sync:
+        try:
+            from service.whiteboard.post_capture_hook import fire_and_forget
+            fire_and_forget(event, draft_filename)
+        except Exception:  # noqa: BLE001
+            logger.debug("post-capture hook dispatch failed", exc_info=True)
     return event
 
 
@@ -357,6 +371,95 @@ async def create_capture_json(
     )
 
 
+async def _auto_spotlight_for_event(
+    *,
+    username: str,
+    session_id: Optional[str],
+    event: CaptureEvent,
+    draft_note_filename: str,
+) -> Optional[str]:
+    """Run the post-capture hook synchronously and stage a Spotlight
+    item for the resulting note so the VTuber sees a
+    ``[USER_SHARED]`` trigger built from the transcript-bearing
+    excerpt. Best-effort: an early hook failure (Whisper down, etc.)
+    still surfaces a spotlight item — the excerpt will just lack the
+    transcript line and the VTuber will react to the audio attachment
+    alone.
+
+    Used by the VTuber STT mode (V2): the user keeps the mic on,
+    every detected utterance comes through ``/captures/upload`` with
+    ``auto_spotlight=true``, and this function makes sure the
+    audio + transcript reach the persona without the user clicking
+    "Share with VTuber" between each sentence.
+    """
+    # 1. Dispatch the hook synchronously. Returns the same audit
+    #    payload `dispatch_post_capture` produces; we don't use it
+    #    directly — the side-effect of prepending the transcript to
+    #    the draft note body is what we want.
+    try:
+        from service.whiteboard.post_capture_hook import (
+            dispatch_post_capture,
+        )
+        await dispatch_post_capture(event, draft_note_filename)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "auto_spotlight: hook dispatch raised; falling back to "
+            "no-transcript spotlight item",
+            exc_info=True,
+        )
+
+    # 2. Build a SpotlightItem from the (now-updated) note. The
+    #    helper pulls title/excerpt/wikilinks the way share_to_spotlight
+    #    does, so the excerpt picks up the freshly-prepended
+    #    ``> **Transcript (lang):**`` block automatically.
+    try:
+        title, excerpt, attachments = _excerpt_from_note(
+            username, draft_note_filename, "user"
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("auto_spotlight: excerpt read failed", exc_info=True)
+        return None
+
+    # No session → no agent to deliver USER_SHARED to. Persisting a
+    # spotlight item without one is harmless (TTL cleans it up), but
+    # we'd skip the trigger, so just bail with None.
+    if not session_id:
+        return None
+
+    try:
+        store = get_spotlight_store()
+        item = store.add(
+            user_id=username,
+            session_id=session_id,
+            source_filename=draft_note_filename,
+            title=title,
+            excerpt=excerpt,
+            attachments=tuple(attachments) if attachments else (),
+            # ttl_minutes left at the store default so VTuber STT
+            # utterances expire on the same schedule as manual shares.
+            pinned=False,
+            capture_id=event.capture_id,
+            note_kind="user",
+            metadata={
+                "source": "vtuber_stt_stream",
+                "capture_source": event.source,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("auto_spotlight: store.add failed", exc_info=True)
+        return None
+
+    try:
+        from service.whiteboard.user_shared_trigger import (
+            fire_user_shared_trigger_async,
+        )
+        fire_user_shared_trigger_async(item)
+    except Exception:  # noqa: BLE001
+        logger.debug("auto_spotlight: USER_SHARED dispatch failed", exc_info=True)
+
+    return item.item_id
+
+
 @router.post("/captures/upload", response_model=CaptureCreatedResponse)
 async def create_capture_upload(
     file: UploadFile = File(...),
@@ -366,6 +469,13 @@ async def create_capture_upload(
     session_id: Optional[str] = Form(None),
     metadata_json: Optional[str] = Form(None),
     inline_text: Optional[str] = Form(None),
+    # V2 (voice-notes follow-up) — when true, the post-capture hook
+    # is awaited synchronously and the new note is immediately added
+    # to the caller's spotlight so the VTuber sees a ``[USER_SHARED]``
+    # trigger built from the transcript-bearing excerpt. Used by the
+    # frontend VTuber STT mode so each utterance reaches the persona
+    # without the user manually clicking "Share with VTuber".
+    auto_spotlight: bool = Form(False),
     auth: dict = Depends(_resolve_user_for_capture),
 ):
     """Multipart capture ingest (binary attachment + metadata).
@@ -443,14 +553,27 @@ async def create_capture_upload(
             metadata=parsed_metadata,
             payload=capture_payload,
             title_override=title,
+            run_hook_sync=auto_spotlight,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    spotlight_item_id: Optional[str] = None
+    if auto_spotlight:
+        draft_note_filename = str(event.metadata.get("draft_note") or "")
+        if draft_note_filename:
+            spotlight_item_id = await _auto_spotlight_for_event(
+                username=username,
+                session_id=session_id,
+                event=event,
+                draft_note_filename=draft_note_filename,
+            )
 
     return CaptureCreatedResponse(
         capture_id=event.capture_id,
         draft_note_filename=str(event.metadata.get("draft_note") or ""),
         attachment_path=event.payload.attachment_path,
+        spotlight_item_id=spotlight_item_id,
     )
 
 
