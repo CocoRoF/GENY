@@ -283,6 +283,8 @@ services:
       - WHISPER_PORT=${WHISPER_PORT:-8001}
       - WHISPER_GPU_MEMORY_FRACTION=${WHISPER_GPU_MEMORY_FRACTION:-0.35}
       - WHISPER_DTYPE=${WHISPER_DTYPE:-auto}
+      # Blackwell (sm_120) FA2 incompat — see prod variant comment.
+      - VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}
       - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN:-}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
     volumes:

@@ -329,6 +329,14 @@ services:
       # 공존 가능하도록 보수적 분할.
       - WHISPER_GPU_MEMORY_FRACTION=${WHISPER_GPU_MEMORY_FRACTION:-0.35}
       - WHISPER_DTYPE=${WHISPER_DTYPE:-auto}
+      # FlashAttention 2 stalls on Blackwell (sm_120, RTX 50 series)
+      # on the encoder-decoder Whisper path — observed as a 24+ min
+      # hang right after "Using FLASH_ATTN attention backend". Force
+      # the Triton kernels (TRITON_ATTN) which compile fresh on
+      # Blackwell and don't require a precompiled FA2 binary.
+      # If a future vllm release ships an FA3 build with sm_120
+      # kernels, this override can be dropped.
+      - VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}
       # HuggingFace 모델 다운로드 (public 모델이라 토큰 없이 가능,
       # rate-limit 회피용으로만 옵션 제공).
       - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN:-}
