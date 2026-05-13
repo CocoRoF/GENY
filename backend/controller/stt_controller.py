@@ -126,6 +126,39 @@ async def transcribe(
     }
 
 
+@router.post("/backfill")
+async def backfill(
+    username: Optional[str] = Form(None),
+    max_per_cycle: Optional[int] = Form(None),
+    auth: dict = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Manually trigger one pass of the inbox audio-backfill loop.
+
+    Without arguments, scans every user's vault and transcribes up
+    to *max_per_cycle* missing notes per user (default = 1). Pass
+    ``username`` to limit the scan to a single vault, and
+    ``max_per_cycle`` to raise the cap for a one-shot batch run
+    (e.g. ``max_per_cycle=50`` to drain a long-standing backlog).
+
+    Returns the :class:`BackfillRunResult` summary as JSON. Each
+    outcome includes the per-note status, so the operator can see
+    which captures filled, which were skipped (already had a
+    transcript), which failed Whisper, and which lost their
+    attachment file.
+    """
+    from service.whiteboard.audio_backfill import (
+        backfill_all_users,
+        backfill_one_user,
+    )
+
+    cap = max_per_cycle if max_per_cycle and max_per_cycle > 0 else 1
+    if username:
+        result = await backfill_one_user(username.strip(), max_per_cycle=cap)
+    else:
+        result = await backfill_all_users(max_per_cycle=cap)
+    return result.to_dict()
+
+
 @router.get("/health")
 async def health(auth: dict = Depends(require_auth)) -> Dict[str, Any]:
     """Lightweight reachability probe for the Whisper service.
