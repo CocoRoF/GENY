@@ -10,7 +10,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Camera, Clipboard, Loader2, Pencil, Upload } from 'lucide-react';
+import { Camera, Clipboard, Loader2, Mic, Pencil, Upload } from 'lucide-react';
 import {
   listCaptureSources,
   onCaptureSourcesChange,
@@ -24,6 +24,7 @@ const FALLBACK_ICONS: Record<string, ReactNode> = {
   file_drop: <Upload size={14} />,
   screen_capture: <Camera size={14} />,
   clipboard_paste: <Clipboard size={14} />,
+  microphone_record: <Mic size={14} />,
   drawing: <Pencil size={14} />,
 };
 

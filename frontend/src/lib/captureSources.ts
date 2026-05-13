@@ -178,6 +178,21 @@ export function registerBuiltinCaptureSources(): void {
       typeof navigator.mediaDevices?.getDisplayMedia === 'function',
     run: async (ctx) => grabScreen(ctx),
   });
+
+  // W3 (voice-notes) — microphone recording via MediaRecorder. The
+  // modal + Web-Audio analyser code is lazy-loaded by `recordAudio()`
+  // so we don't pay the bundle cost on pages that never record.
+  registerCaptureSource({
+    id: 'microphone_record',
+    label: 'Record',
+    icon: null,
+    order: 65,
+    isAvailable: () =>
+      typeof navigator !== 'undefined' &&
+      typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+      typeof MediaRecorder !== 'undefined',
+    run: async (ctx) => grabMicrophone(ctx),
+  });
 }
 
 async function pickFile(): Promise<File | null> {
@@ -309,4 +324,38 @@ async function captureFirstFrame(stream: MediaStream): Promise<Blob | null> {
   return new Promise<Blob | null>((resolve) =>
     canvas.toBlob((blob) => resolve(blob), 'image/png', 0.95),
   );
+}
+
+// ── microphone_record ────────────────────────────────────────────────
+
+
+async function grabMicrophone(
+  ctx: CaptureContext,
+): Promise<WhiteboardCaptureCreatedResponse | null> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.mediaDevices?.getUserMedia ||
+    typeof MediaRecorder === 'undefined'
+  ) {
+    throw new Error('Microphone capture not supported in this browser');
+  }
+  // Lazy-imported so the modal + Web-Audio analyser don't load until
+  // the user actually clicks Record. The promise resolves with the
+  // recorded `Blob`, or `null` when the user cancelled.
+  const { recordAudio } = await import('@/lib/microphoneRecorder');
+  const blob = await recordAudio();
+  if (!blob) return null;
+
+  const mime = blob.type || 'audio/webm';
+  // `audio/webm;codecs=opus` → strip the codec suffix for the filename
+  // extension; backend uses the suffix only for MIME hinting anyway.
+  const baseMime = mime.split(';', 1)[0] || 'audio/webm';
+  const ext = baseMime.split('/')[1] || 'webm';
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = new File([blob], `voice-${stamp}.${ext}`, { type: mime });
+  return uploadCaptureFile(file, {
+    type: 'audio',
+    source: 'microphone_record',
+    ctx,
+  });
 }
