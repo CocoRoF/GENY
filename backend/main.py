@@ -425,6 +425,17 @@ async def lifespan(app: FastAPI):
 
     app.state.library_watcher_task = start_library_watcher(app)
 
+    # ── Audio Backfill Loop ───────────────────────────────────────────
+    # Idle background loop that catches inbox audio notes the W2
+    # PostCaptureHook couldn't transcribe at capture time (whisper-stt
+    # was down, or the capture pre-dates the hook). Runs at most one
+    # transcription per cycle so the live capture path always wins
+    # the GPU race. Cancelled cleanly in the shutdown branch below.
+    from service.whiteboard.audio_backfill import start_audio_backfill_loop
+
+    app.state.audio_backfill_task = start_audio_backfill_loop()
+    logger.info("   ✅ audio_backfill_loop: started")
+
     # Give agent_executor access to app.state for avatar state emission
     from service.execution.agent_executor import set_app_state
     set_app_state(app.state)
@@ -552,6 +563,18 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception) as e:
             if not isinstance(e, asyncio.CancelledError):
                 logger.warning(f"library_watcher shutdown failed: {e}")
+
+    # Stop the audio backfill loop. Cancelling cleanly never throws —
+    # any in-flight transcription gets a chance to finish on the
+    # whisper client's own timeout (~120s default).
+    backfill_task = getattr(app.state, "audio_backfill_task", None)
+    if backfill_task is not None and not backfill_task.done():
+        backfill_task.cancel()
+        try:
+            await backfill_task
+        except (asyncio.CancelledError, Exception) as e:
+            if not isinstance(e, asyncio.CancelledError):
+                logger.warning(f"audio_backfill shutdown failed: {e}")
 
     # Stop cron runner before task runner (cron submits to task runner)
     if getattr(app.state, "cron_runner", None) is not None:
