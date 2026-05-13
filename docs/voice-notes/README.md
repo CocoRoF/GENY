@@ -10,7 +10,7 @@ Geny 의 user opsidian / 화이트보드 위에 **음성 녹음 → 자동 전�
 
 ## 핵심 아이디어 한 페이지
 
-1. **신규 컨테이너 `geny-whisper-stt`** — vLLM 으로 `openai/whisper-large-v3` 서빙. OmniVoice 와 동일한 패턴 (`--profile stt-local`, GPU 1장, bridge network).
+1. **신규 컨테이너 `geny-whisper-stt`** — vLLM 으로 `openai/whisper-large-v3` 서빙. OmniVoice 와 **같은 `--profile audio-local`** 로 묶임 (TTS + STT 동시 활성화). GPU 분할: omnivoice 0.50 + whisper 0.35 = **합 0.85** (RTX 5070 12 GB 의 약 10 GB 사용, 15% 여유).
 2. **백엔드 STT client** — 기존 OmniVoice TTS engine 의 패턴을 미러 (`httpx.AsyncClient` 풀, 자체 설정 모듈, fail-safe).
 3. **화이트보드 후크 재사용** — P0 의 `CaptureType="audio"` enum + P4 의 `register_post_capture_hook("audio", ...)` 가 이미 비어있는 슬롯 → 거기에 **whisper transcribe hook** 을 끼움.
 4. **프론트엔드 캡처 소스 신규** — `microphone_record` (P3 의 `screen_capture` / `clipboard_paste` 와 동일 등록 패턴) — `MediaRecorder` 로 녹음 → `POST /api/opsidian/captures/upload` 그대로 사용.
@@ -23,7 +23,7 @@ Geny 의 user opsidian / 화이트보드 위에 **음성 녹음 → 자동 전�
 
 | 영역 | 변경 |
 |---|---|
-| `docker-compose.prod.yml` / `dev.yml` | 신규 `whisper-stt` service (profile: `stt-local`, GPU reservation) |
+| `docker-compose.{prod,dev,}.yml` | 신규 `whisper-stt` service (profile: `audio-local` — omnivoice 와 동일 profile, GPU reservation) |
 | `backend/service/config/sub_config/stt/` | 신규 dir — `whisper_config.py` (api_url default `http://whisper-stt:8001`) |
 | `backend/service/stt/whisper_client.py` | 신규 — httpx 비동기 클라이언트 (transcribe → text) |
 | `backend/service/whiteboard/post_capture_hook.py` | `register_post_capture_hook("audio", _transcribe_audio_hook)` 한 줄 |
@@ -80,7 +80,7 @@ Geny 의 user opsidian / 화이트보드 위에 **음성 녹음 → 자동 전�
 서버 (2222, /home/hrjang/docker_web/Geny):
   git pull origin main
   sudo docker compose -f docker-compose.prod.yml \
-       --profile tts-local --profile stt-local \
+       --profile audio-local \
        up -d --build
        ↓
 검증:
