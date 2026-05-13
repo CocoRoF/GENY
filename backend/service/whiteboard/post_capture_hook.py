@@ -183,10 +183,87 @@ async def _describe_image_hook(
     return result
 
 
+async def _transcribe_audio_hook(
+    event: CaptureEvent, draft_note_filename: str
+) -> Optional[Dict[str, Any]]:
+    """Default hook for ``audio`` captures.
+
+    Pulls the attachment bytes from the user's Opsidian vault, sends
+    them to the in-cluster ``geny-whisper-stt`` container, and prepends
+    the transcript as a quoted block at the top of the draft note's
+    body. The WhisperClient is best-effort — a service outage encodes
+    as ``source != "whisper"`` and we silently no-op (audit log only).
+
+    Idempotent: re-running on the same note skips the body update when
+    an identical transcript block is already present (matches the
+    ``_describe_image_hook`` shape).
+    """
+    if not event.payload.attachment_path:
+        return None
+    try:
+        from service.stt.whisper_client import get_whisper_client
+    except Exception:  # noqa: BLE001
+        logger.debug("whisper_client unavailable", exc_info=True)
+        return None
+    try:
+        from service.memory.user_opsidian import get_user_opsidian_manager
+    except Exception:  # noqa: BLE001
+        return None
+
+    mgr = get_user_opsidian_manager(event.user_id)
+    try:
+        audio_bytes = mgr.read_attachment(event.payload.attachment_path)
+    except Exception:  # noqa: BLE001
+        logger.warning("transcribe hook: read_attachment failed", exc_info=True)
+        return None
+    if not audio_bytes:
+        return None
+
+    try:
+        result = await get_whisper_client().atranscribe(
+            audio_bytes,
+            filename=event.payload.attachment_path,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("transcribe hook: atranscribe raised", exc_info=True)
+        return None
+
+    audit = {
+        "source": result.source,
+        "language": result.language,
+        "duration_seconds": result.duration_seconds,
+        "error": result.error,
+        "text_len": len(result.text or ""),
+    }
+    if not result.is_ok():
+        # Service unavailable / disabled / empty text — leave the note
+        # body untouched. The capture itself already landed; the agent
+        # can still see the attachment and play it back.
+        return audit
+
+    note = mgr.read_note(draft_note_filename)
+    if not note:
+        return audit
+    body = str(note.get("body") or "")
+    lang = result.language or "auto"
+    block = f"> **Transcript ({lang}):** {result.text.strip()}\n\n"
+    if block.strip() in body:
+        # Already added — idempotent re-runs.
+        audit["skipped"] = "already_present"
+        return audit
+    new_body = block + body
+    try:
+        mgr.update_note(draft_note_filename, body=new_body)
+    except Exception:  # noqa: BLE001
+        logger.debug("transcribe hook: note update failed", exc_info=True)
+    return audit
+
+
 def register_default_hooks() -> None:
-    """Register the built-in P4 hooks. Idempotent."""
+    """Register the built-in P4 / voice-notes hooks. Idempotent."""
     register_post_capture_hook("image", _describe_image_hook)
     register_post_capture_hook("screenshot", _describe_image_hook)
+    register_post_capture_hook("audio", _transcribe_audio_hook)
 
 
 # Auto-register on first import — keeps the call-site clean.
