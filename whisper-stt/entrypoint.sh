@@ -19,12 +19,20 @@ MODEL="${WHISPER_MODEL:-openai/whisper-large-v3}"
 PORT="${WHISPER_PORT:-8001}"
 GPU_MEM_FRACTION="${WHISPER_GPU_MEMORY_FRACTION:-0.35}"
 DTYPE="${WHISPER_DTYPE:-auto}"
+# CLI flag in vllm 0.20.x (the env var of the same name was removed
+# — it now warns "Unknown vLLM environment variable detected").
+# TRITON_ATTN compiles its kernel JIT, so it doesn't depend on a
+# precompiled FA2 binary that would need an sm_120 build for the
+# RTX 5070. FLASH_ATTN / FLASHINFER can be tried via this env once
+# vllm publishes Blackwell-ready binaries.
+ATTENTION_BACKEND="${WHISPER_ATTENTION_BACKEND:-TRITON_ATTN}"
 
 echo "[whisper-stt] starting vLLM"
 echo "[whisper-stt]   model    = ${MODEL}"
 echo "[whisper-stt]   port     = ${PORT}"
 echo "[whisper-stt]   gpu_frac = ${GPU_MEM_FRACTION}"
 echo "[whisper-stt]   dtype    = ${DTYPE}"
+echo "[whisper-stt]   attn     = ${ATTENTION_BACKEND}"
 
 # `--task transcription` was the explicit selector under vllm 0.7/0.8.
 # vllm ≥ 0.10 introspects the model architecture and routes Whisper
@@ -48,4 +56,5 @@ exec vllm serve "${MODEL}" \
     --gpu-memory-utilization "${GPU_MEM_FRACTION}" \
     --dtype "${DTYPE}" \
     --max-model-len 448 \
-    --enforce-eager
+    --enforce-eager \
+    --attention-backend "${ATTENTION_BACKEND}"
