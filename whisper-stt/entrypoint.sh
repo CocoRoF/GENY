@@ -6,6 +6,12 @@
 #  task for openai/whisper-large-v3. The model loads lazily on the
 #  first request, so the healthcheck `start_period` in docker-compose
 #  is generous (600s) to absorb the first-time HF download.
+#
+#  Uses the `vllm serve` CLI shipped by the upstream image (in
+#  /usr/local/bin/vllm). The earlier `python -m
+#  vllm.entrypoints.openai.api_server` invocation broke on the
+#  upstream image because it only ships `python3`, not a `python`
+#  shim, and `exec python` aborts with `not found`.
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -20,8 +26,7 @@ echo "[whisper-stt]   port     = ${PORT}"
 echo "[whisper-stt]   gpu_frac = ${GPU_MEM_FRACTION}"
 echo "[whisper-stt]   dtype    = ${DTYPE}"
 
-exec python -m vllm.entrypoints.openai.api_server \
-    --model "${MODEL}" \
+exec vllm serve "${MODEL}" \
     --host 0.0.0.0 \
     --port "${PORT}" \
     --task transcription \
