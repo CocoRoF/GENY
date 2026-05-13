@@ -26,10 +26,15 @@ echo "[whisper-stt]   port     = ${PORT}"
 echo "[whisper-stt]   gpu_frac = ${GPU_MEM_FRACTION}"
 echo "[whisper-stt]   dtype    = ${DTYPE}"
 
+# `--task transcription` was the explicit selector under vllm 0.7/0.8.
+# vllm ≥ 0.10 introspects the model architecture and routes Whisper
+# automatically to the audio/transcription path — the CLI rejects
+# the flag now (`unrecognized arguments: --task transcription`).
+# Loading the model alone is enough; the OpenAI-compatible
+# /v1/audio/transcriptions endpoint comes up for free.
 exec vllm serve "${MODEL}" \
     --host 0.0.0.0 \
     --port "${PORT}" \
-    --task transcription \
     --gpu-memory-utilization "${GPU_MEM_FRACTION}" \
     --dtype "${DTYPE}" \
     --max-model-len 448
