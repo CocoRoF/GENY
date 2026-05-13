@@ -69,6 +69,16 @@ _VTUBER_CUSTOM_TOOL_WHITELIST = frozenset(
         "blog_agent_cancel",
         "blog_agent_list_posts",
         "blog_agent_get_post",
+        # Whiteboard analysis tools — backing the bundled VTuber-only
+        # skills `whiteboard-react-to-share` and `whiteboard-voice-notes`.
+        # ``whiteboard_describe`` + ``whiteboard_extract_links`` were
+        # latent (skills referenced them but they weren't in the roster);
+        # ``whiteboard_transcribe`` ships in the voice-notes feature
+        # (docs/voice-notes/02_PLAN.md W4) as the retry surface for the
+        # auto-transcribe PostCaptureHook from W2.
+        "whiteboard_describe",
+        "whiteboard_extract_links",
+        "whiteboard_transcribe",
     }
 )
 

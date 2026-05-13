@@ -32,6 +32,11 @@ _EXPECTED_BUNDLED = {
     "summarize_session",
     "search_web_and_summarize",
     "draft_pr",
+    "blog_write",
+    "whiteboard_search",
+    "whiteboard_react_to_share",
+    "whiteboard_curate_suggest",
+    "whiteboard_voice_notes",
 }
 
 
