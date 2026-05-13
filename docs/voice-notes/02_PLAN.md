@@ -31,7 +31,7 @@ backend 코드가 `await client.transcribe(audio_bytes)` 호출하면 vLLM Whisp
 - `whisper-stt/Dockerfile` (신규)
 - `whisper-stt/entrypoint.sh` (신규)
 - `docker-compose.prod.yml` + `docker-compose.dev.yml` 양쪽에 `whisper-stt` service 추가
-- `--profile stt-local` 게이트
+- `--profile audio-local` 게이트
 - `geny-whisper-cache-prod` / `-dev` volume
 
 **W1.2 — Backend config**
@@ -64,7 +64,7 @@ backend 코드가 `await client.transcribe(audio_bytes)` 호출하면 vLLM Whisp
 - AST validate + lint
 
 ### Definition of Done
-- [ ] 서버에서 `--profile stt-local` 로 띄우면 `whisper-stt` 컨테이너 healthy
+- [ ] 서버에서 `--profile audio-local` 로 띄우면 `whisper-stt` 컨테이너 healthy
 - [ ] backend 의 `curl POST /api/stt/transcribe` with sample audio → 정상 텍스트 받음
 - [ ] STT 컨테이너 끄고 같은 endpoint 호출 → 200 + `{"text":"", "source":"unavailable", "error":"..."}` (5xx 안 됨)
 - [ ] 단위 테스트 통과
@@ -195,7 +195,7 @@ VTuber 가 인박스에 새 audio 노트가 떨어지면 (e.g. SpotlightContextB
 cd /home/hrjang/docker_web/Geny
 git pull origin main
 sudo docker compose -f docker-compose.prod.yml \
-    --profile tts-local --profile stt-local \
+    --profile audio-local \
     up -d --build
 
 # 컨테이너 healthy 확인
@@ -236,7 +236,7 @@ asyncio.run(main())
    - PR 생성 + merge
 2. **서버** (2222, /home/hrjang/docker_web/Geny):
    - `git pull origin main`
-   - W1 이 머지된 후 처음으로 `--profile stt-local` 추가하여 컨테이너 띄움
+   - W1 이 머지된 후 처음으로 `--profile audio-local` 추가하여 컨테이너 띄움
    - 그 다음부터는 일반 `--build` 만 (whisper image 캐시됨)
 
 총 4 PR. 한 phase 마다 사용자가 서버에서 동작 확인 후 다음 phase 머지 가능 (안전).

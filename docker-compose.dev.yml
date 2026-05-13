@@ -2,14 +2,14 @@
 #  Geny — Docker Compose (Development / Full)
 #
 #  소스 코드가 바인드 마운트되어 로컬 편집이 컨테이너에 즉시 반영됩니다.
-#  TTS 로컬 엔진은 --profile tts-local 로 활성화할 수 있습니다.
+#  로컬 오디오 엔진 (TTS / STT) 은 --profile audio-local 로 활성화할 수 있습니다.
 #
 #  - Backend : uvicorn --reload (watchfiles 기반 hot reload)
 #  - Frontend: next dev (HMR / Fast Refresh)
 #
 #  Usage:
 #    docker compose -f docker-compose.dev.yml up --build
-#    docker compose -f docker-compose.dev.yml --profile tts-local up --build
+#    docker compose -f docker-compose.dev.yml --profile audio-local up --build
 #    docker compose -f docker-compose.dev.yml down
 #    docker compose -f docker-compose.dev.yml logs -f
 #
@@ -128,7 +128,7 @@ services:
   gpt-sovits:
     image: xxxxrt666/gpt-sovits:latest-cu126
     container_name: geny-gpt-sovits-dev
-    profiles: ["tts-local"]
+    profiles: ["audio-local"]
     init: true
     restart: unless-stopped
     working_dir: /workspace/GPT-SoVITS
@@ -172,7 +172,7 @@ services:
       dockerfile: Dockerfile
     image: geny-omnivoice:dev
     container_name: geny-omnivoice-dev
-    profiles: ["tts-local"]
+    profiles: ["audio-local"]
     init: true
     restart: unless-stopped
     ports:
@@ -262,6 +262,48 @@ services:
     networks:
       - geny-net-dev
 
+  # ── Whisper STT (dev variant of the prod service) ───────────────
+  # GPU split (RTX 5070, 12 GB):
+  #   omnivoice  → 0.50 (≈ 6 GB)
+  #   whisper    → 0.35 (≈ 4 GB)
+  #   total       0.85   (~10 GB)  — 15% headroom for stability
+  whisper-stt:
+    build:
+      context: ./whisper-stt
+      dockerfile: Dockerfile
+    image: geny-whisper-stt:dev
+    container_name: geny-whisper-stt-dev
+    profiles: ["audio-local"]
+    init: true
+    restart: unless-stopped
+    expose:
+      - "8001"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-openai/whisper-large-v3}
+      - WHISPER_PORT=${WHISPER_PORT:-8001}
+      - WHISPER_GPU_MEMORY_FRACTION=${WHISPER_GPU_MEMORY_FRACTION:-0.35}
+      - WHISPER_DTYPE=${WHISPER_DTYPE:-auto}
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN:-}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
+    volumes:
+      - geny-whisper-cache-dev:/cache/huggingface
+    shm_size: 4G
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    networks:
+      - geny-net-dev
+
 networks:
   geny-net-dev:
     driver: bridge
@@ -270,6 +312,8 @@ volumes:
   geny-pgdata-dev:
     driver: local
   geny-omnivoice-models-dev:
+    driver: local
+  geny-whisper-cache-dev:
     driver: local
   # Shared between avatar-editor (rw) and backend (ro) — dev variant.
   geny-baked-exports-dev:

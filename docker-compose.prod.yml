@@ -2,7 +2,7 @@
 #  Geny — Docker Compose (Production with Nginx Reverse Proxy / Full)
 #
 #  도메인을 연결하여 단일 포트(80)로 backend / frontend를 라우팅합니다.
-#  TTS 로컬 엔진은 --profile tts-local 로 활성화할 수 있습니다.
+#  로컬 오디오 엔진 (TTS / STT) 은 --profile audio-local 로 활성화할 수 있습니다.
 #
 #    /api/*            → backend:8000
 #    /health           → backend:8000
@@ -11,7 +11,7 @@
 #
 #  Usage:
 #    docker compose -f docker-compose.prod.yml up --build -d
-#    docker compose -f docker-compose.prod.yml --profile tts-local up --build -d
+#    docker compose -f docker-compose.prod.yml --profile audio-local up --build -d
 #    docker compose -f docker-compose.prod.yml down
 #    docker compose -f docker-compose.prod.yml logs -f
 #
@@ -155,7 +155,7 @@ services:
   # gpt-sovits:
   #   image: xxxxrt666/gpt-sovits:latest-cu126
   #   container_name: geny-gpt-sovits-prod
-  #   profiles: ["tts-local"]
+  #   profiles: ["audio-local"]
   #   init: true
   #   restart: unless-stopped
   #   working_dir: /workspace/GPT-SoVITS
@@ -206,7 +206,7 @@ services:
       dockerfile: Dockerfile
     image: geny-omnivoice:prod
     container_name: geny-omnivoice-prod
-    profiles: ["tts-local"]
+    profiles: ["audio-local"]
     init: true
     restart: unless-stopped
     expose:
@@ -301,6 +301,59 @@ services:
     networks:
       - geny-net-prod
 
+  # ── Whisper STT (Optional — vLLM 기반 음성 전사, GPU 필요) ────────
+  # geny-monorepo 내 whisper-stt/ 에서 빌드. 외부 노출 없이 backend 가
+  # http://whisper-stt:8001 로 호출. vLLM 의 OpenAI 호환
+  # /v1/audio/transcriptions endpoint 를 그대로 사용.
+  #
+  # GPU 분할 (RTX 5070 12GB):
+  #   omnivoice  → 0.50 (≈ 6 GB)
+  #   whisper    → 0.35 (≈ 4 GB)
+  #   ────────────────────
+  #   합계         0.85  (≈ 10 GB)  ← 15% 여유로 OOM 방지
+  whisper-stt:
+    build:
+      context: ./whisper-stt
+      dockerfile: Dockerfile
+    image: geny-whisper-stt:prod
+    container_name: geny-whisper-stt-prod
+    profiles: ["audio-local"]
+    init: true
+    restart: unless-stopped
+    expose:
+      - "8001"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-openai/whisper-large-v3}
+      - WHISPER_PORT=${WHISPER_PORT:-8001}
+      # vLLM 의 GPU 메모리 점유율. OmniVoice 와 같은 GPU 위에서
+      # 공존 가능하도록 보수적 분할.
+      - WHISPER_GPU_MEMORY_FRACTION=${WHISPER_GPU_MEMORY_FRACTION:-0.35}
+      - WHISPER_DTYPE=${WHISPER_DTYPE:-auto}
+      # HuggingFace 모델 다운로드 (public 모델이라 토큰 없이 가능,
+      # rate-limit 회피용으로만 옵션 제공).
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN:-}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
+    volumes:
+      - geny-whisper-cache-prod:/cache/huggingface
+    shm_size: 4G
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # 첫 부팅: 모델 다운로드 (~3 GB) + vLLM 로드. 이후 부팅은
+      # 캐시 hit 으로 ~30 s. 충분히 크게.
+      start_period: 600s
+    networks:
+      - geny-net-prod
+
 
 networks:
   geny-net-prod:
@@ -316,6 +369,9 @@ volumes:
   geny-uploads-prod:
     driver: local
   geny-omnivoice-models-prod:
+    driver: local
+  # Whisper 모델 가중치 영구 캐시. 첫 부팅 시 ~3 GB 다운로드.
+  geny-whisper-cache-prod:
     driver: local
   # Shared between avatar-editor (rw) and backend (ro) — prod variant.
   geny-baked-exports-prod:

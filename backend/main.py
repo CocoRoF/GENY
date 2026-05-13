@@ -68,6 +68,7 @@ from controller.auth_controller import router as auth_router
 from controller.user_opsidian_controller import router as user_opsidian_router
 from controller.curated_knowledge_controller import router as curated_knowledge_router
 from controller.whiteboard_controller import router as whiteboard_router  # whiteboard P0
+from controller.stt_controller import router as stt_router  # voice-notes W1
 from routers.playground2d import router as playground2d_router
 from ws.execute_stream import router as ws_execute_router
 from ws.chat_stream import router as ws_chat_router
@@ -713,6 +714,7 @@ app.include_router(tts_router)  # TTS (Text-to-Speech) API
 app.include_router(user_opsidian_router)  # User Opsidian (personal knowledge vault)
 app.include_router(curated_knowledge_router)  # Curated Knowledge (refined knowledge layer)
 app.include_router(whiteboard_router)  # Whiteboard captures + view ledger (P0)
+app.include_router(stt_router)  # Whisper STT diagnostics + on-demand transcribe (voice-notes W1)
 app.include_router(playground2d_router)  # Playground 2D world layout & state
 app.include_router(ws_execute_router)   # WebSocket: agent execution streaming
 app.include_router(ws_chat_router)      # WebSocket: chat room event streaming

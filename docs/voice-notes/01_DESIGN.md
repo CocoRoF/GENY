@@ -66,7 +66,7 @@ set -euo pipefail
 
 MODEL="${WHISPER_MODEL:-openai/whisper-large-v3}"
 PORT="${WHISPER_PORT:-8001}"
-GPU_MEM_FRACTION="${WHISPER_GPU_MEM:-0.45}"  # OmniVoice 와 공유 GPU
+GPU_MEM_FRACTION="${WHISPER_GPU_MEMORY_FRACTION:-0.35}"  # OmniVoice (0.50) 와 공유 — 합 0.85
 
 exec python -m vllm.entrypoints.openai.api_server \
     --model "$MODEL" \
@@ -78,7 +78,7 @@ exec python -m vllm.entrypoints.openai.api_server \
     --dtype auto
 ```
 
-- `gpu-memory-utilization 0.45` — OmniVoice 와 같은 GPU 위에서 충돌 안 나도록 절반 미만으로 보수적 할당. 환경 변수로 override 가능.
+- `gpu-memory-utilization 0.35` — RTX 5070 (12 GB) 에서 OmniVoice 의 0.50 (≈ 6 GB) 와 같이 운영하면 **합 0.85** (≈ 10 GB) 로 15% 헤드룸 확보. 환경 변수 `WHISPER_GPU_MEMORY_FRACTION` 로 override.
 - `--task transcription` 이 vLLM 의 Whisper 전용 path 를 활성화 (멀티모달 path 와 다름).
 - `--max-model-len 448` — Whisper 의 30s 청크 token cap.
 
@@ -94,7 +94,7 @@ services:
       dockerfile: Dockerfile
     image: geny-whisper-stt:latest
     container_name: geny-whisper-stt-prod
-    profiles: ["stt-local"]
+    profiles: ["audio-local"]
     networks:
       - geny-net-prod
     environment:
@@ -348,7 +348,7 @@ async function grabVoiceRecording(ctx: CaptureContext) {
 
 | 시나리오 | 동작 |
 |---|---|
-| `whisper-stt` 컨테이너 다운 (`stt-local` profile 안 씀) | `WhisperConfig.enabled=False` 또는 connect 실패 → transcript 빈 문자열, audio 자체는 inbox 에 저장됨 |
+| `whisper-stt` 컨테이너 다운 (`audio-local` profile 안 씀) | `WhisperConfig.enabled=False` 또는 connect 실패 → transcript 빈 문자열, audio 자체는 inbox 에 저장됨 |
 | Whisper 가 5초 내 응답 X | timeout 후 빈 transcript. 사용자가 `/whiteboard-transcribe` skill 또는 도구로 재시도 가능 |
 | Audio 파일이 손상됨 | Whisper 가 에러 → `error` 필드만 채워서 반환 → hook 이 노트에 transcript 추가 안 함 |
 | 마이크 권한 거부 | frontend 가 toast 로 에러 표시. Inbox 카드 생성 X |
