@@ -375,6 +375,48 @@ def test_auto_spotlight_defence_in_depth_rejects_filler_excerpt(
     assert fired == []
 
 
+def test_auto_spotlight_uses_short_ttl_for_stt_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V2 STT-stream spotlight items must decay fast (3 min) so that
+    an utterance from 20 minutes ago doesn't keep rendering into the
+    persona's [Spotlight Context] block as if it just arrived."""
+    from datetime import datetime, timedelta, timezone
+
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+    from service.whiteboard.spotlight_store import get_spotlight_store
+
+    _stub_dispatch_post_capture(monkeypatch)
+    _stub_excerpt_from_note(
+        monkeypatch, title="Audio memo", excerpt="> **Transcript (ko):** 안녕",
+    )
+    _stub_user_shared_trigger(monkeypatch)
+
+    before = datetime.now(timezone.utc)
+    _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(source="vtuber_stt_stream"),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+    after = datetime.now(timezone.utc)
+
+    items = get_spotlight_store().list(
+        user_id="alice", session_id="sess-1",
+    )
+    assert len(items) == 1
+    item = items[0]
+    # Expected window: [before + 3min, after + 3min]
+    assert item.expires_at is not None
+    delta = item.expires_at - before
+    assert timedelta(minutes=2, seconds=55) <= delta <= timedelta(minutes=3, seconds=10), (
+        f"expected ~3 min TTL for STT stream, got {delta}"
+    )
+    assert (item.expires_at - after) <= timedelta(minutes=3, seconds=5)
+
+
 def test_auto_spotlight_records_source_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
