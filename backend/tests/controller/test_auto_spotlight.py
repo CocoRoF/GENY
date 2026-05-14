@@ -110,12 +110,16 @@ def test_auto_spotlight_awaits_hook_before_reading_note(
     calls = _stub_dispatch_post_capture(monkeypatch)
 
     # Override the dispatch stub to log into the shared order list.
+    # Return a successful audit (whisper + non-empty text) so the
+    # auto-spotlight flow proceeds to the excerpt read — the only
+    # thing we're asserting here is *ordering*, not the prune
+    # semantics added later.
     from service.whiteboard import post_capture_hook as pch
 
     async def _hook(event, _filename):
         order.append("hook")
         calls["calls"].append(event.capture_id)
-        return None
+        return {"source": "whisper", "text_len": 12}
 
     monkeypatch.setattr(pch, "dispatch_post_capture", _hook)
 
@@ -176,22 +180,21 @@ def test_auto_spotlight_returns_none_without_session(
     assert fired == []  # no trigger
 
 
-def test_auto_spotlight_recovers_from_hook_failure(
+def test_auto_spotlight_skips_when_hook_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A raising hook (e.g. Whisper service blip) must not block the
-    spotlight — the user can still see *something* on the VTuber
-    side, just without the transcript."""
+    """A raising hook (e.g. Whisper service blip mid-dispatch) means
+    we have no transcript guarantee — skip the trigger rather than
+    bother the VTuber with a no-content "what did you say?" reply.
+
+    Previously this flow fell back to a no-transcript spotlight,
+    but the user's feedback (mid-2026-05-14) is that empty / noise
+    captures should never reach the persona.
+    """
     from controller.whiteboard_controller import _auto_spotlight_for_event
 
     _stub_dispatch_post_capture(
         monkeypatch, side_effect=RuntimeError("whisper down")
-    )
-    _stub_excerpt_from_note(
-        monkeypatch,
-        title="Audio memo 2026-05-13",
-        excerpt="![[voice.webm]]",
-        attachments=["voice.webm"],
     )
     fired = _stub_user_shared_trigger(monkeypatch)
 
@@ -204,8 +207,172 @@ def test_auto_spotlight_recovers_from_hook_failure(
         )
     )
 
-    assert item_id is not None
-    assert len(fired) == 1
+    assert item_id is None
+    assert fired == []
+
+
+def test_auto_spotlight_skips_when_hook_pruned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the post-capture hook pruned the note as noise, we MUST
+    NOT create a spotlight item — the VTuber should never react to
+    a deleted "uh" / "음" / silence capture."""
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+    from service.whiteboard.spotlight_store import get_spotlight_store
+
+    _stub_dispatch_post_capture(
+        monkeypatch,
+        side_effect={
+            "source": "whisper",
+            "language": "en",
+            "text_len": 2,
+            "pruned": True,
+            "prune_reason": "noise_transcript",
+        },
+    )
+    excerpt_called = {"hit": False}
+
+    def _stub(_u, _f, _k):
+        excerpt_called["hit"] = True
+        return ("t", "x", [])
+
+    from controller import whiteboard_controller as wc
+    monkeypatch.setattr(wc, "_excerpt_from_note", _stub)
+    fired = _stub_user_shared_trigger(monkeypatch)
+
+    item_id = _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+
+    assert item_id is None
+    assert excerpt_called["hit"] is False
+    assert fired == []
+    assert get_spotlight_store().list(
+        user_id="alice", session_id="sess-1",
+    ) == []
+
+
+def test_auto_spotlight_skips_when_whisper_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``source != "whisper"`` (unavailable / disabled / not_found)
+    means there's no transcript for the VTuber to react to — skip."""
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+
+    _stub_dispatch_post_capture(
+        monkeypatch,
+        side_effect={
+            "source": "unavailable",
+            "text_len": 0,
+            "error": "connect refused",
+        },
+    )
+    fired = _stub_user_shared_trigger(monkeypatch)
+
+    item_id = _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+
+    assert item_id is None
+    assert fired == []
+
+
+def test_auto_spotlight_skips_on_empty_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whisper sometimes returns ``source="whisper"`` with an empty
+    string (silence). Don't bother the VTuber with a blank note."""
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+
+    _stub_dispatch_post_capture(
+        monkeypatch,
+        side_effect={"source": "whisper", "text_len": 0},
+    )
+    fired = _stub_user_shared_trigger(monkeypatch)
+
+    item_id = _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+
+    assert item_id is None
+    assert fired == []
+
+
+def test_auto_spotlight_skips_when_dispatch_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hook not registered or dispatch swallowed an error → returns
+    None. Without an audit signal we don't know the transcript
+    quality, so skip rather than fire on an unknown."""
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+    from service.whiteboard import post_capture_hook as pch
+
+    async def _stub(_e, _f):
+        return None
+
+    monkeypatch.setattr(pch, "dispatch_post_capture", _stub)
+    fired = _stub_user_shared_trigger(monkeypatch)
+
+    item_id = _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+
+    assert item_id is None
+    assert fired == []
+
+
+def test_auto_spotlight_defence_in_depth_rejects_filler_excerpt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even when the audit reported ``text_len > 0``, the excerpt
+    re-read happens AFTER the hook so it should still trip the noise
+    check on the actual body content (e.g. a "uh" transcript that
+    somehow slipped past the hook's prune)."""
+    from controller.whiteboard_controller import _auto_spotlight_for_event
+
+    _stub_dispatch_post_capture(
+        monkeypatch,
+        side_effect={"source": "whisper", "text_len": 2},
+    )
+    from controller import whiteboard_controller as wc
+
+    def _stub(_u, _f, _k):
+        return ("Audio memo", "> **Transcript (auto):** uh\n\n", [])
+
+    monkeypatch.setattr(wc, "_excerpt_from_note", _stub)
+    fired = _stub_user_shared_trigger(monkeypatch)
+
+    item_id = _run(
+        _auto_spotlight_for_event(
+            username="alice",
+            session_id="sess-1",
+            event=_make_event(),
+            draft_note_filename="inbox/audio-1.md",
+        )
+    )
+
+    assert item_id is None
+    assert fired == []
 
 
 def test_auto_spotlight_records_source_metadata(

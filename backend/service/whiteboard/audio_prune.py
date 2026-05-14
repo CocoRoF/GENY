@@ -52,6 +52,49 @@ _MEANINGFUL_CHAR_RE = re.compile(
 )
 
 
+# Common filler / hesitation tokens that Whisper sometimes pops out
+# when the audio is non-speech (cough, mouse click, room hum). The
+# meaningful-char count alone won't catch "uh" (2 chars) or "음"
+# (1 char — Korean would already prune that one) but the user sees
+# them as noise either way. Match is case-insensitive after we strip
+# trailing/leading punctuation.
+_FILLER_TOKENS: frozenset[str] = frozenset({
+    # English
+    "uh", "uhh", "uhhh", "um", "umm", "ummm", "uhm",
+    "ah", "ahh", "ahhh", "oh", "ohh", "ohhh",
+    "mm", "mmm", "mmmm", "hm", "hmm", "hmmm",
+    "huh", "duh", "meh", "yo",
+    "er", "err", "erm",
+    # Korean (Hangul filler vocalizations)
+    "어", "어어", "음", "음음", "흠", "흐음",
+    "아", "아아", "오", "오오", "에", "에이",
+    "응", "엉", "헐",
+    # Japanese fillers
+    "うん", "ううん", "あー", "あ", "えー", "えーと", "んー",
+})
+
+
+def _normalize_for_filler_check(text: str) -> str:
+    """Strip surrounding punctuation/whitespace + lowercase so
+    ``"Uh."``, ``"uh ?"``, ``"  uh  "`` all collapse to ``"uh"``.
+
+    Keeps inner characters intact so ``"uh huh"`` (two tokens) doesn't
+    collapse to ``"uhhuh"`` and accidentally match a filler.
+    """
+    cleaned = re.sub(r"^[\s\.,!?;:\-—…\"']+", "", text)
+    cleaned = re.sub(r"[\s\.,!?;:\-—…\"']+$", "", cleaned)
+    return cleaned.lower()
+
+
+def _is_filler_only(text: str) -> bool:
+    """True when the entire stripped transcript is a single filler
+    token (case-insensitive, surrounding punctuation ignored)."""
+    normalized = _normalize_for_filler_check(text)
+    if not normalized:
+        return False
+    return normalized in _FILLER_TOKENS
+
+
 # Tunables — kept module-level so a future config knob can swap them
 # without touching the predicate signature.
 MIN_MEANINGFUL_CHARS = 2
@@ -64,16 +107,26 @@ def is_noise_transcript(
 ) -> bool:
     """Return True when the transcript should be treated as noise.
 
-    Conservative: returns True only when we're confident the user
-    didn't say anything substantive. False positives ( "real but
-    short" → pruned) are worse than false negatives ( "noise but
-    kept" → user sees a stray inbox note), so the thresholds err
-    toward keeping the note.
+    Conservative — three independent signals trigger the verdict:
+
+      1. Empty / whitespace-only / fewer than ``MIN_MEANINGFUL_CHARS``
+         word-or-CJK characters. Catches ``"-"`` / ``"..."`` / ``"."``
+         style Whisper fallbacks.
+      2. The full stripped text matches a known filler token
+         (``"uh"`` / ``"um"`` / ``"hmm"`` / ``"어"`` / ``"음"`` etc.).
+         Catches the case Whisper does recognise non-speech as a
+         hesitation marker — the user still sees these as noise.
+      3. Audio duration was measured AND it's under
+         ``MIN_DURATION_SECONDS``. Sub-400 ms clips on the VAD
+         barely contain anything; even with a meaningful transcript
+         they're almost always misfires.
     """
     if text is None:
         return True
     stripped = text.strip()
     if not stripped:
+        return True
+    if _is_filler_only(stripped):
         return True
     meaningful = _MEANINGFUL_CHAR_RE.findall(stripped)
     if len(meaningful) < MIN_MEANINGFUL_CHARS:
