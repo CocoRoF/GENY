@@ -78,6 +78,10 @@ services:
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./backend:/app
+      # Persistent agent storage root — see the matching block in
+      # docker-compose.prod.yml. Without this every ``docker compose
+      # up --build backend`` wipes user notes / audio captures.
+      - geny-agent-sessions-dev:/data/geny_agent_sessions
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-dev:/data/baked-imports
@@ -316,6 +320,9 @@ volumes:
   geny-omnivoice-models-dev:
     driver: local
   geny-whisper-cache-dev:
+    driver: local
+  # Backend storage root — see matching block in docker-compose.prod.yml.
+  geny-agent-sessions-dev:
     driver: local
   # Shared between avatar-editor (rw) and backend (ro) — dev variant.
   geny-baked-exports-dev:

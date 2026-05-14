@@ -89,6 +89,16 @@ services:
       # Chat attachment uploads (cycle 20260424_3 PR-1) — without a named
       # volume here every container restart wiped user-uploaded images.
       - geny-uploads-prod:/app/static/uploads
+      # Geny agent storage root — holds every session's chat history,
+      # plus the per-user Opsidian vaults (_user_opsidian/<user>/...)
+      # with their notes, _attachments/, and _captures.jsonl. Without
+      # this volume the entire backend "memory" — all user notes, all
+      # audio captures, all transcripts — lives on the container's
+      # writable layer and gets wiped on every ``docker compose up
+      # --build backend``. Discovered 2026-05-14 when 13 inbox audio
+      # memos vanished after a routine backend rebuild despite
+      # ``GENY_AGENT_STORAGE_ROOT`` being set in the env block above.
+      - geny-agent-sessions-prod:/data/geny_agent_sessions
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-prod:/data/baked-imports
@@ -376,6 +386,13 @@ volumes:
   geny-voices-prod:
     driver: local
   geny-uploads-prod:
+    driver: local
+  # Holds the backend storage root (``GENY_AGENT_STORAGE_ROOT`` →
+  # ``/data/geny_agent_sessions``). Includes every session's chat
+  # log, per-user Opsidian vault (notes + attachments + capture
+  # logs), and the agent memory provider's file backend. Mandatory
+  # for cross-rebuild persistence — see backend.volumes comment.
+  geny-agent-sessions-prod:
     driver: local
   geny-omnivoice-models-prod:
     driver: local
