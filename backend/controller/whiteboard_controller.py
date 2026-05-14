@@ -514,13 +514,22 @@ async def _auto_spotlight_for_event(
         logger.warning("auto_spotlight: store.add failed", exc_info=True)
         return None
 
+    # Trigger dispatch is debounced per session so a burst of VAD
+    # utterances ("안녕 ", "잠깐만 ", "방금 그건 …") in 1-second
+    # intervals produces ONE coalesced ``[USER_SHARED]`` execution
+    # instead of three. The persona still sees every individual
+    # utterance via the per-turn ``[Spotlight Context]`` block — the
+    # debouncer just collapses the *invitations* to react.
     try:
-        from service.whiteboard.user_shared_trigger import (
-            fire_user_shared_trigger_async,
+        from service.whiteboard.user_shared_burst import (
+            coalesce_user_shared_trigger,
         )
-        fire_user_shared_trigger_async(item)
+        await coalesce_user_shared_trigger(item)
     except Exception:  # noqa: BLE001
-        logger.debug("auto_spotlight: USER_SHARED dispatch failed", exc_info=True)
+        logger.debug(
+            "auto_spotlight: coalesced trigger dispatch failed",
+            exc_info=True,
+        )
 
     return item.item_id
 
