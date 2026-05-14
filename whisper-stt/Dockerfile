@@ -59,13 +59,19 @@ RUN apt-get update \
 # re-raises as ``ValueError: Invalid or unsupported audio file``
 # (HTTP 400 to the caller, blank transcript on the inbox note).
 #
-# Installing the ``av`` (pyav) package alone is enough — vLLM only
-# needs the pyav fallback path live, not the rest of the
-# ``vllm[audio]`` extra (librosa / audioread aren't used by the
-# transcription endpoint and would bloat the image). Diagnosed
-# against prod webm samples that ``ffprobe`` and ``ffmpeg`` decode
-# fine — the bytes are valid, the decoder was missing.
-RUN pip install --no-cache-dir "av>=12.0,<15.0"
+# We force ``--only-binary :all:`` so pip pulls the manylinux wheel
+# (bundled ffmpeg libraries) instead of trying a source build — the
+# vLLM base image doesn't ship pkg-config / ffmpeg dev headers, so a
+# source build trips with "No package 'libavformat' found". The
+# pre-built wheel works out of the box on the upstream image's
+# Python 3.12 x86_64 layer.
+#
+# Pinning to ``av`` alone (not the ``vllm[audio]`` extra) keeps the
+# image lean — librosa / audioread aren't used by the transcription
+# endpoint. Diagnosed against prod webm samples that ``ffprobe`` and
+# ``ffmpeg`` decode fine — the bytes are valid, the decoder was
+# missing.
+RUN pip install --no-cache-dir --only-binary :all: "av>=12.0"
 
 WORKDIR /app
 COPY entrypoint.sh /app/entrypoint.sh
