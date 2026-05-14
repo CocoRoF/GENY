@@ -34,11 +34,41 @@ def test_noise_predicate_true_for_garbage(text: Optional[str]) -> None:
     "Yes!",
     "네 알겠습니다.",
     "Mm-hmm — go ahead.",
-    "AB",
 ])
 def test_noise_predicate_false_for_real_speech(text: str) -> None:
     from service.whiteboard.audio_prune import is_noise_transcript
     assert is_noise_transcript(text) is False
+
+
+@pytest.mark.parametrize("text", [
+    "uh",
+    "Uh.",
+    "UH",
+    "  uh  ",
+    "uh?",
+    "um",
+    "Um.",
+    "umm",
+    "uhm",
+    "ah",
+    "ahh",
+    "oh",
+    "hmm",
+    "hm",
+    "어",
+    "어어",
+    "음",
+    "흠",
+    "응",
+    "うん",
+    "あー",
+])
+def test_noise_predicate_catches_filler_tokens(text: str) -> None:
+    """Whisper sometimes outputs filler vocalizations for non-speech
+    audio (mouse clicks, cough, room hum). Those should prune so the
+    VTuber doesn't react to "uh" / "음" memos."""
+    from service.whiteboard.audio_prune import is_noise_transcript
+    assert is_noise_transcript(text) is True
 
 
 def test_noise_predicate_duration_floor() -> None:

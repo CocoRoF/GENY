@@ -392,23 +392,59 @@ async def _auto_spotlight_for_event(
     audio + transcript reach the persona without the user clicking
     "Share with VTuber" between each sentence.
     """
-    # 1. Dispatch the hook synchronously. Returns the same audit
-    #    payload `dispatch_post_capture` produces; we don't use it
-    #    directly — the side-effect of prepending the transcript to
-    #    the draft note body is what we want.
+    # 1. Dispatch the hook synchronously. The audit dict returned
+    #    by ``dispatch_post_capture`` tells us:
+    #      * ``pruned=True``  → hook deleted the note as noise.
+    #      * ``source="whisper"`` + ``text_len>0`` → real transcript
+    #        landed on the note body.
+    #      * Anything else → Whisper failed / disabled / not_found
+    #        or hook ran into an error.
+    #    We use that signal directly to decide whether to fire the
+    #    VTuber trigger so the persona doesn't react to silence,
+    #    fillers, or whisper outages.
+    audit: Optional[dict] = None
     try:
         from service.whiteboard.post_capture_hook import (
             dispatch_post_capture,
         )
-        await dispatch_post_capture(event, draft_note_filename)
+        audit = await dispatch_post_capture(event, draft_note_filename)
     except Exception:  # noqa: BLE001
         logger.warning(
-            "auto_spotlight: hook dispatch raised; falling back to "
-            "no-transcript spotlight item",
+            "auto_spotlight: hook dispatch raised; treating as noise "
+            "and skipping VTuber trigger",
             exc_info=True,
         )
+        return None
 
-    # 2. Build a SpotlightItem from the (now-updated) note. The
+    # 2. Refuse to spotlight noise. The audit hook already pruned
+    #    obviously-bad captures (empty / single char / filler tokens
+    #    via ``is_noise_transcript``); we mirror that decision here
+    #    so the trigger layer never gets a chance to fire on a
+    #    deleted note OR on a still-silent-but-not-pruned one.
+    if audit is None:
+        # Hook unregistered or dispatch swallowed an exception → no
+        # transcript guarantee. Skip the trigger; the user can still
+        # share the audio manually if they want a reaction.
+        return None
+    if audit.get("pruned"):
+        # Note + attachment already deleted by the prune branch.
+        return None
+    if audit.get("source") != "whisper":
+        # source ∈ {"unavailable", "disabled", "not_found"} →
+        # nothing meaningful for the persona to react to.
+        return None
+    if not int(audit.get("text_len") or 0):
+        # Whisper succeeded but returned an empty string. Don't
+        # spotlight a blank ``![[voice.webm]]`` body.
+        return None
+
+    # No session → no agent to deliver USER_SHARED to. Persisting a
+    # spotlight item without one is harmless (TTL cleans it up), but
+    # we'd skip the trigger, so just bail with None.
+    if not session_id:
+        return None
+
+    # 3. Build a SpotlightItem from the (now-updated) note. The
     #    helper pulls title/excerpt/wikilinks the way share_to_spotlight
     #    does, so the excerpt picks up the freshly-prepended
     #    ``> **Transcript (lang):**`` block automatically.
@@ -420,11 +456,22 @@ async def _auto_spotlight_for_event(
         logger.debug("auto_spotlight: excerpt read failed", exc_info=True)
         return None
 
-    # No session → no agent to deliver USER_SHARED to. Persisting a
-    # spotlight item without one is harmless (TTL cleans it up), but
-    # we'd skip the trigger, so just bail with None.
-    if not session_id:
-        return None
+    # Defence-in-depth: even when the audit said the transcript was
+    # ok, re-run the noise predicate against the parsed excerpt. If
+    # the body is empty/filler we still bail before bothering the
+    # VTuber.
+    try:
+        from service.whiteboard.audio_prune import (
+            extract_existing_transcript,
+            is_noise_transcript,
+        )
+        sampled = extract_existing_transcript(excerpt) or excerpt
+        if is_noise_transcript(sampled):
+            return None
+    except Exception:  # noqa: BLE001
+        # The defence layer is optional — if the import path fails
+        # we still trust the audit's text_len > 0 signal above.
+        pass
 
     try:
         store = get_spotlight_store()
