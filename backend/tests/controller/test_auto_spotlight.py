@@ -77,13 +77,27 @@ def _stub_dispatch_post_capture(
 
 
 def _stub_user_shared_trigger(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Stub the trigger fire so we don't recursively launch real agents."""
+    """Stub the trigger fire so we don't recursively launch real agents.
+
+    Patches both the eager fire path (``fire_user_shared_trigger_async``)
+    AND the V2 STT-stream debounced path (``coalesce_user_shared_trigger``)
+    so the test sees a single recorded list either way. The auto-
+    spotlight endpoint switched from the eager path to the
+    coalescing path in feat/vtuber-stt-burst-coalesce — without the
+    second patch every test in this file would see ``fired == []``.
+    """
     from service.whiteboard import user_shared_trigger as ust
+    from service.whiteboard import user_shared_burst as usb
     fired: list = []
     monkeypatch.setattr(
         ust, "fire_user_shared_trigger_async",
         lambda item: fired.append(item),
     )
+
+    async def _coalesce_stub(item):
+        fired.append(item)
+
+    monkeypatch.setattr(usb, "coalesce_user_shared_trigger", _coalesce_stub)
     return fired
 
 
