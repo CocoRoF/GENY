@@ -241,6 +241,32 @@ async def _transcribe_audio_hook(
         # can still see the attachment and play it back.
         return audit
 
+    # Auto-prune noise from the VTuber STT stream BEFORE writing a
+    # transcript: VAD misfires (mouse click, throat clear, room noise)
+    # produce one-character or punctuation-only transcripts that
+    # otherwise clutter the inbox. Manual ``microphone_record`` and
+    # ``file_drop`` captures are excluded — the user clicked Record
+    # on purpose and the note must survive even if silent.
+    try:
+        from service.whiteboard.audio_prune import (
+            is_noise_transcript,
+            prune_audio_note,
+            should_prune_for_source,
+        )
+    except Exception:  # noqa: BLE001
+        is_noise_transcript = prune_audio_note = should_prune_for_source = None  # type: ignore[assignment]
+    if (
+        should_prune_for_source is not None
+        and should_prune_for_source(event.source)
+        and is_noise_transcript(result.text, result.duration_seconds)
+    ):
+        deleted = prune_audio_note(
+            mgr, draft_note_filename, event.payload.attachment_path,
+        )
+        audit["pruned"] = bool(deleted)
+        audit["prune_reason"] = "noise_transcript"
+        return audit
+
     note = mgr.read_note(draft_note_filename)
     if not note:
         return audit

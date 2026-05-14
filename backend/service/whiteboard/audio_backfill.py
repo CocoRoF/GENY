@@ -114,6 +114,11 @@ class _CaptureLogEntry:
     capture_id: str
     draft_note: str
     attachment_path: str
+    # Capture source (``vtuber_stt_stream`` / ``microphone_record`` /
+    # ``file_drop`` / ``manual``). Used by the prune step to decide
+    # whether this capture is eligible for auto-delete — only the
+    # auto-STT stream is.
+    source: str = ""
 
 
 def _iter_audio_captures(
@@ -154,6 +159,7 @@ def _iter_audio_captures(
                     capture_id=str(capture_id),
                     draft_note=str(draft),
                     attachment_path=str(attachment),
+                    source=str(entry.get("source") or ""),
                 )
     except OSError as exc:
         logger.debug("audio_backfill: capture log read failed (%s)", exc)
@@ -169,7 +175,13 @@ class BackfillOutcome:
     username: str
     capture_id: str
     draft_note: str
-    status: str  # "filled" | "skipped" | "unavailable" | "missing" | "error"
+    # "filled"      → transcript was prepended to the note body
+    # "skipped"     → transcript already present (and not noisy)
+    # "pruned"      → noise transcript detected, note + attachment deleted
+    # "unavailable" → Whisper service failed / disabled / empty result
+    # "missing"     → draft note or attachment is gone (user deleted manually)
+    # "error"       → anything else (import failure, IO error, etc.)
+    status: str
     language: Optional[str] = None
     text_len: int = 0
     reason: Optional[str] = None
@@ -182,6 +194,7 @@ class BackfillRunResult:
     scanned: int = 0
     filled: int = 0
     skipped: int = 0
+    pruned: int = 0
     unavailable: int = 0
     missing: int = 0
     errors: int = 0
@@ -191,6 +204,7 @@ class BackfillRunResult:
         self.scanned += other.scanned
         self.filled += other.filled
         self.skipped += other.skipped
+        self.pruned += other.pruned
         self.unavailable += other.unavailable
         self.missing += other.missing
         self.errors += other.errors
@@ -202,6 +216,8 @@ class BackfillRunResult:
             self.filled += 1
         elif outcome.status == "skipped":
             self.skipped += 1
+        elif outcome.status == "pruned":
+            self.pruned += 1
         elif outcome.status == "unavailable":
             self.unavailable += 1
         elif outcome.status == "missing":
@@ -214,6 +230,7 @@ class BackfillRunResult:
             "scanned": self.scanned,
             "filled": self.filled,
             "skipped": self.skipped,
+            "pruned": self.pruned,
             "unavailable": self.unavailable,
             "missing": self.missing,
             "errors": self.errors,
@@ -239,15 +256,31 @@ async def _backfill_one_note(
     username: str,
     entry: _CaptureLogEntry,
 ) -> BackfillOutcome:
-    """Best-effort: load → check guard → transcribe → prepend.
+    """Best-effort: load → re-evaluate-or-transcribe → fill/prune/skip.
 
-    Mirrors the W2 ``_transcribe_audio_hook`` body precisely so the
-    two paths stay interchangeable. Returns the per-note outcome
-    instead of raising.
+    Three branches:
+
+      1. Body already carries a ``> **Transcript (lang):** …`` block.
+         Pull the text out, run the noise predicate, and prune if the
+         capture is auto-STT and the existing transcript is noise.
+         Otherwise skip (the W2 hook or an earlier backfill pass
+         already filled this one cleanly).
+      2. No transcript yet → transcribe, then prune if auto-STT +
+         noise, fill otherwise.
+      3. Anything missing (note deleted, attachment gone, Whisper
+         down) → surface the appropriate status.
+
+    Returns the per-note outcome instead of raising.
     """
     try:
         from service.memory.user_opsidian import get_user_opsidian_manager
         from service.stt.whisper_client import get_whisper_client
+        from service.whiteboard.audio_prune import (
+            extract_existing_transcript,
+            is_noise_transcript,
+            prune_audio_note,
+            should_prune_for_source,
+        )
     except Exception as exc:  # noqa: BLE001
         return BackfillOutcome(
             username=username,
@@ -268,15 +301,41 @@ async def _backfill_one_note(
             reason="draft note no longer exists",
         )
     body = str(note.get("body") or "")
+
+    # Branch 1: body already has a transcript. Re-evaluate it
+    # for noise (catches notes filled before the pruner shipped).
     if _body_has_transcript(body):
+        existing = extract_existing_transcript(body) or ""
+        if (
+            should_prune_for_source(entry.source)
+            and is_noise_transcript(existing)
+        ):
+            deleted = prune_audio_note(
+                mgr, entry.draft_note, entry.attachment_path,
+            )
+            return BackfillOutcome(
+                username=username,
+                capture_id=entry.capture_id,
+                draft_note=entry.draft_note,
+                status="pruned" if deleted else "error",
+                text_len=len(existing),
+                reason=(
+                    "noise transcript detected on existing fill"
+                    if deleted
+                    else "noise transcript detected but prune failed"
+                ),
+            )
         return BackfillOutcome(
             username=username,
             capture_id=entry.capture_id,
             draft_note=entry.draft_note,
             status="skipped",
+            text_len=len(existing),
             reason="transcript block already present",
         )
 
+    # Branch 2: no transcript yet. Try to fill (or prune if Whisper
+    # returns noise on an auto-STT capture).
     try:
         audio_bytes = mgr.read_attachment(entry.attachment_path)
     except Exception as exc:  # noqa: BLE001
@@ -317,6 +376,28 @@ async def _backfill_one_note(
             draft_note=entry.draft_note,
             status="unavailable",
             reason=result.error or f"source={result.source}",
+        )
+
+    # Auto-STT noise → prune note + attachment instead of filling.
+    if (
+        should_prune_for_source(entry.source)
+        and is_noise_transcript(result.text, result.duration_seconds)
+    ):
+        deleted = prune_audio_note(
+            mgr, entry.draft_note, entry.attachment_path,
+        )
+        return BackfillOutcome(
+            username=username,
+            capture_id=entry.capture_id,
+            draft_note=entry.draft_note,
+            status="pruned" if deleted else "error",
+            language=result.language,
+            text_len=len(result.text or ""),
+            reason=(
+                "noise transcript from auto-STT capture"
+                if deleted
+                else "noise detected but prune failed"
+            ),
         )
 
     lang = result.language or "auto"
@@ -386,10 +467,19 @@ async def backfill_one_user(
 
         # Stop as soon as we've satisfied the cycle budget on
         # *productive* attempts (filled OR genuinely failed against
-        # Whisper). Skipped/missing notes don't burn GPU so they
-        # don't count against the cap.
-        productive = outcome.status in {"filled", "unavailable", "error"}
-        if productive and result.filled + result.unavailable + result.errors >= max_per_cycle:
+        # Whisper OR pruned after a Whisper call). Skipped notes
+        # don't burn GPU (no transcription needed) so they don't
+        # count against the cap. ``pruned`` from the retroactive
+        # "transcript already noise" branch also skips Whisper, but
+        # the prune-after-fresh-transcribe branch did call Whisper —
+        # counting all prunes is the conservative choice.
+        productive = outcome.status in {
+            "filled", "unavailable", "error", "pruned",
+        }
+        if productive and (
+            result.filled + result.unavailable + result.errors + result.pruned
+            >= max_per_cycle
+        ):
             break
 
     return result
@@ -464,16 +554,24 @@ async def audio_backfill_loop() -> None:
                 await asyncio.sleep(float(getattr(cfg, "empty_sleep_seconds", 300.0)))
                 continue
 
-            # `filled + unavailable + errors` are the *productive*
-            # cycle outcomes — those that hit Whisper. Skipped /
-            # missing notes don't touch the GPU, so they don't tell
-            # us anything about how long to sleep.
-            if summary.filled + summary.unavailable + summary.errors > 0:
+            # `filled + unavailable + errors + pruned` are the
+            # *productive* cycle outcomes — those that hit Whisper
+            # or deleted noise. Skipped / missing notes don't touch
+            # the GPU, so they don't tell us how long to sleep.
+            productive = (
+                summary.filled
+                + summary.unavailable
+                + summary.errors
+                + summary.pruned
+            )
+            if productive > 0:
                 logger.info(
-                    "[audio-backfill] cycle: %d filled, %d unavailable, "
-                    "%d errors, %d skipped, %d missing across %d scanned",
-                    summary.filled, summary.unavailable, summary.errors,
-                    summary.skipped, summary.missing, summary.scanned,
+                    "[audio-backfill] cycle: %d filled, %d pruned, "
+                    "%d unavailable, %d errors, %d skipped, %d missing "
+                    "across %d scanned",
+                    summary.filled, summary.pruned, summary.unavailable,
+                    summary.errors, summary.skipped, summary.missing,
+                    summary.scanned,
                 )
                 await asyncio.sleep(float(getattr(cfg, "idle_seconds", 30.0)))
             else:
