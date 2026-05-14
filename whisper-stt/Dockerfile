@@ -50,6 +50,23 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     || true
 
+# Audio decoder dependency for vLLM's OpenAI-compatible transcription
+# endpoint. vLLM tries ``soundfile`` (libsndfile) first — fine for
+# WAV/FLAC/OGG but **not WebM/Opus**, which is exactly what browser
+# MediaRecorder emits in the W3 manual record modal and the V2 VTuber
+# STT mode. Without pyav installed, the fallback path raises
+# ``ImportError: Please install vllm[audio]`` which the API surface
+# re-raises as ``ValueError: Invalid or unsupported audio file``
+# (HTTP 400 to the caller, blank transcript on the inbox note).
+#
+# Installing the ``av`` (pyav) package alone is enough — vLLM only
+# needs the pyav fallback path live, not the rest of the
+# ``vllm[audio]`` extra (librosa / audioread aren't used by the
+# transcription endpoint and would bloat the image). Diagnosed
+# against prod webm samples that ``ffprobe`` and ``ffmpeg`` decode
+# fine — the bytes are valid, the decoder was missing.
+RUN pip install --no-cache-dir "av>=12.0,<15.0"
+
 WORKDIR /app
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
