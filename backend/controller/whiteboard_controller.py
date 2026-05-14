@@ -156,6 +156,17 @@ _CONTENT_TYPE_TO_EXT: Dict[str, str] = {
 _MAX_UPLOAD_BYTES = int(os.environ.get("GENY_WHITEBOARD_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 
 
+# Spotlight TTL applied to V2 auto-STT stream captures. The store's
+# default (30 min) keeps deliberate shares around long enough for the
+# persona to reference them across the conversation, but ambient
+# overheard speech goes stale much faster — an utterance from 20
+# minutes ago re-rendering into every system prompt makes the VTuber
+# keep referring back to it as if it just arrived.
+_STT_STREAM_TTL_MINUTES = int(
+    os.environ.get("GENY_STT_STREAM_SPOTLIGHT_TTL_MINUTES", "3")
+)
+
+
 def _ext_for_content_type(content_type: Optional[str], fallback: str = "bin") -> str:
     if not content_type:
         return fallback
@@ -482,8 +493,15 @@ async def _auto_spotlight_for_event(
             title=title,
             excerpt=excerpt,
             attachments=tuple(attachments) if attachments else (),
-            # ttl_minutes left at the store default so VTuber STT
-            # utterances expire on the same schedule as manual shares.
+            # STT-stream items decay fast — 3 minutes vs the 30-minute
+            # default. Without this every ambient utterance lingers in
+            # the [Spotlight Context] block for half an hour, so an
+            # old "코 훌쩍이는 소리" from 25 minutes ago keeps
+            # tempting the persona to re-react to it as if it just
+            # arrived. Deliberate shares (manual Share-with-VTuber,
+            # microphone_record promoted to spotlight) still use the
+            # store default — those represent intentional pinning.
+            ttl_minutes=_STT_STREAM_TTL_MINUTES,
             pinned=False,
             capture_id=event.capture_id,
             note_kind="user",
