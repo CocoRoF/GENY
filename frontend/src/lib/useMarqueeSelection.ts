@@ -82,16 +82,21 @@ function _defaultEmptyArea(
   target: EventTarget | null, container: HTMLElement,
 ): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  if (target === container) return true;
-  // Honour explicit opt-in: anything tagged ``data-marquee-empty``
-  // counts as empty space (the grid wrapper between cards, etc.).
-  if (target.closest('[data-marquee-empty]')) return true;
-  // Anything inside a card / button / interactive control is NOT
-  // empty space.
-  if (target.closest('[data-marquee-item], button, a, input, textarea')) {
+  if (!container.contains(target)) return false;
+  // Interactive elements always reject — clicking a card / trash
+  // icon / suggestion chip / link must NOT begin a marquee, even
+  // when the surrounding container is the marquee surface.
+  if (target.closest('[data-marquee-item], button, a, input, textarea, select')) {
     return false;
   }
-  return false;
+  // Anything else inside the container counts as empty area. With
+  // this rule the caller can mount ``containerProps`` on the
+  // entire scrollable panel — the whole gray background, the gaps
+  // between cards, even the blank space below the last row — and
+  // get marquee selection everywhere except on interactive controls.
+  // Explicit ``data-marquee-empty`` opt-in is still honoured (handled
+  // by the contains() check above) so existing usages don't break.
+  return true;
 }
 
 
