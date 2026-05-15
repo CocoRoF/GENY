@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useAppStore } from '@/store/useAppStore';
 import { userOpsidianApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useMultiSelection } from '@/lib/useMultiSelection';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import RightPanel from '../opsidian/RightPanel';
 import Link from 'next/link';
@@ -449,6 +450,7 @@ function Sidebar({
     new Set(['daily', 'topics', 'projects', 'insights', 'root']),
   );
   const [filterText, setFilterText] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
@@ -479,6 +481,71 @@ function Sidebar({
     });
     return groups;
   }, [files, filterText]);
+
+  // Flat ordered list of currently-visible filenames — drives the
+  // Shift+click range selection. Skips collapsed categories so
+  // ranging only spans what the user can actually see.
+  const visibleFilenames = useMemo(() => {
+    const out: string[] = [];
+    for (const [cat, catFiles] of Object.entries(grouped)) {
+      if (!expandedCategories.has(cat)) continue;
+      for (const f of catFiles) out.push(f.filename);
+    }
+    return out;
+  }, [grouped, expandedCategories]);
+
+  const selection = useMultiSelection({ ids: visibleFilenames });
+
+  const handleFileClick = useCallback(
+    (event: React.MouseEvent, filename: string) => {
+      const openIntent = selection.isOpenIntent(event);
+      selection.handleItemClick(event, filename);
+      if (openIntent) onSelectFile(filename);
+    },
+    [selection, onSelectFile],
+  );
+
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selection.selectedIds);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Delete ${ids.length} ${ids.length === 1 ? 'note' : 'notes'}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      await userOpsidianApi.batchDeleteFiles(ids);
+      selection.clear();
+      onRefresh();
+    } catch (e) {
+      alert(`Bulk delete failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }, [selection, onRefresh]);
+
+  // Delete-key shortcut while the sidebar selection is non-empty.
+  useEffect(() => {
+    if (selection.selectedIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const editing =
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        (target as HTMLElement | null)?.isContentEditable;
+      if (editing) return;
+      e.preventDefault();
+      handleBulkDelete();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selection.selectedIds.size, handleBulkDelete]);
 
   const tagMap = memoryIndex?.tag_map ?? {};
 
@@ -577,6 +644,65 @@ function Sidebar({
                 onChange={(e) => setFilterText(e.target.value)}
               />
             </div>
+            {selection.selectedIds.size > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 10px',
+                  margin: '6px 8px',
+                  background: 'rgba(59,130,246,0.10)',
+                  border: '1px solid rgba(59,130,246,0.35)',
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              >
+                <span style={{ color: 'var(--primary-color, #3b82f6)', fontWeight: 500 }}>
+                  {selection.selectedIds.size} selected
+                </span>
+                <div style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                    title={`Delete ${selection.selectedIds.size} (Delete key)`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '3px 8px',
+                      fontSize: 11,
+                      border: '1px solid rgba(239,68,68,0.45)',
+                      background: 'rgba(239,68,68,0.10)',
+                      color: '#ef4444',
+                      borderRadius: 4,
+                      cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+                      opacity: bulkDeleting ? 0.7 : 1,
+                    }}
+                  >
+                    {bulkDeleting ? <Loader2 size={10} className="spin" /> : <Trash2 size={10} />}
+                    <span>Delete</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selection.clear()}
+                    title="Clear selection (Esc)"
+                    style={{
+                      padding: '3px 6px',
+                      fontSize: 11,
+                      border: '1px solid var(--obs-border, #2c2c2e)',
+                      background: 'transparent',
+                      color: 'var(--obs-text-muted, #8e8e93)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="obs-sb-tree">
               {Object.entries(grouped).map(([cat, catFiles]) => {
                 if (catFiles.length === 0) return null;
@@ -592,19 +718,31 @@ function Sidebar({
                     </button>
                     {expanded && (
                       <div className="obs-sb-cat-files">
-                        {catFiles.map((f) => (
-                          <button
-                            key={f.filename}
-                            className={`obs-sb-file ${selectedFile === f.filename ? 'active' : ''}`}
-                            onClick={() => onSelectFile(f.filename)}
-                          >
-                            <span
-                              className="obs-sb-imp-dot"
-                              style={{ color: IMPORTANCE_DOT[f.importance] || '#64748b' }}
-                            />
-                            <span className="obs-sb-file-title">{f.title || f.filename}</span>
-                          </button>
-                        ))}
+                        {catFiles.map((f) => {
+                          const inMulti = selection.isSelected(f.filename);
+                          return (
+                            <button
+                              key={f.filename}
+                              className={`obs-sb-file ${selectedFile === f.filename ? 'active' : ''}${inMulti ? ' obs-sb-file-multi' : ''}`}
+                              onClick={(e) => handleFileClick(e, f.filename)}
+                              aria-pressed={inMulti}
+                              style={
+                                inMulti
+                                  ? {
+                                      background: 'rgba(59,130,246,0.18)',
+                                      borderLeft: '2px solid var(--primary-color, #3b82f6)',
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <span
+                                className="obs-sb-imp-dot"
+                                style={{ color: IMPORTANCE_DOT[f.importance] || '#64748b' }}
+                              />
+                              <span className="obs-sb-file-title">{f.title || f.filename}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
