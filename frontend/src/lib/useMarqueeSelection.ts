@@ -237,6 +237,16 @@ export function useMarqueeSelection(
           onCommit(new Set(current), state.mode);
           return new Set();
         });
+      } else if (state.mode === 'replace') {
+        // Mousedown landed on empty area, mouseup released without
+        // crossing the drag threshold → a plain click on empty space.
+        // Finder/Explorer semantics: clear the existing selection.
+        // We signal this via an empty-set ``onCommit`` in replace
+        // mode; the consumer treats that as "user clicked the
+        // background → drop the selection." Ctrl/Cmd held (mode =
+        // "add") deliberately does NOT clear — the user might have
+        // been trying to add and missed.
+        onCommit(new Set(), 'replace');
       }
       setIsDragging(false);
       setRect(null);

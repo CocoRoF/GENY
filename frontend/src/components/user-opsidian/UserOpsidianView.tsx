@@ -703,7 +703,22 @@ function Sidebar({
                 </div>
               </div>
             )}
-            <div className="obs-sb-tree">
+            <div
+              className="obs-sb-tree"
+              onMouseDown={(e) => {
+                // Clear the multi-select when the user clicks the
+                // tree background (gaps between category headers /
+                // file rows, the bottom blank area, etc.).
+                // ``closest('button, a')`` catches every interactive
+                // descendant — file rows are <button>, category
+                // headers are <button> — so a click on a real row
+                // doesn't accidentally trip this.
+                const target = e.target as HTMLElement | null;
+                if (target?.closest('button, a, input, textarea')) return;
+                if (selection.selectedIds.size === 0) return;
+                selection.clear();
+              }}
+            >
               {Object.entries(grouped).map(([cat, catFiles]) => {
                 if (catFiles.length === 0) return null;
                 const Icon = CATEGORY_ICONS[cat] || FileText;
