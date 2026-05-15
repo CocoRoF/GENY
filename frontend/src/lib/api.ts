@@ -2361,6 +2361,18 @@ export const userOpsidianApi = {
       { method: 'DELETE' },
     ),
 
+  /** POST /api/opsidian/files/batch-delete — drop N notes in one pass.
+   *  Backs the sidebar multi-select UI. */
+  batchDeleteFiles: (filenames: readonly string[]) =>
+    apiCall<{
+      requested: number;
+      deleted: number;
+      outcomes: Array<{ filename: string; deleted: boolean }>;
+    }>('/api/opsidian/files/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ filenames }),
+    }),
+
   /** GET /api/opsidian/search?q=... */
   search: (query: string, maxResults?: number) => {
     const qs = new URLSearchParams({ q: query });
@@ -2838,6 +2850,24 @@ export const whiteboardApi = {
       `/api/opsidian/captures/${encodeURIComponent(captureId)}`,
       { method: 'DELETE' },
     ),
+
+  /** POST /api/opsidian/captures/batch-delete — drop N captures + their
+   *  attachments in one pass. Backs the inbox multi-select UI. */
+  batchDeleteCaptures: (captureIds: readonly string[]) =>
+    apiCall<{
+      requested: number;
+      deleted: number;
+      missing: string[];
+      outcomes: Array<{
+        capture_id: string;
+        note_deleted: boolean;
+        attachment_deleted: boolean;
+        missing: boolean;
+      }>;
+    }>('/api/opsidian/captures/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ capture_ids: captureIds }),
+    }),
 
   /** GET /api/opsidian/views/stats — ViewLedger sanity check. */
   getViewStats: (agentId?: string) => {

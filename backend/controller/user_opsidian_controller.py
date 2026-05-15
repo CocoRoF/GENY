@@ -185,6 +185,58 @@ async def delete_opsidian_file(
     return {"message": "Note deleted successfully"}
 
 
+class BatchDeleteFilesRequest(BaseModel):
+    filenames: List[str] = Field(default_factory=list)
+
+
+@router.post("/files/batch-delete")
+async def batch_delete_opsidian_files(
+    payload: BatchDeleteFilesRequest,
+    auth: dict = Depends(require_auth),
+):
+    """Delete N notes from the user's vault in one request.
+
+    Backs the Opsidian sidebar multi-select UX. Per-filename outcomes
+    are returned so the frontend can surface "deleted 9 / 10" when
+    one of the names was already gone (race with another tab) or
+    points at a path that no longer resolves.
+
+    Empty input → no-op with zero counters; never 4xx for "nothing
+    to delete" so the client can call this even when the user's
+    selection turned out to be empty after a confirm dialog.
+    """
+    username = auth.get("sub", "anonymous")
+    mgr = _get_manager(username)
+
+    # Dedupe + drop empties so a stray "" in the payload doesn't try
+    # to delete the vault root.
+    targets: list[str] = []
+    seen: set[str] = set()
+    for raw in payload.filenames:
+        name = (raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        targets.append(name)
+
+    outcomes: list[dict] = []
+    deleted = 0
+    for name in targets:
+        try:
+            ok = await mgr.adelete_note(name)
+        except Exception:  # noqa: BLE001
+            ok = False
+        outcomes.append({"filename": name, "deleted": bool(ok)})
+        if ok:
+            deleted += 1
+
+    return {
+        "requested": len(targets),
+        "deleted": deleted,
+        "outcomes": outcomes,
+    }
+
+
 # ============================================================================
 # Endpoints — Search
 # ============================================================================

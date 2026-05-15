@@ -6,19 +6,36 @@
  * for the thumbnail / source-type metadata, and lets the user click
  * through to the regular note editor for full editing.
  *
- * Phase 1 deliverable. Phases 3+ will add bulk select / share /
- * inline action buttons on each card.
+ * Multi-select / bulk-delete:
+ *   • Plain click          → open the capture in the editor.
+ *   • Ctrl/Cmd + click     → toggle the card into the selection.
+ *   • Shift + click        → range-select from the previous anchor.
+ *   • Drag on empty area   → rubber-band marquee selection.
+ *   • Ctrl + drag          → marquee ADDS to existing selection.
+ *   • Esc                  → clear selection.
+ *   • Ctrl + A             → select every visible card.
+ *   • "Delete N" button    → bulk-discard via batchDeleteCaptures.
  */
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Clock, Image as ImageIcon, Loader2, Trash2, Type, Upload } from 'lucide-react';
 import {
   whiteboardApi,
   type WhiteboardCaptureLogEntry,
 } from '@/lib/api';
 import { uploadCaptureFile } from '@/lib/captureSources';
+import { useMultiSelection } from '@/lib/useMultiSelection';
+import { useMarqueeSelection } from '@/lib/useMarqueeSelection';
 import SuggestionsBar from './SuggestionsBar';
 import CaptureToolbar from './CaptureToolbar';
 
@@ -51,6 +68,7 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [internalTick, setInternalTick] = useState(0);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -73,6 +91,48 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
     setInternalTick((n) => n + 1);
   }, []);
 
+  const sortedItems = useMemo(() => {
+    // Server already returns newest-first, but defend against
+    // partially-populated logs by re-sorting locally.
+    return [...items].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+  }, [items]);
+
+  // ── Selection — keyboard + marquee ───────────────────────────────
+  const captureIds = useMemo(
+    () => sortedItems.map((it) => it.capture_id),
+    [sortedItems],
+  );
+  const selection = useMultiSelection({ ids: captureIds });
+  const marquee = useMarqueeSelection({
+    onStart: (mode) => {
+      // Replace-mode marquee clears the existing selection at drag
+      // start; add-mode keeps it. The draft set updates during the
+      // drag via useMarqueeSelection's internal state, and we only
+      // commit on mouseup so a user can still bail by releasing
+      // outside the grid (then escape to clear).
+      if (mode === 'replace') selection.clear();
+    },
+    onCommit: (ids, mode) => {
+      if (ids.size === 0) return;
+      if (mode === 'replace') selection.select(ids);
+      else selection.add(ids);
+    },
+  });
+
+  const handleCardClick = useCallback(
+    (event: React.MouseEvent, item: WhiteboardCaptureLogEntry) => {
+      const openIntent = selection.isOpenIntent(event);
+      selection.handleItemClick(event, item.capture_id);
+      // Plain click also opens the note (single-select + open behaves
+      // like a normal click). Ctrl/Shift clicks only mutate the
+      // selection — they NEVER open.
+      if (openIntent) {
+        onSelectFile(item.draft_note);
+      }
+    },
+    [onSelectFile, selection],
+  );
+
   const handleDelete = useCallback(
     async (captureId: string) => {
       if (!confirm('Discard this capture? The draft note and attachment will be removed.')) {
@@ -88,11 +148,49 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
     [],
   );
 
-  const sortedItems = useMemo(() => {
-    // Server already returns newest-first, but defend against
-    // partially-populated logs by re-sorting locally.
-    return [...items].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
-  }, [items]);
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selection.selectedIds);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Discard ${ids.length} ${ids.length === 1 ? 'capture' : 'captures'}? ` +
+          'Their draft notes and attachments will be removed.',
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      await whiteboardApi.batchDeleteCaptures(ids);
+      selection.clear();
+      setInternalTick((n) => n + 1);
+    } catch (e) {
+      alert(`Bulk delete failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }, [selection]);
+
+  // Delete key shortcut while selection is non-empty (and the user
+  // isn't typing in an input).
+  useEffect(() => {
+    if (selection.selectedIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const editing =
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        (target as HTMLElement | null)?.isContentEditable;
+      if (editing) return;
+      e.preventDefault();
+      handleBulkDelete();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selection.selectedIds.size, handleBulkDelete]);
 
   const [dragActive, setDragActive] = useState(false);
 
@@ -182,6 +280,7 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
   }, []);
 
   const isEmpty = !loading && sortedItems.length === 0 && !error;
+  const selectionCount = selection.selectedIds.size;
 
   return (
     <div
@@ -218,7 +317,42 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
           {sortedItems.length} {sortedItems.length === 1 ? 'capture' : 'captures'}
         </span>
 
-        {/* Right cluster: Organize + capture sources, all on one row. */}
+        {selectionCount > 0 && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '4px 10px',
+              fontSize: 12,
+              fontWeight: 500,
+              borderRadius: 6,
+              background: 'rgba(59,130,246,0.12)',
+              color: 'var(--primary-color, #3b82f6)',
+              border: '1px solid rgba(59,130,246,0.35)',
+            }}
+          >
+            {selectionCount} selected
+            <button
+              type="button"
+              onClick={() => selection.clear()}
+              title="Clear selection (Esc)"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                fontSize: 11,
+                padding: '0 4px',
+                opacity: 0.7,
+              }}
+            >
+              ✕
+            </button>
+          </span>
+        )}
+
+        {/* Right cluster: bulk-delete (when selection) + Organize + capture sources. */}
         <div
           style={{
             marginLeft: 'auto',
@@ -227,6 +361,37 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
             gap: 6,
           }}
         >
+          {selectionCount > 0 && (
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              title={`Discard ${selectionCount} selected (Delete)`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                fontSize: 13,
+                fontWeight: 500,
+                borderRadius: 7,
+                border: '1px solid rgba(239,68,68,0.45)',
+                background: 'rgba(239,68,68,0.10)',
+                color: '#ef4444',
+                cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+                opacity: bulkDeleting ? 0.7 : 1,
+              }}
+            >
+              {bulkDeleting ? (
+                <Loader2 size={14} className="spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              <span>
+                {bulkDeleting ? 'Deleting…' : `Delete ${selectionCount}`}
+              </span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleOrganizeClick}
@@ -364,10 +529,13 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
           </button>
         )}
         <div
+          {...marquee.containerProps}
+          data-marquee-empty
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             gap: 12,
+            ...marquee.containerProps.style,
           }}
         >
           {sortedItems.map((item) => {
@@ -375,12 +543,19 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
               ? whiteboardApi.attachmentUrl(item.attachment_path)
               : null;
             const isImage = item.type === 'image' || item.type === 'screenshot' || item.type === 'drawing';
+            const isSelected =
+              selection.isSelected(item.capture_id) ||
+              (marquee.isDragging && marquee.draftIds.has(item.capture_id));
+
             return (
               <div
                 key={item.capture_id}
+                data-marquee-item
+                ref={(el) => marquee.register(item.capture_id, el)}
                 role="button"
                 tabIndex={0}
-                onClick={() => onSelectFile(item.draft_note)}
+                aria-pressed={isSelected}
+                onClick={(e) => handleCardClick(e, item)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
@@ -392,10 +567,18 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
                   flexDirection: 'column',
                   borderRadius: 10,
                   overflow: 'hidden',
-                  border: '1px solid var(--obs-border, #2c2c2e)',
-                  background: 'var(--obs-bg-secondary, rgba(255,255,255,0.03))',
+                  border: isSelected
+                    ? '1px solid var(--primary-color, #3b82f6)'
+                    : '1px solid var(--obs-border, #2c2c2e)',
+                  outline: isSelected
+                    ? '1px solid var(--primary-color, #3b82f6)'
+                    : 'none',
+                  outlineOffset: -1,
+                  background: isSelected
+                    ? 'rgba(59,130,246,0.10)'
+                    : 'var(--obs-bg-secondary, rgba(255,255,255,0.03))',
                   cursor: 'pointer',
-                  transition: 'border-color 120ms',
+                  transition: 'border-color 120ms, background 120ms',
                 }}
               >
                 <div
@@ -467,8 +650,31 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
               </div>
             );
           })}
+
+          {marquee.isDragging && marquee.rect && (
+            <_MarqueeOverlay rect={marquee.rect} />
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+
+function _MarqueeOverlay({
+  rect,
+}: { rect: { left: number; top: number; width: number; height: number } }) {
+  const style: CSSProperties = {
+    position: 'absolute',
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+    border: '1px dashed rgba(59,130,246,0.85)',
+    background: 'rgba(59,130,246,0.10)',
+    pointerEvents: 'none',
+    zIndex: 5,
+    borderRadius: 4,
+  };
+  return <div style={style} />;
 }

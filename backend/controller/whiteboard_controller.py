@@ -803,6 +803,124 @@ async def delete_capture(
     }
 
 
+class BatchDeleteCapturesRequest(BaseModel):
+    capture_ids: List[str] = Field(default_factory=list)
+
+
+@router.post("/captures/batch-delete")
+async def batch_delete_captures(
+    payload: BatchDeleteCapturesRequest,
+    auth: dict = Depends(_resolve_user_for_capture),
+) -> Dict[str, Any]:
+    """Delete N captures + their attachments in one pass.
+
+    Backs the Opsidian inbox multi-select UX. Reading + rewriting
+    ``_captures.jsonl`` once for a batch is O(log size) instead of
+    O(N × log size) — a meaningful win once a user has accumulated
+    a few hundred audio memos and wants to drain a hundred at a time.
+
+    Skips silently over capture_ids that aren't in the log (e.g.
+    racing with a single-delete from another tab). The response
+    surfaces per-id outcomes so the frontend can show "deleted
+    47/50" if a few fell through.
+    """
+    username = auth.get("sub", "anonymous")
+    mgr = _get_manager(username)
+    log_path = Path(mgr.vault_root) / "_captures.jsonl"
+
+    requested = {cid.strip() for cid in payload.capture_ids if cid and cid.strip()}
+    if not requested:
+        return {
+            "requested": 0,
+            "deleted": 0,
+            "missing": [],
+            "outcomes": [],
+        }
+
+    if not log_path.exists():
+        return {
+            "requested": len(requested),
+            "deleted": 0,
+            "missing": sorted(requested),
+            "outcomes": [],
+        }
+
+    kept_lines: List[str] = []
+    found: Dict[str, Dict[str, Any]] = {}
+    try:
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+            except (ValueError, json.JSONDecodeError):
+                kept_lines.append(line)
+                continue
+            cid = row.get("capture_id")
+            if cid in requested and cid not in found:
+                found[cid] = row
+                continue  # drop from rewrite
+            kept_lines.append(line)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="capture log unreadable") from exc
+
+    outcomes: List[Dict[str, Any]] = []
+    deleted_count = 0
+    for cid in requested:
+        row = found.get(cid)
+        if row is None:
+            outcomes.append({
+                "capture_id": cid,
+                "note_deleted": False,
+                "attachment_deleted": False,
+                "missing": True,
+            })
+            continue
+
+        note_deleted = False
+        attachment_deleted = False
+        note_filename = row.get("draft_note")
+        if note_filename:
+            try:
+                note_deleted = bool(mgr.delete_note(note_filename))
+            except Exception:  # noqa: BLE001
+                note_deleted = False
+        attachment_path = row.get("attachment_path")
+        if attachment_path:
+            try:
+                attachment_deleted = mgr.delete_attachment(attachment_path)
+            except Exception:  # noqa: BLE001
+                attachment_deleted = False
+        deleted_count += 1
+        outcomes.append({
+            "capture_id": cid,
+            "note_deleted": note_deleted,
+            "attachment_deleted": attachment_deleted,
+            "missing": False,
+        })
+
+    try:
+        log_path.write_text(
+            ("\n".join(kept_lines) + ("\n" if kept_lines else "")),
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning(
+            "batch_delete_captures: failed to rewrite captures log",
+            exc_info=True,
+        )
+
+    return {
+        "requested": len(requested),
+        "deleted": deleted_count,
+        "missing": sorted(cid for cid, row in [
+            (c, found.get(c)) for c in requested
+        ] if row is None),
+        "outcomes": outcomes,
+    }
+
+
 # ── ViewLedger inspection endpoint (low-stakes, P0 sanity) ────────────
 
 
