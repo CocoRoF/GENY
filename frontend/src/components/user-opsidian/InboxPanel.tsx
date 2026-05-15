@@ -422,11 +422,16 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
         </div>
       </div>
       <div
+        {...marquee.containerProps}
         style={{
           flex: 1,
           overflow: 'auto',
           padding: 20,
-          position: 'relative',
+          // ``useMarqueeSelection`` already sets ``position: relative``
+          // and ``user-select`` via ``containerProps.style``; merge
+          // afterwards so the outline / dragActive treatment can
+          // still override the background.
+          ...marquee.containerProps.style,
           // Only show a panel-wide outline while dragging AND there
           // is already content. The empty state hero below is its
           // own full-size dropzone and renders its own dragActive
@@ -528,13 +533,10 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
           </button>
         )}
         <div
-          {...marquee.containerProps}
-          data-marquee-empty
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             gap: 12,
-            ...marquee.containerProps.style,
           }}
         >
           {sortedItems.map((item) => {
@@ -649,11 +651,15 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
               </div>
             );
           })}
-
-          {marquee.isDragging && marquee.rect && (
-            <_MarqueeOverlay rect={marquee.rect} />
-          )}
         </div>
+
+        {/* Overlay lives at the scrollable-panel level (the marquee
+         *  container) so the rectangle can extend past the card grid
+         *  into the empty space below — that's where the user
+         *  expects to be able to drag from. */}
+        {marquee.isDragging && marquee.rect && (
+          <_MarqueeOverlay rect={marquee.rect} />
+        )}
       </div>
     </div>
   );
