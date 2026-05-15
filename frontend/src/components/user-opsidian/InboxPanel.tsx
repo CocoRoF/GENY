@@ -104,18 +104,17 @@ export default function InboxPanel({ onSelectFile, refreshTick = 0, sessionId }:
   );
   const selection = useMultiSelection({ ids: captureIds });
   const marquee = useMarqueeSelection({
-    onStart: (mode) => {
-      // Replace-mode marquee clears the existing selection at drag
-      // start; add-mode keeps it. The draft set updates during the
-      // drag via useMarqueeSelection's internal state, and we only
-      // commit on mouseup so a user can still bail by releasing
-      // outside the grid (then escape to clear).
-      if (mode === 'replace') selection.clear();
-    },
     onCommit: (ids, mode) => {
-      if (ids.size === 0) return;
-      if (mode === 'replace') selection.select(ids);
-      else selection.add(ids);
+      // Replace mode → ``select(ids)`` even when ids is empty: that
+      // path is how the hook signals "user clicked empty area /
+      // dragged a marquee over nothing → drop the existing
+      // selection." Add mode only mutates when there's something to
+      // add — a Ctrl+click on empty area is a no-op.
+      if (mode === 'replace') {
+        selection.select(ids);
+      } else if (ids.size > 0) {
+        selection.add(ids);
+      }
     },
   });
 
