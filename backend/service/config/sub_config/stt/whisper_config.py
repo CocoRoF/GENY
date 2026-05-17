@@ -113,7 +113,7 @@ class WhisperConfig(BaseConfig):
             ),
             ConfigField(
                 name="model",
-                field_type=FieldType.TEXT,
+                field_type=FieldType.STRING,
                 label="Model",
                 description=(
                     "HuggingFace ID. Must match the container's "
@@ -124,7 +124,7 @@ class WhisperConfig(BaseConfig):
             ),
             ConfigField(
                 name="language",
-                field_type=FieldType.TEXT,
+                field_type=FieldType.STRING,
                 label="Force language",
                 description=(
                     "ISO 639-1 code (e.g. 'ko', 'en'). Empty = let "
