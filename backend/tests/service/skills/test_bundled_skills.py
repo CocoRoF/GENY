@@ -37,6 +37,7 @@ _EXPECTED_BUNDLED = {
     "whiteboard_react_to_share",
     "whiteboard_curate_suggest",
     "whiteboard_voice_notes",
+    "whiteboard_screen_observation",
 }
 
 

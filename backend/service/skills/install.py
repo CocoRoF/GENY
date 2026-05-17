@@ -56,6 +56,11 @@ _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
     # auto-transcribe PostCaptureHook (W2). VTuber-only so the
     # slash-command menu doesn't show it for Worker / developer roles.
     "whiteboard-voice-notes": frozenset({"vtuber"}),
+    # V3 screen-observation. Backs the [USER_OBSERVATION] synthetic
+    # trigger (service/vtuber/screen_observation.py). VTuber-only —
+    # the silence-first guidance + sensitive-content abstractions
+    # are specifically for the persona that gets the trigger.
+    "whiteboard-screen-observation": frozenset({"vtuber"}),
 }
 
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
