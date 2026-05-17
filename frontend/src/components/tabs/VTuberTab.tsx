@@ -11,6 +11,7 @@ import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
 import STTControls from '@/components/live2d/STTControls';
+import ScreenObservationControls from '@/components/live2d/ScreenObservationControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 import BakedImportsModal from '@/components/avatar/BakedImportsModal';
 
@@ -228,11 +229,12 @@ export default function VTuberTab() {
           )}
         </div>
 
-        {/* TTS + STT Audio Controls */}
+        {/* TTS + STT + Screen-observation cluster */}
         {isVTuberRole && (
           <div className="flex items-center gap-3">
             <AudioControls sessionId={sessionId} />
             <STTControls sessionId={sessionId} />
+            <ScreenObservationControls sessionId={sessionId} />
           </div>
         )}
       </div>

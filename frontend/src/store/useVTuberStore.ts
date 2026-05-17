@@ -124,6 +124,15 @@ interface VTuberState {
   // per session.
   sttEnabled: boolean;
 
+  // Screen observation (V3) — when on, the browser holds a
+  // persistent ``getDisplayMedia`` MediaStream and a 3-min timer
+  // captures a frame, ships it to ``/api/vtuber/screen-observation/upload``
+  // along with the session id. Backend persists into session
+  // storage, vision-captions, and (subject to cooldown) fires
+  // ``[USER_OBSERVATION]``. Default OFF — must be explicitly
+  // enabled per session, browser permission requested once.
+  screenObservationEnabled: boolean;
+
   // Actions
   fetchModels: () => Promise<void>;
   assignModel: (sessionId: string, modelName: string) => Promise<void>;
@@ -147,6 +156,10 @@ interface VTuberState {
   toggleSTT: () => void;
   setSTTEnabled: (enabled: boolean) => void;
 
+  // Screen-observation actions (V3)
+  toggleScreenObservation: () => void;
+  setScreenObservationEnabled: (enabled: boolean) => void;
+
   // ── Live chat-stream pre-emit TTS ──
   /** 새 유저 메시지 시작 시 호출 — 턴 인덱스 증가 + 이전 턴 잔여 클립 폐기. */
   beginTTSTurn: (sessionId: string) => void;
@@ -168,6 +181,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   ttsSpeaking: {},
   ttsVolume: 0.7,
   sttEnabled: false,  // default OFF — user must opt in per session
+  screenObservationEnabled: false,  // V3 — default OFF, mic-style opt-in
 
   fetchModels: async () => {
     try {
@@ -340,6 +354,16 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
 
   setSTTEnabled: (enabled) => {
     set({ sttEnabled: enabled });
+  },
+
+  // ─── Screen-observation Actions (V3) ───
+
+  toggleScreenObservation: () => {
+    set({ screenObservationEnabled: !get().screenObservationEnabled });
+  },
+
+  setScreenObservationEnabled: (enabled) => {
+    set({ screenObservationEnabled: enabled });
   },
 
   speakResponse: async (sessionId, text, emotion) => {
