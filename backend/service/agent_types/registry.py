@@ -30,22 +30,39 @@ except ImportError:  # pragma: no cover — only triggers on stale exec
     SubagentTypeRegistry = None  # type: ignore[assignment]
 
 
+# Phase E1 — seeds gain a ``provider`` slot so the multi-provider
+# sub-agent path in geny-executor 2.0.0 can route each sub-agent to
+# the right LLM backend. ``provider=None`` means "inherit parent".
 _SEED = (
     (
         "worker",
         "General-purpose worker. Full default toolset (Read / Write / "
         "Edit / Bash / Grep / Glob / NotebookEdit / WebFetch).",
+        None,                           # inherit parent provider
     ),
     (
         "researcher",
         "Read-only investigation. Read / Grep / Glob / WebFetch / "
         "WebSearch only — no write/edit/bash so research can't "
         "accidentally mutate state.",
+        "anthropic",                    # deep reasoning default
+    ),
+    (
+        "summarizer",
+        "Cheap summarisation worker. Suited for stage 19 / context "
+        "compaction overflow.",
+        "openai",                       # cheap model
+    ),
+    (
+        "critic",
+        "Code-aware review using the local Claude Code CLI.",
+        "claude_code_cli",
     ),
     (
         "vtuber-narrator",
         "VTuber persona for short stream narrations. Memory + "
         "Knowledge tools only.",
+        None,
     ),
 )
 
@@ -75,8 +92,20 @@ def _make_descriptors() -> List[Any]:
         return []
 
     out: List[Any] = []
-    for agent_type, description in _SEED:
-        # Try the new (1.2.0+) signature first.
+    for agent_type, description, provider in _SEED:
+        # Phase E1 — try the v2.0.0 signature with provider/parallel
+        # fields first; fall back to the v1 signature if the installed
+        # executor predates Phase D1 (unlikely once Geny pins >=2.0.0).
+        try:
+            out.append(SubagentTypeDescriptor(
+                agent_type=agent_type,
+                factory=_placeholder_factory,
+                description=description,
+                provider=provider,
+            ))
+            continue
+        except TypeError:
+            pass
         try:
             out.append(SubagentTypeDescriptor(
                 agent_type=agent_type,
@@ -86,7 +115,6 @@ def _make_descriptors() -> List[Any]:
             continue
         except TypeError:
             pass
-        # Legacy signature without factory.
         try:
             out.append(SubagentTypeDescriptor(
                 agent_type=agent_type,

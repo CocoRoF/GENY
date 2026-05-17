@@ -31,18 +31,17 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 1.21.0 — root _index.json is a bounded folder-tree
-    # summary (was an unbounded flat dump in 1.20.0). Per-note metadata
-    # lives only inside <cat>/_index.json shards; the host drills via
-    # the progressive-disclosure 4-step chain. <root>/_summary.json is
-    # retired — its content moved into <root>/_index.json.
-    #
-    # Earlier 1.20.0 surfaces (provider-driven Stage 2 / Stage 18,
-    # MemoryAwareRetriever, ProviderDrivenStrategy, MemoryHooks single
-    # policy bag, NoteGraph queries, executor-owned hierarchical
-    # sidecars, Stage 19 session-close summary, typed interaction
-    # fields) all retained.
-    "geny-executor>=1.21.0,<2.0.0",
+    # geny-executor 2.0.0 — LLM backend overhaul cycle. ClientRegistry
+    # now ships 6 providers (anthropic / openai / google / vllm +
+    # claude_code_cli / copilot_cli). Credentials flow through a single
+    # CredentialBundle channel (auto-wrapped from api_key= for legacy
+    # call sites). Provider location is unified at
+    # manifest.stages[6].config["provider"] — strategies['provider']
+    # is rejected at strict load. SubagentTypeDescriptor gains
+    # provider/parallel/max_concurrent for multi-provider sub-agents.
+    # Earlier 1.21.0 surfaces (bounded root _index.json, provider-driven
+    # Stage 2 / Stage 18, etc.) all retained.
+    "geny-executor>=2.0.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

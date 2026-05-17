@@ -27,6 +27,10 @@ from service.config.sub_config.general.api_config import APIConfig
 from service.config.sub_config.general.limits_config import LimitsConfig
 from service.config.sub_config.general.telemetry_config import TelemetryConfig
 from service.config.sub_config.general.github_config import GitHubConfig
+from service.config.sub_config.general.cli_backends_config import (
+    CLIBackendClaudeCodeConfig,
+    CLIBackendCopilotConfig,
+)
 
 __all__ = [
     'BaseConfig',
@@ -42,4 +46,6 @@ __all__ = [
     'LimitsConfig',
     'TelemetryConfig',
     'GitHubConfig',
+    'CLIBackendClaudeCodeConfig',
+    'CLIBackendCopilotConfig',
 ]
