@@ -32,6 +32,7 @@ from controller.agent_tasks_controller import router as agent_tasks_router
 from controller.cron_controller import router as cron_router
 from controller.slash_commands_controller import router as slash_router
 from controller.config_controller import router as config_router
+from controller.llm_backends_controller import router as llm_backends_router
 from controller.shared_folder_controller import router as shared_folder_router
 from controller.chat_controller import router as chat_router
 from controller.upload_controller import router as upload_router
@@ -709,6 +710,7 @@ app.include_router(agent_tasks_router)  # background tasks REST (PR-A.5.4)
 app.include_router(cron_router)  # cron REST (PR-A.8.3)
 app.include_router(slash_router)  # slash commands REST (PR-A.6.2)
 app.include_router(config_router)  # Configuration management
+app.include_router(llm_backends_router)  # LLM backend health + Claude Code login + subagent listing (Phase E4)
 app.include_router(shared_folder_router)  # Shared folder
 app.include_router(chat_router)  # Chat broadcast
 app.include_router(upload_router)  # File / image uploads (multipart)
