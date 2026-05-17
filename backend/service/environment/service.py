@@ -540,16 +540,29 @@ class EnvironmentService:
         self,
         env_id: str,
         *,
-        api_key: str,
+        credentials: Optional[Any] = None,
+        api_key: Optional[str] = None,
+        subagent_registry: Optional[Any] = None,
         strict: bool = True,
         adhoc_providers: Sequence[Any] = (),
     ) -> Pipeline:
         """Load the manifest and build a Pipeline via the library helper.
 
-        Uses :meth:`Pipeline.from_manifest_async` (geny-executor v0.22+)
-        so that any ``tools.mcp_servers`` declared in the manifest are
-        connected before the pipeline is returned, and
-        ``adhoc_providers`` get a chance to register their tools against
+        Phase E2 of the LLM backend upgrade — the canonical credential
+        channel is ``credentials`` (a geny-executor
+        :class:`CredentialBundle`). ``api_key`` is retained as a thin
+        compatibility shim that wraps a single Anthropic key into a
+        bundle so older call sites keep working until they migrate.
+
+        ``subagent_registry`` is forwarded to
+        ``Pipeline.from_manifest_async`` so Stage 12's ``subagent_type``
+        orchestrator is wired with the host's seed of sub-agent
+        descriptors.
+
+        Uses :meth:`Pipeline.from_manifest_async` so that any
+        ``tools.mcp_servers`` declared in the manifest are connected
+        before the pipeline is returned, and ``adhoc_providers`` get a
+        chance to register their tools against
         ``manifest.tools.external``.
         """
         manifest = self.load_manifest(env_id)
@@ -557,7 +570,9 @@ class EnvironmentService:
             raise EnvironmentNotFoundError(env_id)
         return await Pipeline.from_manifest_async(
             manifest,
+            credentials=credentials,
             api_key=api_key,
+            subagent_registry=subagent_registry,
             strict=strict,
             adhoc_providers=adhoc_providers,
         )

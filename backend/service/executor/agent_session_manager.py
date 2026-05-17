@@ -363,6 +363,38 @@ class AgentSessionManager:
         )
 
     # ========================================================================
+    # Provider Resolution (Phase E2)
+    # ========================================================================
+
+    def _extract_primary_provider(self, env_id: str) -> Optional[str]:
+        """Return the active Stage 6 provider for ``env_id``.
+
+        Looks first at ``stages[6].config['provider']`` (the v2.0.0
+        single source of truth) and falls back to the legacy
+        ``strategies['provider']`` location so manifests created before
+        the executor 2.0.0 reseeding still resolve. Returns ``None``
+        when the manifest is missing or Stage 6 is inactive.
+        """
+        if self._environment_service is None:
+            return None
+        manifest = self._environment_service.load_manifest(env_id)
+        if manifest is None:
+            return None
+        for entry in manifest.stage_entries():
+            if entry.order != 6 or entry.name != "api":
+                continue
+            if not entry.active:
+                return None
+            cfg_provider = (entry.config or {}).get("provider")
+            if cfg_provider:
+                return str(cfg_provider)
+            strat_provider = (entry.strategies or {}).get("provider")
+            if strat_provider:
+                return str(strat_provider)
+            return None
+        return None
+
+    # ========================================================================
     # Prompt Builder
     # ========================================================================
 
@@ -640,16 +672,33 @@ class AgentSessionManager:
                 "Wire it via set_environment_service(...) at app boot — "
                 "every session now resolves through the manifest path."
             )
-        try:
-            from service.config.manager import get_config_manager
-            from service.config.sub_config.general.api_config import APIConfig
-            api_key = os.environ.get("ANTHROPIC_API_KEY") or (
-                get_config_manager().load_config(APIConfig).anthropic_api_key or ""
+        # Phase E2 — build the executor's CredentialBundle from Geny's
+        # settings (APIConfig + CLI backend configs). The bundle is the
+        # single channel; the legacy ``api_key`` kwarg is gone from
+        # this code path.
+        from service.executor.credentials import CredentialBundleBuilder
+
+        credentials = CredentialBundleBuilder().build()
+
+        # Determine the active session's primary provider so we can
+        # validate that the matching credentials are actually present —
+        # this catches the "user selected Claude Code CLI but never
+        # logged in / never set ANTHROPIC_API_KEY" case at session
+        # creation time instead of at first LLM call.
+        primary_provider = self._extract_primary_provider(env_id)
+        if primary_provider and not credentials.has(primary_provider):
+            raise ValueError(
+                f"환경 '{env_id}'의 Stage 6 provider '{primary_provider}'에 사용할 "
+                f"자격증명이 설정되지 않았습니다. Settings → API에서 해당 provider의 "
+                f"API key를 입력하거나, CLI 백엔드라면 binary 설치 + 인증을 완료해 주세요."
             )
-        except Exception:
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required for manifest-backed sessions")
+
+        # Build the per-session SubagentTypeRegistry once. The Stage 12
+        # orchestrator slot is auto-rewired by
+        # ``Pipeline.from_manifest_async(subagent_registry=...)``.
+        from service.agent_types import SubagentRegistryBuilder
+
+        subagent_registry = SubagentRegistryBuilder().build()
         adhoc_providers: list = []
         if self._tool_loader is not None:
             from service.executor.geny_tool_provider import GenyToolProvider
@@ -701,7 +750,10 @@ class AgentSessionManager:
             logger.debug(f"  skill registry install skipped: {exc}", exc_info=True)
 
         prebuilt_pipeline = await self._environment_service.instantiate_pipeline(
-            env_id, api_key=api_key, adhoc_providers=adhoc_providers,
+            env_id,
+            credentials=credentials,
+            subagent_registry=subagent_registry,
+            adhoc_providers=adhoc_providers,
         )
         logger.info(
             f"  env_id: {env_id} → manifest-backed pipeline built "
