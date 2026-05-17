@@ -2136,6 +2136,43 @@ export const vtuberApi = {
       { method: 'POST', body: JSON.stringify({ hit_area: hitArea, x, y }) },
     ),
 
+  /** POST /api/vtuber/screen-observation/upload — V3 proactive
+   *  screen-observation. Periodic frame from the user's screen-
+   *  share stream + optional ``forceTrigger`` (bypass cooldown for
+   *  the "Show Now" button). */
+  uploadScreenObservation: async (params: {
+    sessionId: string;
+    blob: Blob;
+    filename?: string;
+    forceTrigger?: boolean;
+  }): Promise<{
+    observation_id: string;
+    session_id: string;
+    image_path: string | null;
+    note_path: string | null;
+    caption: string;
+    vision_source: string;
+    trigger_fired: boolean;
+    skipped_reason: string | null;
+  }> => {
+    const form = new FormData();
+    form.append('session_id', params.sessionId);
+    form.append('file', params.blob, params.filename ?? 'screen.png');
+    if (params.forceTrigger) form.append('force_trigger', 'true');
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(
+      '/api/vtuber/screen-observation/upload',
+      { method: 'POST', headers, body: form },
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
   /** POST /api/vtuber/agents/{sessionId}/emotion — manual emotion override */
   setEmotion: (sessionId: string, emotion: string, intensity = 1.0, transitionMs = 300) =>
     apiCall<{ status: string; emotion: string; expression_index: number }>(
