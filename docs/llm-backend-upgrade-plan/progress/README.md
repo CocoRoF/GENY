@@ -55,13 +55,13 @@
 
 | # | Action | Status | Notes | Progress file |
 |---|---|---|---|---|
-| R | Publish `geny-executor==2.0.0` to PyPI | pending | After Phase D merge | [r_pypi_release.md](./r_pypi_release.md) |
+| R | Publish `geny-executor==2.0.0` to PyPI | **published** | 2026-05-17T13:40Z | [r_pypi_release.md](./r_pypi_release.md) |
 
 ### Phase E — Geny wiring
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| E1 | feat(settings): CLI backend sections + CredentialBundleBuilder + SubagentRegistryBuilder | `feat/llm-backend/e1-settings-credentials` | pending | TBD | — | [e1_settings_credentials.md](./e1_settings_credentials.md) |
+| E1 | feat(settings): CLI backend sections + CredentialBundleBuilder + SubagentRegistryBuilder | `feat/llm-backend/e1-settings-credentials` | pending | (post-PyPI) | — | [e1_settings_credentials.md](./e1_settings_credentials.md) |
 | E2 | refactor(executor): AgentSessionManager + EnvironmentService for credentials/registry | `feat/llm-backend/e2-session-manager` | pending | TBD | — | [e2_session_manager.md](./e2_session_manager.md) |
 | E3 | refactor(manifest): rewrite default_manifest for unified provider location | `feat/llm-backend/e3-default-manifest` | pending | TBD | — | [e3_default_manifest.md](./e3_default_manifest.md) |
 | E4 | feat(api): health endpoint + cli_backends + subagents routes | `feat/llm-backend/e4-health-routes` | pending | TBD | — | [e4_health_routes.md](./e4_health_routes.md) |
