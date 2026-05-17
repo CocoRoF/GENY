@@ -46,10 +46,10 @@
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| D1 | refactor(s12_agent): SubagentTypeDescriptor + SubAgentBuildContext + new PipelineFactory | `feat/llm-backend/d1-subagent-descriptor` | pending | 20ca976 | — | [d1_subagent_descriptor.md](./d1_subagent_descriptor.md) |
-| D2 | feat(s12_agent): parallel orchestrator with semaphore | `feat/llm-backend/d2-subagent-parallel` | pending | TBD | — | [d2_subagent_parallel.md](./d2_subagent_parallel.md) |
-| D3 | feat(pipeline): subagent_registry slot + credential propagation | `feat/llm-backend/d3-pipeline-subagent` | pending | TBD | — | [d3_pipeline_subagent.md](./d3_pipeline_subagent.md) |
-| D4 | refactor(skills/fork): multi-provider via CredentialBundle + CHANGELOG v2.0.0 | `feat/llm-backend/d4-fork-multi-provider` | pending | TBD | — | [d4_fork_multi_provider.md](./d4_fork_multi_provider.md) |
+| D1 | refactor(s12_agent): SubagentTypeDescriptor + SubAgentBuildContext + new PipelineFactory | `feat/llm-backend/d1-subagent-descriptor` | merged | 20ca976 | d592273 | [d1_subagent_descriptor.md](./d1_subagent_descriptor.md) |
+| D2 | feat(s12_agent): parallel orchestrator with semaphore | `feat/llm-backend/d2-subagent-parallel` | merged | d592273 | 85b226d | [d2_subagent_parallel.md](./d2_subagent_parallel.md) |
+| D3 | feat(pipeline): subagent_registry slot + credential propagation | `feat/llm-backend/d3-pipeline-subagent` | merged | 85b226d | 2a41f53 | [d3_pipeline_subagent.md](./d3_pipeline_subagent.md) |
+| D4 | refactor(skills/fork): multi-provider via CredentialBundle + CHANGELOG v2.0.0 | `feat/llm-backend/d4-fork-multi-provider` | merged | 2a41f53 | 1aa13d8 | [d4_fork_multi_provider.md](./d4_fork_multi_provider.md) |
 
 ### PyPI Release
 
