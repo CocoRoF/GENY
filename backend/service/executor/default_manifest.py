@@ -371,8 +371,12 @@ def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
         StageManifestEntry(
             order=6,
             name="api",
+            # Phase E3 — Provider lives at config['provider'] (single
+            # source). strategies carries only the real strategy slots
+            # (retry, router). The frontend (modelCatalog) writes here
+            # and Pipeline._resolve_llm_client reads here.
+            config={"provider": "anthropic"},
             strategies={
-                "provider": "anthropic",
                 "retry": "exponential_backoff",
                 # G12 / S7.8: capability-aware adaptive router. Default
                 # config picks Opus for the first turn (deep planning),
@@ -423,7 +427,10 @@ def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
         StageManifestEntry(
             order=12,
             name="agent",
-            strategies={"orchestrator": "single_agent"},
+            # Phase E3 — multi-agent enabled by default. Pipeline.from_manifest
+            # rewires this slot with SubagentTypeOrchestrator(registry)
+            # when AgentSessionManager passes subagent_registry= along.
+            strategies={"orchestrator": "subagent_type"},
             config={"max_delegations": 4},
         ),
         StageManifestEntry(
@@ -537,8 +544,11 @@ def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
         StageManifestEntry(
             order=6,
             name="api",
+            # Phase E3 — Provider lives at config['provider'] (single
+            # source). VTuber preset uses passthrough router so the
+            # session's bound model is honoured verbatim.
+            config={"provider": "anthropic"},
             strategies={
-                "provider": "anthropic",
                 "retry": "exponential_backoff",
                 "router": "passthrough",
             },
@@ -578,7 +588,10 @@ def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
         StageManifestEntry(
             order=12,
             name="agent",
-            strategies={"orchestrator": "single_agent"},
+            # Phase E3 — multi-agent enabled by default. Pipeline.from_manifest
+            # rewires this slot with SubagentTypeOrchestrator(registry)
+            # when AgentSessionManager passes subagent_registry= along.
+            strategies={"orchestrator": "subagent_type"},
             config={"max_delegations": 4},
         ),
         StageManifestEntry(
