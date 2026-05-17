@@ -6,6 +6,7 @@ different subagent_types swap this seed without touching framework
 code.
 """
 
+from service.agent_types.builder import SubagentRegistryBuilder
 from service.agent_types.registry import DESCRIPTORS, install_subagent_types
 
-__all__ = ["DESCRIPTORS", "install_subagent_types"]
+__all__ = ["DESCRIPTORS", "install_subagent_types", "SubagentRegistryBuilder"]

@@ -29,6 +29,8 @@ PROVIDER_OPTIONS = [
     {"value": "openai", "label": "OpenAI"},
     {"value": "google", "label": "Google"},
     {"value": "vllm", "label": "vLLM (OpenAI-compatible)"},
+    {"value": "claude_code_cli", "label": "Claude Code (CLI)"},
+    {"value": "copilot_cli", "label": "GitHub Copilot (CLI)"},
 ]
 
 
@@ -38,6 +40,11 @@ class APIConfig(BaseConfig):
     """Anthropic API and model settings."""
 
     anthropic_api_key: str = ""
+    # Phase E1 — additional vendor keys so geny-executor 2.0.0's
+    # CredentialBundle can authenticate any of the 6 registered
+    # providers from a single source of truth.
+    openai_api_key: str = ""
+    google_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
     vtuber_default_model: str = "claude-haiku-4-5-20251001"
     memory_model: str = "claude-haiku-4-5-20251001"
@@ -50,6 +57,8 @@ class APIConfig(BaseConfig):
 
     _ENV_MAP = {
         "anthropic_api_key": "ANTHROPIC_API_KEY",
+        "openai_api_key": "OPENAI_API_KEY",
+        "google_api_key": "GOOGLE_API_KEY",
         "anthropic_model": "ANTHROPIC_MODEL",
         "vtuber_default_model": "VTUBER_DEFAULT_MODEL",
         "memory_model": "MEMORY_MODEL",
@@ -154,6 +163,28 @@ class APIConfig(BaseConfig):
                 group="api",
                 secure=True,
                 apply_change=env_sync("ANTHROPIC_API_KEY"),
+            ),
+            ConfigField(
+                name="openai_api_key",
+                field_type=FieldType.PASSWORD,
+                label="OpenAI API Key",
+                description="API key for OpenAI / vLLM-OpenAI-compat models",
+                required=False,
+                placeholder="sk-…",
+                group="api",
+                secure=True,
+                apply_change=env_sync("OPENAI_API_KEY"),
+            ),
+            ConfigField(
+                name="google_api_key",
+                field_type=FieldType.PASSWORD,
+                label="Google API Key",
+                description="API key for Google Gemini models",
+                required=False,
+                placeholder="AIza…",
+                group="api",
+                secure=True,
+                apply_change=env_sync("GOOGLE_API_KEY"),
             ),
             ConfigField(
                 name="anthropic_model",
