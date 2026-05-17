@@ -62,18 +62,18 @@
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
 | E1 | feat(settings): CLI backend sections + CredentialBundleBuilder + SubagentRegistryBuilder | `feat/llm-backend/e1-settings-credentials` | merged | 10e01d5 | 1fcf105 | [e1_settings_credentials.md](./e1_settings_credentials.md) |
-| E2 | refactor(executor): AgentSessionManager + EnvironmentService for credentials/registry | `feat/llm-backend/e2-session-manager` | pending | TBD | — | [e2_session_manager.md](./e2_session_manager.md) |
-| E3 | refactor(manifest): rewrite default_manifest for unified provider location | `feat/llm-backend/e3-default-manifest` | pending | TBD | — | [e3_default_manifest.md](./e3_default_manifest.md) |
-| E4 | feat(api): health endpoint + cli_backends + subagents routes | `feat/llm-backend/e4-health-routes` | pending | TBD | — | [e4_health_routes.md](./e4_health_routes.md) |
-| E5 | feat(scripts): reseed_environments + dev QA cleanup | `feat/llm-backend/e5-reseed` | pending | TBD | — | [e5_reseed.md](./e5_reseed.md) |
+| E2 | refactor(executor): AgentSessionManager + EnvironmentService for credentials/registry | `feat/llm-backend/e2-session-manager` | merged | 1fcf105 | 27dc25b | [e2_session_manager.md](./e2_session_manager.md) |
+| E3 | refactor(manifest): rewrite default_manifest for unified provider location | `feat/llm-backend/e3-default-manifest` | merged | 27dc25b | f87e8c2 | [e3_default_manifest.md](./e3_default_manifest.md) |
+| E4 | feat(api): health endpoint + Claude Code login + subagents routes | `feat/llm-backend/e4-health-routes` | merged | f87e8c2 | ee464eb | [e4_health_routes.md](./e4_health_routes.md) |
+| E5 | feat(scripts): migrate stored manifests to config['provider'] | `feat/llm-backend/e5-reseed` | merged | ee464eb | 6f322ab | [e5_reseed.md](./e5_reseed.md) |
 
 ### Phase F — Frontend + polish (Geny)
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| F1 | feat(frontend): 6-provider catalog + capability badges | `feat/llm-backend/f1-frontend-catalog` | pending | TBD | — | [f1_frontend_catalog.md](./f1_frontend_catalog.md) |
-| F2 | feat(frontend): stage editor overrides + CLI backend settings + subagent catalog | `feat/llm-backend/f2-frontend-editors` | pending | TBD | — | [f2_frontend_editors.md](./f2_frontend_editors.md) |
-| F3 | docs: cycle wrap-up + postmortem | `feat/llm-backend/f3-wrap-up` | pending | TBD | — | [f3_wrap_up.md](./f3_wrap_up.md) |
+| F1 | feat(frontend): 6-provider catalog + capability badges | `feat/llm-backend/f1-frontend-catalog` | merged | 6f322ab | 160d9f9 | [f1_frontend_catalog.md](./f1_frontend_catalog.md) |
+| F2 | feat(frontend): LLM Backends panel + Claude Code login UX | `feat/llm-backend/f2-frontend-editors` | merged | 160d9f9 | 1c8674b | [f2_frontend_editors.md](./f2_frontend_editors.md) |
+| F3 | docs: cycle wrap-up + postmortem | `feat/llm-backend/f3-wrap-up` | in PR | 1c8674b | — | [f3_wrap_up.md](./f3_wrap_up.md) |
 
 ## Status legend
 
