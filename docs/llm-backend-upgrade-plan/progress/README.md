@@ -39,8 +39,8 @@
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | pending | 17b8468 | — | [c1_copilot_client.md](./c1_copilot_client.md) |
-| C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | pending | TBD | — | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
+| C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | merged | 17b8468 | f99d0d7 | [c1_copilot_client.md](./c1_copilot_client.md) |
+| C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | pending | f99d0d7 | — | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
 
 ### Phase D — Sub-agent multi-provider (executor)
 
