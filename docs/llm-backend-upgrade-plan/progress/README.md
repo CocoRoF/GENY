@@ -33,13 +33,13 @@
 |---|---|---|---|---|---|---|
 | B1 | feat(llm_client): translators/_cli.py for claude_code | `feat/llm-backend/b1-translators-claude-code` | merged | 6fd3f02 | 9fda0ac | [b1_translators_claude_code.md](./b1_translators_claude_code.md) |
 | B2 | feat(llm_client): ClaudeCodeCLIClient | `feat/llm-backend/b2-claude-code-client` | merged | 9fda0ac | c54be88 | [b2_claude_code_client.md](./b2_claude_code_client.md) |
-| B3 | test(llm_client): claude_code_cli conformance suite | `feat/llm-backend/b3-claude-code-conformance` | pending | c54be88 | — | [b3_claude_code_conformance.md](./b3_claude_code_conformance.md) |
+| B3 | test(llm_client): claude_code_cli conformance suite | `feat/llm-backend/b3-claude-code-conformance` | merged | c54be88 | 17b8468 | [b3_claude_code_conformance.md](./b3_claude_code_conformance.md) |
 
 ### Phase C — Copilot CLI (executor)
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | pending | TBD | — | [c1_copilot_client.md](./c1_copilot_client.md) |
+| C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | pending | 17b8468 | — | [c1_copilot_client.md](./c1_copilot_client.md) |
 | C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | pending | TBD | — | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
 
 ### Phase D — Sub-agent multi-provider (executor)
