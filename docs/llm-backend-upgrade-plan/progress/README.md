@@ -65,7 +65,7 @@
 | E2 | refactor(executor): AgentSessionManager + EnvironmentService for credentials/registry | `feat/llm-backend/e2-session-manager` | merged | 1fcf105 | 27dc25b | [e2_session_manager.md](./e2_session_manager.md) |
 | E3 | refactor(manifest): rewrite default_manifest for unified provider location | `feat/llm-backend/e3-default-manifest` | merged | 27dc25b | f87e8c2 | [e3_default_manifest.md](./e3_default_manifest.md) |
 | E4 | feat(api): health endpoint + Claude Code login + subagents routes | `feat/llm-backend/e4-health-routes` | merged | f87e8c2 | ee464eb | [e4_health_routes.md](./e4_health_routes.md) |
-| E5 | feat(scripts): migrate stored manifests to config['provider'] | `feat/llm-backend/e5-reseed` | merged | ee464eb | 6f322ab | [e5_reseed.md](./e5_reseed.md) |
+| E5 | ~~feat(scripts): migrate stored manifests~~ — **REVERTED** (cycle is a clean break — no migration ever needed) | `feat/llm-backend/e5-reseed` | rolled_back | ee464eb | merged 6f322ab → reverted | [e5_reseed.md](./e5_reseed.md) |
 
 ### Phase F — Frontend + polish (Geny)
 

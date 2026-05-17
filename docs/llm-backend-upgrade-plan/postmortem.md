@@ -62,6 +62,10 @@ Tests: **3235 passed, 8 skipped, 0 failed.**
 - **PyPI publish before Geny consumes** kept the integration story clean — Geny pins a real version, not a `path =` dep.
 - **CredentialBundle as a single channel** turned out to be more important than the new providers themselves. The silent-divergence bug between `config['provider']` and `strategies['provider']` was a footgun nobody had noticed; the bundle made it untenable.
 
+## Errors we caught mid-cycle
+
+- **E5 migrator was a mistake** that survived a full PR (#778 → 6f322ab) before user pushback caught it. The cycle's own ground rules — written in plan 00_overview.md and stated explicitly by the user twice — say "no migration, clean break, service not live yet." Building `scripts/migrate_manifests_provider_location.py` directly contradicted that. Reverted in a follow-up PR; the script is gone. Lesson: when a plan's principle is "clean break," every PR — especially scripts/ — should be tested against it before opening.
+
 ## What we'd do differently
 
 - **Test rewrite scope was bigger than estimated.** Phase A3 absorbed ~50 test updates because the old `APIStage(provider=MockProvider())` fixture pattern was load-bearing across the suite. Next time, budget an extra 30% time when an API surface change has wide test reach.
