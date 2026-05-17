@@ -68,15 +68,31 @@ _SEED = (
 
 
 def _placeholder_factory():
-    """Stub factory for descriptors that don't need a real sub-pipeline
-    (viewer-only). The executor's Stage 12 only invokes the factory
-    when the LLM actually delegates to that agent_type — registering
-    the descriptor is enough to surface the name in the registry/UI.
-    """
+    """Legacy zero-arg placeholder. Retained as the absolute fallback
+    when ``service.agent_types.factories`` cannot be imported (e.g.
+    when geny-executor is absent during a minimal test environment).
+    Production sub-agents run through the real factory below."""
     raise NotImplementedError(
-        "Subagent factory not wired — Geny does not currently spawn "
-        "sub-pipelines from this descriptor.",
+        "This descriptor was built without a real factory. Pin "
+        "geny-executor>=2.0.0 so service.agent_types.factories is "
+        "importable, then re-create the registry.",
     )
+
+
+def _resolve_default_factory():
+    """Lazy import of the v2.0.0 sub-pipeline factory.
+
+    Phase E3 wires this in. Any failure (missing executor, etc) falls
+    back to ``_placeholder_factory`` so module load never crashes — the
+    failure surfaces only when the LLM actually tries to delegate.
+    """
+    try:
+        from service.agent_types.factories import make_default_subagent_factory
+
+        return make_default_subagent_factory()
+    except Exception:  # noqa: BLE001 — defensive
+        logger.warning("subagent factory import failed; using placeholder")
+        return _placeholder_factory
 
 
 def _make_descriptors() -> List[Any]:
@@ -91,15 +107,16 @@ def _make_descriptors() -> List[Any]:
     if SubagentTypeDescriptor is None:
         return []
 
+    factory = _resolve_default_factory()
     out: List[Any] = []
     for agent_type, description, provider in _SEED:
-        # Phase E1 — try the v2.0.0 signature with provider/parallel
-        # fields first; fall back to the v1 signature if the installed
-        # executor predates Phase D1 (unlikely once Geny pins >=2.0.0).
+        # Phase E3 — descriptors now ship with the real default
+        # factory. The fallback branches stay so an older executor
+        # still loads.
         try:
             out.append(SubagentTypeDescriptor(
                 agent_type=agent_type,
-                factory=_placeholder_factory,
+                factory=factory,
                 description=description,
                 provider=provider,
             ))
@@ -109,7 +126,7 @@ def _make_descriptors() -> List[Any]:
         try:
             out.append(SubagentTypeDescriptor(
                 agent_type=agent_type,
-                factory=_placeholder_factory,
+                factory=factory,
                 description=description,
             ))
             continue
