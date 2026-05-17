@@ -7,13 +7,13 @@
 | 항목 | 값 |
 |---|---|
 | Repo | `Geny` |
-| Branch | `docs/llm-backend-upgrade-plan` |
+| Branch | `docs/llm-backend-upgrade-plan` (deleted after merge) |
 | Base SHA | `f81637a` |
-| PR # | TBD (작성 후 채움) |
-| Merge SHA | TBD |
-| Status | pending |
-| Date opened | TBD |
-| Date merged | TBD |
+| PR # | https://github.com/CocoRoF/Geny/pull/773 |
+| Merge SHA | `d67d09c` |
+| Status | **merged** |
+| Date opened | 2026-05-17 |
+| Date merged | 2026-05-17 |
 
 ## 목적
 
@@ -60,12 +60,15 @@ git push origin main
 
 | Step | Action | SHA | Notes |
 |---|---|---|---|
-| 1 | branch 생성 | TBD | `docs/llm-backend-upgrade-plan` |
-| 2 | files staged | — | `git add docs/llm-backend-upgrade-plan/` |
-| 3 | commit | TBD | |
-| 4 | push origin | TBD | |
-| 5 | PR open | TBD | |
-| 6 | merge | TBD | squash |
-| 7 | main pull | TBD | |
+| 1 | branch 생성 | — | `docs/llm-backend-upgrade-plan` from `f81637a` |
+| 2 | files staged | — | 14 files in `docs/llm-backend-upgrade-plan/` only |
+| 3 | commit | `4ccb815` | `docs: add LLM backend upgrade plan` |
+| 4 | push origin | — | branch pushed |
+| 5 | PR open | #773 | https://github.com/CocoRoF/Geny/pull/773 |
+| 6 | merge | `d67d09c` | squash; branch auto-deleted |
+| 7 | main pull | — | up to date with origin/main at `d67d09c` |
 
-(채움 예정)
+## Result
+
+Plan docs live at `docs/llm-backend-upgrade-plan/` on Geny `main`. All subsequent
+PRs in this cycle will reference this plan and append their progress files here.

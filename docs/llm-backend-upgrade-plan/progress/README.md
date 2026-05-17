@@ -17,7 +17,7 @@
 
 | # | PR title | Branch | Repo | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|---|
-| 0 | docs: add LLM backend upgrade plan | `docs/llm-backend-upgrade-plan` | Geny | pending | f81637a | — | [00_plan_commit.md](./00_plan_commit.md) |
+| 0 | docs: add LLM backend upgrade plan | `docs/llm-backend-upgrade-plan` | Geny | merged | f81637a | d67d09c | [00_plan_commit.md](./00_plan_commit.md) |
 
 ### Phase A — Foundation (executor)
 
