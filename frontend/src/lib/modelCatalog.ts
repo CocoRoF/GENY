@@ -1,42 +1,71 @@
 /**
  * Provider + model catalog for the global model config editor.
  *
- * Provider taxonomy mirrors geny-executor's
- * `geny_executor.llm_client.registry.ClientRegistry` — the four
- * adapters that ship with the executor:
+ * Provider taxonomy mirrors geny-executor 2.0.0's
+ * `geny_executor.llm_client.registry.ClientRegistry` — six providers:
  *
- *   - anthropic  Claude family (default, hard dependency)
- *   - openai     GPT-4.1 family + reasoning models (o3 / o4-mini)
- *   - google     Gemini 3.x / 2.5
- *   - vllm       any model identifier served by a local vLLM endpoint;
- *                free-form because the deployed model is opaque to us.
- *
- * Catalog entries are sourced from the executor's own pricing table
- * (`stages/s07_token/artifact/default/pricing.py::ALL_PRICING`) so
- * every listed identifier is one the executor can both call and price.
+ *   - anthropic         Claude family (default; hard dependency)
+ *   - openai            GPT-4.1 + reasoning models (o3 / o4-mini)
+ *   - google            Gemini 3.x / 2.5
+ *   - vllm              any model on a local vLLM endpoint; free-form
+ *   - claude_code_cli   subprocess driving the local `claude` CLI
+ *                       (Anthropic-subscription or API-key auth)
+ *   - copilot_cli       subprocess driving `gh copilot`; plain text
+ *                       only — no streaming, no tools, no structured
+ *                       output. Honest capability flags surface this
+ *                       in the StageEditor / Settings UI.
  *
  * If a future executor release exposes an HTTP `/models` endpoint, swap
  * the static lists for an API call without changing the call sites —
  * the `MODEL_CATALOG` shape is the public contract here.
  */
 
-export type ProviderId = 'anthropic' | 'openai' | 'google' | 'vllm';
+export type ProviderKind = 'api' | 'cli';
+
+export type ProviderId =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'vllm'
+  | 'claude_code_cli'
+  | 'copilot_cli';
 
 export interface ProviderInfo {
   id: ProviderId;
   /** Display label rendered in the provider selector. */
   label: string;
   /** When true, the model field is a free-form input rather than a
-   *  strict dropdown — used for vLLM where the served model is
-   *  user-controlled and arbitrary. */
+   *  strict dropdown — used for vLLM (user-controlled) and the CLI
+   *  backends (model aliases vary by binary version). */
   freeForm: boolean;
+  /** Whether this provider is an HTTP API or a local subprocess CLI. */
+  kind: ProviderKind;
+  /** When kind === 'cli', a short hint the UI surfaces if the binary
+   *  / login isn't ready yet. */
+  installHelp?: string;
 }
 
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'anthropic', label: 'Anthropic', freeForm: false },
-  { id: 'openai', label: 'OpenAI', freeForm: false },
-  { id: 'google', label: 'Google', freeForm: false },
-  { id: 'vllm', label: 'vLLM', freeForm: true },
+  { id: 'anthropic', label: 'Anthropic', freeForm: false, kind: 'api' },
+  { id: 'openai', label: 'OpenAI', freeForm: false, kind: 'api' },
+  { id: 'google', label: 'Google', freeForm: false, kind: 'api' },
+  { id: 'vllm', label: 'vLLM (self-host)', freeForm: true, kind: 'api' },
+  {
+    id: 'claude_code_cli',
+    label: 'Claude Code (CLI)',
+    freeForm: true,
+    kind: 'cli',
+    installHelp:
+      'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY in API settings.',
+  },
+  {
+    id: 'copilot_cli',
+    label: 'GitHub Copilot (CLI)',
+    freeForm: true,
+    kind: 'cli',
+    installHelp:
+      'Install `gh` (cli.github.com), then `gh auth login` + `gh extension install github/gh-copilot`.',
+  },
 ];
 
 export interface ModelOption {
@@ -76,6 +105,16 @@ export const MODEL_CATALOG: Record<ProviderId, ModelOption[]> = {
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
   ],
   vllm: [],
+  claude_code_cli: [
+    { id: 'sonnet', label: 'Claude Sonnet (alias)' },
+    { id: 'opus', label: 'Claude Opus (alias)' },
+    { id: 'haiku', label: 'Claude Haiku (alias)' },
+    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (pinned)' },
+    { id: 'claude-opus-4-7', label: 'Opus 4.7 (pinned)' },
+  ],
+  copilot_cli: [
+    { id: 'default', label: 'Copilot default (server-chosen)' },
+  ],
 };
 
 export const DEFAULT_PROVIDER: ProviderId = 'anthropic';
@@ -89,6 +128,8 @@ export const PROVIDER_DEFAULT_MODEL: Record<ProviderId, string> = {
   openai: 'gpt-4.1',
   google: 'gemini-3.1-pro',
   vllm: '',
+  claude_code_cli: 'sonnet',
+  copilot_cli: 'default',
 };
 
 /** Look up provider metadata by id. Returns the canonical Anthropic
@@ -96,6 +137,18 @@ export const PROVIDER_DEFAULT_MODEL: Record<ProviderId, string> = {
 export function getProviderInfo(id: string | null | undefined): ProviderInfo {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
+
+/** Capability hints rendered as badges next to the selected provider.
+ *  The frontend shows these for the CLI backends so users know up-front
+ *  that, e.g., Copilot CLI doesn't stream. */
+export const PROVIDER_CAPABILITY_HINTS: Record<ProviderId, string[]> = {
+  anthropic: ['thinking', 'tools', 'streaming', 'top_k'],
+  openai: ['tools', 'streaming', 'json_schema'],
+  google: ['tools', 'streaming', 'top_k', 'json_schema'],
+  vllm: ['streaming'],
+  claude_code_cli: ['thinking', 'tools', 'streaming', 'mcp', 'session_resume', 'budget'],
+  copilot_cli: ['no streaming', 'no tools'],
+};
 
 /** Mirrors executor's `_infer_api_artifact` so the UI can fall back to
  *  prefix-based provider detection when the s06_api stage hasn't yet
