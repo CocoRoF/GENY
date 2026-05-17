@@ -40,13 +40,13 @@
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
 | C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | merged | 17b8468 | f99d0d7 | [c1_copilot_client.md](./c1_copilot_client.md) |
-| C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | pending | f99d0d7 | — | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
+| C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | merged | f99d0d7 | 20ca976 | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
 
 ### Phase D — Sub-agent multi-provider (executor)
 
 | # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
 |---|---|---|---|---|---|---|
-| D1 | refactor(s12_agent): SubagentTypeDescriptor + SubAgentBuildContext + new PipelineFactory | `feat/llm-backend/d1-subagent-descriptor` | pending | TBD | — | [d1_subagent_descriptor.md](./d1_subagent_descriptor.md) |
+| D1 | refactor(s12_agent): SubagentTypeDescriptor + SubAgentBuildContext + new PipelineFactory | `feat/llm-backend/d1-subagent-descriptor` | pending | 20ca976 | — | [d1_subagent_descriptor.md](./d1_subagent_descriptor.md) |
 | D2 | feat(s12_agent): parallel orchestrator with semaphore | `feat/llm-backend/d2-subagent-parallel` | pending | TBD | — | [d2_subagent_parallel.md](./d2_subagent_parallel.md) |
 | D3 | feat(pipeline): subagent_registry slot + credential propagation | `feat/llm-backend/d3-pipeline-subagent` | pending | TBD | — | [d3_pipeline_subagent.md](./d3_pipeline_subagent.md) |
 | D4 | refactor(skills/fork): multi-provider via CredentialBundle + CHANGELOG v2.0.0 | `feat/llm-backend/d4-fork-multi-provider` | pending | TBD | — | [d4_fork_multi_provider.md](./d4_fork_multi_provider.md) |
