@@ -1,0 +1,109 @@
+# Progress Tracker — LLM Backend Upgrade Cycle
+
+> 본 사이클의 모든 PR을 PR별로 추적한다. 각 PR이 어느 baseline SHA에서 출발해 어느 merge SHA로 합쳐졌는지 기록 → 롤백 가능.
+
+## Baseline (사이클 시작 시점)
+
+| Repo | Branch | SHA | Notes |
+|---|---|---|---|
+| `geny-executor` | `main` | `474522a` | feat(memory): root _index.json is a bounded folder-tree summary (1.21.0) (#190) |
+| `Geny` | `main` | `f81637a` | Merge pull request #772 from CocoRoF/feat/vtuber-screen-observation-skill |
+
+자세한 baseline 정보 + 환경 변수 + 의존성 버전: [baseline.md](./baseline.md)
+
+## Phase tracker
+
+### Geny side (plan/progress 자체 commit)
+
+| # | PR title | Branch | Repo | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|---|
+| 0 | docs: add LLM backend upgrade plan | `docs/llm-backend-upgrade-plan` | Geny | pending | f81637a | — | [00_plan_commit.md](./00_plan_commit.md) |
+
+### Phase A — Foundation (executor)
+
+| # | PR title | Branch | Repo | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|---|
+| A1 | feat(llm_client): extend capabilities, request/response, error categories | `feat/llm-backend/a1-capabilities-types-errors` | executor | pending | 474522a | — | [a1_capabilities_types_errors.md](./a1_capabilities_types_errors.md) |
+| A2 | feat(llm_client): add _cli_runtime + credentials; drop bridge.py | `feat/llm-backend/a2-cli-runtime-credentials` | executor | pending | TBD | — | [a2_cli_runtime_credentials.md](./a2_cli_runtime_credentials.md) |
+| A3 | refactor(pipeline): unify provider location at config["provider"]; conformance harness skeleton | `feat/llm-backend/a3-provider-unification` | executor | pending | TBD | — | [a3_provider_unification.md](./a3_provider_unification.md) |
+
+### Phase B — Claude Code CLI (executor)
+
+| # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|
+| B1 | feat(llm_client): translators/_cli.py for claude_code | `feat/llm-backend/b1-translators-claude-code` | pending | TBD | — | [b1_translators_claude_code.md](./b1_translators_claude_code.md) |
+| B2 | feat(llm_client): ClaudeCodeCLIClient | `feat/llm-backend/b2-claude-code-client` | pending | TBD | — | [b2_claude_code_client.md](./b2_claude_code_client.md) |
+| B3 | test(llm_client): claude_code_cli conformance suite | `feat/llm-backend/b3-claude-code-conformance` | pending | TBD | — | [b3_claude_code_conformance.md](./b3_claude_code_conformance.md) |
+
+### Phase C — Copilot CLI (executor)
+
+| # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|
+| C1 | feat(llm_client): CopilotCLIClient + translators | `feat/llm-backend/c1-copilot-client` | pending | TBD | — | [c1_copilot_client.md](./c1_copilot_client.md) |
+| C2 | test(llm_client): copilot_cli conformance + CHANGELOG | `feat/llm-backend/c2-copilot-conformance` | pending | TBD | — | [c2_copilot_conformance.md](./c2_copilot_conformance.md) |
+
+### Phase D — Sub-agent multi-provider (executor)
+
+| # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|
+| D1 | refactor(s12_agent): SubagentTypeDescriptor + SubAgentBuildContext + new PipelineFactory | `feat/llm-backend/d1-subagent-descriptor` | pending | TBD | — | [d1_subagent_descriptor.md](./d1_subagent_descriptor.md) |
+| D2 | feat(s12_agent): parallel orchestrator with semaphore | `feat/llm-backend/d2-subagent-parallel` | pending | TBD | — | [d2_subagent_parallel.md](./d2_subagent_parallel.md) |
+| D3 | feat(pipeline): subagent_registry slot + credential propagation | `feat/llm-backend/d3-pipeline-subagent` | pending | TBD | — | [d3_pipeline_subagent.md](./d3_pipeline_subagent.md) |
+| D4 | refactor(skills/fork): multi-provider via CredentialBundle + CHANGELOG v2.0.0 | `feat/llm-backend/d4-fork-multi-provider` | pending | TBD | — | [d4_fork_multi_provider.md](./d4_fork_multi_provider.md) |
+
+### PyPI Release
+
+| # | Action | Status | Notes | Progress file |
+|---|---|---|---|---|
+| R | Publish `geny-executor==2.0.0` to PyPI | pending | After Phase D merge | [r_pypi_release.md](./r_pypi_release.md) |
+
+### Phase E — Geny wiring
+
+| # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|
+| E1 | feat(settings): CLI backend sections + CredentialBundleBuilder + SubagentRegistryBuilder | `feat/llm-backend/e1-settings-credentials` | pending | TBD | — | [e1_settings_credentials.md](./e1_settings_credentials.md) |
+| E2 | refactor(executor): AgentSessionManager + EnvironmentService for credentials/registry | `feat/llm-backend/e2-session-manager` | pending | TBD | — | [e2_session_manager.md](./e2_session_manager.md) |
+| E3 | refactor(manifest): rewrite default_manifest for unified provider location | `feat/llm-backend/e3-default-manifest` | pending | TBD | — | [e3_default_manifest.md](./e3_default_manifest.md) |
+| E4 | feat(api): health endpoint + cli_backends + subagents routes | `feat/llm-backend/e4-health-routes` | pending | TBD | — | [e4_health_routes.md](./e4_health_routes.md) |
+| E5 | feat(scripts): reseed_environments + dev QA cleanup | `feat/llm-backend/e5-reseed` | pending | TBD | — | [e5_reseed.md](./e5_reseed.md) |
+
+### Phase F — Frontend + polish (Geny)
+
+| # | PR title | Branch | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|
+| F1 | feat(frontend): 6-provider catalog + capability badges | `feat/llm-backend/f1-frontend-catalog` | pending | TBD | — | [f1_frontend_catalog.md](./f1_frontend_catalog.md) |
+| F2 | feat(frontend): stage editor overrides + CLI backend settings + subagent catalog | `feat/llm-backend/f2-frontend-editors` | pending | TBD | — | [f2_frontend_editors.md](./f2_frontend_editors.md) |
+| F3 | docs: cycle wrap-up + postmortem | `feat/llm-backend/f3-wrap-up` | pending | TBD | — | [f3_wrap_up.md](./f3_wrap_up.md) |
+
+## Status legend
+
+- **pending** — branch 미생성, 작업 미시작
+- **in_progress** — branch 생성, 작업 중
+- **pr_open** — PR 생성됨, review/merge 대기
+- **merged** — PR 머지됨, 본 사이클 작업 항목 한 개 완료
+- **rolled_back** — 머지 후 문제 발견하여 revert
+
+## Rollback recipe
+
+각 PR이 머지된 SHA가 적혀 있으면 다음으로 단일-PR 롤백 가능:
+
+```bash
+git revert <merge_sha> --no-edit
+git push origin main
+```
+
+전체 사이클 롤백 (catastrophic 시):
+
+```bash
+# executor
+cd /home/geny-workspace/geny-executor
+git checkout main && git reset --hard 474522a   # baseline
+git push origin main --force-with-lease         # 사용자 명시 승인 필요
+
+# Geny
+cd /home/geny-workspace/Geny
+git checkout main && git reset --hard f81637a
+git push origin main --force-with-lease         # 사용자 명시 승인 필요
+```
+
+> **주의:** force push는 destructive. 본 README에 적은 것은 *recipe*일 뿐, 실제 실행은 반드시 사용자 명시 승인 후.
