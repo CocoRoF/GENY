@@ -1507,6 +1507,55 @@ export const configApi = {
     }),
 };
 
+// ==================== LLM Backends API (Phase E4 / F2) ====================
+
+export interface ProviderHealth {
+  provider: string;
+  label: string;
+  kind: 'api' | 'cli';
+  available: boolean;
+  detail?: string | null;
+  binary_path?: string | null;
+  binary_version?: string | null;
+  auth_ok?: boolean | null;
+  auth_method?: 'api_key' | 'subscription' | 'extension' | null;
+  install_help?: string | null;
+}
+
+export interface BackendsHealthResponse {
+  providers: ProviderHealth[];
+}
+
+export interface SubagentInfo {
+  agent_type: string;
+  description: string;
+  provider?: string | null;
+  allowed_tools: string[];
+  model_override?: string | null;
+}
+
+export interface SubagentsResponse {
+  items: SubagentInfo[];
+}
+
+export const llmBackendsApi = {
+  /** GET /api/llm-backends/health — every provider's status. */
+  health: () => apiCall<BackendsHealthResponse>('/api/llm-backends/health'),
+
+  /** POST /api/llm-backends/cli/claude-code/recheck — refresh just
+   *  the Claude Code probe (UI calls this after the user reports
+   *  finishing `claude auth login` in a terminal). */
+  recheckClaudeCode: () =>
+    apiCall<ProviderHealth>('/api/llm-backends/cli/claude-code/recheck', { method: 'POST' }),
+
+  /** POST /api/llm-backends/cli/copilot/recheck */
+  recheckCopilot: () =>
+    apiCall<ProviderHealth>('/api/llm-backends/cli/copilot/recheck', { method: 'POST' }),
+
+  /** GET /api/llm-backends/subagents — registered sub-agent types. */
+  subagents: () => apiCall<SubagentsResponse>('/api/llm-backends/subagents'),
+};
+
 // ==================== Chat API ====================
 
 export const chatApi = {

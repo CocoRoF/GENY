@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { configApi } from '@/lib/api';
+import LLMBackendsPanel from './LLMBackendsPanel';
 import { twMerge } from 'tailwind-merge';
 import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import NumberStepper from '@/components/ui/NumberStepper';
@@ -175,6 +176,15 @@ export default function SettingsTab() {
               <span className="flex-1">{t('settings.all')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{configs.length}</span>
             </button>
+            {/* Phase F2 — virtual 'LLM Backends' category. Swaps the
+                 main pane to the health/login panel. */}
+            <button
+              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'llm_backends' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              onClick={() => setSelectedCategory('llm_backends')}
+            >
+              <span className="flex-1">LLM Backends</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">6</span>
+            </button>
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
               return (
@@ -193,7 +203,9 @@ export default function SettingsTab() {
         {/* Config List — h-full + min-h-0 so content fills the row, and overflow-y-auto
              gives this pane its own scroll context independent from the sidebar. */}
         <div className="flex-1 h-full min-h-0 overflow-y-auto p-3 md:p-5">
-          {filtered.length === 0 ? (
+          {selectedCategory === 'llm_backends' ? (
+            <LLMBackendsPanel />
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4"><p className="text-[0.8125rem] text-[var(--text-muted)]">{t('settings.noConfigs')}</p></div>
           ) : (
             <div className="flex flex-col gap-3">
