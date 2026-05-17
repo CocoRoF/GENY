@@ -25,7 +25,7 @@
 |---|---|---|---|---|---|---|---|
 | A1 | feat(llm_client): extend capabilities, request/response, error categories | `feat/llm-backend/a1-capabilities-types-errors` | executor | merged | 474522a | 70e98c3 | [a1_capabilities_types_errors.md](./a1_capabilities_types_errors.md) |
 | A2 | feat(llm_client): add _cli_runtime + credentials primitives | `feat/llm-backend/a2-cli-runtime-credentials` | executor | merged | 70e98c3 | 8261ed3 | [a2_cli_runtime_credentials.md](./a2_cli_runtime_credentials.md) |
-| A3 | refactor(pipeline): unify provider location + drop bridge.py + conformance harness | `feat/llm-backend/a3-provider-unification` | executor | pending | 8261ed3 | — | [a3_provider_unification.md](./a3_provider_unification.md) |
+| A3 | refactor(pipeline): unify provider location + CredentialBundle + conformance harness | `feat/llm-backend/a3-provider-unification` | executor | merged | 8261ed3 | 6fd3f02 | [a3_provider_unification.md](./a3_provider_unification.md) |
 
 ### Phase B — Claude Code CLI (executor)
 
