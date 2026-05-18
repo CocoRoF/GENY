@@ -25,6 +25,7 @@ import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key, ExternalL
 
 import { llmBackendsApi, type ProviderHealth } from '@/lib/api';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
+import CopilotAuthModal from './CopilotAuthModal';
 
 
 function Badge({
@@ -263,14 +264,18 @@ export default function LLMBackendsPanel() {
       {openProvider === 'claude_code_cli' && (
         <ClaudeCodeAuthModal
           onClose={() => setOpenProvider(null)}
-          onChange={() => {
-            // Refresh the card after mutations (login / logout / token save).
-            fetchHealth();
-          }}
+          onChange={() => fetchHealth()}
         />
       )}
 
-      {openProvider && openProvider !== 'claude_code_cli' && (
+      {openProvider === 'copilot_cli' && (
+        <CopilotAuthModal
+          onClose={() => setOpenProvider(null)}
+          onChange={() => fetchHealth()}
+        />
+      )}
+
+      {openProvider && openProvider !== 'claude_code_cli' && openProvider !== 'copilot_cli' && (
         <PlaceholderProviderModal
           providerId={openProvider}
           providerLabel={providers.find((p) => p.provider === openProvider)?.label || openProvider}
@@ -296,9 +301,7 @@ function PlaceholderProviderModal({
   onClose: () => void;
 }) {
   const hint =
-    providerId === 'copilot_cli'
-      ? 'A dedicated Copilot login modal lands in Phase G4. For now, configure under Settings → CLI Backend Copilot CLI.'
-      : providerId === 'anthropic' || providerId === 'openai' || providerId === 'google'
+    providerId === 'anthropic' || providerId === 'openai' || providerId === 'google'
       ? `${providerLabel} API key paste + Test modal lands in Phase G5. Configure today under Settings → Claude API.`
       : providerId === 'vllm'
       ? "Set base_url under Settings → Claude API. vLLM doesn't need an API key."
