@@ -434,6 +434,12 @@ const ko: Translations = {
         apiKeyIntro: 'Anthropic Console API 키. 토큰 단위 과금 — 구독 쿼터를 사용하지 않습니다.',
         signOutConfirm: '서버에서 Claude Code 로그아웃할까요? 다시 로그인하기 전까지 이후 세션이 실패합니다.',
         jobStarted: '작업: {id} · 시작 {time}',
+        authCodeLabel: '브라우저에서 받은 인증 코드',
+        authCodeHint: '브라우저에서 로그인을 승인한 뒤, Claude가 보여주는 인증 코드를 복사해 여기에 붙여넣으세요.',
+        authCodePlaceholder: '인증 코드를 붙여넣으세요…',
+        submitAuthCode: '코드 제출',
+        authCodeSubmitted: 'CLI에 코드를 전송했습니다. 완료를 기다리는 중…',
+        authCodeError: 'CLI에 코드 전송 실패: {error}',
       },
       copilotModal: {
         title: 'GitHub Copilot (CLI) — 인증',

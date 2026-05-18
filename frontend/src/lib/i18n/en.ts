@@ -439,6 +439,13 @@ const en = {
         apiKeyIntro: 'Anthropic Console API key. Per-token billing — no subscription quota involved.',
         signOutConfirm: 'Sign out of Claude Code on the server? Subsequent sessions will fail until you log in again.',
         jobStarted: 'job: {id} · started {time}',
+        // Auth-code paste-back flow (post-OAuth)
+        authCodeLabel: 'Auth code from browser',
+        authCodeHint: 'After approving in the browser, copy the auth code Claude shows and paste it here.',
+        authCodePlaceholder: 'Paste the auth code…',
+        submitAuthCode: 'Submit code',
+        authCodeSubmitted: 'Code submitted to CLI. Watching for completion…',
+        authCodeError: 'Failed to send code to CLI: {error}',
       },
       // Copilot modal
       copilotModal: {

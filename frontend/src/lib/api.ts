@@ -1651,6 +1651,18 @@ export const llmBackendsApi = {
       { method: 'POST' },
     ),
 
+  /** Forward one line (or raw bytes) to the auth subprocess's stdin.
+   *  Used by the modal to deliver the OAuth auth code the user pastes
+   *  back from the browser into the CLI's prompt. */
+  submitAuthJobInput: (jobId: string, text: string, appendNewline = true) =>
+    apiCall<{ ok: boolean }>(
+      `/api/llm-backends/auth/login/${encodeURIComponent(jobId)}/input`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ text, append_newline: appendNewline }),
+      },
+    ),
+
   /** Returns the SSE URL the modal opens an EventSource against.
    *  Browser's EventSource carries cookies for same-origin requests,
    *  which is how we authenticate. */

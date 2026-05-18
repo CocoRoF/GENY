@@ -211,7 +211,7 @@ export default function ApiBackendModal({
             type="button"
             onClick={save}
             disabled={saving}
-            className="px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-color-hover)] disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50"
           >
             {saving
               ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" />

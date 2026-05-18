@@ -112,6 +112,13 @@ export default function ClaudeCodeAuthModal({
 
   const [showConsole, setShowConsole] = useState(false);
 
+  // OAuth code paste-back state
+  const [authCodeInput, setAuthCodeInput] = useState('');
+  const [authCodeSubmitting, setAuthCodeSubmitting] = useState(false);
+  const [authCodeStatus, setAuthCodeStatus] = useState<
+    { kind: 'ok' | 'err'; text: string } | null
+  >(null);
+
   // ── Status ──────────────────────────────────────────────────────
 
   const refreshStatus = useCallback(async () => {
@@ -177,6 +184,34 @@ export default function ClaudeCodeAuthModal({
     setJobRunning(false);
     refreshStatus();
   }, [job, closeStream, refreshStatus]);
+
+  const submitAuthCode = useCallback(async () => {
+    if (!job || !authCodeInput.trim()) return;
+    setAuthCodeSubmitting(true);
+    setAuthCodeStatus(null);
+    try {
+      await llmBackendsApi.submitAuthJobInput(job.job_id, authCodeInput.trim());
+      setAuthCodeStatus({
+        kind: 'ok',
+        text: t('settings.llmBackends.claudeCodeModal.authCodeSubmitted'),
+      });
+      setAuthCodeInput('');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAuthCodeStatus({
+        kind: 'err',
+        text: t('settings.llmBackends.claudeCodeModal.authCodeError', { error: msg }),
+      });
+    } finally {
+      setAuthCodeSubmitting(false);
+    }
+  }, [job, authCodeInput, t]);
+
+  // Reset code-input state whenever a new job starts.
+  useEffect(() => {
+    setAuthCodeInput('');
+    setAuthCodeStatus(null);
+  }, [job?.job_id]);
 
   const logout = useCallback(async () => {
     if (!confirm(t('settings.llmBackends.claudeCodeModal.signOutConfirm'))) return;
@@ -373,7 +408,7 @@ export default function ClaudeCodeAuthModal({
                   type="button"
                   onClick={() => startLogin(false)}
                   disabled={jobRunning}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-color-hover)] disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50"
                 >
                   {jobRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
                   {t('settings.llmBackends.claudeCodeModal.startLogin')}
@@ -382,7 +417,7 @@ export default function ClaudeCodeAuthModal({
                   type="button"
                   onClick={() => startLogin(true)}
                   disabled={jobRunning}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
                 >
                   {t('settings.llmBackends.claudeCodeModal.startConsoleLogin')}
                 </button>
@@ -405,6 +440,58 @@ export default function ClaudeCodeAuthModal({
                   {urls.map((u) => (
                     <UrlPanel key={u} url={u} t={t} />
                   ))}
+                </div>
+              )}
+
+              {/* Auth-code paste-back. The Claude CLI prompts for the
+                  code on stdin after the user approves the OAuth flow
+                  in their browser. We surface this only after a URL
+                  has been printed by the job. */}
+              {job && jobRunning && urls.length > 0 && (
+                <div className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3 flex flex-col gap-2">
+                  <label className="text-[0.8125rem] font-medium">
+                    {t('settings.llmBackends.claudeCodeModal.authCodeLabel')}
+                  </label>
+                  <p className="text-[0.7rem] text-[var(--text-tertiary)] leading-relaxed">
+                    {t('settings.llmBackends.claudeCodeModal.authCodeHint')}
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={authCodeInput}
+                      onChange={(e) => setAuthCodeInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && authCodeInput.trim() && !authCodeSubmitting) {
+                          e.preventDefault();
+                          submitAuthCode();
+                        }
+                      }}
+                      placeholder={t('settings.llmBackends.claudeCodeModal.authCodePlaceholder')}
+                      autoFocus
+                      className="flex-1 px-3 py-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[0.8125rem] font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={submitAuthCode}
+                      disabled={!authCodeInput.trim() || authCodeSubmitting}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50"
+                    >
+                      {authCodeSubmitting
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : t('settings.llmBackends.claudeCodeModal.submitAuthCode')}
+                    </button>
+                  </div>
+                  {authCodeStatus && (
+                    <div
+                      className={`text-[0.75rem] rounded p-2 border ${
+                        authCodeStatus.kind === 'ok'
+                          ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+                          : 'text-rose-300 bg-rose-500/10 border-rose-500/30'
+                      }`}
+                    >
+                      {authCodeStatus.text}
+                    </div>
+                  )}
                 </div>
               )}
 
