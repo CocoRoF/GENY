@@ -202,31 +202,11 @@ def test_attach_runtime_receives_base_client(stub_full_pipeline, monkeypatch, tm
     assert captured["llm_client"].provider == "anthropic"
 
 
-def test_unknown_provider_surfaces_at_build_time(stub_full_pipeline, monkeypatch, tmp_path):
-    _clear_cycle4_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("LLM_PROVIDER", "not-a-real-provider")
-
-    session = _make_session(stub_full_pipeline)
-    with pytest.raises(Exception):
-        session._build_pipeline()
-
-
-# ─────────────────────────────────────────────────────────────────
-# s06_api config sync
-# ─────────────────────────────────────────────────────────────────
-
-
-def test_s06_stage_config_synced(stub_full_pipeline, monkeypatch, tmp_path):
-    _clear_cycle4_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    monkeypatch.setenv("LLM_BASE_URL", "https://custom.example")
-
-    session = _make_session(stub_full_pipeline)
-    session._build_pipeline()
-
-    _s2, s6, _s15, _s18 = stub_full_pipeline.stages
-    assert s6._config.get("provider") == "anthropic"
-    assert s6._config.get("base_url") == "https://custom.example"
+# Phase H — provider selection moved to per-Environment manifest. The
+# session no longer reads a global provider, so the "unknown provider
+# surfaces at build time" and "s06 stage config synced from APIConfig"
+# tests were removed. s06's provider / base_url now come from the
+# manifest at instantiation time; AgentSession does not override them.
 
 
 # ─────────────────────────────────────────────────────────────────

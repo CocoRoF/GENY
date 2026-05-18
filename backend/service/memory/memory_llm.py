@@ -1,17 +1,16 @@
 """Unified memory-path LLM helper.
 
-Builds a ``BaseClient`` + ``ModelConfig`` from ``APIConfig`` and wraps
-them in a small ``MemoryLLM`` adapter. Offline memory-path callers
-(curation scheduler / controller) use this instead of instantiating
-``ChatAnthropic`` directly so that ``APIConfig.provider`` and
-``APIConfig.base_url`` are honoured — without this, a user who
-switched the provider to ``openai`` or ``vllm`` would silently still
-hit Anthropic for every curation note.
+Builds a ``BaseClient`` + ``ModelConfig`` and wraps them in a small
+``MemoryLLM`` adapter. Phase H — the memory path is hardcoded to the
+Anthropic client because ``memory_model`` is always a Claude model
+in defaults, and there is no longer a global "current provider"
+setting (provider selection is per-Environment at the manifest
+level). The API key comes from the hidden ``LLMCredentialsConfig``
+(edited via the LLM Backends panel), and the model name from
+``APIConfig.memory_model`` / ``anthropic_model``.
 
-This module is the cycle ``20260421_5`` closure of the curation
-migration explicitly deferred by ``20260421_4``
-(see ``dev_docs/20260421_4/analysis/02_memory_llm_inventory.md``
-§6 — "Sites NOT touched by this cycle").
+Offline memory-path callers (curation scheduler / controller) use
+this instead of instantiating ``ChatAnthropic`` directly.
 """
 
 from __future__ import annotations
@@ -58,20 +57,27 @@ class MemoryLLM:
 
 
 def build_memory_llm() -> Optional[MemoryLLM]:
-    """Build a memory-path LLM adapter from the current ``APIConfig``.
+    """Build a memory-path LLM adapter.
 
-    Returns ``None`` when no API key / model is configured so callers
-    already prepared for a falsy value (``CurationEngine`` gates every
-    LLM stage on ``self._llm``) degrade cleanly to rule-based paths.
+    Hardcoded to the Anthropic client — see module docstring. Returns
+    ``None`` when no API key / model is configured so callers already
+    prepared for a falsy value (``CurationEngine`` gates every LLM
+    stage on ``self._llm``) degrade cleanly to rule-based paths.
     Empty ``memory_model`` falls back to ``anthropic_model`` — same
     semantics as ``AgentSession._build_pipeline``.
     """
     try:
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.api_config import APIConfig
+        from service.config.sub_config.general.llm_credentials_config import (
+            LLMCredentialsConfig,
+        )
 
-        api_cfg = get_config_manager().load_config(APIConfig)
-        api_key = api_cfg.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        cm = get_config_manager()
+        api_cfg = cm.load_config(APIConfig)
+        creds = cm.load_config(LLMCredentialsConfig)
+
+        api_key = creds.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return None
 
@@ -79,14 +85,8 @@ def build_memory_llm() -> Optional[MemoryLLM]:
         if not model_name:
             return None
 
-        provider_name = (getattr(api_cfg, "provider", "") or "anthropic").strip()
-        base_url = (getattr(api_cfg, "base_url", "") or "").strip() or None
-
-        client_cls = ClientRegistry.get(provider_name)
-        client_kwargs: dict = {"api_key": api_key}
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        client = client_cls(**client_kwargs)
+        client_cls = ClientRegistry.get("anthropic")
+        client = client_cls(api_key=api_key)
 
         model_config = ModelConfig(
             model=model_name,

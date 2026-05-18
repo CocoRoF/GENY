@@ -24,6 +24,7 @@ from service.config.sub_config.channels.slack_config import SlackConfig
 from service.config.sub_config.channels.teams_config import TeamsConfig
 from service.config.sub_config.general.language_config import LanguageConfig
 from service.config.sub_config.general.api_config import APIConfig
+from service.config.sub_config.general.llm_credentials_config import LLMCredentialsConfig
 from service.config.sub_config.general.limits_config import LimitsConfig
 from service.config.sub_config.general.telemetry_config import TelemetryConfig
 from service.config.sub_config.general.github_config import GitHubConfig
@@ -43,6 +44,7 @@ __all__ = [
     'TeamsConfig',
     'LanguageConfig',
     'APIConfig',
+    'LLMCredentialsConfig',
     'LimitsConfig',
     'TelemetryConfig',
     'GitHubConfig',

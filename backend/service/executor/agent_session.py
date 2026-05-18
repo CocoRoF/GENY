@@ -1768,8 +1768,13 @@ class AgentSession:
         try:
             from service.config.manager import get_config_manager
             from service.config.sub_config.general.api_config import APIConfig
-            api_cfg = get_config_manager().load_config(APIConfig)
-            api_key = api_key or api_cfg.anthropic_api_key or ""
+            from service.config.sub_config.general.llm_credentials_config import (
+                LLMCredentialsConfig,
+            )
+            cm = get_config_manager()
+            api_cfg = cm.load_config(APIConfig)
+            creds = cm.load_config(LLMCredentialsConfig)
+            api_key = api_key or creds.anthropic_api_key or ""
         except Exception:
             pass
         if api_cfg is None:
@@ -1910,24 +1915,25 @@ class AgentSession:
                     f"skipping memory model override"
                 )
 
-        # ── Shared LLM client (cycle 20260421_4) ──
+        # ── Shared LLM client (cycle 20260421_4 / Phase H) ──
         #
-        # Build the vendor-selected client once and inject it via
-        # attach_runtime. s06_api's _resolve_client prefers state.llm_client,
-        # so main-stage and memory-stage LLM calls both run through the
-        # same instance — no credential drift by construction.
-        provider_name = (getattr(api_cfg, "provider", "") or "anthropic").strip()
-        base_url = (getattr(api_cfg, "base_url", "") or "").strip() or None
+        # Build a fallback Anthropic client for the out-of-pipeline
+        # tool calls (``memory_distill``, etc.) that read
+        # ``self._llm_client_handle``. The per-Environment provider
+        # selection lives in the manifest at Stage 6 — we no longer
+        # override s06's config with a global APIConfig setting, since
+        # Phase H removed that global field. Anthropic is the safe
+        # default because the memory_model default is a Claude model;
+        # if a future Environment needs non-Anthropic out-of-pipeline
+        # tooling, the manifest-driven s06 client will still be
+        # consulted by the executor's main path.
         try:
-            client_cls = ClientRegistry.get(provider_name)
-            client_kwargs: Dict[str, Any] = {"api_key": api_key}
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            llm_client = client_cls(**client_kwargs)
+            client_cls = ClientRegistry.get("anthropic")
+            llm_client = client_cls(api_key=api_key)
         except Exception as exc:
             logger.exception(
-                f"[{self._session_id}] cycle-4: failed to build LLM client "
-                f"for provider={provider_name!r}: {exc}"
+                f"[{self._session_id}] cycle-4: failed to build fallback "
+                f"Anthropic client: {exc}"
             )
             raise
 
@@ -1938,23 +1944,6 @@ class AgentSession:
         # session-init still sees them in the right order.
         self._llm_client_handle = llm_client
         self._memory_cfg_handle = memory_cfg
-
-        # Sync s06_api's own config so its fallback client (used only if
-        # state.llm_client ever becomes None at run time) stays consistent.
-        try:
-            s06_stage = next(
-                (st for st in self._prebuilt_pipeline.stages if getattr(st, "order", None) == 6),
-                None,
-            )
-            if s06_stage is not None and hasattr(s06_stage, "update_config"):
-                s06_stage.update_config({
-                    "provider": provider_name,
-                    "base_url": base_url or "",
-                })
-        except Exception as exc:
-            logger.warning(
-                f"[{self._session_id}] cycle-4: failed to sync s06 provider: {exc}"
-            )
 
         # ── Legacy reflection callback (kept behind APIConfig flag) ──
         use_legacy_reflect = bool(getattr(api_cfg, "use_legacy_reflect", False))

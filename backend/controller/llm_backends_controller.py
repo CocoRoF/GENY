@@ -34,7 +34,6 @@ from pydantic import BaseModel
 
 from service.auth.auth_middleware import require_auth
 from service.config import get_config_manager
-from service.config.sub_config.general.api_config import APIConfig
 from service.config.sub_config.general.cli_backends_config import (
     CLIBackendClaudeCodeConfig,
     CLIBackendCopilotConfig,

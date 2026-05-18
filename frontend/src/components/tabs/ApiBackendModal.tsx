@@ -1,15 +1,16 @@
 /**
- * ApiBackendModal — Phase G5. A small modal used by the four API
+ * ApiBackendModal — Phase G5 / Phase H. A small modal used by the four API
  * backends (Anthropic / OpenAI / Google / vLLM) to paste a credential
  * and re-probe the panel's health card in place. Single component
  * with per-provider field bindings keeps the UI uniform and the code
  * short.
  *
- * Save target:
- *   - api.anthropic_api_key  → Anthropic, Claude Code subscription override
- *   - api.openai_api_key     → OpenAI
- *   - api.google_api_key     → Google Gemini
- *   - api.base_url           → vLLM (text instead of password)
+ * Save target (config name = ``llm_credentials``, hidden from the
+ * generic SettingsTab list — this modal is the only editor):
+ *   - llm_credentials.anthropic_api_key  → Anthropic
+ *   - llm_credentials.openai_api_key     → OpenAI
+ *   - llm_credentials.google_api_key     → Google Gemini
+ *   - llm_credentials.base_url           → vLLM (text instead of password)
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -82,13 +83,13 @@ export default function ApiBackendModal({
   const [healthRow, setHealthRow] = useState<ProviderHealth | null>(null);
   const [probing, setProbing] = useState(false);
 
-  // Pre-fill current value from /api/config/api on open (so the user
-  // sees the field is "configured" rather than always blank).
+  // Pre-fill current value from /api/config/llm_credentials on open (so
+  // the user sees the field is "configured" rather than always blank).
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const res = await configApi.get('api');
+        const res = await configApi.get('llm_credentials');
         if (!mounted) return;
         const raw = (res.values as Record<string, unknown> | undefined)?.[spec.configField];
         // Don't leak the actual secret — just indicate it's set.
@@ -126,7 +127,7 @@ export default function ApiBackendModal({
     setSaving(true);
     setError(null);
     try {
-      await configApi.update('api', { [spec.configField]: value });
+      await configApi.update('llm_credentials', { [spec.configField]: value });
       onChange?.();
       await refreshHealth();
     } catch (e) {
