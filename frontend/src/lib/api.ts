@@ -1538,13 +1538,50 @@ export interface SubagentsResponse {
   items: SubagentInfo[];
 }
 
+// Phase G — auth flow shapes.
+
+export interface ClaudeCodeAuthStatus {
+  raw: Record<string, unknown>;
+  logged_in?: boolean | null;
+  auth_method?: string | null;       // "claude.ai" | "console" | ...
+  subscription_type?: string | null; // "max" | "pro" | ...
+  email?: string | null;
+  org_name?: string | null;
+}
+
+export interface CopilotAuthStatus {
+  logged_in: boolean;
+  auth_status_text: string;
+  extension_installed: boolean;
+}
+
+export interface AuthLoginStartResponse {
+  job_id: string;
+  kind: 'claude_code' | 'copilot';
+  argv: string[];
+  hint: string;
+}
+
+export interface AuthJobEvent {
+  channel: 'stdout' | 'stderr' | 'exit';
+  text: string;
+  ts: number;
+  exit_code?: number;
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  duration_ms: number;
+  detail: string;
+  raw_stdout_tail?: string | null;
+  raw_stderr_tail?: string | null;
+}
+
 export const llmBackendsApi = {
   /** GET /api/llm-backends/health — every provider's status. */
   health: () => apiCall<BackendsHealthResponse>('/api/llm-backends/health'),
 
-  /** POST /api/llm-backends/cli/claude-code/recheck — refresh just
-   *  the Claude Code probe (UI calls this after the user reports
-   *  finishing `claude auth login` in a terminal). */
+  /** POST /api/llm-backends/cli/claude-code/recheck */
   recheckClaudeCode: () =>
     apiCall<ProviderHealth>('/api/llm-backends/cli/claude-code/recheck', { method: 'POST' }),
 
@@ -1552,8 +1589,70 @@ export const llmBackendsApi = {
   recheckCopilot: () =>
     apiCall<ProviderHealth>('/api/llm-backends/cli/copilot/recheck', { method: 'POST' }),
 
-  /** GET /api/llm-backends/subagents — registered sub-agent types. */
+  /** GET /api/llm-backends/subagents */
   subagents: () => apiCall<SubagentsResponse>('/api/llm-backends/subagents'),
+
+  // ── Phase G — Claude Code auth ────────────────────────────────
+
+  claudeCodeStatus: () =>
+    apiCall<ClaudeCodeAuthStatus>('/api/llm-backends/cli/claude-code/auth/status'),
+
+  claudeCodeStartLogin: (opts?: { useConsole?: boolean; email?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.useConsole) params.set('use_console', 'true');
+    if (opts?.email) params.set('email', opts.email);
+    const qs = params.toString();
+    return apiCall<AuthLoginStartResponse>(
+      `/api/llm-backends/cli/claude-code/auth/login${qs ? `?${qs}` : ''}`,
+      { method: 'POST' },
+    );
+  },
+
+  claudeCodeLogout: () =>
+    apiCall<{ ok: boolean }>('/api/llm-backends/cli/claude-code/auth/logout', { method: 'POST' }),
+
+  claudeCodeTest: () =>
+    apiCall<TestConnectionResponse>('/api/llm-backends/cli/claude-code/test', { method: 'POST' }),
+
+  // ── Phase G — Copilot auth ────────────────────────────────────
+
+  copilotStatus: () =>
+    apiCall<CopilotAuthStatus>('/api/llm-backends/cli/copilot/auth/status'),
+
+  copilotStartLogin: () =>
+    apiCall<AuthLoginStartResponse>('/api/llm-backends/cli/copilot/auth/login', { method: 'POST' }),
+
+  copilotLogout: () =>
+    apiCall<{ ok: boolean }>('/api/llm-backends/cli/copilot/auth/logout', { method: 'POST' }),
+
+  copilotTest: () =>
+    apiCall<TestConnectionResponse>('/api/llm-backends/cli/copilot/test', { method: 'POST' }),
+
+  // ── Phase G — Shared SSE / cancel ─────────────────────────────
+
+  /** Polling fallback / full snapshot of an auth job. */
+  authJobState: (jobId: string) =>
+    apiCall<{
+      job_id: string;
+      kind: string;
+      argv: string[];
+      started_at: number;
+      finished_at: number | null;
+      exit_code: number | null;
+      history: AuthJobEvent[];
+    }>(`/api/llm-backends/auth/login/${encodeURIComponent(jobId)}`),
+
+  cancelAuthJob: (jobId: string) =>
+    apiCall<{ ok: boolean; already_finished?: boolean }>(
+      `/api/llm-backends/auth/login/${encodeURIComponent(jobId)}/cancel`,
+      { method: 'POST' },
+    ),
+
+  /** Returns the SSE URL the modal opens an EventSource against.
+   *  Browser's EventSource carries cookies for same-origin requests,
+   *  which is how we authenticate. */
+  authJobEventsUrl: (jobId: string) =>
+    `${getBackendUrl()}/api/llm-backends/auth/login/${encodeURIComponent(jobId)}/events`,
 };
 
 // ==================== Chat API ====================

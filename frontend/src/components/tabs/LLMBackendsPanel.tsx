@@ -21,9 +21,10 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key, ExternalLink, Settings as SettingsIcon } from 'lucide-react';
 
 import { llmBackendsApi, type ProviderHealth } from '@/lib/api';
+import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 
 
 function Badge({
@@ -53,10 +54,13 @@ function ProviderCard({
   provider,
   onRecheck,
   recheckLoading,
+  onOpenSettings,
 }: {
   provider: ProviderHealth;
   onRecheck: (id: string) => Promise<void>;
   recheckLoading: string | null;
+  /** Click → open the per-provider settings modal. */
+  onOpenSettings: (providerId: string) => void;
 }) {
   const isCli = provider.kind === 'cli';
   const recheckTarget =
@@ -94,14 +98,29 @@ function ProviderCard({
   }
 
   return (
-    <div className="rounded-[var(--border-radius)] border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenSettings(provider.provider)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpenSettings(provider.provider);
+        }
+      }}
+      className="rounded-[var(--border-radius)] border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 flex flex-col gap-3 text-left cursor-pointer hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
+      aria-label={`Open settings for ${provider.label}`}
+    >
+      <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-2">
           {isCli ? <Terminal className="w-4 h-4 text-[var(--text-secondary)]" /> : <Key className="w-4 h-4 text-[var(--text-secondary)]" />}
           <span className="font-medium">{provider.label}</span>
           <span className="text-[0.7rem] text-[var(--text-tertiary)]">{provider.provider}</span>
         </div>
-        {badge}
+        <div className="flex items-center gap-2">
+          {badge}
+          <SettingsIcon className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+        </div>
       </div>
 
       <div className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
@@ -127,7 +146,7 @@ function ProviderCard({
           <button
             type="button"
             className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-color)] text-[0.75rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-            onClick={() => onRecheck(recheckTarget)}
+            onClick={(e) => { e.stopPropagation(); onRecheck(recheckTarget); }}
             disabled={recheckActive}
             aria-label={`Re-check ${provider.label}`}
           >
@@ -139,6 +158,7 @@ function ProviderCard({
               href="https://docs.anthropic.com/claude/code"
               target="_blank"
               rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1 text-[0.75rem] text-sky-400 hover:underline"
             >
               Docs <ExternalLink className="w-3 h-3" />
@@ -156,6 +176,7 @@ export default function LLMBackendsPanel() {
   const [loading, setLoading] = useState(false);
   const [recheckLoading, setRecheckLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openProvider, setOpenProvider] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
@@ -234,8 +255,71 @@ export default function LLMBackendsPanel() {
             provider={p}
             onRecheck={handleRecheck}
             recheckLoading={recheckLoading}
+            onOpenSettings={(id) => setOpenProvider(id)}
           />
         ))}
+      </div>
+
+      {openProvider === 'claude_code_cli' && (
+        <ClaudeCodeAuthModal
+          onClose={() => setOpenProvider(null)}
+          onChange={() => {
+            // Refresh the card after mutations (login / logout / token save).
+            fetchHealth();
+          }}
+        />
+      )}
+
+      {openProvider && openProvider !== 'claude_code_cli' && (
+        <PlaceholderProviderModal
+          providerId={openProvider}
+          providerLabel={providers.find((p) => p.provider === openProvider)?.label || openProvider}
+          onClose={() => setOpenProvider(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+
+/** Stub modal for backends whose dedicated modal lands in a follow-up
+ *  PR (G4 = Copilot, G5 = the four API backends). Until those ship,
+ *  clicking those cards still feels responsive: the modal explains
+ *  where to configure the backend today and links there. */
+function PlaceholderProviderModal({
+  providerId,
+  providerLabel,
+  onClose,
+}: {
+  providerId: string;
+  providerLabel: string;
+  onClose: () => void;
+}) {
+  const hint =
+    providerId === 'copilot_cli'
+      ? 'A dedicated Copilot login modal lands in Phase G4. For now, configure under Settings → CLI Backend Copilot CLI.'
+      : providerId === 'anthropic' || providerId === 'openai' || providerId === 'google'
+      ? `${providerLabel} API key paste + Test modal lands in Phase G5. Configure today under Settings → Claude API.`
+      : providerId === 'vllm'
+      ? "Set base_url under Settings → Claude API. vLLM doesn't need an API key."
+      : 'No dedicated modal yet.';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[480px] mx-4 p-5 flex flex-col gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-[1rem] font-semibold">{providerLabel}</h3>
+        <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">{hint}</p>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)]"
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
