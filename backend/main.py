@@ -131,6 +131,18 @@ async def lifespan(app: FastAPI):
     print_step_banner("START", "GENY AGENT STARTUP", "Initializing agent session management system")
     logger.info("Starting Geny Agent")
 
+    # ── Step 0: LLM client runtime patches ────────────────────────────
+    # geny-executor 2.0.1 builds the Claude Code CLI argv without
+    # ``--verbose``, but the newer Claude CLI rejects
+    # ``--print --output-format stream-json`` unless ``--verbose`` is
+    # also passed. This patch wraps the argv builder to inject the
+    # missing flag before any Developer / Claude-Code session starts.
+    try:
+        from service.llm_patches import install_llm_patches
+        install_llm_patches()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"   - LLM patches install failed: {exc}")
+
     # ── Step 1: Initialize PostgreSQL Database ─────────────────────────
     app_db = None
     try:
