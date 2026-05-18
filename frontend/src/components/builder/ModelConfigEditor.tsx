@@ -24,9 +24,10 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Save, RotateCcw } from 'lucide-react';
+import { Save, RotateCcw, AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { PROVIDERS, type ProviderId } from '@/lib/modelCatalog';
+import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -234,31 +235,11 @@ export function ModelConfigEditor({
       )}
 
       {providerAware && (
-        <div className="grid gap-1.5">
-          <Label>{t('envManagement.modelEditor.providerLabel')}</Label>
-          <div className="inline-flex items-center p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] w-fit">
-            {PROVIDERS.map((p) => {
-              const active = p.id === provider;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onProviderChange!(p.id)}
-                  className={`h-7 px-3 text-[0.75rem] font-medium rounded transition-colors ${
-                    active
-                      ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
-                      : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
-            {t('envManagement.modelEditor.providerHint')}
-          </p>
-        </div>
+        <ProviderTabStrip
+          provider={provider!}
+          onProviderChange={onProviderChange!}
+          t={t}
+        />
       )}
 
       <div className="grid gap-1.5">
@@ -437,5 +418,156 @@ export function ModelConfigEditor({
     </section>
   );
 }
+
+
+/**
+ * Provider tab strip — gates each tab on the live ``GET
+ * /api/llm-backends/health`` probe. Providers whose card is "Not
+ * configured" in the LLM Backends panel get rendered as disabled
+ * (faded, no pointer events, tooltip + native title attribute
+ * explaining what's missing). If the currently selected provider is
+ * itself unavailable a warning banner surfaces above the strip with
+ * a one-click jump to Settings.
+ *
+ * The fetch is deduped via ``useLLMBackendsHealthStore`` so the three
+ * editors on a single Environment page (global + stage6 + stage18)
+ * share one snapshot.
+ */
+function ProviderTabStrip({
+  provider,
+  onProviderChange,
+  t,
+}: {
+  provider: ProviderId;
+  onProviderChange: (next: ProviderId) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const providers = useLLMBackendsHealthStore((s) => s.providers);
+  const loaded = useLLMBackendsHealthStore((s) => s.loaded);
+  const loading = useLLMBackendsHealthStore((s) => s.loading);
+  const error = useLLMBackendsHealthStore((s) => s.error);
+  const generation = useLLMBackendsHealthStore((s) => s.generation);
+  const fetchHealth = useLLMBackendsHealthStore((s) => s.fetch);
+
+  // Trigger the fetch once per generation. ``markStale()`` bumps the
+  // generation when a sibling modal saves a credential so we re-probe.
+  useEffect(() => {
+    fetchHealth();
+  }, [fetchHealth, generation]);
+
+  // Cross-tab refresh: if the user fixed a credential in the LLM
+  // Backends settings (a separate browser tab) and switches back here,
+  // the visibilitychange / focus event triggers a force-refetch so the
+  // gate reflects the fresh state without a manual page reload.
+  useEffect(() => {
+    const onFocus = () => {
+      void fetchHealth(true);
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onFocus();
+    });
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [fetchHealth]);
+
+  const currentAvailable = providers[provider]?.available === true;
+  const currentLabel =
+    PROVIDERS.find((p) => p.id === provider)?.label ?? provider;
+
+  return (
+    <div className="grid gap-1.5">
+      <Label>{t('envManagement.modelEditor.providerLabel')}</Label>
+
+      {/* Tab strip */}
+      <div className="inline-flex items-center p-0.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] w-fit flex-wrap gap-0.5">
+        {PROVIDERS.map((p) => {
+          const active = p.id === provider;
+          const row = providers[p.id];
+          // While the probe is in-flight, leave everything enabled so
+          // the user isn't blocked on a slow network — flip to
+          // disabled only once we have a verdict.
+          const available =
+            !loaded ? true : row?.available === true;
+          const isDisabled = !available;
+          const tooltip = isDisabled
+            ? t('envManagement.modelEditor.providerUnavailableTip', { provider: p.label })
+            : undefined;
+
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                if (isDisabled) return;
+                onProviderChange(p.id);
+              }}
+              disabled={isDisabled}
+              title={tooltip}
+              aria-disabled={isDisabled}
+              className={`h-7 px-3 text-[0.75rem] font-medium rounded transition-colors inline-flex items-center gap-1.5 ${
+                active
+                  ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
+                  : isDisabled
+                    ? 'text-[hsl(var(--muted-foreground))] opacity-40 cursor-not-allowed'
+                    : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
+              }`}
+            >
+              {p.label}
+              {isDisabled && (
+                <span className="text-[0.6rem] uppercase tracking-wide font-semibold text-[hsl(var(--muted-foreground))] opacity-80">
+                  · {t('envManagement.modelEditor.providerUnavailableBadge')}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        {loading && !loaded && (
+          <span className="inline-flex items-center gap-1 px-2 text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            {t('envManagement.modelEditor.providerHealthLoading')}
+          </span>
+        )}
+      </div>
+
+      {/* Generic hint */}
+      <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+        {t('envManagement.modelEditor.providerHint')}
+      </p>
+
+      {/* Fetch error — informational, don't block the editor */}
+      {error && (
+        <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+          {t('envManagement.modelEditor.providerHealthError', { error })}
+        </p>
+      )}
+
+      {/* Current provider unavailable — surface a warning + CTA */}
+      {loaded && !currentAvailable && (
+        <div className="mt-1 px-3 py-2 rounded-md bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.3)] text-[0.75rem] text-[var(--warning-color)] flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="leading-relaxed">
+              {t('envManagement.modelEditor.providerCurrentUnavailable', {
+                provider: currentLabel,
+              })}
+            </p>
+            <a
+              href="/?tab=settings&settings_category=llm_backends"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[var(--warning-color)] hover:underline"
+            >
+              {t('envManagement.modelEditor.providerOpenSettings')}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 export default ModelConfigEditor;

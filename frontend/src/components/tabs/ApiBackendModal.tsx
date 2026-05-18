@@ -18,6 +18,7 @@ import { X, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from 'lucide-react
 
 import { configApi, llmBackendsApi, type ProviderHealth } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 
 
 type ApiProviderId = 'anthropic' | 'openai' | 'google' | 'vllm';
@@ -90,6 +91,8 @@ export default function ApiBackendModal({
 
   useEffect(() => { refreshHealth(); }, [refreshHealth]);
 
+  const markHealthStale = useLLMBackendsHealthStore((s) => s.markStale);
+
   const save = useCallback(async () => {
     if (spec.password && value.startsWith('•')) {
       setError(t('settings.llmBackends.apiModal.placeholderUnchanged'));
@@ -99,6 +102,11 @@ export default function ApiBackendModal({
     setError(null);
     try {
       await configApi.update('llm_credentials', { [spec.configField]: value });
+      // Bust the shared health-store cache so any open Environment
+      // editor's gate re-probes and either un-disables this provider
+      // or clears the "currently selected provider is unavailable"
+      // warning the user just resolved.
+      markHealthStale();
       onChange?.();
       await refreshHealth();
     } catch (e) {
@@ -106,7 +114,7 @@ export default function ApiBackendModal({
     } finally {
       setSaving(false);
     }
-  }, [spec.configField, spec.password, value, onChange, refreshHealth, t]);
+  }, [spec.configField, spec.password, value, onChange, refreshHealth, t, markHealthStale]);
 
   const fieldLabel = t(`settings.llmBackends.apiModal.fieldLabel.${providerId}`);
   const helper = t(`settings.llmBackends.apiModal.helper.${providerId}`);
