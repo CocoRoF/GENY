@@ -225,10 +225,10 @@ export default function LLMBackendsPanel() {
         <div>
           <h3 className="text-[1rem] font-semibold">LLM Backends</h3>
           <p className="text-[0.8125rem] text-[var(--text-secondary)] mt-1">
-            Six providers map to the executor's ClientRegistry. API providers use the keys configured under
-            "Claude API". CLI providers (Claude Code, Copilot) wrap a local binary — install + log in once,
-            then this panel turns green and any Environment whose Stage 6 picks that provider will route
-            actual VTuber / Worker sessions through it.
+            Six providers map to the executor's ClientRegistry. Each card is the single editor for that
+            provider — click to paste an API key (Anthropic / OpenAI / Google / vLLM) or run the in-modal
+            login flow (Claude Code, Copilot). Once a card turns green any Environment whose Stage 6 picks
+            that provider routes actual VTuber / Worker sessions through it.
           </p>
         </div>
         <button

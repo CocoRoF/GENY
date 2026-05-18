@@ -45,7 +45,7 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
     bare_mode: bool = True
     default_permission_mode: str = "default"
     max_budget_usd: float = 0.0            # 0 = no cap
-    api_key: str = ""                      # blank → fall back to APIConfig.anthropic_api_key
+    api_key: str = ""                      # blank → fall back to LLMCredentialsConfig.anthropic_api_key
     settings_path: str = ""                # --settings file
     mcp_config_path: str = ""              # --mcp-config <path>
     allow_tools_csv: str = ""              # comma-separated --allowedTools
@@ -86,6 +86,12 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
     @classmethod
     def get_icon(cls) -> str:
         return "terminal"
+
+    @classmethod
+    def is_user_visible(cls) -> bool:
+        # Phase H — edited only through the LLM Backends panel's
+        # ClaudeCodeAuthModal, not the auto-form list.
+        return False
 
     @classmethod
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
@@ -157,7 +163,7 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
                 name="api_key",
                 field_type=FieldType.PASSWORD,
                 label="ANTHROPIC_API_KEY (override)",
-                description="Optional. Blank = inherit APIConfig.anthropic_api_key.",
+                description="Optional. Blank = inherit LLMCredentialsConfig.anthropic_api_key.",
                 default="",
                 group="claude_code",
                 secure=True,
@@ -260,6 +266,12 @@ class CLIBackendCopilotConfig(BaseConfig):
     @classmethod
     def get_icon(cls) -> str:
         return "terminal"
+
+    @classmethod
+    def is_user_visible(cls) -> bool:
+        # Phase H — edited only through the LLM Backends panel's
+        # CopilotAuthModal, not the auto-form list.
+        return False
 
     @classmethod
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:

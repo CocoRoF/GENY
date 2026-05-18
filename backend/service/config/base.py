@@ -159,6 +159,19 @@ class BaseConfig(ABC):
         return "settings"
 
     @classmethod
+    def is_user_visible(cls) -> bool:
+        """Whether this config surfaces in the generic SettingsTab list.
+
+        Hidden configs (returning ``False``) are still fully accessible
+        through ``GET /api/config/{name}`` and ``PUT /api/config/{name}``
+        — only the list endpoint filters them out. Use this to gate
+        configs that have a dedicated editor (e.g. ``llm_credentials``
+        edited via the LLM Backends panel, ``cli_backend_*`` edited
+        through the per-CLI auth modals).
+        """
+        return True
+
+    @classmethod
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
         """
         Return i18n translations keyed by locale code.

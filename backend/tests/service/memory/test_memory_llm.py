@@ -1,25 +1,16 @@
-"""Regression tests for the cycle 20260421_5 memory-LLM adapter.
+"""Regression tests for the memory-LLM adapter.
 
-After this cycle:
+Phase H — memory always uses the Anthropic client because the
+``memory_model`` default is a Claude model and there is no global
+"current provider" setting (provider selection is per-Environment at
+the manifest level). The remaining contract surface:
 
 * ``build_memory_llm`` returns ``None`` when no API key is configured,
   so ``CurationEngine`` degrades cleanly without raising.
-* Empty ``APIConfig.memory_model`` falls back to ``anthropic_model`` —
-  the same contract used by ``AgentSession._build_pipeline`` so
-  operators don't have to reason about two different fallback rules
-  depending on whether the call happens in-session or in curation.
-* ``APIConfig.provider`` and ``APIConfig.base_url`` flow through to
-  the underlying ``BaseClient`` — a user who switches provider to
-  ``openai`` or ``vllm`` gets curation on that provider, not
-  silently on Anthropic.
+* Empty ``APIConfig.memory_model`` falls back to ``anthropic_model``.
 * ``MemoryLLM.complete`` wraps a ``BaseClient.create_message`` call
   with the ``ModelConfig`` built from the above; the return value
-  is the joined text content so duck-typed callers (currently just
-  ``CurationEngine``) don't have to know ``APIResponse``'s shape.
-
-These tests pin the migration done in cycle 20260421_5 so a later
-refactor can't silently regress curation back onto the hardcoded
-ChatAnthropic path removed by this cycle.
+  is the joined text content.
 """
 
 from __future__ import annotations
@@ -100,37 +91,16 @@ def test_build_memory_llm_falls_back_to_main_model_when_memory_empty(
     assert llm.model_config.model == "claude-sonnet-4-6"
 
 
-def test_build_memory_llm_uses_provider_selection(monkeypatch, tmp_path):
+def test_build_memory_llm_always_uses_anthropic(monkeypatch, tmp_path):
+    """Phase H — memory client is hardcoded to Anthropic regardless of
+    env hints. Provider selection is per-Environment via the manifest,
+    not a global setting that the memory path consults."""
     _reset_config_manager(monkeypatch, tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
 
     llm = build_memory_llm()
     assert llm is not None
     assert llm.client.provider == "anthropic"
-
-
-def test_build_memory_llm_passes_base_url(monkeypatch, tmp_path):
-    _reset_config_manager(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    monkeypatch.setenv("LLM_BASE_URL", "https://custom.example")
-
-    llm = build_memory_llm()
-    assert llm is not None
-    # BaseClient stores base_url on _base_url during __init__.
-    assert getattr(llm.client, "_base_url", None) == "https://custom.example"
-
-
-def test_build_memory_llm_unknown_provider_returns_none(monkeypatch, tmp_path):
-    _reset_config_manager(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "not-a-real-provider")
-
-    # Unknown provider must not crash the curation scheduler — the
-    # helper swallows the registry error and returns None so callers
-    # fall back to rule-based curation.
-    assert build_memory_llm() is None
 
 
 # ─────────────────────────────────────────────────────────────────

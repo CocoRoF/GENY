@@ -1,12 +1,12 @@
 """Build :class:`geny_executor.CredentialBundle` from Geny's settings.
 
-Phase E1 of the LLM backend upgrade cycle (geny-executor 2.0.0). Geny's
-settings store API keys (APIConfig) and CLI-backend settings
-(CLIBackendClaudeCodeConfig, CLIBackendCopilotConfig) in two related
-but separate dataclasses. The builder here unifies them into the single
-:class:`CredentialBundle` channel that ``Pipeline.from_manifest_async``
-consumes — no more split between ``api_key=`` and bespoke
-provider-specific wiring.
+Phase H of the LLM backend upgrade cycle. The API credentials moved
+out of ``APIConfig`` into a dedicated hidden ``LLMCredentialsConfig``
+(edited only through the LLM Backends panel); the CLI-backend configs
+(``CLIBackendClaudeCodeConfig`` / ``CLIBackendCopilotConfig``) are also
+hidden from the general list. This builder unifies all three into the
+single :class:`CredentialBundle` channel that
+``Pipeline.from_manifest_async`` consumes.
 
 The bundle is built fresh per session so a user toggling a backend on
 or off (or rotating a key) takes effect on the next session create.
@@ -22,6 +22,7 @@ from geny_executor import CredentialBundle, ProviderCredentials
 
 from service.config import get_config_manager
 from service.config.sub_config.general.api_config import APIConfig
+from service.config.sub_config.general.llm_credentials_config import LLMCredentialsConfig
 from service.config.sub_config.general.cli_backends_config import (
     CLIBackendClaudeCodeConfig,
     CLIBackendCopilotConfig,
@@ -58,27 +59,27 @@ class CredentialBundleBuilder:
     # ─────────────────────────────────────────────────────────── build ─
 
     def build(self) -> CredentialBundle:
-        api = self._cm.load_config(APIConfig)
+        creds = self._cm.load_config(LLMCredentialsConfig)
         claude_cli = self._cm.load_config(CLIBackendClaudeCodeConfig)
         copilot_cli = self._cm.load_config(CLIBackendCopilotConfig)
 
         by_provider: Dict[str, ProviderCredentials] = {
             "anthropic": ProviderCredentials(
-                api_key=(api.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")),
+                api_key=(creds.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")),
             ),
             "openai": ProviderCredentials(
-                api_key=(api.openai_api_key or os.environ.get("OPENAI_API_KEY", "")),
+                api_key=(creds.openai_api_key or os.environ.get("OPENAI_API_KEY", "")),
             ),
             "google": ProviderCredentials(
-                api_key=(api.google_api_key or os.environ.get("GOOGLE_API_KEY", "")),
+                api_key=(creds.google_api_key or os.environ.get("GOOGLE_API_KEY", "")),
             ),
             "vllm": ProviderCredentials(
-                base_url=(api.base_url or None),
+                base_url=(creds.base_url or None),
             ),
         }
 
         if claude_cli.enabled:
-            by_provider["claude_code_cli"] = self._build_claude_code(api, claude_cli)
+            by_provider["claude_code_cli"] = self._build_claude_code(creds, claude_cli)
         if copilot_cli.enabled:
             by_provider["copilot_cli"] = self._build_copilot(copilot_cli)
 
@@ -88,7 +89,7 @@ class CredentialBundleBuilder:
 
     def _build_claude_code(
         self,
-        api: APIConfig,
+        creds: LLMCredentialsConfig,
         claude_cli: CLIBackendClaudeCodeConfig,
     ) -> ProviderCredentials:
         binary = (
@@ -98,7 +99,7 @@ class CredentialBundleBuilder:
         )
         api_key = (
             claude_cli.api_key
-            or api.anthropic_api_key
+            or creds.anthropic_api_key
             or os.environ.get("ANTHROPIC_API_KEY", "")
         )
         extras: Dict[str, Any] = {

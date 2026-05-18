@@ -75,10 +75,20 @@ async def list_configs():
     List all configurations with their current values.
 
     Returns configs grouped by category with validation status.
+    Configs whose class returns ``is_user_visible() == False`` are
+    excluded — they have a dedicated editor surface (e.g.
+    ``llm_credentials`` via the LLM Backends panel) and must not
+    leak into the generic auto-form list.
     """
     manager = get_config_manager()
 
-    configs = manager.get_all_configs()
+    config_classes = manager.get_registered_config_classes()
+    all_configs = manager.get_all_configs()
+    configs = [
+        c for c in all_configs
+        if config_classes.get(c.get("schema", {}).get("name", ""), None) is None
+        or config_classes[c["schema"]["name"]].is_user_visible()
+    ]
 
     # Extract unique categories
     categories_set = set()

@@ -1,8 +1,17 @@
 """
-Claude API Configuration.
+LLM Defaults — model selection + Anthropic-side knobs.
 
-Controls the Anthropic API key, default model, thinking budget,
-and autonomous permission mode.
+Phase H of the LLM backend upgrade cycle. Credentials
+(``anthropic_api_key`` / ``openai_api_key`` / ``google_api_key`` /
+``base_url``) moved out into ``LLMCredentialsConfig``, edited only
+through the LLM Backends panel. The global ``provider`` field is
+gone — provider selection is per-Environment at the manifest level,
+not a global setting.
+
+What remains here are the LLM defaults that are legitimately
+"general" settings: which Claude model to default to for CLI vs
+VTuber vs memory work, the Extended Thinking token budget, and the
+service-wide port + permission-prompt knob.
 """
 
 from __future__ import annotations
@@ -24,46 +33,24 @@ MODEL_OPTIONS = [
     {"value": "claude-haiku-4-20250414", "label": "Claude Haiku 4"},
 ]
 
-PROVIDER_OPTIONS = [
-    {"value": "anthropic", "label": "Anthropic"},
-    {"value": "openai", "label": "OpenAI"},
-    {"value": "google", "label": "Google"},
-    {"value": "vllm", "label": "vLLM (OpenAI-compatible)"},
-    {"value": "claude_code_cli", "label": "Claude Code (CLI)"},
-    {"value": "copilot_cli", "label": "GitHub Copilot (CLI)"},
-]
-
 
 @register_config
 @dataclass
 class APIConfig(BaseConfig):
-    """Anthropic API and model settings."""
+    """LLM model defaults + permission / port knobs."""
 
-    anthropic_api_key: str = ""
-    # Phase E1 — additional vendor keys so geny-executor 2.0.0's
-    # CredentialBundle can authenticate any of the 6 registered
-    # providers from a single source of truth.
-    openai_api_key: str = ""
-    google_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
     vtuber_default_model: str = "claude-haiku-4-5-20251001"
     memory_model: str = "claude-haiku-4-5-20251001"
-    provider: str = "anthropic"
-    base_url: str = ""
     use_legacy_reflect: bool = False
     max_thinking_tokens: int = 31999
     skip_permissions: bool = True
     app_port: int = 8000
 
     _ENV_MAP = {
-        "anthropic_api_key": "ANTHROPIC_API_KEY",
-        "openai_api_key": "OPENAI_API_KEY",
-        "google_api_key": "GOOGLE_API_KEY",
         "anthropic_model": "ANTHROPIC_MODEL",
         "vtuber_default_model": "VTUBER_DEFAULT_MODEL",
         "memory_model": "MEMORY_MODEL",
-        "provider": "LLM_PROVIDER",
-        "base_url": "LLM_BASE_URL",
         "use_legacy_reflect": "USE_LEGACY_REFLECT",
         "max_thinking_tokens": "MAX_THINKING_TOKENS",
         "skip_permissions": "CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS",
@@ -81,11 +68,15 @@ class APIConfig(BaseConfig):
 
     @classmethod
     def get_display_name(cls) -> str:
-        return "Claude API"
+        return "LLM Defaults"
 
     @classmethod
     def get_description(cls) -> str:
-        return "Anthropic API key, default model, thinking budget, and permission mode."
+        return (
+            "Default models for CLI / VTuber / memory paths, Extended "
+            "Thinking budget, permission mode, and the backend port. "
+            "API keys live under LLM Backends."
+        )
 
     @classmethod
     def get_category(cls) -> str:
@@ -99,17 +90,13 @@ class APIConfig(BaseConfig):
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
         return {
             "ko": {
-                "display_name": "Claude API",
-                "description": "Anthropic API key, default model, thinking token budget, and permission mode settings.",
+                "display_name": "LLM 기본 설정",
+                "description": "CLI / VTuber / 메모리 경로의 기본 모델, Extended Thinking 토큰 예산, 권한 모드, 백엔드 포트. API 키는 LLM Backends에서 설정합니다.",
                 "groups": {
-                    "api": "API Settings",
+                    "api": "Model Defaults",
                     "permissions": "Permissions",
                 },
                 "fields": {
-                    "anthropic_api_key": {
-                        "label": "Anthropic API Key",
-                        "description": "API key for Anthropic Claude models",
-                    },
                     "anthropic_model": {
                         "label": "Default Model",
                         "description": "Default Claude model for CLI sessions",
@@ -122,17 +109,9 @@ class APIConfig(BaseConfig):
                         "label": "Memory Model",
                         "description": "메모리 게이트/인사이트 추출 전용 경량 모델 (비워두면 메인 모델 사용)",
                     },
-                    "provider": {
-                        "label": "LLM Provider",
-                        "description": "어느 벤더 SDK가 메인·메모리 LLM 호출을 담당할지 선택합니다. 기본값: anthropic.",
-                    },
-                    "base_url": {
-                        "label": "Base URL",
-                        "description": "API 엔드포인트 오버라이드. vllm에는 필수, 그 외에는 선택. 비워두면 벤더 기본값을 사용합니다.",
-                    },
                     "use_legacy_reflect": {
                         "label": "Use legacy LLM reflection (hardcoded Haiku)",
-                        "description": "기본 Off — 메모리 반영은 geny-executor의 s15 단계에서 Memory Model 설정으로 실행됩니다. On으로 바꾸면 cycle 20260421_4 이전의 하드코딩된 Haiku 콜백 경로로 롤백합니다.",
+                        "description": "기본 Off — 메모리 반영은 geny-executor의 s15 단계에서 Memory Model 설정으로 실행됩니다.",
                     },
                     "max_thinking_tokens": {
                         "label": "Max Thinking Tokens",
@@ -153,39 +132,6 @@ class APIConfig(BaseConfig):
     @classmethod
     def get_fields_metadata(cls) -> List[ConfigField]:
         return [
-            ConfigField(
-                name="anthropic_api_key",
-                field_type=FieldType.PASSWORD,
-                label="Anthropic API Key",
-                description="API key for Anthropic Claude models",
-                required=True,
-                placeholder="sk-ant-…",
-                group="api",
-                secure=True,
-                apply_change=env_sync("ANTHROPIC_API_KEY"),
-            ),
-            ConfigField(
-                name="openai_api_key",
-                field_type=FieldType.PASSWORD,
-                label="OpenAI API Key",
-                description="API key for OpenAI / vLLM-OpenAI-compat models",
-                required=False,
-                placeholder="sk-…",
-                group="api",
-                secure=True,
-                apply_change=env_sync("OPENAI_API_KEY"),
-            ),
-            ConfigField(
-                name="google_api_key",
-                field_type=FieldType.PASSWORD,
-                label="Google API Key",
-                description="API key for Google Gemini models",
-                required=False,
-                placeholder="AIza…",
-                group="api",
-                secure=True,
-                apply_change=env_sync("GOOGLE_API_KEY"),
-            ),
             ConfigField(
                 name="anthropic_model",
                 field_type=FieldType.SELECT,
@@ -217,40 +163,13 @@ class APIConfig(BaseConfig):
                 apply_change=env_sync("MEMORY_MODEL"),
             ),
             ConfigField(
-                name="provider",
-                field_type=FieldType.SELECT,
-                label="LLM Provider",
-                description=(
-                    "Which vendor SDK backs both the main reasoning call and "
-                    "memory-side LLM work. Default: anthropic. Changing requires "
-                    "the matching vendor SDK to be installed."
-                ),
-                default="anthropic",
-                options=PROVIDER_OPTIONS,
-                group="api",
-                apply_change=env_sync("LLM_PROVIDER"),
-            ),
-            ConfigField(
-                name="base_url",
-                field_type=FieldType.STRING,
-                label="Base URL",
-                description=(
-                    "Override API endpoint. Required for vllm; optional for other "
-                    "providers. Leave blank to use the vendor default."
-                ),
-                default="",
-                group="api",
-                apply_change=env_sync("LLM_BASE_URL"),
-            ),
-            ConfigField(
                 name="use_legacy_reflect",
                 field_type=FieldType.BOOLEAN,
                 label="Use legacy LLM reflection (hardcoded Haiku)",
                 description=(
                     "Off (default): memory reflection runs via the geny-executor "
                     "memory stage, using the Memory Model above. "
-                    "On: falls back to the pre-cycle hardcoded-Haiku callback path. "
-                    "Use only if the default path is misbehaving."
+                    "On: falls back to the pre-cycle hardcoded-Haiku callback path."
                 ),
                 default=False,
                 group="api",
