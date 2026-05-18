@@ -24,9 +24,12 @@ import asyncio
 import json
 import os
 import shutil
-from typing import Any, Dict, List, Optional
+import time
+import uuid
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from service.auth.auth_middleware import require_auth
@@ -409,3 +412,416 @@ async def list_subagents() -> SubagentsResponse:
             model_override=getattr(d, "model_override", None),
         ))
     return SubagentsResponse(items=items)
+
+
+# ---------------------------------------------------------------------------
+# Phase G — Interactive auth flows (claude / gh) driven by the modal.
+#
+# The flow:
+#   1. POST /auth/{kind}/login → spawn subprocess, return ``job_id``.
+#   2. GET  /auth/{kind}/login/{job_id}/events → SSE stream of stdout/stderr
+#                                                 lines. Closes when the
+#                                                 subprocess exits.
+#   3. POST /auth/{kind}/login/{job_id}/cancel → kill the subprocess.
+#
+# Jobs are kept in-memory only — the modal is a per-user, per-tab affair
+# and we don't need them to survive a backend restart. A reaper drops
+# jobs older than 1h or in a terminal state.
+# ---------------------------------------------------------------------------
+
+
+class _AuthJob:
+    """One in-flight subprocess (``claude auth login`` / ``gh auth login``)
+    plus a bounded buffer of stdout/stderr lines for SSE streaming."""
+
+    def __init__(self, kind: str, argv: List[str]) -> None:
+        self.kind = kind          # "claude_code" | "copilot"
+        self.argv = argv
+        self.job_id = uuid.uuid4().hex
+        self.started_at = time.time()
+        self.proc: Optional[asyncio.subprocess.Process] = None
+        self.lines: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue(maxsize=512)
+        self.history: List[Dict[str, Any]] = []
+        self.exit_code: Optional[int] = None
+        self.finished_at: Optional[float] = None
+        self._writer_task: Optional[asyncio.Task] = None
+
+    def is_finished(self) -> bool:
+        return self.exit_code is not None
+
+    async def push(self, payload: Dict[str, Any]) -> None:
+        self.history.append(payload)
+        try:
+            self.lines.put_nowait(payload)
+        except asyncio.QueueFull:
+            # Drop a single intermediate line rather than block the
+            # subprocess. The history list still has everything.
+            pass
+
+
+_AUTH_JOBS: Dict[str, _AuthJob] = {}
+_AUTH_JOB_RETENTION_S = 60 * 60   # 1h
+
+
+def _reap_old_jobs() -> None:
+    cutoff = time.time() - _AUTH_JOB_RETENTION_S
+    for jid, job in list(_AUTH_JOBS.items()):
+        if (job.finished_at or job.started_at) < cutoff:
+            _AUTH_JOBS.pop(jid, None)
+
+
+async def _stream_subprocess(job: _AuthJob) -> None:
+    """Background coroutine: copy the subprocess's stdout/stderr into the
+    job's queue + history, push a final ``exit`` event, drop a sentinel
+    so the SSE consumer can close."""
+    proc = job.proc
+    assert proc is not None
+
+    async def _drain(stream: Optional[asyncio.StreamReader], channel: str) -> None:
+        if stream is None:
+            return
+        while True:
+            chunk = await stream.readline()
+            if not chunk:
+                return
+            text = chunk.decode("utf-8", errors="replace").rstrip("\r\n")
+            await job.push({"channel": channel, "text": text, "ts": time.time()})
+
+    await asyncio.gather(
+        _drain(proc.stdout, "stdout"),
+        _drain(proc.stderr, "stderr"),
+    )
+    rc = await proc.wait()
+    job.exit_code = rc
+    job.finished_at = time.time()
+    await job.push({"channel": "exit", "text": f"exit code {rc}", "ts": time.time(), "exit_code": rc})
+    # Sentinel for the SSE generator.
+    try:
+        job.lines.put_nowait(None)
+    except asyncio.QueueFull:
+        pass
+
+
+# ── Common job spawn ──────────────────────────────────────────────────
+
+
+async def _start_auth_job(kind: str, argv: List[str]) -> _AuthJob:
+    _reap_old_jobs()
+    job = _AuthJob(kind=kind, argv=argv)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,  # killpg-able on cancel
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=f"binary not found: {e}")
+    job.proc = proc
+    _AUTH_JOBS[job.job_id] = job
+    # Kick off the drain task; we don't await it.
+    job._writer_task = asyncio.create_task(_stream_subprocess(job))
+    return job
+
+
+# ── Response shapes ───────────────────────────────────────────────────
+
+
+class AuthStatusResponse(BaseModel):
+    raw: Dict[str, Any]                    # claude auth status --json output (verbatim)
+    logged_in: Optional[bool] = None
+    auth_method: Optional[str] = None
+    subscription_type: Optional[str] = None
+    email: Optional[str] = None
+    org_name: Optional[str] = None
+
+
+class AuthLoginStartResponse(BaseModel):
+    job_id: str
+    kind: str
+    argv: List[str]
+    hint: str
+
+
+class TestConnectionResponse(BaseModel):
+    ok: bool
+    duration_ms: int
+    detail: str
+    raw_stdout_tail: Optional[str] = None
+    raw_stderr_tail: Optional[str] = None
+
+
+# ── Claude Code auth ──────────────────────────────────────────────────
+
+
+def _claude_binary() -> str:
+    binary = shutil.which("claude") or os.environ.get("CLAUDE_CODE_BINARY", "")
+    if not binary or not os.path.exists(binary):
+        raise HTTPException(status_code=400, detail="claude CLI not available in this container")
+    return binary
+
+
+@router.get(
+    "/cli/claude-code/auth/status",
+    response_model=AuthStatusResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def claude_code_auth_status() -> AuthStatusResponse:
+    binary = _claude_binary()
+    rc, out, err = await _run_cmd([binary, "auth", "status", "--json"], timeout=5.0)
+    if rc != 0:
+        # CLI prints JSON even on "not logged in" usually; if not, surface
+        # the stderr as a synthetic record.
+        try:
+            raw = json.loads(out) if out.strip() else {}
+        except Exception:
+            raw = {}
+        raw.setdefault("loggedIn", False)
+        raw.setdefault("error", err.strip()[:300])
+        return AuthStatusResponse(raw=raw, logged_in=bool(raw.get("loggedIn")))
+    try:
+        raw = json.loads(out)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"claude auth status returned non-JSON: {out[:200]}")
+    return AuthStatusResponse(
+        raw=raw,
+        logged_in=bool(raw.get("loggedIn")),
+        auth_method=raw.get("authMethod"),
+        subscription_type=raw.get("subscriptionType"),
+        email=raw.get("email"),
+        org_name=raw.get("orgName"),
+    )
+
+
+@router.post(
+    "/cli/claude-code/auth/login",
+    response_model=AuthLoginStartResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def claude_code_auth_login(
+    use_console: bool = False,
+    email: Optional[str] = None,
+) -> AuthLoginStartResponse:
+    """Spawn ``claude auth login`` and return a job id the client can
+    follow via SSE. ``use_console=True`` switches to Anthropic Console
+    (API-usage billing); default is the Claude.ai subscription flow."""
+    binary = _claude_binary()
+    argv = [binary, "auth", "login"]
+    if use_console:
+        argv.append("--console")
+    else:
+        argv.append("--claudeai")
+    if email:
+        argv += ["--email", email]
+    job = await _start_auth_job("claude_code", argv)
+    return AuthLoginStartResponse(
+        job_id=job.job_id, kind=job.kind, argv=argv,
+        hint=(
+            "Subscribe via the URL the CLI prints. The credential lands in "
+            "~/.claude/.credentials.json — which the backend mounts RW."
+        ),
+    )
+
+
+@router.post(
+    "/cli/claude-code/auth/logout",
+    dependencies=[Depends(require_auth)],
+)
+async def claude_code_auth_logout() -> Dict[str, Any]:
+    binary = _claude_binary()
+    rc, out, err = await _run_cmd([binary, "auth", "logout"], timeout=10.0)
+    return {"ok": rc == 0, "stdout": out, "stderr": err}
+
+
+@router.post(
+    "/cli/claude-code/test",
+    response_model=TestConnectionResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def claude_code_test() -> TestConnectionResponse:
+    """Ping the CLI in --bare mode. Returns ok=True if the CLI exits 0
+    and emits any text response. The intent is "is the credential
+    file actually usable", not "is the model on form"."""
+    binary = _claude_binary()
+    started = time.monotonic()
+    rc, out, err = await _run_cmd(
+        [binary, "--print", "--bare", "--output-format", "json", "ping"],
+        timeout=20.0,
+    )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    ok = rc == 0 and bool(out.strip())
+    return TestConnectionResponse(
+        ok=ok,
+        duration_ms=elapsed_ms,
+        detail=("response received" if ok else f"exit code {rc}"),
+        raw_stdout_tail=out[-400:] if out else None,
+        raw_stderr_tail=err[-400:] if err else None,
+    )
+
+
+# ── Copilot CLI auth ──────────────────────────────────────────────────
+
+
+def _gh_binary() -> str:
+    binary = shutil.which("gh") or os.environ.get("GH_BINARY", "")
+    if not binary or not os.path.exists(binary):
+        raise HTTPException(status_code=400, detail="gh CLI not available in this container")
+    return binary
+
+
+@router.get(
+    "/cli/copilot/auth/status",
+    dependencies=[Depends(require_auth)],
+)
+async def copilot_auth_status() -> Dict[str, Any]:
+    binary = _gh_binary()
+    # gh auth status doesn't have --json; we surface text + exit code.
+    rc, out, err = await _run_cmd([binary, "auth", "status"], timeout=5.0)
+    rc_ext, ext_out, _ = await _run_cmd([binary, "extension", "list"], timeout=5.0)
+    extension_installed = (rc_ext == 0 and "github/gh-copilot" in ext_out)
+    return {
+        "logged_in": rc == 0,
+        "auth_status_text": out or err,
+        "extension_installed": extension_installed,
+    }
+
+
+@router.post(
+    "/cli/copilot/auth/login",
+    response_model=AuthLoginStartResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def copilot_auth_login() -> AuthLoginStartResponse:
+    binary = _gh_binary()
+    # Web-based device flow — gh prints the device code + URL to stderr.
+    argv = [binary, "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"]
+    job = await _start_auth_job("copilot", argv)
+    return AuthLoginStartResponse(
+        job_id=job.job_id, kind=job.kind, argv=argv,
+        hint="gh prints a one-time code + URL. Open the URL in a browser, paste the code, return here.",
+    )
+
+
+@router.post(
+    "/cli/copilot/auth/logout",
+    dependencies=[Depends(require_auth)],
+)
+async def copilot_auth_logout() -> Dict[str, Any]:
+    binary = _gh_binary()
+    rc, out, err = await _run_cmd([binary, "auth", "logout", "--hostname", "github.com"], timeout=10.0)
+    return {"ok": rc == 0, "stdout": out, "stderr": err}
+
+
+@router.post(
+    "/cli/copilot/test",
+    response_model=TestConnectionResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def copilot_test() -> TestConnectionResponse:
+    binary = _gh_binary()
+    started = time.monotonic()
+    rc, out, err = await _run_cmd([binary, "copilot", "-p", "ping", "--", ""], timeout=20.0)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    ok = rc == 0 and bool(out.strip())
+    return TestConnectionResponse(
+        ok=ok, duration_ms=elapsed_ms,
+        detail=("response received" if ok else f"exit code {rc}"),
+        raw_stdout_tail=out[-400:] if out else None,
+        raw_stderr_tail=err[-400:] if err else None,
+    )
+
+
+# ── Shared SSE stream / cancel for any auth job ──────────────────────
+
+
+def _job_or_404(job_id: str) -> _AuthJob:
+    job = _AUTH_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"unknown auth job {job_id}")
+    return job
+
+
+@router.get(
+    "/auth/login/{job_id}/events",
+    dependencies=[Depends(require_auth)],
+)
+async def auth_login_events(job_id: str) -> StreamingResponse:
+    """Server-Sent Events stream of an auth job's subprocess output.
+
+    Each event is a JSON object: ``{channel, text, ts[, exit_code]}``.
+    ``channel`` is ``stdout`` / ``stderr`` / ``exit``. The stream closes
+    when the subprocess exits and a final ``exit`` event has been sent.
+
+    The endpoint replays the job's history first so a client that
+    connects after the URL was already printed doesn't miss it.
+    """
+    job = _job_or_404(job_id)
+
+    async def gen() -> AsyncIterator[bytes]:
+        # Replay history first.
+        for entry in list(job.history):
+            yield f"data: {json.dumps(entry)}\n\n".encode("utf-8")
+        # Then live-tail until sentinel.
+        while True:
+            try:
+                entry = await asyncio.wait_for(job.lines.get(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # Heartbeat — keeps the SSE connection alive through proxies.
+                yield b": heartbeat\n\n"
+                if job.is_finished():
+                    return
+                continue
+            if entry is None:
+                return
+            yield f"data: {json.dumps(entry)}\n\n".encode("utf-8")
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # tell nginx to skip its proxy buffering
+        },
+    )
+
+
+@router.post(
+    "/auth/login/{job_id}/cancel",
+    dependencies=[Depends(require_auth)],
+)
+async def auth_login_cancel(job_id: str) -> Dict[str, Any]:
+    job = _job_or_404(job_id)
+    if job.proc is None or job.is_finished():
+        return {"ok": True, "already_finished": True}
+    proc = job.proc
+    try:
+        if proc.returncode is None:
+            # killpg → kill the new session we started above.
+            import signal
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "already_finished": False}
+
+
+@router.get(
+    "/auth/login/{job_id}",
+    dependencies=[Depends(require_auth)],
+)
+async def auth_login_state(job_id: str) -> Dict[str, Any]:
+    """Polling fallback for clients that can't use SSE — returns the
+    full history snapshot + exit_code if known."""
+    job = _job_or_404(job_id)
+    return {
+        "job_id": job_id,
+        "kind": job.kind,
+        "argv": job.argv,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "exit_code": job.exit_code,
+        "history": list(job.history),
+    }
