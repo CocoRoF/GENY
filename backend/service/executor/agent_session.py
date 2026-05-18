@@ -1780,11 +1780,17 @@ class AgentSession:
         if api_cfg is None:
             from service.config.sub_config.general.api_config import APIConfig
             api_cfg = APIConfig()
-        if not api_key:
-            raise RuntimeError(
-                f"[{self._session_id}] ANTHROPIC_API_KEY is required. "
-                f"Set it in environment or config."
-            )
+        # Phase H: do NOT hard-require ANTHROPIC_API_KEY here. The
+        # per-Environment provider check upstream
+        # (``AgentSessionManager._extract_primary_provider`` +
+        # ``CredentialBundle.has``) already validates the credentials
+        # actually needed by the manifest. Failing here would block
+        # Claude Code (CLI) / Copilot (CLI) / OpenAI / Google /
+        # vLLM-only environments where the user never set an
+        # Anthropic key — even though their session never makes an
+        # Anthropic SDK call. The fallback client below becomes
+        # optional and the property exposes ``None`` for those envs;
+        # no production code path requires it at session-build time.
 
         working_dir = self._working_dir or self.storage_path or ""
         is_vtuber = self._role == SessionRole.VTUBER
@@ -1917,31 +1923,45 @@ class AgentSession:
 
         # ── Shared LLM client (cycle 20260421_4 / Phase H) ──
         #
-        # Build a fallback Anthropic client for the out-of-pipeline
-        # tool calls (``memory_distill``, etc.) that read
+        # Build a fallback Anthropic client for out-of-pipeline tool
+        # calls (``memory_distill``, etc.) that read
         # ``self._llm_client_handle``. The per-Environment provider
-        # selection lives in the manifest at Stage 6 — we no longer
-        # override s06's config with a global APIConfig setting, since
-        # Phase H removed that global field. Anthropic is the safe
-        # default because the memory_model default is a Claude model;
-        # if a future Environment needs non-Anthropic out-of-pipeline
-        # tooling, the manifest-driven s06 client will still be
-        # consulted by the executor's main path.
-        try:
-            client_cls = ClientRegistry.get("anthropic")
-            llm_client = client_cls(api_key=api_key)
-        except Exception as exc:
-            logger.exception(
-                f"[{self._session_id}] cycle-4: failed to build fallback "
-                f"Anthropic client: {exc}"
+        # selection lives in the manifest at Stage 6, so this handle
+        # is *not* the main-path client — it's only consulted by tools
+        # that explicitly reach for ``session.llm_client``.
+        #
+        # Phase H: this is now OPTIONAL. If the user runs a
+        # claude_code_cli / copilot_cli / openai / google / vllm-only
+        # environment without an Anthropic key, we leave the handle as
+        # None. The hard ``raise`` here used to block such sessions at
+        # build time even though their main path doesn't need an
+        # Anthropic SDK at all.
+        llm_client: Optional[Any] = None
+        if api_key:
+            try:
+                client_cls = ClientRegistry.get("anthropic")
+                llm_client = client_cls(api_key=api_key)
+            except Exception as exc:
+                logger.warning(
+                    f"[{self._session_id}] could not build the optional "
+                    f"Anthropic fallback client: {exc}. Out-of-pipeline "
+                    f"tools that need ``session.llm_client`` will see None."
+                )
+                llm_client = None
+        else:
+            logger.info(
+                f"[{self._session_id}] no Anthropic key configured; "
+                f"skipping fallback client build. The main session path "
+                f"uses the manifest's Stage 6 provider — this only "
+                f"affects out-of-pipeline tools that consult "
+                f"``session.llm_client``."
             )
-            raise
 
-        # Cycle 20260501_1 B — publish the shared client + memory cfg
-        # to AgentSession's public properties so out-of-pipeline tool
-        # calls (memory_distill, etc.) can reuse them. The handles are
-        # set *before* attach_runtime so a tool that races a fast
-        # session-init still sees them in the right order.
+        # Cycle 20260501_1 B — publish the (possibly None) shared
+        # client + memory cfg to AgentSession's public properties so
+        # out-of-pipeline tool calls (memory_distill, etc.) can reuse
+        # them. Tools must already null-check ``session.llm_client``
+        # since the property has always been ``Optional[Any]``.
         self._llm_client_handle = llm_client
         self._memory_cfg_handle = memory_cfg
 
