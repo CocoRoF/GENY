@@ -102,6 +102,15 @@ services:
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-prod:/data/baked-imports
+      # Phase G of the LLM backend upgrade cycle — host's ``~/.claude``
+      # holds the Pro/Max OAuth credential file the local ``claude``
+      # CLI maintains. Mount RW so the CLI can refresh the access
+      # token in place. ``${CLAUDE_HOST_DIR}`` lets operators point at
+      # an alternate path (e.g. a per-deployment scratch dir); default
+      # is the deploy user's ``$HOME/.claude``. The backend container
+      # runs as root, so the 1000-owned credential file is
+      # readable/writable despite the UID mismatch.
+      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy

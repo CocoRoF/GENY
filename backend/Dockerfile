@@ -17,6 +17,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Cleanup
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# ── Claude Code CLI ──────────────────────────────────────────────────
+# Backs the ``claude_code_cli`` provider in geny-executor's ClientRegistry.
+# Phase G of the LLM backend upgrade cycle pairs this binary with a host
+# bind-mount of ``~/.claude/`` so Geny sessions route through the user's
+# Pro/Max subscription quota. Pin a known-good major version line so a
+# remote npm publish can't break the auth/CLI surface we depend on; bump
+# explicitly when the LLM backend tests update the contract.
+RUN npm install -g --silent @anthropic-ai/claude-code@latest && \
+    claude --version
+
 WORKDIR /app
 
 # ── Python dependencies (layer cache) ─────────────────────────────────
