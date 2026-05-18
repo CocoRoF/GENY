@@ -73,7 +73,24 @@
 |---|---|---|---|---|---|---|
 | F1 | feat(frontend): 6-provider catalog + capability badges | `feat/llm-backend/f1-frontend-catalog` | merged | 6f322ab | 160d9f9 | [f1_frontend_catalog.md](./f1_frontend_catalog.md) |
 | F2 | feat(frontend): LLM Backends panel + Claude Code login UX | `feat/llm-backend/f2-frontend-editors` | merged | 160d9f9 | 1c8674b | [f2_frontend_editors.md](./f2_frontend_editors.md) |
-| F3 | docs: cycle wrap-up + postmortem | `feat/llm-backend/f3-wrap-up` | in PR | 1c8674b | — | [f3_wrap_up.md](./f3_wrap_up.md) |
+| F3 | docs: cycle wrap-up + postmortem | `feat/llm-backend/f3-wrap-up` | merged | 1c8674b | dd3172e | [f3_wrap_up.md](./f3_wrap_up.md) |
+
+### Phase G — Real Claude Code / Copilot auth in the Settings modal (follow-up)
+
+User feedback after F2 landed: panel was view-only — needs clickable
+cards, per-backend editor modals, and a real CLI-style login flow that
+writes the canonical Pro/Max subscription credential. Plan in
+[10_phase_g_real_auth.md](../10_phase_g_real_auth.md).
+
+| # | PR title | Branch | Repo | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|---|
+| G0 | docs: phase G plan (real Claude Code auth modal) | `feat/llm-backend/g0-phase-plan` | Geny | pending | (post-2.0.1) | — | (this row) |
+| G1 | Dockerfile claude CLI + docker-compose ~/.claude RW mount | `feat/llm-backend/g1-claude-cli-in-container` | Geny | pending | TBD | — | TBD |
+| G2 | Backend auth endpoints (status/login/SSE/test/logout) + Copilot equivalents | `feat/llm-backend/g2-auth-endpoints` | Geny | pending | TBD | — | TBD |
+| G3 | Frontend Claude Code modal — clickable card, 4 auth modes, live SSE | `feat/llm-backend/g3-claude-code-modal` | Geny | pending | TBD | — | TBD |
+| G4 | Frontend Copilot modal | `feat/llm-backend/g4-copilot-modal` | Geny | pending | TBD | — | TBD |
+| G5 | Frontend modals for the other 4 backends | `feat/llm-backend/g5-api-backend-modals` | Geny | pending | TBD | — | TBD |
+| G6 | prod deploy + Max-plan billing verification | `feat/llm-backend/g6-prod-verify` | Geny | pending | TBD | — | TBD |
 
 ## Status legend
 
