@@ -88,7 +88,7 @@ services:
       # Phase G — host's ``~/.claude`` for Pro/Max OAuth credential
       # passthrough to the in-container ``claude`` CLI. RW for token
       # refresh.
-      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
+      - ${CLAUDE_HOST_DIR:-geny-claude-creds-prod}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -200,4 +200,7 @@ volumes:
     driver: local
   # Shared between avatar-editor (rw) and backend (ro) — prod variant.
   geny-baked-exports-prod:
+    driver: local
+  # Phase G — Claude Code OAuth credentials. See backend.volumes.
+  geny-claude-creds-prod:
     driver: local

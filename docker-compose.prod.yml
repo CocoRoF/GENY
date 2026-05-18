@@ -102,15 +102,23 @@ services:
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-prod:/data/baked-imports
-      # Phase G of the LLM backend upgrade cycle — host's ``~/.claude``
-      # holds the Pro/Max OAuth credential file the local ``claude``
-      # CLI maintains. Mount RW so the CLI can refresh the access
-      # token in place. ``${CLAUDE_HOST_DIR}`` lets operators point at
-      # an alternate path (e.g. a per-deployment scratch dir); default
-      # is the deploy user's ``$HOME/.claude``. The backend container
-      # runs as root, so the 1000-owned credential file is
-      # readable/writable despite the UID mismatch.
-      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
+      # Phase G of the LLM backend upgrade cycle — Claude Code OAuth
+      # credentials live in /root/.claude/ inside the container. Two
+      # operator paths:
+      #   1) Default (``CLAUDE_HOST_DIR`` unset): use the named volume
+      #      ``geny-claude-creds-prod``. Survives container rebuilds.
+      #      The user logs in from inside the container via the
+      #      Settings → LLM Backends → Claude Code modal ("Sign in
+      #      here") — `claude auth login` writes to this volume.
+      #   2) Override (``CLAUDE_HOST_DIR=/abs/path``): bind-mount a
+      #      host directory. Use this when the operator has already
+      #      run `claude auth login` on the host and wants the
+      #      container to share that subscription.
+      # The earlier ``${HOME}/.claude`` default was sudo-broken — under
+      # ``sudo docker compose`` HOME=/root, so the bind would silently
+      # create an empty /root/.claude on the host. Named volume avoids
+      # that footgun entirely.
+      - ${CLAUDE_HOST_DIR:-geny-claude-creds-prod}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -410,4 +418,9 @@ volumes:
     driver: local
   # Shared between avatar-editor (rw) and backend (ro) — prod variant.
   geny-baked-exports-prod:
+    driver: local
+  # Phase G — backend's /root/.claude (Claude Code OAuth credentials)
+  # when CLAUDE_HOST_DIR isn't overridden. See backend.volumes for the
+  # full rationale.
+  geny-claude-creds-prod:
     driver: local
