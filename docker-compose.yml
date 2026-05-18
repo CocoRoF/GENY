@@ -91,7 +91,7 @@ services:
       # Phase G — host's ``~/.claude`` for Pro/Max OAuth credential
       # passthrough to the in-container ``claude`` CLI. RW for token
       # refresh.
-      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
+      - ${CLAUDE_HOST_DIR:-geny-claude-creds}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -290,4 +290,7 @@ volumes:
   # /data/baked-imports). Carries baked puppet zips from the editor's
   # "send to Geny" action to the backend's import flow.
   geny-baked-exports:
+    driver: local
+  # Phase G — Claude Code OAuth credentials. See backend.volumes.
+  geny-claude-creds:
     driver: local
