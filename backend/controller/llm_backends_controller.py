@@ -54,12 +54,20 @@ class ProviderHealth(BaseModel):
     label: str
     kind: str                            # "api" | "cli"
     available: bool
+    # ``detail`` / ``install_help`` are the English fallback strings — the
+    # frontend renders ``detail_code`` + ``detail_params`` through its
+    # i18n module first and falls back to these strings only when the
+    # code is missing or unknown (handles deploy ordering / unknown
+    # backends).
     detail: Optional[str] = None
+    detail_code: Optional[str] = None
+    detail_params: Optional[Dict[str, str]] = None
     binary_path: Optional[str] = None
     binary_version: Optional[str] = None
     auth_ok: Optional[bool] = None
     auth_method: Optional[str] = None    # "api_key" | "subscription" | "extension"
     install_help: Optional[str] = None
+    install_help_code: Optional[str] = None
 
 
 class BackendsHealthResponse(BaseModel):
@@ -131,46 +139,32 @@ def _detect(name: str, override: Optional[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-async def _check_anthropic(bundle) -> ProviderHealth:
-    creds = bundle.get("anthropic")
+def _api_key_health(provider: str, env_var: str, bundle) -> ProviderHealth:
+    creds = bundle.get(provider)
     have = bool(creds.api_key)
     return ProviderHealth(
-        provider="anthropic",
-        label=PROVIDER_LABELS["anthropic"],
+        provider=provider,
+        label=PROVIDER_LABELS[provider],
         kind="api",
         available=have,
-        detail=("ANTHROPIC_API_KEY configured." if have else "No API key set."),
+        detail=(f"{env_var} configured." if have else "No API key set."),
+        detail_code="api.key_configured" if have else "api.key_missing",
+        detail_params={"env": env_var},
         auth_method="api_key" if have else None,
         auth_ok=have or None,
     )
+
+
+async def _check_anthropic(bundle) -> ProviderHealth:
+    return _api_key_health("anthropic", "ANTHROPIC_API_KEY", bundle)
 
 
 async def _check_openai(bundle) -> ProviderHealth:
-    creds = bundle.get("openai")
-    have = bool(creds.api_key)
-    return ProviderHealth(
-        provider="openai",
-        label=PROVIDER_LABELS["openai"],
-        kind="api",
-        available=have,
-        detail=("OPENAI_API_KEY configured." if have else "No API key set."),
-        auth_method="api_key" if have else None,
-        auth_ok=have or None,
-    )
+    return _api_key_health("openai", "OPENAI_API_KEY", bundle)
 
 
 async def _check_google(bundle) -> ProviderHealth:
-    creds = bundle.get("google")
-    have = bool(creds.api_key)
-    return ProviderHealth(
-        provider="google",
-        label=PROVIDER_LABELS["google"],
-        kind="api",
-        available=have,
-        detail=("GOOGLE_API_KEY configured." if have else "No API key set."),
-        auth_method="api_key" if have else None,
-        auth_ok=have or None,
-    )
+    return _api_key_health("google", "GOOGLE_API_KEY", bundle)
 
 
 async def _check_vllm(bundle) -> ProviderHealth:
@@ -183,8 +177,10 @@ async def _check_vllm(bundle) -> ProviderHealth:
         available=have_url,
         detail=(
             f"base_url={creds.base_url}" if have_url
-            else "Set base_url in API settings to enable vLLM."
+            else "vLLM base URL not set. Open this card and paste the OpenAI-compatible endpoint."
         ),
+        detail_code="vllm.base_url_set" if have_url else "vllm.base_url_missing",
+        detail_params={"url": creds.base_url or ""},
         auth_method=None,
         auth_ok=have_url or None,
     )
@@ -200,8 +196,8 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
     label = PROVIDER_LABELS["claude_code_cli"]
     install_help = (
         "Install Claude Code (https://docs.anthropic.com/claude/code/) and ensure "
-        "`claude` is on PATH. Then either paste ANTHROPIC_API_KEY in settings or "
-        "run `claude auth login` in a terminal."
+        "`claude` is on PATH. Then either paste ANTHROPIC_API_KEY through this "
+        "card or run `claude auth login` in the in-modal terminal."
     )
     if not claude_cfg.enabled:
         return ProviderHealth(
@@ -209,8 +205,10 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
             label=label,
             kind="cli",
             available=False,
-            detail="Claude Code backend disabled in settings.",
+            detail="Claude Code backend disabled. Open this card to enable it.",
+            detail_code="claude_code.disabled",
             install_help=install_help,
+            install_help_code="claude_code.install_help",
         )
     binary = _detect("claude", claude_cfg.binary_path or os.environ.get("CLAUDE_CODE_BINARY", ""))
     if not binary:
@@ -219,8 +217,10 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
             label=label,
             kind="cli",
             available=False,
-            detail="claude binary not found on PATH.",
+            detail="`claude` binary not found on PATH.",
+            detail_code="claude_code.binary_missing",
             install_help=install_help,
+            install_help_code="claude_code.install_help",
         )
 
     # --version is fast and side-effect-free.
@@ -262,11 +262,18 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
             f"binary at {binary}; version={version or 'unknown'}; "
             f"auth={auth_method or 'unauthenticated'}."
         ),
+        detail_code="claude_code.ready" if auth_ok else "claude_code.unauthenticated",
+        detail_params={
+            "path": binary,
+            "version": version or "unknown",
+            "auth": auth_method or "unauthenticated",
+        },
         binary_path=binary,
         binary_version=version,
         auth_method=auth_method,
         auth_ok=auth_ok,
         install_help=install_help if not auth_ok else None,
+        install_help_code="claude_code.install_help" if not auth_ok else None,
     )
 
 
@@ -282,8 +289,10 @@ async def _check_copilot(bundle, copilot_cfg: CLIBackendCopilotConfig) -> Provid
             label=label,
             kind="cli",
             available=False,
-            detail="Copilot CLI backend disabled in settings.",
+            detail="Copilot CLI backend disabled. Open this card to enable it.",
+            detail_code="copilot.disabled",
             install_help=install_help,
+            install_help_code="copilot.install_help",
         )
     gh = _detect("gh", copilot_cfg.gh_binary_path or os.environ.get("GH_BINARY", ""))
     if not gh:
@@ -292,8 +301,10 @@ async def _check_copilot(bundle, copilot_cfg: CLIBackendCopilotConfig) -> Provid
             label=label,
             kind="cli",
             available=False,
-            detail="gh binary not found on PATH.",
+            detail="`gh` binary not found on PATH.",
+            detail_code="copilot.binary_missing",
             install_help=install_help,
+            install_help_code="copilot.install_help",
         )
     version = None
     rc, out, _ = await _run_cmd([gh, "--version"], timeout=4.0)
@@ -317,17 +328,31 @@ async def _check_copilot(bundle, copilot_cfg: CLIBackendCopilotConfig) -> Provid
     parts.append(f"auth_ok={auth_ok}")
     parts.append(f"copilot_extension={'installed' if ext_installed else 'missing'}")
 
+    if available:
+        detail_code = "copilot.ready"
+    elif not auth_ok:
+        detail_code = "copilot.login_required"
+    else:
+        detail_code = "copilot.extension_missing"
+
     return ProviderHealth(
         provider="copilot_cli",
         label=label,
         kind="cli",
         available=available,
         detail="; ".join(parts),
+        detail_code=detail_code,
+        detail_params={
+            "path": gh,
+            "version": version or "unknown",
+            "extension": "installed" if ext_installed else "missing",
+        },
         binary_path=gh,
         binary_version=version,
         auth_method=("extension" if ext_installed and auth_ok else None),
         auth_ok=(auth_ok and ext_installed),
         install_help=None if available else install_help,
+        install_help_code=None if available else "copilot.install_help",
     )
 
 

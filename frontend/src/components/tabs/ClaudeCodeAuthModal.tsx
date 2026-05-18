@@ -1,5 +1,5 @@
 /**
- * ClaudeCodeAuthModal — Phase G3.
+ * ClaudeCodeAuthModal — Phase G3 / Phase H polish.
  *
  * Click a Claude Code (CLI) card on Settings → LLM Backends and this
  * modal opens. It wraps the real ``claude auth login`` flow:
@@ -7,23 +7,18 @@
  *   1. Auth-mode radio:
  *      A. Host mount (default) — show current ``claude auth status``
  *         output. If logged in via the host already, the modal is
- *         essentially read-only ("Max plan via gkfua00@gmail.com").
+ *         essentially read-only.
  *      B. In-modal login — POST start, then open the SSE stream and
- *         display every stdout/stderr line as it arrives. The user
- *         sees the device-code URL the CLI prints, clicks "Open URL"
- *         in a new tab, logs in, comes back — the modal auto-refreshes
- *         status when the subprocess exits 0.
+ *         display every stdout/stderr line as it arrives.
  *      C. setup-token paste — accepts a long-lived subscription token
  *         and stores it in the Claude Code config (override slot).
  *      D. API key (Console) — Anthropic Console API key, same shape.
  *
- *   2. Test connection — runs a fast `claude --print --bare … ping`
- *      and surfaces the response or the stderr tail.
+ *   2. Test connection — runs a fast `claude --print --bare … ping`.
  *
  *   3. Sign out — `claude auth logout`.
  *
- * The live console pane (toggle) shows the trailing ~40 lines of the
- * latest auth subprocess.
+ * All static strings flow through ``useI18n``.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -37,30 +32,42 @@ import {
   type AuthJobEvent,
   type AuthLoginStartResponse,
   type ClaudeCodeAuthStatus,
-  type ProviderHealth,
   type TestConnectionResponse,
 } from '@/lib/api';
 import { configApi } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 
 type AuthMode = 'host_mount' | 'in_modal_login' | 'setup_token' | 'api_key';
 
 
-function StatusBadge({ status }: { status: ClaudeCodeAuthStatus | null }) {
+function StatusBadge({
+  status,
+  t,
+}: {
+  status: ClaudeCodeAuthStatus | null;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
   if (!status) {
-    return <span className="text-[var(--text-tertiary)] text-[0.8125rem]">Loading…</span>;
+    return (
+      <span className="text-[var(--text-tertiary)] text-[0.8125rem]">
+        {t('settings.llmBackends.common.loading')}
+      </span>
+    );
   }
   if (!status.logged_in) {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-rose-500/30 bg-rose-500/15 text-rose-300 text-[0.7rem]">
-        <AlertCircle className="w-3 h-3" /> Not authenticated
+        <AlertCircle className="w-3 h-3" /> {t('settings.llmBackends.common.notAuthenticated')}
       </span>
     );
   }
   const sub = (status.subscription_type || '').toLowerCase();
   const label = sub
-    ? `${sub.charAt(0).toUpperCase() + sub.slice(1)} plan`
-    : (status.auth_method === 'console' ? 'Console (API)' : 'Logged in');
+    ? t('settings.llmBackends.claudeCodeModal.plan', { name: sub.charAt(0).toUpperCase() + sub.slice(1) })
+    : (status.auth_method === 'console'
+        ? t('settings.llmBackends.claudeCodeModal.consoleAuth')
+        : t('settings.llmBackends.claudeCodeModal.loggedIn'));
   const tone = sub === 'max' || sub === 'pro'
     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
     : 'bg-sky-500/15 text-sky-300 border-sky-500/30';
@@ -83,34 +90,29 @@ export default function ClaudeCodeAuthModal({
   onChange,
 }: {
   onClose: () => void;
-  /** Called whenever the modal materially mutates state — host
-   *  panel refreshes its card. */
   onChange?: () => void;
 }) {
+  const { t } = useI18n();
   const [authMode, setAuthMode] = useState<AuthMode>('host_mount');
   const [status, setStatus] = useState<ClaudeCodeAuthStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
-  // Login job state
   const [job, setJob] = useState<AuthLoginStartResponse | null>(null);
   const [events, setEvents] = useState<AuthJobEvent[]>([]);
   const [jobRunning, setJobRunning] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
-  // Test connection
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
-  // setup_token + api_key edit state
   const [tokenInput, setTokenInput] = useState('');
   const [tokenVisible, setTokenVisible] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
 
-  // Live console toggle
   const [showConsole, setShowConsole] = useState(false);
 
-  // ── Status fetch ────────────────────────────────────────────────
+  // ── Status ──────────────────────────────────────────────────────
 
   const refreshStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -125,9 +127,7 @@ export default function ClaudeCodeAuthModal({
     }
   }, []);
 
-  useEffect(() => {
-    refreshStatus();
-  }, [refreshStatus]);
+  useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   // ── Login flow ──────────────────────────────────────────────────
 
@@ -160,12 +160,10 @@ export default function ClaudeCodeAuthModal({
             onChange?.();
           }
         } catch {
-          /* ignore malformed */
+          /* ignore */
         }
       };
-      es.onerror = () => {
-        setJobRunning(false);
-      };
+      es.onerror = () => setJobRunning(false);
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : String(e));
       setJobRunning(false);
@@ -174,18 +172,14 @@ export default function ClaudeCodeAuthModal({
 
   const cancelLogin = useCallback(async () => {
     if (!job) return;
-    try {
-      await llmBackendsApi.cancelAuthJob(job.job_id);
-    } catch {
-      /* swallow */
-    }
+    try { await llmBackendsApi.cancelAuthJob(job.job_id); } catch { /* swallow */ }
     closeStream();
     setJobRunning(false);
     refreshStatus();
   }, [job, closeStream, refreshStatus]);
 
   const logout = useCallback(async () => {
-    if (!confirm('Sign out of Claude Code on the server? Subsequent sessions will fail until you log in again.')) return;
+    if (!confirm(t('settings.llmBackends.claudeCodeModal.signOutConfirm'))) return;
     try {
       await llmBackendsApi.claudeCodeLogout();
       onChange?.();
@@ -193,7 +187,7 @@ export default function ClaudeCodeAuthModal({
       setStatusError(e instanceof Error ? e.message : String(e));
     }
     refreshStatus();
-  }, [refreshStatus, onChange]);
+  }, [refreshStatus, onChange, t]);
 
   // ── Test connection ────────────────────────────────────────────
 
@@ -214,16 +208,11 @@ export default function ClaudeCodeAuthModal({
     }
   }, []);
 
-  // ── setup-token / api-key save ─────────────────────────────────
+  // ── Token / API key save ───────────────────────────────────────
 
   const saveToken = useCallback(async () => {
     if (!tokenInput.trim()) return;
     try {
-      // The Claude Code config carries an ``api_key`` override slot
-      // which gets injected as ANTHROPIC_API_KEY to the child CLI.
-      // We reuse it for both the "setup token" path and the API key
-      // path — server-side they're indistinguishable, the difference
-      // is which one the user chose semantically.
       await configApi.update('cli_backend_claude_code', { api_key: tokenInput, enabled: true });
       setTokenInput('');
       onChange?.();
@@ -245,12 +234,25 @@ export default function ClaudeCodeAuthModal({
     }
   }, [apiKeyInput, onChange, refreshStatus]);
 
-  // ── Derived state ──────────────────────────────────────────────
+  // ── Derived ────────────────────────────────────────────────────
 
   const liveText = useMemo(() => events.map((e) => `[${e.channel}] ${e.text}`).join('\n'), [events]);
   const urls = useMemo(() => extractUrls(liveText), [liveText]);
 
-  // ── Render ─────────────────────────────────────────────────────
+  const modeBlurbs: ReadonlyArray<readonly [AuthMode, string, string]> = useMemo(() => ([
+    ['host_mount',
+      t('settings.llmBackends.claudeCodeModal.modes.hostMountLabel'),
+      t('settings.llmBackends.claudeCodeModal.modes.hostMountBlurb')] as const,
+    ['in_modal_login',
+      t('settings.llmBackends.claudeCodeModal.modes.inModalLoginLabel'),
+      t('settings.llmBackends.claudeCodeModal.modes.inModalLoginBlurb')] as const,
+    ['setup_token',
+      t('settings.llmBackends.claudeCodeModal.modes.setupTokenLabel'),
+      t('settings.llmBackends.claudeCodeModal.modes.setupTokenBlurb')] as const,
+    ['api_key',
+      t('settings.llmBackends.claudeCodeModal.modes.apiKeyLabel'),
+      t('settings.llmBackends.claudeCodeModal.modes.apiKeyBlurb')] as const,
+  ]), [t]);
 
   return (
     <div
@@ -265,12 +267,13 @@ export default function ClaudeCodeAuthModal({
         <div className="flex justify-between items-center py-4 px-6 border-b border-[var(--border-color)]">
           <h3 className="text-[1rem] font-semibold inline-flex items-center gap-2">
             <Terminal className="w-4 h-4 text-[var(--text-secondary)]" />
-            Claude Code (CLI) — Authentication
+            {t('settings.llmBackends.claudeCodeModal.title')}
           </h3>
           <button
             type="button"
             className="w-8 h-8 rounded-[var(--border-radius)] hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
             onClick={onClose}
+            aria-label={t('settings.llmBackends.common.close')}
           >
             <X size={16} className="m-auto" />
           </button>
@@ -280,8 +283,8 @@ export default function ClaudeCodeAuthModal({
           {/* Status panel */}
           <section className="rounded-[var(--border-radius)] border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <StatusBadge status={status} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <StatusBadge status={status} t={t} />
                 {status?.email && (
                   <span className="text-[0.75rem] text-[var(--text-secondary)]">{status.email}</span>
                 )}
@@ -296,7 +299,7 @@ export default function ClaudeCodeAuthModal({
                 className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-color)] text-[0.75rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
               >
                 {statusLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                Refresh
+                {t('settings.llmBackends.common.refresh')}
               </button>
             </div>
             {statusError && (
@@ -306,21 +309,18 @@ export default function ClaudeCodeAuthModal({
             )}
             {status && status.logged_in && status.auth_method && (
               <div className="mt-2 text-[0.7rem] text-[var(--text-tertiary)]">
-                auth_method: {status.auth_method}
+                {t('settings.llmBackends.claudeCodeModal.authMethodLabel')}: {status.auth_method}
               </div>
             )}
           </section>
 
           {/* Auth mode radios */}
           <section>
-            <h4 className="text-[0.875rem] font-semibold mb-2">Authentication mode</h4>
+            <h4 className="text-[0.875rem] font-semibold mb-2">
+              {t('settings.llmBackends.claudeCodeModal.sectionAuthMode')}
+            </h4>
             <div className="flex flex-col gap-2">
-              {([
-                ['host_mount', 'Host mount (default)', 'Re-use ~/.claude on the host. Pro/Max subscription billing.'],
-                ['in_modal_login', 'Sign in here', 'Run `claude auth login` in the backend container; pick up the device-code URL below.'],
-                ['setup_token', 'Setup token (paste)', 'Long-lived subscription token from `claude setup-token`.'],
-                ['api_key', 'API key (Console)', 'Anthropic Console API key — billed per token.'],
-              ] as const).map(([id, label, blurb]) => (
+              {modeBlurbs.map(([id, label, blurb]) => (
                 <label key={id} className="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-[var(--bg-hover)]">
                   <input
                     type="radio"
@@ -343,14 +343,32 @@ export default function ClaudeCodeAuthModal({
           {authMode === 'host_mount' && (
             <section className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
               {status?.logged_in
-                ? <>The backend container is reading the host's <code>~/.claude/.credentials.json</code> directly. Sessions billing against your <strong>{status.subscription_type || 'subscription'}</strong> plan. Nothing else to do here.</>
-                : <>The host's <code>~/.claude</code> directory is mounted RW, but no credential was found. Run <code className="bg-[var(--bg-tertiary)] px-1 rounded">claude auth login</code> on the host machine — or use <em>"Sign in here"</em> above to do it inside the container.</>}
+                ? (
+                  <>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.loggedInPrefix')}
+                    <code>~/.claude/.credentials.json</code>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.loggedInMid')}
+                    <strong>{status.subscription_type || t('settings.llmBackends.claudeCodeModal.hostMount.subscription')}</strong>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.loggedInSuffix')}
+                  </>
+                )
+                : (
+                  <>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.notLoggedInPrefix')}
+                    <code>~/.claude</code>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.notLoggedInMid')}
+                    <code className="bg-[var(--bg-tertiary)] px-1 rounded">claude auth login</code>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.notLoggedInSuffix')}
+                    <em>"{t('settings.llmBackends.claudeCodeModal.hostMount.signInHere')}"</em>
+                    {t('settings.llmBackends.claudeCodeModal.hostMount.notLoggedInTrail')}
+                  </>
+                )}
             </section>
           )}
 
           {authMode === 'in_modal_login' && (
             <section className="flex flex-col gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => startLogin(false)}
@@ -358,7 +376,7 @@ export default function ClaudeCodeAuthModal({
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-color-hover)] disabled:opacity-50"
                 >
                   {jobRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
-                  Start subscription login
+                  {t('settings.llmBackends.claudeCodeModal.startLogin')}
                 </button>
                 <button
                   type="button"
@@ -366,7 +384,7 @@ export default function ClaudeCodeAuthModal({
                   disabled={jobRunning}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
                 >
-                  Console (API billing) instead
+                  {t('settings.llmBackends.claudeCodeModal.startConsoleLogin')}
                 </button>
                 {jobRunning && (
                   <button
@@ -374,23 +392,28 @@ export default function ClaudeCodeAuthModal({
                     onClick={cancelLogin}
                     className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded border border-rose-500/30 text-rose-300 text-[0.75rem] hover:bg-rose-500/10"
                   >
-                    Cancel
+                    {t('settings.llmBackends.common.cancel')}
                   </button>
                 )}
               </div>
 
               {urls.length > 0 && (
                 <div className="rounded border border-sky-500/30 bg-sky-500/10 p-3 flex flex-col gap-2">
-                  <div className="text-[0.75rem] text-sky-300 uppercase tracking-wide">Open this URL in your browser:</div>
+                  <div className="text-[0.75rem] text-sky-300 uppercase tracking-wide">
+                    {t('settings.llmBackends.common.openUrl')}
+                  </div>
                   {urls.map((u) => (
-                    <UrlPanel key={u} url={u} />
+                    <UrlPanel key={u} url={u} t={t} />
                   ))}
                 </div>
               )}
 
               {job && (
                 <div className="text-[0.7rem] text-[var(--text-tertiary)]">
-                  job: {job.job_id} · started {new Date().toLocaleTimeString()}
+                  {t('settings.llmBackends.claudeCodeModal.jobStarted', {
+                    id: job.job_id,
+                    time: new Date().toLocaleTimeString(),
+                  })}
                 </div>
               )}
             </section>
@@ -399,9 +422,11 @@ export default function ClaudeCodeAuthModal({
           {authMode === 'setup_token' && (
             <section className="flex flex-col gap-2">
               <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
-                Generate a long-lived token on a machine where you've signed in:
+                {t('settings.llmBackends.claudeCodeModal.setupTokenIntro')}
                 <code className="block bg-[var(--bg-tertiary)] mt-1 p-2 rounded text-[0.75rem]">claude setup-token</code>
-                Then paste the resulting token here. We store it in the Claude Code config's <code>api_key</code> override slot.
+                {t('settings.llmBackends.claudeCodeModal.setupTokenStore')}
+                <code>api_key</code>
+                {t('settings.llmBackends.claudeCodeModal.setupTokenStoreSuffix')}
               </p>
               <div className="flex gap-2">
                 <input
@@ -415,6 +440,7 @@ export default function ClaudeCodeAuthModal({
                   type="button"
                   className="px-2 rounded border border-[var(--border-color)] hover:bg-[var(--bg-hover)]"
                   onClick={() => setTokenVisible((v) => !v)}
+                  aria-label={tokenVisible ? t('settings.hide') : t('settings.show')}
                 >
                   {tokenVisible ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -424,7 +450,7 @@ export default function ClaudeCodeAuthModal({
                   disabled={!tokenInput.trim()}
                   className="px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] disabled:opacity-50"
                 >
-                  Save
+                  {t('settings.llmBackends.common.save')}
                 </button>
               </div>
             </section>
@@ -433,7 +459,7 @@ export default function ClaudeCodeAuthModal({
           {authMode === 'api_key' && (
             <section className="flex flex-col gap-2">
               <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
-                Anthropic Console API key. Per-token billing — no subscription quota involved.
+                {t('settings.llmBackends.claudeCodeModal.apiKeyIntro')}
               </p>
               <div className="flex gap-2">
                 <input
@@ -449,7 +475,7 @@ export default function ClaudeCodeAuthModal({
                   disabled={!apiKeyInput.trim()}
                   className="px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] disabled:opacity-50"
                 >
-                  Save
+                  {t('settings.llmBackends.common.save')}
                 </button>
               </div>
             </section>
@@ -464,18 +490,20 @@ export default function ClaudeCodeAuthModal({
                 className="inline-flex items-center gap-1 text-[0.75rem] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] mb-1"
               >
                 <Terminal className="w-3 h-3" />
-                {showConsole ? 'Hide live console' : 'Show live console'}
+                {showConsole
+                  ? t('settings.llmBackends.claudeCodeModal.hideLiveConsole')
+                  : t('settings.llmBackends.claudeCodeModal.showLiveConsole')}
               </button>
               {showConsole && (
                 <pre className="rounded border border-[var(--border-color)] bg-black/40 text-[0.72rem] leading-relaxed p-3 max-h-[200px] overflow-y-auto whitespace-pre-wrap text-[var(--text-secondary)]">
-                  {liveText || '(no output yet)'}
+                  {liveText || t('settings.llmBackends.claudeCodeModal.noOutput')}
                 </pre>
               )}
             </section>
           )}
 
           {/* Test + Logout */}
-          <section className="flex items-center gap-2 pt-2 border-t border-[var(--border-color)]">
+          <section className="flex items-center gap-2 pt-2 border-t border-[var(--border-color)] flex-wrap">
             <button
               type="button"
               onClick={runTest}
@@ -483,7 +511,7 @@ export default function ClaudeCodeAuthModal({
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
             >
               {testLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-              Test connection
+              {t('settings.llmBackends.common.testConnection')}
             </button>
             <button
               type="button"
@@ -491,7 +519,7 @@ export default function ClaudeCodeAuthModal({
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-rose-500/30 text-rose-300 text-[0.8125rem] hover:bg-rose-500/10"
             >
               <LogOut className="w-3.5 h-3.5" />
-              Sign out
+              {t('settings.llmBackends.common.signOut')}
             </button>
             {testResult && (
               <span className={`text-[0.75rem] ${testResult.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -513,7 +541,7 @@ export default function ClaudeCodeAuthModal({
             onClick={onClose}
             className="px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)]"
           >
-            Close
+            {t('settings.llmBackends.common.close')}
           </button>
         </div>
       </div>
@@ -522,7 +550,13 @@ export default function ClaudeCodeAuthModal({
 }
 
 
-function UrlPanel({ url }: { url: string }) {
+function UrlPanel({
+  url,
+  t,
+}: {
+  url: string;
+  t: (key: string) => string;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(async () => {
     try {
@@ -551,7 +585,7 @@ function UrlPanel({ url }: { url: string }) {
         className="px-2 py-1 rounded border border-sky-500/30 text-[0.7rem] text-sky-300 hover:bg-sky-500/10 inline-flex items-center gap-1"
       >
         {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('settings.llmBackends.common.copied') : t('settings.llmBackends.common.copy')}
       </button>
     </div>
   );

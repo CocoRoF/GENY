@@ -1515,11 +1515,14 @@ export interface ProviderHealth {
   kind: 'api' | 'cli';
   available: boolean;
   detail?: string | null;
+  detail_code?: string | null;
+  detail_params?: Record<string, string> | null;
   binary_path?: string | null;
   binary_version?: string | null;
   auth_ok?: boolean | null;
   auth_method?: 'api_key' | 'subscription' | 'extension' | null;
   install_help?: string | null;
+  install_help_code?: string | null;
 }
 
 export interface BackendsHealthResponse {

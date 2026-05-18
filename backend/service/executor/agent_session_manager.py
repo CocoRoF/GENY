@@ -689,8 +689,8 @@ class AgentSessionManager:
         if primary_provider and not credentials.has(primary_provider):
             raise ValueError(
                 f"환경 '{env_id}'의 Stage 6 provider '{primary_provider}'에 사용할 "
-                f"자격증명이 설정되지 않았습니다. Settings → API에서 해당 provider의 "
-                f"API key를 입력하거나, CLI 백엔드라면 binary 설치 + 인증을 완료해 주세요."
+                f"자격증명이 설정되지 않았습니다. Settings → LLM Backends에서 해당 provider 카드를 "
+                f"열어 API key를 입력하거나, CLI 백엔드라면 binary 설치 + 인증을 완료해 주세요."
             )
 
         # Build the per-session SubagentTypeRegistry once. The Stage 12
