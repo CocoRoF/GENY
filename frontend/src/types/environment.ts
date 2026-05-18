@@ -153,6 +153,11 @@ export interface EnvironmentSummary {
   created_at: string;
   updated_at: string;
   base_preset?: string;
+  /** Backend-set: ``true`` for host-supplied default templates
+   *  (currently ``template-worker-env`` / ``template-vtuber-env``).
+   *  The Environment editor uses this to gate the Edit affordance —
+   *  built-ins are clone-only, users can only edit their own envs. */
+  built_in?: boolean;
 }
 
 // D.3 (cycle 20260426_1) — populated by manifest-write endpoints to

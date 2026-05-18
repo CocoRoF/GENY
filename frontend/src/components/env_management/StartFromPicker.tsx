@@ -62,14 +62,19 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
     };
   }, []);
 
-  const presetEnvs = useMemo(
-    () => envs.filter((e) => (e.tags || []).includes('preset')),
-    [envs],
-  );
-  const nonPresetEnvs = useMemo(
-    () => envs.filter((e) => !(e.tags || []).includes('preset')),
-    [envs],
-  );
+  // An env counts as "preset" (clone-only, no in-place Edit) when:
+  //   - the backend marks it ``built_in`` (host-installed template,
+  //     id-prefix ``template-``), OR
+  //   - the manifest carries the legacy ``preset`` tag.
+  // Without the ``built_in`` check, VTuber Environment / Worker
+  // Environment leaked into the user-env section after Phase H landed
+  // because their manifest doesn't ship the ``preset`` tag — they're
+  // identified by id, not by tag.
+  const isPreset = (e: EnvironmentSummary): boolean =>
+    e.built_in === true || (e.tags || []).includes('preset');
+
+  const presetEnvs = useMemo(() => envs.filter(isPreset), [envs]);
+  const nonPresetEnvs = useMemo(() => envs.filter((e) => !isPreset(e)), [envs]);
 
   const visibleNonPresets = showAll ? nonPresetEnvs : nonPresetEnvs.slice(0, 6);
 
@@ -209,12 +214,17 @@ function PresetCard({
     accent === 'violet'
       ? 'border-violet-500/30 hover:border-violet-500'
       : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]';
+  // ``h-full`` lets the grid (default ``align-items: stretch``) make
+  // every card in a row the same height regardless of description
+  // length. Inside, ``flex-col`` + the description's reserved 2-line
+  // ``min-h`` + ``mt-auto`` on the footer keep the visual rhythm
+  // consistent for cards with 1-line vs 2-line descriptions.
   return (
     <button
       type="button"
       onClick={onPick}
       disabled={disabled}
-      className={`group flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed ${accentClass}`}
+      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed ${accentClass}`}
     >
       <div className="flex items-center gap-1.5">
         <Sparkles
@@ -226,7 +236,7 @@ function PresetCard({
           {env.name}
         </span>
       </div>
-      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed">
+      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed min-h-[2.3rem]">
         {env.description || t('envManagement.startFrom.noDescription')}
       </p>
       {env.tags && env.tags.length > 0 && (
@@ -241,7 +251,7 @@ function PresetCard({
           ))}
         </div>
       )}
-      <div className="text-[0.625rem] text-[hsl(var(--primary))] mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="text-[0.625rem] text-[hsl(var(--primary))] mt-auto pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {t('envManagement.startFrom.useThis')} →
       </div>
     </button>
@@ -278,6 +288,16 @@ function UserEnvCard({
   disabled: boolean;
 }) {
   const { t } = useI18n();
+  // Layout invariants (Phase H polish):
+  //   - ``h-full``    Every card stretches to the row's tallest card
+  //                   so a 1-line and a 2-line description don't end
+  //                   up at different heights side-by-side.
+  //   - description ``line-clamp-2 min-h-[2.3rem]`` reserves space
+  //                   for exactly two lines; a 1-line description
+  //                   still occupies the 2-line slot.
+  //   - action row ``mt-auto`` pins the Edit / Clone buttons to the
+  //                   bottom of the card regardless of description
+  //                   length.
   return (
     <div
       role="button"
@@ -290,7 +310,7 @@ function UserEnvCard({
           onEdit();
         }
       }}
-      className={`group flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
+      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
         disabled
           ? 'opacity-50 cursor-not-allowed'
           : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
@@ -304,7 +324,7 @@ function UserEnvCard({
           {env.name}
         </span>
       </div>
-      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed">
+      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed min-h-[2.3rem]">
         {env.description || t('envManagement.startFrom.noDescription')}
       </p>
       {env.tags && env.tags.length > 0 && (
@@ -320,8 +340,10 @@ function UserEnvCard({
         </div>
       )}
       {/* Action row — both buttons stop click propagation so they
-          don't double-fire the card body's Edit handler. */}
-      <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-[hsl(var(--border))]">
+          don't double-fire the card body's Edit handler. ``mt-auto``
+          pins the row to the card's bottom edge so 1-line and 2-line
+          descriptions present identically. */}
+      <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-[hsl(var(--border))]">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); if (!disabled) onEdit(); }}
