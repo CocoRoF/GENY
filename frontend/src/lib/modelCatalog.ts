@@ -152,9 +152,44 @@ export const PROVIDER_CAPABILITY_HINTS: Record<ProviderId, string[]> = {
 
 /** Mirrors executor's `_infer_api_artifact` so the UI can fall back to
  *  prefix-based provider detection when the s06_api stage hasn't yet
- *  pinned an explicit provider. */
+ *  pinned an explicit provider via ``config.provider``.
+ *
+ *  Order:
+ *   1. CLI-only catalogs first — claude_code_cli ships short aliases
+ *      ("sonnet", "opus", "haiku") that the API anthropic catalog
+ *      doesn't have. Without this check, "sonnet" falls through to
+ *      the claude-* prefix rule and gets misclassified as anthropic.
+ *   2. copilot_cli catalog ("default").
+ *   3. Prefix detection for the API providers.
+ *   4. Default: anthropic — same fallback the executor uses.
+ *
+ *  Note: this is only a *fallback* for manifests that don't carry an
+ *  explicit ``config.provider``. Editors should always read the
+ *  explicit field first and only call ``inferProvider`` when it's
+ *  missing — see ``Stage06ApiEditor`` / ``Stage18MemoryEditor``.
+ */
 export function inferProvider(model: string | null | undefined): ProviderId {
   const m = (model ?? '').toLowerCase();
+  if (!m) return 'anthropic';
+
+  // CLI catalog match — only for *CLI-exclusive* ids, i.e. ids that
+  // appear in a CLI catalog but in no API catalog. Otherwise a legacy
+  // manifest pinned to "claude-sonnet-4-6" (which is in both the
+  // anthropic and claude_code_cli catalogs) would silently re-infer
+  // as claude_code_cli after this rule landed.
+  const inAnyApi =
+    MODEL_CATALOG.anthropic.some((o) => o.id === m) ||
+    MODEL_CATALOG.openai.some((o) => o.id === m) ||
+    MODEL_CATALOG.google.some((o) => o.id === m);
+  if (!inAnyApi) {
+    if (MODEL_CATALOG.claude_code_cli.some((o) => o.id === m)) {
+      return 'claude_code_cli';
+    }
+    if (MODEL_CATALOG.copilot_cli.some((o) => o.id === m)) {
+      return 'copilot_cli';
+    }
+  }
+
   if (
     m.startsWith('gpt-') ||
     m.startsWith('o1') ||
@@ -168,4 +203,15 @@ export function inferProvider(model: string | null | undefined): ProviderId {
   // claude-* and unknowns default to anthropic — same fallback the
   // executor uses for the legacy default APIStage.
   return 'anthropic';
+}
+
+
+/** Validate an arbitrary string against the ProviderId union. Returns
+ *  ``null`` if the value isn't a known provider, otherwise the
+ *  narrowed type. Used by editors that read an explicit provider from
+ *  manifest config and need to fall back to ``inferProvider`` when
+ *  the field is missing or malformed. */
+export function parseProviderId(value: unknown): ProviderId | null {
+  if (typeof value !== 'string') return null;
+  return (PROVIDERS.some((p) => p.id === value) ? (value as ProviderId) : null);
 }
