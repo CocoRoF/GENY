@@ -40,6 +40,35 @@ import { useI18n } from '@/lib/i18n';
 
 type AuthMode = 'host_mount' | 'in_modal_login' | 'setup_token' | 'api_key';
 
+const AUTH_MODE_STORAGE_KEY = 'geny.claudeCodeAuthMode';
+const VALID_AUTH_MODES: ReadonlyArray<AuthMode> = [
+  'host_mount', 'in_modal_login', 'setup_token', 'api_key',
+];
+
+
+function readPersistedAuthMode(): AuthMode {
+  if (typeof window === 'undefined') return 'host_mount';
+  try {
+    const raw = window.localStorage.getItem(AUTH_MODE_STORAGE_KEY);
+    if (raw && (VALID_AUTH_MODES as readonly string[]).includes(raw)) {
+      return raw as AuthMode;
+    }
+  } catch {
+    /* private mode / quota — fall through */
+  }
+  return 'host_mount';
+}
+
+
+function persistAuthMode(mode: AuthMode): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AUTH_MODE_STORAGE_KEY, mode);
+  } catch {
+    /* private mode / quota — best-effort */
+  }
+}
+
 
 function StatusBadge({
   status,
@@ -93,7 +122,10 @@ export default function ClaudeCodeAuthModal({
   onChange?: () => void;
 }) {
   const { t } = useI18n();
-  const [authMode, setAuthMode] = useState<AuthMode>('host_mount');
+  // Seed from localStorage at state-creation time so the modal opens
+  // directly on the user's last-picked tab — no first-render flash to
+  // host_mount before a useEffect catches up.
+  const [authMode, setAuthMode] = useState<AuthMode>(() => readPersistedAuthMode());
   const [status, setStatus] = useState<ClaudeCodeAuthStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
@@ -212,6 +244,12 @@ export default function ClaudeCodeAuthModal({
     setAuthCodeInput('');
     setAuthCodeStatus(null);
   }, [job?.job_id]);
+
+  // Persist the user's last-picked auth mode so the modal opens on
+  // the same tab next time.
+  useEffect(() => {
+    persistAuthMode(authMode);
+  }, [authMode]);
 
   const logout = useCallback(async () => {
     if (!confirm(t('settings.llmBackends.claudeCodeModal.signOutConfirm'))) return;
