@@ -50,6 +50,7 @@ import {
   MODEL_CATALOG,
   PROVIDER_DEFAULT_MODEL,
   inferProvider,
+  parseProviderId,
   type ProviderId,
 } from '@/lib/modelCatalog';
 import { Switch } from '@/components/ui/switch';
@@ -292,26 +293,37 @@ function ModelOverridePanel({
               });
             }}
             onClearError={() => {}}
-            provider={inferProvider(
-              (entry.model_override?.model as string | undefined) ?? '',
-            )}
+            // Provider resolution priority: explicit config.provider
+            // first, then the inferred fallback for legacy manifests.
+            // Required so CLI providers (whose default model ids like
+            // "sonnet"/"default" are ambiguous on prefix-only inference)
+            // can be persisted at all.
+            provider={
+              parseProviderId(entry.config?.provider) ??
+              inferProvider(
+                (entry.model_override?.model as string | undefined) ?? '',
+              )
+            }
             onProviderChange={(next: ProviderId) => {
-              const current = (entry.model_override ??
-                {}) as Record<string, unknown>;
-              if (next === 'vllm') return;
-              const currentModel =
-                (current.model as string | undefined) ?? '';
-              const inCatalog = MODEL_CATALOG[next].some(
-                (o) => o.id === currentModel,
-              );
-              if (!inCatalog) {
-                patchStage(order, {
-                  model_override: {
-                    ...current,
+              const currentConfig = (entry.config ?? {}) as Record<string, unknown>;
+              const currentOverride = (entry.model_override ?? {}) as Record<string, unknown>;
+              const currentModel = (currentOverride.model as string | undefined) ?? '';
+              let nextOverride = currentOverride;
+              if (next !== 'vllm') {
+                const inCatalog = MODEL_CATALOG[next].some(
+                  (o) => o.id === currentModel,
+                );
+                if (!inCatalog) {
+                  nextOverride = {
+                    ...currentOverride,
                     model: PROVIDER_DEFAULT_MODEL[next],
-                  } as unknown as StageModelOverride,
-                });
+                  };
+                }
               }
+              patchStage(order, {
+                config: { ...currentConfig, provider: next },
+                model_override: nextOverride as unknown as StageModelOverride,
+              });
             }}
           />
         </div>

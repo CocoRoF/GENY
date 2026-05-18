@@ -31,6 +31,7 @@ import {
   MODEL_CATALOG,
   PROVIDER_DEFAULT_MODEL,
   inferProvider,
+  parseProviderId,
   type ProviderId,
 } from '@/lib/modelCatalog';
 import { Input } from '@/components/ui/input';
@@ -327,31 +328,38 @@ export default function Stage18MemoryEditor({ order, entry }: Props) {
                 });
               }}
               onClearError={() => {}}
-              provider={inferProvider(
-                (entry.model_override?.model as string | undefined) ?? '',
-              )}
+              // Provider resolution priority — same pattern as
+              // Stage06ApiEditor / GlobalSettingsView. The earlier
+              // "infer from model name" path silently snapped the
+              // selection back to anthropic when the user picked a
+              // CLI provider, because the CLI default model "sonnet"
+              // prefix-matched claude-* in inferProvider's fallback.
+              provider={
+                parseProviderId(entry.config?.provider) ??
+                inferProvider(
+                  (entry.model_override?.model as string | undefined) ?? '',
+                )
+              }
               onProviderChange={(next: ProviderId) => {
-                // Per-stage overrides don't carry an explicit provider
-                // field — the executor infers from the model id prefix.
-                // Keep the model in the new provider's catalog so the
-                // inference resolves the way the user expects; vLLM
-                // leaves the value alone (free-form).
-                const current = (entry.model_override ??
-                  {}) as Record<string, unknown>;
-                if (next === 'vllm') return;
-                const currentModel =
-                  (current.model as string | undefined) ?? '';
-                const inCatalog = MODEL_CATALOG[next].some(
-                  (o) => o.id === currentModel,
-                );
-                if (!inCatalog) {
-                  patchStage(order, {
-                    model_override: {
-                      ...current,
+                const currentConfig = (entry.config ?? {}) as Record<string, unknown>;
+                const currentOverride = (entry.model_override ?? {}) as Record<string, unknown>;
+                const currentModel = (currentOverride.model as string | undefined) ?? '';
+                let nextOverride = currentOverride;
+                if (next !== 'vllm') {
+                  const inCatalog = MODEL_CATALOG[next].some(
+                    (o) => o.id === currentModel,
+                  );
+                  if (!inCatalog) {
+                    nextOverride = {
+                      ...currentOverride,
                       model: PROVIDER_DEFAULT_MODEL[next],
-                    } as unknown as StageModelOverride,
-                  });
+                    };
+                  }
                 }
+                patchStage(order, {
+                  config: { ...currentConfig, provider: next },
+                  model_override: nextOverride as unknown as StageModelOverride,
+                });
               }}
             />
           </div>

@@ -24,6 +24,7 @@ import {
   MODEL_CATALOG,
   PROVIDER_DEFAULT_MODEL,
   inferProvider,
+  parseProviderId,
   type ProviderId,
 } from '@/lib/modelCatalog';
 import { Switch } from '@/components/ui/switch';
@@ -110,26 +111,49 @@ export default function Stage06ApiEditor({ order, entry }: Props) {
                 });
               }}
               onClearError={() => {}}
-              provider={inferProvider(
-                (entry.model_override?.model as string | undefined) ?? '',
-              )}
+              // Provider resolution priority:
+              //   1. ``entry.config.provider`` — the canonical persisted
+              //      choice (matches GlobalSettingsView's pattern). This
+              //      is what makes Claude Code (CLI) / Copilot (CLI)
+              //      selectable at all, since their default model ids
+              //      (sonnet/opus/haiku/default) can't be uniquely
+              //      inferred from the model name alone.
+              //   2. ``inferProvider(model)`` — fallback for legacy
+              //      manifests that predate the explicit config field.
+              provider={
+                parseProviderId(entry.config?.provider) ??
+                inferProvider(
+                  (entry.model_override?.model as string | undefined) ?? '',
+                )
+              }
               onProviderChange={(next: ProviderId) => {
-                const current = (entry.model_override ??
-                  {}) as Record<string, unknown>;
-                if (next === 'vllm') return;
-                const currentModel =
-                  (current.model as string | undefined) ?? '';
-                const inCatalog = MODEL_CATALOG[next].some(
-                  (o) => o.id === currentModel,
-                );
-                if (!inCatalog) {
-                  patchStage(order, {
-                    model_override: {
-                      ...current,
+                // Always persist the explicit choice — otherwise
+                // inferProvider re-runs on the next render and the
+                // selection silently reverts (the original bug:
+                // picking Claude Code (CLI) snapped back to Anthropic
+                // because "sonnet" prefix-matched to claude-*).
+                const currentConfig = (entry.config ?? {}) as Record<string, unknown>;
+                const currentOverride = (entry.model_override ?? {}) as Record<string, unknown>;
+                const currentModel = (currentOverride.model as string | undefined) ?? '';
+                // Keep the model in the new provider's catalog so the
+                // dropdown shows a valid option. vLLM is free-form so
+                // leave any user-typed id alone.
+                let nextOverride = currentOverride;
+                if (next !== 'vllm') {
+                  const inCatalog = MODEL_CATALOG[next].some(
+                    (o) => o.id === currentModel,
+                  );
+                  if (!inCatalog) {
+                    nextOverride = {
+                      ...currentOverride,
                       model: PROVIDER_DEFAULT_MODEL[next],
-                    } as unknown as StageModelOverride,
-                  });
+                    };
+                  }
                 }
+                patchStage(order, {
+                  config: { ...currentConfig, provider: next },
+                  model_override: nextOverride as unknown as StageModelOverride,
+                });
               }}
             />
           </div>
