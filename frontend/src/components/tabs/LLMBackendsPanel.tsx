@@ -26,6 +26,9 @@ import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key, ExternalL
 import { llmBackendsApi, type ProviderHealth } from '@/lib/api';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import CopilotAuthModal from './CopilotAuthModal';
+import ApiBackendModal from './ApiBackendModal';
+
+const API_PROVIDERS = new Set(['anthropic', 'openai', 'google', 'vllm']);
 
 
 function Badge({
@@ -275,11 +278,12 @@ export default function LLMBackendsPanel() {
         />
       )}
 
-      {openProvider && openProvider !== 'claude_code_cli' && openProvider !== 'copilot_cli' && (
-        <PlaceholderProviderModal
-          providerId={openProvider}
+      {openProvider && API_PROVIDERS.has(openProvider) && (
+        <ApiBackendModal
+          providerId={openProvider as 'anthropic' | 'openai' | 'google' | 'vllm'}
           providerLabel={providers.find((p) => p.provider === openProvider)?.label || openProvider}
           onClose={() => setOpenProvider(null)}
+          onChange={() => fetchHealth()}
         />
       )}
     </div>
@@ -287,43 +291,3 @@ export default function LLMBackendsPanel() {
 }
 
 
-/** Stub modal for backends whose dedicated modal lands in a follow-up
- *  PR (G4 = Copilot, G5 = the four API backends). Until those ship,
- *  clicking those cards still feels responsive: the modal explains
- *  where to configure the backend today and links there. */
-function PlaceholderProviderModal({
-  providerId,
-  providerLabel,
-  onClose,
-}: {
-  providerId: string;
-  providerLabel: string;
-  onClose: () => void;
-}) {
-  const hint =
-    providerId === 'anthropic' || providerId === 'openai' || providerId === 'google'
-      ? `${providerLabel} API key paste + Test modal lands in Phase G5. Configure today under Settings → Claude API.`
-      : providerId === 'vllm'
-      ? "Set base_url under Settings → Claude API. vLLM doesn't need an API key."
-      : 'No dedicated modal yet.';
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[480px] mx-4 p-5 flex flex-col gap-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-[1rem] font-semibold">{providerLabel}</h3>
-        <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">{hint}</p>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)]"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
