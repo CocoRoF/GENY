@@ -271,6 +271,13 @@ class EnvironmentSummaryResponse(BaseModel):
     active_stage_count: int = 0
     model: str
     base_preset: str = ""
+    # ``True`` for the host-supplied default templates that
+    # ``install_environment_templates`` writes on boot (currently
+    # ``template-worker-env`` / ``template-vtuber-env``). The UI uses
+    # this to gate the Edit affordance — built-ins are read-only;
+    # users clone them to start a new env. Server-side this is also a
+    # convenient hook for future delete-protection.
+    built_in: bool = False
 
 
 class AffectedSessionsSummary(BaseModel):

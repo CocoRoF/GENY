@@ -263,6 +263,15 @@ class EnvironmentService:
             active = sum(
                 1 for s in stages if isinstance(s, dict) and s.get("is_active")
             )
+        # Built-in template IDs are minted by
+        # ``install_environment_templates`` with stable, well-known
+        # values (``template-worker-env`` / ``template-vtuber-env``).
+        # User-created envs always get a 12-char hex from
+        # ``_fresh_id``, so the prefix is unambiguous. We surface the
+        # boolean rather than asking the frontend to do the prefix
+        # check so future template additions / renames are a
+        # one-place change.
+        built_in = env_id.startswith("template-")
         return {
             "id": env_id,
             "name": data.get("name", ""),
@@ -274,6 +283,7 @@ class EnvironmentService:
             "active_stage_count": active,
             "model": model,
             "base_preset": base_preset,
+            "built_in": built_in,
         }
 
     def update(self, env_id: str, changes: Dict[str, Any]) -> Optional[Dict[str, Any]]:
