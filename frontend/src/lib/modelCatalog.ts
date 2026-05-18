@@ -56,7 +56,7 @@ export const PROVIDERS: ProviderInfo[] = [
     freeForm: true,
     kind: 'cli',
     installHelp:
-      'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY in API settings.',
+      'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM Backends.',
   },
   {
     id: 'copilot_cli',
