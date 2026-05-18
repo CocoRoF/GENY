@@ -41,11 +41,27 @@ function getLocalizedGroup(groupName: string, schema: ConfigSchema, locale: Loca
   return loc || fallbackGroups[groupName] || groupName;
 }
 
+/** Read ``?settings_category=...`` once at mount so deep-links from
+ *  the Environment editor (and any other page) can land directly on the
+ *  intended sub-category — e.g. ``llm_backends`` to reach the LLM
+ *  Backends panel without manual clicking. */
+function readInitialCategory(): string {
+  if (typeof window === 'undefined') return 'all';
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get('settings_category');
+    if (v && v.trim()) return v;
+  } catch {
+    /* ignore */
+  }
+  return 'all';
+}
+
 export default function SettingsTab() {
   const { t, tRaw, locale, setLocale } = useI18n();
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
   const [categories, setCategories] = useState<ConfigCategory[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => readInitialCategory());
   const [editing, setEditing] = useState<{ name: string; schema: ConfigSchema; values: Record<string, any> } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importData, setImportData] = useState('');
