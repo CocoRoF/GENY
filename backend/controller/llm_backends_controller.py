@@ -533,9 +533,14 @@ async def _start_auth_job(kind: str, argv: List[str]) -> _AuthJob:
     _reap_old_jobs()
     job = _AuthJob(kind=kind, argv=argv)
     try:
+        # stdin=PIPE so the modal can forward an interactive prompt's
+        # response (Claude's "paste your auth code" / gh's "paste device
+        # code"). Both CLIs read these from stdin; the previous
+        # DEVNULL wiring left the user staring at the URL with no way
+        # to finish the flow.
         proc = await asyncio.create_subprocess_exec(
             *argv,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,  # killpg-able on cancel
@@ -830,6 +835,56 @@ async def auth_login_cancel(job_id: str) -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
     return {"ok": True, "already_finished": False}
+
+
+class AuthInputRequest(BaseModel):
+    """Body for ``POST /auth/login/{job_id}/input``.
+
+    ``text`` is written to the subprocess's stdin verbatim, plus a
+    trailing newline (CLI prompts almost universally read line-by-line).
+    Set ``append_newline=False`` for the rare prompt that wants raw
+    bytes.
+    """
+    text: str
+    append_newline: bool = True
+
+
+@router.post(
+    "/auth/login/{job_id}/input",
+    dependencies=[Depends(require_auth)],
+)
+async def auth_login_input(job_id: str, body: AuthInputRequest) -> Dict[str, Any]:
+    """Forward one line of user input to the auth subprocess's stdin.
+
+    ``claude auth login`` and ``gh auth login`` both pause after
+    printing the device-code URL, then read the user's auth-code
+    response from stdin. The frontend modal posts the user's pasted
+    code here; we write it to the CLI and echo it into the job history
+    so the live console pane shows what was sent.
+    """
+    job = _job_or_404(job_id)
+    if job.proc is None or job.is_finished():
+        raise HTTPException(status_code=409, detail="job already finished")
+    stdin = job.proc.stdin
+    if stdin is None or stdin.is_closing():
+        raise HTTPException(status_code=409, detail="stdin not available")
+    payload = body.text + ("\n" if body.append_newline else "")
+    try:
+        stdin.write(payload.encode("utf-8"))
+        await stdin.drain()
+    except (BrokenPipeError, ConnectionResetError) as e:
+        raise HTTPException(status_code=409, detail=f"stdin write failed: {e}")
+    # Echo into job history so the live console shows what was submitted.
+    # Mask anything that looks like a token (keep first 12 chars only)
+    # so a stray copy/paste doesn't permanently log a long-lived
+    # credential into the in-memory history.
+    masked = body.text[:12] + ("…" if len(body.text) > 12 else "")
+    await job.push({
+        "channel": "stdin",
+        "text": f"(submitted {len(body.text)} chars: {masked})",
+        "ts": time.time(),
+    })
+    return {"ok": True}
 
 
 @router.get(

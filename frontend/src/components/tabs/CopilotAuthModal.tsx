@@ -244,7 +244,7 @@ export default function CopilotAuthModal({
                 type="button"
                 onClick={startLogin}
                 disabled={jobRunning}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-color-hover)] disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--primary-color)] text-white text-[0.8125rem] hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50"
               >
                 {jobRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
                 {t('settings.llmBackends.copilotModal.startLogin')}
