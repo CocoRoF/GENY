@@ -23,8 +23,8 @@
  * (the per-stage override case).
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { Save, RotateCcw, AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Save, RotateCcw, AlertTriangle, ExternalLink, Loader2, CheckCircle2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { PROVIDERS, type ProviderId } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
@@ -174,9 +174,19 @@ export function ModelConfigEditor({
   const [draft, setDraft] = useState<ModelDraft>(() => snapshotToDraft(initial));
   const providerAware = provider !== undefined && onProviderChange !== undefined;
 
+  // Transient "saved just now" indicator next to the Save button.
+  // Cleared after 2.4s or whenever the user makes a new change so the
+  // signal corresponds to the latest save, not a stale one.
+  const [justSavedAt, setJustSavedAt] = useState<number | null>(null);
+  const justSavedTimer = useRef<number | null>(null);
+
   useEffect(() => {
     setDraft(snapshotToDraft(initial));
   }, [initial]);
+
+  useEffect(() => () => {
+    if (justSavedTimer.current) window.clearTimeout(justSavedTimer.current);
+  }, []);
 
   const buildResult = useMemo(() => buildChanges(initial, draft), [initial, draft]);
   const dirty = buildResult.ok ? Object.keys(buildResult.changes).length > 0 : true;
@@ -185,6 +195,14 @@ export function ModelConfigEditor({
     if (!buildResult.ok) return;
     if (Object.keys(buildResult.changes).length === 0) return;
     onSave(buildResult.changes);
+    // Mark "just saved" — UI flashes a green ✓ + label for ~2.4s.
+    // The reset effect below also clears this on the next edit.
+    setJustSavedAt(Date.now());
+    if (justSavedTimer.current) window.clearTimeout(justSavedTimer.current);
+    justSavedTimer.current = window.setTimeout(() => {
+      setJustSavedAt(null);
+      justSavedTimer.current = null;
+    }, 2400);
   };
 
   const handleReset = () => {
@@ -195,6 +213,8 @@ export function ModelConfigEditor({
   const update = <K extends keyof ModelDraft>(key: K, value: ModelDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
     onClearError();
+    // Any new edit invalidates the "just saved" signal.
+    if (justSavedAt !== null) setJustSavedAt(null);
   };
 
   return (
@@ -209,6 +229,16 @@ export function ModelConfigEditor({
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {justSavedAt !== null && (
+            <span
+              className="inline-flex items-center gap-1 text-[0.75rem] font-medium text-emerald-500 animate-in fade-in"
+              role="status"
+              aria-live="polite"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {t('envManagement.modelEditor.savedJustNow')}
+            </span>
+          )}
           <ActionButton icon={RotateCcw} onClick={handleReset} disabled={saving || !dirty}>
             {t('common.reset')}
           </ActionButton>

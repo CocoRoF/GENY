@@ -45,6 +45,14 @@ export interface ProviderInfo {
   installHelp?: string;
 }
 
+// ``freeForm`` semantics — Phase H fix:
+//   - vLLM: TRUE. No bundled catalog; the served model id is fully
+//     user-controlled and unbounded.
+//   - CLI providers (claude_code_cli / copilot_cli): FALSE. They DO
+//     ship catalogs (sonnet/opus/haiku aliases + a couple of pinned
+//     ids). The picker exposes those catalogs as a Select with a
+//     "Custom value…" escape hatch so the rare power-user can still
+//     pin an arbitrary date-stamped model.
 export const PROVIDERS: ProviderInfo[] = [
   { id: 'anthropic', label: 'Anthropic', freeForm: false, kind: 'api' },
   { id: 'openai', label: 'OpenAI', freeForm: false, kind: 'api' },
@@ -53,7 +61,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'claude_code_cli',
     label: 'Claude Code (CLI)',
-    freeForm: true,
+    freeForm: false,
     kind: 'cli',
     installHelp:
       'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM Backends.',
@@ -61,7 +69,7 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'copilot_cli',
     label: 'GitHub Copilot (CLI)',
-    freeForm: true,
+    freeForm: false,
     kind: 'cli',
     installHelp:
       'Install `gh` (cli.github.com), then `gh auth login` + `gh extension install github/gh-copilot`.',
