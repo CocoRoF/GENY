@@ -309,6 +309,11 @@ export interface EnvironmentDraftState {
   error: string | null;
   /** True while saveDraft() is in flight. */
   saving: boolean;
+  /** When set, ``saveDraft`` updates the existing env at this id
+   *  instead of POSTing a fresh ``mode=blank`` record. Populated by
+   *  ``loadExistingForEdit``; cleared by ``newDraft`` /
+   *  ``newDraftFromExisting`` / ``resetDraft``. */
+  editingId: string | null;
 
   // ── Actions ──
   newDraft: () => Promise<void>;
@@ -318,6 +323,13 @@ export interface EnvironmentDraftState {
    *  so the user has to type fresh metadata before saving (and the
    *  saved env will be a separate record from the source). */
   newDraftFromExisting: (envId: string) => Promise<void>;
+  /** Load an existing env for in-place editing. Preserves the env's
+   *  id + metadata; ``saveDraft`` will PUT updates back to that id
+   *  rather than POSTing a new record. Used by the "Edit" action on
+   *  user-created env cards. Presets (tagged ``preset``) should NOT
+   *  go through this path — they're read-only by convention; the
+   *  card body uses ``newDraftFromExisting`` (clone) for them. */
+  loadExistingForEdit: (envId: string) => Promise<void>;
   resetDraft: () => void;
 
   patchMetadata: (patch: Partial<EnvironmentMetadata>) => void;
@@ -372,6 +384,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
     validationErrors: [],
     error: null,
     saving: false,
+    editingId: null,
 
     newDraft: async () => {
       set({ seeding: true, error: null });
@@ -421,6 +434,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           validationErrors: runValidation(fresh),
           error: null,
           seeding: false,
+          editingId: null,
         });
       } catch (e) {
         // If we created a seed but failed to load, try to clean up.
@@ -466,6 +480,40 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           validationErrors: runValidation(fresh),
           error: null,
           seeding: false,
+          editingId: null,
+        });
+      } catch (e) {
+        set({
+          seeding: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        throw e;
+      }
+    },
+
+    loadExistingForEdit: async (envId) => {
+      set({ seeding: true, error: null });
+      try {
+        const detail = await environmentApi.get(envId);
+        if (!detail.manifest) {
+          throw new Error('Environment has no manifest');
+        }
+        // Preserve identity. The manifest's metadata.id / name /
+        // description / tags carry through so ``saveDraft`` can PUT
+        // updates back to the same record.
+        const fresh = cloneManifest(detail.manifest);
+        set({
+          draft: fresh,
+          stageDirty: new Set<number>(),
+          metadataDirty: false,
+          modelDirty: false,
+          pipelineDirty: false,
+          toolsDirty: false,
+          hostSelectionsDirty: false,
+          validationErrors: runValidation(fresh),
+          error: null,
+          seeding: false,
+          editingId: envId,
         });
       } catch (e) {
         set({
@@ -489,6 +537,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         validationErrors: [],
         error: null,
         saving: false,
+        editingId: null,
       }),
 
     patchMetadata: (patch) => {
@@ -620,7 +669,7 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       get().validationErrors.some((e) => e.severity === 'error'),
 
     saveDraft: async ({ name, description = '', tags = [] }) => {
-      const { draft, hasBlockingErrors } = get();
+      const { draft, hasBlockingErrors, editingId } = get();
       if (!draft) {
         throw new Error('No draft to save');
       }
@@ -632,13 +681,30 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       }
       set({ saving: true, error: null });
       try {
-        const res = await environmentApi.create({
-          mode: 'blank',
-          name: name.trim(),
-          description,
-          tags,
-          manifest_override: draft,
-        });
+        let envId: string;
+        if (editingId) {
+          // Update existing env in place — push metadata via
+          // ``update`` (name / description / tags) and the manifest
+          // via ``replaceManifest``. Both routes are idempotent so
+          // running them on every save is safe.
+          await environmentApi.update(editingId, {
+            name: name.trim(),
+            description,
+            tags,
+          });
+          await environmentApi.replaceManifest(editingId, draft);
+          envId = editingId;
+        } else {
+          // Fresh record.
+          const res = await environmentApi.create({
+            mode: 'blank',
+            name: name.trim(),
+            description,
+            tags,
+            manifest_override: draft,
+          });
+          envId = res.id;
+        }
         // Caller owns post-save navigation; clear local state.
         set({
           draft: null,
@@ -650,8 +716,9 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
           hostSelectionsDirty: false,
           validationErrors: [],
           saving: false,
+          editingId: null,
         });
-        return res;
+        return { id: envId };
       } catch (e) {
         set({
           saving: false,

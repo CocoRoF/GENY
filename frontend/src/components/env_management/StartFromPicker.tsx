@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Plus, Sparkles, Star } from 'lucide-react';
+import { Boxes, Copy, Pencil, Plus, Sparkles, Star } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -33,6 +33,9 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
   const newDraft = useEnvironmentDraftStore((s) => s.newDraft);
   const newDraftFromExisting = useEnvironmentDraftStore(
     (s) => s.newDraftFromExisting,
+  );
+  const loadExistingForEdit = useEnvironmentDraftStore(
+    (s) => s.loadExistingForEdit,
   );
   const seeding = useEnvironmentDraftStore((s) => s.seeding);
 
@@ -81,6 +84,14 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
   const handleFromExisting = async (id: string) => {
     try {
       await newDraftFromExisting(id);
+    } catch {
+      /* error surfaces via store */
+    }
+  };
+
+  const handleEdit = async (id: string) => {
+    try {
+      await loadExistingForEdit(id);
     } catch {
       /* error surfaces via store */
     }
@@ -135,7 +146,7 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
         </div>
       )}
 
-      {/* ── Existing envs ── */}
+      {/* ── Existing user-created envs — Edit / Clone ── */}
       {nonPresetEnvs.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -161,12 +172,12 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {visibleNonPresets.map((env) => (
-              <PresetCard
+              <UserEnvCard
                 key={env.id}
                 env={env}
-                onPick={() => handleFromExisting(env.id)}
+                onEdit={() => handleEdit(env.id)}
+                onClone={() => handleFromExisting(env.id)}
                 disabled={seeding}
-                accent="blue"
               />
             ))}
           </div>
@@ -234,5 +245,102 @@ function PresetCard({
         {t('envManagement.startFrom.useThis')} →
       </div>
     </button>
+  );
+}
+
+
+/**
+ * UserEnvCard — card for user-created (non-preset) environments.
+ *
+ * Card body click ≙ Edit (the obvious / most common action — opens
+ * the existing env in place, preserving its id so a subsequent save
+ * updates the record rather than creating a clone).
+ *
+ * The action row at the bottom exposes:
+ *   - Edit (primary, same as body click — also visible at rest so
+ *     the affordance is discoverable on touch / focus-only flows)
+ *   - Clone (secondary — uses ``newDraftFromExisting`` which wipes
+ *     identity, behaviour-identical to the preset cards)
+ *
+ * Built-in presets (``VTuber Environment`` / ``Worker Environment``
+ * tagged ``preset``) bypass this component entirely and stay
+ * read-only — see ``PresetCard`` above for that path.
+ */
+function UserEnvCard({
+  env,
+  onEdit,
+  onClone,
+  disabled,
+}: {
+  env: EnvironmentSummary;
+  onEdit: () => void;
+  onClone: () => void;
+  disabled: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => { if (!disabled) onEdit(); }}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      className={`group flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
+        disabled
+          ? 'opacity-50 cursor-not-allowed'
+          : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
+      }`}
+      aria-disabled={disabled}
+      aria-label={t('envManagement.startFrom.editAriaLabel', { name: env.name })}
+    >
+      <div className="flex items-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5 shrink-0 text-[hsl(var(--primary))]" />
+        <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] truncate flex-1">
+          {env.name}
+        </span>
+      </div>
+      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed">
+        {env.description || t('envManagement.startFrom.noDescription')}
+      </p>
+      {env.tags && env.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {env.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--muted-foreground))]"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+      {/* Action row — both buttons stop click propagation so they
+          don't double-fire the card body's Edit handler. */}
+      <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-[hsl(var(--border))]">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (!disabled) onEdit(); }}
+          disabled={disabled}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/0.1)] transition-colors disabled:opacity-50"
+        >
+          <Pencil className="w-3 h-3" />
+          {t('envManagement.startFrom.edit')}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (!disabled) onClone(); }}
+          disabled={disabled}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-50"
+        >
+          <Copy className="w-3 h-3" />
+          {t('envManagement.startFrom.clone')}
+        </button>
+      </div>
+    </div>
   );
 }
