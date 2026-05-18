@@ -92,6 +92,16 @@ writes the canonical Pro/Max subscription credential. Plan in
 | G5 | Frontend modals for the other 4 backends | `feat/llm-backend/g5-api-backend-modals` | Geny | pending | TBD | — | TBD |
 | G6 | prod deploy + Max-plan billing verification | `feat/llm-backend/g6-prod-verify` | Geny | pending | TBD | — | TBD |
 
+### Phase H — Consolidate LLM backend settings into the LLM Backends panel
+
+User feedback after G6 landed: 전체설정 list still showed CLI backend
+configs + API keys, duplicating the LLM Backends panel modals. Plan in
+[11_phase_h_consolidate_llm_settings.md](../11_phase_h_consolidate_llm_settings.md).
+
+| # | PR title | Branch | Repo | Status | Base SHA | Merge SHA | Progress file |
+|---|---|---|---|---|---|---|---|
+| H0 | feat(config): consolidate LLM backend settings into LLM Backends panel | `phase-h-consolidate-llm-settings` | Geny | merged | ac91da7 | 5eacbd3 (PR #793) | (this row) |
+
 ## Status legend
 
 - **pending** — branch 미생성, 작업 미시작
