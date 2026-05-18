@@ -88,6 +88,10 @@ services:
       # then moves the consumed zip into installed/ — rw mount required.
       # See docs/plan/GENY_AVATAR_INTEGRATION.md (Phase C).
       - geny-baked-exports:/data/baked-imports
+      # Phase G — host's ``~/.claude`` for Pro/Max OAuth credential
+      # passthrough to the in-container ``claude`` CLI. RW for token
+      # refresh.
+      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy

@@ -85,6 +85,10 @@ services:
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-dev:/data/baked-imports
+      # Phase G — host's ``~/.claude`` for Pro/Max OAuth credential
+      # passthrough to the in-container ``claude`` CLI. RW for token
+      # refresh.
+      - ${CLAUDE_HOST_DIR:-${HOME}/.claude}:/root/.claude:rw
     depends_on:
       postgres:
         condition: service_healthy
