@@ -44,10 +44,21 @@ class ConfigManager:
 
         Args:
             config_dir: Directory to store config files (fallback).
+                Honours, in order of precedence:
+                  1. This kwarg.
+                  2. ``GENY_CONFIG_VARIABLES_DIR`` env var (set by
+                     docker-compose so the JSON fallback survives
+                     ``docker compose up --build backend``).
+                  3. Legacy default ``<this-module>/variables/``
+                     which lives on the container writable layer.
             app_db: AppDatabaseManager instance for DB-backed storage.
         """
         if config_dir is None:
-            config_dir = Path(__file__).parent / "variables"
+            env = (os.environ.get("GENY_CONFIG_VARIABLES_DIR") or "").strip()
+            if env:
+                config_dir = Path(env)
+            else:
+                config_dir = Path(__file__).parent / "variables"
 
         self.config_dir = Path(config_dir)
         self._ensure_config_dir()

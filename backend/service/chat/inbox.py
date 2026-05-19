@@ -22,6 +22,7 @@ Public API::
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from logging import getLogger
@@ -31,9 +32,20 @@ from typing import Any, Dict, List, Optional
 
 logger = getLogger(__name__)
 
+
+def _resolve_chat_dir() -> Path:
+    """Base directory for chat-related JSON fallback files. Honours
+    ``GENY_CHAT_CONVERSATIONS_DIR`` (set by docker-compose) so the
+    inbox + DLQ survive ``--build backend`` rebuilds."""
+    env = (os.environ.get("GENY_CHAT_CONVERSATIONS_DIR") or "").strip()
+    if env:
+        return Path(env)
+    return Path(__file__).parent.parent / "chat_conversations"
+
+
 # Store inbox files alongside chat_conversations
-_INBOX_DIR = Path(__file__).parent.parent / "chat_conversations" / "inbox"
-_DLQ_DIR = Path(__file__).parent.parent / "chat_conversations" / "inbox_dlq"
+_INBOX_DIR = _resolve_chat_dir() / "inbox"
+_DLQ_DIR = _resolve_chat_dir() / "inbox_dlq"
 
 
 def _atomic_write_json(path: Path, data: Any) -> None:
@@ -58,9 +70,12 @@ class InboxManager:
     """Thread-safe per-session inbox for direct messages between agents."""
 
     def __init__(self, inbox_dir: Optional[Path] = None, dlq_dir: Optional[Path] = None) -> None:
-        self._dir = inbox_dir or _INBOX_DIR
+        # Re-resolve each construction so env-var changes (tests, ops
+        # tweaks) propagate without a module reload.
+        chat_base = _resolve_chat_dir()
+        self._dir = Path(inbox_dir) if inbox_dir else (chat_base / "inbox")
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._dlq_dir = dlq_dir or _DLQ_DIR
+        self._dlq_dir = Path(dlq_dir) if dlq_dir else (chat_base / "inbox_dlq")
         self._dlq_dir.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
 

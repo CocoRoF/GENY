@@ -391,10 +391,18 @@ async def lifespan(app: FastAPI):
             SqliteCreatureStateProvider,
         )
 
+        # Resolve creature SQLite path. The legacy default
+        # ``backend/data/geny_state.sqlite3`` is on the container
+        # writable layer (wiped on rebuild). docker-compose now sets
+        # ``GENY_GAME_STATE_DB`` to a named-volume path so creature
+        # state survives ``docker compose up --build backend``.
+        _state_default = os.environ.get("GENY_GAME_STATE_DB", "").strip() or str(
+            Path(__file__).parent / "data" / "geny_state.sqlite3"
+        )
         resolved_db_path = (
             game_cfg.state_db_path.strip()
             if game_cfg.state_db_path
-            else str(Path(__file__).parent / "data" / "geny_state.sqlite3")
+            else _state_default
         )
         Path(resolved_db_path).parent.mkdir(parents=True, exist_ok=True)
         state_provider = SqliteCreatureStateProvider(db_path=resolved_db_path)

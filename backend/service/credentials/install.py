@@ -9,6 +9,7 @@ they don't need to re-auth on every new session.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +19,15 @@ CREDENTIALS_FILE = "credentials.json"
 
 
 def credentials_path() -> Path:
+    """Resolve the MCP credentials file.
+
+    Honours ``GENY_MCP_CREDENTIALS`` (set by docker-compose to point
+    at a named volume) so OAuth tokens survive ``--build`` rebuilds.
+    Falls back to ``~/.geny/credentials.json`` for dev workflows.
+    """
+    env = (os.environ.get("GENY_MCP_CREDENTIALS") or "").strip()
+    if env:
+        return Path(env)
     return Path.home() / ".geny" / CREDENTIALS_FILE
 
 
