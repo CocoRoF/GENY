@@ -57,6 +57,24 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
     };
   }, [tick]);
 
+  // Stages whose ``model_override`` is non-null — surfaced as a small
+  // "Model" chip on each node so the canvas overview matches the
+  // in-editor StageProgressBar at a glance.
+  //
+  // MUST be declared before the ``if (!draft) return`` early-return
+  // below so hook call order stays stable across renders — React
+  // raises error #310 ("Rendered more hooks than during the previous
+  // render") otherwise. The memo gracefully handles ``draft===null``
+  // by returning an empty set; the value is only consumed in the
+  // canvas branch.
+  const modelOrders = useMemo(() => {
+    const set = new Set<number>();
+    draft?.stages.forEach((s) => {
+      if (s.model_override != null) set.add(s.order);
+    });
+    return set;
+  }, [draft]);
+
   // ── Empty state — no draft yet
   if (!draft) {
     const handleAdd = async () => {
@@ -91,17 +109,6 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
       </RegistryPageShell>
     );
   }
-
-  // Stages whose ``model_override`` is non-null — surfaced as a small
-  // "Model" chip on each node so the canvas overview matches the
-  // in-editor StageProgressBar at a glance.
-  const modelOrders = useMemo(() => {
-    const set = new Set<number>();
-    draft.stages.forEach((s) => {
-      if (s.model_override != null) set.add(s.order);
-    });
-    return set;
-  }, [draft]);
 
   // ── Draft active — big canvas
   // The .stage-circle class + --pipe-* CSS variables are scoped under
