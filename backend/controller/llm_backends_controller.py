@@ -766,21 +766,82 @@ async def claude_code_auth_logout() -> Dict[str, Any]:
     dependencies=[Depends(require_auth)],
 )
 async def claude_code_test() -> TestConnectionResponse:
-    """Ping the CLI in --bare mode. Returns ok=True if the CLI exits 0
-    and emits any text response. The intent is "is the credential
-    file actually usable", not "is the model on form"."""
+    """Ping the CLI to confirm credentials are usable.
+
+    Two correctness gates:
+
+      1. ``--bare`` is **only** safe for the API-key auth path. The
+         CLI explicitly documents ``--bare`` as "Anthropic auth is
+         strictly ANTHROPIC_API_KEY or apiKeyHelper … OAuth and
+         keychain are never read." Subscription users who just
+         completed OAuth login would otherwise always get
+         ``"Not logged in · Please run /login"`` even though the
+         credential file is perfectly fine — which is exactly what
+         the user hit on 2026-05-19.
+
+      2. ``--print --output-format json`` returns rc=0 even when the
+         response envelope carries ``is_error: true`` (e.g. invalid
+         credentials, rate limit, model unavailable). Treat that
+         envelope as a failure so the UI button reflects the real
+         state instead of misleading "exit code 0".
+
+    Auth-method detection: an ANTHROPIC_API_KEY in env (or via the
+    bundle) means we're on the API-key path → include ``--bare``.
+    Otherwise we're on the subscription OAuth path → drop it.
+    """
     binary = _claude_binary()
+
+    use_bare = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    argv = [binary, "--print"]
+    if use_bare:
+        argv.append("--bare")
+    argv += ["--output-format", "json", "ping"]
+
     started = time.monotonic()
-    rc, out, err = await _run_cmd(
-        [binary, "--print", "--bare", "--output-format", "json", "ping"],
-        timeout=20.0,
-    )
+    rc, out, err = await _run_cmd(argv, timeout=20.0)
     elapsed_ms = int((time.monotonic() - started) * 1000)
-    ok = rc == 0 and bool(out.strip())
+
+    is_error_envelope = False
+    envelope_msg = ""
+    api_error_status: Optional[int] = None
+    if out.strip():
+        try:
+            envelope = json.loads(out)
+            if isinstance(envelope, dict) and envelope.get("is_error"):
+                is_error_envelope = True
+                envelope_msg = str(envelope.get("result") or envelope.get("error") or "").strip()
+                api_status_raw = envelope.get("api_error_status")
+                if api_status_raw is not None:
+                    try:
+                        api_error_status = int(api_status_raw)
+                    except (TypeError, ValueError):
+                        api_error_status = None
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+    ok = rc == 0 and bool(out.strip()) and not is_error_envelope
+    if ok:
+        detail = "response received"
+    elif is_error_envelope:
+        # Surface the CLI's own message — that's what the user
+        # needs to act on (e.g. "Not logged in", "rate limit").
+        if api_error_status == 401 or "Not logged in" in envelope_msg:
+            detail = (
+                "인증이 만료되었거나 유효하지 않습니다. "
+                "위 ‘구독 로그인 시작’ 버튼으로 다시 로그인하세요. "
+                f"(CLI: {envelope_msg or 'auth failed'})"
+            )
+        else:
+            detail = (
+                f"CLI 응답에 에러 — {envelope_msg or 'unknown error'}"
+                + (f" (HTTP {api_error_status})" if api_error_status else "")
+            )
+    else:
+        detail = f"exit code {rc}"
     return TestConnectionResponse(
         ok=ok,
         duration_ms=elapsed_ms,
-        detail=("response received" if ok else f"exit code {rc}"),
+        detail=detail,
         raw_stdout_tail=out[-400:] if out else None,
         raw_stderr_tail=err[-400:] if err else None,
     )
