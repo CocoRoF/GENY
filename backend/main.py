@@ -275,6 +275,15 @@ async def lifespan(app: FastAPI):
     from service.tool_preset.store import get_tool_preset_store
     from service.tool_preset.templates import install_templates as install_tool_preset_templates
     tool_preset_store = get_tool_preset_store()
+    # Phase 2A — wire Postgres as the SOT before templates are
+    # installed so the seed rows land in the DB. ``set_database``
+    # also runs a DB↔file reconcile so any presets created during a
+    # previous DB outage are pushed up.
+    if app_db is not None:
+        tool_preset_store.set_database(app_db)
+        logger.info("   - Tool preset storage: PostgreSQL (primary) + JSON (backup)")
+    else:
+        logger.info("   - Tool preset storage: JSON files (database unavailable)")
     tool_preset_templates_installed = install_tool_preset_templates(tool_preset_store)
     logger.info(f"   - Tool preset templates installed: {tool_preset_templates_installed}")
     logger.info(f"   - Total tool presets: {len(tool_preset_store.list_all())}")

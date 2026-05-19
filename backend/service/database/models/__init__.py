@@ -20,6 +20,7 @@ from service.database.models.background_task import (
     BackgroundTaskOutputModel,
 )
 from service.database.models.cron_job import CronJobModel
+from service.database.models.tool_preset import ToolPresetModel
 
 __all__ = [
     'BaseModel',
@@ -33,6 +34,7 @@ __all__ = [
     'BackgroundTaskModel',
     'BackgroundTaskOutputModel',
     'CronJobModel',
+    'ToolPresetModel',
 ]
 
 # List of models used by the application
@@ -49,4 +51,5 @@ APPLICATION_MODELS = [
     BackgroundTaskModel,
     BackgroundTaskOutputModel,
     CronJobModel,
+    ToolPresetModel,
 ]

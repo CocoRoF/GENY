@@ -243,6 +243,10 @@ class AppDatabaseManager:
 
             # Add UNIQUE constraint to persistent_configs table if not present
             self._ensure_unique_constraint("persistent_configs", "config_name", "config_key")
+            # Tool presets are keyed by ``preset_id`` (user-facing UUID).
+            # The CREATE-TABLE query declares the UNIQUE inline; this
+            # second call covers tables created before Phase 2A landed.
+            self._ensure_unique_constraint("tool_presets", "preset_id")
 
             self.logger.info("All application tables created successfully")
             return True
