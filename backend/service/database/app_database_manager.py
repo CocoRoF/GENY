@@ -250,6 +250,8 @@ class AppDatabaseManager:
             # Environments are keyed by ``env_id`` (12-char hex or
             # ``template-*``). Same retro-fit story as tool_presets.
             self._ensure_unique_constraint("environments", "env_id")
+            # Trigger presets are keyed by ``preset_id``.
+            self._ensure_unique_constraint("trigger_presets", "preset_id")
 
             self.logger.info("All application tables created successfully")
             return True
