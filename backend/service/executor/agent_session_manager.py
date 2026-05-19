@@ -676,9 +676,33 @@ class AgentSessionManager:
         # settings (APIConfig + CLI backend configs). The bundle is the
         # single channel; the legacy ``api_key`` kwarg is gone from
         # this code path.
-        from service.executor.credentials import CredentialBundleBuilder
+        #
+        # Phase I — for sessions that will resolve to ``claude_code_cli``
+        # as their Stage 6 provider, we mint a per-session MCP bridge
+        # token and synthesize an MCP config pointing at the spawned
+        # ``geny_mcp_bridge.py`` subprocess. The bridge proxies the
+        # CLI's MCP tool calls back to ``/api/internal/mcp/.../rpc``
+        # so Geny's tool registry is exposed to the CLI's LLM. The
+        # token is later attached to the AgentSession instance so
+        # ``mcp_bridge_controller.require_mcp_bridge_auth`` can
+        # validate incoming bridge requests.
+        from service.executor.credentials import (
+            CredentialBundleBuilder,
+            McpBridgeContext,
+        )
+        from controller.mcp_bridge_controller import mint_bridge_token
 
-        credentials = CredentialBundleBuilder().build()
+        # Pre-generate the session_id here so the bridge context can
+        # reference it (the existing pre-gen below at line ~621 stays
+        # — this is symbolically harmless because Python re-binds).
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        mcp_bridge_token = mint_bridge_token()
+        mcp_bridge_ctx = McpBridgeContext(
+            session_id=session_id, token=mcp_bridge_token,
+        )
+
+        credentials = CredentialBundleBuilder(mcp_bridge=mcp_bridge_ctx).build()
 
         # Determine the active session's primary provider so we can
         # validate that the matching credentials are actually present —
@@ -873,6 +897,19 @@ class AgentSessionManager:
                 logger.info(f"[{session_id}] Memory DB backend enabled")
             except Exception as e:
                 logger.warning(f"[{session_id}] Failed to wire memory DB: {e}")
+
+        # Phase I — attach the MCP bridge token to the agent so
+        # ``mcp_bridge_controller.require_mcp_bridge_auth`` can
+        # validate incoming bridge requests for this session. The
+        # token is only meaningful when the env's Stage 6 provider
+        # is ``claude_code_cli`` (the executor only reads
+        # extras["mcp_config"] for that provider); for other
+        # providers the attachment is a harmless ~96 bytes that
+        # never gets used.
+        try:
+            agent._mcp_bridge_token = mcp_bridge_token
+        except Exception:
+            pass
 
         # Link shared folder into session's storage directory
         storage = agent.storage_path if hasattr(agent, 'storage_path') else None
