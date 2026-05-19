@@ -3,11 +3,22 @@ Tool Preset Store — JSON-file persistence for tool preset definitions.
 
 Mirrors WorkflowStore pattern: individual JSON files under a
 configurable directory.
+
+The directory honours, in order of precedence:
+  1. The ``storage_dir`` arg passed to the constructor.
+  2. The ``GENY_TOOL_PRESETS_DIR`` env var (set by docker-compose
+     to point at a named volume — survives backend rebuilds).
+  3. The legacy default ``<repo>/backend/tool_presets/`` — which
+     **lives on the container's writable layer** and gets wiped on
+     every ``docker compose up --build``. Kept as a final fallback
+     for dev workflows where the operator manually mounts the
+     repo.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from logging import getLogger
@@ -18,14 +29,19 @@ from service.tool_preset.models import ToolPresetDefinition
 
 logger = getLogger(__name__)
 
-_DEFAULT_DIR = Path(__file__).parent.parent.parent / "tool_presets"
+
+def _resolve_default_dir() -> Path:
+    env = (os.environ.get("GENY_TOOL_PRESETS_DIR") or "").strip()
+    if env:
+        return Path(env)
+    return Path(__file__).parent.parent.parent / "tool_presets"
 
 
 class ToolPresetStore:
     """Persist and load ToolPresetDefinition objects as JSON files."""
 
     def __init__(self, storage_dir: Optional[Path] = None) -> None:
-        self._dir = storage_dir or _DEFAULT_DIR
+        self._dir = Path(storage_dir) if storage_dir else _resolve_default_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"ToolPresetStore initialized at {self._dir}")
 

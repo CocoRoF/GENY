@@ -74,14 +74,33 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
-      # EnvironmentService (Phase 3)
-      - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-./data/environments}
+      # ── Persistent-storage paths (Phase 1, 2026-05-19) ─────────────
+      # Mirrors docker-compose.prod.yml — each path is backed by a
+      # named volume below. ``-prod`` suffix is shared with the full
+      # prod compose so the two can swap freely without data loss.
+      - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-/data/environments}
+      - TRIGGER_PRESET_STORAGE_PATH=${TRIGGER_PRESET_STORAGE_PATH:-/data/trigger_presets}
+      - GENY_TOOL_PRESETS_DIR=/data/tool_presets
+      - GENY_CHAT_CONVERSATIONS_DIR=/data/chat_conversations
+      - GENY_GAME_STATE_DB=/data/creature_state/geny_state.sqlite3
+      - GENY_CONFIG_VARIABLES_DIR=/data/config_variables
+      - GENY_MCP_CREDENTIALS=/data/mcp/credentials.json
     volumes:
       - geny-tts-cache-prod:/app/cache/tts
       - geny-voices-prod:/app/static/voices
       # Chat attachment uploads (cycle 20260424_3 PR-1) — without a named
       # volume here every container restart wiped user-uploaded images.
       - geny-uploads-prod:/app/static/uploads
+      # ── Backend storage root (notes / vault / capture logs) ────────
+      - geny-agent-sessions-prod:/data/geny_agent_sessions
+      # ── Phase-1 persistence volumes (2026-05-19) ───────────────────
+      - geny-environments-prod:/data/environments
+      - geny-trigger-presets-prod:/data/trigger_presets
+      - geny-tool-presets-prod:/data/tool_presets
+      - geny-chat-conversations-prod:/data/chat_conversations
+      - geny-creature-state-prod:/data/creature_state
+      - geny-config-variables-prod:/data/config_variables
+      - geny-mcp-credentials-prod:/data/mcp
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-prod:/data/baked-imports
@@ -203,4 +222,24 @@ volumes:
     driver: local
   # Phase G — Claude Code OAuth credentials. See backend.volumes.
   geny-claude-creds-prod:
+    driver: local
+  # ── Backend storage root (notes / vault / capture logs) ────────────
+  # Shares the ``-prod`` suffix with docker-compose.prod.yml so the
+  # two compose files can swap freely without losing state.
+  geny-agent-sessions-prod:
+    driver: local
+  # ── Phase-1 persistent-storage volumes (2026-05-19) ────────────────
+  geny-environments-prod:
+    driver: local
+  geny-trigger-presets-prod:
+    driver: local
+  geny-tool-presets-prod:
+    driver: local
+  geny-chat-conversations-prod:
+    driver: local
+  geny-creature-state-prod:
+    driver: local
+  geny-config-variables-prod:
+    driver: local
+  geny-mcp-credentials-prod:
     driver: local

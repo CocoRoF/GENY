@@ -73,8 +73,16 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
-      # EnvironmentService (Phase 3)
-      - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-./data/environments}
+      # ── Persistent-storage paths (Phase 1, 2026-05-19) ─────────────
+      # Mirrors docker-compose.prod.yml — each path is backed by a
+      # named volume so its data survives ``docker compose up --build``.
+      - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-/data/environments}
+      - TRIGGER_PRESET_STORAGE_PATH=${TRIGGER_PRESET_STORAGE_PATH:-/data/trigger_presets}
+      - GENY_TOOL_PRESETS_DIR=/data/tool_presets
+      - GENY_CHAT_CONVERSATIONS_DIR=/data/chat_conversations
+      - GENY_GAME_STATE_DB=/data/creature_state/geny_state.sqlite3
+      - GENY_CONFIG_VARIABLES_DIR=/data/config_variables
+      - GENY_MCP_CREDENTIALS=/data/mcp/credentials.json
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./backend:/app
@@ -82,6 +90,17 @@ services:
       # docker-compose.prod.yml. Without this every ``docker compose
       # up --build backend`` wipes user notes / audio captures.
       - geny-agent-sessions-dev:/data/geny_agent_sessions
+      # ── Phase-1 persistence volumes (2026-05-19) ────────────────────
+      # Mirrors docker-compose.prod.yml. Each env var declared above
+      # resolves to a path that is backed by a named volume — without
+      # these mounts ``docker compose up --build`` wipes the data.
+      - geny-environments-dev:/data/environments
+      - geny-trigger-presets-dev:/data/trigger_presets
+      - geny-tool-presets-dev:/data/tool_presets
+      - geny-chat-conversations-dev:/data/chat_conversations
+      - geny-creature-state-dev:/data/creature_state
+      - geny-config-variables-dev:/data/config_variables
+      - geny-mcp-credentials-dev:/data/mcp
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-dev:/data/baked-imports
@@ -333,4 +352,20 @@ volumes:
     driver: local
   # Phase G — Claude Code OAuth credentials. See backend.volumes.
   geny-claude-creds-dev:
+    driver: local
+  # ── Phase-1 persistent-storage volumes (2026-05-19) ─────────────────
+  # See docker-compose.prod.yml for the full rationale.
+  geny-environments-dev:
+    driver: local
+  geny-trigger-presets-dev:
+    driver: local
+  geny-tool-presets-dev:
+    driver: local
+  geny-chat-conversations-dev:
+    driver: local
+  geny-creature-state-dev:
+    driver: local
+  geny-config-variables-dev:
+    driver: local
+  geny-mcp-credentials-dev:
     driver: local

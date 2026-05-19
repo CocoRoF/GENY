@@ -36,10 +36,30 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional
 
+import os
+
 logger = getLogger(__name__)
 
-# Storage directory — next to the backend root
-_STORE_DIR = Path(__file__).parent.parent / "chat_conversations"
+
+def _resolve_default_dir() -> Path:
+    """Resolve the chat-conversation directory.
+
+    Precedence:
+      1. ``GENY_CHAT_CONVERSATIONS_DIR`` env (set by docker-compose
+         so the JSON fallback + ``.db_migrated`` marker survive
+         backend rebuilds).
+      2. Legacy default ``<backend>/service/chat_conversations/``
+         (ephemeral on the container writable layer; safe only when
+         the DB stays up).
+    """
+    env = (os.environ.get("GENY_CHAT_CONVERSATIONS_DIR") or "").strip()
+    if env:
+        return Path(env)
+    return Path(__file__).parent.parent / "chat_conversations"
+
+
+# Storage directory — kept as a module-level alias for back-compat.
+_STORE_DIR = _resolve_default_dir()
 
 
 class ChatConversationStore:
@@ -51,7 +71,9 @@ class ChatConversationStore:
     """
 
     def __init__(self, store_dir: Optional[Path] = None) -> None:
-        self._dir = store_dir or _STORE_DIR
+        # Re-resolve each construction so tests + reconfigured env
+        # vars pick up the new value without re-importing the module.
+        self._dir = Path(store_dir) if store_dir else _resolve_default_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._rooms_path = self._dir / "rooms.json"
         self._lock = Lock()
