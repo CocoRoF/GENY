@@ -491,6 +491,14 @@ async def lifespan(app: FastAPI):
         set_trigger_preset_service,
     )
     trigger_preset_service = TriggerPresetService()
+    # Phase 2C — wire Postgres as the SOT. ``set_database`` also
+    # reconciles file-only presets back into the DB so a preset
+    # created during a DB outage gets picked up on next boot.
+    if app_db is not None:
+        trigger_preset_service.set_database(app_db)
+        logger.info("   - Trigger preset storage: PostgreSQL (primary) + JSON (backup)")
+    else:
+        logger.info("   - Trigger preset storage: JSON files (database unavailable)")
     app.state.trigger_preset_service = trigger_preset_service
     set_trigger_preset_service(trigger_preset_service)
     logger.info(

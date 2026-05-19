@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,8 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from service.trigger_preset.defaults import default_manifest
+
+logger = logging.getLogger(__name__)
 from service.trigger_preset.exceptions import (
     TriggerPresetNotFoundError,
     TriggerPresetValidationError,
@@ -73,16 +76,44 @@ class TriggerPresetService:
     the corresponding file already reflects the change.
     """
 
-    def __init__(self, storage_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        storage_path: Optional[str] = None,
+        app_db: Any = None,
+    ) -> None:
         path = storage_path or _default_storage_path()
         self._storage = Path(path)
         self._storage.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
         self._version = 0
+        self._app_db = app_db
 
     @property
     def storage_path(self) -> Path:
         return self._storage
+
+    # ── DB wiring ─────────────────────────────────────────────
+
+    def set_database(self, app_db: Any) -> None:
+        """Attach the AppDatabaseManager and reconcile both backends."""
+        with self._lock:
+            self._app_db = app_db
+            logger.info("TriggerPresetService: database backend attached")
+            try:
+                self._reconcile_locked()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: reconcile failed (continuing): %s", exc,
+                )
+
+    @property
+    def _db_available(self) -> bool:
+        if self._app_db is None:
+            return False
+        try:
+            return self._app_db.db_manager._is_pool_healthy()
+        except Exception:
+            return False
 
     # ── Versioning (cache invalidation) ───────────────────────
 
@@ -108,6 +139,24 @@ class TriggerPresetService:
         return self._storage / f"{preset_id}.json"
 
     def _read_record(self, preset_id: str) -> Optional[TriggerPresetRecord]:
+        """DB-first read; falls back to JSON file on miss / outage."""
+        if self._db_available:
+            try:
+                row = self._app_db.db_manager.execute_query_one(
+                    "SELECT data FROM trigger_presets WHERE preset_id = %s",
+                    (preset_id,),
+                )
+                record = _row_to_record(row)
+                if record is not None:
+                    return record
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: DB read failed for %s, trying file: %s",
+                    preset_id, exc,
+                )
+        return self._read_record_from_file(preset_id)
+
+    def _read_record_from_file(self, preset_id: str) -> Optional[TriggerPresetRecord]:
         path = self._path(preset_id)
         if not path.exists():
             return None
@@ -121,12 +170,56 @@ class TriggerPresetService:
             return None
 
     def _write_record(self, record: TriggerPresetRecord) -> None:
+        """UPSERT to DB; always mirror to the JSON file."""
+        payload_obj = record.model_dump(mode="json")
+        payload_json = json.dumps(payload_obj, ensure_ascii=False, default=str)
+
+        if self._db_available:
+            try:
+                self._app_db.db_manager.execute_insert(
+                    """
+                    INSERT INTO trigger_presets (preset_id, name, data)
+                    VALUES (%s, %s, %s::jsonb)
+                    ON CONFLICT (preset_id)
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        data = EXCLUDED.data,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (record.id, record.name, payload_json),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: DB write failed for %s, falling back to file: %s",
+                    record.id, exc,
+                )
+
+        # Mirror to disk regardless — fallback / DR copy.
         path = self._path(record.id)
-        payload = record.model_dump(mode="json")
         path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
+            json.dumps(payload_obj, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def _delete_from_db(self, preset_id: str) -> bool:
+        affected = self._app_db.db_manager.execute_update_delete(
+            "DELETE FROM trigger_presets WHERE preset_id = %s",
+            (preset_id,),
+        )
+        return bool(affected and affected > 0)
+
+    def _list_records_from_db(self) -> List[TriggerPresetRecord]:
+        rows = self._app_db.db_manager.execute_query(
+            "SELECT data FROM trigger_presets ORDER BY name ASC",
+        )
+        if not rows:
+            return []
+        out: List[TriggerPresetRecord] = []
+        for row in rows:
+            rec = _row_to_record(row)
+            if rec is not None:
+                out.append(rec)
+        return out
 
     # ── Read API ──────────────────────────────────────────────
 
@@ -134,8 +227,22 @@ class TriggerPresetService:
         return self._read_record(preset_id)
 
     def list_all(self) -> List[Dict[str, Any]]:
-        """Return UI-friendly summary dicts for every stored preset."""
-        result: List[Dict[str, Any]] = []
+        """Return UI-friendly summary dicts for every stored preset.
+
+        Prefers DB rows; merges in any JSON-only orphans (e.g. presets
+        created while the DB was unreachable).
+        """
+        seen: Dict[str, Dict[str, Any]] = {}
+        if self._db_available:
+            try:
+                for record in self._list_records_from_db():
+                    seen[record.id] = self._summarize(record)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: DB list failed, falling back to files: %s",
+                    exc,
+                )
+
         for f in sorted(self._storage.glob("*.json")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
@@ -145,7 +252,11 @@ class TriggerPresetService:
                 record = TriggerPresetRecord.model_validate(data)
             except Exception:  # noqa: BLE001
                 continue
-            result.append(self._summarize(record))
+            if record.id in seen:
+                continue
+            seen[record.id] = self._summarize(record)
+
+        result = list(seen.values())
         # newest-first so the FE renders most recent activity at the top.
         result.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
         return result
@@ -276,16 +387,31 @@ class TriggerPresetService:
             return new_id
 
     def delete(self, preset_id: str) -> bool:
+        """Remove from DB + file. Returns True if anything was removed."""
         with self._lock:
+            db_removed = False
+            if self._db_available:
+                try:
+                    db_removed = self._delete_from_db(preset_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "TriggerPresetService: DB delete failed for %s: %s",
+                        preset_id, exc,
+                    )
+
+            file_removed = False
             path = self._path(preset_id)
-            if not path.exists():
-                return False
-            try:
-                path.unlink()
-            except OSError:
-                return False
-            self._bump_version()
-            return True
+            if path.exists():
+                try:
+                    path.unlink()
+                    file_removed = True
+                except OSError:
+                    pass
+
+            if db_removed or file_removed:
+                self._bump_version()
+                return True
+            return False
 
     # ── Reset to defaults ─────────────────────────────────────
 
@@ -297,3 +423,110 @@ class TriggerPresetService:
         from VTuber sessions stay valid.
         """
         return self.replace_manifest(preset_id, default_manifest())
+
+    # ── Reconcile ─────────────────────────────────────────────
+
+    def _reconcile_locked(self) -> None:
+        """Align DB + JSON-file backends at startup. DB wins on conflict.
+
+        Must be called with ``self._lock`` held — invoked from
+        ``set_database`` which already takes it.
+
+        Strategy mirrors ToolPresetStore (Phase 2A) and
+        EnvironmentService (Phase 2B):
+          1. DB rows mirror to disk.
+          2. File-only records push up to the DB.
+          3. Orphans on either side stay; deletes are explicit.
+        """
+        if not self._db_available:
+            logger.info("TriggerPresetService: reconcile skipped (DB unavailable)")
+            return
+
+        try:
+            db_records = {r.id: r for r in self._list_records_from_db()}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("TriggerPresetService: reconcile DB read failed: %s", exc)
+            return
+
+        file_records: Dict[str, TriggerPresetRecord] = {}
+        for f in sorted(self._storage.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                record = TriggerPresetRecord.model_validate(data)
+            except (json.JSONDecodeError, OSError):
+                continue
+            except Exception:  # noqa: BLE001
+                continue
+            file_records[record.id] = record
+
+        mirrored = 0
+        for record in db_records.values():
+            try:
+                self._path(record.id).write_text(
+                    json.dumps(
+                        record.model_dump(mode="json"),
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                mirrored += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: reconcile mirror failed for %s: %s",
+                    record.id, exc,
+                )
+
+        pushed = 0
+        for preset_id, record in file_records.items():
+            if preset_id in db_records:
+                continue
+            try:
+                payload_json = json.dumps(
+                    record.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    default=str,
+                )
+                self._app_db.db_manager.execute_insert(
+                    """
+                    INSERT INTO trigger_presets (preset_id, name, data)
+                    VALUES (%s, %s, %s::jsonb)
+                    ON CONFLICT (preset_id)
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        data = EXCLUDED.data,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (record.id, record.name, payload_json),
+                )
+                pushed += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: reconcile push failed for %s: %s",
+                    preset_id, exc,
+                )
+
+        logger.info(
+            "TriggerPresetService: reconcile done — db_rows=%d, files=%d, mirrored=%d, pushed=%d",
+            len(db_records), len(file_records), mirrored, pushed,
+        )
+
+
+def _row_to_record(row: Any) -> Optional[TriggerPresetRecord]:
+    """Decode a ``trigger_presets.data`` row into a TriggerPresetRecord."""
+    if row is None:
+        return None
+    raw = row.get("data") if isinstance(row, dict) else row[0]
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse trigger_preset JSON from DB: %s", exc)
+            return None
+    try:
+        return TriggerPresetRecord.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to validate TriggerPresetRecord from DB row: %s", exc)
+        return None
