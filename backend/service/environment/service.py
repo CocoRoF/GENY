@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from geny_executor import (
     EnvironmentManifest,
@@ -76,16 +79,55 @@ def _default_storage_path() -> str:
 
 
 class EnvironmentService:
-    """Save, load, diff, and mutate pipeline environments on disk."""
+    """Save, load, diff, and mutate pipeline environments.
 
-    def __init__(self, storage_path: Optional[str] = None) -> None:
+    Phase 2B (cycle 20260519): Postgres ``environments`` table is the
+    source of truth when the DB is reachable; the JSON files under
+    ``ENVIRONMENT_STORAGE_PATH`` are a mirrored fallback used during
+    DB outages. ``set_database(app_db)`` wires the DB at startup and
+    runs a one-shot reconcile that pushes file-only envs to the DB
+    and mirrors DB rows to disk (DB wins on conflict).
+
+    All CRUD funnels through ``_read_raw`` / ``_write_raw`` /
+    ``delete`` / ``list_all`` so the DB indirection is transparent to
+    the rest of the service's API.
+    """
+
+    def __init__(
+        self,
+        storage_path: Optional[str] = None,
+        app_db: Any = None,
+    ) -> None:
         path = storage_path or _default_storage_path()
         self._storage = Path(path)
         self._storage.mkdir(parents=True, exist_ok=True)
+        self._app_db = app_db
 
     @property
     def storage_path(self) -> Path:
         return self._storage
+
+    # ── DB wiring ──────────────────────────────────────────────
+
+    def set_database(self, app_db: Any) -> None:
+        """Attach the AppDatabaseManager and reconcile both backends."""
+        self._app_db = app_db
+        logger.info("EnvironmentService: database backend attached")
+        try:
+            self._reconcile()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "EnvironmentService: reconcile failed (continuing): %s", exc,
+            )
+
+    @property
+    def _db_available(self) -> bool:
+        if self._app_db is None:
+            return False
+        try:
+            return self._app_db.db_manager._is_pool_healthy()
+        except Exception:
+            return False
 
     # ── File layout helpers ────────────────────────────────────
 
@@ -93,6 +135,23 @@ class EnvironmentService:
         return self._storage / f"{env_id}.json"
 
     def _read_raw(self, env_id: str) -> Optional[Dict[str, Any]]:
+        """DB-first read; falls back to the JSON file on miss / outage."""
+        if self._db_available:
+            try:
+                row = self._app_db.db_manager.execute_query_one(
+                    "SELECT data FROM environments WHERE env_id = %s",
+                    (env_id,),
+                )
+                if row is not None:
+                    return _row_to_record(row)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: DB read failed for %s, trying file: %s",
+                    env_id, exc,
+                )
+        return self._read_raw_from_file(env_id)
+
+    def _read_raw_from_file(self, env_id: str) -> Optional[Dict[str, Any]]:
         path = self._path(env_id)
         if not path.exists():
             return None
@@ -102,7 +161,55 @@ class EnvironmentService:
             return None
 
     def _write_raw(self, env_id: str, data: Dict[str, Any]) -> None:
+        """DB-UPSERT first; always mirror to the JSON file."""
+        if self._db_available:
+            try:
+                self._upsert_to_db(env_id, data)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: DB write failed for %s, falling back to file: %s",
+                    env_id, exc,
+                )
+        # Mirror to disk regardless — fallback / DR copy.
         self._path(env_id).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+    def _upsert_to_db(self, env_id: str, data: Dict[str, Any]) -> None:
+        is_template = bool(env_id.startswith("template-"))
+        name = data.get("name") or ""
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+        query = """
+            INSERT INTO environments (env_id, name, is_template, data)
+            VALUES (%s, %s, %s, %s::jsonb)
+            ON CONFLICT (env_id)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                is_template = EXCLUDED.is_template,
+                data = EXCLUDED.data,
+                updated_at = CURRENT_TIMESTAMP
+        """
+        self._app_db.db_manager.execute_insert(
+            query, (env_id, name, is_template, payload),
+        )
+
+    def _delete_from_db(self, env_id: str) -> bool:
+        affected = self._app_db.db_manager.execute_update_delete(
+            "DELETE FROM environments WHERE env_id = %s",
+            (env_id,),
+        )
+        return bool(affected and affected > 0)
+
+    def _list_raw_from_db(self) -> List[Dict[str, Any]]:
+        rows = self._app_db.db_manager.execute_query(
+            "SELECT data FROM environments ORDER BY name ASC",
+        )
+        if not rows:
+            return []
+        records: List[Dict[str, Any]] = []
+        for row in rows:
+            rec = _row_to_record(row)
+            if rec is not None:
+                records.append(rec)
+        return records
 
     # ── Manifest load / save ───────────────────────────────────
 
@@ -230,17 +337,40 @@ class EnvironmentService:
         return self._read_raw(env_id)
 
     def list_all(self) -> List[Dict[str, Any]]:
-        """List stored environments with UI-friendly summaries."""
-        result: List[Dict[str, Any]] = []
+        """List stored environments with UI-friendly summaries.
+
+        Prefers DB rows; layers in any JSON-file orphans (e.g. envs
+        created while the DB was unreachable) so the operator can see
+        them in the UI and decide whether to delete or repair.
+        """
+        seen: Dict[str, Dict[str, Any]] = {}
+        if self._db_available:
+            try:
+                for record in self._list_raw_from_db():
+                    env_id = record.get("id")
+                    if not env_id:
+                        continue
+                    summary = self._summarize(record)
+                    if summary is not None:
+                        seen[env_id] = summary
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: DB list failed, falling back to files: %s",
+                    exc,
+                )
+
         for f in sorted(self._storage.glob("*.json")):
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
+            env_id = data.get("id")
+            if not env_id or env_id in seen:
+                continue
             summary = self._summarize(data)
             if summary is not None:
-                result.append(summary)
-        return result
+                seen[env_id] = summary
+        return list(seen.values())
 
     @staticmethod
     def _summarize(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -305,11 +435,21 @@ class EnvironmentService:
         return raw
 
     def delete(self, env_id: str) -> bool:
+        """Remove from DB + file. Returns True if either side had it."""
+        db_removed = False
+        if self._db_available:
+            try:
+                db_removed = self._delete_from_db(env_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: DB delete failed for %s: %s", env_id, exc,
+                )
+        file_removed = False
         path = self._path(env_id)
         if path.exists():
             path.unlink()
-            return True
-        return False
+            file_removed = True
+        return db_removed or file_removed
 
     def export_json(self, env_id: str) -> Optional[str]:
         raw = self._read_raw(env_id)
@@ -587,6 +727,70 @@ class EnvironmentService:
             adhoc_providers=adhoc_providers,
         )
 
+    # ── Reconcile ──────────────────────────────────────────────
+
+    def _reconcile(self) -> None:
+        """Align DB + JSON-file backends at startup. DB wins on conflict.
+
+        Strategy mirrors ToolPresetStore (Phase 2A):
+          1. Every DB record is mirrored to its on-disk JSON file.
+          2. Every JSON-file env not in the DB is pushed up (covers
+             "DB was down when user created env X" recovery).
+          3. Orphans on either side stay; deletes remain explicit.
+        """
+        if not self._db_available:
+            logger.info("EnvironmentService: reconcile skipped (DB unavailable)")
+            return
+
+        try:
+            db_records = {
+                rec["id"]: rec for rec in self._list_raw_from_db() if rec.get("id")
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("EnvironmentService: reconcile DB read failed: %s", exc)
+            return
+
+        file_records: Dict[str, Dict[str, Any]] = {}
+        for f in sorted(self._storage.glob("*.json")):
+            try:
+                rec = json.loads(f.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            env_id = rec.get("id")
+            if env_id:
+                file_records[env_id] = rec
+
+        mirrored = 0
+        for env_id, rec in db_records.items():
+            try:
+                self._path(env_id).write_text(
+                    json.dumps(rec, ensure_ascii=False, indent=2),
+                )
+                mirrored += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: reconcile mirror failed for %s: %s",
+                    env_id, exc,
+                )
+
+        pushed = 0
+        for env_id, rec in file_records.items():
+            if env_id in db_records:
+                continue
+            try:
+                self._upsert_to_db(env_id, rec)
+                pushed += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EnvironmentService: reconcile push failed for %s: %s",
+                    env_id, exc,
+                )
+
+        logger.info(
+            "EnvironmentService: reconcile done — db_rows=%d, files=%d, mirrored=%d, pushed=%d",
+            len(db_records), len(file_records), mirrored, pushed,
+        )
+
     # ── Diff ───────────────────────────────────────────────────
 
     def diff(self, env_id_a: str, env_id_b: str) -> List[Dict[str, Any]]:
@@ -681,3 +885,26 @@ class EnvironmentService:
             changes.append(
                 {"path": prefix, "type": "changed", "old_value": old, "new_value": new}
             )
+
+
+def _row_to_record(row: Any) -> Optional[Dict[str, Any]]:
+    """Decode an ``environments.data`` row into the raw env record.
+
+    psycopg returns JSONB as a Python dict by default; older drivers
+    can hand back a string. Handle both. Returns the same shape as
+    the on-disk JSON file (``id``, ``name``, ``manifest``, etc.).
+    """
+    if row is None:
+        return None
+    raw = row.get("data") if isinstance(row, dict) else row[0]
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse environment JSON from DB: %s", exc)
+            return None
+    if not isinstance(raw, dict):
+        return None
+    return raw

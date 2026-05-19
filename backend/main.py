@@ -349,6 +349,15 @@ async def lifespan(app: FastAPI):
         set_environment_service,
     )
     environment_service = EnvironmentService()
+    # Phase 2B — wire Postgres as the SOT before the default
+    # manifest seeds run so they land in the DB on first boot.
+    # ``set_database`` also reconciles file-only envs (created
+    # during a previous DB outage) back into the DB.
+    if app_db is not None:
+        environment_service.set_database(app_db)
+        logger.info("   - Environment storage: PostgreSQL (primary) + JSON (backup)")
+    else:
+        logger.info("   - Environment storage: JSON files (database unavailable)")
     app.state.environment_service = environment_service
     agent_manager.set_environment_service(environment_service)
     # Phase 9.9.2 — module-level accessor so service-layer code (e.g.

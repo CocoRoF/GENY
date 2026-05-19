@@ -247,6 +247,9 @@ class AppDatabaseManager:
             # The CREATE-TABLE query declares the UNIQUE inline; this
             # second call covers tables created before Phase 2A landed.
             self._ensure_unique_constraint("tool_presets", "preset_id")
+            # Environments are keyed by ``env_id`` (12-char hex or
+            # ``template-*``). Same retro-fit story as tool_presets.
+            self._ensure_unique_constraint("environments", "env_id")
 
             self.logger.info("All application tables created successfully")
             return True
