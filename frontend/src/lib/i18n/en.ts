@@ -345,6 +345,7 @@ const en = {
         'claude_code.binary_missing': '`claude` binary not found on PATH.',
         'claude_code.ready': '{path} · {version} · auth={auth}',
         'claude_code.unauthenticated': '{path} · {version} · auth={auth}',
+        'claude_code.auth_expired': 'OAuth token expired. Click ‘Sign in’ below to refresh. ({path} · {version})',
         'copilot.disabled': 'Copilot CLI backend disabled. Open this card to enable it.',
         'copilot.binary_missing': '`gh` binary not found on PATH.',
         'copilot.ready': '{path} · {version} · extension={extension}',
@@ -353,6 +354,7 @@ const en = {
       } as Record<string, string>,
       installHelp: {
         'claude_code.install_help': 'Install Claude Code (https://docs.anthropic.com/claude/code/) and ensure `claude` is on PATH. Then either paste ANTHROPIC_API_KEY through this card or run `claude auth login` in the in-modal terminal.',
+        'claude_code.auth_expired': 'Subscription OAuth token expired. Click the ‘Sign in’ button on this card to refresh. The new credential is stored in a named docker volume so it survives container rebuilds until the next expiry.',
         'copilot.install_help': 'Install GitHub CLI (https://cli.github.com/), run `gh auth login`, then `gh extension install github/gh-copilot`.',
       } as Record<string, string>,
       auth: 'auth',

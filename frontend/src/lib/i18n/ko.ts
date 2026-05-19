@@ -343,6 +343,7 @@ const ko: Translations = {
         'claude_code.binary_missing': '`claude` 바이너리를 PATH에서 찾을 수 없습니다.',
         'claude_code.ready': '{path} · {version} · 인증={auth}',
         'claude_code.unauthenticated': '{path} · {version} · 인증={auth}',
+        'claude_code.auth_expired': 'OAuth 토큰이 만료됐어요. 아래 ‘다시 로그인 / Sign in’ 버튼으로 갱신해주세요. ({path} · {version})',
         'copilot.disabled': 'Copilot CLI 백엔드가 비활성화 상태입니다. 카드를 열어 활성화하세요.',
         'copilot.binary_missing': '`gh` 바이너리를 PATH에서 찾을 수 없습니다.',
         'copilot.ready': '{path} · {version} · 확장={extension}',
@@ -351,6 +352,7 @@ const ko: Translations = {
       } as Record<string, string>,
       installHelp: {
         'claude_code.install_help': 'Claude Code(https://docs.anthropic.com/claude/code/)를 설치하고 `claude`가 PATH에 있는지 확인하세요. 그 다음 이 카드에서 ANTHROPIC_API_KEY를 붙여넣거나 모달 내 터미널에서 `claude auth login`을 실행하면 됩니다.',
+        'claude_code.auth_expired': 'OAuth 토큰이 만료됐습니다. 이 카드의 ‘다시 로그인 / Sign in’ 버튼을 눌러 인증을 갱신해주세요. 갱신된 자격증명은 named volume 에 저장돼 다음 토큰 만료까지 유지됩니다.',
         'copilot.install_help': 'GitHub CLI(https://cli.github.com/)를 설치하고 `gh auth login`을 실행한 뒤, `gh extension install github/gh-copilot`으로 확장을 설치하세요.',
       } as Record<string, string>,
       auth: '인증',
