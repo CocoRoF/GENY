@@ -980,11 +980,27 @@ class AgentSessionManager:
                 _sub_worker_cfg = _load_vtuber_sub_worker_section()
                 _settings_default_env_id = _sub_worker_cfg.get("default_env_id")
                 _settings_default_model = _sub_worker_cfg.get("default_model")
-                # Let resolve_env_id(role=WORKER, explicit=sub_worker_env_id)
-                # pick template-worker-env by default, or honor an
-                # explicit override. workflow_id/graph_name/tool_preset_id
-                # are left as Pydantic defaults — the manifest path (PR 15)
-                # owns stage layout and tool registration now.
+                # Resolve the sub-worker's env_id BEFORE we recurse —
+                # ``CreateSessionRequest`` has no ``env_id`` field
+                # (env_id is a sibling kwarg on ``create_agent_session``,
+                # not a field on the request schema). The pre-fix code
+                # passed ``env_id=...`` to the constructor where Pydantic
+                # silently dropped it, then called
+                # ``create_agent_session(worker_request)`` without the
+                # ``env_id=`` kwarg — so the recursive call's parameter
+                # defaulted to ``None`` and ``resolve_env_id(WORKER, None)``
+                # always picked ``template-worker-env``, ignoring the
+                # user's explicit selection (or the settings default).
+                sub_worker_env_id = (
+                    request.sub_worker_env_id
+                    or (_settings_default_env_id if isinstance(_settings_default_env_id, str) and _settings_default_env_id.strip() else None)
+                )
+                # Sub-worker model override is still threaded through
+                # ``request.model`` for session-info display tagging.
+                # The actual LLM model used by the sub-worker pipeline
+                # comes from its env manifest's Stage 6 (model_override
+                # or pipeline.model) — manifest-driven, just like the
+                # main path.
                 worker_request = CreateSessionRequest(
                     session_name=worker_name,
                     working_dir=shared_dir,
@@ -997,15 +1013,13 @@ class AgentSessionManager:
                     max_iterations=request.max_iterations or 50,
                     role=SessionRole.WORKER,
                     system_prompt=request.sub_worker_system_prompt,
-                    env_id=(
-                        request.sub_worker_env_id
-                        or (_settings_default_env_id if isinstance(_settings_default_env_id, str) and _settings_default_env_id.strip() else None)
-                    ),
                     linked_session_id=session_id,
                     session_type="sub",
                     env_vars=request.env_vars,
                 )
-                worker_agent = await self.create_agent_session(worker_request)
+                worker_agent = await self.create_agent_session(
+                    worker_request, env_id=sub_worker_env_id,
+                )
                 worker_session_id = worker_agent.session_id
 
                 # Back-link: update VTuber session with Sub-Worker ID

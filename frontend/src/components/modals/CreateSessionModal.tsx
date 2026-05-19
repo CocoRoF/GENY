@@ -32,17 +32,13 @@ interface Props { onClose: () => void; }
 const DEFAULT_VTUBER_ENV_ID = 'template-vtuber-env';
 const DEFAULT_WORKER_ENV_ID = 'template-worker-env';
 
-const MODEL_OPTIONS_BASE = [
-  { value: '', labelKey: 'createSession.modelDefault' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
-  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-  { value: 'claude-haiku-4-20250414', label: 'Claude Haiku 4' },
-];
+// Session-level model selectors removed in the env-driven cleanup
+// (PR for "VTuber sub-worker env regression + model UI clutter"):
+// the env manifest's Stage 6 (model_override or pipeline.model) is
+// the single source of truth for the LLM model. Picking a model in
+// this modal only tagged the session record for display; it never
+// influenced the actual LLM call. To change the model, edit the env.
+
 
 export default function CreateSessionModal({ onClose }: Props) {
   const { createSession, prompts, loadPrompts, loadPromptContent } = useAppStore();
@@ -322,26 +318,22 @@ export default function CreateSessionModal({ onClose }: Props) {
               value={formState.session_name || ''} onChange={e => setFormState(f => ({ ...f, session_name: e.target.value }))} />
           </div>
 
-          {/* Role + Model */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.role')}</label>
-              <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.role} onChange={e => handleRoleChange(e.target.value)}>
-                <option value="developer">{t('createSession.roleDeveloper')}</option>
-                <option value="worker">{t('createSession.roleWorker')}</option>
-                <option value="researcher">{t('createSession.roleResearcher')}</option>
-                <option value="planner">{t('createSession.rolePlanner')}</option>
-                <option value="vtuber">{t('createSession.roleVTuber')}</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.model')}</label>
-              <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.model || ''} onChange={e => setFormState(f => ({ ...f, model: e.target.value }))}>
-                {MODEL_OPTIONS_BASE.map(opt => (
-                  <option key={opt.value} value={opt.value}>{'labelKey' in opt ? t(opt.labelKey as string) : opt.label}</option>
-                ))}
-              </select>
-            </div>
+          {/* Role — model is driven by the Environment manifest's
+              Stage 6 (model_override or pipeline.model), NOT a session-
+              level selector. Picking the model here was always
+              misleading: it only tagged the session record for display
+              while the actual LLM call routed through the env's
+              manifest. Removed in PR for env-driven single-source-of-
+              truth. To change the model, edit the env. */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.role')}</label>
+            <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.role} onChange={e => handleRoleChange(e.target.value)}>
+              <option value="developer">{t('createSession.roleDeveloper')}</option>
+              <option value="worker">{t('createSession.roleWorker')}</option>
+              <option value="researcher">{t('createSession.roleResearcher')}</option>
+              <option value="planner">{t('createSession.rolePlanner')}</option>
+              <option value="vtuber">{t('createSession.roleVTuber')}</option>
+            </select>
           </div>
 
           {/* Avatar (VTuber only) */}
@@ -725,16 +717,10 @@ export default function CreateSessionModal({ onClose }: Props) {
                 <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={3} placeholder={t('createSession.subWorkerPromptPlaceholder')}
                   value={formState.sub_worker_system_prompt || ''} onChange={e => setFormState(f => ({ ...f, sub_worker_system_prompt: e.target.value }))} />
               </div>
-              {/* Sub-Worker Model */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.subWorkerModel')} <InfoTooltip text={t('createSession.subWorkerModelHelp')} /></label>
-                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.sub_worker_model || ''} onChange={e => setFormState(f => ({ ...f, sub_worker_model: e.target.value }))}>
-                  <option value="">{t('createSession.subWorkerModelSame')}</option>
-                  {MODEL_OPTIONS_BASE.filter(o => o.value).map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
+              {/* Sub-Worker model selector removed — env-driven. The
+                  Sub-Worker uses its env manifest's Stage 6 model_override
+                  (or pipeline.model). To change the Sub-Worker's model,
+                  edit the env picked in "서브 워커 환경" below. */}
               {/* Sub-Worker Environment — feeds sub_worker_env_id
                   on the backend. Default is the seeded WORKER env;
                   the user can swap to any EnvironmentManifest (e.g.
