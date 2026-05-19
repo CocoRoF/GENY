@@ -256,7 +256,11 @@ def _err(code: int, message: str) -> Dict[str, Any]:
     return {"code": code, "message": message}
 
 
-@router.post("/{session_id}/rpc", response_model=JsonRpcResponse)
+@router.post(
+    "/{session_id}/rpc",
+    response_model=JsonRpcResponse,
+    response_model_exclude_none=True,  # JSON-RPC 2.0: result XOR error, never both
+)
 async def mcp_rpc(
     request: JsonRpcRequest,
     session_id: str = Path(..., description="Session UUID"),
@@ -278,11 +282,19 @@ async def mcp_rpc(
     params = request.params or {}
 
     if method == "initialize":
-        logger.info("mcp_bridge: initialize session=%s", session_id)
+        # Echo back the client's requested protocol version when present
+        # so we can handshake against whatever Claude Code CLI 2.1.x
+        # ships with — the MCP spec lets the server pick, but echoing
+        # the client's choice is the maximally-compatible path.
+        client_version = str(params.get("protocolVersion") or _PROTOCOL_VERSION)
+        logger.info(
+            "mcp_bridge: initialize session=%s client_protocolVersion=%s client_caps=%s",
+            session_id, client_version, params.get("capabilities"),
+        )
         return JsonRpcResponse(
             id=request.id,
             result={
-                "protocolVersion": _PROTOCOL_VERSION,
+                "protocolVersion": client_version,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": _SERVER_NAME, "version": _SERVER_VERSION},
             },
