@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { Cpu } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import type { StageManifestEntry } from '@/types/environment';
 import { getStageMetaByOrder } from './stageMetadata';
@@ -75,9 +76,21 @@ interface StageNodeProps {
    *  edits in the Library (NEW) draft store. Optional so the read-only
    *  SessionEnvironmentTab call site stays unchanged. */
   isDirty?: boolean;
+  /** When true, render a small "Model" chip under the label to signal
+   *  that the stage pins its own ``model_override`` (s06_api,
+   *  s18_memory etc). Mirrors the same badge in
+   *  ``StageProgressBar``. */
+  hasModelOverride?: boolean;
 }
 
-function StageNode({ order, entry, isSelected, onSelect, isDirty = false }: StageNodeProps) {
+function StageNode({
+  order,
+  entry,
+  isSelected,
+  onSelect,
+  isDirty = false,
+  hasModelOverride = false,
+}: StageNodeProps) {
   const locale = useI18n((s) => s.locale);
   const t = useI18n((s) => s.t);
   const meta = getStageMetaByOrder(order, locale);
@@ -152,6 +165,20 @@ function StageNode({ order, entry, isSelected, onSelect, isDirty = false }: Stag
       >
         {displayName}
       </span>
+      {hasModelOverride && (
+        <span
+          className="mt-0.5 inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded-full text-[9px] font-semibold tracking-wide leading-none uppercase"
+          style={{
+            background: 'hsl(var(--primary) / 0.12)',
+            color: 'hsl(var(--primary))',
+            border: '1px solid hsl(var(--primary) / 0.3)',
+          }}
+          title={t('envManagement.progress.modelOverrideTip')}
+        >
+          <Cpu className="w-2.5 h-2.5" />
+          {t('envManagement.progress.modelBadge')}
+        </span>
+      )}
     </div>
   );
 }
@@ -341,6 +368,11 @@ interface PipelineCanvasProps {
    *  in this set get an accent badge to signal "edited but not saved".
    *  Read-only callers (SessionEnvironmentTab) omit it. */
   dirtyOrders?: ReadonlySet<number>;
+  /** Stage orders whose ``model_override`` is non-null. Each node
+   *  renders a small "Model" chip under its label. Mirrors the
+   *  ``StageProgressBar`` badge so the canvas overview and the
+   *  in-editor strip stay in sync. */
+  modelOrders?: ReadonlySet<number>;
   /** Cycle 20260427_2 — when false, the canvas becomes a fixed-display
    *  surface: no wheel zoom, no drag pan, just auto-fits and recentres
    *  on container resize via ResizeObserver. Stage circles stay
@@ -355,6 +387,7 @@ export default function PipelineCanvas({
   onSelectStage,
   onResetView,
   dirtyOrders,
+  modelOrders,
   interactive = true,
 }: PipelineCanvasProps) {
   const {
@@ -461,6 +494,7 @@ export default function PipelineCanvas({
                 isSelected={selectedOrder === order}
                 onSelect={onSelectStage}
                 isDirty={dirtyOrders?.has(order) ?? false}
+                hasModelOverride={modelOrders?.has(order) ?? false}
               />
             </div>
           );

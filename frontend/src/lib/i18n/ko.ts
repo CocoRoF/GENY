@@ -1207,6 +1207,8 @@ const ko: Translations = {
     progress: {
       back: '전체 보기',
       backTip: '21단계 캔버스로 돌아가기',
+      modelBadge: '모델',
+      modelOverrideTip: '이 단계는 자체 모델 설정을 사용합니다 — 전역 파이프라인 모델보다 우선합니다.',
     },
     globalSectionTitle: '전역 설정',
     globalSectionHint: '단계별 override가 없을 때 모든 단계에 적용되는 기본값.',

@@ -24,7 +24,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2 } from 'lucide-react';
+import { ArrowLeft, Cpu, Settings2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { getStageMetaByOrder } from '@/components/session-env/stageMetadata';
@@ -80,6 +80,13 @@ export interface StageProgressBarProps {
   onBack: () => void;
   dirtyOrders: ReadonlySet<number>;
   activeOrders: ReadonlySet<number>;
+  /** Stages whose ``model_override`` is non-null — i.e. the stage
+   *  pins its own ModelConfig instead of inheriting from the global
+   *  pipeline model. Surfaced as a small "Model" chip beneath the
+   *  stage label so operators see at a glance which stages diverge
+   *  (s06_api and s18_memory are the common cases). Defaults to an
+   *  empty set when omitted by legacy call sites. */
+  modelOrders?: ReadonlySet<number>;
 }
 
 // Stage 0 is the env-wide "globals" entry; stages 1..21 are the
@@ -107,6 +114,7 @@ export default function StageProgressBar({
   onBack,
   dirtyOrders,
   activeOrders,
+  modelOrders,
 }: StageProgressBarProps) {
   const { t } = useI18n();
   const locale = useI18n((s) => s.locale);
@@ -433,6 +441,7 @@ export default function StageProgressBar({
               const isSelected = order === selectedOrder;
               const isStageActive = activeOrders.has(order);
               const isDirty = dirtyOrders.has(order);
+              const hasModelOverride = !isGlobals && (modelOrders?.has(order) ?? false);
               const label = isGlobals
                 ? t('envManagement.compactBar.globalsLabel')
                 : (meta?.displayName ?? `Stage ${order}`);
@@ -534,6 +543,29 @@ export default function StageProgressBar({
                     >
                       {label}
                     </span>
+
+                    {/* "Model" chip — surfaces when the stage's
+                        ``model_override`` is non-null (s06_api and
+                        s18_memory are the common cases). Operators
+                        see at a glance which stages diverge from the
+                        global pipeline model. Placed under the label
+                        — the dirty marker still owns the top-right
+                        corner of the circle so the two signals never
+                        collide. */}
+                    {hasModelOverride && (
+                      <span
+                        className="mt-1 inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded-full text-[0.625rem] font-semibold tracking-wide leading-none uppercase"
+                        style={{
+                          background: 'hsl(var(--primary) / 0.12)',
+                          color: 'hsl(var(--primary))',
+                          border: '1px solid hsl(var(--primary) / 0.3)',
+                        }}
+                        title={t('envManagement.progress.modelOverrideTip')}
+                      >
+                        <Cpu className="w-2.5 h-2.5" />
+                        {t('envManagement.progress.modelBadge')}
+                      </span>
+                    )}
                   </div>
 
                   {/* Connector — sits at the same vertical level as the

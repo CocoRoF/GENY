@@ -96,6 +96,21 @@ export default function EnvManagementShell({
     return set;
   }, [draft]);
 
+  // Stages whose ``model_override`` toggle is ON — i.e. stages that
+  // pin their own ModelConfig instead of inheriting the pipeline
+  // model. The s06_api and s18_memory editors are the common ones
+  // but ``StageGenericEditor`` lets any stage opt in, so we scan
+  // the whole draft. Surfaced as a "Model" badge in the stage
+  // progress bar + pipeline canvas — operators see at a glance
+  // which stages diverge from the global model.
+  const modelOrders = useMemo(() => {
+    const set = new Set<number>();
+    draft?.stages.forEach((s) => {
+      if (s.model_override != null) set.add(s.order);
+    });
+    return set;
+  }, [draft]);
+
   const handleSaved = (newEnvId: string) => {
     setView({ mode: 'overview' });
     resetDraft();
@@ -128,6 +143,7 @@ export default function EnvManagementShell({
                 onBack={() => setView({ mode: 'overview' })}
                 dirtyOrders={stageDirty}
                 activeOrders={activeOrders}
+                modelOrders={modelOrders}
               />
               {view.order === 0 ? (
                 <GlobalSettingsView />

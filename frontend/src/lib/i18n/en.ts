@@ -1167,6 +1167,8 @@ const en = {
     progress: {
       back: 'Overview',
       backTip: 'Back to the 21-stage canvas',
+      modelBadge: 'Model',
+      modelOverrideTip: 'This stage uses its own model config — overrides the global pipeline model.',
     },
     globalSectionTitle: 'Global settings',
     globalSectionHint: 'Defaults that apply to every stage unless overridden.',

@@ -15,7 +15,7 @@
  * which switches the shell to the "stage" view mode.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Layers, MousePointerClick } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -92,6 +92,17 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
     );
   }
 
+  // Stages whose ``model_override`` is non-null — surfaced as a small
+  // "Model" chip on each node so the canvas overview matches the
+  // in-editor StageProgressBar at a glance.
+  const modelOrders = useMemo(() => {
+    const set = new Set<number>();
+    draft.stages.forEach((s) => {
+      if (s.model_override != null) set.add(s.order);
+    });
+    return set;
+  }, [draft]);
+
   // ── Draft active — big canvas
   // The .stage-circle class + --pipe-* CSS variables are scoped under
   // .pipeline-scope in globals.css; without that wrapper the stage
@@ -106,6 +117,7 @@ export default function OverviewView({ onSelectStage }: OverviewViewProps) {
           if (order != null) onSelectStage(order);
         }}
         dirtyOrders={stageDirty}
+        modelOrders={modelOrders}
         interactive={false}
       />
       {/* Bottom hint pill — gentle nudge that stages are clickable */}
