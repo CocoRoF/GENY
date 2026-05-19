@@ -125,32 +125,56 @@ def _maybe_extract_error_envelope(raw: Any) -> Optional[Dict[str, Any]]:
     return line
 
 
-def _patched_argv(original_argv: List[str]) -> List[str]:
-    """Return a new argv with ``--verbose`` inserted after ``--print``
-    whenever the upstream argv asks for stream-json output but didn't
-    include ``--verbose`` itself.
+def _patched_argv(
+    original_argv: List[str],
+    *,
+    has_api_key: Optional[bool] = None,
+) -> List[str]:
+    """Return a transformed argv applying two independent fixes:
+
+      A. ``--verbose`` injection — required after ``--print
+         --output-format stream-json`` for CLI ≥ 2.1.x. See the
+         module docstring for the history.
+
+      B. ``--bare`` stripping on the OAuth path — the CLI's
+         ``--bare`` flag explicitly disables OAuth ("Anthropic auth
+         is strictly ANTHROPIC_API_KEY or apiKeyHelper via
+         --settings (OAuth and keychain are never read)") but
+         ``geny-executor`` 2.0.1 builds the
+         ``ClaudeCodeCLIClient`` with ``bare_mode=True`` as the
+         default. The combination crashes every subscription /
+         OAuth user with ``"Not logged in · Please run /login"`` or
+         an empty-stderr ``exited with code 1:``.
+
+         When *has_api_key* is False (no ``ANTHROPIC_API_KEY`` in
+         env), remove ``--bare`` from the argv so the CLI is allowed
+         to read the OAuth credentials. When *has_api_key* is True,
+         keep ``--bare`` — that's the auth path it was designed for.
+         When *has_api_key* is None (caller didn't tell us), we
+         detect via ``os.environ`` as a fall-back.
 
     Pure function — handy for tests.
     """
-    if "--verbose" in original_argv:
-        # Upstream already passes it (or some other caller did). Leave
-        # the argv untouched.
-        return original_argv
-    # Look for ``--output-format`` ``stream-json`` as a *pair* — bare
-    # presence of the string elsewhere shouldn't trigger the patch.
-    try:
-        of_idx = original_argv.index("--output-format")
-    except ValueError:
-        return original_argv
-    if of_idx + 1 >= len(original_argv):
-        return original_argv
-    if original_argv[of_idx + 1] != "stream-json":
-        return original_argv
-
     new_argv = list(original_argv)
-    # Insert ``--verbose`` right after ``--print`` so the flag order
-    # reads naturally in logs. If ``--print`` somehow isn't there
-    # (defensive — geny-executor always adds it), append to the end.
+
+    # ── Fix B: drop --bare on OAuth path ─────────────────────────────
+    if has_api_key is None:
+        import os
+        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    if not has_api_key:
+        new_argv = [arg for arg in new_argv if arg != "--bare"]
+
+    # ── Fix A: inject --verbose for stream-json output ──────────────
+    if "--verbose" in new_argv:
+        return new_argv
+    try:
+        of_idx = new_argv.index("--output-format")
+    except ValueError:
+        return new_argv
+    if of_idx + 1 >= len(new_argv):
+        return new_argv
+    if new_argv[of_idx + 1] != "stream-json":
+        return new_argv
     try:
         insert_at = new_argv.index("--print") + 1
     except ValueError:

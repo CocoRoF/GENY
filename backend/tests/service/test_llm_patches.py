@@ -22,7 +22,9 @@ def test_streaming_argv_gets_verbose_inserted() -> None:
         "--include-partial-messages",
         "--model", "claude-opus-4-7",
     ]
-    patched = _patched_argv(original)
+    # API-key path — only the verbose-injection fix is exercised
+    # here. The bare-strip fix has its own test below.
+    patched = _patched_argv(original, has_api_key=True)
 
     assert patched != original, "argv should be modified"
     assert "--verbose" in patched
@@ -30,6 +32,64 @@ def test_streaming_argv_gets_verbose_inserted() -> None:
     # ``--print``.
     print_idx = patched.index("--print")
     assert patched[print_idx + 1] == "--verbose"
+
+
+def test_oauth_path_strips_bare_flag() -> None:
+    """Subscription / OAuth users (no ``ANTHROPIC_API_KEY``) must
+    NOT pass ``--bare`` — the flag explicitly disables OAuth at
+    the CLI level. ``geny-executor`` 2.0.1 always emits ``--bare``
+    via its ``bare_mode=True`` default, so we strip it here on
+    every OAuth invocation."""
+    from service.llm_patches import _patched_argv
+
+    original = [
+        "--print",
+        "--output-format", "stream-json",
+        "--bare",
+        "--model", "claude-opus-4-7",
+    ]
+    patched = _patched_argv(original, has_api_key=False)
+    assert "--bare" not in patched
+    # ``--verbose`` should still be injected for stream-json output.
+    assert "--verbose" in patched
+
+
+def test_api_key_path_keeps_bare_flag() -> None:
+    """When ``ANTHROPIC_API_KEY`` is set, ``--bare`` is the right
+    flag — keep it untouched."""
+    from service.llm_patches import _patched_argv
+
+    original = [
+        "--print",
+        "--output-format", "stream-json",
+        "--bare",
+        "--model", "claude-opus-4-7",
+    ]
+    patched = _patched_argv(original, has_api_key=True)
+    assert "--bare" in patched
+    assert "--verbose" in patched
+
+
+def test_auto_detect_has_api_key_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``has_api_key=None`` (default) means "infer from env". With
+    the env var set, ``--bare`` stays; without, it's stripped."""
+    from service.llm_patches import _patched_argv
+
+    original = [
+        "--print",
+        "--output-format", "stream-json",
+        "--bare",
+    ]
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
+    keep = _patched_argv(original)
+    assert "--bare" in keep
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    drop = _patched_argv(original)
+    assert "--bare" not in drop
 
 
 def test_non_streaming_argv_is_untouched() -> None:
