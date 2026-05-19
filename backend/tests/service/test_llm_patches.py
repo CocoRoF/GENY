@@ -258,6 +258,179 @@ def test_install_actually_patches_streaming_call(
         _cli.claude_code_argv = pristine
 
 
+# ── Assembler patch: stream-json error → friendly message ────────────
+
+
+def test_friendly_error_message_recognises_auth_failure() -> None:
+    from service.llm_patches import _friendly_error_message_for_result_envelope
+
+    envelope = {
+        "type": "result",
+        "is_error": True,
+        "api_error_status": 401,
+        "error": "authentication_failed",
+        "result": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+    }
+    msg = _friendly_error_message_for_result_envelope(envelope)
+    assert "Claude Code 인증이 만료" in msg
+    assert "다시 로그인" in msg or "Sign in" in msg
+    # And the original error is preserved so an operator inspecting
+    # logs can see the underlying API message.
+    assert "401" in msg
+
+
+def test_friendly_error_message_for_generic_api_error() -> None:
+    from service.llm_patches import _friendly_error_message_for_result_envelope
+
+    envelope = {
+        "type": "result",
+        "is_error": True,
+        "api_error_status": 503,
+        "error": "overloaded",
+        "result": "Service unavailable, please retry",
+    }
+    msg = _friendly_error_message_for_result_envelope(envelope)
+    assert "Claude Code API 에러" in msg
+    assert "503" in msg
+    # Non-401 must NOT use the auth-expired message.
+    assert "인증이 만료" not in msg
+
+
+def test_maybe_extract_error_envelope_accepts_bytes_and_str() -> None:
+    from service.llm_patches import _maybe_extract_error_envelope
+
+    line_bytes = b'{"type":"result","is_error":true,"api_error_status":401}'
+    line_str = '{"type":"result","is_error":true,"api_error_status":401}'
+    assert _maybe_extract_error_envelope(line_bytes) is not None
+    assert _maybe_extract_error_envelope(line_str) is not None
+
+
+@pytest.mark.parametrize("payload", [
+    b'',
+    b'\n',
+    b'not json',
+    b'{"type":"system"}',
+    b'{"type":"result","is_error":false}',
+    b'{"type":"result"}',
+    b'[]',
+])
+def test_maybe_extract_error_envelope_returns_none_for_non_error_lines(
+    payload: bytes,
+) -> None:
+    from service.llm_patches import _maybe_extract_error_envelope
+    assert _maybe_extract_error_envelope(payload) is None
+
+
+def test_assembler_patch_raises_friendly_error_on_auth_failure() -> None:
+    """End-to-end through ``assemble_response_from_stream_json``:
+    install the patch, feed a synthetic stream that ends with the
+    auth-failed envelope, and assert the wrapped function raises
+    with the Korean re-login message instead of returning silently."""
+    pytest.importorskip("geny_executor.llm_client.translators._cli")
+    import asyncio
+    import importlib
+
+    from service.llm_patches import install_llm_patches
+
+    cli_module = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    pristine = cli_module.assemble_response_from_stream_json
+    try:
+        install_llm_patches()
+        wrapped = cli_module.assemble_response_from_stream_json
+
+        async def _fake_stream():
+            yield (
+                b'{"type":"system","subtype":"init","model":"claude-opus-4-7"}'
+            )
+            yield (
+                b'{"type":"result","is_error":true,"api_error_status":401,'
+                b'"error":"authentication_failed",'
+                b'"result":"Failed to authenticate. API Error: 401 ..."}'
+            )
+
+        async def _runner():
+            return await wrapped(_fake_stream(), model="claude-opus-4-7")
+
+        with pytest.raises(RuntimeError, match="인증이 만료"):
+            asyncio.new_event_loop().run_until_complete(_runner())
+    finally:
+        cli_module.assemble_response_from_stream_json = pristine
+
+
+def test_assembler_patch_pass_through_on_clean_stream() -> None:
+    """A successful stream (no ``is_error`` envelope) must return
+    the original APIResponse unchanged — the patch is non-intrusive
+    on the happy path."""
+    pytest.importorskip("geny_executor.llm_client.translators._cli")
+    import asyncio
+    import importlib
+
+    from service.llm_patches import install_llm_patches
+
+    cli_module = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    pristine = cli_module.assemble_response_from_stream_json
+    try:
+        install_llm_patches()
+        wrapped = cli_module.assemble_response_from_stream_json
+
+        async def _fake_stream():
+            yield (
+                b'{"type":"system","subtype":"init","model":"claude-opus-4-7"}'
+            )
+            yield (
+                b'{"type":"assistant","delta":{"type":"text_delta",'
+                b'"text":"hello"}}'
+            )
+            yield (
+                b'{"type":"result","stop_reason":"end_turn",'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}'
+            )
+
+        async def _runner():
+            return await wrapped(_fake_stream(), model="claude-opus-4-7")
+
+        resp = asyncio.new_event_loop().run_until_complete(_runner())
+        # Don't pin the full APIResponse shape — just confirm it
+        # didn't raise and we got *something* back.
+        assert resp is not None
+    finally:
+        cli_module.assemble_response_from_stream_json = pristine
+
+
+def test_assembler_patch_installs_across_all_three_namespaces() -> None:
+    """Like the argv patch, the assembler function is re-exported in
+    three places. Patching only the source leaves
+    ``claude_code.assemble_response_from_stream_json`` (the actual
+    call site at line 203) pointed at the pristine function."""
+    pytest.importorskip("geny_executor.llm_client.claude_code")
+    import importlib
+
+    from service.llm_patches import install_llm_patches
+
+    modules = [
+        importlib.import_module("geny_executor.llm_client.translators._cli"),
+        importlib.import_module("geny_executor.llm_client.translators"),
+        importlib.import_module("geny_executor.llm_client.claude_code"),
+    ]
+    pristines = [getattr(m, "assemble_response_from_stream_json") for m in modules]
+    try:
+        install_llm_patches()
+        wrapped = [getattr(m, "assemble_response_from_stream_json") for m in modules]
+        for fn in wrapped:
+            assert hasattr(fn, "_geny_assembler_error_patch_applied")
+        assert wrapped[0] is wrapped[1] is wrapped[2]
+    finally:
+        for m, original in zip(modules, pristines):
+            setattr(m, "assemble_response_from_stream_json", original)
+
+
+# ── Original argv patch tests ─────────────────────────────────────────
+
+
 def test_install_does_not_modify_non_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

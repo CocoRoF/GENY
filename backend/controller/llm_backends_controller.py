@@ -186,12 +186,50 @@ async def _check_vllm(bundle) -> ProviderHealth:
     )
 
 
+def _read_claude_oauth_expires_at_ms() -> Optional[int]:
+    """Return the OAuth ``expiresAt`` (ms epoch) from the credential
+    file the CLI maintains, or ``None`` when the file is missing /
+    malformed / uses a different auth method.
+
+    The file lives at ``~/.claude/.credentials.json``. Schema
+    (subscription path)::
+
+        {"claudeAiOauth": {
+            "accessToken": "...",
+            "refreshToken": "...",
+            "expiresAt": 1779107407695,
+            "subscriptionType": "max",
+            ...
+        }}
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        creds_path = _Path(os.path.expanduser("~/.claude/.credentials.json"))
+        if not creds_path.exists():
+            return None
+        data = _json.loads(creds_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    oauth = (data or {}).get("claudeAiOauth") or {}
+    raw = oauth.get("expiresAt")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> ProviderHealth:
     """Probe the Claude Code CLI: binary, --version, and a non-mutating
     'auth' inspection. Auth methods:
       - api_key   : ANTHROPIC_API_KEY in the env (or in the config)
       - subscription : ``claude auth status`` reports an active session
       - none      : neither path is available; user must log in or paste a key
+
+    Subscription path further validates the OAuth ``expiresAt`` from
+    ``~/.claude/.credentials.json``. An expired token gets flagged
+    as ``auth_ok=False`` with a Korean re-login hint so the card
+    doesn't show "준비됨" (ready) on a stale credential.
     """
     label = PROVIDER_LABELS["claude_code_cli"]
     install_help = (
@@ -236,6 +274,9 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
     auth_method: Optional[str] = None
     auth_ok: Optional[bool] = None
 
+    auth_expired = False
+    auth_expires_at_ms: Optional[int] = None
+
     if api_key:
         auth_method = "api_key"
         auth_ok = True
@@ -253,27 +294,83 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
             auth_method = None
             auth_ok = False
 
+        # The CLI returns ``loggedIn: true`` whenever the credential
+        # file is present, even if its ``accessToken`` has expired
+        # and refresh has been failing. That's the case the user hit
+        # on 2026-05-18 — the card showed "준비됨" while every
+        # session execution crashed with a stream-json 401. Cross-
+        # check ``expiresAt`` against the wall clock so the card
+        # surfaces the real state.
+        if auth_ok and auth_method == "subscription":
+            auth_expires_at_ms = _read_claude_oauth_expires_at_ms()
+            if auth_expires_at_ms is not None:
+                now_ms = int(time.time() * 1000)
+                if now_ms >= auth_expires_at_ms:
+                    auth_ok = False
+                    auth_expired = True
+
+    if auth_expired:
+        # Render a Korean message identifying the precise next step
+        # — point at this very card so the user can re-login without
+        # leaving the page.
+        from datetime import datetime, timezone
+        try:
+            expired_at = datetime.fromtimestamp(
+                (auth_expires_at_ms or 0) / 1000, timezone.utc,
+            ).strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:  # noqa: BLE001
+            expired_at = "(unknown)"
+        detail = (
+            f"OAuth 토큰이 만료됐어요 (만료: {expired_at}). "
+            f"이 카드의 ‘다시 로그인 / Sign in’ 버튼으로 인증을 갱신해주세요. "
+            f"binary={binary}, version={version or 'unknown'}."
+        )
+        detail_code = "claude_code.auth_expired"
+        login_hint = (
+            "Subscription token expired. Press this card's "
+            "‘Sign in’ button to refresh the OAuth credential."
+        )
+    elif not auth_ok:
+        detail = (
+            f"binary at {binary}; version={version or 'unknown'}; "
+            f"auth={auth_method or 'unauthenticated'}."
+        )
+        detail_code = "claude_code.unauthenticated"
+        login_hint = install_help
+    else:
+        detail = (
+            f"binary at {binary}; version={version or 'unknown'}; "
+            f"auth={auth_method or 'unauthenticated'}."
+        )
+        detail_code = "claude_code.ready"
+        login_hint = None
+
     return ProviderHealth(
         provider="claude_code_cli",
         label=label,
         kind="cli",
         available=bool(auth_ok),
-        detail=(
-            f"binary at {binary}; version={version or 'unknown'}; "
-            f"auth={auth_method or 'unauthenticated'}."
-        ),
-        detail_code="claude_code.ready" if auth_ok else "claude_code.unauthenticated",
+        detail=detail,
+        detail_code=detail_code,
         detail_params={
             "path": binary,
             "version": version or "unknown",
             "auth": auth_method or "unauthenticated",
+            # ``detail_params`` is typed as ``Dict[str, str]`` for
+            # i18n placeholder substitution; stringify both new
+            # entries so pydantic accepts the model.
+            "expired": "true" if auth_expired else "false",
+            "expires_at_ms": str(auth_expires_at_ms) if auth_expires_at_ms is not None else "",
         },
         binary_path=binary,
         binary_version=version,
         auth_method=auth_method,
         auth_ok=auth_ok,
-        install_help=install_help if not auth_ok else None,
-        install_help_code="claude_code.install_help" if not auth_ok else None,
+        install_help=login_hint,
+        install_help_code=(
+            "claude_code.auth_expired" if auth_expired
+            else ("claude_code.install_help" if login_hint else None)
+        ),
     )
 
 
