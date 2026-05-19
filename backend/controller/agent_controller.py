@@ -552,10 +552,16 @@ async def restore_session(
             session_type=params.get("session_type"),
         )
 
-        # Reuse the SAME session_id → preserves storage_path
+        # Reuse the SAME session_id → preserves storage_path. Forward
+        # the persisted ``env_id`` as a kwarg — CreateSessionRequest
+        # has no ``env_id`` field, so passing it to the constructor
+        # gets silently dropped by Pydantic and the session would
+        # restore against ``resolve_env_id(role, None)`` instead of
+        # the manifest the user originally picked.
         agent = await agent_manager.create_agent_session(
             request=request,
             session_id=session_id,
+            env_id=params.get("env_id"),
             trigger_preset_id=params.get("trigger_preset_id"),
         )
 
@@ -602,6 +608,15 @@ async def restore_session(
                         linked_agent = await agent_manager.create_agent_session(
                             request=linked_request,
                             session_id=linked_id,
+                            # env_id is a sibling kwarg on
+                            # create_agent_session (not a field on
+                            # CreateSessionRequest). Forward the
+                            # persisted value so the restored
+                            # sub-worker uses the same env the user
+                            # picked at creation time instead of
+                            # silently falling back to
+                            # template-worker-env via resolve_env_id.
+                            env_id=linked_params.get("env_id"),
                         )
                         if linked_system_prompt:
                             agent_manager.persona_provider.set_static_override(
