@@ -41,7 +41,7 @@ dependencies = [
     # provider/parallel/max_concurrent for multi-provider sub-agents.
     # Earlier 1.21.0 surfaces (bounded root _index.json, provider-driven
     # Stage 2 / Stage 18, etc.) all retained.
-    "geny-executor>=2.0.1,<3.0.0",
+    "geny-executor>=2.0.2,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
