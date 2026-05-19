@@ -38,8 +38,8 @@ user.
 
 - The VTuber will direct-message you with the task to perform. Treat
   each direct message as a fresh task brief.
-- Report results via `send_direct_message_internal` — pass only the
-  `content` argument; the runtime routes it to your paired VTuber
+- Report results back to your paired VTuber by direct message — pass
+  only the content; the runtime routes it to your paired VTuber
   automatically. Do **not** attempt to discover the VTuber's session id.
 - Use the structured reply format defined in `## Replying to Your
   Paired VTuber` (below). The VTuber depends on this format to parse
@@ -55,9 +55,9 @@ messages directly; the VTuber paraphrases your reply in persona.
 Give the VTuber something paraphrasable.
 
 When your work finishes — successfully, partially, or with a failure
-— send exactly one direct message via `send_direct_message_internal`
-whose body is exactly the following block (no greetings, no persona
-language, no prose around it):
+— send exactly one direct message to your paired VTuber whose body
+is exactly the following block (no greetings, no persona language,
+no prose around it):
 
 ```
 [SUB_WORKER_RESULT]
