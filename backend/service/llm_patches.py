@@ -242,7 +242,30 @@ def install_llm_patches() -> None:
     if _cached_wrapper is None:
         def _wrapped(*args: Any, **kwargs: Any) -> List[str]:
             argv = original(*args, **kwargs)
-            return _patched_argv(argv)
+            patched = _patched_argv(argv)
+            # Phase-I diagnostic: log the final argv every CLI invocation
+            # so we can verify ``--tools ""`` / ``--strict-mcp-config`` /
+            # ``--mcp-config`` are actually reaching the spawned ``claude``
+            # process. Sensitive payloads — ``--mcp-config <json>`` carries
+            # the per-session bearer token and ``--system-prompt`` carries
+            # the assembled persona — are redacted to their lengths so the
+            # log stays grep-friendly without leaking the actual content.
+            try:
+                redacted: List[str] = []
+                skip_next = False
+                for i, arg in enumerate(patched):
+                    if skip_next:
+                        # Redact the value following a sensitive flag.
+                        redacted.append(f"<redacted len={len(arg)}>")
+                        skip_next = False
+                        continue
+                    redacted.append(arg)
+                    if arg in {"--mcp-config", "--system-prompt", "--append-system-prompt"}:
+                        skip_next = True
+                logger.info("[llm_patches] claude argv (%d args): %s", len(patched), redacted)
+            except Exception:  # noqa: BLE001
+                pass
+            return patched
 
         setattr(_wrapped, _PATCH_APPLIED_FLAG, True)
         setattr(_wrapped, "_original", original)

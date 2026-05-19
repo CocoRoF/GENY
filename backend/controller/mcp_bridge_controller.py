@@ -278,6 +278,7 @@ async def mcp_rpc(
     params = request.params or {}
 
     if method == "initialize":
+        logger.info("mcp_bridge: initialize session=%s", session_id)
         return JsonRpcResponse(
             id=request.id,
             result={
@@ -298,11 +299,22 @@ async def mcp_rpc(
         except Exception as exc:  # noqa: BLE001
             logger.error("mcp_bridge: tools/list failed: %s", exc, exc_info=True)
             return JsonRpcResponse(id=request.id, error=_err(-32603, str(exc)))
+        # Phase-I diagnostic: log what we are about to advertise. Helps
+        # confirm whether the spawned ``claude`` sees a populated tool
+        # surface or an empty list (the "ghost delegation" symptom).
+        logger.info(
+            "mcp_bridge: tools/list session=%s returning %d tools: %s",
+            session_id, len(tools), [t.get("name") for t in tools],
+        )
         return JsonRpcResponse(id=request.id, result={"tools": tools})
 
     if method == "tools/call":
         name = str(params.get("name") or "")
         arguments = params.get("arguments") or {}
+        logger.info(
+            "mcp_bridge: tools/call session=%s name=%s arg_keys=%s",
+            session_id, name, list(arguments.keys()) if isinstance(arguments, dict) else type(arguments).__name__,
+        )
         if not name:
             return JsonRpcResponse(
                 id=request.id, error=_err(-32602, "missing tool name"),
