@@ -19,6 +19,7 @@ from logging import getLogger
 from typing import Any, Dict, List, Optional
 import asyncio
 import os
+import re
 import uuid
 
 from service.sessions.models import (
@@ -98,16 +99,63 @@ def _load_vtuber_sub_worker_section() -> dict:
     return sub if isinstance(sub, dict) else {}
 
 
-def _vtuber_sub_worker_notice() -> str:
+# Geny tool names that may be referenced *by bare identifier* in
+# role prompts / sub-worker notices / persona context blocks. When
+# a session's Stage 6 provider is ``claude_code_cli`` the Geny tool
+# registry is surfaced to the CLI's LLM via MCP, which (per the CLI's
+# protocol) prepends ``mcp__<server>__`` to every advertised tool
+# name. The prompts still spell the bare name (``send_direct_message_internal``),
+# so the LLM is told "use tool X" but its tool list registers
+# ``mcp__geny__X``. With no exact match it falls back to emitting
+# the pre-2024 XML ``<function_calls><invoke name="X">`` text — which
+# is plain text, never executes, and produces the user-visible
+# "ghost delegation" bug.
+#
+# Keep this list aligned with the bare names that actually appear in
+# ``backend/prompts/*.md`` and the persona-context notices. A simple
+# regex substitution at session-create time rewrites the bare token
+# to ``mcp__geny__<name>`` so the LLM picks the structurally
+# registered MCP tool every time.
+_MCP_GENY_PREFIXED_TOOL_NAMES = (
+    "send_direct_message_internal",
+    "send_direct_message_external",
+    "spawn_subworker",
+)
+
+_MCP_GENY_PREFIX = "mcp__geny__"
+
+
+def _apply_mcp_geny_prefix(text: str) -> str:
+    """Rewrite bare Geny tool name references to their MCP-wrapped
+    form. Word-boundary anchored with a negative-lookbehind on the
+    prefix itself so this stays idempotent — repeated application is
+    a no-op."""
+    if not text:
+        return text
+    for name in _MCP_GENY_PREFIXED_TOOL_NAMES:
+        pattern = rf"(?<!mcp__geny__)\b{re.escape(name)}\b"
+        text = re.sub(pattern, f"{_MCP_GENY_PREFIX}{name}", text)
+    return text
+
+
+def _vtuber_sub_worker_notice(provider: Optional[str] = None) -> str:
     """Settings-driven notice template; falls back to the built-in
     default when ``settings.json:vtuber.sub_worker.notice_template``
-    is absent or empty."""
+    is absent or empty.
+
+    When ``provider == "claude_code_cli"`` the bare Geny tool names
+    inside the notice are rewritten to ``mcp__geny__<name>`` so the
+    LLM running inside the spawned CLI sees the same identifier in
+    the prompt and in its registered MCP tool list."""
     sub = _load_vtuber_sub_worker_section()
     template = sub.get("notice_template")
     if isinstance(template, str) and template.strip():
         text = template if template.startswith("\n") else "\n\n" + template
-        return text
-    return _VTUBER_SUB_WORKER_NOTICE_DEFAULT
+    else:
+        text = _VTUBER_SUB_WORKER_NOTICE_DEFAULT
+    if provider == "claude_code_cli":
+        text = _apply_mcp_geny_prefix(text)
+    return text
 
 
 
@@ -710,6 +758,19 @@ class AgentSessionManager:
         # logged in / never set ANTHROPIC_API_KEY" case at session
         # creation time instead of at first LLM call.
         primary_provider = self._extract_primary_provider(env_id)
+        # Phase I follow-up — when the session's Stage 6 provider is
+        # ``claude_code_cli``, every Geny tool surface to the LLM is
+        # MCP-wrapped (``mcp__geny__<name>``). The assembled system
+        # prompt and role markdown files still reference the bare
+        # names, so rewrite them here before the prompt is locked in
+        # by ``set_static_override`` / passed to ``AgentSession.create``.
+        # Without this rewrite the LLM falls back to emitting legacy
+        # ``<function_calls><invoke name="...">`` XML text against a
+        # name that doesn't exist in its registered tool list — the
+        # "ghost delegation" bug seen on VTuber sessions where the
+        # Sub-Worker is never actually messaged.
+        if primary_provider == "claude_code_cli":
+            system_prompt = _apply_mcp_geny_prefix(system_prompt)
         if primary_provider and not credentials.has(primary_provider):
             raise ValueError(
                 f"환경 '{env_id}'의 Stage 6 provider '{primary_provider}'에 사용할 "
@@ -848,7 +909,7 @@ class AgentSessionManager:
             and request.linked_session_id
         ):
             self._persona_provider.append_context(
-                session_id, _vtuber_sub_worker_notice()
+                session_id, _vtuber_sub_worker_notice(primary_provider)
             )
 
         # Create AgentSession
@@ -1084,7 +1145,7 @@ class AgentSessionManager:
                 # text, so re-registration of an already-paired VTuber is
                 # safe.
                 self._persona_provider.append_context(
-                    session_id, _vtuber_sub_worker_notice()
+                    session_id, _vtuber_sub_worker_notice(primary_provider)
                 )
 
                 # SESSION_PAIRED — fires once per pair, after both sides'
