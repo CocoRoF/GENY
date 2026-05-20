@@ -3586,11 +3586,19 @@ class AgentSession:
                     f"[{self._session_id}] Pipeline not initialized. "
                     f"Call initialize() before invoke()."
                 )
+            # Surface CLI-handled tool calls (Bash / Read / Write /
+            # Edit / …) to this session's logger via the contextvar
+            # the stream-observability patch in ``llm_patches`` reads.
+            # ``ContextVar`` is async-safe — every task spawned under
+            # this scope inherits the value.
+            from service.llm_patches import cli_stream_logger_ctx as _cli_log_ctx
+            _cli_log_token = _cli_log_ctx.set(session_logger)
             try:
                 return await self._invoke_pipeline(
                     input_text, start_time, session_logger, **kwargs
                 )
             finally:
+                _cli_log_ctx.reset(_cli_log_token)
                 self._is_executing = False
                 self._execution_start_time = datetime.now()
                 self._freshness.reset_revive_counter()
@@ -3676,6 +3684,11 @@ class AgentSession:
                 f"Call initialize() before astream()."
             )
 
+        # See ``invoke()`` for rationale — surfaces CLI-handled tools
+        # (Bash / Read / Write / Edit / …) to this session's logger
+        # via the stream-observability patch in ``llm_patches``.
+        from service.llm_patches import cli_stream_logger_ctx as _cli_log_ctx
+        _cli_log_token = _cli_log_ctx.set(session_logger)
         try:
             async for event in self._astream_pipeline(
                 input_text, start_time, session_logger, **kwargs
@@ -3703,6 +3716,7 @@ class AgentSession:
 
             raise
         finally:
+            _cli_log_ctx.reset(_cli_log_token)
             self._is_executing = False
             self._execution_start_time = datetime.now()
             self._freshness.reset_revive_counter()
