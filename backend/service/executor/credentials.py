@@ -232,6 +232,22 @@ class CredentialBundleBuilder:
         # can be added later by merging the dicts here.
         if mcp_bridge is not None:
             extras["mcp_config"] = _build_mcp_bridge_config(mcp_bridge)
+            # Claude Code CLI's default permission mode prompts the
+            # user before dispatching each tool call. In ``--print``
+            # (non-interactive) mode there is no terminal to answer
+            # that prompt, so the CLI blocks the call and the LLM
+            # surfaces "권한이 아직 없어서…" / "permission denied" to
+            # the user even though the bridge would have happily
+            # served it. Because we've already disabled CLI built-ins
+            # via ``--tools ""`` *and* we control the MCP server, the
+            # only callable surface is our own bridge — bypassing the
+            # CLI's own prompt is correct (Geny's permission rules
+            # ride on the bridge endpoint, not the CLI). Override only
+            # when the operator hasn't already pinned a non-default
+            # mode in settings — so a power-user wanting ``plan`` or
+            # ``acceptEdits`` retains control.
+            if extras["default_permission_mode"] == "default":
+                extras["default_permission_mode"] = "bypassPermissions"
         elif claude_cli.mcp_config_path:
             extras["mcp_config"] = claude_cli.mcp_config_path
         return ProviderCredentials(
