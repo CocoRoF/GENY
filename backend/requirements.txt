@@ -18,8 +18,9 @@ ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
 # geny-executor 2.0.0 — LLM backend overhaul cycle. ClientRegistry
-# ships 6 providers (anthropic / openai / google / vllm +
-# claude_code_cli / copilot_cli). Credentials flow through a single
+# ships 5 providers (anthropic / openai / google / vllm +
+# claude_code_cli; copilot_cli was removed in cycle 20260520).
+# Credentials flow through a single
 # CredentialBundle channel. SubagentTypeDescriptor gains provider/
 # parallel/max_concurrent for multi-provider sub-agents.
 # Must match the version pin in backend/pyproject.toml — out-of-sync

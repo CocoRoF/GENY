@@ -1,8 +1,8 @@
 /**
  * Provider + model catalog for the global model config editor.
  *
- * Provider taxonomy mirrors geny-executor 2.0.0's
- * `geny_executor.llm_client.registry.ClientRegistry` — six providers:
+ * Provider taxonomy mirrors geny-executor's
+ * `geny_executor.llm_client.registry.ClientRegistry` — five providers:
  *
  *   - anthropic         Claude family (default; hard dependency)
  *   - openai            GPT-4.1 + reasoning models (o3 / o4-mini)
@@ -10,10 +10,10 @@
  *   - vllm              any model on a local vLLM endpoint; free-form
  *   - claude_code_cli   subprocess driving the local `claude` CLI
  *                       (Anthropic-subscription or API-key auth)
- *   - copilot_cli       subprocess driving `gh copilot`; plain text
- *                       only — no streaming, no tools, no structured
- *                       output. Honest capability flags surface this
- *                       in the StageEditor / Settings UI.
+ *
+ * The legacy ``copilot_cli`` provider was removed in cycle 20260520 —
+ * ``gh copilot`` does not support streaming, tools, or MCP, so it
+ * could never host Geny's Sub-Worker delegation or Stage-10 dispatch.
  *
  * If a future executor release exposes an HTTP `/models` endpoint, swap
  * the static lists for an API call without changing the call sites —
@@ -27,8 +27,7 @@ export type ProviderId =
   | 'openai'
   | 'google'
   | 'vllm'
-  | 'claude_code_cli'
-  | 'copilot_cli';
+  | 'claude_code_cli';
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -48,11 +47,11 @@ export interface ProviderInfo {
 // ``freeForm`` semantics — Phase H fix:
 //   - vLLM: TRUE. No bundled catalog; the served model id is fully
 //     user-controlled and unbounded.
-//   - CLI providers (claude_code_cli / copilot_cli): FALSE. They DO
-//     ship catalogs (sonnet/opus/haiku aliases + a couple of pinned
-//     ids). The picker exposes those catalogs as a Select with a
-//     "Custom value…" escape hatch so the rare power-user can still
-//     pin an arbitrary date-stamped model.
+//   - CLI provider (claude_code_cli): FALSE. Ships a catalog
+//     (sonnet/opus/haiku aliases + a couple of pinned ids). The picker
+//     exposes the catalog as a Select with a "Custom value…" escape
+//     hatch so the rare power-user can still pin an arbitrary
+//     date-stamped model.
 export const PROVIDERS: ProviderInfo[] = [
   { id: 'anthropic', label: 'Anthropic', freeForm: false, kind: 'api' },
   { id: 'openai', label: 'OpenAI', freeForm: false, kind: 'api' },
@@ -65,14 +64,6 @@ export const PROVIDERS: ProviderInfo[] = [
     kind: 'cli',
     installHelp:
       'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM Backends.',
-  },
-  {
-    id: 'copilot_cli',
-    label: 'GitHub Copilot (CLI)',
-    freeForm: false,
-    kind: 'cli',
-    installHelp:
-      'Install `gh` (cli.github.com), then `gh auth login` + `gh extension install github/gh-copilot`.',
   },
 ];
 
@@ -120,9 +111,6 @@ export const MODEL_CATALOG: Record<ProviderId, ModelOption[]> = {
     { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (pinned)' },
     { id: 'claude-opus-4-7', label: 'Opus 4.7 (pinned)' },
   ],
-  copilot_cli: [
-    { id: 'default', label: 'Copilot default (server-chosen)' },
-  ],
 };
 
 export const DEFAULT_PROVIDER: ProviderId = 'anthropic';
@@ -137,7 +125,6 @@ export const PROVIDER_DEFAULT_MODEL: Record<ProviderId, string> = {
   google: 'gemini-3.1-pro',
   vllm: '',
   claude_code_cli: 'sonnet',
-  copilot_cli: 'default',
 };
 
 /** Look up provider metadata by id. Returns the canonical Anthropic
@@ -147,15 +134,14 @@ export function getProviderInfo(id: string | null | undefined): ProviderInfo {
 }
 
 /** Capability hints rendered as badges next to the selected provider.
- *  The frontend shows these for the CLI backends so users know up-front
- *  that, e.g., Copilot CLI doesn't stream. */
+ *  The frontend shows these so users know up-front what the chosen
+ *  backend can / can't do. */
 export const PROVIDER_CAPABILITY_HINTS: Record<ProviderId, string[]> = {
   anthropic: ['thinking', 'tools', 'streaming', 'top_k'],
   openai: ['tools', 'streaming', 'json_schema'],
   google: ['tools', 'streaming', 'top_k', 'json_schema'],
   vllm: ['streaming'],
   claude_code_cli: ['thinking', 'tools', 'streaming', 'mcp', 'session_resume', 'budget'],
-  copilot_cli: ['no streaming', 'no tools'],
 };
 
 /** Mirrors executor's `_infer_api_artifact` so the UI can fall back to
@@ -163,13 +149,12 @@ export const PROVIDER_CAPABILITY_HINTS: Record<ProviderId, string[]> = {
  *  pinned an explicit provider via ``config.provider``.
  *
  *  Order:
- *   1. CLI-only catalogs first — claude_code_cli ships short aliases
+ *   1. CLI catalog first — claude_code_cli ships short aliases
  *      ("sonnet", "opus", "haiku") that the API anthropic catalog
  *      doesn't have. Without this check, "sonnet" falls through to
  *      the claude-* prefix rule and gets misclassified as anthropic.
- *   2. copilot_cli catalog ("default").
- *   3. Prefix detection for the API providers.
- *   4. Default: anthropic — same fallback the executor uses.
+ *   2. Prefix detection for the API providers.
+ *   3. Default: anthropic — same fallback the executor uses.
  *
  *  Note: this is only a *fallback* for manifests that don't carry an
  *  explicit ``config.provider``. Editors should always read the
@@ -181,7 +166,7 @@ export function inferProvider(model: string | null | undefined): ProviderId {
   if (!m) return 'anthropic';
 
   // CLI catalog match — only for *CLI-exclusive* ids, i.e. ids that
-  // appear in a CLI catalog but in no API catalog. Otherwise a legacy
+  // appear in the CLI catalog but in no API catalog. Otherwise a legacy
   // manifest pinned to "claude-sonnet-4-6" (which is in both the
   // anthropic and claude_code_cli catalogs) would silently re-infer
   // as claude_code_cli after this rule landed.
@@ -192,9 +177,6 @@ export function inferProvider(model: string | null | undefined): ProviderId {
   if (!inAnyApi) {
     if (MODEL_CATALOG.claude_code_cli.some((o) => o.id === m)) {
       return 'claude_code_cli';
-    }
-    if (MODEL_CATALOG.copilot_cli.some((o) => o.id === m)) {
-      return 'copilot_cli';
     }
   }
 

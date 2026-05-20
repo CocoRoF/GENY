@@ -3,12 +3,12 @@
 /**
  * ModelPicker — provider-aware model selector.
  *
- *   - For anthropic / openai / google / claude_code_cli / copilot_cli:
+ *   - For anthropic / openai / google / claude_code_cli:
  *     renders a styled Select with the curated catalog. The CLI
- *     catalogs include short aliases (sonnet / opus / haiku /
- *     default) plus a couple of date-pinned ids. Values not in the
- *     catalog (legacy manifests, hand-edited pins) still render
- *     with a "Custom" badge.
+ *     catalog includes short aliases (sonnet / opus / haiku) plus
+ *     a couple of date-pinned ids. Values not in the catalog (legacy
+ *     manifests, hand-edited pins) still render with a "Custom"
+ *     badge.
  *   - For vllm: pure free-form Input — the served model id is fully
  *     user-controlled and unbounded.
  *

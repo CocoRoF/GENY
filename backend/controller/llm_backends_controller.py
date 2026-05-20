@@ -1,4 +1,4 @@
-"""LLM backend health + Claude Code login + Copilot CLI status routes.
+"""LLM backend health + Claude Code login routes.
 
 Phase E4 of the LLM backend upgrade cycle. The frontend uses these
 endpoints to:
@@ -10,10 +10,15 @@ endpoints to:
     ``claude auth login`` in a terminal). The endpoint also reports
     the binary version, which auth mode is active, and whether a
     quick smoke test passed.
-  * Same for ``gh copilot``: detect binary, ``gh auth status``,
-    extension installed yes/no.
   * List the registered sub-agent types so the frontend's catalog
     page can render them without re-walking the registry.
+
+Cycle 20260520 — the ``gh copilot`` CLI routes were removed.
+``gh copilot`` is one-shot text-in / text-out with no streaming, no
+tool round-trip, and no MCP support, so it could never host Geny's
+Sub-Worker delegation or Stage-10 dispatch. See
+``service/executor/credentials.py`` module docstring + the matching
+removal commit for the full rationale.
 
 All routes are guarded by ``require_auth``.
 """
@@ -36,7 +41,6 @@ from service.auth.auth_middleware import require_auth
 from service.config import get_config_manager
 from service.config.sub_config.general.cli_backends_config import (
     CLIBackendClaudeCodeConfig,
-    CLIBackendCopilotConfig,
 )
 from service.executor.credentials import CredentialBundleBuilder
 
@@ -97,7 +101,6 @@ PROVIDER_LABELS: Dict[str, str] = {
     "google": "Google Gemini",
     "vllm": "vLLM (self-host)",
     "claude_code_cli": "Claude Code (CLI)",
-    "copilot_cli": "GitHub Copilot (CLI)",
 }
 
 
@@ -374,85 +377,6 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
     )
 
 
-async def _check_copilot(bundle, copilot_cfg: CLIBackendCopilotConfig) -> ProviderHealth:
-    label = PROVIDER_LABELS["copilot_cli"]
-    install_help = (
-        "Install GitHub CLI (https://cli.github.com/), run `gh auth login`, "
-        "then `gh extension install github/gh-copilot`."
-    )
-    if not copilot_cfg.enabled:
-        return ProviderHealth(
-            provider="copilot_cli",
-            label=label,
-            kind="cli",
-            available=False,
-            detail="Copilot CLI backend disabled. Open this card to enable it.",
-            detail_code="copilot.disabled",
-            install_help=install_help,
-            install_help_code="copilot.install_help",
-        )
-    gh = _detect("gh", copilot_cfg.gh_binary_path or os.environ.get("GH_BINARY", ""))
-    if not gh:
-        return ProviderHealth(
-            provider="copilot_cli",
-            label=label,
-            kind="cli",
-            available=False,
-            detail="`gh` binary not found on PATH.",
-            detail_code="copilot.binary_missing",
-            install_help=install_help,
-            install_help_code="copilot.install_help",
-        )
-    version = None
-    rc, out, _ = await _run_cmd([gh, "--version"], timeout=4.0)
-    if rc == 0 and out:
-        version = out.splitlines()[0].strip()
-
-    # gh auth status — non-zero means not logged in.
-    rc_auth, _, err_auth = await _run_cmd([gh, "auth", "status"], timeout=4.0)
-    auth_ok = (rc_auth == 0)
-
-    # Copilot extension probe (best-effort).
-    ext_installed = False
-    rc_ext, out_ext, _ = await _run_cmd([gh, "extension", "list"], timeout=4.0)
-    if rc_ext == 0 and "github/gh-copilot" in out_ext:
-        ext_installed = True
-
-    available = bool(auth_ok and ext_installed)
-    parts = [f"binary at {gh}"]
-    if version:
-        parts.append(f"version={version}")
-    parts.append(f"auth_ok={auth_ok}")
-    parts.append(f"copilot_extension={'installed' if ext_installed else 'missing'}")
-
-    if available:
-        detail_code = "copilot.ready"
-    elif not auth_ok:
-        detail_code = "copilot.login_required"
-    else:
-        detail_code = "copilot.extension_missing"
-
-    return ProviderHealth(
-        provider="copilot_cli",
-        label=label,
-        kind="cli",
-        available=available,
-        detail="; ".join(parts),
-        detail_code=detail_code,
-        detail_params={
-            "path": gh,
-            "version": version or "unknown",
-            "extension": "installed" if ext_installed else "missing",
-        },
-        binary_path=gh,
-        binary_version=version,
-        auth_method=("extension" if ext_installed and auth_ok else None),
-        auth_ok=(auth_ok and ext_installed),
-        install_help=None if available else install_help,
-        install_help_code=None if available else "copilot.install_help",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -466,7 +390,6 @@ async def get_backends_health() -> BackendsHealthResponse:
     cm = get_config_manager()
     bundle = CredentialBundleBuilder(cm).build()
     claude_cfg = cm.load_config(CLIBackendClaudeCodeConfig)
-    copilot_cfg = cm.load_config(CLIBackendCopilotConfig)
 
     results = await asyncio.gather(
         _check_anthropic(bundle),
@@ -474,7 +397,6 @@ async def get_backends_health() -> BackendsHealthResponse:
         _check_google(bundle),
         _check_vllm(bundle),
         _check_claude_code(bundle, claude_cfg),
-        _check_copilot(bundle, copilot_cfg),
     )
     return BackendsHealthResponse(providers=list(results))
 
@@ -492,18 +414,6 @@ async def recheck_claude_code() -> ProviderHealth:
     bundle = CredentialBundleBuilder(cm).build()
     cfg = cm.load_config(CLIBackendClaudeCodeConfig)
     return await _check_claude_code(bundle, cfg)
-
-
-@router.post(
-    "/cli/copilot/recheck",
-    response_model=ProviderHealth,
-    dependencies=[Depends(require_auth)],
-)
-async def recheck_copilot() -> ProviderHealth:
-    cm = get_config_manager()
-    bundle = CredentialBundleBuilder(cm).build()
-    cfg = cm.load_config(CLIBackendCopilotConfig)
-    return await _check_copilot(bundle, cfg)
 
 
 @router.get(
@@ -552,11 +462,11 @@ async def list_subagents() -> SubagentsResponse:
 
 
 class _AuthJob:
-    """One in-flight subprocess (``claude auth login`` / ``gh auth login``)
-    plus a bounded buffer of stdout/stderr lines for SSE streaming."""
+    """One in-flight subprocess (``claude auth login``) plus a bounded
+    buffer of stdout/stderr lines for SSE streaming."""
 
     def __init__(self, kind: str, argv: List[str]) -> None:
-        self.kind = kind          # "claude_code" | "copilot"
+        self.kind = kind          # "claude_code"
         self.argv = argv
         self.job_id = uuid.uuid4().hex
         self.started_at = time.time()
@@ -842,78 +752,6 @@ async def claude_code_test() -> TestConnectionResponse:
         ok=ok,
         duration_ms=elapsed_ms,
         detail=detail,
-        raw_stdout_tail=out[-400:] if out else None,
-        raw_stderr_tail=err[-400:] if err else None,
-    )
-
-
-# ── Copilot CLI auth ──────────────────────────────────────────────────
-
-
-def _gh_binary() -> str:
-    binary = shutil.which("gh") or os.environ.get("GH_BINARY", "")
-    if not binary or not os.path.exists(binary):
-        raise HTTPException(status_code=400, detail="gh CLI not available in this container")
-    return binary
-
-
-@router.get(
-    "/cli/copilot/auth/status",
-    dependencies=[Depends(require_auth)],
-)
-async def copilot_auth_status() -> Dict[str, Any]:
-    binary = _gh_binary()
-    # gh auth status doesn't have --json; we surface text + exit code.
-    rc, out, err = await _run_cmd([binary, "auth", "status"], timeout=5.0)
-    rc_ext, ext_out, _ = await _run_cmd([binary, "extension", "list"], timeout=5.0)
-    extension_installed = (rc_ext == 0 and "github/gh-copilot" in ext_out)
-    return {
-        "logged_in": rc == 0,
-        "auth_status_text": out or err,
-        "extension_installed": extension_installed,
-    }
-
-
-@router.post(
-    "/cli/copilot/auth/login",
-    response_model=AuthLoginStartResponse,
-    dependencies=[Depends(require_auth)],
-)
-async def copilot_auth_login() -> AuthLoginStartResponse:
-    binary = _gh_binary()
-    # Web-based device flow — gh prints the device code + URL to stderr.
-    argv = [binary, "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"]
-    job = await _start_auth_job("copilot", argv)
-    return AuthLoginStartResponse(
-        job_id=job.job_id, kind=job.kind, argv=argv,
-        hint="gh prints a one-time code + URL. Open the URL in a browser, paste the code, return here.",
-    )
-
-
-@router.post(
-    "/cli/copilot/auth/logout",
-    dependencies=[Depends(require_auth)],
-)
-async def copilot_auth_logout() -> Dict[str, Any]:
-    binary = _gh_binary()
-    rc, out, err = await _run_cmd([binary, "auth", "logout", "--hostname", "github.com"], timeout=10.0)
-    return {"ok": rc == 0, "stdout": out, "stderr": err}
-
-
-@router.post(
-    "/cli/copilot/test",
-    response_model=TestConnectionResponse,
-    dependencies=[Depends(require_auth)],
-)
-async def copilot_test() -> TestConnectionResponse:
-    binary = _gh_binary()
-    started = time.monotonic()
-    rc, out, err = await _run_cmd([binary, "copilot", "-p", "ping", "--", ""], timeout=20.0)
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-    ok = rc == 0 and bool(out.strip())
-    return TestConnectionResponse(
-        ok=ok, duration_ms=elapsed_ms,
-        detail=("response received" if ok else f"exit code {rc}"),
         raw_stdout_tail=out[-400:] if out else None,
         raw_stderr_tail=err[-400:] if err else None,
     )

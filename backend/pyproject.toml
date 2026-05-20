@@ -32,8 +32,9 @@ dependencies = [
     # WebSocket protocol
     "websockets>=13.0",
     # geny-executor 2.0.0 — LLM backend overhaul cycle. ClientRegistry
-    # now ships 6 providers (anthropic / openai / google / vllm +
-    # claude_code_cli / copilot_cli). Credentials flow through a single
+    # ships 5 providers (anthropic / openai / google / vllm +
+    # claude_code_cli; copilot_cli was removed in cycle 20260520).
+    # Credentials flow through a single
     # CredentialBundle channel (auto-wrapped from api_key= for legacy
     # call sites). Provider location is unified at
     # manifest.stages[6].config["provider"] — strategies['provider']

@@ -72,7 +72,7 @@ export const useLLMBackendsHealthStore = create<State>((set, get) => ({
 
   // ``available`` already encodes the executor-level usability:
   //   - API providers: api_key (or base_url for vLLM) set
-  //   - CLI providers: binary on PATH + auth ok + (for copilot) extension installed
+  //   - CLI providers: binary on PATH + auth ok
   // The editor only ever needs the boolean, so wrap that here.
   isAvailable: (provider: string) => {
     const row = get().providers[provider];

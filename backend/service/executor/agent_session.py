@@ -1931,7 +1931,7 @@ class AgentSession:
         # that explicitly reach for ``session.llm_client``.
         #
         # Phase H: this is now OPTIONAL. If the user runs a
-        # claude_code_cli / copilot_cli / openai / google / vllm-only
+        # claude_code_cli / openai / google / vllm-only
         # environment without an Anthropic key, we leave the handle as
         # None. The hard ``raise`` here used to block such sessions at
         # build time even though their main path doesn't need an

@@ -30,7 +30,6 @@ from service.config.sub_config.general.telemetry_config import TelemetryConfig
 from service.config.sub_config.general.github_config import GitHubConfig
 from service.config.sub_config.general.cli_backends_config import (
     CLIBackendClaudeCodeConfig,
-    CLIBackendCopilotConfig,
 )
 
 __all__ = [
@@ -49,5 +48,4 @@ __all__ = [
     'TelemetryConfig',
     'GitHubConfig',
     'CLIBackendClaudeCodeConfig',
-    'CLIBackendCopilotConfig',
 ]
