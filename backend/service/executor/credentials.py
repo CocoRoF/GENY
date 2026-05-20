@@ -22,6 +22,7 @@ The CLI's LLM then sees Geny tools as ``mcp__geny__<name>`` and the
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -238,16 +239,34 @@ class CredentialBundleBuilder:
             # that prompt, so the CLI blocks the call and the LLM
             # surfaces "권한이 아직 없어서…" / "permission denied" to
             # the user even though the bridge would have happily
-            # served it. Because we've already disabled CLI built-ins
-            # via ``--tools ""`` *and* we control the MCP server, the
-            # only callable surface is our own bridge — bypassing the
-            # CLI's own prompt is correct (Geny's permission rules
-            # ride on the bridge endpoint, not the CLI). Override only
-            # when the operator hasn't already pinned a non-default
-            # mode in settings — so a power-user wanting ``plan`` or
-            # ``acceptEdits`` retains control.
-            if extras["default_permission_mode"] == "default":
-                extras["default_permission_mode"] = "bypassPermissions"
+            # served it.
+            #
+            # ``--permission-mode bypassPermissions`` would skip all
+            # checks but the CLI maps it to ``--dangerously-skip-permissions``
+            # internally, which is hard-blocked when the spawning
+            # process runs as ``root`` (our containerised case):
+            #
+            #   "--dangerously-skip-permissions cannot be used with
+            #    root/sudo privileges for security reasons"
+            #
+            # Instead we pre-allow the entire ``geny`` MCP server via
+            # the documented ``permissions.allow`` settings entry.
+            # ``"mcp__geny"`` matches every tool advertised by the
+            # bridge (the CLI normalises MCP tool names to
+            # ``mcp__<server>__<tool>``) so the LLM can dispatch any
+            # Geny tool without prompts, while the CLI's built-in
+            # palette stays gated by ``--tools ""`` and any user-
+            # supplied entries in the operator's settings_path are
+            # preserved verbatim — we synthesise an *inline* JSON via
+            # ``--settings`` only when the operator hasn't already
+            # pinned a settings file (the executor's argv builder
+            # passes whatever ``settings_path`` resolves to through
+            # to ``--settings <file-or-json>`` unchanged, and the CLI
+            # auto-detects file vs inline JSON).
+            if not extras.get("settings_path"):
+                extras["settings_path"] = json.dumps(
+                    {"permissions": {"allow": ["mcp__geny"]}}
+                )
         elif claude_cli.mcp_config_path:
             extras["mcp_config"] = claude_cli.mcp_config_path
         return ProviderCredentials(
