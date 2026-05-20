@@ -18,7 +18,6 @@ import {
 import { llmBackendsApi, type ProviderHealth } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
-import CopilotAuthModal from './CopilotAuthModal';
 import ApiBackendModal from './ApiBackendModal';
 
 const API_PROVIDERS = new Set(['anthropic', 'openai', 'google', 'vllm']);
@@ -83,7 +82,6 @@ function ProviderCard({
   const isCli = provider.kind === 'cli';
   const recheckTarget =
     provider.provider === 'claude_code_cli' ? 'claude_code_cli'
-    : provider.provider === 'copilot_cli' ? 'copilot_cli'
     : null;
   const recheckActive = recheckLoading === recheckTarget;
 
@@ -239,12 +237,15 @@ export default function LLMBackendsPanel() {
 
   const handleRecheck = useCallback(
     async (provider: string) => {
+      // Only ``claude_code_cli`` has a per-provider recheck endpoint
+      // today; API providers re-fetch the full health card instead.
+      if (provider !== 'claude_code_cli') {
+        await fetchHealth();
+        return;
+      }
       setRecheckLoading(provider);
       try {
-        const res =
-          provider === 'claude_code_cli'
-            ? await llmBackendsApi.recheckClaudeCode()
-            : await llmBackendsApi.recheckCopilot();
+        const res = await llmBackendsApi.recheckClaudeCode();
         setProviders((prev) =>
           prev.map((p) => (p.provider === res.provider ? res : p)),
         );
@@ -254,7 +255,7 @@ export default function LLMBackendsPanel() {
         setRecheckLoading(null);
       }
     },
-    [],
+    [fetchHealth],
   );
 
   const providerLabelById = useMemo(() => {
@@ -316,13 +317,6 @@ export default function LLMBackendsPanel() {
       {/* Modals */}
       {openProvider === 'claude_code_cli' && (
         <ClaudeCodeAuthModal
-          onClose={() => setOpenProvider(null)}
-          onChange={() => fetchHealth()}
-        />
-      )}
-
-      {openProvider === 'copilot_cli' && (
-        <CopilotAuthModal
           onClose={() => setOpenProvider(null)}
           onChange={() => fetchHealth()}
         />

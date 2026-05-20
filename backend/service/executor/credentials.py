@@ -2,9 +2,8 @@
 
 Phase H of the LLM backend upgrade cycle. The API credentials moved
 out of ``APIConfig`` into a dedicated hidden ``LLMCredentialsConfig``
-(edited only through the LLM Backends panel); the CLI-backend configs
-(``CLIBackendClaudeCodeConfig`` / ``CLIBackendCopilotConfig``) are also
-hidden from the general list. This builder unifies all three into the
+(edited only through the LLM Backends panel); ``CLIBackendClaudeCodeConfig``
+is also hidden from the general list. This builder unifies both into the
 single :class:`CredentialBundle` channel that
 ``Pipeline.from_manifest_async`` consumes.
 
@@ -15,9 +14,13 @@ Phase I (``mcp_bridge=...``): when a session pins ``claude_code_cli``
 as the Stage 6 provider, the builder synthesises a per-session MCP
 config that wraps Geny's tool registry (via the
 ``backend/scripts/geny_mcp_bridge.py`` stdio bridge → HTTP endpoint).
-The CLI's LLM then sees Geny tools as ``mcp__geny__<name>`` and the
-``--strict-mcp-config`` + ``--tools ""`` flags emitted by executor
-2.0.5 prevent it from hallucinating against CLI built-ins.
+The CLI's LLM then sees Geny tools as ``mcp__geny__<name>``.
+
+Cycle 20260520 — the legacy ``copilot_cli`` provider was removed. The
+``gh copilot`` CLI does not support streaming, tools, or MCP, so it
+cannot host Geny's Sub-Worker delegation or Stage-10 dispatch. Its
+config + credential builder + auth controller + frontend card were all
+deleted; only ``claude_code_cli`` remains on the CLI-driven path.
 """
 
 from __future__ import annotations
@@ -36,7 +39,6 @@ from service.config.sub_config.general.api_config import APIConfig
 from service.config.sub_config.general.llm_credentials_config import LLMCredentialsConfig
 from service.config.sub_config.general.cli_backends_config import (
     CLIBackendClaudeCodeConfig,
-    CLIBackendCopilotConfig,
 )
 
 
@@ -152,7 +154,6 @@ class CredentialBundleBuilder:
     def build(self) -> CredentialBundle:
         creds = self._cm.load_config(LLMCredentialsConfig)
         claude_cli = self._cm.load_config(CLIBackendClaudeCodeConfig)
-        copilot_cli = self._cm.load_config(CLIBackendCopilotConfig)
 
         by_provider: Dict[str, ProviderCredentials] = {
             "anthropic": ProviderCredentials(
@@ -173,8 +174,6 @@ class CredentialBundleBuilder:
             by_provider["claude_code_cli"] = self._build_claude_code(
                 creds, claude_cli, mcp_bridge=self._mcp_bridge,
             )
-        if copilot_cli.enabled:
-            by_provider["copilot_cli"] = self._build_copilot(copilot_cli)
 
         return CredentialBundle(by_provider=by_provider)
 
@@ -314,18 +313,3 @@ class CredentialBundleBuilder:
             extras=extras,
         )
 
-    # ───────────────────────────────────────────────────── copilot_cli ─
-
-    def _build_copilot(self, copilot_cli: CLIBackendCopilotConfig) -> ProviderCredentials:
-        binary = (
-            copilot_cli.gh_binary_path
-            or os.environ.get("GH_BINARY", "")
-            or (shutil.which("gh") or "")
-        )
-        extras: Dict[str, Any] = {
-            "allow_tools": _split_csv(copilot_cli.allow_tools_csv),
-            "cwd": copilot_cli.cwd or None,
-            "extra_args": _split_csv(copilot_cli.extra_args_csv),
-            "timeout_s": float(copilot_cli.timeout_s) if copilot_cli.timeout_s else 180.0,
-        }
-        return ProviderCredentials(binary_path=binary, extras=extras)

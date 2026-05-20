@@ -1552,15 +1552,9 @@ export interface ClaudeCodeAuthStatus {
   org_name?: string | null;
 }
 
-export interface CopilotAuthStatus {
-  logged_in: boolean;
-  auth_status_text: string;
-  extension_installed: boolean;
-}
-
 export interface AuthLoginStartResponse {
   job_id: string;
-  kind: 'claude_code' | 'copilot';
+  kind: 'claude_code';
   argv: string[];
   hint: string;
 }
@@ -1588,10 +1582,6 @@ export const llmBackendsApi = {
   recheckClaudeCode: () =>
     apiCall<ProviderHealth>('/api/llm-backends/cli/claude-code/recheck', { method: 'POST' }),
 
-  /** POST /api/llm-backends/cli/copilot/recheck */
-  recheckCopilot: () =>
-    apiCall<ProviderHealth>('/api/llm-backends/cli/copilot/recheck', { method: 'POST' }),
-
   /** GET /api/llm-backends/subagents */
   subagents: () => apiCall<SubagentsResponse>('/api/llm-backends/subagents'),
 
@@ -1616,20 +1606,6 @@ export const llmBackendsApi = {
 
   claudeCodeTest: () =>
     apiCall<TestConnectionResponse>('/api/llm-backends/cli/claude-code/test', { method: 'POST' }),
-
-  // ── Phase G — Copilot auth ────────────────────────────────────
-
-  copilotStatus: () =>
-    apiCall<CopilotAuthStatus>('/api/llm-backends/cli/copilot/auth/status'),
-
-  copilotStartLogin: () =>
-    apiCall<AuthLoginStartResponse>('/api/llm-backends/cli/copilot/auth/login', { method: 'POST' }),
-
-  copilotLogout: () =>
-    apiCall<{ ok: boolean }>('/api/llm-backends/cli/copilot/auth/logout', { method: 'POST' }),
-
-  copilotTest: () =>
-    apiCall<TestConnectionResponse>('/api/llm-backends/cli/copilot/test', { method: 'POST' }),
 
   // ── Phase G — Shared SSE / cancel ─────────────────────────────
 

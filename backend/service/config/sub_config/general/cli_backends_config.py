@@ -1,14 +1,19 @@
-"""CLI-backend (Claude Code, GitHub Copilot) settings.
+"""CLI-backend (Claude Code) settings.
 
-Phase E1 of the LLM backend upgrade cycle adds two new providers to
-geny-executor (``claude_code_cli`` / ``copilot_cli``) that drive local
-CLI binaries instead of vendor SDKs. These two configs let users
-enable each backend, point at a specific binary, and override the
-behavioural knobs (workspace, bare mode, budget, allowed tools, etc).
+Phase E1 of the LLM backend upgrade cycle added CLI-driven LLM providers
+to geny-executor — currently only ``claude_code_cli`` (a Stage-6 provider
+that spawns the Claude Code CLI subprocess and wraps Geny's tool registry
+through an MCP bridge per Phase I, ``docs/llm-backend-upgrade-plan/12_phase_i_claude_code_mcp_wrap.md``).
 
-Both are no-ops until the user flips ``enabled=True``; until then the
-``CredentialBundleBuilder`` does not include them in the bundle and
-``ClientRegistry`` builds these clients with empty extras.
+The ``copilot_cli`` provider was removed in cycle 20260520 — ``gh copilot``
+fundamentally does not support streaming, tool round-trip, or MCP, so it
+could only ever be a one-shot text-completion backend incompatible with
+the Sub-Worker delegation / Stage 10 dispatch pipeline. See the same plan
+doc + commit message for the full rationale.
+
+``CLIBackendClaudeCodeConfig`` is a no-op until the user flips
+``enabled=True``; until then the ``CredentialBundleBuilder`` does not
+include it in the bundle.
 """
 
 from __future__ import annotations
@@ -222,121 +227,12 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
         ]
 
 
-@register_config
-@dataclass
-class CLIBackendCopilotConfig(BaseConfig):
-    """GitHub Copilot CLI backend settings."""
-
-    enabled: bool = False
-    gh_binary_path: str = ""            # default: shutil.which("gh")
-    allow_tools_csv: str = ""           # comma-separated --allow-tool scopes
-    cwd: str = ""                       # working directory for the subprocess
-    extra_args_csv: str = ""
-    timeout_s: float = 180.0
-
-    _ENV_MAP = {
-        "enabled": "COPILOT_CLI_ENABLED",
-        "gh_binary_path": "GH_BINARY",
-    }
-
-    @classmethod
-    def get_default_instance(cls) -> "CLIBackendCopilotConfig":
-        defaults = read_env_defaults(cls._ENV_MAP, cls.__dataclass_fields__)
-        return cls(**defaults)
-
-    @classmethod
-    def get_config_name(cls) -> str:
-        return "cli_backend_copilot"
-
-    @classmethod
-    def get_display_name(cls) -> str:
-        return "GitHub Copilot (CLI)"
-
-    @classmethod
-    def get_description(cls) -> str:
-        return (
-            "Settings for the GitHub Copilot CLI backend. Drives ``gh copilot`` "
-            "as a geny-executor LLM provider."
-        )
-
-    @classmethod
-    def get_category(cls) -> str:
-        return "general"
-
-    @classmethod
-    def get_icon(cls) -> str:
-        return "terminal"
-
-    @classmethod
-    def is_user_visible(cls) -> bool:
-        # Phase H — edited only through the LLM Backends panel's
-        # CopilotAuthModal, not the auto-form list.
-        return False
-
-    @classmethod
-    def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
-        return {
-            "ko": {
-                "display_name": "GitHub Copilot (CLI)",
-                "description": "로컬 gh copilot CLI를 geny-executor의 LLM provider로 사용합니다.",
-            }
-        }
-
-    @classmethod
-    def get_fields_metadata(cls) -> List[ConfigField]:
-        return [
-            ConfigField(
-                name="enabled",
-                field_type=FieldType.BOOLEAN,
-                label="Enabled",
-                description="Activate the Copilot CLI provider in CredentialBundle.",
-                default=False,
-                group="copilot",
-                apply_change=env_sync("COPILOT_CLI_ENABLED"),
-            ),
-            ConfigField(
-                name="gh_binary_path",
-                field_type=FieldType.STRING,
-                label="gh Binary Path",
-                description="Path to the gh CLI. Empty = auto-detect via PATH.",
-                default="",
-                placeholder="/usr/local/bin/gh",
-                group="copilot",
-                apply_change=env_sync("GH_BINARY"),
-            ),
-            ConfigField(
-                name="allow_tools_csv",
-                field_type=FieldType.STRING,
-                label="Allow-Tool scopes (CSV)",
-                description="Comma-separated. Each becomes a --allow-tool flag.",
-                default="",
-                placeholder="shell(git),fs(read)",
-                group="copilot",
-            ),
-            ConfigField(
-                name="cwd",
-                field_type=FieldType.STRING,
-                label="CWD",
-                description="Working directory for the spawned gh process.",
-                default="",
-                group="copilot",
-            ),
-            ConfigField(
-                name="extra_args_csv",
-                field_type=FieldType.STRING,
-                label="Extra Args (CSV)",
-                description="Escape hatch — additional argv tokens, comma-separated.",
-                default="",
-                group="copilot",
-            ),
-            ConfigField(
-                name="timeout_s",
-                field_type=FieldType.NUMBER,
-                label="Timeout (seconds)",
-                description="Per-call wall-clock timeout. Default 180s.",
-                default=180.0,
-                min_value=10.0,
-                max_value=600.0,
-                group="copilot",
-            ),
-        ]
+# ``CLIBackendCopilotConfig`` was removed in cycle 20260520. The
+# ``gh copilot`` CLI advertises (and the upstream geny-executor's
+# ``CopilotCLIClient`` honestly mirrors) ``supports_streaming=False``,
+# ``supports_tools=False``, ``supports_mcp_passthrough=False`` — it is a
+# one-shot text-in / text-out subprocess that cannot participate in
+# Geny's Sub-Worker delegation or Stage-10 tool dispatch. Keeping the
+# config card around encouraged operators to enable a backend that would
+# immediately fail at the first tool call. Existing DB rows for
+# ``cli_backend_copilot`` are harmlessly ignored.

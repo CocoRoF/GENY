@@ -114,10 +114,10 @@ export default function Stage06ApiEditor({ order, entry }: Props) {
               // Provider resolution priority:
               //   1. ``entry.config.provider`` — the canonical persisted
               //      choice (matches GlobalSettingsView's pattern). This
-              //      is what makes Claude Code (CLI) / Copilot (CLI)
-              //      selectable at all, since their default model ids
-              //      (sonnet/opus/haiku/default) can't be uniquely
-              //      inferred from the model name alone.
+              //      is what makes Claude Code (CLI) selectable at all,
+              //      since its default model ids (sonnet/opus/haiku)
+              //      can't be uniquely inferred from the model name
+              //      alone.
               //   2. ``inferProvider(model)`` — fallback for legacy
               //      manifests that predate the explicit config field.
               provider={
