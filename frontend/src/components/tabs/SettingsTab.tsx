@@ -193,13 +193,17 @@ export default function SettingsTab() {
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{configs.length}</span>
             </button>
             {/* Phase F2 — virtual 'LLM Backends' category. Swaps the
-                 main pane to the health/login panel. */}
+                 main pane to the health/login panel.
+                 Count mirrors the provider list in ``LLMBackendsPanel``:
+                 anthropic / openai / google / vllm / claude_code_cli
+                 = 5. Cycle 20260520 dropped ``copilot_cli`` so this
+                 used to be ``6``. */}
             <button
               className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'llm_backends' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               onClick={() => setSelectedCategory('llm_backends')}
             >
               <span className="flex-1">{t('settings.llmBackends.navLabel')}</span>
-              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">6</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">5</span>
             </button>
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
