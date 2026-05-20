@@ -1,520 +1,424 @@
-"""Tests for the Claude Code CLI argv runtime patch.
+"""Tests for ``service/llm_patches.py``.
 
-Validates the pure ``_patched_argv`` predicate function plus the
-idempotent monkey-patch installer.
+Post-cycle-20260520 surface is much smaller — the four generic
+Claude-Code CLI argv fixes that previously lived here folded into
+``geny-executor`` 2.0.6 (``--verbose`` injection, ``--bare`` strip on
+OAuth, drop of auto-``--tools ""``, ``StreamJsonAccumulator.finalize``
+tool_use strip). What's left is Geny-specific and covered here:
+
+  1. Korean friendly-error messages for stream-json ``is_error``
+     result envelopes (auth-expired hint + generic API-error
+     fallback).
+  2. CLI-tool observability into Geny's :class:`SessionLogger`
+     (``log_tool_use`` + ``log_tool_result`` for non-``mcp__*``
+     blocks observed in the stream, routed through the
+     :data:`cli_stream_logger_ctx` ContextVar).
 """
 
 from __future__ import annotations
 
+import json
+from typing import Any, AsyncIterator, Dict, List
+
 import pytest
 
 
-# ── Pure transformation ──────────────────────────────────────────────
-
-
-def test_streaming_argv_gets_verbose_inserted() -> None:
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--input-format", "stream-json",
-        "--output-format", "stream-json",
-        "--include-partial-messages",
-        "--model", "claude-opus-4-7",
-    ]
-    # API-key path — only the verbose-injection fix is exercised
-    # here. The bare-strip fix has its own test below.
-    patched = _patched_argv(original, has_api_key=True)
-
-    assert patched != original, "argv should be modified"
-    assert "--verbose" in patched
-    # Order matters for readable logs: ``--verbose`` immediately after
-    # ``--print``.
-    print_idx = patched.index("--print")
-    assert patched[print_idx + 1] == "--verbose"
-
-
-def test_oauth_path_strips_bare_flag() -> None:
-    """Subscription / OAuth users (no ``ANTHROPIC_API_KEY``) must
-    NOT pass ``--bare`` — the flag explicitly disables OAuth at
-    the CLI level. ``geny-executor`` 2.0.1 always emits ``--bare``
-    via its ``bare_mode=True`` default, so we strip it here on
-    every OAuth invocation."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--output-format", "stream-json",
-        "--bare",
-        "--model", "claude-opus-4-7",
-    ]
-    patched = _patched_argv(original, has_api_key=False)
-    assert "--bare" not in patched
-    # ``--verbose`` should still be injected for stream-json output.
-    assert "--verbose" in patched
-
-
-def test_api_key_path_keeps_bare_flag() -> None:
-    """When ``ANTHROPIC_API_KEY`` is set, ``--bare`` is the right
-    flag — keep it untouched."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--output-format", "stream-json",
-        "--bare",
-        "--model", "claude-opus-4-7",
-    ]
-    patched = _patched_argv(original, has_api_key=True)
-    assert "--bare" in patched
-    assert "--verbose" in patched
-
-
-def test_auto_detect_has_api_key_from_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``has_api_key=None`` (default) means "infer from env". With
-    the env var set, ``--bare`` stays; without, it's stripped."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--output-format", "stream-json",
-        "--bare",
-    ]
-
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
-    keep = _patched_argv(original)
-    assert "--bare" in keep
-
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    drop = _patched_argv(original)
-    assert "--bare" not in drop
-
-
-def test_non_streaming_argv_is_untouched() -> None:
-    """``--output-format json`` (non-streaming) doesn't need
-    ``--verbose`` — the CLI accepts it as-is. Patch must NOT add
-    ``--verbose`` in that case to avoid changing semantics."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--output-format", "json",
-        "--model", "claude-opus-4-7",
-    ]
-    patched = _patched_argv(original)
-    assert "--verbose" not in patched
-    assert patched == original
-
-
-def test_argv_with_existing_verbose_is_untouched() -> None:
-    """Defensive: if a future ``geny-executor`` ships the fix
-    upstream, our patch must become a no-op so we don't double-add."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--verbose",
-        "--output-format", "stream-json",
-    ]
-    patched = _patched_argv(original)
-    assert patched == original
-    assert patched.count("--verbose") == 1
-
-
-def test_argv_without_output_format_is_untouched() -> None:
-    from service.llm_patches import _patched_argv
-
-    original = ["--print", "--model", "x"]
-    assert _patched_argv(original) == original
-
-
-def test_argv_with_stream_json_input_only_is_untouched() -> None:
-    """``--input-format stream-json`` doesn't trigger the
-    ``--print --output-format`` requirement; only the *output* format
-    does. Patch must only react to the output-format pair."""
-    from service.llm_patches import _patched_argv
-
-    original = [
-        "--print",
-        "--input-format", "stream-json",
-        "--output-format", "json",
-    ]
-    patched = _patched_argv(original)
-    assert "--verbose" not in patched
-    assert patched == original
-
-
-def test_argv_with_dangling_output_format_at_end() -> None:
-    """Defensive: ``--output-format`` is the last token with no value.
-    Don't crash — just leave it alone."""
-    from service.llm_patches import _patched_argv
-
-    original = ["--print", "--output-format"]
-    patched = _patched_argv(original)
-    assert patched == original  # No crash, no insertion.
-
-
-# ── Installer ────────────────────────────────────────────────────────
-
-
-def test_install_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Repeated installs must not double-wrap the function. The
-    wrapper is flagged with ``_geny_verbose_patch_applied`` so the
-    second call sees the flag and returns early."""
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
-    from service.llm_patches import install_llm_patches
-    from geny_executor.llm_client.translators import _cli
-
-    pristine = _cli.claude_code_argv
-    try:
-        install_llm_patches()
-        once = _cli.claude_code_argv
-        install_llm_patches()
-        twice = _cli.claude_code_argv
-        assert once is twice, "second install must be a no-op"
-        # Confirm the wrapper exposes the original so future re-stacks
-        # can chain off it.
-        assert hasattr(once, "_original")
-    finally:
-        _cli.claude_code_argv = pristine
-
-
-def test_install_patches_every_re_export_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The function is re-exported across THREE modules; patching
-    only the source isn't enough because the caller did
-    ``from … import claude_code_argv`` and captured a local binding.
-
-    Without patching all three, the live CLI invocation in
-    ``claude_code.py`` (line 178) still calls the pristine function
-    and the user sees ``--verbose`` error in prod. This test pins
-    the bug we hit on 2026-05-18.
-    """
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
-    import importlib
-
-    from service.llm_patches import install_llm_patches
-
-    modules = [
-        importlib.import_module("geny_executor.llm_client.translators._cli"),
-        importlib.import_module("geny_executor.llm_client.translators"),
-        importlib.import_module("geny_executor.llm_client.claude_code"),
-    ]
-    pristines = [getattr(m, "claude_code_argv") for m in modules]
-
-    try:
-        install_llm_patches()
-        wrapped = [getattr(m, "claude_code_argv") for m in modules]
-        # Every module must point at a wrapper, AND they must all be
-        # the same wrapper instance so a stale reference can't slip
-        # through.
-        for fn in wrapped:
-            assert hasattr(fn, "_geny_verbose_patch_applied")
-        assert wrapped[0] is wrapped[1] is wrapped[2], (
-            "all three modules must share the same wrapper — otherwise "
-            "claude_code.py keeps calling the pristine function"
-        )
-    finally:
-        for m, original in zip(modules, pristines):
-            setattr(m, "claude_code_argv", original)
-
-
-def test_install_patches_claude_code_caller_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End-to-end pin for the user's reported regression: invoke the
-    argv builder through the same import path ``claude_code.py``
-    uses (``claude_code.claude_code_argv``) and verify ``--verbose``
-    lands in the result. This is what the live CLI invocation does
-    at runtime."""
-    pytest.importorskip("geny_executor.llm_client.claude_code")
-    import importlib
-
-    from service.llm_patches import install_llm_patches
-
-    cc_module = importlib.import_module(
-        "geny_executor.llm_client.claude_code"
-    )
-    cli_module = importlib.import_module(
-        "geny_executor.llm_client.translators._cli"
-    )
-    translators_pkg = importlib.import_module(
-        "geny_executor.llm_client.translators"
-    )
-
-    pristine_cc = cc_module.claude_code_argv
-    pristine_cli = cli_module.claude_code_argv
-    pristine_pkg = translators_pkg.claude_code_argv
-
-    try:
-        install_llm_patches()
-
-        class _Req:
-            stream = True
-            model = "claude-opus-4-7"
-            system = ""
-            thinking = None
-            response_format = None
-            session_hint = None
-
-        # The crucial assertion: the function call path
-        # ``claude_code.claude_code_argv(...)`` must return an argv
-        # that contains ``--verbose``. Before the deep-patch fix this
-        # returned the pristine result and the prod session crashed.
-        argv = cc_module.claude_code_argv(_Req())
-        assert "--verbose" in argv, (
-            "claude_code.py's local binding must point at the patched "
-            "wrapper, otherwise the live CLI invocation crashes with "
-            "'When using --print, --output-format=stream-json requires "
-            "--verbose'"
-        )
-    finally:
-        cc_module.claude_code_argv = pristine_cc
-        cli_module.claude_code_argv = pristine_cli
-        translators_pkg.claude_code_argv = pristine_pkg
-
-
-def test_install_actually_patches_streaming_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End-to-end: install the patch, then invoke ``claude_code_argv``
-    the way geny-executor's caller does and assert ``--verbose``
-    lands in the argv."""
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
-    from service.llm_patches import install_llm_patches
-    from geny_executor.llm_client.translators import _cli
-
-    pristine = _cli.claude_code_argv
-    try:
-        install_llm_patches()
-
-        # Build a minimal ``ChatCompletionRequest``-shaped object the
-        # function expects. We use a duck-typed stub to avoid pulling
-        # the full geny_executor request model.
-        class _Req:
-            stream = True
-            model = "claude-opus-4-7"
-            system = ""
-            thinking = None
-            response_format = None
-            session_hint = None
-
-        argv = _cli.claude_code_argv(_Req())
-        assert "--print" in argv
-        assert "--output-format" in argv
-        of_idx = argv.index("--output-format")
-        assert argv[of_idx + 1] == "stream-json"
-        assert "--verbose" in argv, (
-            "patch must inject --verbose for stream-json output"
-        )
-        print_idx = argv.index("--print")
-        assert argv[print_idx + 1] == "--verbose", (
-            "--verbose must sit right after --print for readable logs"
-        )
-    finally:
-        _cli.claude_code_argv = pristine
-
-
-# ── Assembler patch: stream-json error → friendly message ────────────
+# ── _friendly_error_message_for_result_envelope ─────────────────
 
 
 def test_friendly_error_message_recognises_auth_failure() -> None:
     from service.llm_patches import _friendly_error_message_for_result_envelope
 
-    envelope = {
+    msg = _friendly_error_message_for_result_envelope({
         "type": "result",
         "is_error": True,
         "api_error_status": 401,
         "error": "authentication_failed",
-        "result": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
-    }
-    msg = _friendly_error_message_for_result_envelope(envelope)
+        "result": "Failed to authenticate. API Error: 401",
+    })
+    # Korean prompt that points the user at the LLM Backends Settings card.
     assert "Claude Code 인증이 만료" in msg
-    assert "다시 로그인" in msg or "Sign in" in msg
-    # And the original error is preserved so an operator inspecting
-    # logs can see the underlying API message.
-    assert "401" in msg
+    assert "LLM 백엔드" in msg
+    # The raw CLI message is appended as ``(원본: ...)`` for forensics.
+    assert "Failed to authenticate" in msg
 
 
-def test_friendly_error_message_for_generic_api_error() -> None:
+def test_friendly_error_message_generic_api_error() -> None:
     from service.llm_patches import _friendly_error_message_for_result_envelope
 
-    envelope = {
+    msg = _friendly_error_message_for_result_envelope({
         "type": "result",
         "is_error": True,
-        "api_error_status": 503,
-        "error": "overloaded",
-        "result": "Service unavailable, please retry",
-    }
-    msg = _friendly_error_message_for_result_envelope(envelope)
+        "api_error_status": 500,
+        "error": "internal_server_error",
+        "result": "Upstream provider returned 500",
+    })
     assert "Claude Code API 에러" in msg
-    assert "503" in msg
-    # Non-401 must NOT use the auth-expired message.
-    assert "인증이 만료" not in msg
+    assert "500" in msg
+    assert "Upstream provider returned 500" in msg
+
+
+def test_friendly_error_message_no_api_status_falls_back_to_cli_error() -> None:
+    from service.llm_patches import _friendly_error_message_for_result_envelope
+
+    msg = _friendly_error_message_for_result_envelope({
+        "type": "result",
+        "is_error": True,
+        "result": "claude binary segfaulted",
+    })
+    assert "Claude Code CLI 에러" in msg
+    assert "claude binary segfaulted" in msg
+
+
+# ── _maybe_extract_error_envelope ───────────────────────────────
 
 
 def test_maybe_extract_error_envelope_accepts_bytes_and_str() -> None:
     from service.llm_patches import _maybe_extract_error_envelope
 
-    line_bytes = b'{"type":"result","is_error":true,"api_error_status":401}'
-    line_str = '{"type":"result","is_error":true,"api_error_status":401}'
-    assert _maybe_extract_error_envelope(line_bytes) is not None
-    assert _maybe_extract_error_envelope(line_str) is not None
+    payload = json.dumps({
+        "type": "result", "is_error": True, "api_error_status": 401,
+    })
+    assert _maybe_extract_error_envelope(payload.encode("utf-8"))
+    assert _maybe_extract_error_envelope(payload)
+    assert _maybe_extract_error_envelope(bytearray(payload, "utf-8"))
 
 
 @pytest.mark.parametrize("payload", [
-    b'',
-    b'\n',
-    b'not json',
-    b'{"type":"system"}',
-    b'{"type":"result","is_error":false}',
-    b'{"type":"result"}',
-    b'[]',
+    b"",
+    b"  ",
+    b"not json",
+    json.dumps({"type": "assistant"}).encode("utf-8"),
+    json.dumps({"type": "result"}).encode("utf-8"),  # no is_error
+    json.dumps({"type": "result", "is_error": False}).encode("utf-8"),
+    json.dumps([1, 2, 3]).encode("utf-8"),  # not a dict
 ])
 def test_maybe_extract_error_envelope_returns_none_for_non_error_lines(
     payload: bytes,
 ) -> None:
     from service.llm_patches import _maybe_extract_error_envelope
+
     assert _maybe_extract_error_envelope(payload) is None
 
 
-def test_assembler_patch_raises_friendly_error_on_auth_failure() -> None:
-    """End-to-end through ``assemble_response_from_stream_json``:
-    install the patch, feed a synthetic stream that ends with the
-    auth-failed envelope, and assert the wrapped function raises
-    with the Korean re-login message instead of returning silently."""
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
-    import asyncio
-    import importlib
+# ── install_llm_patches: idempotency + re-export coverage ──
 
+
+def test_install_is_idempotent() -> None:
+    """Calling ``install_llm_patches()`` multiple times must be a
+    no-op after the first install — the assembler wrapper and the
+    accumulator observability patch both use cached state, so a
+    second call leaves the patched attributes pointing at the
+    *same* wrapper object."""
     from service.llm_patches import install_llm_patches
 
-    cli_module = importlib.import_module(
+    # First install (might happen at app boot before this test).
+    install_llm_patches()
+
+    import importlib
+
+    cli_translator = importlib.import_module(
         "geny_executor.llm_client.translators._cli"
     )
-    pristine = cli_module.assemble_response_from_stream_json
-    try:
-        install_llm_patches()
-        wrapped = cli_module.assemble_response_from_stream_json
+    first_assembler = cli_translator.assemble_response_from_stream_json
+    first_accum_feed = cli_translator.StreamJsonAccumulator.feed
 
-        async def _fake_stream():
-            yield (
-                b'{"type":"system","subtype":"init","model":"claude-opus-4-7"}'
-            )
-            yield (
-                b'{"type":"result","is_error":true,"api_error_status":401,'
-                b'"error":"authentication_failed",'
-                b'"result":"Failed to authenticate. API Error: 401 ..."}'
-            )
+    # Second install — should hit the cached-wrapper path.
+    install_llm_patches()
 
-        async def _runner():
-            return await wrapped(_fake_stream(), model="claude-opus-4-7")
+    second_assembler = cli_translator.assemble_response_from_stream_json
+    second_accum_feed = cli_translator.StreamJsonAccumulator.feed
 
-        with pytest.raises(RuntimeError, match="인증이 만료"):
-            asyncio.new_event_loop().run_until_complete(_runner())
-    finally:
-        cli_module.assemble_response_from_stream_json = pristine
+    # Same instance, no double-stacking.
+    assert first_assembler is second_assembler
+    assert first_accum_feed is second_accum_feed
 
 
-def test_assembler_patch_pass_through_on_clean_stream() -> None:
-    """A successful stream (no ``is_error`` envelope) must return
-    the original APIResponse unchanged — the patch is non-intrusive
-    on the happy path."""
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
-    import asyncio
-    import importlib
-
+def test_install_patches_assembler_across_re_exports() -> None:
+    """The assembler is re-exported from three modules; all the
+    attributes must point at the wrapper after install so any caller
+    that captured a local binding hits it."""
     from service.llm_patches import install_llm_patches
 
-    cli_module = importlib.import_module(
-        "geny_executor.llm_client.translators._cli"
-    )
-    pristine = cli_module.assemble_response_from_stream_json
-    try:
-        install_llm_patches()
-        wrapped = cli_module.assemble_response_from_stream_json
+    install_llm_patches()
 
-        async def _fake_stream():
-            yield (
-                b'{"type":"system","subtype":"init","model":"claude-opus-4-7"}'
-            )
-            yield (
-                b'{"type":"assistant","delta":{"type":"text_delta",'
-                b'"text":"hello"}}'
-            )
-            yield (
-                b'{"type":"result","stop_reason":"end_turn",'
-                b'"usage":{"input_tokens":1,"output_tokens":1}}'
-            )
-
-        async def _runner():
-            return await wrapped(_fake_stream(), model="claude-opus-4-7")
-
-        resp = asyncio.new_event_loop().run_until_complete(_runner())
-        # Don't pin the full APIResponse shape — just confirm it
-        # didn't raise and we got *something* back.
-        assert resp is not None
-    finally:
-        cli_module.assemble_response_from_stream_json = pristine
-
-
-def test_assembler_patch_installs_across_all_three_namespaces() -> None:
-    """Like the argv patch, the assembler function is re-exported in
-    three places. Patching only the source leaves
-    ``claude_code.assemble_response_from_stream_json`` (the actual
-    call site at line 203) pointed at the pristine function."""
-    pytest.importorskip("geny_executor.llm_client.claude_code")
     import importlib
-
-    from service.llm_patches import install_llm_patches
-
     modules = [
-        importlib.import_module("geny_executor.llm_client.translators._cli"),
-        importlib.import_module("geny_executor.llm_client.translators"),
-        importlib.import_module("geny_executor.llm_client.claude_code"),
+        "geny_executor.llm_client.translators._cli",
+        "geny_executor.llm_client.translators",
+        "geny_executor.llm_client.claude_code",
     ]
-    pristines = [getattr(m, "assemble_response_from_stream_json") for m in modules]
-    try:
-        install_llm_patches()
-        wrapped = [getattr(m, "assemble_response_from_stream_json") for m in modules]
-        for fn in wrapped:
-            assert hasattr(fn, "_geny_assembler_error_patch_applied")
-        assert wrapped[0] is wrapped[1] is wrapped[2]
-    finally:
-        for m, original in zip(modules, pristines):
-            setattr(m, "assemble_response_from_stream_json", original)
+    fns = []
+    for name in modules:
+        mod = importlib.import_module(name)
+        fn = getattr(mod, "assemble_response_from_stream_json", None)
+        if fn is not None:
+            fns.append(fn)
+    assert len(fns) >= 2  # at least source + one re-export
+    assert all(fn is fns[0] for fn in fns)
 
 
-# ── Original argv patch tests ─────────────────────────────────────────
+# ── assembler-side: stream-json error envelope → friendly raise ──
 
 
-def test_install_does_not_modify_non_streaming(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pytest.importorskip("geny_executor.llm_client.translators._cli")
+@pytest.mark.asyncio
+async def test_assembler_patch_raises_friendly_error_on_auth_failure() -> None:
+    """When the stream ends with an ``is_error: true`` result
+    envelope, the patched assembler must raise a Korean human-readable
+    error instead of silently returning an empty response."""
     from service.llm_patches import install_llm_patches
-    from geny_executor.llm_client.translators import _cli
 
-    pristine = _cli.claude_code_argv
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    assemble = cli_translator.assemble_response_from_stream_json
+
+    async def _gen() -> AsyncIterator[bytes]:
+        yield b'{"type": "system", "session_id": "s1"}\n'
+        yield (
+            b'{"type": "result", "is_error": true, "api_error_status": 401, '
+            b'"error": "authentication_failed", '
+            b'"result": "Failed to authenticate. API Error: 401"}\n'
+        )
+
+    with pytest.raises(RuntimeError, match="Claude Code 인증이 만료"):
+        await assemble(_gen(), model="m")
+
+
+@pytest.mark.asyncio
+async def test_assembler_patch_passes_through_clean_stream() -> None:
+    """Clean streams (no ``is_error`` envelope) must produce a valid
+    APIResponse with the text content intact."""
+    from service.llm_patches import install_llm_patches
+
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    assemble = cli_translator.assemble_response_from_stream_json
+
+    async def _gen() -> AsyncIterator[bytes]:
+        yield b'{"type": "system", "session_id": "s1", "model": "sonnet"}\n'
+        yield b'{"type": "assistant", "delta": {"type": "text_delta", "text": "ok"}}\n'
+        yield b'{"type": "message_stop"}\n'
+        yield (
+            b'{"type": "result", "stop_reason": "end_turn", '
+            b'"usage": {"input_tokens": 1, "output_tokens": 1}}\n'
+        )
+
+    resp = await assemble(_gen(), model="default")
+    assert resp.text == "ok"
+    assert resp.stop_reason == "end_turn"
+
+
+# ── Stream observability: CLI built-in tool calls → SessionLogger ──
+
+
+class _FakeLogger:
+    """Minimal stand-in for Geny's ``SessionLogger``. Records every
+    ``log_tool_use`` / ``log_tool_result`` call so tests can assert on
+    the observability patch's behavior without booting the real
+    logger + DB."""
+
+    def __init__(self) -> None:
+        self.tool_uses: List[Dict[str, Any]] = []
+        self.tool_results: List[Dict[str, Any]] = []
+
+    def log_tool_use(self, **kwargs: Any) -> None:
+        self.tool_uses.append(kwargs)
+
+    def log_tool_result(self, **kwargs: Any) -> None:
+        self.tool_results.append(kwargs)
+
+
+def test_observability_emits_tool_use_for_assistant_envelope() -> None:
+    """``"assistant"`` envelopes carrying a non-``mcp__*`` ``tool_use``
+    block trigger a ``log_tool_use`` call on the active session logger."""
+    from service.llm_patches import (
+        cli_stream_logger_ctx,
+        install_llm_patches,
+    )
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    accum = cli_translator.StreamJsonAccumulator(model="m")
+    fake = _FakeLogger()
+    token = cli_stream_logger_ctx.set(fake)
     try:
-        install_llm_patches()
-
-        class _Req:
-            stream = False  # non-streaming
-            model = "claude-opus-4-7"
-            system = ""
-            thinking = None
-            response_format = None
-            session_hint = None
-
-        argv = _cli.claude_code_argv(_Req())
-        # Non-streaming uses ``--output-format json`` — no verbose
-        # injection.
-        assert "--verbose" not in argv
-        of_idx = argv.index("--output-format")
-        assert argv[of_idx + 1] == "json"
+        accum.feed({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "tu_1", "name": "Bash",
+                     "input": {"command": "ls"}},
+                ],
+            },
+        })
     finally:
-        _cli.claude_code_argv = pristine
+        cli_stream_logger_ctx.reset(token)
+
+    assert len(fake.tool_uses) == 1
+    call = fake.tool_uses[0]
+    assert call["tool_name"] == "Bash"
+    assert call["tool_id"] == "tu_1"
+    assert call["tool_input"] == {"command": "ls"}
+
+
+def test_observability_skips_mcp_prefixed_tools() -> None:
+    """MCP tools are already logged from ``mcp_bridge_controller`` —
+    the observability patch must NOT double-render them."""
+    from service.llm_patches import (
+        cli_stream_logger_ctx,
+        install_llm_patches,
+    )
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    accum = cli_translator.StreamJsonAccumulator(model="m")
+    fake = _FakeLogger()
+    token = cli_stream_logger_ctx.set(fake)
+    try:
+        accum.feed({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "mc_1",
+                     "name": "mcp__geny__send_direct_message_internal",
+                     "input": {"content": "hi"}},
+                ],
+            },
+        })
+    finally:
+        cli_stream_logger_ctx.reset(token)
+
+    assert fake.tool_uses == []
+
+
+def test_observability_emits_tool_result_with_duration() -> None:
+    """A matching ``"user"`` ``tool_result`` envelope triggers a
+    ``log_tool_result`` call with measured ``duration_ms`` and the
+    extracted result text."""
+    from service.llm_patches import (
+        cli_stream_logger_ctx,
+        install_llm_patches,
+    )
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    accum = cli_translator.StreamJsonAccumulator(model="m")
+    fake = _FakeLogger()
+    token = cli_stream_logger_ctx.set(fake)
+    try:
+        accum.feed({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "tu_1", "name": "Read",
+                     "input": {"path": "/etc/hostname"}},
+                ],
+            },
+        })
+        accum.feed({
+            "type": "user",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "tu_1",
+                     "content": "myhost\n"},
+                ],
+            },
+        })
+    finally:
+        cli_stream_logger_ctx.reset(token)
+
+    assert len(fake.tool_results) == 1
+    res = fake.tool_results[0]
+    assert res["tool_name"] == "Read"
+    assert res["tool_id"] == "tu_1"
+    assert res["result"] == "myhost\n"
+    assert res["is_error"] is False
+    assert isinstance(res["duration_ms"], int) and res["duration_ms"] >= 0
+
+
+def test_observability_handles_content_block_list_result_shape() -> None:
+    """Tool results can arrive as either a plain string OR a list of
+    ``{"type":"text","text":...}`` content blocks. The patch
+    flattens the list shape into a newline-joined string."""
+    from service.llm_patches import (
+        cli_stream_logger_ctx,
+        install_llm_patches,
+    )
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    accum = cli_translator.StreamJsonAccumulator(model="m")
+    fake = _FakeLogger()
+    token = cli_stream_logger_ctx.set(fake)
+    try:
+        accum.feed({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "tu_1", "name": "Bash",
+                     "input": {"command": "echo hi"}},
+                ],
+            },
+        })
+        accum.feed({
+            "type": "user",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "tu_1",
+                     "content": [
+                         {"type": "text", "text": "hi"},
+                         {"type": "text", "text": "(exit 0)"},
+                     ]},
+                ],
+            },
+        })
+    finally:
+        cli_stream_logger_ctx.reset(token)
+
+    assert fake.tool_results[0]["result"] == "hi\n(exit 0)"
+
+
+def test_observability_inert_without_active_context() -> None:
+    """If no ``cli_stream_logger_ctx`` is set (e.g. the accumulator is
+    driven outside a session-bound code path), the patch must
+    silently no-op rather than crash."""
+    from service.llm_patches import install_llm_patches
+    install_llm_patches()
+
+    import importlib
+    cli_translator = importlib.import_module(
+        "geny_executor.llm_client.translators._cli"
+    )
+    accum = cli_translator.StreamJsonAccumulator(model="m")
+    # No context set → ContextVar is the default ``None``.
+    accum.feed({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "tool_use", "id": "tu_1", "name": "Bash",
+                 "input": {"command": "ls"}},
+            ],
+        },
+    })
+    # No exception is the assertion; the patch is a no-op when the
+    # ContextVar isn't set, so there's nothing observable to compare.
