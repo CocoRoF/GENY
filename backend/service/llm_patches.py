@@ -359,10 +359,41 @@ def _install_assembler_error_patch() -> None:
         async def _wrapped(
             stream: AsyncIterator[Any], *, model: str,
         ) -> Any:
-            """Spy on the stream-json output. If the CLI emitted an
-            ``is_error`` result envelope, raise a Korean
-            human-readable error instead of letting the runtime's
-            empty-stderr fallback kick in."""
+            """Spy on the stream-json output. Two fixes:
+
+            A. Error envelope detection — if the CLI emitted an
+               ``is_error`` result envelope, raise a Korean human-readable
+               error instead of letting the runtime's empty-stderr
+               fallback kick in.
+
+            B. Strip in-CLI ``tool_use`` blocks from the assembled
+               response. The Claude Code CLI runs the full agentic
+               loop internally (LLM → MCP tool → LLM → ...). Every
+               intermediate assistant turn shows up in the stream-json
+               output as a separate ``assistant`` envelope, and the
+               upstream :class:`StreamJsonAccumulator` *concatenates*
+               their content — so the final ``APIResponse`` returned
+               to Stage 6 contains all the ``tool_use`` blocks the CLI
+               *already dispatched* via MCP. Geny's Stage 10 (the
+               canonical Anthropic-API tool-dispatch stage) then sees
+               those ``tool_use`` blocks, looks up the
+               ``mcp__geny__<name>`` ids in Geny's own ToolLoader
+               (which only knows the bare names — the MCP prefix is
+               applied by the CLI, not Geny), finds nothing, and
+               surfaces "Tool X: ERROR (0ms) — No output" for every
+               call the user can plainly see succeeded (the worker
+               actually received the message, the worker actually
+               replied, the bridge log records ``tools/call`` traffic).
+
+               Per the Phase-I design doc — "Stage 10 receives that
+               assistant message, sees no ``tool_use`` blocks (they
+               were executed inside the CLI), and naturally no-ops"
+               — the canonical fix is to strip ``tool_use`` blocks
+               from the response before they reach Stage 10. Geny's
+               permission/audit telemetry for those calls flows via
+               the MCP bridge endpoint (cycle 20260519/Phase-2),
+               not through Stage 10, so this strip is lossless.
+            """
             err_holder: List[Dict[str, Any]] = []
 
             async def _spy() -> AsyncIterator[Any]:
@@ -392,6 +423,30 @@ def _install_assembler_error_patch() -> None:
                 raise RuntimeError(
                     _friendly_error_message_for_result_envelope(err_holder[-1])
                 )
+
+            # Fix B — strip already-dispatched ``tool_use`` blocks.
+            try:
+                content = getattr(response, "content", None)
+                if isinstance(content, list) and any(
+                    getattr(b, "type", None) == "tool_use" for b in content
+                ):
+                    filtered = [
+                        b for b in content if getattr(b, "type", None) != "tool_use"
+                    ]
+                    stripped = len(content) - len(filtered)
+                    response.content = filtered
+                    logger.info(
+                        "[llm_patches] stripped %d CLI-handled tool_use block(s) "
+                        "from claude_code response (Stage 10 no-ops)",
+                        stripped,
+                    )
+            except Exception:  # noqa: BLE001
+                # Strip is best-effort — never let it break the response.
+                logger.debug(
+                    "[llm_patches] tool_use strip skipped (response shape)",
+                    exc_info=True,
+                )
+
             return response
 
         setattr(_wrapped, _ASSEMBLER_PATCH_APPLIED_FLAG, True)
