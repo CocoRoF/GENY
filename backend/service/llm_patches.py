@@ -41,14 +41,32 @@ it alone.
 from __future__ import annotations
 
 import json
+import time
+from contextvars import ContextVar
 from logging import getLogger
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 logger = getLogger(__name__)
 
 
 _PATCH_APPLIED_FLAG = "_geny_verbose_patch_applied"
 _ASSEMBLER_PATCH_APPLIED_FLAG = "_geny_assembler_error_patch_applied"
+
+
+# Context variable carrying the active Geny ``SessionLogger`` so the
+# stream-observability monkey-patch on ``StreamJsonAccumulator`` can
+# emit ``log_tool_use`` / ``log_tool_result`` entries for *CLI-handled*
+# tools (Bash / Read / Write / Edit / …) without having to thread a
+# logger through the executor's LLM-client layer.
+#
+# ``agent_session.astream()`` / ``invoke()`` set this for the duration
+# of a turn; the accumulator's ``feed()`` (which the executor calls
+# concurrently inside the streaming code path) reads it. Default
+# ``None`` makes the patch a no-op when no Geny session context is
+# active — e.g. unit tests that drive the accumulator directly.
+cli_stream_logger_ctx: ContextVar[Optional[Any]] = ContextVar(
+    "geny_cli_stream_logger_ctx", default=None,
+)
 
 # Cached wrapper. Set on the first ``install_llm_patches()`` call so
 # subsequent installs re-use the same instance — matters because the
@@ -347,6 +365,13 @@ def install_llm_patches() -> None:
     # ``_install_stream_accumulator_patch`` for the rationale.
     _install_stream_accumulator_patch()
 
+    # Phase-I follow-up — surface CLI-handled tool calls (Bash /
+    # Read / Write / Edit / …) to the active Geny ``SessionLogger``
+    # via ``cli_stream_logger_ctx``. The strip patch above silences
+    # Stage 10, so without this companion patch CLI built-in tool
+    # work would simply not appear in the Geny session log.
+    _install_stream_observability_patch()
+
 
 # ── Stream-json error envelope detection ─────────────────────────────
 
@@ -600,3 +625,222 @@ def _install_stream_accumulator_patch() -> None:
         "[llm_patches] installed StreamJsonAccumulator.finalize "
         "tool_use strip patch (claude_code_cli ghost-error fix)"
     )
+
+
+# ── StreamJsonAccumulator observability: surface CLI built-ins ───────
+
+
+_OBSERVABILITY_PATCH_APPLIED_FLAG = "_geny_accumulator_observability_patch_applied"
+_cached_accumulator_init: Any = None
+_cached_accumulator_feed: Any = None
+
+
+def _install_stream_observability_patch() -> None:
+    """Monkey-patch ``StreamJsonAccumulator.feed`` so every CLI-handled
+    ``tool_use`` / ``tool_result`` block observed in the stream gets
+    surfaced to Geny's :class:`SessionLogger` via
+    :data:`cli_stream_logger_ctx`.
+
+    Why
+    ---
+    With PR #825's tool_use strip in ``finalize()``, Geny's Stage 10
+    naturally no-ops for ``claude_code_cli`` sessions — which means
+    the in-pipeline ``tool.call_start`` / ``tool.call_complete``
+    events never fire and CLI-handled tools (``Bash`` / ``Read`` /
+    ``Write`` / ``Edit`` / ``WebFetch`` / …) disappear from the
+    session log. ``mcp_bridge_controller`` already emits log entries
+    for MCP ``tools/call`` traffic (the bridge sees those directly),
+    so that surface is covered.
+
+    The remaining gap is the *CLI built-in* layer: tools the CLI
+    dispatches **internally** without going through our bridge. They
+    only show up in the stream-json output that the executor parses
+    via ``StreamJsonAccumulator`` — which is what this patch taps.
+
+    Mechanics
+    ---------
+    - On each ``feed(line)`` call, peek at the line *before* delegating
+      to the original feed.
+    - ``"assistant"`` envelopes carry ``tool_use`` blocks → emit
+      ``session_logger.log_tool_use`` for each, and stash
+      ``(name, monotonic_start)`` per ``tool_use_id`` so the matching
+      ``tool_result`` later can be timed.
+    - ``"user"`` envelopes carry ``tool_result`` blocks → look up the
+      stashed start time, compute ``duration_ms``, extract content
+      (CLI emits both string and ``content_block_text`` shapes here),
+      and emit ``log_tool_result``.
+    - Skip names starting with ``mcp__`` — those are MCP tools and
+      ``mcp_bridge_controller`` already logs them with more accurate
+      timing + actual dispatch outcome. Logging them again here would
+      double-render in the UI.
+    - All logger calls are try/except'd; observability must never
+      break the underlying tool dispatch.
+
+    No upstream executor changes required. When executor 2.0.6 adds
+    first-class CLI-tool observability events to the pipeline event
+    bus, we drop this patch.
+    """
+    import importlib
+
+    try:
+        cli_translator = importlib.import_module(
+            "geny_executor.llm_client.translators._cli"
+        )
+    except Exception:  # noqa: BLE001
+        return
+    accum_cls = getattr(cli_translator, "StreamJsonAccumulator", None)
+    if accum_cls is None:
+        return
+
+    if getattr(accum_cls, _OBSERVABILITY_PATCH_APPLIED_FLAG, False):
+        # Already patched in a prior install. Re-applying would
+        # double-stack the wrappers; bail.
+        return
+
+    original_init = accum_cls.__init__
+    original_feed = accum_cls.feed
+
+    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        # Per-instance side table: tool_use_id → (tool_name, monotonic_start).
+        # The accumulator is single-use (one per CLI invocation) so the
+        # table never spans turns; growth is bounded by the CLI's
+        # internal-loop turn count.
+        self._geny_obs_pending: Dict[str, Tuple[str, float]] = {}
+
+    def _patched_feed(self: Any, line: Any) -> Any:
+        events = original_feed(self, line)
+        # Best-effort observability — emit *after* the original feed
+        # so a parse error in the original surfaces unchanged.
+        try:
+            if isinstance(line, dict):
+                _maybe_emit_cli_tool_events(self, line)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[llm_patches] CLI observability emit failed (continuing)",
+                exc_info=True,
+            )
+        return events
+
+    accum_cls.__init__ = _patched_init
+    accum_cls.feed = _patched_feed
+    setattr(accum_cls, _OBSERVABILITY_PATCH_APPLIED_FLAG, True)
+
+    global _cached_accumulator_init, _cached_accumulator_feed
+    _cached_accumulator_init = _patched_init
+    _cached_accumulator_feed = _patched_feed
+
+    logger.info(
+        "[llm_patches] installed StreamJsonAccumulator observability "
+        "patch (CLI built-in tool calls now surface to session log)"
+    )
+
+
+def _maybe_emit_cli_tool_events(accum: Any, line: Dict[str, Any]) -> None:
+    """Inspect one stream-json line and emit ``log_tool_use`` /
+    ``log_tool_result`` on the active session logger as appropriate.
+
+    Pure observability — never mutates the accumulator's parsing state.
+    """
+    sl = cli_stream_logger_ctx.get()
+    if sl is None:
+        return  # No Geny session context — patch is inert.
+
+    ltype = str(line.get("type", ""))
+    if ltype not in ("assistant", "user"):
+        return
+
+    message = line.get("message")
+    if not isinstance(message, dict):
+        return
+    content = message.get("content")
+    if not isinstance(content, list):
+        return
+
+    pending: Dict[str, Tuple[str, float]] = getattr(
+        accum, "_geny_obs_pending", None,
+    ) or {}
+
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = str(block.get("type", ""))
+
+        # Assistant turn → record + log tool_use
+        if ltype == "assistant" and btype == "tool_use":
+            tu_id = str(block.get("id") or "")
+            tu_name = str(block.get("name") or "")
+            tu_input = block.get("input") or {}
+            if not tu_id or not tu_name:
+                continue
+            if tu_name.startswith("mcp__"):
+                # MCP tools are logged from the bridge controller —
+                # avoid double-render in the UI.
+                continue
+            if tu_id in pending:
+                # Already saw this tool_use — duplicate envelope, skip.
+                continue
+            pending[tu_id] = (tu_name, time.monotonic())
+            try:
+                sl.log_tool_use(
+                    tool_name=tu_name,
+                    tool_input=tu_input if isinstance(tu_input, dict) else {},
+                    tool_id=tu_id,
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[llm_patches] log_tool_use failed for %s", tu_name,
+                    exc_info=True,
+                )
+
+        # User turn (tool_result) → look up pending, emit result
+        elif ltype == "user" and btype == "tool_result":
+            tu_id = str(block.get("tool_use_id") or "")
+            if not tu_id:
+                continue
+            entry = pending.pop(tu_id, None)
+            if entry is None:
+                # Saw a result without a matching prior tool_use.
+                # Either we skipped the tool_use (e.g. mcp__ prefix)
+                # or the CLI emitted out of order; either way silently
+                # ignore — the matching log_tool_use already happened
+                # in the bridge for the MCP case.
+                continue
+            tu_name, start_time = entry
+            # Result content can be a plain string OR a list of
+            # ``{"type":"text"|"image"|…, "text": ...}`` blocks.
+            raw_result = block.get("content")
+            if isinstance(raw_result, list):
+                parts: List[str] = []
+                for c in raw_result:
+                    if isinstance(c, dict) and c.get("type") == "text":
+                        parts.append(str(c.get("text", "")))
+                    elif isinstance(c, dict):
+                        parts.append(json.dumps(c, ensure_ascii=False))
+                    else:
+                        parts.append(str(c))
+                result_text: Optional[str] = "\n".join(parts) if parts else None
+            elif isinstance(raw_result, str):
+                result_text = raw_result
+            elif raw_result is None:
+                result_text = None
+            else:
+                try:
+                    result_text = json.dumps(raw_result, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    result_text = str(raw_result)
+            is_error = bool(block.get("is_error", False))
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            try:
+                sl.log_tool_result(
+                    tool_name=tu_name,
+                    tool_id=tu_id,
+                    result=result_text,
+                    is_error=is_error,
+                    duration_ms=duration_ms,
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[llm_patches] log_tool_result failed for %s", tu_name,
+                    exc_info=True,
+                )
