@@ -130,7 +130,7 @@ def _patched_argv(
     *,
     has_api_key: Optional[bool] = None,
 ) -> List[str]:
-    """Return a transformed argv applying two independent fixes:
+    """Return a transformed argv applying three independent fixes:
 
       A. ``--verbose`` injection — required after ``--print
          --output-format stream-json`` for CLI ≥ 2.1.x. See the
@@ -153,6 +153,21 @@ def _patched_argv(
          When *has_api_key* is None (caller didn't tell us), we
          detect via ``os.environ`` as a fall-back.
 
+      C. ``--tools ""`` stripping (Phase-I follow-up) — executor 2.0.5
+         auto-emits ``--tools ""`` whenever ``--mcp-config`` is set
+         and no ``allow_tools`` was supplied, which disables the CLI's
+         entire built-in palette (Bash / Read / Write / Edit / Glob /
+         Grep / TodoWrite / WebFetch / WebSearch / etc.). For Geny we
+         want the *opposite*: CLI built-ins available alongside our
+         MCP-wrapped Geny tools, so the Sub-Worker can actually edit
+         files / run shell / browse the web. The CLI's permission
+         system gates each call, and Geny pre-allows the safe set via
+         the synthesised ``settings.json`` (see
+         ``credentials.py:_build_claude_code``). Stripping the
+         ``["--tools", ""]`` pair restores CLI defaults; the
+         ``--strict-mcp-config`` flag remains in argv so the *MCP*
+         surface stays scoped to our session bridge.
+
     Pure function — handy for tests.
     """
     new_argv = list(original_argv)
@@ -163,6 +178,19 @@ def _patched_argv(
         has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
     if not has_api_key:
         new_argv = [arg for arg in new_argv if arg != "--bare"]
+
+    # ── Fix C: drop ``--tools ""`` pair so CLI built-ins remain on ──
+    cleaned: List[str] = []
+    skip_next = False
+    for i, arg in enumerate(new_argv):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--tools" and (i + 1) < len(new_argv) and new_argv[i + 1] == "":
+            skip_next = True
+            continue
+        cleaned.append(arg)
+    new_argv = cleaned
 
     # ── Fix A: inject --verbose for stream-json output ──────────────
     if "--verbose" in new_argv:
@@ -314,6 +342,11 @@ def install_llm_patches() -> None:
     # expired hint.
     _install_assembler_error_patch()
 
+    # Phase-I ghost-error fix — strip tool_use blocks from the
+    # ``StreamJsonAccumulator`` final response. See
+    # ``_install_stream_accumulator_patch`` for the rationale.
+    _install_stream_accumulator_patch()
+
 
 # ── Stream-json error envelope detection ─────────────────────────────
 
@@ -424,28 +457,11 @@ def _install_assembler_error_patch() -> None:
                     _friendly_error_message_for_result_envelope(err_holder[-1])
                 )
 
-            # Fix B — strip already-dispatched ``tool_use`` blocks.
-            try:
-                content = getattr(response, "content", None)
-                if isinstance(content, list) and any(
-                    getattr(b, "type", None) == "tool_use" for b in content
-                ):
-                    filtered = [
-                        b for b in content if getattr(b, "type", None) != "tool_use"
-                    ]
-                    stripped = len(content) - len(filtered)
-                    response.content = filtered
-                    logger.info(
-                        "[llm_patches] stripped %d CLI-handled tool_use block(s) "
-                        "from claude_code response (Stage 10 no-ops)",
-                        stripped,
-                    )
-            except Exception:  # noqa: BLE001
-                # Strip is best-effort — never let it break the response.
-                logger.debug(
-                    "[llm_patches] tool_use strip skipped (response shape)",
-                    exc_info=True,
-                )
+            # Note: the equivalent tool_use strip lives in
+            # ``_install_stream_accumulator_patch`` because the actual
+            # streaming code path (``ClaudeCodeCLIClient._stream``)
+            # bypasses this assembler entirely and calls
+            # ``StreamJsonAccumulator.finalize`` directly.
 
             return response
 
@@ -470,3 +486,117 @@ def _install_assembler_error_patch() -> None:
             "across %d modules: %s",
             len(patched), ", ".join(patched),
         )
+
+
+# ── StreamJsonAccumulator finalize: strip CLI-handled tool_use ──────
+
+
+_ACCUMULATOR_PATCH_APPLIED_FLAG = "_geny_accumulator_strip_patch_applied"
+_cached_accumulator_finalize: Any = None
+
+
+def _install_stream_accumulator_patch() -> None:
+    """Monkey-patch ``StreamJsonAccumulator.finalize`` so the final
+    :class:`APIResponse` returned to Stage 6 carries **no**
+    ``tool_use`` blocks for the Claude Code CLI streaming path.
+
+    Why this lives in Geny rather than the executor
+    -----------------------------------------------
+    Claude Code CLI 2.1.x runs the whole agentic loop *internally*
+    (LLM → tool → LLM → tool → …). Every intermediate assistant turn
+    arrives as its own ``{"type":"assistant","message":{...}}``
+    envelope in stream-json, and ``StreamJsonAccumulator._feed_message``
+    appends every block from every envelope into a shared buffer with
+    no per-turn reset. ``finalize()`` therefore returns an
+    ``APIResponse`` whose ``content`` carries every ``tool_use`` block
+    the CLI *already dispatched* via MCP or its own built-ins.
+
+    Geny's downstream pipeline (Stage 9 parse → Stage 10 dispatch)
+    treats those ``tool_use`` blocks as *pending* and tries to
+    redispatch them against Geny's own tool registry — but the CLI
+    advertises MCP tools with the ``mcp__geny__<name>`` prefix that
+    Geny's registry doesn't know, so every call instantly fails with
+    ``ERROR (0ms) — No output``. Meanwhile the actual tool work
+    already succeeded via the MCP bridge: every Sub-Worker message
+    was delivered, every memory_write persisted, every browser_*
+    call dispatched. The user sees both a successful final reply
+    *and* a session log full of bogus failures — confusing,
+    operationally noisy, and capable of nudging the LLM itself into
+    apologising mid-conversation ("messaging tool not connected").
+
+    Per the Phase-I design doc:
+
+        Stage 10 receives that assistant message, sees no ``tool_use``
+        blocks (they were executed inside the CLI), and naturally
+        no-ops.
+
+    The accumulator's append-everything behaviour violates that
+    contract. Stripping ``tool_use`` from ``finalize()`` restores it.
+    Phase-2 audit/telemetry for those calls flows through the MCP
+    bridge endpoint, so the strip is lossless — Geny's
+    ``mcp_bridge_controller`` is already where ``tools/call`` events
+    are recorded.
+
+    A future executor 2.0.6 should encode this directly (per-turn
+    buffer reset, or skip ``tool_use`` on the claude_code_cli path);
+    when that lands we drop this patch.
+    """
+    import importlib
+
+    try:
+        cli_translator = importlib.import_module(
+            "geny_executor.llm_client.translators._cli"
+        )
+    except Exception:  # noqa: BLE001
+        return
+    accum_cls = getattr(cli_translator, "StreamJsonAccumulator", None)
+    if accum_cls is None:
+        return
+
+    original = getattr(accum_cls, "finalize", None)
+    if original is None:
+        return
+
+    # Unwrap stale wrappers so we don't double-stack across reloads.
+    while getattr(original, _ACCUMULATOR_PATCH_APPLIED_FLAG, False):
+        inner = getattr(original, "_original", None)
+        if inner is None:
+            break
+        original = inner
+
+    global _cached_accumulator_finalize
+    if _cached_accumulator_finalize is None:
+        def _wrapped(self: Any) -> Any:
+            response = original(self)
+            try:
+                content = getattr(response, "content", None)
+                if isinstance(content, list):
+                    filtered = [
+                        b for b in content
+                        if getattr(b, "type", None) != "tool_use"
+                    ]
+                    stripped = len(content) - len(filtered)
+                    if stripped:
+                        response.content = filtered
+                        logger.info(
+                            "[llm_patches] stripped %d CLI-handled "
+                            "tool_use block(s) from claude_code stream "
+                            "response (Stage 10 no-ops)",
+                            stripped,
+                        )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[llm_patches] accumulator finalize strip skipped",
+                    exc_info=True,
+                )
+            return response
+
+        setattr(_wrapped, _ACCUMULATOR_PATCH_APPLIED_FLAG, True)
+        setattr(_wrapped, "_original", original)
+        _cached_accumulator_finalize = _wrapped
+
+    setattr(accum_cls, "finalize", _cached_accumulator_finalize)
+    logger.info(
+        "[llm_patches] installed StreamJsonAccumulator.finalize "
+        "tool_use strip patch (claude_code_cli ghost-error fix)"
+    )

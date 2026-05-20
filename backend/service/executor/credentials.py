@@ -264,8 +264,47 @@ class CredentialBundleBuilder:
             # to ``--settings <file-or-json>`` unchanged, and the CLI
             # auto-detects file vs inline JSON).
             if not extras.get("settings_path"):
+                # ``mcp__geny`` matches every tool advertised by our
+                # bridge (the CLI normalises MCP tool names to
+                # ``mcp__<server>__<tool>``). The bare names below
+                # cover the Claude Code CLI's safe built-in palette
+                # — Sub-Worker sessions in particular need
+                # ``Bash`` / ``Read`` / ``Write`` / ``Edit`` to do
+                # actual file work; without them in the allow-list,
+                # the CLI's ``--print`` mode (which can't prompt a
+                # human) blocks every call and the LLM apologises
+                # mid-conversation ("messaging tool not connected").
+                #
+                # Entries are documented per claude-code's settings
+                # schema: bare ``Tool`` = allow all invocations of
+                # that tool; ``Tool(pattern)`` = pattern-restricted.
+                # We intentionally do NOT list destructive system
+                # tools (``KillBash``, ``WebSearch`` is fine —
+                # ``Bash(rm *)`` would be the dangerous one and is
+                # implicitly disallowed by listing only ``Bash``).
+                _ALLOWED_CLI_BUILTINS = [
+                    # MCP surface — every Geny tool the bridge exposes
+                    "mcp__geny",
+                    # File ops
+                    "Read", "Write", "Edit", "MultiEdit",
+                    "NotebookEdit",
+                    # Filesystem search
+                    "Glob", "Grep",
+                    # Shell
+                    "Bash",
+                    # Planning / structured work
+                    "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+                    # Web
+                    "WebFetch", "WebSearch",
+                    # Meta / orchestration
+                    "Skill", "Agent", "AgentSearch", "ToolSearch",
+                    "Monitor", "TaskOutput", "TaskStop",
+                    # User interaction
+                    "AskUserQuestion", "PushNotification",
+                    "ScheduleWakeup", "RemoteTrigger",
+                ]
                 extras["settings_path"] = json.dumps(
-                    {"permissions": {"allow": ["mcp__geny"]}}
+                    {"permissions": {"allow": _ALLOWED_CLI_BUILTINS}}
                 )
         elif claude_cli.mcp_config_path:
             extras["mcp_config"] = claude_cli.mcp_config_path

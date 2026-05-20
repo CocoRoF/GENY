@@ -331,6 +331,41 @@ async def mcp_rpc(
             return JsonRpcResponse(
                 id=request.id, error=_err(-32602, "missing tool name"),
             )
+
+        # Tool display in Geny session log. Geny's Stage 10 no-ops for
+        # claude_code_cli sessions (the executor's accumulator strip
+        # in ``llm_patches.py`` removes ``tool_use`` blocks so the
+        # downstream pipeline doesn't re-dispatch CLI-handled tools);
+        # without an explicit emit here the session log would be
+        # silent about the actual tool work the CLI does via MCP.
+        # Emitting from the bridge keeps the display semantically
+        # correct — the tool DID dispatch from this entry point with
+        # exactly these arguments — and ties the success/failure
+        # marker to the *real* outcome of the dispatch instead of
+        # Stage 10's ghost dispatch attempt.
+        display_tool_name = f"mcp__geny__{name}"
+        _log = None
+        try:
+            from service.logging.session_logger import get_session_logger
+
+            _log = get_session_logger(session_id, create_if_missing=False)
+            if _log is not None:
+                _log.log_tool_use(
+                    tool_name=display_tool_name,
+                    tool_input=arguments if isinstance(arguments, dict) else {},
+                    tool_id=str(request.id) if request.id is not None else None,
+                )
+        except Exception:  # noqa: BLE001
+            # Logging must never break dispatch — but record at debug
+            # level so misconfiguration shows up in operator logs.
+            logger.debug(
+                "mcp_bridge: session_logger.log_tool_use failed for %s",
+                display_tool_name, exc_info=True,
+            )
+            _log = None
+
+        import time as _time
+        _t0 = _time.monotonic()
         try:
             result = await _execute_tool(session_id, name, arguments)
         except HTTPException:
@@ -339,7 +374,48 @@ async def mcp_rpc(
             logger.error(
                 "mcp_bridge: tools/call '%s' failed: %s", name, exc, exc_info=True,
             )
+            if _log is not None:
+                try:
+                    _log.log_tool_result(
+                        tool_name=display_tool_name,
+                        tool_id=str(request.id) if request.id is not None else None,
+                        result=str(exc)[:500],
+                        is_error=True,
+                        duration_ms=int((_time.monotonic() - _t0) * 1000),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             return JsonRpcResponse(id=request.id, error=_err(-32603, str(exc)))
+
+        # Surface the tool result to the session log so the UI shows
+        # success + duration + a short content preview, mirroring how
+        # the Anthropic API path renders Stage 10 dispatches.
+        if _log is not None:
+            try:
+                _result_text = None
+                if isinstance(result, dict):
+                    is_error_flag = bool(result.get("isError", False))
+                    contents = result.get("content") or []
+                    if isinstance(contents, list):
+                        for c in contents:
+                            if isinstance(c, dict) and c.get("type") == "text":
+                                _result_text = str(c.get("text", ""))
+                                break
+                else:
+                    is_error_flag = False
+                _log.log_tool_result(
+                    tool_name=display_tool_name,
+                    tool_id=str(request.id) if request.id is not None else None,
+                    result=_result_text,
+                    is_error=is_error_flag,
+                    duration_ms=int((_time.monotonic() - _t0) * 1000),
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "mcp_bridge: session_logger.log_tool_result failed for %s",
+                    display_tool_name, exc_info=True,
+                )
+
         return JsonRpcResponse(id=request.id, result=result)
 
     return JsonRpcResponse(
