@@ -39,6 +39,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
 )
 
 from service.sessions.models import (
@@ -173,6 +174,33 @@ def _apply_attention_recovery(buf: Any) -> None:
 # ============================================================================
 # AgentSession Class
 # ============================================================================
+
+
+def _extract_executor_error_meta(exc: BaseException) -> Tuple[Optional[str], str]:
+    """Pull the structured ``ExecutorErrorCode`` value off an executor
+    exception, returning ``(code_str, exception_type_str)``.
+
+    ``code_str`` is ``None`` when the exception isn't a
+    :class:`GenyExecutorError` subclass (e.g. raw ``RuntimeError`` /
+    ``ValueError`` slipped past). ``exception_type_str`` is the fully
+    qualified class name and is always populated.
+
+    Defensive on the import — the executor pin is ``>=2.1.0`` but a
+    plain string fallback keeps the catch-block robust against future
+    refactors.
+    """
+    exc_type = f"{type(exc).__module__}.{type(exc).__name__}"
+    code_str: Optional[str] = None
+    try:
+        from geny_executor import GenyExecutorError  # noqa: WPS433 — lazy import
+
+        if isinstance(exc, GenyExecutorError):
+            code_attr = getattr(exc, "code", None)
+            if code_attr is not None:
+                code_str = getattr(code_attr, "value", str(code_attr))
+    except Exception:  # noqa: BLE001 — diagnostics must never crash the catch block
+        pass
+    return code_str, exc_type
 
 
 _DEFAULT_WORKER_PROMPT = """\
@@ -395,6 +423,14 @@ class AgentSession:
         # Execution state
         self._initialized = False
         self._error_message: Optional[str] = None
+        # Last error's structured code (since executor 2.1.0).
+        # ``GenyExecutorError.code.value`` (e.g. ``"exec.cli.auth_failed"``)
+        # when the surfaced exception was one the executor classified;
+        # ``None`` for plain ``RuntimeError`` / ``ValueError``. Surfaces
+        # via the SSE error payload and the session-status API so the
+        # frontend can render via i18n key (``executor.<code>``) instead
+        # of the raw English message.
+        self._error_code: Optional[str] = None
         self._current_iteration: int = 0
         self._execution_count: int = 0
         self._execution_start_time: Optional[datetime] = None
@@ -3609,9 +3645,21 @@ class AgentSession:
             self._execution_start_time = datetime.now()
             self._status = SessionStatus.RUNNING
             self._error_message = str(e)
-            logger.exception(f"[{self._session_id}] Error during invoke: {e}")
+            err_code, err_type = _extract_executor_error_meta(e)
+            self._error_code = err_code
+            logger.exception(
+                f"[{self._session_id}] Error during invoke: {e} "
+                f"(code={err_code or 'n/a'} type={err_type})"
+            )
 
             if session_logger:
+                session_logger.log_stage_error(
+                    stage_name="invoke",
+                    error=str(e),
+                    iteration=self._current_iteration,
+                    error_code=err_code,
+                    exception_type=err_type,
+                )
                 session_logger.log_stage_execution_complete(
                     success=False,
                     total_iterations=self._current_iteration,
@@ -3696,7 +3744,12 @@ class AgentSession:
                 yield event
         except Exception as e:
             self._error_message = str(e)
-            logger.exception(f"[{self._session_id}] Error during astream: {e}")
+            err_code, err_type = _extract_executor_error_meta(e)
+            self._error_code = err_code
+            logger.exception(
+                f"[{self._session_id}] Error during astream: {e} "
+                f"(code={err_code or 'n/a'} type={err_type})"
+            )
 
             duration_ms = int((time.time() - start_time) * 1000)
             if session_logger:
@@ -3704,7 +3757,8 @@ class AgentSession:
                     error_message=str(e),
                     node_name="astream",
                     iteration=self._current_iteration,
-                    error_type=type(e).__name__,
+                    error_type=err_type,
+                    error_code=err_code,
                 )
                 session_logger.log_stage_execution_complete(
                     success=False,
@@ -3822,6 +3876,7 @@ class AgentSession:
             created_at=self._created_at,
             pid=None,
             error_message=self._error_message,
+            error_code=self._error_code,
             model=effective_model,
             max_turns=self._max_turns,
             timeout=self._timeout,
