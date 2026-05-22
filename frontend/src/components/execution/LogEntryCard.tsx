@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { LogEntry, LogEntryMetadata } from '@/types';
+import { useI18n } from '@/lib/i18n';
 import {
   Terminal,
   Wrench,
@@ -49,8 +50,27 @@ function formatTimestamp(ts: string): string {
 }
 
 // ── Structured description for an entry ──
-function getEntryDescription(entry: LogEntry): string {
+type Translator = (key: string, vars?: Record<string, string | number>) => string;
+
+function getEntryDescription(entry: LogEntry, t: Translator): string {
   const meta = entry.metadata as LogEntryMetadata | undefined;
+
+  // Executor error code → i18n key (since executor 2.1.0). Every
+  // ``GenyExecutorError`` carries a stable ``exec.<component>.<reason>``
+  // identifier that agent_executor stashes on response / stage_error
+  // metadata. The i18n source's ``executor`` namespace stores codes
+  // with dots converted to underscores (``exec.cli.auth_failed`` →
+  // ``exec_cli_auth_failed``) because ``getByPath`` splits keys on
+  // dots — the underscore form keeps each code as a single flat
+  // namespace entry. When the code has no translation yet (forward
+  // compatibility — new executor codes), fall back to the raw
+  // message body.
+  if (meta?.error_code) {
+    const i18nSafe = meta.error_code.replace(/\./g, '_');
+    const key = `executor.${i18nSafe}`;
+    const rendered = t(key);
+    if (rendered !== key) return rendered;
+  }
 
   if (entry.level === 'TOOL' && meta?.tool_name) {
     if (meta.file_changes) {
@@ -166,10 +186,11 @@ export interface LogEntryCardProps {
 }
 
 export default function LogEntryCard({ entry, isSelected, onClick }: LogEntryCardProps) {
+  const { t } = useI18n();
   const config = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.DEBUG;
   const Icon = config.icon;
   const meta = entry.metadata as LogEntryMetadata | undefined;
-  const description = useMemo(() => getEntryDescription(entry), [entry]);
+  const description = useMemo(() => getEntryDescription(entry, t), [entry, t]);
   // Any entry that carries either a non-trivial message body or rich
   // metadata is worth opening in the detail panel. INFO / WARNING
   // were historically excluded which made delegation events like

@@ -255,6 +255,64 @@ const en = {
     restoredCount: 'Restored ({count} msgs)',
   },
 
+  // ─── Executor error codes (since geny-executor 2.1.0) ───
+  // Stable ``exec.<component>.<reason>`` identifiers from
+  // ``ExecutorErrorCode`` flow through agent_executor onto log
+  // metadata as ``error_code``. Frontend strips dots → underscores
+  // for ``getByPath`` traversal (see LogEntryCard.getEntryDescription).
+  // Keys here MUST exactly mirror the executor's enum values with
+  // ``.`` → ``_``. Full taxonomy: ``geny-executor/docs/error_codes.md``.
+  executor: {
+    // exec.api.* — vendor API surface
+    exec_api_auth_invalid_key: 'The API key is missing or invalid. Open Settings → LLM Backends and paste a valid key.',
+    exec_api_auth_expired: 'The API credential has expired. Re-issue or refresh it in Settings → LLM Backends.',
+    exec_api_rate_limited: 'The vendor is rate-limiting your account. The executor will retry shortly.',
+    exec_api_timeout: 'The request timed out. The executor will retry.',
+    exec_api_network: 'A network error blocked the request. The executor will retry.',
+    exec_api_token_limit: 'The prompt exceeded the model\'s context window. Shorten the conversation or pick a larger-window model.',
+    exec_api_bad_request: 'The vendor rejected the request shape. Likely a bug — please report it with the session id.',
+    exec_api_server_error: 'The vendor returned a server error (5xx). The executor will retry.',
+    exec_api_terminal: 'The vendor declared the request unprocessable (often policy / content block). Don\'t retry.',
+    exec_api_unknown: 'An unclassified API error occurred. See logs for the original message.',
+    exec_api_no_client: 'No LLM client is wired into the pipeline. Configure the provider in Settings → LLM Backends.',
+    exec_api_stream_incomplete: 'The provider stream ended without a final response. Usually a vendor / network issue — retry.',
+    exec_api_retry_exhausted: 'Hit the retry limit after a recoverable error. See logs for the original failure.',
+
+    // exec.cli.* — CLI-driven backends (claude_code_cli)
+    exec_cli_binary_not_found: 'The CLI binary (e.g. `claude`) is not on PATH. Install the CLI or set the binary path in Settings → LLM Backends.',
+    exec_cli_auth_failed: 'Claude Code CLI is not authenticated. Open Settings → LLM Backends → Claude Code (CLI) and sign in (or paste an `ANTHROPIC_API_KEY`).',
+    exec_cli_timeout: 'The CLI did not return within the configured timeout. Retry, and consider raising the timeout for long tasks.',
+    exec_cli_protocol_error: 'The CLI emitted malformed stream output. The executor will retry; report if it persists.',
+    exec_cli_permission_denied: 'The CLI\'s permission system blocked the call. Adjust the `permissions.allow` list in the spawned settings.',
+    exec_cli_exited: 'The CLI exited with a non-zero return code. Inspect the chained cause in the logs.',
+
+    // exec.pipeline.* / exec.stage.*
+    exec_pipeline_not_initialized: 'The pipeline was used before being built. Call `Pipeline.from_manifest_async(...)` or the equivalent builder first.',
+    exec_pipeline_invalid_manifest: 'The environment manifest failed schema validation. Check the manifest JSON.',
+    exec_stage_failed: 'A pipeline stage raised. See the chained cause in the logs.',
+    exec_stage_guard_rejected: 'A safety guard refused execution (budget / cost / iteration / permission). Loosen the guard or shrink the workload.',
+
+    // exec.tool.*
+    exec_tool_unknown: 'The LLM tried to call a tool that isn\'t registered. Usually a hallucination or a stale registry.',
+    exec_tool_invalid_input: 'The tool input failed schema validation.',
+    exec_tool_access_denied: 'The session\'s tool binding disallows this tool.',
+    exec_tool_crashed: 'The tool raised an unexpected exception during execution.',
+    exec_tool_transport: 'An MCP adapter / RPC transport failure during tool dispatch.',
+
+    // exec.mutation.*
+    exec_mutation_invalid: 'The runtime config mutation was rejected (bad stage / slot / impl).',
+    exec_mutation_locked: 'The target stage is currently executing; try again after it exits.',
+
+    // exec.mcp.*
+    exec_mcp_connect_failed: 'Could not reach the MCP server (transport / process spawn / handshake).',
+    exec_mcp_initialize_failed: 'The MCP server\'s `initialize` handshake failed.',
+    exec_mcp_list_tools_failed: 'The MCP server\'s `tools/list` errored after initialize.',
+    exec_mcp_sdk_missing: 'The MCP SDK is not installed in the host\'s environment.',
+
+    // exec.unknown
+    exec_unknown: 'An unclassified error occurred. See logs for the original message.',
+  } as Record<string, string>,
+
   // ─── HITL approval modal (Stage 15) ───
   hitl: {
     modalTitle: 'Approval required',

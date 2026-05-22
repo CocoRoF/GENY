@@ -255,6 +255,64 @@ const ko: Translations = {
     restoredCount: '복원됨 ({count}개 메시지)',
   },
 
+  // ─── Executor 에러 코드 (geny-executor 2.1.0+) ───
+  // 안정된 ``exec.<component>.<reason>`` 식별자가 ``ExecutorErrorCode``
+  // 에서 agent_executor 를 거쳐 log metadata 의 ``error_code`` 로
+  // 흐릅니다. 프론트엔드는 ``.`` → ``_`` 로 변환해 ``getByPath`` 탐색이
+  // 가능하도록 합니다 (LogEntryCard.getEntryDescription 참조). 여기
+  // 키들은 executor enum 값과 ``.`` → ``_`` 만 다른 1:1 매핑이어야
+  // 합니다. 전체 분류: ``geny-executor/docs/error_codes.md``.
+  executor: {
+    // exec.api.* — 벤더 API 표면
+    exec_api_auth_invalid_key: 'API 키가 없거나 잘못됐어요. 설정 → LLM 백엔드에서 유효한 키를 붙여넣어 주세요.',
+    exec_api_auth_expired: 'API 자격증명이 만료됐어요. 설정 → LLM 백엔드에서 갱신해 주세요.',
+    exec_api_rate_limited: '벤더가 요청 빈도를 제한하고 있어요. 잠시 후 자동 재시도합니다.',
+    exec_api_timeout: '요청이 시간 초과됐어요. 자동 재시도합니다.',
+    exec_api_network: '네트워크 오류로 요청이 막혔어요. 자동 재시도합니다.',
+    exec_api_token_limit: '프롬프트가 모델의 컨텍스트 윈도우를 초과했어요. 대화를 줄이거나 더 큰 모델을 선택해 주세요.',
+    exec_api_bad_request: '벤더가 요청 형식을 거부했어요. 버그일 가능성이 큽니다 — 세션 id와 함께 제보해 주세요.',
+    exec_api_server_error: '벤더가 서버 에러(5xx)를 반환했어요. 자동 재시도합니다.',
+    exec_api_terminal: '벤더가 처리 불가능하다고 선언했어요(주로 정책/콘텐츠 차단). 재시도하지 않습니다.',
+    exec_api_unknown: '분류되지 않은 API 에러입니다. 원본 메시지는 로그를 확인해 주세요.',
+    exec_api_no_client: '파이프라인에 LLM 클라이언트가 연결되지 않았어요. 설정 → LLM 백엔드에서 provider 를 구성해 주세요.',
+    exec_api_stream_incomplete: '응답 스트림이 최종 응답 없이 종료됐어요. 보통 벤더/네트워크 문제 — 재시도해 주세요.',
+    exec_api_retry_exhausted: '복구 가능한 에러였지만 재시도 한도를 초과했어요. 원인은 로그를 확인해 주세요.',
+
+    // exec.cli.* — CLI 기반 backend (claude_code_cli)
+    exec_cli_binary_not_found: 'CLI 바이너리(예: `claude`)가 PATH 에 없어요. CLI 를 설치하거나 설정 → LLM 백엔드에서 바이너리 경로를 지정해 주세요.',
+    exec_cli_auth_failed: 'Claude Code CLI 인증이 만료됐어요. 설정 → LLM 백엔드 → Claude Code (CLI) 카드의 ‘다시 로그인’을 누르거나 `ANTHROPIC_API_KEY` 를 붙여넣어 주세요.',
+    exec_cli_timeout: 'CLI 가 설정된 시간 내에 응답하지 않았어요. 재시도하시거나 긴 작업이라면 timeout 값을 늘려주세요.',
+    exec_cli_protocol_error: 'CLI 가 잘못된 stream 출력을 내보냈어요. 자동 재시도합니다. 계속되면 제보해 주세요.',
+    exec_cli_permission_denied: 'CLI 의 권한 시스템이 호출을 차단했어요. spawned settings 의 `permissions.allow` 목록을 조정해 주세요.',
+    exec_cli_exited: 'CLI 가 비정상 종료 코드로 종료됐어요. 원인은 로그의 cause chain 확인.',
+
+    // exec.pipeline.* / exec.stage.*
+    exec_pipeline_not_initialized: '파이프라인이 빌드되기 전에 사용됐어요. `Pipeline.from_manifest_async(...)` 또는 builder 를 먼저 호출해 주세요.',
+    exec_pipeline_invalid_manifest: '환경 manifest 가 스키마 검증에 실패했어요. manifest JSON 을 확인해 주세요.',
+    exec_stage_failed: '파이프라인 stage 가 실패했어요. 원인은 로그의 cause chain 확인.',
+    exec_stage_guard_rejected: '안전 가드가 실행을 거부했어요(budget / cost / iteration / permission). 가드를 완화하거나 작업량을 줄여주세요.',
+
+    // exec.tool.*
+    exec_tool_unknown: 'LLM 이 등록되지 않은 tool 을 호출하려 했어요. hallucination 이거나 registry 가 오래됐을 가능성.',
+    exec_tool_invalid_input: 'Tool 입력이 schema 검증에 실패했어요.',
+    exec_tool_access_denied: '이 세션의 tool binding 은 해당 tool 을 허용하지 않아요.',
+    exec_tool_crashed: 'Tool 실행 중 예외가 발생했어요.',
+    exec_tool_transport: 'MCP 어댑터/RPC transport 실패로 tool dispatch 가 실패했어요.',
+
+    // exec.mutation.*
+    exec_mutation_invalid: '런타임 config mutation 이 거부됐어요(잘못된 stage/slot/impl).',
+    exec_mutation_locked: '대상 stage 가 실행 중이라 mutation 이 막혔어요. 종료 후 재시도해 주세요.',
+
+    // exec.mcp.*
+    exec_mcp_connect_failed: 'MCP 서버에 연결하지 못했어요(transport/프로세스 spawn/handshake).',
+    exec_mcp_initialize_failed: 'MCP 서버의 `initialize` handshake 가 실패했어요.',
+    exec_mcp_list_tools_failed: 'MCP 서버의 `tools/list` 가 initialize 이후 실패했어요.',
+    exec_mcp_sdk_missing: '호스트 환경에 MCP SDK 가 설치돼 있지 않아요.',
+
+    // exec.unknown
+    exec_unknown: '분류되지 않은 에러입니다. 원본 메시지는 로그를 확인해 주세요.',
+  } as Record<string, string>,
+
   // ─── HITL 승인 모달 (Stage 15) ───
   hitl: {
     modalTitle: '승인 필요',

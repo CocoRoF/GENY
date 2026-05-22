@@ -401,6 +401,16 @@ export interface LogEntryMetadata {
   command_data?: CommandData;
   file_read?: FileReadData;
 
+  // Executor error code (since executor 2.1.0). Carries the stable
+  // ``exec.<component>.<reason>`` identifier so the UI can render the
+  // error via i18n key (``executor.<code>``) instead of the raw
+  // English message text. Also surfaces on response-type entries and
+  // stage_error events.
+  error_code?: string;
+  // Fully-qualified exception class for Sentry / log grouping when no
+  // structured code is attached.
+  exception_type?: string;
+
   // Catch-all
   [key: string]: unknown;
 }

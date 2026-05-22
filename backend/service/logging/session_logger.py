@@ -402,6 +402,8 @@ class SessionLogger:
         num_turns: Optional[int] = None,
         env_id: Optional[str] = None,
         role: Optional[str] = None,
+        error_code: Optional[str] = None,
+        exception_type: Optional[str] = None,
     ):
         """
         Log a response from Claude.
@@ -418,6 +420,15 @@ class SessionLogger:
                 ``log_command`` so every per-turn entry carries the
                 same context.
             role: Session role string.
+            error_code: Structured executor code (executor 2.1.0+)
+                — ``"exec.cli.auth_failed"`` etc. Surfaces in the SSE
+                payload so the frontend can render via i18n key
+                (``executor.<code>``) instead of the raw English
+                ``error`` text.
+            exception_type: Fully-qualified exception class
+                (``"geny_executor.core.errors.APIError"``) for
+                downstream Sentry / log-aggregator grouping when no
+                structured code is available.
         """
         # Store full message for log file
         output_length = len(output) if output else 0
@@ -436,6 +447,8 @@ class SessionLogger:
             "num_turns": num_turns,
             "env_id": env_id,
             "role": role,
+            "error_code": error_code,
+            "exception_type": exception_type,
         }
         # Remove None values
         metadata = {k: v for k, v in metadata.items() if v is not None}
@@ -938,11 +951,30 @@ class SessionLogger:
         *,
         stage_order: Optional[int] = None,
         iteration: int = 0,
+        error_code: Optional[str] = None,
+        exception_type: Optional[str] = None,
     ) -> str:
-        """Log a stage that raised. Recovery may still follow."""
+        """Log a stage that raised. Recovery may still follow.
+
+        ``error_code`` carries the structured :class:`ExecutorErrorCode`
+        identifier (since executor 2.1.0) the host extracted from the
+        underlying exception. Optional — when present it flows through
+        the cache + the SSE payload's ``metadata.data`` field so the
+        frontend can render via i18n key (``executor.<code>``) instead
+        of the raw English message.
+
+        ``exception_type`` is the fully-qualified exception class
+        (``"geny_executor.core.errors.APIError"``) for downstream
+        Sentry / log-aggregator grouping when a code isn't available.
+        """
         display = stage_display_name(stage_name, stage_order)
         short = (error or "")[:200]
         message = f"✗ {display}: {short}"
+        data: Dict[str, Any] = {"error": error}
+        if error_code:
+            data["error_code"] = error_code
+        if exception_type:
+            data["exception_type"] = exception_type
         return self.log_stage_event(
             event_type="stage_error",
             message=message,
@@ -950,7 +982,7 @@ class SessionLogger:
             stage_order=stage_order,
             stage_display_name=display,
             iteration=iteration,
-            data={"error": error},
+            data=data,
         )
 
     def log_stage_execution_start(
@@ -1114,13 +1146,18 @@ class SessionLogger:
         node_name: Optional[str] = None,
         iteration: int = 0,
         error_type: Optional[str] = None,
+        error_code: Optional[str] = None,
     ) -> str:
-        """DEPRECATED — use :meth:`log_stage_error`."""
+        """DEPRECATED — use :meth:`log_stage_error`. ``error_code`` is
+        passed through to ``log_stage_error`` for the structured-code
+        path added in executor 2.1.0."""
         return self.log_stage_error(
             stage_name=node_name or "unknown",
             error=error_message,
             stage_order=STAGE_ORDER.get(node_name) if node_name else None,
             iteration=iteration,
+            error_code=error_code,
+            exception_type=error_type,
         )
 
     def get_stage_events(self, limit: int = 50) -> List[Dict[str, Any]]:

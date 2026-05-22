@@ -76,6 +76,16 @@ class ExecutionResult:
     duration_ms: int = 0
     cost_usd: Optional[float] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    # Structured executor error identifier (since executor 2.1.0).
+    # ``"exec.cli.auth_failed"`` etc. — populated only when the
+    # surfaced exception was a ``GenyExecutorError`` subclass. ``None``
+    # otherwise. Surfaces verbatim in the SSE payload so the frontend
+    # can render via i18n key (``executor.<code>``) instead of the raw
+    # English ``error`` message.
+    error_code: Optional[str] = None
+    # Fully-qualified exception class name for cases where no
+    # structured code is available — useful for Sentry / log grouping.
+    exception_type: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1254,17 +1264,40 @@ async def _execute_core(
 
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.error("❌ Execution failed for %s: %s", session_id, e, exc_info=True)
+        # Pull the structured executor code off the exception so the
+        # frontend can render via i18n key + Sentry can group cleanly.
+        # The ``AgentSession`` catch block already stashed it on
+        # ``_error_code`` for the session-info API; we duplicate the
+        # extraction here so the SSE / response surface gets it
+        # without an extra round-trip through the session manager.
+        err_code: Optional[str] = None
+        exc_type = f"{type(e).__module__}.{type(e).__name__}"
+        try:
+            from geny_executor import GenyExecutorError  # noqa: WPS433
+
+            if isinstance(e, GenyExecutorError):
+                code_attr = getattr(e, "code", None)
+                if code_attr is not None:
+                    err_code = getattr(code_attr, "value", str(code_attr))
+        except Exception:  # noqa: BLE001 — diagnostics must never crash the catch
+            pass
+        logger.error(
+            "❌ Execution failed for %s: %s (code=%s type=%s)",
+            session_id, e, err_code or "n/a", exc_type, exc_info=True,
+        )
         if session_logger:
             session_logger.log_response(
                 success=False, error=str(e), duration_ms=duration_ms,
                 env_id=log_env_id, role=log_role,
+                error_code=err_code, exception_type=exc_type,
             )
         result = ExecutionResult(
             success=False,
             session_id=session_id,
             error=str(e),
             duration_ms=duration_ms,
+            error_code=err_code,
+            exception_type=exc_type,
         )
         holder["error"] = str(e)
         holder["result"] = result.to_dict()

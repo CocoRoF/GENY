@@ -265,6 +265,12 @@ class SessionInfo(BaseModel):
     created_at: datetime
     pid: Optional[int] = None
     error_message: Optional[str] = None
+    # Last error's structured executor code (since executor 2.1.0).
+    # ``"exec.cli.auth_failed"`` etc. — ``None`` when the surfaced
+    # exception wasn't a ``GenyExecutorError`` subclass or the session
+    # hasn't errored. Frontend uses this for i18n key lookup
+    # (``executor.<code>``) and Sentry / log grouping.
+    error_code: Optional[str] = None
 
     # Claude-related information
     model: Optional[str] = None
