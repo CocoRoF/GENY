@@ -3,431 +3,305 @@
 
 > 지니가 할게, 넌 가만히 있어.
 
-Autonomous multi-agent system — manage multiple agent sessions, orchestrate autonomous tasks, and visualize it all in a 3D city playground.
+A multi-agent VTuber + autonomous worker platform. Pair a chatty Live2D / Spine VTuber with a tool-running Sub-Worker, watch them collaborate inside a 3D city, swap any of five LLM backends with one config click.
+
+[한국어 README](README_ko.md) · [Architecture](docs/architecture.md) · [LLM Providers](docs/providers.md) · [Sessions & Delegation](docs/sessions.md) · [Environments](docs/environments.md) · [Error Codes](docs/error_codes.md)
 
 ---
 
-## Overview
+## What Geny is
 
-Geny lets you spin up multiple Claude Code sessions, each working autonomously on its own task. A **Next.js** frontend with a 3D city visualization shows your agents as characters walking around a miniature city, while a **FastAPI + LangGraph** backend manages session lifecycles, pathfinding AI, memory, and tool orchestration.
+| Concept | What it does |
+|---|---|
+| **VTuber session** | The conversational face. Live2D / Spine avatar, persona prompt, TTS, emotion tags. Talks to the user; delegates real work to a paired Sub-Worker. |
+| **Sub-Worker session** | The execution layer. Tool-using agent — file ops, shell, web fetch, MCP-bridged host tools. Reports results back through structured `[SUB_WORKER_RESULT]` messages. |
+| **Environment** | A serialisable [`EnvironmentManifest`](docs/environments.md) that pins every pipeline stage + provider + tool set. One artifact, deterministic reproduction. |
+| **3D City Playground** | Three.js / React Three Fiber dashboard — agents appear as characters walking a procedural city. |
+| **Five LLM backends** | `anthropic` / `openai` / `google` / `vllm` (self-host) / `claude_code_cli` — switch per env, no code change. |
+| **Stable error codes** | Every executor failure surfaces with a stable `exec.<component>.<reason>` code. Frontend renders localised, actionable Korean / English prompts. |
 
-### Key Features
+The backend is built on [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-executor) — a 21-stage manifest-driven agent pipeline (no LangChain, no LangGraph). The frontend is Next.js 16 with R3F-powered 3D, Pixi.js for whiteboard / 2D overlays, and a Korean/English i18n layer.
 
-- **🤖 Multi-Agent Orchestration**: Run multiple Claude Code sessions in parallel, each with independent storage
-- **🏙️ 3D City Playground**: Three.js / React Three Fiber visualization — agents are characters wandering a city
-- **🧠 LangGraph Autonomous Agent**: Resilient graph-based agent with memory, context guard, and model fallback
-- **🗂️ Role-based Prompts**: Pre-built prompts for developer, researcher, planner, and worker roles
-- **📡 Multi-pod Support**: Redis-backed session sharing across Kubernetes pods
-- **🔌 MCP Auto-loading**: Drop JSON configs into `backend/mcp/` — automatically available in all sessions
-- **🔧 Custom Tools**: Drop Python tool files into `backend/tools/` — auto-registered
+---
 
-## Architecture
+## Architecture (high level)
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Geny                                       │
-├──────────────────────────┬──────────────────────────────────────────┤
-│   Frontend (Next.js)     │   Backend (FastAPI + LangGraph)          │
-│                          │                                          │
-│   App Shell              │   [API Layer]                            │
-│   ├── Header             │   ├── /api/sessions      CRUD           │
-│   ├── Sidebar            │   ├── /api/sessions/execute              │
-│   └── Tabs               │   ├── /api/agent/sessions  LangGraph    │
-│       ├── Dashboard      │   ├── /api/commands        CLI dispatch │
-│       ├── Playground 🏙️  │   └── /api/config          runtime cfg  │
-│       ├── Command        │                                          │
-│       ├── Graph          │   [LangGraph Agent]                      │
-│       ├── Logs           │   ├── autonomous_graph.py                │
-│       ├── Info           │   ├── context_guard.py                   │
-│       ├── Settings       │   ├── model_fallback.py                  │
-│       └── Storage        │   ├── resilience_nodes.py                │
-│                          │   └── memory (short/long-term)           │
-│   3D Engine              │                                          │
-│   ├── City layout 21×21  │   [Session Manager]                      │
-│   ├── Asset loader       │   ├── Claude CLI process mgmt            │
-│   ├── Avatar system      │   ├── Redis-based metadata               │
-│   │   ├── Bone animation │   └── Multi-pod routing                  │
-│   │   ├── A* pathfinding │                                          │
-│   │   └── Wandering AI   │   [Tool & MCP]                           │
-│   └── R3F + Drei         │   ├── mcp/ auto-loader                   │
-│                          │   └── tools/ auto-register               │
-└──────────────────────────┴──────────────────────────────────────────┘
+┌────────────────────────── Geny ──────────────────────────────────┐
+│                                                                  │
+│  Frontend (Next.js 16 + R3F + Pixi)                              │
+│   ├── 3D City Playground (Three.js / R3F)                        │
+│   ├── VTuber chat panel + Live2D / Spine avatar                  │
+│   ├── Environment editor (21-stage manifest UI)                  │
+│   ├── LLM Backends settings (5 provider cards)                   │
+│   ├── Memory / Knowledge / Whiteboard tabs                       │
+│   └── Logs tab (i18n'd error codes, tool traces, stage events)   │
+│                                                                  │
+│  Backend (FastAPI)                                               │
+│   ├── controller/  ← FastAPI routes (sessions, env, vtuber, …)   │
+│   ├── service/                                                   │
+│   │   ├── executor/    ← geny-executor 2.1.0 hookup              │
+│   │   ├── environment/ ← manifest store + templates              │
+│   │   ├── llm_patches/ ← Korean error envelopes + CLI tool tap   │
+│   │   ├── memory/      ← session memory v2 + vector retrieval    │
+│   │   ├── permission/  ← per-tool ACL evaluator                  │
+│   │   ├── vtuber/      ← Live2D / Spine library + thinking-trig  │
+│   │   └── chat/        ← chat-room store + delegation routing    │
+│   ├── tools/  ← auto-loaded Python tools (send DM, memory, …)    │
+│   ├── mcp/    ← auto-loaded MCP server configs                   │
+│   ├── scripts/geny_mcp_bridge.py ← per-session MCP wrap for CLI  │
+│   └── prompts/  ← role markdown (vtuber.md, worker.md, …)        │
+│                                                                  │
+│  geny-executor 2.1.0  (PyPI dep)                                 │
+│   ├── 21-stage agent pipeline                                    │
+│   ├── 5 LLM client implementations                               │
+│   └── ExecutorErrorCode taxonomy                                 │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## Project Structure
+Full architecture writeup → [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## Key features
+
+### 🎭 VTuber ↔ Sub-Worker pairing
+Every VTuber session is auto-paired with a Sub-Worker. The VTuber handles conversation and personality; the Sub-Worker does real work. Delegation flows through a single MCP-bridged tool (`mcp__geny__send_direct_message_internal`) — see [`docs/sessions.md`](docs/sessions.md).
+
+### 🧠 Five LLM backends, one selector
+Settings → LLM Backends gives each of the 5 providers (Anthropic / OpenAI / Google / vLLM / Claude Code CLI) its own card with health probe + auth flow. Stage 6 of any environment picks one via dropdown — see [`docs/providers.md`](docs/providers.md).
+
+### 🛠️ Manifest-driven environments
+Pipelines are defined as `EnvironmentManifest` JSON artifacts — 21 stages, one strategy per slot, version-controlled. The Environment editor in the UI lets you customise any preset (worker / VTuber / Sub-Worker) without touching code — see [`docs/environments.md`](docs/environments.md).
+
+### 🌐 Per-session MCP wrap (Claude Code CLI)
+When a session pins `claude_code_cli` as its Stage 6 backend, Geny attaches a per-session MCP bridge so the spawned CLI's LLM sees **Geny's tool registry** as `mcp__geny__<tool>` — file ops, web fetch, memory, blog publisher, sub-worker delegation — all callable natively inside the CLI's agentic loop.
+
+### 🏷️ Stable error codes + i18n
+Every executor exception carries a stable `exec.<component>.<reason>` code. The session log renders the matching Korean (or English) message + recommended next step instead of the raw English server error — see [`docs/error_codes.md`](docs/error_codes.md).
+
+### 🏙️ 3D city playground
+Active sessions appear as walking characters in a procedural Kenney-asset city. A* pathfinding, bone-animated avatars, time-of-day cycle. R3F + Drei + Three.js.
+
+### 🎨 Live2D + Spine + AI-baked avatars
+Geny ships with a separate puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI, and bake the model straight into Geny's VTuber library.
+
+### 🔊 TTS / STT / voice notes
+edge-tts for output, Whisper for input, OmniVoice integration for multi-speaker scenes. Voice-notes feature lets users dictate into the whiteboard.
+
+### 📚 Knowledge whiteboard + memory v2
+Session memory routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Memory) — progressive disclosure, vault map, vector retrieval. Knowledge whiteboard exposes a collaborative Pixi.js canvas for diagram-style sessions.
+
+### 🤖 Multi-pod ready
+Redis-backed session metadata sharding lets multiple backend pods serve one user — useful for cloud deployments.
+
+---
+
+## Project structure
 
 ```
 geny/
-├── README.md
-├── backend/                            # FastAPI + LangGraph backend
-│   ├── main.py                         # App entrypoint
-│   ├── pyproject.toml
-│   ├── requirements.txt
-│   ├── .env.example
-│   ├── controller/
-│   │   ├── agent_controller.py         # LangGraph agent endpoints
-│   │   ├── claude_controller.py        # Session CRUD + execute
-│   │   ├── command_controller.py       # CLI command dispatch
-│   │   └── config_controller.py        # Runtime config API
+├── README.md / README_ko.md          # this hub
+├── img/                              # logos and screenshots
+├── docs/                             # topic-page docs (architecture, sessions, …)
+├── backend/                          # FastAPI + geny-executor host
+│   ├── main.py                       # app entry + executor wiring
+│   ├── pyproject.toml                # pins geny-executor >= 2.1.0
+│   ├── controller/                   # FastAPI routes
+│   │   ├── agent_controller.py       # session + stream + invoke
+│   │   ├── llm_backends_controller.py# 5-provider health + auth
+│   │   ├── mcp_bridge_controller.py  # per-session MCP RPC
+│   │   ├── vtuber_*.py               # VTuber library + chat + thinking
+│   │   ├── memory_*.py               # memory + knowledge + opsidian
+│   │   ├── chat_controller.py        # chat-room CRUD
+│   │   ├── environment_controller.py # manifest editor backend
+│   │   └── …                         # cron, whiteboard, voice-notes, ...
 │   ├── service/
-│   │   ├── claude_manager/             # Core session management
-│   │   │   ├── models.py              # Data models
-│   │   │   ├── process_manager.py     # Claude CLI process control
-│   │   │   ├── session_manager.py     # Session lifecycle
-│   │   │   ├── session_store.py       # Persistence
-│   │   │   ├── stream_parser.py       # Output stream parsing
-│   │   │   └── mcp_tools_server.py    # LangChain → MCP wrapper
-│   │   ├── langgraph/                  # Autonomous agent engine
-│   │   │   ├── autonomous_graph.py    # Main LangGraph graph
-│   │   │   ├── agent_session.py       # Agent session state
-│   │   │   ├── context_guard.py       # Context window guard
-│   │   │   ├── model_fallback.py      # Model fallback strategy
-│   │   │   ├── resilience_nodes.py    # Error recovery nodes
-│   │   │   ├── checkpointer.py        # Graph checkpointing
-│   │   │   └── state.py              # Graph state definition
-│   │   ├── memory/                     # Agent memory system
-│   │   │   ├── short_term.py          # Working memory
-│   │   │   ├── long_term.py           # Persistent memory
-│   │   │   └── manager.py            # Memory coordinator
-│   │   ├── config/                     # Configuration management
-│   │   ├── prompt/                     # Prompt building & templates
-│   │   ├── redis/                      # Redis client
-│   │   ├── pod/                        # Pod info (multi-pod)
-│   │   ├── middleware/                 # Session routing middleware
-│   │   ├── proxy/                      # Inter-pod proxy
-│   │   ├── tool_policy/                # Tool access policies
-│   │   ├── logging/                    # Session logger
-│   │   └── mcp_loader.py              # MCP/tools auto-loader
-│   ├── prompts/                        # Role-based prompt templates
-│   │   ├── developer.md
-│   │   ├── researcher.md
-│   │   ├── planner.md
-│   │   ├── worker.md
-│   │   └── self-manager.md
-│   ├── mcp/                            # MCP server configs (auto-load)
-│   └── tools/                          # Custom tools (auto-load)
-│       ├── base.py                     # BaseTool, @tool decorator
-│       └── example_tool.py
-│
-├── frontend/                           # Next.js 16 + React 19 frontend
-│   ├── package.json
-│   ├── next.config.ts                  # API proxy → backend:8000
-│   ├── tsconfig.json
-│   ├── public/
-│   │   └── assets/                     # 3D models & textures
-│   │       ├── kenney_mini-characters/ # Character GLB models
-│   │       ├── kenney_city-kit-*/      # City building/road models
-│   │       └── sky.jpg
+│   │   ├── executor/                 # AgentSessionManager + AgentSession
+│   │   ├── environment/              # manifest store + templates
+│   │   ├── llm_patches.py            # Korean error envelopes + CLI tool tap
+│   │   ├── memory/                   # session memory v2
+│   │   ├── permission/               # per-tool ACL
+│   │   ├── vtuber/                   # Live2D / Spine library + triggers
+│   │   ├── chat/                     # chat-room store + delegation routing
+│   │   ├── config/                   # ConfigManager + settings cards
+│   │   ├── logging/                  # SessionLogger (now with error_code)
+│   │   └── …
+│   ├── tools/                        # auto-loaded Python tools
+│   │   ├── built_in/                 # ships: messaging, memory, knowledge
+│   │   └── custom/                   # web_search, browser, whiteboard, blog
+│   ├── mcp/                          # auto-loaded MCP server configs
+│   ├── scripts/geny_mcp_bridge.py    # stdio bridge for CLI MCP wrap
+│   └── prompts/                      # role markdown (vtuber.md, worker.md, …)
+├── frontend/                         # Next.js 16 + R3F + Pixi
 │   └── src/
-│       ├── app/
-│       │   ├── layout.tsx              # Root layout + metadata
-│       │   ├── page.tsx                # Main page
-│       │   └── globals.css             # Tailwind v4 + CSS vars
-│       ├── components/
-│       │   ├── Header.tsx              # "Geny" branding header
-│       │   ├── Sidebar.tsx             # Session list + stats
-│       │   ├── TabNavigation.tsx       # Tab switcher
-│       │   ├── TabContent.tsx          # Active tab renderer
-│       │   ├── tabs/
-│       │   │   ├── PlaygroundTab.tsx   # 3D city + R3F canvas
-│       │   │   ├── CommandTab.tsx
-│       │   │   ├── GraphTab.tsx
-│       │   │   ├── LogsTab.tsx
-│       │   │   ├── InfoTab.tsx
-│       │   │   ├── SettingsTab.tsx
-│       │   │   └── StorageTab.tsx
-│       │   ├── modals/
-│       │   │   ├── CreateSessionModal.tsx
-│       │   │   └── DeleteSessionModal.tsx
-│       │   └── ui/
-│       │       └── NumberStepper.tsx
-│       ├── lib/
-│       │   ├── api.ts                  # Typed API layer
-│       │   ├── cityLayout.ts           # 21×21 city grid generator
-│       │   ├── assetLoader.ts          # GLB model cache & manifest
-│       │   └── avatarSystem.ts         # Bone animation + pathfinding
-│       ├── store/
-│       │   └── useAppStore.ts          # Zustand global state
-│       └── types/
-│           └── index.ts                # Shared TypeScript types
-│
-└── frontend-legacy/                    # Legacy vanilla JS frontend (reference)
+│       ├── components/               # tabs, modals, panels, env_management/…
+│       ├── lib/                      # api.ts, i18n/, modelCatalog.ts, …
+│       ├── store/                    # Zustand stores
+│       └── types/                    # shared TypeScript types
+├── vendor/geny-avatar/               # puppet-editor submodule
+└── docker-compose.{yml,dev,prod}.yml # compose stacks
 ```
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS v4 |
-| **3D Engine** | Three.js 0.183, React Three Fiber 9, Drei 10 |
-| **State** | Zustand 5 |
-| **Backend** | Python 3.11+, FastAPI, Uvicorn |
-| **Agent** | LangGraph, LangChain, langchain-anthropic |
-| **Cache** | Redis (optional, for multi-pod) |
-| **Models** | Kenney Mini Characters, Kenney City Kit |
+For the developer-facing internal architecture maps see [`backend/docs/`](backend/docs/) and [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## Avatar Editor (geny-avatar)
+## Tech stack
 
-Geny ships with a separate Next.js puppet-editor service ([geny-avatar](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. It lets you upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and **send a baked model directly into Geny's VTuber library** — appears with the suffix `(Editor)` so it doesn't clash with the bundled Hiyori / Mao Pro / etc.
-
-**Tracking strategy**: `vendor/geny-avatar` tracks `main` (see `.gitmodules` `branch = main`). The recorded pointer in this repo is a **floor**, not a fixed pin. A versioned `post-merge` hook ([`.githooks/post-merge`](.githooks/post-merge)) fast-forwards the submodule worktree to upstream main on every `git pull`, so the server always rolls with the latest geny-avatar main without a pointer-bump dance. To lock a release, commit the submodule pointer normally.
-
-**One-time setup per clone** (point git at the versioned hooks dir):
-
-```bash
-git config core.hooksPath .githooks
-```
-
-**Server update**:
-
-```bash
-git pull                                  # post-merge hook fast-forwards vendor/geny-avatar
-docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor backend
-```
-
-**Topology**:
-
-| Compose file | Access | Notes |
-|---|---|---|
-| `docker-compose.yml` (standalone) | `http://localhost:3001/` | Direct host port. No nginx. |
-| `docker-compose.dev.yml` / `dev-core` | `http://localhost:3001/` | Same; container names suffixed `-dev`. |
-| `docker-compose.prod.yml` / `prod-core` | `http://<host>:58443/avatar-editor/` | Behind nginx; `NEXT_PUBLIC_BASE_PATH=/avatar-editor` baked at build time. |
-
-**Data path**: editor's "send to Geny" writes a baked zip into the shared Docker volume `geny-baked-exports{,-dev,-prod}` mounted at `/exports` on the editor side and `/data/baked-imports` on the backend side (read-write — backend moves installed zips into `installed/`). Geny backend's import endpoint reads from there: `POST /api/vtuber/baked-imports/install` unzips, registers in `model_registry.json` with `(Editor)` suffix, and the entry shows up in the model selector on next refresh.
-
-**Editor's Animation tab** (`/avatar-editor/edit/<id>?tab=animation`) — per-puppet display tuning (kScale / shift), idle motion group, motion ▶ preview, emotion → expression NAME mapping, and hit-area motion mapping. The export embeds an `avatar-editor.json` schemaVersion 2 sidecar; Geny's install translates emotion NAMES to indices by parsing `model3.json`'s Expressions array.
-
-**Override the host port**:
-
-```bash
-AVATAR_EDITOR_PORT=3050 docker compose up --build
-```
-
-Detailed architecture and integration sprints: [`docs/plan/GENY_AVATAR_INTEGRATION.md`](docs/plan/GENY_AVATAR_INTEGRATION.md). Progress log: [`docs/progress/GENY_AVATAR_INTEGRATION_PROGRESS.md`](docs/progress/GENY_AVATAR_INTEGRATION_PROGRESS.md).
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Zustand 5, Pixi.js |
+| **3D engine** | Three.js, React Three Fiber, Drei |
+| **Avatars** | Live2D Cubism, Spine 4, [geny-avatar](https://github.com/CocoRoF/geny-avatar) editor |
+| **Backend** | Python 3.11+, FastAPI, Uvicorn |
+| **Agent pipeline** | [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-executor) (21 stages, 5 providers) |
+| **LLM SDKs** | `anthropic`, `openai`, `google-genai` + vLLM (OpenAI-compatible) + Claude Code CLI subprocess |
+| **MCP** | host-attached servers + per-session CLI MCP wrap |
+| **TTS / STT** | edge-tts (output), Whisper (input), OmniVoice (multi-speaker) |
+| **Persistence** | PostgreSQL (sessions, memory, knowledge), Redis (multi-pod metadata, optional) |
+| **Container** | Docker Compose (dev / prod profiles + named volumes for OAuth credential survival) |
 
 ---
 
 ## Installation
 
-### 🐳 Docker (Recommended)
-
-**Prerequisites**: Docker Desktop (or Docker Engine + Docker Compose v2)
+### 🐳 Docker (recommended)
 
 ```bash
-# 1. Clone (with submodules — pulls geny-licensed-assets and geny-avatar)
-git clone --recurse-submodules https://github.com/<your-org>/geny.git && cd geny
+# 1. Clone with submodules (geny-avatar + geny-licensed-assets)
+git clone --recurse-submodules https://github.com/CocoRoF/Geny.git
+cd Geny
 
-# (Already cloned without --recurse-submodules?)
-# git submodule update --init --recursive
-
-# 2. Configure API keys
+# 2. Configure
 cp backend/.env.example backend/.env
-# Edit backend/.env — set ANTHROPIC_API_KEY at minimum
+# Edit backend/.env — at minimum set ANTHROPIC_API_KEY (or use OAuth via Settings)
 
 # 3. Run
 docker compose up --build
 ```
 
-Open **http://localhost:3000** — done!
+Open **http://localhost:3000**.
 
-**Custom ports:**
+Compose profiles:
 
-```bash
-BACKEND_PORT=8080 FRONTEND_PORT=3001 docker compose up --build
-```
+| File | Use |
+|---|---|
+| `docker-compose.yml` | Default dev stack |
+| `docker-compose.dev.yml` / `dev-core.yml` | Dev with hot-reload bind mounts |
+| `docker-compose.prod.yml` / `prod-core.yml` | Production behind nginx |
 
-**Data directories** (bind-mounted to host for visibility):
+Custom ports + data dirs documented in [`docs/architecture.md`](docs/architecture.md).
 
-| Host Path | Container Path | Description |
-|-----------|---------------|-------------|
-| `./data/geny_agent_sessions/` | `/data/geny_agent_sessions` | Agent workspace directories (one per session) |
-| `./data/sessions.json` | `/app/service/claude_manager/sessions.json` | Session metadata — persists across restarts |
-| `./data/logs/` | `/app/logs` | Backend execution logs |
+### Manual setup
 
-You can browse, edit, or `tail -f` these files directly from the host.
-
-**Other commands:**
-
-```bash
-docker compose up -d            # Background
-docker compose logs -f          # Tail logs
-docker compose logs backend     # Backend logs only
-docker compose down             # Stop
-docker compose down -v          # Stop + remove volumes
-docker compose build --no-cache # Full rebuild
-```
-
-### Manual Setup (without Docker)
-
-<details>
-<summary>Click to expand manual setup instructions</summary>
-
-#### Prerequisites
-
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Python | 3.11+ | Backend runtime |
-| Node.js | 18+ | Frontend + Claude CLI + MCP servers |
-| npm | 9+ | Frontend package manager |
-| Git | 2.30+ | Version control |
-| Claude CLI | latest | `npm i -g @anthropic-ai/claude-code` |
-| GitHub CLI | 2.0+ | PR/Issue automation (optional) |
-| Redis | 6+ | Multi-pod session sharing (optional) |
-
-#### Backend Setup
-
-```bash
-cd backend
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-# macOS/Linux:
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-# or
-pip install -e .
-
-# Configure environment
-cp .env.example .env
-# Edit .env — set ANTHROPIC_API_KEY at minimum
-```
-
-#### Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Development server (proxies API to backend:8000)
-npm run dev
-
-# Production build
-npm run build
-npm start
-```
-
-#### Quick Start
-
-```bash
-# Terminal 1 — Backend
-cd backend
-python main.py                  # Starts on :8000
-
-# Terminal 2 — Frontend
-cd frontend
-npm run dev                     # Starts on :3000, proxies /api → :8000
-```
-
-Open http://localhost:3000 — the Geny dashboard with 3D City Playground.
-
-</details>
+For non-Docker development see the expandable section in [`docs/architecture.md`](docs/architecture.md). Minimum requirements: Python 3.11+, Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`), and at least one provider's credentials.
 
 ---
 
-## Environment Variables
+## Avatar Editor (geny-avatar)
+
+Geny ships with a Next.js puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and bake the model directly into Geny's VTuber library (appears with the `(Editor)` suffix).
+
+`vendor/geny-avatar` tracks `main` via a versioned `post-merge` hook ([`.githooks/post-merge`](.githooks/post-merge)) — the server fast-forwards the submodule on every `git pull` without a pointer-bump dance.
+
+```bash
+git config core.hooksPath .githooks       # one-time per clone
+git pull                                  # fast-forwards vendor/geny-avatar
+docker compose -f docker-compose.prod.yml --profile tts-local up -d --build avatar-editor backend
+```
+
+Detailed integration → [`docs/_archive/`](docs/_archive/) (geny-avatar integration sprints).
+
+---
+
+## Environment variables
 
 Configure in `backend/.env`:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+|---|---|---|
 | `APP_HOST` | Server bind address | `0.0.0.0` |
 | `APP_PORT` | Server port | `8000` |
-| `DEBUG_MODE` | Debug mode | `false` |
-| `USE_REDIS` | Enable Redis for multi-pod | `false` |
-| `REDIS_HOST` | Redis host | `localhost` |
-| `REDIS_PORT` | Redis port | `6379` |
-| `REDIS_PASSWORD` | Redis password | — |
-| `GENY_AGENT_STORAGE_ROOT` | Session storage path | OS-dependent* |
-| `ANTHROPIC_API_KEY` | Anthropic API key (**required**) | — |
+| `DEBUG_MODE` | Verbose logging | `false` |
+| `ANTHROPIC_API_KEY` | Anthropic key (or use OAuth via Settings) | — |
+| `OPENAI_API_KEY` | OpenAI key (or paste via Settings) | — |
+| `GOOGLE_API_KEY` | Google GenAI key | — |
 | `GITHUB_TOKEN` | GitHub PAT for PR automation | — |
-| `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` | Autonomous mode | `true` |
+| `USE_REDIS` | Enable Redis multi-pod metadata | `false` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis | `localhost` / `6379` / — |
+| `GENY_AGENT_STORAGE_ROOT` | Session storage path | `/data/geny_agent_sessions` (Docker) |
 
-\*Default storage: Windows `%LOCALAPPDATA%\geny_agent_sessions` / macOS & Linux `/tmp/geny_agent_sessions`
-
-For frontend, set `API_URL` in the shell environment to override the backend target (default `http://localhost:8000`).
+Frontend's `API_URL` env (shell, build-time) overrides the backend target — see [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## API Usage
+## Quick API tour
 
-### Session Management
+Geny exposes REST + SSE under `/api/`. The most commonly used:
 
 ```bash
-# Create session
+# Create a VTuber session (auto-pairs a Sub-Worker)
 curl -X POST http://localhost:8000/api/sessions \
   -H "Content-Type: application/json" \
-  -d '{"session_name": "my-session", "model": "claude-sonnet-4-20250514"}'
+  -d '{
+    "session_name": "geny-1",
+    "role": "vtuber",
+    "env_id": "template-vtuber-env",
+    "character_display_name": "Geny"
+  }'
 
 # List sessions
 curl http://localhost:8000/api/sessions
 
-# Execute prompt
-curl -X POST http://localhost:8000/api/sessions/{session_id}/execute \
+# Send a chat message to the VTuber (auto-delegates to Sub-Worker for complex tasks)
+curl -X POST http://localhost:8000/api/chat/rooms/<room_id>/messages \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello, Claude!"}'
+  -d '{"content": "test.txt 만들어서 자기소개 적어놔"}'
 
-# Delete session
-curl -X DELETE http://localhost:8000/api/sessions/{session_id}
+# Stream session logs (SSE)
+curl -N http://localhost:8000/api/command/logs/<session_id>/stream
 ```
 
-### 🤖 Autonomous Mode
+| Endpoint family | Purpose |
+|---|---|
+| `/api/sessions` | Session CRUD + status |
+| `/api/agent/sessions/{id}/invoke` | One-shot invoke |
+| `/api/command/logs/{id}/stream` | SSE log stream (carries error_code for i18n) |
+| `/api/chat/rooms/*` | Chat-room store (VTuber ↔ user messaging) |
+| `/api/environments` | Manifest CRUD + templates |
+| `/api/llm-backends` | 5-provider health, auth, login flows |
+| `/api/internal/mcp/{sid}/rpc` | Per-session MCP bridge (CLI wrap) |
+| `/api/vtuber/library` | Live2D / Spine model registry |
+| `/api/memory/*` | Session memory + knowledge whiteboard |
 
-```bash
-# Create autonomous session
-curl -X POST http://localhost:8000/api/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_name": "auto-refactor",
-    "max_turns": 100,
-    "autonomous": true
-  }'
-
-# Autonomous execution — Claude works independently
-curl -X POST http://localhost:8000/api/sessions/{session_id}/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Analyze all files, refactor for quality, add types and tests, commit with descriptive messages.",
-    "system_prompt": "Work autonomously without asking questions.",
-    "max_turns": 50,
-    "timeout": 21600
-  }'
-```
+Full API reference → `/docs` (FastAPI auto-generated) when the backend is running.
 
 ---
 
-## 🔌 MCP & Custom Tools
+## 🔌 MCP & custom tools
 
-### MCP Auto-Loading
+### Auto-loaded MCP servers
 
-Drop `.json` configs into `backend/mcp/` — they are automatically available in every session.
+Drop a `.json` into `backend/mcp/` and it's available in every session that pulls it in via env manifest:
 
 ```jsonc
 // backend/mcp/github.json
 {
   "type": "http",
-  "url": "https://api.githubcopilot.com/mcp/",
+  "url": "https://api.github.com/mcp/",
   "description": "GitHub MCP server"
 }
 ```
 
-See [backend/mcp/README.md](backend/mcp/README.md) for details.
+See [`backend/mcp/README.md`](backend/mcp/README.md).
 
-### Custom Tool Auto-Loading
+### Auto-registered Python tools
 
-Drop `*_tool.py` files into `backend/tools/` — they are auto-registered in every session.
+Drop a `*_tool.py` into `backend/tools/custom/`:
 
 ```python
-# backend/tools/my_tool.py
+# backend/tools/custom/search_db_tools.py
 from tools.base import tool
 
 @tool
@@ -438,71 +312,58 @@ def search_database(query: str) -> str:
 TOOLS = [search_database]
 ```
 
-See [backend/tools/README.md](backend/tools/README.md) for details.
+See [`backend/tools/README.md`](backend/tools/README.md).
 
-### MCP via API
+### Per-session MCP wrap (Claude Code CLI)
 
-```bash
-curl -X POST http://localhost:8000/api/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_name": "full-stack",
-    "mcp_config": {
-      "servers": {
-        "github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"},
-        "filesystem": {"type": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]},
-        "database": {"type": "stdio", "command": "npx", "args": ["-y", "@bytebase/dbhub", "--dsn", "postgresql://user:pass@localhost:5432/mydb"]}
-      }
-    }
-  }'
-```
-
-| Transport | Description | Use Case |
-|-----------|-------------|----------|
-| `stdio` | Local process | npx, python scripts |
-| `http` | Remote HTTP | GitHub, Notion, Sentry, Slack |
+When a session's Stage 6 provider is `claude_code_cli`, Geny attaches its own tool registry to the spawned CLI's LLM via a stdio MCP bridge (`scripts/geny_mcp_bridge.py`). The CLI's LLM sees `send_direct_message_internal`, `memory_write`, `web_search`, etc. as `mcp__geny__<tool>` and calls them natively — see [`docs/sessions.md`](docs/sessions.md) for the full flow.
 
 ---
 
-## 🔄 GitHub Automation
+## Error handling + i18n
 
-Geny can clone repos, create branches, make changes, and submit PRs autonomously.
+Every executor exception carries a stable [`ExecutorErrorCode`](https://github.com/CocoRoF/geny-executor/blob/main/docs/error_codes.md) like `exec.cli.auth_failed`. The backend threads it through `SessionLogger` onto the SSE payload; the frontend renders the localised message + actionable next step via `executor.<code>` i18n lookup. End-user sees:
 
-**Setup**: Set `GITHUB_TOKEN` in `backend/.env` (scopes: `repo`, `workflow`). Geny auto-configures `gh` CLI.
+> Claude Code CLI 인증이 만료됐어요. 설정 → LLM 백엔드 → Claude Code (CLI) 카드의 ‘다시 로그인’을 누르거나 `ANTHROPIC_API_KEY` 를 붙여넣어 주세요.
 
-```bash
-curl -X POST http://localhost:8000/api/sessions/{session_id}/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Clone https://github.com/user/repo.git, create branch feature/docs, add JSDoc to all functions, commit, push, and create a PR.",
-    "timeout": 21600,
-    "system_prompt": "You are an autonomous coding agent. Complete all tasks without asking questions."
-  }'
-```
+instead of the raw English server message. Detailed flow → [`docs/error_codes.md`](docs/error_codes.md).
 
 ---
 
-## Cross-Platform Support
+## Cross-platform support
 
-Geny works on Windows, macOS, and Linux:
-
-- **Windows**: Uses `%LOCALAPPDATA%\geny_agent_sessions`, auto-detects `.cmd`/`.exe` executables
-- **macOS/Linux**: Uses `/tmp/geny_agent_sessions`, standard executable paths
+- **Windows**: `%LOCALAPPDATA%\geny_agent_sessions`, auto-detects `.cmd`/`.exe` executables.
+- **macOS / Linux**: `/tmp/geny_agent_sessions` (host) → `/data/geny_agent_sessions` (container).
 
 ---
 
 ## Community
 
-| Author|  Name | Description | URL |
-|-------|-------|-------------|----------|
-|<a href="https://github.com/SonAIengine"><img src="https://avatars.githubusercontent.com/u/166786347?v=4&s=48" width="48" height="48" alt="Son Seong Jun" title="Son Seong Jun"/></a>|`graph-tool-call` | Tool-Search-Logic is inspired by SonSJ| https://github.com/SonAIengine/graph-tool-call |
+| Contributor | What | Link |
+|---|---|---|
+| <a href="https://github.com/SonAIengine"><img src="https://avatars.githubusercontent.com/u/166786347?v=4&s=48" width="48" height="48" alt="Son Seong Jun" title="Son Seong Jun"/></a> [`graph-tool-call`](https://github.com/SonAIengine/graph-tool-call) | Inspiration for Tool-Search-Logic | — |
 
 ---
 
 ## License
 
-MIT License
+MIT.
 
 ---
 
-> _Last tested: 2026-04-13 — Git workflow verified by Claude Code._
+## Versioning + history
+
+| Date | Highlight |
+|---|---|
+| 2026-05-22 | Doc refresh — README EN/KO, docs/* topic pages |
+| 2026-05-22 | Phase 2: executor error codes → frontend i18n (PR #830) |
+| 2026-05-21 | geny-executor 2.1.0 — `ExecutorErrorCode` taxonomy + structured event payloads |
+| 2026-05-20 | geny-executor 2.0.6 — copilot_cli removed + 4 compat patches upstreamed |
+| 2026-05-19 | Phase I — claude_code_cli MCP wrap (per-session bridge + tool_use strip + observability tap) |
+| 2026-04-29 | host_selections (env-scoped hooks / skills / permission picker) |
+
+See the [GitHub commit history](https://github.com/CocoRoF/Geny/commits/main) for the full log.
+
+---
+
+> _현재 사용자 모드: 한국어가 주 — 영어는 ENG 버튼으로 즉시 전환 가능._
