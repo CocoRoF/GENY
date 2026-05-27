@@ -2736,7 +2736,6 @@ export interface VoiceProfile {
   emotion_refs?: Record<string, { file: string; prompt_text?: string; prompt_lang?: string }>;
   has_refs?: Record<string, boolean>;
   active?: boolean;
-  gpt_sovits_settings?: Record<string, unknown>;
 }
 
 export const ttsApi = {

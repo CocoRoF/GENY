@@ -20,7 +20,7 @@ class TTSGeneralConfig(BaseConfig):
 
     # ─── Basic ───
     enabled: bool = True
-    provider: str = "gpt_sovits"
+    provider: str = "omnivoice"
     auto_speak: bool = True
     default_language: str = "ko"
 
@@ -109,7 +109,6 @@ class TTSGeneralConfig(BaseConfig):
                     {"value": "edge_tts", "label": "Edge TTS (Free)"},
                     {"value": "openai", "label": "OpenAI TTS"},
                     {"value": "elevenlabs", "label": "ElevenLabs"},
-                    {"value": "gpt_sovits", "label": "GPT-SoVITS (Open Source)"},
                     {"value": "omnivoice", "label": "OmniVoice (Open Source · 600+ langs)"},
                     {"value": "azure", "label": "Azure Speech"},
                     {"value": "google", "label": "Google Cloud TTS"},

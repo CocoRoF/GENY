@@ -5,5 +5,5 @@ Provides text-to-speech synthesis with multiple engine backends:
 - Edge TTS (free, Microsoft)
 - OpenAI TTS
 - ElevenLabs
-- GPT-SoVITS (open-source, local)
+- OmniVoice (open-source, local · 600+ langs · clone/design)
 """
