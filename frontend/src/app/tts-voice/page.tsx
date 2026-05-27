@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { ttsApi, type VoiceProfile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import StudioPromoBanner from '@/components/voice-studio/StudioPromoBanner';
 
 const EMOTIONS = ['neutral', 'joy', 'anger', 'sadness', 'fear', 'surprise', 'disgust', 'smirk'] as const;
 type Emotion = (typeof EMOTIONS)[number];
@@ -179,6 +180,8 @@ export default function TtsVoicePage() {
             </span>
           )}
         </div>
+
+        <StudioPromoBanner />
 
         {/* Toast */}
         {msg && (
