@@ -109,6 +109,48 @@ export interface CacheStats {
   hit_rate?: number;
 }
 
+export interface BatchLine {
+  text: string;
+  profile?: string;
+  emotion?: string;
+  seed?: number;
+  instruct?: string;
+  language?: string;
+  mode?: PreviewMode;
+}
+
+export interface BatchStartParams {
+  label?: string;
+  // Shared defaults — mirrors a subset of PreviewParams.
+  profile?: string;
+  emotion?: string;
+  mode?: PreviewMode;
+  language?: string;
+  instruct?: string;
+  num_step?: number;
+  guidance_scale?: number;
+  speed?: number;
+  audio_format?: PreviewAudioFormat;
+  sample_rate?: number;
+  auto_asr?: boolean;
+  denoise?: boolean;
+  lines: BatchLine[];
+}
+
+export interface BatchJob {
+  id: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  state: 'queued' | 'running' | 'done' | 'cancelled' | 'failed';
+  total_lines: number;
+  completed_lines: number;
+  error_lines: number;
+  label?: string | null;
+  log_text?: string;
+  has_zip?: boolean;
+}
+
 const PREVIEW_URL = '/api/voice-studio/synth/preview';
 const HISTORY_URL = '/api/voice-studio/synth/history';
 const SAVE_AS_REF_URL = '/api/voice-studio/synth/save-as-ref';
@@ -116,6 +158,7 @@ const LANGS_URL = '/api/voice-studio/languages';
 const ENGINES_URL = '/api/voice-studio/engines';
 const ENGINES_DEFAULT_URL = '/api/voice-studio/engines/default';
 const OMNI_DEFAULTS_URL = '/api/voice-studio/settings/omnivoice-defaults';
+const BATCH_URL = '/api/voice-studio/batch';
 const LEGACY_CACHE_STATS_URL = '/api/tts/cache/stats';
 const LEGACY_CACHE_DELETE_URL = '/api/tts/cache';
 
@@ -267,6 +310,54 @@ export const voiceStudioApi = {
       const text = await res.text().catch(() => res.statusText);
       throw new Error(`clear cache ${res.status}: ${text}`);
     }
+  },
+
+  // ── Batch synthesis (Phase 4A) ───────────────────────────────────
+
+  async startBatch(body: BatchStartParams): Promise<{ job_id: string; state: string; total_lines: number }> {
+    const res = await fetch(BATCH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const text = await res.text();
+        try {
+          detail = JSON.parse(text)?.detail ?? text;
+        } catch {
+          detail = text;
+        }
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`batch start ${res.status}: ${detail}`);
+    }
+    return res.json();
+  },
+
+  async listBatches(signal?: AbortSignal): Promise<BatchJob[]> {
+    const res = await fetch(BATCH_URL, { signal });
+    if (!res.ok) throw new Error(`list batches ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    return Array.isArray(data.jobs) ? (data.jobs as BatchJob[]) : [];
+  },
+
+  async getBatch(id: string, signal?: AbortSignal): Promise<BatchJob> {
+    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}`, { signal });
+    if (!res.ok) throw new Error(`get batch ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  async cancelBatch(id: string): Promise<{ ok: boolean }> {
+    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    if (!res.ok) throw new Error(`cancel batch ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  getBatchDownloadUrl(id: string): string {
+    return `${BATCH_URL}/${encodeURIComponent(id)}/download`;
   },
 
   async saveAsRef(body: SaveAsRefParams): Promise<{ ok: true; profile: string; emotion: string }> {
