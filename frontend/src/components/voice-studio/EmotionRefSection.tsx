@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Trash2, Upload, Loader2, Play, Square } from 'lucide-react';
+import { Trash2, Upload, Loader2, Play, Square, Mic, Scissors } from 'lucide-react';
 import { ttsApi, type VoiceProfile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import RecorderModal from './RecorderModal';
+import TrimmerModal from './TrimmerModal';
 
 const EMOTIONS = [
   'neutral', 'joy', 'anger', 'sadness', 'fear', 'surprise', 'disgust', 'smirk',
@@ -47,6 +49,12 @@ export default function EmotionRefSection({ profile, onRefresh }: EmotionRefSect
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const isTemplate = !!profile.is_template;
 
+  // Modal state (recorder + trimmer) — outer-managed so 8 cards share a single instance.
+  const [activeEmotion, setActiveEmotion] = useState<Emotion | null>(null);
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [trimmerOpen, setTrimmerOpen] = useState(false);
+  const [trimSource, setTrimSource] = useState<Blob | null>(null);
+
   const showMsg = useCallback((type: 'success' | 'error', text: string) => {
     setMsg({ type, text });
     setTimeout(() => setMsg(null), 3000);
@@ -66,6 +74,58 @@ export default function EmotionRefSection({ profile, onRefresh }: EmotionRefSect
     },
     [profile.name, onRefresh, showMsg, t],
   );
+
+  const openRecorder = useCallback((emotion: Emotion) => {
+    setActiveEmotion(emotion);
+    setRecorderOpen(true);
+  }, []);
+
+  const openTrimmerForExistingRef = useCallback(
+    async (emotion: Emotion) => {
+      setActiveEmotion(emotion);
+      try {
+        const url = ttsApi.getRefAudioUrl(profile.name, emotion);
+        const res = await fetch(url);
+        const blob = await res.blob();
+        setTrimSource(blob);
+        setTrimmerOpen(true);
+      } catch (e: unknown) {
+        showMsg('error', e instanceof Error ? e.message : String(e));
+      }
+    },
+    [profile.name, showMsg],
+  );
+
+  const handleRecorderConfirm = useCallback(
+    (wav: Blob) => {
+      if (!activeEmotion) return;
+      const file = new File([wav], `ref_${activeEmotion}.wav`, { type: 'audio/wav' });
+      handleUpload(activeEmotion, file);
+    },
+    [activeEmotion, handleUpload],
+  );
+
+  const handleRecorderRequestTrim = useCallback((wav: Blob) => {
+    setTrimSource(wav);
+    setTrimmerOpen(true);
+  }, []);
+
+  const handleTrimmerConfirm = useCallback(
+    (wav: Blob) => {
+      if (!activeEmotion) return;
+      const file = new File([wav], `ref_${activeEmotion}.wav`, { type: 'audio/wav' });
+      handleUpload(activeEmotion, file);
+      setTrimSource(null);
+    },
+    [activeEmotion, handleUpload],
+  );
+
+  const closeAllModals = useCallback(() => {
+    setRecorderOpen(false);
+    setTrimmerOpen(false);
+    setTrimSource(null);
+    setActiveEmotion(null);
+  }, []);
 
   const handleDelete = useCallback(
     async (emotion: string) => {
@@ -125,10 +185,31 @@ export default function EmotionRefSection({ profile, onRefresh }: EmotionRefSect
             onUpload={(file, text, lang) => handleUpload(emotion, file, text, lang)}
             onDelete={() => handleDelete(emotion)}
             onUpdatePrompt={(body) => handleUpdatePrompt(emotion, body)}
+            onRecord={() => openRecorder(emotion)}
+            onTrim={() => openTrimmerForExistingRef(emotion)}
             t={t}
           />
         ))}
       </div>
+
+      {/* Modals (mounted once, driven by activeEmotion + open flags) */}
+      <RecorderModal
+        open={recorderOpen}
+        onClose={() => {
+          setRecorderOpen(false);
+          // Keep activeEmotion alive so the trimmer can still tag the upload
+          // if the recorder closed via "trim next".
+          if (!trimmerOpen) setActiveEmotion(null);
+        }}
+        onConfirm={handleRecorderConfirm}
+        onRequestTrim={handleRecorderRequestTrim}
+      />
+      <TrimmerModal
+        open={trimmerOpen}
+        source={trimSource}
+        onClose={closeAllModals}
+        onConfirm={handleTrimmerConfirm}
+      />
     </section>
   );
 }
@@ -143,12 +224,14 @@ interface EmotionRefCardProps {
   onUpload: (file: File, text?: string, lang?: string) => void;
   onDelete: () => void;
   onUpdatePrompt: (body: { prompt_text?: string; prompt_lang?: string }) => void;
+  onRecord: () => void;
+  onTrim: () => void;
   t: (k: string, vars?: Record<string, string | number>) => string;
 }
 
 function EmotionRefCard({
   profileName, emotion, hasRef, emotionRef, uploading, isTemplate,
-  onUpload, onDelete, onUpdatePrompt, t,
+  onUpload, onDelete, onUpdatePrompt, onRecord, onTrim, t,
 }: EmotionRefCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -243,6 +326,22 @@ function EmotionRefCard({
                   >
                     <Upload size={12} />
                   </button>
+                  <button
+                    onClick={onRecord}
+                    className="flex items-center justify-center w-7 h-7 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] cursor-pointer transition-all"
+                    title={t('voiceStudio.recorder.openTitle')}
+                  >
+                    <Mic size={12} />
+                  </button>
+                  {hasRef && (
+                    <button
+                      onClick={onTrim}
+                      className="flex items-center justify-center w-7 h-7 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] cursor-pointer transition-all"
+                      title={t('voiceStudio.trimmer.openTitle')}
+                    >
+                      <Scissors size={12} />
+                    </button>
+                  )}
                   {hasRef && (
                     <button
                       onClick={onDelete}

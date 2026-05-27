@@ -44,12 +44,18 @@
 - [x] Frontend `npm run build` 0 errors, 17 routes (변동 없음)
 - [x] 회귀 — 기존 `/api/tts/*` 미변경, `tts-voice` 페이지 미변경
 
-### 8. 배포
-- [ ] commit + PR + squash 머지
-- [ ] 2222 서버 sudo git pull
-- [ ] sudo docker compose --build backend frontend
-- [ ] 운영 확인 — `/api/voice-studio/synth/preview` 헤더 + WAV bytes / UI 합성 시연
+### 8. 배포 ✅
+- [x] commit `feat(voice-studio): Clone & Design page with full OmniVoice parameter surface`
+- [x] PR [#834](https://github.com/CocoRoF/Geny/pull/834) — `MERGEABLE` / GitGuardian SUCCESS → squash 머지 → main `f544416`
+- [x] 2222 서버 `sudo git pull origin main`
+- [x] `sudo docker compose -f docker-compose.prod.yml up -d --build backend frontend`
+- [x] 운영 확인:
+  - frontend Up 17s, backend Up 29s (healthy)
+  - omnivoice/avatar/whisper/nginx/postgres 모두 unchanged
+  - `GET /api/voice-studio/languages` → count=646, normalised payload
+  - `POST /api/voice-studio/synth/preview` (ellen_joe/neutral/clone/num_step=8/seed=12345) → 200 audio/wav 90KB, RTF=0.2060, seed=12345, engine=omnivoice
+  - 회귀: `GET /api/tts/engines` 그대로 (4 엔진, default=omnivoice)
 
-### 9. 마무리
-- [ ] PROGRESS_1B.md 최종 완료 처리
-- [ ] Phase 2A PLAN 초안
+### 9. 마무리 ✅
+- [x] PROGRESS_1B.md 최종 완료 처리
+- [ ] Phase 2A PLAN 초안 — 다음 사이클
