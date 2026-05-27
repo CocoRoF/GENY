@@ -91,6 +91,7 @@ services:
       - GENY_GAME_STATE_DB=/data/creature_state/geny_state.sqlite3
       - GENY_CONFIG_VARIABLES_DIR=/data/config_variables
       - GENY_MCP_CREDENTIALS=/data/mcp/credentials.json
+      - GENY_VOICE_STUDIO_DATA_DIR=/data/voice_studio
     volumes:
       - geny-tts-cache-prod:/app/cache/tts
       - geny-voices-prod:/app/static/voices
@@ -121,6 +122,7 @@ services:
       - geny-creature-state-prod:/data/creature_state
       - geny-config-variables-prod:/data/config_variables
       - geny-mcp-credentials-prod:/data/mcp
+      - geny-voice-studio-prod:/data/voice_studio
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-prod:/data/baked-imports
@@ -416,4 +418,5 @@ volumes:
   geny-config-variables-prod:
     driver: local
   geny-mcp-credentials-prod:
+  geny-voice-studio-prod:
     driver: local

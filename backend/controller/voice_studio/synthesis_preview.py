@@ -49,6 +49,27 @@ async def synth_preview(params: PreviewParams) -> Response:
         logger.exception("voice-studio synth/preview failed")
         raise HTTPException(status_code=502, detail=f"synth/preview failed: {e}") from e
 
+    # Best-effort: append to history. A failure here must not block the
+    # synthesis response — the user still gets their audio.
+    history_id: str = ""
+    try:
+        from service.voice_studio.history_store import get_history_store
+
+        history_id = get_history_store().insert(
+            text=params.text,
+            profile=params.profile,
+            engine="omnivoice",
+            mode=params.mode,
+            seed=result.seed_used,
+            params=params.model_dump(exclude_none=True),
+            audio_bytes=result.audio_bytes,
+            duration_seconds=result.duration,
+            rtf=result.rtf,
+            sample_rate=result.sample_rate,
+        )
+    except Exception:
+        logger.warning("voice-studio history insert failed", exc_info=True)
+
     return Response(
         content=result.audio_bytes,
         media_type=_MIME_BY_FORMAT.get(params.audio_format, "application/octet-stream"),
@@ -58,5 +79,6 @@ async def synth_preview(params: PreviewParams) -> Response:
             "X-VoiceStudio-Seed-Used": str(result.seed_used) if result.seed_used is not None else "",
             "X-VoiceStudio-Duration-Seconds": f"{result.duration:.4f}",
             "X-VoiceStudio-Engine": "omnivoice",
+            "X-VoiceStudio-History-Id": history_id,
         },
     )

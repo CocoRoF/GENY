@@ -28,11 +28,16 @@
 - [x] `npm run build` 0 errors, 17 routes 유지
 - [x] 회귀 — 기존 ⬆/🗑/per-emotion prompt 코드는 변경하지 않음 (액션 버튼 추가만)
 
-### 7. 배포
-- [ ] commit + PR + squash 머지
-- [ ] sudo git pull + sudo docker compose --build frontend (backend 무변경)
-- [ ] 운영 시연 확인
+### 7. 배포 ✅
+- [x] commit `feat(voice-studio): in-page mic recording + waveform trimming for emotion refs`
+- [x] PR [#835](https://github.com/CocoRoF/Geny/pull/835) — `MERGEABLE` / GitGuardian SUCCESS → squash 머지 → main `e3a563b`
+- [x] 2222 서버 `sudo git pull origin main` (9 files, 1250 insertions / 11 deletions)
+- [x] `sudo docker compose -f docker-compose.prod.yml up -d --build frontend` — frontend Recreated, backend Running 그대로
+- [x] 운영 확인:
+  - frontend Up 15s, backend Up 43m (untouched)
+  - omnivoice/whisper/avatar/nginx/postgres 모두 unchanged
+  - 회귀: `GET /api/tts/profiles` → 6 프로필 정상
 
-### 8. 마무리
-- [ ] PROGRESS_2A.md 완료 처리
-- [ ] Phase 2B PLAN 초안
+### 8. 마무리 ✅
+- [x] PROGRESS_2A.md 완료 처리
+- [ ] Phase 2B PLAN 초안 — 다음 사이클

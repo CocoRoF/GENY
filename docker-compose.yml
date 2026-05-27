@@ -82,6 +82,7 @@ services:
       - GENY_GAME_STATE_DB=/data/creature_state/geny_state.sqlite3
       - GENY_CONFIG_VARIABLES_DIR=/data/config_variables
       - GENY_MCP_CREDENTIALS=/data/mcp/credentials.json
+      - GENY_VOICE_STUDIO_DATA_DIR=/data/voice_studio
     volumes:
       - geny-tts-cache:/app/cache/tts
       - geny-voices:/app/static/voices
@@ -95,6 +96,7 @@ services:
       - geny-creature-state:/data/creature_state
       - geny-config-variables:/data/config_variables
       - geny-mcp-credentials:/data/mcp
+      - geny-voice-studio:/data/voice_studio
       # Chat attachment uploads (content-addressable: /app/static/uploads/{shard}/{sha256}.{ext}).
       # Cycle 20260424_3 PR-1: without this volume the folder was ephemeral —
       # every container restart wiped user-uploaded images.
@@ -280,4 +282,5 @@ volumes:
   geny-config-variables:
     driver: local
   geny-mcp-credentials:
+  geny-voice-studio:
     driver: local

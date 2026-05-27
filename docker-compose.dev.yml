@@ -81,6 +81,7 @@ services:
       - GENY_GAME_STATE_DB=/data/creature_state/geny_state.sqlite3
       - GENY_CONFIG_VARIABLES_DIR=/data/config_variables
       - GENY_MCP_CREDENTIALS=/data/mcp/credentials.json
+      - GENY_VOICE_STUDIO_DATA_DIR=/data/voice_studio
     volumes:
       # ── Bind mount: 로컬 소스 ↔ 컨테이너 동기화 ──────────────────
       - ./backend:/app
@@ -99,6 +100,7 @@ services:
       - geny-creature-state-dev:/data/creature_state
       - geny-config-variables-dev:/data/config_variables
       - geny-mcp-credentials-dev:/data/mcp
+      - geny-voice-studio-dev:/data/voice_studio
       # Baked puppet zips dropped here by avatar-editor. Backend reads + moves to
       # installed/ subdir after install (rw — was :ro before C.3 added install).
       - geny-baked-exports-dev:/data/baked-imports
@@ -322,4 +324,5 @@ volumes:
   geny-config-variables-dev:
     driver: local
   geny-mcp-credentials-dev:
+  geny-voice-studio-dev:
     driver: local
