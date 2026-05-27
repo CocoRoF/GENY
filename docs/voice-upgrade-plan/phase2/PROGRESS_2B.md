@@ -38,11 +38,20 @@
 - [x] `npm run build` 0 errors, 17 routes (변동 없음)
 - [x] docker compose config 3 파일 모두 정상
 
-### 7. 배포
-- [ ] commit + PR + squash 머지
-- [ ] sudo git pull + sudo docker compose --build backend frontend
-- [ ] 운영 검증 — history insert / audio stream / save-as-ref / replay
+### 7. 배포 ✅
+- [x] commit `feat(voice-studio): synthesis history + save-as-ref`
+- [x] PR [#836](https://github.com/CocoRoF/Geny/pull/836) — `MERGEABLE` → squash → main `424c723`
+- [x] 2222 서버 `sudo git pull origin main` (17 files, 1683 insertions)
+- [x] `sudo docker compose -f docker-compose.prod.yml up -d --build backend frontend`
+  - `Volume "geny_geny-voice-studio-prod" Created` — named volume 신규 생성
+  - backend Recreated, frontend Recreated, postgres/omnivoice/whisper/avatar/nginx unchanged
+- [x] 운영 검증:
+  - `/data/voice_studio` 디렉토리 마운트 확인 (root 소유, lazy-create 후 비어있음)
+  - 초기 `GET /synth/history` → `{"items": [], "count": 0}`
+  - `POST /synth/preview` (ellen_joe / clone / 你好 / seed=42) → 200 + audio 37 KB + `X-VoiceStudio-History-Id: c1ecae659310bfb6`
+  - `GET /synth/history` → count=1, 첫 항목이 위 id (profile=ellen_joe, mode=clone, seed=42, rtf=0.387)
+  - 회귀: `GET /api/tts/engines` → 4 엔진, default=omnivoice 그대로
 
-### 8. 마무리
-- [ ] PROGRESS_2B.md 완료 처리
-- [ ] Phase 3 PLAN 초안
+### 8. 마무리 ✅
+- [x] PROGRESS_2B.md 완료 처리
+- [ ] Phase 3 PLAN 초안 — 다음 사이클

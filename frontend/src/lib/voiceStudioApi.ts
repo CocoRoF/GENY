@@ -67,10 +67,50 @@ export interface SaveAsRefParams {
   prompt_lang?: string;
 }
 
+export interface EngineCard {
+  id: string;
+  display_name: string;
+  sample_rate: number;
+  supported_languages: string[];
+  gpu_compat: string[];
+  supports_voice_design: boolean;
+  supports_clone: boolean;
+  supports_emotion_vector: boolean;
+  license: string;
+  available: boolean;
+  reason: string;
+}
+
+export interface OmniVoiceDefaults {
+  num_step: number;
+  guidance_scale: number;
+  speed: number;
+  duration_seconds: number;
+  denoise: boolean;
+  audio_format: PreviewAudioFormat;
+}
+
+export interface CacheStats {
+  enabled?: boolean;
+  size_bytes?: number;
+  size_mb?: number;
+  entry_count?: number;
+  hit_count?: number;
+  miss_count?: number;
+  hit_rate?: number;
+  max_size_mb?: number;
+  ttl_hours?: number;
+}
+
 const PREVIEW_URL = '/api/voice-studio/synth/preview';
 const HISTORY_URL = '/api/voice-studio/synth/history';
 const SAVE_AS_REF_URL = '/api/voice-studio/synth/save-as-ref';
 const LANGS_URL = '/api/voice-studio/languages';
+const ENGINES_URL = '/api/voice-studio/engines';
+const ENGINES_DEFAULT_URL = '/api/voice-studio/engines/default';
+const OMNI_DEFAULTS_URL = '/api/voice-studio/settings/omnivoice-defaults';
+const LEGACY_CACHE_STATS_URL = '/api/tts/cache/stats';
+const LEGACY_CACHE_DELETE_URL = '/api/tts/cache';
 
 function parsePreviewHeaders(res: Response, fallbackBlob: Blob): Omit<PreviewResult, 'blob' | 'blobUrl'> {
   const seedHdr = res.headers.get('X-VoiceStudio-Seed-Used');
@@ -168,6 +208,60 @@ export const voiceStudioApi = {
    * POST /api/voice-studio/synth/save-as-ref — promote a stored
    * synthesis into a profile/emotion ref slot, server-side copy.
    */
+  // ── Settings (Phase 3) ───────────────────────────────────────────
+
+  async getEngines(signal?: AbortSignal): Promise<{ engines: EngineCard[]; default: string }> {
+    const res = await fetch(ENGINES_URL, { signal });
+    if (!res.ok) throw new Error(`engines ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  async setDefaultEngine(name: string): Promise<{ ok: true; default: string }> {
+    const res = await fetch(ENGINES_DEFAULT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`set default ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  async getOmniVoiceDefaults(signal?: AbortSignal): Promise<OmniVoiceDefaults> {
+    const res = await fetch(OMNI_DEFAULTS_URL, { signal });
+    if (!res.ok) throw new Error(`omnivoice-defaults ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  async putOmniVoiceDefaults(body: OmniVoiceDefaults): Promise<OmniVoiceDefaults> {
+    const res = await fetch(OMNI_DEFAULTS_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`omnivoice-defaults PUT ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  async getCacheStats(signal?: AbortSignal): Promise<CacheStats> {
+    const res = await fetch(LEGACY_CACHE_STATS_URL, { signal });
+    if (!res.ok) throw new Error(`cache stats ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  async clearCache(): Promise<void> {
+    const res = await fetch(LEGACY_CACHE_DELETE_URL, { method: 'DELETE' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`clear cache ${res.status}: ${text}`);
+    }
+  },
+
   async saveAsRef(body: SaveAsRefParams): Promise<{ ok: true; profile: string; emotion: string }> {
     const res = await fetch(SAVE_AS_REF_URL, {
       method: 'POST',

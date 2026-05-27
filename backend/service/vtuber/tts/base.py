@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from logging import getLogger
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, ClassVar, Optional
 
 logger = getLogger(__name__)
 
@@ -98,6 +98,21 @@ class TTSEngine(ABC):
     #: feature-detect cheaply without exception handling.
     supports_sentence_stream: bool = False
 
+    # ── Voice Studio metadata (Phase 3) ─────────────────────────────
+    # Pure metadata, no runtime dependency. Surfaced by
+    # ``GET /api/voice-studio/engines`` to drive the Settings page's
+    # Compatibility Matrix. Defaults below are deliberately permissive
+    # so legacy engines that haven't been touched still render in the
+    # matrix (with vague but non-broken labels).
+    display_name: ClassVar[str] = "Unknown engine"
+    sample_rate: ClassVar[int] = 24000
+    supported_languages: ClassVar[list] = ["multi"]
+    gpu_compat: ClassVar[tuple] = ("cpu",)
+    supports_voice_design: ClassVar[bool] = False
+    supports_clone: ClassVar[bool] = False
+    supports_emotion_vector: ClassVar[bool] = False
+    license: ClassVar[str] = ""
+
     @abstractmethod
     async def synthesize_stream(self, request: TTSRequest) -> AsyncIterator[TTSChunk]:
         """Synthesize text to a stream of audio chunks"""
@@ -167,6 +182,20 @@ class TTSEngine(ABC):
     async def health_check(self) -> bool:
         """Check if this engine is available and operational"""
         ...
+
+    async def is_available(self) -> tuple[bool, str]:
+        """Studio-aware availability probe (Phase 3).
+
+        Returns ``(ok, reason)``. Default surface is ``health_check`` with
+        a generic reason; concrete engines should override to expose
+        specific failure causes — missing API key, omnivoice phase=loading,
+        etc. — so the Settings Compatibility Matrix can show them inline.
+        """
+        try:
+            ok = await self.health_check()
+        except Exception as e:
+            return (False, f"{type(e).__name__}: {e}")
+        return (ok, "ok") if ok else (False, "health check failed")
 
     async def apply_emotion(self, request: TTSRequest) -> TTSRequest:
         """
