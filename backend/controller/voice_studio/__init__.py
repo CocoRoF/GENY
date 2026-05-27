@@ -21,6 +21,7 @@ from .history import router as _history_router
 from .languages import router as _languages_router
 from .save_as_ref import router as _save_as_ref_router
 from .synthesis_preview import router as _synth_router
+from .tools import router as _tools_router
 
 router = APIRouter(prefix="/api/voice-studio", tags=["voice-studio"])
 router.include_router(_synth_router)
@@ -31,3 +32,4 @@ router.include_router(_engines_router)
 router.include_router(_defaults_router)
 router.include_router(_batch_router)
 router.include_router(_events_router)
+router.include_router(_tools_router)
