@@ -92,14 +92,21 @@ export interface OmniVoiceDefaults {
 
 export interface CacheStats {
   enabled?: boolean;
+  // ``/api/tts/cache/stats`` surface: ``entries`` + ``total_size_mb`` +
+  // ``max_size_mb`` + ``ttl_hours``. ``hit_count`` / ``miss_count`` /
+  // ``hit_rate`` are not currently exposed by the legacy endpoint, so
+  // we keep them optional for forward compat.
+  entries?: number;
+  total_size_mb?: number;
+  max_size_mb?: number;
+  ttl_hours?: number;
+  // Aliases — older snapshots may have used these names.
   size_bytes?: number;
   size_mb?: number;
   entry_count?: number;
   hit_count?: number;
   miss_count?: number;
   hit_rate?: number;
-  max_size_mb?: number;
-  ttl_hours?: number;
 }
 
 const PREVIEW_URL = '/api/voice-studio/synth/preview';
