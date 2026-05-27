@@ -37,11 +37,17 @@
 - [x] py_compile 10 파일 통과
 - [x] `npm run build` 0 errors, 17 routes (변동 없음)
 
-### 6. 배포
-- [ ] commit + PR + squash 머지
-- [ ] sudo git pull + sudo docker compose --build backend frontend
-- [ ] 운영 검증
+### 6. 배포 ✅
+- [x] commit `feat(voice-studio): engine compatibility matrix + OmniVoice defaults + cache stats`
+- [x] PR [#837](https://github.com/CocoRoF/Geny/pull/837) → squash → main `4d7ece4`
+- [x] 2222 서버 `sudo git pull` + `docker compose -f docker-compose.prod.yml up -d --build backend frontend`
+- [x] 운영 검증:
+  - frontend Up 18s, backend Up 29s (healthy), 다른 5개 unchanged
+  - `GET /api/voice-studio/engines` → 4 cards, default=omnivoice, openai/elevenlabs 정확히 "missing API key" 사유 표시
+  - `GET /api/voice-studio/settings/omnivoice-defaults` → 현 cfg snapshot
+  - 회귀 `GET /api/tts/engines` → 정상
+- [x] **hotfix [#838](https://github.com/CocoRoF/Geny/pull/838)** — CacheCard 필드 이름 (`entries` / `total_size_mb`) `/api/tts/cache/stats` 응답과 정렬 (squash → main `0f31560`, frontend rebuild)
 
-### 7. 마무리
-- [ ] PROGRESS.md 완료 처리
-- [ ] Phase 4 PLAN 초안
+### 7. 마무리 ✅
+- [x] PROGRESS.md 완료 처리
+- [ ] Phase 4 PLAN 초안 — 다음 사이클

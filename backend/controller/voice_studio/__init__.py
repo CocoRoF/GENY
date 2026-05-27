@@ -13,8 +13,10 @@ prefix.
 
 from fastapi import APIRouter
 
+from .batch import router as _batch_router
 from .defaults import router as _defaults_router
 from .engines import router as _engines_router
+from .events import router as _events_router
 from .history import router as _history_router
 from .languages import router as _languages_router
 from .save_as_ref import router as _save_as_ref_router
@@ -27,3 +29,5 @@ router.include_router(_save_as_ref_router)
 router.include_router(_languages_router)
 router.include_router(_engines_router)
 router.include_router(_defaults_router)
+router.include_router(_batch_router)
+router.include_router(_events_router)
