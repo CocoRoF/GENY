@@ -23,6 +23,7 @@ const ko: Translations = {
     normalMode: '일반',
     wiki: '위키',
     ttsVoice: 'TTS Voice',
+    voiceStudio: 'Voice Studio',
     envManagement: '환경 관리',
     login: '로그인',
     logout: '로그아웃',
@@ -2906,6 +2907,11 @@ const ko: Translations = {
     refPromptText: '프롬프트 텍스트',
     refPromptPlaceholder: '이 오디오에서 말하는 내용...',
     refLang: '언어',
+    studioPromoBanner: {
+      title: '강화된 Voice Studio가 도착했습니다 — OmniVoice 풀 컨트롤 + 합성 미리듣기 + 일괄 처리',
+      cta: '열기',
+      dismiss: '닫기',
+    },
   },
 
   // ─── User Opsidian ───
@@ -3038,6 +3044,53 @@ const ko: Translations = {
     moveTo: '이동…',
     renameTag: '태그 이름 변경',
     removeTagFromAll: '모든 노트에서 제거',
+  },
+
+  // ─── Voice Studio (cycle 20260527 / Phase 1) ───
+  voiceStudio: {
+    title: 'Voice Studio',
+    backToApp: '메인으로',
+    nav: {
+      cloneDesign: '합성 · 디자인',
+      voices: '보이스 프로필',
+      batch: '배치 합성',
+      tools: '도구',
+      settings: '설정',
+    },
+    voices: {
+      searchPlaceholder: '프로필 검색...',
+      filter: {
+        all: '전체',
+        templates: '템플릿',
+        mine: '내 프로필',
+      },
+      count: '{n}개',
+      loading: '로딩 중...',
+      empty: '표시할 프로필이 없습니다.',
+      refCount: 'ref {n}개',
+      template: '템플릿',
+      active: '활성',
+      activate: '활성 보이스로',
+      openInDesign: 'Clone & Design',
+    },
+    placeholder: {
+      cloneDesign: {
+        title: '합성 · 디자인',
+        body: 'OmniVoice 풀 파라미터 합성 카드는 다음 PR(1B)에서 도입됩니다.',
+      },
+      batch: {
+        title: '배치 합성',
+        body: 'CSV/JSON/텍스트 라인별 합성 + zip 다운로드는 Phase 4에서 도입됩니다.',
+      },
+      tools: {
+        title: '도구',
+        body: 'Seed search, language detect, A/B compare 등은 Phase 4에서 도입됩니다.',
+      },
+      settings: {
+        title: '설정',
+        body: '엔진 Compatibility Matrix + OmniVoice 디폴트 + 캐시 + HF token은 Phase 3에서 도입됩니다.',
+      },
+    },
   },
 
   // ─── Next-session banner (cycle 20260426_1 / C.1) ───

@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, Code2, User, BookOpen, AudioLines, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
+import { Menu, Sun, Moon, Code2, User, BookOpen, AudioLines, Sliders, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 
@@ -93,6 +93,15 @@ export default function Header() {
           title={t('header.ttsVoice')}
         >
           <AudioLines size={14} />
+        </Link>
+
+        {/* ── Voice Studio Button — hidden on mobile ── */}
+        <Link
+          href="/voice-studio"
+          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          title={t('header.voiceStudio')}
+        >
+          <Sliders size={14} />
         </Link>
 
         {/* ── Avatar Editor Button — opens the geny-avatar service in a

@@ -23,6 +23,7 @@ const en = {
     normalMode: 'Normal',
     wiki: 'Wiki',
     ttsVoice: 'TTS Voice',
+    voiceStudio: 'Voice Studio',
     envManagement: 'Environments',
     login: 'Login',
     logout: 'Logout',
@@ -2865,6 +2866,11 @@ const en = {
     refPromptText: 'Prompt Text',
     refPromptPlaceholder: 'What is spoken in this audio...',
     refLang: 'Lang',
+    studioPromoBanner: {
+      title: 'The upgraded Voice Studio is here — full OmniVoice controls, synthesis preview, batch jobs',
+      cta: 'Open',
+      dismiss: 'Dismiss',
+    },
   },
   // ─── User Opsidian ───
   opsidian: {
@@ -2996,6 +3002,53 @@ const en = {
     moveTo: 'Move to…',
     renameTag: 'Rename Tag',
     removeTagFromAll: 'Remove from All Notes',
+  },
+
+  // ─── Voice Studio (cycle 20260527 / Phase 1) ───
+  voiceStudio: {
+    title: 'Voice Studio',
+    backToApp: 'Back to app',
+    nav: {
+      cloneDesign: 'Clone & Design',
+      voices: 'Voices',
+      batch: 'Batch',
+      tools: 'Tools',
+      settings: 'Settings',
+    },
+    voices: {
+      searchPlaceholder: 'Search profiles...',
+      filter: {
+        all: 'All',
+        templates: 'Templates',
+        mine: 'Mine',
+      },
+      count: '{n} profile(s)',
+      loading: 'Loading...',
+      empty: 'No profiles to show.',
+      refCount: '{n} ref(s)',
+      template: 'Template',
+      active: 'Active',
+      activate: 'Activate',
+      openInDesign: 'Clone & Design',
+    },
+    placeholder: {
+      cloneDesign: {
+        title: 'Clone & Design',
+        body: 'The full OmniVoice synthesis surface lands in the next PR (1B).',
+      },
+      batch: {
+        title: 'Batch Synthesis',
+        body: 'CSV / JSON / text line-by-line synthesis + zip download lands in Phase 4.',
+      },
+      tools: {
+        title: 'Tools',
+        body: 'Seed search, language detect, A/B compare — coming in Phase 4.',
+      },
+      settings: {
+        title: 'Settings',
+        body: 'Engine Compatibility Matrix + OmniVoice defaults + cache + HF token — coming in Phase 3.',
+      },
+    },
   },
 
   // ─── Next-session banner (cycle 20260426_1 / C.1) ───
