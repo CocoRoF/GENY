@@ -16,8 +16,6 @@
 #  경량 버전 (TTS 없음):
 #    docker compose -f docker-compose.dev-core.yml up --build
 #
-#  TTS 설정:
-#    GPT-SoVITS API URL → 설정 UI에서 http://gpt-sovits:9880 입력
 # ══════════════════════════════════════════════════════════════════════
 
 services:
@@ -133,7 +131,6 @@ services:
     environment:
       - API_URL=http://backend:8000
       - NEXT_PUBLIC_BACKEND_PORT=${BACKEND_PORT:-8000}
-      - NEXT_PUBLIC_GPT_SOVITS_WEBUI_PORT=${GPT_SOVITS_WEBUI_PORT:-9874}
       - PORT=3000
       - HOSTNAME=0.0.0.0
     volumes:
@@ -146,49 +143,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    networks:
-      - geny-net-dev
-
-  # ── GPT-SoVITS (Optional — TTS 로컬 엔진, GPU 필요) ──────────────
-  # xxxxrt666/gpt-sovits:latest (공식 이미지, v2 API, 한국어 지원)
-  # api_v2.py → 포트 9880 서빙, webui.py → 포트 9874 (TTS Studio)
-  gpt-sovits:
-    image: xxxxrt666/gpt-sovits:latest-cu126
-    container_name: geny-gpt-sovits-dev
-    profiles: ["audio-local"]
-    init: true
-    restart: unless-stopped
-    working_dir: /workspace/GPT-SoVITS
-    command:
-      - /bin/bash
-      - "-c"
-      - |
-        pip install nvidia-npp-cu12 -q 2>/dev/null;
-        rm -rf GPT_SoVITS/pretrained_models GPT_SoVITS/text/G2PWModel tools/asr/models tools/uvr5/uvr5_weights 2>/dev/null;
-        ln -sf /workspace/models/pretrained_models GPT_SoVITS/pretrained_models;
-        ln -sf /workspace/models/G2PWModel       GPT_SoVITS/text/G2PWModel;
-        ln -sf /workspace/models/asr_models       tools/asr/models;
-        ln -sf /workspace/models/uvr5_weights     tools/uvr5/uvr5_weights;
-        python webui.py &
-        exec python api_v2.py -a 0.0.0.0 -p 9880
-    ports:
-      - "127.0.0.1:${GPT_SOVITS_PORT:-9880}:9880"
-      - "127.0.0.1:${GPT_SOVITS_WEBUI_PORT:-9874}:9874"
-    volumes:
-      - ./backend/static/voices:/workspace/GPT-SoVITS/references:ro
-    tty: true
-    stdin_open: true
-    shm_size: 16G
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    environment:
-      - is_half=True
-      - LD_LIBRARY_PATH=/root/conda/lib:/root/conda/lib/python3.12/site-packages/nvidia/npp/lib
     networks:
       - geny-net-dev
 

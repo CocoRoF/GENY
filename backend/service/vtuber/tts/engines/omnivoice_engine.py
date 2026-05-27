@@ -5,8 +5,8 @@ Connects to the FastAPI server defined under ``Geny/omnivoice/server/`` via HTTP
 Supports voice cloning (``mode=clone``), voice design (``mode=design``),
 and auto voice (``mode=auto``).
 
-Compatible with the same ``static/voices/<profile>/profile.json`` layout
-used by ``GPTSoVITSEngine`` so existing voice profiles work unchanged.
+Reads voice profiles from the shared ``static/voices/<profile>/profile.json``
+layout (reference audio per emotion, prompt text/language metadata).
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ async def aclose_clients() -> None:
         _clients.clear()
 
 
-# ── Voice-profile filesystem layout (shared with GPT-SoVITS) ─────────
+# ── Voice-profile filesystem layout ──────────────────────────────────
 # Backend path:   /app/static/voices/<profile>/...
 # omnivoice path: /voices/<profile>/...   (read-only bind from same source)
 _BACKEND_VOICES_ROOT = "/app/static/voices"

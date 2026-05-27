@@ -5,9 +5,8 @@ Settings for the in-cluster ``geny-omnivoice`` service (see
 ``Geny/omnivoice/``). OmniVoice is a 600+ language zero-shot TTS model
 with three modes:
 
-- ``clone``  — voice cloning using a reference audio (compatible with
-  the ``static/voices/<profile>/ref_*.wav`` layout we already use for
-  GPT-SoVITS).
+- ``clone``  — voice cloning using a reference audio, sourced from the
+  shared ``static/voices/<profile>/ref_*.wav`` layout.
 - ``design`` — generate a voice from a natural-language ``instruct``
   string (``"female, low pitch, british accent"``).
 - ``auto``   — let the model pick a random voice.
@@ -202,7 +201,7 @@ class OmniVoiceConfig(BaseConfig):
 
     @classmethod
     def _get_profile_options(cls) -> List[Dict[str, str]]:
-        """Reuse the same scan logic as GPT-SoVITS for parity."""
+        """Scan ``static/voices/`` for voice profile directories."""
         import json as _json
         from pathlib import Path as _Path
 

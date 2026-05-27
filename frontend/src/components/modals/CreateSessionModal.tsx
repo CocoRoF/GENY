@@ -103,8 +103,8 @@ export default function CreateSessionModal({ onClose }: Props) {
         ttsApi.engines().catch((): { engines: string[]; default: string } => ({ engines: [], default: '' })),
         ttsApi.listProfiles().catch((): { profiles: VoiceProfile[] } => ({ profiles: [] })),
       ]).then(([enginesRes, profilesRes]) => {
-        const hasGptSovits = enginesRes.engines.includes('gpt_sovits');
-        setTtsEnabled(hasGptSovits);
+        const hasTtsEngine = (enginesRes.engines?.length ?? 0) > 0;
+        setTtsEnabled(hasTtsEngine);
         setTtsProfiles(profilesRes.profiles || []);
         setTtsProfilesLoaded(true);
       });

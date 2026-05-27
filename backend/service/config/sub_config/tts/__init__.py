@@ -6,5 +6,5 @@ This category contains configs for TTS (Text-to-Speech) engine settings:
 - Edge TTS: Free Microsoft TTS voice settings
 - OpenAI TTS: OpenAI API settings
 - ElevenLabs: Voice cloning + emotion settings
-- GPT-SoVITS: Open-source voice cloning with emotion references
+- OmniVoice: Open-source 600+ language zero-shot voice cloning + design
 """

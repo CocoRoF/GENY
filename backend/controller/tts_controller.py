@@ -110,10 +110,6 @@ async def speak(session_id: str, body: SpeakRequest):
         }.get(general.audio_format, "audio/mpeg")
         default_language = general.default_language
         current_provider = general.provider
-
-        # GPT-SoVITS v1 api.py always returns wav regardless of config
-        if current_provider == "gpt_sovits":
-            content_type = "audio/wav"
     except Exception:
         default_language = "ko"
         current_provider = "edge_tts"
@@ -1116,7 +1112,6 @@ class UpdateProfileRequest(BaseModel):
     language: Optional[str] = None
     prompt_text: Optional[str] = None
     prompt_lang: Optional[str] = None
-    gpt_sovits_settings: Optional[dict] = None
 
 
 @router.get("/profiles")
@@ -1151,14 +1146,14 @@ async def list_profiles():
                     "has_refs": refs,
                 })
 
-    # Mark which profile is currently active in GPT-SoVITS config
+    # Mark which profile is currently active in OmniVoice config
     active_dir = ""
     try:
         from service.config.manager import get_config_manager
-        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+        from service.config.sub_config.tts.omnivoice_config import OmniVoiceConfig
 
-        cfg = get_config_manager().load_config(GPTSoVITSConfig)
-        active_dir = os.path.basename(cfg.ref_audio_dir.rstrip("/"))
+        cfg = get_config_manager().load_config(OmniVoiceConfig)
+        active_dir = cfg.voice_profile or ""
     except Exception:
         pass
 
@@ -1213,12 +1208,6 @@ async def create_profile(body: CreateProfileRequest, auth: dict = Depends(requir
         "prompt_text": body.prompt_text,
         "prompt_lang": body.prompt_lang,
         "emotion_refs": {},
-        "gpt_sovits_settings": {
-            "top_k": 5,
-            "top_p": 1.0,
-            "temperature": 1.0,
-            "speed_factor": 1.0,
-        },
     }
     _atomic_write_json(profile_dir / "profile.json", profile_data)
     return profile_data
@@ -1243,8 +1232,6 @@ async def update_profile(name: str, body: UpdateProfileRequest, auth: dict = Dep
         data["prompt_text"] = body.prompt_text
     if body.prompt_lang is not None:
         data["prompt_lang"] = body.prompt_lang
-    if body.gpt_sovits_settings is not None:
-        data["gpt_sovits_settings"] = body.gpt_sovits_settings
 
     _atomic_write_json(profile_json, data)
     return data
@@ -1376,7 +1363,7 @@ async def update_emotion_ref(name: str, emotion: str, body: UpdateEmotionRefRequ
 
 @router.post("/profiles/{name}/activate")
 async def activate_profile(name: str, auth: dict = Depends(require_auth)):
-    """Set a voice profile as the active GPT-SoVITS voice"""
+    """Set a voice profile as the active OmniVoice voice"""
     # Validate name to prevent path traversal
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid profile name")
@@ -1387,24 +1374,15 @@ async def activate_profile(name: str, auth: dict = Depends(require_auth)):
 
     try:
         from service.config.manager import get_config_manager
-        from service.config.sub_config.tts.gpt_sovits_config import GPTSoVITSConfig
+        from service.config.sub_config.tts.omnivoice_config import OmniVoiceConfig
 
         mgr = get_config_manager()
-        cfg = mgr.load_config(GPTSoVITSConfig)
+        cfg = mgr.load_config(OmniVoiceConfig)
 
-        # Update voice_profile (new) + legacy path fields for compatibility
+        # OmniVoice resolves the reference audio from <voices_dir>/<voice_profile>/
+        # at request time (see Geny/omnivoice/server/voices.py). Setting
+        # voice_profile is sufficient to mark this profile as active.
         cfg.voice_profile = name
-        cfg.ref_audio_dir = f"/app/static/voices/{name}"
-        cfg.container_ref_dir = f"/workspace/GPT-SoVITS/references/{name}"
-
-        # Update prompt from profile.json if available
-        profile_json = profile_dir / "profile.json"
-        if profile_json.exists():
-            data = json.loads(profile_json.read_text(encoding="utf-8"))
-            if data.get("prompt_text"):
-                cfg.prompt_text = data["prompt_text"]
-            if data.get("prompt_lang"):
-                cfg.prompt_lang = data["prompt_lang"]
 
         mgr.save_config(cfg)
         logger.info(f"Activated voice profile: {name}")
@@ -1412,8 +1390,6 @@ async def activate_profile(name: str, auth: dict = Depends(require_auth)):
         return {
             "success": True,
             "profile": name,
-            "ref_audio_dir": cfg.ref_audio_dir,
-            "container_ref_dir": cfg.container_ref_dir,
         }
     except Exception as e:
         logger.error(f"Failed to activate profile '{name}': {e}")
