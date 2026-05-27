@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Sparkles, RefreshCw } from 'lucide-react';
+import { Loader2, Sparkles, RefreshCw, Save } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import type { VoiceProfile } from '@/lib/api';
 import {
   voiceStudioApi,
+  type HistoryItem,
   type PreviewMode,
   type PreviewParams,
   type PreviewResult,
@@ -14,8 +15,10 @@ import AdvancedParamsPanel, {
   DEFAULT_ADVANCED_PARAMS,
   type AdvancedParams,
 } from './AdvancedParamsPanel';
+import HistoryPanel from './HistoryPanel';
 import InstructPanel from './InstructPanel';
 import LanguagePicker from './LanguagePicker';
+import SaveAsRefModal from './SaveAsRefModal';
 import WaveformPreview from './WaveformPreview';
 
 const EMOTIONS = [
@@ -58,6 +61,11 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<PreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // PR 2B: history panel auto-refresh + save-as-ref modal state.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveModalItem, setSaveModalItem] = useState<HistoryItem | null>(null);
 
   // Revoke previous blob URL when result changes / on unmount.
   useEffect(() => {
@@ -113,6 +121,7 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
     try {
       const res = await voiceStudioApi.synthesizePreview(params);
       setResult(res);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -129,12 +138,37 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
     try {
       const res = await voiceStudioApi.synthesizePreview(seeded);
       setResult(res);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }, [params, result?.seedUsed, result?.blobUrl]);
+
+  // Open SaveAsRefModal for either the latest result or a history row.
+  const openSaveAsRef = useCallback((item: HistoryItem | null) => {
+    if (item) {
+      setSaveModalItem(item);
+    } else if (result?.historyId) {
+      // Build a minimal HistoryItem from the current result.
+      setSaveModalItem({
+        id: result.historyId,
+        created_at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+        text,
+        profile: profile?.name,
+        engine: result.engine,
+        mode,
+        seed: result.seedUsed,
+        duration_seconds: result.durationSeconds,
+        rtf: result.rtf,
+        sample_rate: result.sampleRate,
+      });
+    } else {
+      return;
+    }
+    setSaveModalOpen(true);
+  }, [result, text, profile?.name, mode]);
 
   const charCount = text.length;
   const estimatedSeconds = (charCount / 8).toFixed(1); // rough heuristic
@@ -233,6 +267,17 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
             {t('voiceStudio.cloneDesign.regenerateSameSeed')}
           </button>
         )}
+        {result?.historyId && (
+          <button
+            onClick={() => openSaveAsRef(null)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-secondary)] text-[0.75rem] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={t('voiceStudio.saveAsRef.openTitle')}
+          >
+            <Save size={12} />
+            {t('voiceStudio.saveAsRef.openLabel')}
+          </button>
+        )}
         {isDesign && !instruct.trim() && (
           <span className="text-[0.6875rem] text-[var(--warning-color)]">
             {t('voiceStudio.cloneDesign.errors.designNeedsInstruct')}
@@ -264,6 +309,19 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
               }.${advanced.audio_format}`
             : undefined
         }
+      />
+
+      {/* History panel — auto-opens after the first generate. */}
+      <HistoryPanel refreshKey={historyRefreshKey} onSaveAsRef={(item) => openSaveAsRef(item)} />
+
+      {/* Save-as-ref modal — fires from the result button OR from a history row. */}
+      <SaveAsRefModal
+        open={saveModalOpen}
+        item={saveModalItem}
+        defaultEmotion={emotion}
+        defaultProfile={profile?.is_template ? undefined : profile?.name}
+        onClose={() => setSaveModalOpen(false)}
+        onSaved={() => setHistoryRefreshKey((k) => k + 1)}
       />
     </section>
   );
