@@ -26,6 +26,15 @@ class EdgeTTSEngine(TTSEngine):
 
     engine_name = "edge_tts"
 
+    # ── Studio metadata (Phase 3) ───────────────────────────────────
+    display_name = "Edge TTS (Microsoft)"
+    sample_rate = 24000
+    supported_languages = ["multi"]  # 80+ Microsoft Neural voices
+    gpu_compat = ("cloud",)
+    supports_voice_design = False
+    supports_clone = False
+    license = "Microsoft Edge Read Aloud ToS"
+
     # Default voice mapping per language
     _DEFAULT_VOICES = {
         "ko": "ko-KR-SunHiNeural",

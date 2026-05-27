@@ -39,6 +39,27 @@ class OpenAITTSEngine(TTSEngine):
 
     engine_name = "openai"
 
+    # ── Studio metadata (Phase 3) ───────────────────────────────────
+    display_name = "OpenAI TTS"
+    sample_rate = 24000
+    supported_languages = ["multi"]  # 50+ via tts-1 / tts-1-hd
+    gpu_compat = ("cloud",)
+    supports_voice_design = False
+    supports_clone = False
+    license = "OpenAI ToS"
+
+    async def is_available(self) -> tuple[bool, str]:
+        try:
+            from service.config.manager import get_config_manager
+            from service.config.sub_config.tts.openai_tts_config import OpenAITTSConfig
+
+            cfg = get_config_manager().load_config(OpenAITTSConfig)
+            if not cfg.api_key:
+                return False, "missing OPENAI_API_KEY"
+            return True, "ok"
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+
     async def synthesize_stream(self, request: TTSRequest) -> AsyncIterator[TTSChunk]:
         """Stream audio from OpenAI TTS API"""
         from service.config.manager import get_config_manager

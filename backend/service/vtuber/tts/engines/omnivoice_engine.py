@@ -170,6 +170,15 @@ class OmniVoiceEngine(TTSEngine):
     engine_name = "omnivoice"
     supports_sentence_stream = True
 
+    # ── Studio metadata (Phase 3) ───────────────────────────────────
+    display_name = "OmniVoice (k2-fsa)"
+    sample_rate = 24000
+    supported_languages = ["multi"]  # 646 languages, see /api/voice-studio/languages
+    gpu_compat = ("cuda", "mps", "cpu")
+    supports_voice_design = True
+    supports_clone = True
+    license = "OpenRAIL-M"
+
     # ── Internal: payload builder shared by /tts and /tts/stream ────
     def _build_payload(self, request: TTSRequest, config) -> tuple[dict, str]:
         """Return ``(payload, profile_name)`` for the upstream request.

@@ -25,6 +25,29 @@ class ElevenLabsEngine(TTSEngine):
 
     engine_name = "elevenlabs"
 
+    # ── Studio metadata (Phase 3) ───────────────────────────────────
+    display_name = "ElevenLabs"
+    sample_rate = 24000
+    supported_languages = ["multi"]  # ~30 via multilingual_v2
+    gpu_compat = ("cloud",)
+    supports_voice_design = False
+    supports_clone = True  # cloud voice cloning via Voice Library
+    license = "ElevenLabs ToS"
+
+    async def is_available(self) -> tuple[bool, str]:
+        try:
+            from service.config.manager import get_config_manager
+            from service.config.sub_config.tts.elevenlabs_config import ElevenLabsConfig
+
+            cfg = get_config_manager().load_config(ElevenLabsConfig)
+            if not cfg.api_key:
+                return False, "missing ELEVENLABS_API_KEY"
+            if not cfg.voice_id:
+                return False, "missing voice_id"
+            return True, "ok"
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+
     # Emotion → ElevenLabs voice_settings overrides
     EMOTION_SETTINGS = {
         "neutral":  {"stability": 0.50, "similarity_boost": 0.75, "style": 0.00},
