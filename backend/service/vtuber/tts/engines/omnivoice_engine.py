@@ -602,3 +602,96 @@ class OmniVoiceEngine(TTSEngine):
         except Exception as e:
             logger.warning("OmniVoice health check error: %s: %s", type(e).__name__, e)
             return False
+
+    async def synthesize_preview(self, params):  # type: ignore[no-untyped-def]
+        """Voice Studio Synthesize card — full-parameter forwarding.
+
+        Unlike :meth:`synthesize_stream` (chat path) this does NOT apply
+        adaptive ``num_step`` or implicit config overrides; the user
+        dialled the values in directly via the advanced panel. Only
+        values left as ``None`` in ``params`` fall back to
+        :class:`OmniVoiceConfig` defaults.
+
+        ``params`` is :class:`service.voice_studio.synthesis_preview.PreviewParams`
+        (untyped here to avoid a circular import at module load time).
+        Returns :class:`service.voice_studio.synthesis_preview.PreviewResult`.
+        """
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.tts.omnivoice_config import OmniVoiceConfig
+        from service.voice_studio.synthesis_preview import PreviewResult
+
+        config = get_config_manager().load_config(OmniVoiceConfig)
+        if not config.enabled:
+            raise ValueError("OmniVoice is not enabled")
+
+        profile = params.profile or config.voice_profile or ""
+        mode = params.mode
+
+        payload: dict = {
+            "text": params.text,
+            "mode": mode,
+            "language": params.language or None,
+            "speed": float(params.speed),
+            "duration": float(params.duration_seconds) if params.duration_seconds else None,
+            "num_step": int(params.num_step if params.num_step is not None else config.num_step),
+            "guidance_scale": float(
+                params.guidance_scale if params.guidance_scale is not None else config.guidance_scale
+            ),
+            "denoise": bool(params.denoise if params.denoise is not None else config.denoise),
+            "audio_format": params.audio_format,
+            "sample_rate": int(params.sample_rate or 24000),
+        }
+        if params.seed is not None:
+            payload["seed"] = int(params.seed)
+
+        if mode in ("clone", "auto") and profile:
+            ref_audio_path, prompt_text, _ = _resolve_emotion_ref(
+                profile, params.emotion or "neutral"
+            )
+            if ref_audio_path:
+                payload["mode"] = "clone"
+                payload["ref_audio_path"] = ref_audio_path
+                effective_auto_asr = (
+                    params.auto_asr if params.auto_asr is not None else config.auto_asr
+                )
+                if prompt_text:
+                    payload["ref_text"] = prompt_text
+                elif effective_auto_asr:
+                    payload["ref_text"] = None
+            elif mode == "clone":
+                raise ValueError(
+                    f"OmniVoice mode=clone: profile '{profile}' has no ref audio "
+                    f"for emotion '{params.emotion}'"
+                )
+            else:
+                payload["mode"] = "auto"
+
+        if mode == "design":
+            instruct = (params.instruct or "").strip()
+            if not instruct:
+                raise ValueError("OmniVoice mode=design requires instruct")
+            payload["instruct"] = instruct
+        elif params.instruct:
+            payload["instruct"] = params.instruct.strip()
+
+        # Drop None values so omnivoice uses its own defaults for omitted keys.
+        payload = {k: v for k, v in payload.items() if v is not None}
+
+        api_url = config.api_url.rstrip("/")
+        timeout = max(float(config.timeout_seconds or 0.0), 180.0)
+        client = await _get_client(api_url, read_timeout=timeout)
+        logger.info(
+            "voice-studio preview: mode=%s profile=%s lang=%s text_len=%d",
+            payload.get("mode"), profile, payload.get("language"), len(params.text),
+        )
+        resp = await client.post(f"{api_url}/tts", json=payload)
+        resp.raise_for_status()
+
+        seed_hdr = resp.headers.get("X-OmniVoice-Seed")
+        return PreviewResult(
+            audio_bytes=resp.content,
+            sample_rate=int(resp.headers.get("X-OmniVoice-Sample-Rate") or 24000),
+            rtf=float(resp.headers.get("X-OmniVoice-RTF") or 0.0),
+            seed_used=int(seed_hdr) if seed_hdr else params.seed,
+            duration=float(resp.headers.get("X-OmniVoice-Duration") or 0.0),
+        )

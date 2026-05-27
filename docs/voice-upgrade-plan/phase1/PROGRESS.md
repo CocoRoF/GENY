@@ -38,15 +38,20 @@
 - [x] `git diff frontend/src/app/tts-voice/page.tsx` — import 1줄 + 컴포넌트 1줄 + 빈줄 1줄 (총 3줄) 만 변경 — 565줄 본문 무변경 확인
 - [x] i18n 인터폴레이션 `{n}` 패턴 — 기존 `{count}` 패턴과 호환 (interpolation regex `\{(\w+)\}`)
 
-### 5. 배포
-- [ ] commit + PR + squash 머지
-- [ ] 2222 서버 sudo git pull
-- [ ] sudo docker compose --build frontend (backend 무변경)
-- [ ] 운영 확인 — /tts-voice 배너 / Header Voice Studio 아이콘 / /voice-studio/voices 카드 / activate 흐름
+### 5. 배포 ✅
+- [x] commit `feat(voice-studio): scaffold /voice-studio + voices catalog + header entry`
+- [x] PR [#833](https://github.com/CocoRoF/Geny/pull/833) — `MERGEABLE` / GitGuardian SUCCESS → squash 머지 → main 커밋 `76b8970`
+- [x] 2222 서버 `sudo git pull origin main` (17 files, 1216 insertions)
+- [x] `sudo docker compose -f docker-compose.prod.yml up -d --build frontend` — frontend Recreated, backend Running 그대로
+- [x] 운영 확인:
+  - frontend Up 23s, backend Up 23m (healthy)
+  - `/voice-studio/voices` HTML에 5탭 SideNav 링크 모두 존재
+  - `/tts-voice` 정상 서빙 (배너는 client-side hydrate 후 표시, 의도된 패턴)
+  - `GET /api/tts/engines` → `{"engines": ["edge_tts", "openai", "elevenlabs", "omnivoice"], "default": "omnivoice"}` 그대로
 
-### 6. 마무리
-- [ ] PROGRESS.md 완전 완료 처리
-- [ ] Phase 1B PLAN.md 초안
+### 6. 마무리 ✅
+- [x] PROGRESS.md 완료 처리
+- [ ] Phase 1B PLAN.md 초안 — 다음 사이클
 
 ---
 
