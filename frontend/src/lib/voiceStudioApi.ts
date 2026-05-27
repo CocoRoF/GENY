@@ -159,8 +159,41 @@ const ENGINES_URL = '/api/voice-studio/engines';
 const ENGINES_DEFAULT_URL = '/api/voice-studio/engines/default';
 const OMNI_DEFAULTS_URL = '/api/voice-studio/settings/omnivoice-defaults';
 const BATCH_URL = '/api/voice-studio/batch';
+const TOOLS_LANG_URL = '/api/voice-studio/tools/detect-language';
+const TOOLS_REF_URL = '/api/voice-studio/tools/analyze-ref';
+const TOOLS_SEED_URL = '/api/voice-studio/tools/seed-search';
 const LEGACY_CACHE_STATS_URL = '/api/tts/cache/stats';
 const LEGACY_CACHE_DELETE_URL = '/api/tts/cache';
+
+export interface LangDetectResult {
+  language: string;
+  confidence: number;
+  detail: Record<string, number>;
+}
+
+export interface RefAnalysisResult {
+  duration_seconds: number;
+  sample_rate: number;
+  channels: number;
+  rms_db: number;
+  silence_ratio: number;
+  suggested_windows: { start: number; end: number; rms_db: number; silent_ratio: number }[];
+}
+
+export interface SeedSearchEntry {
+  seed: number;
+  audio_url?: string;
+  duration?: number;
+  rtf?: number;
+  seed_used?: number;
+  error?: string;
+}
+
+export interface SeedSearchResult {
+  batch_id: string;
+  n: number;
+  results: SeedSearchEntry[];
+}
 
 function parsePreviewHeaders(res: Response, fallbackBlob: Blob): Omit<PreviewResult, 'blob' | 'blobUrl'> {
   const seedHdr = res.headers.get('X-VoiceStudio-Seed-Used');
@@ -358,6 +391,53 @@ export const voiceStudioApi = {
 
   getBatchDownloadUrl(id: string): string {
     return `${BATCH_URL}/${encodeURIComponent(id)}/download`;
+  },
+
+  // ── Tools (Phase 4B) ─────────────────────────────────────────────
+
+  async detectLanguage(text: string, signal?: AbortSignal): Promise<LangDetectResult> {
+    const res = await fetch(TOOLS_LANG_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal,
+    });
+    if (!res.ok) throw new Error(`detect-language ${res.status}: ${res.statusText}`);
+    return res.json();
+  },
+
+  async analyzeRef(file: Blob, signal?: AbortSignal): Promise<RefAnalysisResult> {
+    const fd = new FormData();
+    fd.append('file', file, 'ref.wav');
+    const res = await fetch(TOOLS_REF_URL, { method: 'POST', body: fd, signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`analyze-ref ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  async seedSearch(body: {
+    text: string;
+    profile: string;
+    emotion?: string;
+    mode?: PreviewMode;
+    language?: string;
+    num_step?: number;
+    n?: number;
+    seeds?: number[];
+  }, signal?: AbortSignal): Promise<SeedSearchResult> {
+    const res = await fetch(TOOLS_SEED_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`seed-search ${res.status}: ${text}`);
+    }
+    return res.json();
   },
 
   async saveAsRef(body: SaveAsRefParams): Promise<{ ok: true; profile: string; emotion: string }> {
