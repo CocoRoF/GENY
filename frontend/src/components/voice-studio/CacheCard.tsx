@@ -55,11 +55,12 @@ export default function CacheCard() {
     }
   }, [t, load]);
 
-  const sizeLabel = formatSize(stats?.size_mb, stats?.size_bytes);
+  const sizeLabel = formatSize(stats?.total_size_mb ?? stats?.size_mb, stats?.size_bytes);
   const maxLabel = stats?.max_size_mb ? `${stats.max_size_mb} MB` : '—';
   const ttl = stats?.ttl_hours ? `${stats.ttl_hours} h` : '—';
-  const hits = stats?.hit_count ?? 0;
-  const misses = stats?.miss_count ?? 0;
+  const entries = stats?.entries ?? stats?.entry_count ?? '—';
+  const hits = stats?.hit_count ?? '—';
+  const misses = stats?.miss_count ?? '—';
   const rate = stats?.hit_rate !== undefined ? `${(stats.hit_rate * 100).toFixed(1)}%` : '—';
 
   return (
@@ -84,7 +85,7 @@ export default function CacheCard() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[0.8125rem]">
         <Stat label={t('voiceStudio.settings.cache.size')} value={sizeLabel} />
-        <Stat label={t('voiceStudio.settings.cache.entries')} value={stats?.entry_count ?? '—'} />
+        <Stat label={t('voiceStudio.settings.cache.entries')} value={entries} />
         <Stat label={t('voiceStudio.settings.cache.hits')} value={hits} />
         <Stat label={t('voiceStudio.settings.cache.misses')} value={misses} />
         <Stat label={t('voiceStudio.settings.cache.hitRate')} value={rate} />
