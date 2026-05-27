@@ -33,7 +33,12 @@
 - [x] py_compile 5 파일 통과
 - [x] `npm run build` 0 errors, 17 routes 그대로
 
-### 6. 배포
-- [ ] commit + PR + squash 머지
-- [ ] sudo git pull + sudo docker compose --build backend frontend
-- [ ] 운영 검증
+### 6. 배포 ✅
+- [x] commit `feat(voice-studio): tools page (language detect / A/B compare / seed search / ref analyzer)`
+- [x] PR [#840](https://github.com/CocoRoF/Geny/pull/840) → squash → main `a82bddb`
+- [x] 2222 서버 `sudo git pull` + `docker compose ... up -d --build backend frontend`
+- [x] 운영 검증:
+  - containers: frontend Up 22s · backend Up 34s (healthy) · 다른 5개 unchanged
+  - `detect-language` 한/영/일 모두 정확 (ja는 hiragana + han 동시 검출하여 ja 분류)
+  - `analyze-ref` paimon_ko ref (4.8s, 16kHz, RMS -14.9dB, silence 8.3%) — 4.8s<5.0s 이므로 suggested_windows=[] (의도된 동작)
+  - 회귀 `/api/tts/engines` 4엔진 그대로
