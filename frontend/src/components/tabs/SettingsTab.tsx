@@ -17,7 +17,7 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 }
 
 /** Resolve localized config-level metadata from schema i18n data */
-function getLocalizedSchema(schema: ConfigSchema, locale: Locale) {
+export function getLocalizedSchema(schema: ConfigSchema, locale: Locale) {
   const loc: ConfigI18nLocale | undefined = locale !== 'en' ? schema.i18n?.[locale] : undefined;
   return {
     display_name: loc?.display_name || schema.display_name || schema.name,
@@ -26,7 +26,7 @@ function getLocalizedSchema(schema: ConfigSchema, locale: Locale) {
 }
 
 /** Resolve localized field metadata from schema i18n data */
-function getLocalizedField(field: ConfigField, schema: ConfigSchema, locale: Locale) {
+export function getLocalizedField(field: ConfigField, schema: ConfigSchema, locale: Locale) {
   const loc = locale !== 'en' ? schema.i18n?.[locale]?.fields?.[field.name] : undefined;
   return {
     label: loc?.label || field.label,
@@ -36,7 +36,7 @@ function getLocalizedField(field: ConfigField, schema: ConfigSchema, locale: Loc
 }
 
 /** Resolve localized group name from schema i18n data */
-function getLocalizedGroup(groupName: string, schema: ConfigSchema, locale: Locale, fallbackGroups: Record<string, string>) {
+export function getLocalizedGroup(groupName: string, schema: ConfigSchema, locale: Locale, fallbackGroups: Record<string, string>) {
   const loc = locale !== 'en' ? schema.i18n?.[locale]?.groups?.[groupName] : undefined;
   return loc || fallbackGroups[groupName] || groupName;
 }
@@ -346,7 +346,7 @@ export default function SettingsTab() {
   );
 }
 
-function ConfigFieldInput({ field, value, onChange, allValues, allFields, onChangeField, localizedLabel, localizedDescription, localizedPlaceholder }: { field: ConfigField; value: any; onChange: (v: any) => void; allValues?: Record<string, unknown>; allFields?: ConfigField[]; onChangeField?: (name: string, v: any) => void; localizedLabel?: string; localizedDescription?: string; localizedPlaceholder?: string }) {
+export function ConfigFieldInput({ field, value, onChange, allValues, allFields, onChangeField, localizedLabel, localizedDescription, localizedPlaceholder }: { field: ConfigField; value: any; onChange: (v: any) => void; allValues?: Record<string, unknown>; allFields?: ConfigField[]; onChangeField?: (name: string, v: any) => void; localizedLabel?: string; localizedDescription?: string; localizedPlaceholder?: string }) {
   const { t } = useI18n();
   const [showPass, setShowPass] = useState(false);
   const id = `cf-${field.name}`;
