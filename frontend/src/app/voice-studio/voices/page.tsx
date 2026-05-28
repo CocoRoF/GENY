@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Mic, Search } from 'lucide-react';
+import { Mic, Plus, Search } from 'lucide-react';
 import { ttsApi, type VoiceProfile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import CreateProfileModal from '@/components/voice-studio/CreateProfileModal';
 import VoiceCard from '@/components/voice-studio/VoiceCard';
 
 type Filter = 'all' | 'templates' | 'mine';
@@ -15,6 +16,7 @@ export default function VoicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [createOpen, setCreateOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -78,7 +80,20 @@ export default function VoicesPage() {
         <span className="text-[0.75rem] text-[var(--text-muted)] ml-auto">
           {t('voiceStudio.voices.count', { n: filtered.length })}
         </span>
+        <button
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--primary-color)] text-white text-[0.75rem] font-medium border-none cursor-pointer hover:opacity-90 transition-opacity"
+        >
+          <Plus size={12} />
+          {t('voiceStudio.voices.newProfile')}
+        </button>
       </div>
+
+      <CreateProfileModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => load()}
+      />
 
       {/* States */}
       {loading && (

@@ -22,7 +22,6 @@ const en = {
     devMode: 'Dev',
     normalMode: 'Normal',
     wiki: 'Wiki',
-    ttsVoice: 'TTS Voice',
     voiceStudio: 'Voice Studio',
     envManagement: 'Environments',
     login: 'Login',
@@ -2866,11 +2865,6 @@ const en = {
     refPromptText: 'Prompt Text',
     refPromptPlaceholder: 'What is spoken in this audio...',
     refLang: 'Lang',
-    studioPromoBanner: {
-      title: 'The upgraded Voice Studio is here — full OmniVoice controls, synthesis preview, batch jobs',
-      cta: 'Open',
-      dismiss: 'Dismiss',
-    },
   },
   // ─── User Opsidian ───
   opsidian: {
@@ -3030,6 +3024,7 @@ const en = {
       active: 'Active',
       activate: 'Activate',
       openInDesign: 'Clone & Design',
+      newProfile: 'New profile',
     },
     cloneDesign: {
       profile: 'Profile',

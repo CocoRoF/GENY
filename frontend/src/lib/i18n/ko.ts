@@ -22,7 +22,6 @@ const ko: Translations = {
     devMode: '개발',
     normalMode: '일반',
     wiki: '위키',
-    ttsVoice: 'TTS Voice',
     voiceStudio: 'Voice Studio',
     envManagement: '환경 관리',
     login: '로그인',
@@ -2907,11 +2906,6 @@ const ko: Translations = {
     refPromptText: '프롬프트 텍스트',
     refPromptPlaceholder: '이 오디오에서 말하는 내용...',
     refLang: '언어',
-    studioPromoBanner: {
-      title: '강화된 Voice Studio가 도착했습니다 — OmniVoice 풀 컨트롤 + 합성 미리듣기 + 일괄 처리',
-      cta: '열기',
-      dismiss: '닫기',
-    },
   },
 
   // ─── User Opsidian ───
@@ -3072,6 +3066,7 @@ const ko: Translations = {
       active: '활성',
       activate: '활성 보이스로',
       openInDesign: 'Clone & Design',
+      newProfile: '신규 프로필',
     },
     cloneDesign: {
       profile: '프로필',
