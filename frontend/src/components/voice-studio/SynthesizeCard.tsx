@@ -81,6 +81,35 @@ export default function SynthesizeCard({ profile }: SynthesizeCardProps) {
     setError(null);
   }, [profile?.name]);
 
+  // Pull the OmniVoice defaults from /api/voice-studio/settings/omnivoice-defaults
+  // so the Advanced panel pre-fills with whatever the user saved on the
+  // Settings page (rather than the hardcoded 16 / 2.0 / 1.0 baseline). Without
+  // this, frontend always sent its hardcoded params and the backend's
+  // ``params.num_step is not None`` branch silently overrode OmniVoiceConfig.
+  useEffect(() => {
+    let cancelled = false;
+    voiceStudioApi
+      .getOmniVoiceDefaults()
+      .then((d) => {
+        if (cancelled) return;
+        setAdvanced((prev) => ({
+          ...prev,
+          num_step: d.num_step,
+          guidance_scale: d.guidance_scale,
+          speed: d.speed,
+          duration_seconds: d.duration_seconds,
+          denoise: d.denoise,
+          audio_format: d.audio_format,
+        }));
+      })
+      .catch(() => {
+        // Stick with DEFAULT_ADVANCED_PARAMS — the page still works.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const params: PreviewParams = useMemo(() => {
     const p: PreviewParams = {
       text,
