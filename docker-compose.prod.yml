@@ -228,7 +228,11 @@ services:
       # CUDA 컨텍스트 메모리 단편화 방지. 0.85 = 12GB 5070 에서 ~10.2GB
       # 예약 (전용 GPU 호스트 기준). 공유 시 0.5~0.7 로 낮춰서 운영.
       # 0 으로 두면 비활성화.
-      - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.5}
+      # 2026-05-29: bumped from 0.5 → 0.65 after observing post-reboot
+      # idle GPU usage of ~1.7 GiB (other containers) on the 12 GiB
+      # 5070. 0.65 → 7.48 GiB cap; combined with neighbours peaks ~9.2
+      # GiB (~80 % of total), leaves the OS comfortable headroom.
+      - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.65}
       # CUDA caching-allocator: switch to expandable segments to avoid the
       # fragmentation-induced OOM the production GPU was hitting at the
       # 50% fraction cap (5.74 / 5.75 GiB used, no contiguous block left
