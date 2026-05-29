@@ -1237,62 +1237,6 @@ async def update_profile(name: str, body: UpdateProfileRequest, auth: dict = Dep
     return data
 
 
-# OmniVoice's voice-clone tokenizer encodes the entire reference audio
-# in one go, so the GPU memory cost scales with ref duration. The model
-# is happiest with 5–15 s; a 30+ s reference can spike memory enough to
-# OOM at the 50–70 % GPU fraction the prod compose uses (2026-05-29
-# incident: a 1.77 MB / ~18 s ref crashed every synth attempt with
-# ``CUDA out of memory``). We cap uploads here so a careless drop
-# doesn't take the engine down. Tunable via env var so an operator can
-# raise it on a GPU-rich box.
-MAX_REF_AUDIO_SECONDS = float(os.environ.get("TTS_MAX_REF_AUDIO_SECONDS", "20.0"))
-
-
-def _trim_wav_to_seconds(wav_bytes: bytes, max_seconds: float) -> tuple[bytes, dict]:
-    """If the wav is longer than ``max_seconds``, return a new wav with
-    only the first ``max_seconds`` of audio. stdlib only — no librosa.
-
-    Returns ``(bytes, {"trimmed": bool, "original_seconds": float,
-    "final_seconds": float})``. On any parse error (corrupt header,
-    non-wav payload, …) returns the input bytes unchanged and
-    ``{"trimmed": False, "error": "..."}`` so the upload path still
-    succeeds — omnivoice will emit its own clearer error later.
-    """
-    import wave
-    from io import BytesIO
-
-    try:
-        with wave.open(BytesIO(wav_bytes), "rb") as rf:
-            framerate = rf.getframerate() or 24000
-            nframes = rf.getnframes()
-            original = nframes / framerate if framerate else 0.0
-            if original <= max_seconds:
-                return wav_bytes, {
-                    "trimmed": False,
-                    "original_seconds": round(original, 3),
-                    "final_seconds": round(original, 3),
-                }
-            target_frames = int(max_seconds * framerate)
-            rf.rewind()
-            frames = rf.readframes(target_frames)
-            nchannels = rf.getnchannels()
-            sampwidth = rf.getsampwidth()
-    except (wave.Error, EOFError) as e:
-        return wav_bytes, {"trimmed": False, "error": str(e)}
-
-    out = BytesIO()
-    with wave.open(out, "wb") as wf:
-        wf.setnchannels(nchannels)
-        wf.setsampwidth(sampwidth)
-        wf.setframerate(framerate)
-        wf.writeframes(frames)
-    return out.getvalue(), {
-        "trimmed": True,
-        "original_seconds": round(original, 3),
-        "final_seconds": round(max_seconds, 3),
-    }
-
-
 @router.post("/profiles/{name}/ref")
 async def upload_reference_audio(
     name: str,
@@ -1317,19 +1261,9 @@ async def upload_reference_audio(
     if not file.filename or not file.filename.lower().endswith(".wav"):
         raise HTTPException(status_code=400, detail="Only .wav files are accepted")
 
-    # Auto-trim oversized refs so they don't OOM OmniVoice.
-    raw = await file.read()
-    content, trim_meta = _trim_wav_to_seconds(raw, MAX_REF_AUDIO_SECONDS)
-    if trim_meta.get("trimmed"):
-        logger.info(
-            "ref auto-trim: profile=%s emotion=%s %.2fs → %.2fs (input %d → %d bytes)",
-            name, emotion,
-            trim_meta["original_seconds"], trim_meta["final_seconds"],
-            len(raw), len(content),
-        )
-
     # Save file
     ref_path = profile_dir / f"ref_{emotion}.wav"
+    content = await file.read()
     ref_path.write_bytes(content)
 
     # Update profile.json emotion_refs with per-emotion prompt
@@ -1351,7 +1285,6 @@ async def upload_reference_audio(
         "emotion": emotion,
         "file": f"ref_{emotion}.wav",
         "size": len(content),
-        "trim": trim_meta,
     }
 
 
