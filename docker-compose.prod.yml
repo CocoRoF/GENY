@@ -229,6 +229,12 @@ services:
       # 예약 (전용 GPU 호스트 기준). 공유 시 0.5~0.7 로 낮춰서 운영.
       # 0 으로 두면 비활성화.
       - OMNIVOICE_GPU_MEMORY_FRACTION=${OMNIVOICE_GPU_MEMORY_FRACTION:-0.5}
+      # CUDA caching-allocator: switch to expandable segments to avoid the
+      # fragmentation-induced OOM the production GPU was hitting at the
+      # 50% fraction cap (5.74 / 5.75 GiB used, no contiguous block left
+      # for a 20 MiB allocation). See pytorch.org/docs/stable/notes/
+      # cuda.html#environment-variables.
+      - PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
       - OMNIVOICE_AUTO_ASR=${OMNIVOICE_AUTO_ASR:-false}
       - OMNIVOICE_LOG_LEVEL=${OMNIVOICE_LOG_LEVEL:-info}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
