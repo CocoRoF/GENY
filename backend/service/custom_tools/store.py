@@ -136,10 +136,14 @@ class CustomToolStore:
         from datetime import datetime, timezone
         defn.updated_at = datetime.now(timezone.utc)
         payload = defn.model_dump_json()
+        # execute_insert calls cur.fetchone() after the write — psycopg3
+        # raises ProgrammingError unless the statement actually produces
+        # rows, so we need an explicit RETURNING clause.
         db.db_manager.execute_insert(
             "INSERT INTO custom_tools "
             "(tool_id, name, backend_kind, enabled, is_sample, data) "
-            "VALUES (%s, %s, %s, %s, %s, %s::jsonb)",
+            "VALUES (%s, %s, %s, %s, %s, %s::jsonb) "
+            "RETURNING id",
             (
                 defn.id, defn.name, defn.backend_kind,
                 defn.enabled, defn.is_sample, payload,
