@@ -65,18 +65,33 @@ interface Props {
 const KIND_LABELS: Record<CustomToolBackendKind, string> = {
   http: 'HTTP API',
   mcp_proxy: 'MCP Proxy',
+  python_inline: 'Python (Inline)',
   builtin_alias: 'Builtin Alias',
 };
 const KIND_ICONS: Record<CustomToolBackendKind, typeof Wrench> = {
   http: Globe,
   mcp_proxy: Link2,
+  python_inline: Code2,
   builtin_alias: Wrench,
 };
 const KIND_HINTS: Record<CustomToolBackendKind, string> = {
   http: '외부 HTTP API 호출. URL/헤더/본문 템플릿에서 ${arg:foo}, ${secret:KEY}, ${session:session_id} 치환 가능',
   mcp_proxy: '이미 등록된 MCP 서버의 도구를 다른 이름·스키마로 재노출',
-  builtin_alias: 'backend/tools/custom/*_tools.py 의 Python 도구에 메타데이터 오버레이만 적용',
+  python_inline:
+    'BaseTool 서브클래스를 Python 으로 직접 작성. service.* / geny_executor.* 모두 import 가능. host-admin 권한으로 실행.',
+  builtin_alias:
+    '(legacy) backend/tools/custom/*_tools.py 의 Python 도구에 메타데이터 오버레이만 적용 — 신규 도구는 python_inline 권장',
 };
+
+// Backend kinds the new-tool form lets you pick. ``builtin_alias`` is
+// kept in the type union for backward-compat (existing rows still load
+// correctly) but hidden from the picker — write the actual Python via
+// ``python_inline`` instead so the tool lives in the web, not the repo.
+const NEW_TOOL_KINDS: CustomToolBackendKind[] = [
+  'http',
+  'mcp_proxy',
+  'python_inline',
+];
 
 const DEFAULT_SCHEMA = {
   type: 'object',
@@ -105,10 +120,26 @@ const DEFAULT_ALIAS_CFG = {
   description_override: null,
   examples_override: null,
 };
+const DEFAULT_PYTHON_CFG = {
+  source_code: `from tools.base import BaseTool, ToolError
+
+class MyCustomTool(BaseTool):
+    name = "my_custom_tool"
+    description = "Describe what this tool does for the LLM."
+
+    def run(self, query: str) -> str:
+        # The host strips host-injected kwargs (session_id) before they
+        # reach this method. Raise ToolError(\"...\") for clean failures
+        # — the bridge surfaces it as isError=True with the message text.
+        return f"You asked: {query}"
+`,
+  class_name: 'MyCustomTool',
+};
 
 function defaultConfigFor(kind: CustomToolBackendKind): Record<string, unknown> {
   if (kind === 'http') return { ...DEFAULT_HTTP_CFG };
   if (kind === 'mcp_proxy') return { ...DEFAULT_MCP_CFG };
+  if (kind === 'python_inline') return { ...DEFAULT_PYTHON_CFG };
   return { ...DEFAULT_ALIAS_CFG };
 }
 
@@ -302,8 +333,14 @@ export default function CustomToolFormModal({
         subtitle={KIND_HINTS[kind]}
       >
         <Field label="백엔드 종류">
-          <div className="flex gap-2">
-            {(['http', 'mcp_proxy', 'builtin_alias'] as const).map((k) => {
+          <div className="flex flex-wrap gap-2">
+            {/* When editing an existing builtin_alias row we keep the
+                picker showing it so the operator can see + change it;
+                for new tools we hide it (legacy kind — use python_inline). */}
+            {(isEdit && editing?.backend_kind === 'builtin_alias'
+              ? ([...NEW_TOOL_KINDS, 'builtin_alias'] as CustomToolBackendKind[])
+              : NEW_TOOL_KINDS
+            ).map((k) => {
               const Icon = KIND_ICONS[k];
               const active = k === kind;
               return (
@@ -312,7 +349,7 @@ export default function CustomToolFormModal({
                   type="button"
                   onClick={() => setKind(k)}
                   className={[
-                    'flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm border',
+                    'flex-1 min-w-[120px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm border',
                     active
                       ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.06)] text-[hsl(var(--primary))]'
                       : 'border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]',
@@ -325,32 +362,41 @@ export default function CustomToolFormModal({
             })}
           </div>
         </Field>
-        <Field
-          label="config (JSON)"
-          right={<ParseChip ok={parsedConfig.ok} error={parsedConfig.error} />}
-        >
-          <Textarea
-            value={configText}
-            onChange={(e) => setConfigText(e.target.value)}
-            rows={12}
-            className="text-xs font-mono"
+
+        {kind === 'python_inline' ? (
+          <PythonInlineEditor
+            configText={configText}
+            setConfigText={setConfigText}
+            parsedConfig={parsedConfig}
           />
-          {kind === 'http' && (
-            <Hint>
-              ${'{arg:foo}'} → LLM 인자 / ${'{secret:KEY}'} → 호스트 env or settings / ${'{session:session_id}'} → 트러스티드 컨텍스트. method · url_template · headers · body_template · timeout_seconds · response_handler 지원.
-            </Hint>
-          )}
-          {kind === 'mcp_proxy' && (
-            <Hint>
-              upstream_mcp_server (등록된 MCP 서버 이름) + upstream_tool_name 필수. schema_overlay 로 부분 스키마 덮어쓰기 가능.
-            </Hint>
-          )}
-          {kind === 'builtin_alias' && (
-            <Hint>
-              source_module = `blog_agent_tools` 같은 *_tools.py 의 stem. source_class = BaseTool 서브클래스 이름. description_override 로 LLM 노출 설명만 바꿀 수 있음.
-            </Hint>
-          )}
-        </Field>
+        ) : (
+          <Field
+            label="config (JSON)"
+            right={<ParseChip ok={parsedConfig.ok} error={parsedConfig.error} />}
+          >
+            <Textarea
+              value={configText}
+              onChange={(e) => setConfigText(e.target.value)}
+              rows={12}
+              className="text-xs font-mono"
+            />
+            {kind === 'http' && (
+              <Hint>
+                ${'{arg:foo}'} → LLM 인자 / ${'{secret:KEY}'} → 호스트 env or settings / ${'{session:session_id}'} → 트러스티드 컨텍스트. method · url_template · headers · body_template · timeout_seconds · response_handler 지원.
+              </Hint>
+            )}
+            {kind === 'mcp_proxy' && (
+              <Hint>
+                upstream_mcp_server (등록된 MCP 서버 이름) + upstream_tool_name 필수. schema_overlay 로 부분 스키마 덮어쓰기 가능.
+              </Hint>
+            )}
+            {kind === 'builtin_alias' && (
+              <Hint>
+                (legacy) source_module = `blog_agent_tools` 같은 *_tools.py 의 stem. 신규 도구는 python_inline 으로 작성 권장.
+              </Hint>
+            )}
+          </Field>
+        )}
       </Section>
 
       {/* 3. 테스트 */}
@@ -532,5 +578,73 @@ function ParseChip({ ok, error }: { ok: boolean; error?: string }) {
       {ok ? <CheckCircle2 className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
       {ok ? 'JSON OK' : 'JSON 오류'}
     </span>
+  );
+}
+
+/**
+ * PythonInlineEditor — split editor for the python_inline backend.
+ *
+ * The DB-side ``config`` is a single ``PythonInlineConfig`` blob
+ * (``source_code`` + ``class_name``). For ergonomics, we split it into
+ * a tall code textarea and a small class-name input — and serialise
+ * back to the same JSON the other backends use, so the parent's
+ * ``parsedConfig`` chip + save path don't care which kind we're in.
+ */
+function PythonInlineEditor({
+  configText,
+  setConfigText,
+  parsedConfig,
+}: {
+  configText: string;
+  setConfigText: (text: string) => void;
+  parsedConfig: { ok: boolean; value: unknown; error?: string };
+}) {
+  const obj =
+    parsedConfig.ok && parsedConfig.value && typeof parsedConfig.value === 'object'
+      ? (parsedConfig.value as Record<string, unknown>)
+      : null;
+  const sourceCode =
+    obj && typeof obj.source_code === 'string' ? obj.source_code : '';
+  const className =
+    obj && typeof obj.class_name === 'string' ? obj.class_name : '';
+
+  const update = (next: { source_code?: string; class_name?: string }) => {
+    const merged = {
+      source_code: next.source_code ?? sourceCode,
+      class_name: next.class_name ?? className,
+    };
+    setConfigText(JSON.stringify(merged, null, 2));
+  };
+
+  return (
+    <div className="space-y-3">
+      <Field
+        label="class_name"
+        right={<ParseChip ok={parsedConfig.ok} error={parsedConfig.error} />}
+      >
+        <Input
+          value={className}
+          onChange={(e) => update({ class_name: e.target.value })}
+          placeholder="MyCustomTool"
+          className="font-mono text-sm"
+        />
+        <Hint>
+          source_code 안에서 instantiate 할 BaseTool 서브클래스 이름. 같은 파일에 helper class 가 여러 개 있어도 됨.
+        </Hint>
+      </Field>
+      <Field label="source_code (Python)">
+        <Textarea
+          value={sourceCode}
+          onChange={(e) => update({ source_code: e.target.value })}
+          rows={24}
+          className="text-xs font-mono"
+          spellCheck={false}
+          wrap="off"
+        />
+        <Hint>
+          BaseTool 서브클래스를 정의. <code>BaseTool</code>, <code>ToolError</code>, <code>asyncio</code>, <code>json</code>, <code>logging</code>, <code>typing</code> 은 네임스페이스에 자동 주입. <code>service.*</code>, <code>geny_executor.*</code> 등은 일반 import 로 접근. host-admin 권한으로 실행됨 — 외부 사용자에 admin 권한 주지 말 것.
+        </Hint>
+      </Field>
+    </div>
   );
 }
