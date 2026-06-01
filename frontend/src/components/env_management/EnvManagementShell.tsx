@@ -50,6 +50,7 @@ import { SkillsTab } from '@/components/tabs/SkillsTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
 import { McpServersTab } from '@/components/tabs/McpServersTab';
 import { TriggersTab } from '@/components/tabs/TriggersTab';
+import { CustomToolsTab } from '@/components/tabs/CustomToolsTab';
 
 export interface EnvManagementShellProps {
   /** Called after a successful Save with the new env id. */
@@ -164,6 +165,12 @@ export default function EnvManagementShell({
       {activeTab === 'skills' && (
         <RegistryTabSlot>
           <SkillsTab />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'custom_tools' && (
+        <RegistryTabSlot>
+          <CustomToolsTab />
         </RegistryTabSlot>
       )}
 
