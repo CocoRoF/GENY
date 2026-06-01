@@ -24,17 +24,17 @@
  *
  * manifest mapping:
  *
- *   Executor Built-in → manifest.tools.built_in[]      (framework BUILT_IN_TOOL_CLASSES)
- *   Geny Built-in     → manifest.tools.external[]      (catalog category="built_in")
- *   Custom Tools      → manifest.tools.external[]      (catalog category="custom" — file + DB python_inline)
- *   MCP Servers       → manifest.tools.mcp_servers[]   (full snapshot copy)
+ *   Executor Built-in → manifest.tools.built_in[]    (framework BUILT_IN_TOOL_CLASSES)
+ *   Geny Built-in     → manifest.tools.external[]    (source_kind ∈ {geny_builtin, geny_custom_file})
+ *   Custom Tools      → manifest.tools.external[]    (source_kind = custom_db — DB python_inline)
+ *   MCP Servers       → manifest.tools.mcp_servers[] (full snapshot copy)
  *
  * The stage-active toggle (`이 단계 실행`) and stage-local
  * ``tool_binding`` (allowed / blocked) are stage-specific concerns
  * and live further down the page.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Box,
@@ -42,9 +42,7 @@ import {
   ChevronRight,
   ExternalLink,
   Filter,
-  Globe,
   Layers,
-  Link2,
   Network,
   Sparkles,
   Wrench,
@@ -52,6 +50,10 @@ import {
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
+import {
+  externalToolCatalogApi,
+  type ExternalToolEntry,
+} from '@/lib/api';
 import type {
   StageManifestEntry,
   StageToolBinding,
@@ -66,11 +68,14 @@ interface Props {
   entry: StageManifestEntry;
 }
 
-// Local fallback for the catalog category type — keep the prop value
-// in sync with GenyToolsExplorer's ``filterCategory`` union.
-type GenyCategory = 'built_in' | 'custom';
-
 type CategoryId = 'executor' | 'geny' | 'custom' | 'mcp';
+
+// Catalog ``source_kind`` sets for the two GenyToolsExplorer windows.
+// Geny Built-in = every pre-shipped Geny tool (whether it lives under
+// ``tools/built_in`` or ``tools/custom``); Custom Tools = only the
+// DB-backed rows the operator authored via the Custom Tools tab.
+const GENY_BUILTIN_KINDS = ['geny_builtin', 'geny_custom_file'] as const;
+const CUSTOM_TOOLS_KINDS = ['custom_db'] as const;
 
 interface CategoryDef {
   id: CategoryId;
@@ -132,6 +137,27 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
     Record<string, unknown>
   >;
 
+  // Catalog lookup for the sidebar badges. The picker pane fetches
+  // its own copy; we keep a slim mirror here so each sidebar item can
+  // render a per-category "selected / total" badge without waiting
+  // for the picker to mount. One fetch per Stage 10 entry — cheap.
+  const [catalog, setCatalog] = useState<ExternalToolEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const r = await externalToolCatalogApi.list('ko');
+        if (!cancelled) setCatalog(r.tools);
+      } catch {
+        // Catalog miss → badges fall back to total selection count.
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const binding = (entry.tool_binding ?? {}) as StageToolBinding;
   const filterMode: 'inherit' | 'allowlist' | 'blocklist' = (() => {
     if (binding.allowed && binding.allowed.length > 0) return 'allowlist';
@@ -177,18 +203,44 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
   // render as "1 / N" — misleading when the manifest actually means
   // "every tool in this category". Render ★ in that mode.
   const wildcardBuiltIn = builtInList.includes('*');
-  const badge = (selected: number, total: number, wildcard: boolean) => {
-    if (wildcard) return '★';
-    return `${selected} / ${total}`;
-  };
 
-  // The geny/custom catalogs share manifest.tools.external — we can't
-  // compute the per-category selected count without knowing each
-  // tool's catalog category. Render a simple "n selected" badge as a
-  // best-effort. The picker itself shows the exact count.
+  // Split externalList into per-source-kind windows using the catalog
+  // mirror. A tool name we haven't seen in the catalog (race during
+  // first paint, or a stale manifest reference to a since-removed
+  // tool) is excluded from the count — that's the safe default and
+  // matches what the picker shows.
+  const { genySelected, genyTotal, customSelected, customTotal } = useMemo(() => {
+    const selectedSet = new Set(externalList);
+    let gs = 0, gt = 0, cs = 0, ct = 0;
+    for (const e of catalog ?? []) {
+      const isGeny = e.source_kind === 'geny_builtin'
+        || e.source_kind === 'geny_custom_file';
+      const isCustom = e.source_kind === 'custom_db';
+      if (isGeny) {
+        gt += 1;
+        if (selectedSet.has(e.name)) gs += 1;
+      }
+      if (isCustom) {
+        ct += 1;
+        if (selectedSet.has(e.name)) cs += 1;
+      }
+    }
+    return {
+      genySelected: gs,
+      genyTotal: gt,
+      customSelected: cs,
+      customTotal: ct,
+    };
+  }, [catalog, externalList]);
+
   const genyBadge =
-    externalList.length > 0 ? `${externalList.length}` : '0';
-  const customBadge = genyBadge; // same field; picker breaks it down
+    catalog == null
+      ? `${externalList.length}`
+      : `${genySelected} / ${genyTotal}`;
+  const customBadge =
+    catalog == null
+      ? `${externalList.length}`
+      : `${customSelected} / ${customTotal}`;
   const executorBadge = wildcardBuiltIn
     ? '★'
     : `${builtInList.length} / 38`;
@@ -283,7 +335,7 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
               <GenyToolsExplorer
                 value={externalList}
                 onChange={(names) => patchTools({ external: names })}
-                filterCategory={'built_in' satisfies GenyCategory}
+                filterSourceKinds={GENY_BUILTIN_KINDS}
               />
             )}
 
@@ -302,7 +354,7 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
                 <GenyToolsExplorer
                   value={externalList}
                   onChange={(names) => patchTools({ external: names })}
-                  filterCategory={'custom' satisfies GenyCategory}
+                  filterSourceKinds={CUSTOM_TOOLS_KINDS}
                 />
               </div>
             )}

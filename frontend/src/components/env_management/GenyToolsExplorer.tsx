@@ -68,26 +68,24 @@ export interface GenyToolsExplorerProps {
   value: string[];
   onChange: (next: string[]) => void;
   /**
-   * Restrict the catalog to a single ``category`` bucket from
-   * ``/api/tools/catalog/external``:
+   * Restrict the catalog window to the given ``source_kind`` set.
    *
-   *   * ``"built_in"`` — Geny in-repo built-in tools
-   *     (``backend/tools/built_in/*_tools.py`` — memory_*, knowledge_*,
-   *     session/room/messaging, geny_tools).
-   *   * ``"custom"`` — Geny custom tools, including both
-   *     ``backend/tools/custom/*_tools.py`` (browser, web_search,
-   *     web_fetch, blog_agent_*) and DB-backed ``python_inline`` rows
-   *     from the Custom Tools tab.
+   *   * ``["geny_builtin", "geny_custom_file"]`` — every pre-shipped
+   *     tool from ``backend/tools/{built_in,custom}/``. Stage 10's
+   *     "Geny Built-in" tab.
+   *   * ``["custom_db"]`` — operator-authored DB rows
+   *     (python_inline / http / mcp_proxy). Stage 10's "Custom Tools"
+   *     tab.
    *
-   * Omit (``undefined``) to show every tool the loader exposes —
-   * the legacy behaviour.
+   * Omit / ``undefined`` to show every tool — the legacy behaviour.
    *
-   * The picker's editing target is still the same manifest field
-   * (``manifest.tools.external[]``) regardless of which bucket is
-   * shown — the operator is just choosing WHICH catalog window to
-   * edit through.
+   * The picker's editing target is always the same manifest field
+   * (``manifest.tools.external[]``). ``filterSourceKinds`` only
+   * scopes WHAT the operator sees + the bulk operations (select-all
+   * / clear-all) to the visible window — so toggling Custom Tools
+   * can never sweep in Geny Built-in entries and vice versa.
    */
-  filterCategory?: 'built_in' | 'custom';
+  filterSourceKinds?: readonly string[];
 }
 
 const FAMILY_ICONS: Record<
@@ -131,7 +129,7 @@ function familyIcon(id: string): React.ComponentType<{ className?: string }> {
 export default function GenyToolsExplorer({
   value,
   onChange,
-  filterCategory,
+  filterSourceKinds,
 }: GenyToolsExplorerProps) {
   const { t } = useI18n();
   const locale = useI18n((s) => s.locale);
@@ -165,15 +163,16 @@ export default function GenyToolsExplorer({
 
   const selectedSet = useMemo(() => new Set(value), [value]);
 
-  // Optional category filter — Stage 10 splits the picker into "Geny
-  // Built-in" (category === "built_in") and "Custom Tools"
-  // (category === "custom") windows. Stage 0 (legacy) callers don't
-  // pass ``filterCategory`` and see everything.
+  // Optional source_kind filter — Stage 10 splits the picker into
+  // "Geny Built-in" (kind ∈ {geny_builtin, geny_custom_file}) and
+  // "Custom Tools" (kind ∈ {custom_db}) windows. Stage 0 (legacy)
+  // callers don't pass it and see everything.
   const visibleTools = useMemo<ExternalToolEntry[] | null>(() => {
     if (tools == null) return null;
-    if (!filterCategory) return tools;
-    return tools.filter((t) => t.category === filterCategory);
-  }, [tools, filterCategory]);
+    if (!filterSourceKinds || filterSourceKinds.length === 0) return tools;
+    const allowed = new Set<string>(filterSourceKinds);
+    return tools.filter((t) => allowed.has(t.source_kind));
+  }, [tools, filterSourceKinds]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, ExternalToolEntry[]>();
@@ -213,7 +212,21 @@ export default function GenyToolsExplorer({
   }, [grouped, search, visibleTools]);
 
   const totalCount = visibleTools?.length ?? 0;
-  const selectedCount = value.length;
+  // Count selections WITHIN the visible window only. Reading
+  // ``value.length`` would mix in selections from other catalog
+  // windows (e.g. Stage 10's Geny Built-in entries when this picker
+  // is mounted as the Custom Tools view), producing the "31 / 16"
+  // badge the operator flagged in the screenshot. The intersection
+  // is the right metric — it answers "how many of THIS window's
+  // tools are on?".
+  const selectedCount = useMemo(() => {
+    if (!visibleTools) return 0;
+    let n = 0;
+    for (const t of visibleTools) {
+      if (selectedSet.has(t.name)) n += 1;
+    }
+    return n;
+  }, [visibleTools, selectedSet]);
 
   const toggleTool = (name: string) => {
     const set = new Set(value);
@@ -243,20 +256,22 @@ export default function GenyToolsExplorer({
 
   const handleSelectAll = () => {
     if (!visibleTools) return;
-    // Select everything in the *visible* window so a category-filtered
-    // picker doesn't accidentally sweep in tools from the other bucket.
+    // Select everything in the *visible* window so a filtered picker
+    // doesn't accidentally sweep in tools from another bucket.
     const set = new Set(value);
     for (const t of visibleTools) set.add(t.name);
     onChange(Array.from(set));
   };
   const handleClear = () => {
-    if (!filterCategory) {
+    // Drop only this window's tools — leave selections that belong
+    // to other windows (e.g. Geny Built-in entries when this picker
+    // is the Custom Tools view) intact. When no filter is active the
+    // whole catalog is the window, so this collapses to "clear all".
+    const visible = new Set((visibleTools ?? []).map((t) => t.name));
+    if (visible.size === 0) {
       onChange([]);
       return;
     }
-    // Drop only this window's tools — leave the other category's
-    // selection intact.
-    const visible = new Set((visibleTools ?? []).map((t) => t.name));
     onChange(value.filter((n) => !visible.has(n)));
   };
 
