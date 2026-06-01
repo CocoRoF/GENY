@@ -1844,11 +1844,15 @@ const en = {
         },
         geny: {
           label: 'Geny Built-in',
-          hint: 'Geny in-repo host tools — memory / knowledge / session / messaging / geny_tools',
+          hint: 'Geny-official in-repo tools — tools/built_in/*_tools.py (memory / knowledge / session / messaging / geny_tools)',
+        },
+        custom_builtin: {
+          label: 'Custom Built-in',
+          hint: 'Operator-added in-repo tools — tools/custom/*_tools.py (browser / web_search / web_fetch)',
         },
         custom: {
           label: 'Custom Tools',
-          hint: 'tools/custom/*_tools.py + DB python_inline (defined in the Custom Tools tab)',
+          hint: 'DB python_inline / http / mcp_proxy — defined in the web via the Custom Tools tab',
           manageLink: 'Define / edit custom tools',
         },
         mcp: {

@@ -68,13 +68,23 @@ interface Props {
   entry: StageManifestEntry;
 }
 
-type CategoryId = 'executor' | 'geny' | 'custom' | 'mcp';
+type CategoryId =
+  | 'executor'
+  | 'geny'
+  | 'custom_builtin'
+  | 'custom'
+  | 'mcp';
 
-// Catalog ``source_kind`` sets for the two GenyToolsExplorer windows.
-// Geny Built-in = every pre-shipped Geny tool (whether it lives under
-// ``tools/built_in`` or ``tools/custom``); Custom Tools = only the
-// DB-backed rows the operator authored via the Custom Tools tab.
-const GENY_BUILTIN_KINDS = ['geny_builtin', 'geny_custom_file'] as const;
+// Catalog ``source_kind`` sets per GenyToolsExplorer window.
+//
+//   Geny Built-in   = ``tools/built_in/*_tools.py`` — Geny 공식 in-repo
+//   Custom Built-in = ``tools/custom/*_tools.py``   — 운영자가 repo 에 추가
+//   Custom Tools    = DB python_inline / http / mcp_proxy — 웹에서 정의
+//
+// All three windows write to the same ``manifest.tools.external[]``
+// field; ``filterSourceKinds`` only scopes what each operator sees.
+const GENY_BUILTIN_KINDS = ['geny_builtin'] as const;
+const CUSTOM_BUILTIN_KINDS = ['geny_custom_file'] as const;
 const CUSTOM_TOOLS_KINDS = ['custom_db'] as const;
 
 interface CategoryDef {
@@ -103,7 +113,15 @@ const CATEGORIES: CategoryDef[] = [
     i18nKey: 'geny',
     fallbackLabel: 'Geny Built-in',
     fallbackHint:
-      'Geny 호스트의 in-repo 도구 — memory / knowledge / session / messaging / geny_tools',
+      'Geny 공식 in-repo 도구 — tools/built_in/*_tools.py (memory / knowledge / session / messaging / geny_tools)',
+  },
+  {
+    id: 'custom_builtin',
+    icon: Layers,
+    i18nKey: 'custom_builtin',
+    fallbackLabel: 'Custom Built-in',
+    fallbackHint:
+      '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (browser, web_search, web_fetch)',
   },
   {
     id: 'custom',
@@ -111,7 +129,7 @@ const CATEGORIES: CategoryDef[] = [
     i18nKey: 'custom',
     fallbackLabel: 'Custom Tools',
     fallbackHint:
-      'tools/custom/*_tools.py + DB python_inline (커스텀 도구 탭에서 정의)',
+      'DB python_inline / http / mcp_proxy — 환경관리 → 커스텀 도구 탭에서 web 으로 정의',
   },
   {
     id: 'mcp',
@@ -209,38 +227,41 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
   // first paint, or a stale manifest reference to a since-removed
   // tool) is excluded from the count — that's the safe default and
   // matches what the picker shows.
-  const { genySelected, genyTotal, customSelected, customTotal } = useMemo(() => {
+  const windowCounts = useMemo(() => {
     const selectedSet = new Set(externalList);
-    let gs = 0, gt = 0, cs = 0, ct = 0;
+    let gs = 0, gt = 0;          // geny_builtin
+    let cbs = 0, cbt = 0;         // geny_custom_file ("Custom Built-in")
+    let cs = 0, ct = 0;           // custom_db ("Custom Tools")
     for (const e of catalog ?? []) {
-      const isGeny = e.source_kind === 'geny_builtin'
-        || e.source_kind === 'geny_custom_file';
-      const isCustom = e.source_kind === 'custom_db';
-      if (isGeny) {
+      if (e.source_kind === 'geny_builtin') {
         gt += 1;
         if (selectedSet.has(e.name)) gs += 1;
-      }
-      if (isCustom) {
+      } else if (e.source_kind === 'geny_custom_file') {
+        cbt += 1;
+        if (selectedSet.has(e.name)) cbs += 1;
+      } else if (e.source_kind === 'custom_db') {
         ct += 1;
         if (selectedSet.has(e.name)) cs += 1;
       }
     }
     return {
-      genySelected: gs,
-      genyTotal: gt,
-      customSelected: cs,
-      customTotal: ct,
+      geny: { sel: gs, total: gt },
+      customBuiltin: { sel: cbs, total: cbt },
+      custom: { sel: cs, total: ct },
     };
   }, [catalog, externalList]);
 
-  const genyBadge =
-    catalog == null
-      ? `${externalList.length}`
-      : `${genySelected} / ${genyTotal}`;
-  const customBadge =
-    catalog == null
-      ? `${externalList.length}`
-      : `${customSelected} / ${customTotal}`;
+  const fmtBadge = (sel: number, total: number) =>
+    catalog == null ? `${externalList.length}` : `${sel} / ${total}`;
+  const genyBadge = fmtBadge(windowCounts.geny.sel, windowCounts.geny.total);
+  const customBuiltinBadge = fmtBadge(
+    windowCounts.customBuiltin.sel,
+    windowCounts.customBuiltin.total,
+  );
+  const customBadge = fmtBadge(
+    windowCounts.custom.sel,
+    windowCounts.custom.total,
+  );
   const executorBadge = wildcardBuiltIn
     ? '★'
     : `${builtInList.length} / 38`;
@@ -278,14 +299,20 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
             {CATEGORIES.map((cat) => {
               const active = cat.id === category;
               const Icon = cat.icon;
-              const labelBadge =
-                cat.id === 'executor'
-                  ? executorBadge
-                  : cat.id === 'geny'
-                    ? genyBadge
-                    : cat.id === 'custom'
-                      ? customBadge
-                      : mcpBadge;
+              const labelBadge = (() => {
+                switch (cat.id) {
+                  case 'executor':
+                    return executorBadge;
+                  case 'geny':
+                    return genyBadge;
+                  case 'custom_builtin':
+                    return customBuiltinBadge;
+                  case 'custom':
+                    return customBadge;
+                  case 'mcp':
+                    return mcpBadge;
+                }
+              })();
               return (
                 <button
                   key={cat.id}
@@ -336,6 +363,14 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
                 value={externalList}
                 onChange={(names) => patchTools({ external: names })}
                 filterSourceKinds={GENY_BUILTIN_KINDS}
+              />
+            )}
+
+            {category === 'custom_builtin' && (
+              <GenyToolsExplorer
+                value={externalList}
+                onChange={(names) => patchTools({ external: names })}
+                filterSourceKinds={CUSTOM_BUILTIN_KINDS}
               />
             )}
 
