@@ -1887,11 +1887,15 @@ const ko: Translations = {
         },
         geny: {
           label: 'Geny Built-in',
-          hint: 'Geny 호스트의 in-repo 도구 — memory / knowledge / session / messaging / geny_tools',
+          hint: 'Geny 공식 in-repo 도구 — tools/built_in/*_tools.py (memory / knowledge / session / messaging / geny_tools)',
+        },
+        custom_builtin: {
+          label: 'Custom Built-in',
+          hint: '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (browser / web_search / web_fetch)',
         },
         custom: {
           label: 'Custom Tools',
-          hint: 'tools/custom/*_tools.py + DB python_inline (커스텀 도구 탭에서 정의)',
+          hint: 'DB python_inline / http / mcp_proxy — 환경관리 → 커스텀 도구 탭에서 web 으로 정의',
           manageLink: '커스텀 도구 정의 / 편집',
         },
         mcp: {
