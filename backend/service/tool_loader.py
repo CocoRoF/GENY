@@ -43,6 +43,11 @@ class ToolLoader:
 
         # Track which file each tool came from (for UI grouping)
         self._tool_source: Dict[str, str] = {}
+        # Subset of ``custom_tools`` names that came from the DB-backed
+        # CustomTool registry (PR #2). The boot pass loads filesystem
+        # tools first, then overlays DB rows; ``reload_custom_tools_db``
+        # uses this set to know which entries to drop before re-adding.
+        self._db_custom_names: set = set()
 
     def load_all(self) -> None:
         """Scan built_in/ and custom/ directories and load all tools."""
@@ -64,6 +69,84 @@ class ToolLoader:
             f"🔧 ToolLoader: {total} tools loaded "
             f"(built-in: {len(self.builtin_tools)}, custom: {len(self.custom_tools)})"
         )
+
+    # ── DB-backed custom tools (PR #2 / Phase B) ────────────────
+
+    def load_custom_tools_from_db(self) -> int:
+        """Load enabled :class:`CustomToolDefinition` rows from Postgres.
+
+        Wraps each row with the matching adapter and merges into
+        ``self.custom_tools``. Filesystem custom tools loaded by
+        :meth:`load_all` win on name collision — a user can't shadow
+        ``blog_agent_delegate`` by registering a same-named DB tool
+        (the underlying Python implementation is still authoritative).
+
+        Returns the number of DB tools merged. Called from ``main.py``
+        after :meth:`load_all` and after ``CustomToolStore.set_database``.
+        """
+        try:
+            from service.custom_tools import (
+                get_custom_tool_store,
+                build_adapter,
+            )
+        except ImportError as exc:
+            logger.warning("ToolLoader: custom_tools module unavailable: %s", exc)
+            return 0
+
+        store = get_custom_tool_store()
+        try:
+            defs = store.list_enabled()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ToolLoader: failed to read custom_tools table: %s (filesystem-only roster)",
+                exc,
+            )
+            return 0
+
+        added = 0
+        builtin_lookup = self.get_all_tools()  # for builtin_alias resolution
+        for defn in defs:
+            if defn.name in self.builtin_tools or defn.name in self.custom_tools:
+                logger.info(
+                    "ToolLoader: skipping DB tool %s — name already registered "
+                    "(filesystem tool wins)", defn.name,
+                )
+                continue
+            try:
+                adapter = build_adapter(defn, builtin_lookup=builtin_lookup)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ToolLoader: failed to build adapter for %s (%s): %s",
+                    defn.name, defn.backend_kind, exc,
+                )
+                continue
+            self.custom_tools[defn.name] = adapter
+            self._tool_source[defn.name] = f"db:{defn.backend_kind}"
+            self._db_custom_names.add(defn.name)
+            added += 1
+            logger.info(
+                "ToolLoader: registered DB custom tool %s (kind=%s, sample=%s)",
+                defn.name, defn.backend_kind, defn.is_sample,
+            )
+        if added:
+            logger.info(
+                "🔧 ToolLoader: +%d DB-backed custom tool(s) loaded "
+                "(now total custom: %d)", added, len(self.custom_tools),
+            )
+        return added
+
+    def reload_custom_tools_db(self) -> int:
+        """Re-read the DB after an admin CRUD operation.
+
+        Drops every previously DB-registered tool then re-runs
+        :meth:`load_custom_tools_from_db`. Filesystem tools and the
+        non-DB portion of ``self.custom_tools`` are untouched.
+        """
+        for name in list(self._db_custom_names):
+            self.custom_tools.pop(name, None)
+            self._tool_source.pop(name, None)
+        self._db_custom_names.clear()
+        return self.load_custom_tools_from_db()
 
     def _load_from_dir(
         self, dir_path: Path, target: Dict[str, Any], category: str

@@ -23,6 +23,7 @@ from service.database.models.cron_job import CronJobModel
 from service.database.models.tool_preset import ToolPresetModel
 from service.database.models.environment import EnvironmentModel
 from service.database.models.trigger_preset import TriggerPresetModel
+from service.database.models.custom_tool import CustomToolModel
 
 __all__ = [
     'BaseModel',
@@ -39,6 +40,7 @@ __all__ = [
     'ToolPresetModel',
     'EnvironmentModel',
     'TriggerPresetModel',
+    'CustomToolModel',
 ]
 
 # List of models used by the application
@@ -58,4 +60,5 @@ APPLICATION_MODELS = [
     ToolPresetModel,
     EnvironmentModel,
     TriggerPresetModel,
+    CustomToolModel,
 ]

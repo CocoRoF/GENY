@@ -39,6 +39,7 @@ from controller.chat_controller import router as chat_router
 from controller.upload_controller import router as upload_router
 from controller.tool_preset_controller import router as tool_preset_router
 from controller.tool_controller import router as tool_catalog_router
+from controller.custom_tools_controller import router as custom_tools_router  # Phase B — DB-backed user tools
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
 from controller.permission_controller import router as permission_router  # PR-E.2.1
@@ -289,6 +290,21 @@ async def lifespan(app: FastAPI):
     tool_preset_templates_installed = install_tool_preset_templates(tool_preset_store)
     logger.info(f"   - Tool preset templates installed: {tool_preset_templates_installed}")
     logger.info(f"   - Total tool presets: {len(tool_preset_store.list_all())}")
+
+    # ── Custom Tools store (Phase B — DB-backed user tools) ─────────
+    # Mirrors the tool-preset store wiring. Must run *after* the
+    # filesystem ToolLoader so the boot-time merge can resolve
+    # builtin_alias rows. The loader's ``reload_custom_tools_db``
+    # path is the runtime hot-reload entry used by the CRUD controller.
+    from service.custom_tools import get_custom_tool_store
+    custom_tool_store = get_custom_tool_store()
+    if app_db is not None:
+        custom_tool_store.set_database(app_db)
+        # Overlay DB-backed custom tools onto the filesystem roster.
+        added = tool_loader.load_custom_tools_from_db()
+        logger.info(f"   - Custom tools (DB): {added}")
+    else:
+        logger.info("   - Custom tools (DB): skipped — database unavailable")
 
     # Initialize Shared Folder
     print_step_banner("SHARED", "SHARED FOLDER", "Initializing shared folder for cross-session collaboration...")
@@ -765,6 +781,7 @@ app.include_router(chat_router)  # Chat broadcast
 app.include_router(upload_router)  # File / image uploads (multipart)
 app.include_router(tool_preset_router)  # Tool preset management
 app.include_router(tool_catalog_router)  # Tool catalog API
+app.include_router(custom_tools_router)  # Custom tools CRUD (Phase B — DB-backed)
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)
 app.include_router(permission_router)  # Permission rules CRUD (PR-E.2.1)
