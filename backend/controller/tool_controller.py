@@ -220,10 +220,37 @@ async def get_mcp_servers():
 class ExternalToolEntry(BaseModel):
     """One Geny-provided tool that a manifest can attach via
     ``manifest.tools.external``. Mirrors the shape of ``ToolInfo`` but
-    only carries the fields the picker UI needs."""
+    only carries the fields the picker UI needs.
+
+    ``source_kind`` (cycle 20260525_1 follow-up) is the operator-facing
+    classification:
+
+      * ``"geny_builtin"``    — ships in ``backend/tools/built_in/`` —
+                                memory_*, knowledge_*, geny_tools,
+                                memory_inspect_tools …
+      * ``"geny_custom_file"``— ships in ``backend/tools/custom/`` —
+                                browser_*, web_search_*, web_fetch_*,
+                                etc. (pre-shipped by Geny but in the
+                                "custom" subdir for historical reasons).
+      * ``"custom_db"``       — defined entirely in the web via
+                                ``python_inline`` (or ``http`` /
+                                ``mcp_proxy``) and stored as a DB row.
+                                This is the "operator-authored" bucket.
+
+    The legacy ``category`` field (``"built_in" | "custom"``) tracks
+    the loader's bucket, which is *not* what the operator wants
+    grouped in the UI. ``source_kind`` is the right knob.
+    """
 
     name: str
-    category: str = Field(..., description='"built_in" | "custom"')
+    category: str = Field(..., description='Legacy: "built_in" | "custom" (loader bucket)')
+    source_kind: str = Field(
+        ...,
+        description=(
+            '"geny_builtin" | "geny_custom_file" | "custom_db" — the '
+            'classification the Stage 10 picker groups by.'
+        ),
+    )
     description: str = ""
 
 
@@ -255,6 +282,12 @@ async def get_external_tools(
     """
     loader = get_tool_loader()
     out: List[ExternalToolEntry] = []
+    # DB-backed python_inline / http / mcp_proxy tools — operator-
+    # authored in the web. The loader tracks them in this set so the
+    # catalog can mark them as ``custom_db``. File-system tools (both
+    # ``tools/built_in/`` and ``tools/custom/``) get their own labels
+    # for the Stage 10 sidebar split.
+    db_names = getattr(loader, "_db_custom_names", None) or set()
 
     def _describe(name: str, tool: Any) -> str:
         en = getattr(tool, "description", "") or ""
@@ -262,19 +295,34 @@ async def get_external_tools(
             return TOOL_DESCRIPTIONS_KO.get(name, en)
         return en
 
+    def _source_kind(name: str, loader_bucket: str) -> str:
+        # DB origin wins over loader bucket — when a DB tool's name
+        # doesn't collide with a filesystem one, ``custom_tools`` has
+        # the adapter and ``_db_custom_names`` carries the name.
+        if name in db_names:
+            return "custom_db"
+        if loader_bucket == "built_in":
+            return "geny_builtin"
+        return "geny_custom_file"
+
     for name, tool in (loader.builtin_tools or {}).items():
         out.append(ExternalToolEntry(
             name=name,
             category="built_in",
+            source_kind=_source_kind(name, "built_in"),
             description=_describe(name, tool),
         ))
     for name, tool in (loader.custom_tools or {}).items():
         out.append(ExternalToolEntry(
             name=name,
             category="custom",
+            source_kind=_source_kind(name, "custom"),
             description=_describe(name, tool),
         ))
-    out.sort(key=lambda r: (r.category != "built_in", r.name))
+    # Stable order: geny_builtin → geny_custom_file → custom_db, then
+    # alphabetical within each bucket.
+    _SOURCE_ORDER = {"geny_builtin": 0, "geny_custom_file": 1, "custom_db": 2}
+    out.sort(key=lambda r: (_SOURCE_ORDER.get(r.source_kind, 9), r.name))
     return ExternalToolCatalogResponse(tools=out)
 
 

@@ -16,7 +16,9 @@ Public surface:
 Phase 별 의존:
     Phase 1: client + registry + delivery
     Phase 2: InteractionEvent 분류 (geny_tools 측 변경)
-    Phase 3: blog_agent_tools.py 가 이 패키지를 import
+    Phase 3: blog_agent_*  도구 (현재 ``service.custom_tools.sample_sources.blog/*.py``
+             의 python_inline DB 샘플) 가 이 패키지를 import — registry,
+             client, delivery 의 단일 SOT.
 """
 
 from service.blog_agent.exceptions import (

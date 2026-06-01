@@ -568,9 +568,28 @@ export const frameworkToolApi = {
 };
 
 // T.1 (cycle 20260426_2) — Geny external tool catalog (manifest.tools.external).
+//
+// ``source_kind`` (cycle 20260525_1 follow-up) is the operator-facing
+// classification:
+//
+//   * "geny_builtin"     — backend/tools/built_in/*_tools.py
+//                          (memory_*, knowledge_*, geny_tools, etc.)
+//   * "geny_custom_file" — backend/tools/custom/*_tools.py
+//                          (browser_*, web_search_*, web_fetch_*)
+//   * "custom_db"        — DB-backed (python_inline / http / mcp_proxy)
+//                          — operator-authored via the Custom Tools tab.
+//
+// The legacy ``category`` field stays for backwards compat but the
+// Stage 10 sidebar groups by ``source_kind``.
+export type ExternalToolSourceKind =
+  | 'geny_builtin'
+  | 'geny_custom_file'
+  | 'custom_db';
+
 export interface ExternalToolEntry {
   name: string;
-  category: string; // "built_in" | "custom"
+  category: string; // legacy: "built_in" | "custom"
+  source_kind: ExternalToolSourceKind;
   description: string;
 }
 

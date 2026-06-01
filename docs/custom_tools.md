@@ -159,15 +159,11 @@ The same hygiene that PR #847 installed on Python tools applies here:
 
 ## Bundled samples
 
-Geny ships the five `blog_agent_*` tools as `python_inline` samples. The seeder reads `backend/tools/custom/blog_agent_tools.py` at boot and writes its source into 5 DB rows (one per tool, same source body, different `class_name`) so you can:
+Geny ships the five `blog_agent_*` tools as `python_inline` samples. Each tool has its own self-contained source file under `backend/service/custom_tools/sample_sources/blog/<tool>.py`; the seeder reads each at boot and writes it into one DB row per tool — open the sample in the form modal to read the real Python implementation, duplicate to fork into a User row, or disable if you don't use the external blog Agent.
 
-1. **Open any sample in the form modal** and read the real Python implementation.
-2. **Duplicate → edit** to fork into a User row and customise — the original stays as a reference.
-3. **Disable** any of them if you don't use the external blog Agent.
+The seeder is idempotent and runs every boot. It also upgrades legacy `builtin_alias` rows (from PR #851) and the first-cut monolithic `python_inline` rows (from the first PR #853 attempt) in place — operator forks (`is_sample=false`) are never touched.
 
-The seeder is idempotent and runs every boot. It also actively upgrades legacy `builtin_alias` rows from PR #851 to the new `python_inline` form, so operators who saw the alias version flip to the editable Python version on the next deploy.
-
-Once the DB-backed samples are verified working in your environment, the in-repo `backend/tools/custom/blog_agent_tools.py` can be removed — the shared service code under `backend/service/blog_agent/` (registry, client, delivery) keeps working because the inline samples reach it via normal `import service.blog_agent.*`.
+The legacy in-repo `backend/tools/custom/blog_agent_tools.py` was removed; the shared service code under `backend/service/blog_agent/` (registry, client, delivery) is what each inline sample imports.
 
 ---
 
