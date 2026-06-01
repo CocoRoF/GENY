@@ -115,10 +115,13 @@ class McpProxyConfig(BaseModel):
 class BuiltinAliasConfig(BaseModel):
     """Metadata overlay on a Python tool living in ``backend/tools/custom``.
 
-    Used by Phase D to ship the existing ``blog_agent_*`` tools as
-    Custom-Tools samples without moving any Python code. The adapter
-    re-uses the BaseTool instance from the loader and only overrides
-    the description / examples / capabilities shown to the LLM.
+    Legacy backend kind from PR #851. Kept for backward-compatibility on
+    rows that still reference an in-repo Python module, but no longer
+    exposed in the new-tool UI — ``python_inline`` is the proper
+    "make a tool in the web" path.
+
+    The adapter re-uses the BaseTool instance from the loader and only
+    overrides the description / examples / capabilities shown to the LLM.
     """
 
     source_module: str = Field(
@@ -136,7 +139,57 @@ class BuiltinAliasConfig(BaseModel):
     examples_override: Optional[List[Dict[str, Any]]] = None
 
 
-CustomToolConfig = Union[HttpToolConfig, McpProxyConfig, BuiltinAliasConfig]
+class PythonInlineConfig(BaseModel):
+    """A complete Python tool defined inline in the DB row.
+
+    The source code is the same as a regular ``backend/tools/custom/*_tools.py``
+    file — defines a ``BaseTool`` subclass with a ``run`` or ``arun``
+    method. At load time the adapter ``exec()``s the source in a
+    fresh namespace (with ``tools.base.BaseTool`` + ``ToolError``
+    plus any ``service.*`` modules pre-imported), picks the named
+    class, and instantiates it.
+
+    This is the "make a tool entirely in the web" backend kind. The
+    operator hand-writes the Python in the form modal and clicks Save;
+    the next request hits the new tool. Same expressive power as a
+    file-system tool, no file system access required.
+
+    Security note: the host is single-admin (one operator who could
+    just as easily SSH in and add a ``.py`` file), so no sandboxing.
+    Any code in the inline source runs server-side with full host
+    privilege — that's the *point* of the backend kind. If you ever
+    open the admin surface to untrusted users, hide this kind first.
+    """
+
+    source_code: str = Field(
+        ...,
+        min_length=1,
+        max_length=200_000,
+        description=(
+            "Python source code defining a BaseTool subclass. "
+            "Identical shape to ``backend/tools/custom/*_tools.py`` — "
+            "``from tools.base import BaseTool, ToolError`` is "
+            "pre-injected; ``service.*`` modules are importable."
+        ),
+    )
+    class_name: str = Field(
+        ...,
+        pattern=r"^[A-Z][A-Za-z0-9_]*$",
+        max_length=128,
+        description=(
+            "Name of the BaseTool subclass to instantiate. The source "
+            "code may declare multiple classes / helpers — this picks "
+            "which one is the tool."
+        ),
+    )
+
+
+CustomToolConfig = Union[
+    HttpToolConfig,
+    McpProxyConfig,
+    BuiltinAliasConfig,
+    PythonInlineConfig,
+]
 
 
 # ── Top-level definition ─────────────────────────────────────────
@@ -180,7 +233,7 @@ class CustomToolDefinition(BaseModel):
             "the adapter on every load."
         ),
     )
-    backend_kind: Literal["http", "mcp_proxy", "builtin_alias"]
+    backend_kind: Literal["http", "mcp_proxy", "builtin_alias", "python_inline"]
     config: CustomToolConfig
     capabilities: ToolCapabilities = Field(default_factory=ToolCapabilities)
     enabled: bool = True
@@ -198,6 +251,7 @@ class CustomToolDefinition(BaseModel):
             "http": HttpToolConfig,
             "mcp_proxy": McpProxyConfig,
             "builtin_alias": BuiltinAliasConfig,
+            "python_inline": PythonInlineConfig,
         }
         expected = kind_to_cls.get(self.backend_kind)
         if expected is not None and not isinstance(self.config, expected):

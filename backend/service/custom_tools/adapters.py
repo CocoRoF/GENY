@@ -48,6 +48,7 @@ from service.custom_tools.models import (
     CustomToolDefinition,
     HttpToolConfig,
     McpProxyConfig,
+    PythonInlineConfig,
 )
 
 logger = getLogger(__name__)
@@ -410,6 +411,142 @@ class BuiltinAliasAdapter(BaseTool):
         return _run_async(self.arun(**kwargs))
 
 
+# ── Python-inline backend ────────────────────────────────────────
+
+
+class PythonInlineAdapter(BaseTool):
+    """Loads a complete BaseTool subclass from inline Python source stored
+    in the DB row. The "make a tool fully in the web" backend kind.
+
+    The source code is ``exec()``d in a fresh namespace that already
+    has ``BaseTool`` / ``ToolError`` plus ``asyncio`` / ``json`` /
+    ``httpx`` available so the operator doesn't need to handle the
+    common imports. The host's ``service.*`` and ``geny_executor.*``
+    namespaces remain importable via normal ``import`` statements so a
+    tool can reach the BlogTaskRegistry, the SessionLogger, etc.
+    exactly like an in-repo ``*_tools.py`` file.
+
+    Compilation happens once at adapter construction (loader boot /
+    hot-reload). A syntax error raises immediately so the row is
+    rejected before being registered with the ToolLoader.
+
+    Security: host is single-admin (the same operator who could SSH
+    in and write a ``.py`` file). No sandboxing; the inline source
+    runs with full host privilege. That's the *point* of the kind.
+    """
+
+    def __init__(self, defn: CustomToolDefinition) -> None:
+        cfg = defn.config
+        if not isinstance(cfg, PythonInlineConfig):
+            raise TypeError(
+                f"PythonInlineAdapter requires PythonInlineConfig, "
+                f"got {type(cfg).__name__}"
+            )
+        self._defn = defn
+        self._cfg = cfg
+
+        underlying = _compile_python_inline(cfg)
+        self._underlying = underlying
+
+        # The inline tool's own ``name``/``description``/``parameters``
+        # take precedence (the operator wrote them on the BaseTool
+        # subclass directly). Fall back to the DB-row fields if the
+        # inline class left them blank.
+        self.name = getattr(underlying, "name", "") or defn.name
+        self.description = (
+            getattr(underlying, "description", "") or defn.description
+        )
+        self.parameters = _hygiene(
+            dict(getattr(underlying, "parameters", None) or defn.input_schema or {}),
+        )
+        self.CAPABILITIES = (
+            getattr(type(underlying), "CAPABILITIES", None)
+            or getattr(underlying, "CAPABILITIES", None)
+            or _to_executor_capabilities(defn)
+        )
+
+    async def arun(self, **kwargs: Any) -> str:
+        underlying = self._underlying
+        if hasattr(underlying, "arun"):
+            return await underlying.arun(**kwargs)
+        if hasattr(underlying, "run"):
+            run_fn = underlying.run
+            if asyncio.iscoroutinefunction(run_fn):
+                return await run_fn(**kwargs)
+            return await asyncio.to_thread(lambda: run_fn(**kwargs))
+        raise ToolError(
+            f"inline tool '{self.name}' has no run/arun method",
+            code="INLINE_BAD_SHAPE",
+        )
+
+    def run(self, **kwargs: Any) -> str:
+        return _run_async(self.arun(**kwargs))
+
+
+def _compile_python_inline(cfg: PythonInlineConfig) -> BaseTool:
+    """``exec`` the source, fish out the requested class, instantiate.
+
+    Imports + a couple of convenience names are seeded so the operator
+    doesn't have to spell out the obvious ones. The full ``service.*``
+    namespace is reachable via normal ``import`` statements, same as a
+    filesystem tool.
+    """
+    import asyncio as _asyncio  # noqa: F401 — exposed via namespace
+    import json as _json  # noqa: F401
+    import logging as _logging  # noqa: F401
+    import typing as _typing  # noqa: F401
+
+    try:
+        compiled = compile(
+            cfg.source_code,
+            f"<python_inline:{cfg.class_name}>",
+            "exec",
+        )
+    except SyntaxError as exc:
+        raise ToolError(
+            f"inline source syntax error at line {exc.lineno}: {exc.msg}",
+            code="INLINE_SYNTAX",
+        ) from exc
+
+    namespace: Dict[str, Any] = {
+        "__name__": f"custom_tools.python_inline.{cfg.class_name}",
+        "BaseTool": BaseTool,
+        "ToolError": ToolError,
+        "asyncio": _asyncio,
+        "json": _json,
+        "logging": _logging,
+        "typing": _typing,
+    }
+
+    try:
+        exec(compiled, namespace)  # noqa: S102 — intentional, see docstring
+    except Exception as exc:  # noqa: BLE001
+        raise ToolError(
+            f"inline source failed to load: {type(exc).__name__}: {exc}",
+            code="INLINE_LOAD",
+        ) from exc
+
+    cls = namespace.get(cfg.class_name)
+    if cls is None:
+        raise ToolError(
+            f"inline source did not define class '{cfg.class_name}'",
+            code="INLINE_CLASS_NOT_FOUND",
+        )
+    if not (isinstance(cls, type) and issubclass(cls, BaseTool)):
+        raise ToolError(
+            f"inline source's '{cfg.class_name}' is not a BaseTool subclass",
+            code="INLINE_BAD_CLASS",
+        )
+
+    try:
+        return cls()
+    except Exception as exc:  # noqa: BLE001
+        raise ToolError(
+            f"inline class '{cfg.class_name}' failed to instantiate: {exc}",
+            code="INLINE_INSTANTIATE",
+        ) from exc
+
+
 # ── Factory ──────────────────────────────────────────────────────
 
 
@@ -449,6 +586,8 @@ def build_adapter(
         return HttpToolAdapter(defn)
     if defn.backend_kind == "mcp_proxy":
         return McpProxyAdapter(defn)
+    if defn.backend_kind == "python_inline":
+        return PythonInlineAdapter(defn)
     if defn.backend_kind == "builtin_alias":
         if builtin_lookup is None:
             raise ValueError(

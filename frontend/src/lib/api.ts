@@ -1168,7 +1168,11 @@ export const customMcpApi = {
 
 // ==================== Custom Tools (Phase B — DB-backed) ==========
 
-export type CustomToolBackendKind = 'http' | 'mcp_proxy' | 'builtin_alias';
+export type CustomToolBackendKind =
+  | 'http'
+  | 'mcp_proxy'
+  | 'builtin_alias'
+  | 'python_inline';
 
 export interface CustomToolSummary {
   id: string;

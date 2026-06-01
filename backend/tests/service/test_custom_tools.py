@@ -343,3 +343,88 @@ def test_hygiene_strips_handcrafted_session_id():
     assert out["required"] == []
     # Ensure INJECTED_PARAM_NAMES is what we expect — pin contract.
     assert "session_id" in INJECTED_PARAM_NAMES
+
+
+# ── python_inline backend ────────────────────────────────────────
+
+
+def test_python_inline_definition_roundtrips():
+    """``PythonInlineConfig`` must validate cleanly and ``CustomToolDefinition``
+    must pin its hygiene defaults the same as other backends."""
+    defn = CustomToolDefinition(
+        name="inline_smoke",
+        description="x",
+        backend_kind="python_inline",
+        config={
+            "source_code": "from tools.base import BaseTool\nclass HelloTool(BaseTool):\n    name='inline_smoke'\n    description='hi'\n    def run(self) -> str:\n        return 'hi'\n",
+            "class_name": "HelloTool",
+        },
+    )
+    assert defn.input_schema["additionalProperties"] is False
+    from service.custom_tools.models import PythonInlineConfig
+    assert isinstance(defn.config, PythonInlineConfig)
+
+
+@pytest.mark.asyncio
+async def test_python_inline_adapter_compiles_and_dispatches():
+    from service.custom_tools.adapters import PythonInlineAdapter
+    from service.custom_tools.models import PythonInlineConfig
+
+    defn = CustomToolDefinition(
+        name="inline_echo",
+        description="Inline echo for tests.",
+        backend_kind="python_inline",
+        config=PythonInlineConfig(
+            source_code=(
+                "from tools.base import BaseTool\n"
+                "class InlineEcho(BaseTool):\n"
+                "    name = 'inline_echo'\n"
+                "    description = 'Inline echo for tests.'\n"
+                "    def run(self, msg: str = '') -> str:\n"
+                "        return f'echo:{msg}'\n"
+            ),
+            class_name="InlineEcho",
+        ),
+    )
+    adapter = PythonInlineAdapter(defn)
+    assert adapter.name == "inline_echo"
+    out = await adapter.arun(msg="hi")
+    assert out == "echo:hi"
+
+
+@pytest.mark.asyncio
+async def test_python_inline_adapter_rejects_bad_class():
+    from service.custom_tools.adapters import PythonInlineAdapter
+    from service.custom_tools.models import PythonInlineConfig
+
+    defn = CustomToolDefinition(
+        name="inline_bad",
+        description="x",
+        backend_kind="python_inline",
+        config=PythonInlineConfig(
+            source_code="x = 1\n",  # no class at all
+            class_name="DoesNotExist",
+        ),
+    )
+    with pytest.raises(ToolError) as exc:
+        PythonInlineAdapter(defn)
+    assert "did not define class" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_python_inline_adapter_rejects_non_basetool():
+    from service.custom_tools.adapters import PythonInlineAdapter
+    from service.custom_tools.models import PythonInlineConfig
+
+    defn = CustomToolDefinition(
+        name="inline_notool",
+        description="x",
+        backend_kind="python_inline",
+        config=PythonInlineConfig(
+            source_code="class NotATool:\n    pass\n",
+            class_name="NotATool",
+        ),
+    )
+    with pytest.raises(ToolError) as exc:
+        PythonInlineAdapter(defn)
+    assert "BaseTool subclass" in str(exc.value)

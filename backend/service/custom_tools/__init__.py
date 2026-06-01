@@ -28,12 +28,14 @@ from service.custom_tools.models import (
     HttpToolConfig,
     McpProxyConfig,
     BuiltinAliasConfig,
+    PythonInlineConfig,
 )
 from service.custom_tools.store import CustomToolStore, get_custom_tool_store
 from service.custom_tools.adapters import (
     HttpToolAdapter,
     McpProxyAdapter,
     BuiltinAliasAdapter,
+    PythonInlineAdapter,
     build_adapter,
 )
 
@@ -42,10 +44,12 @@ __all__ = [
     "HttpToolConfig",
     "McpProxyConfig",
     "BuiltinAliasConfig",
+    "PythonInlineConfig",
     "CustomToolStore",
     "get_custom_tool_store",
     "HttpToolAdapter",
     "McpProxyAdapter",
     "BuiltinAliasAdapter",
+    "PythonInlineAdapter",
     "build_adapter",
 ]

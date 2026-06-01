@@ -1,35 +1,40 @@
 """Bundled Custom-Tool samples.
 
-PR #5 (Phase D) of cycle 20260525_1. Seeds the ``custom_tools`` table
-with the existing ``blog_agent_*`` family as ``builtin_alias`` rows so
-they appear in the env-management → 커스텀 도구 tab as Geny-shipped
-samples. The Python implementations under
-``backend/tools/custom/blog_agent_tools.py`` are unchanged — these
-rows are pure metadata overlays the operator can duplicate and edit
-to learn the Custom Tools surface.
+PR #5 (Phase D) of cycle 20260525_1 originally shipped these as
+``builtin_alias`` overlays on top of the in-repo Python file. That was
+a shortcut — it didn't actually move the implementation to the web,
+just dressed up Python. The follow-up (current PR) makes them real
+``python_inline`` samples: the full Python source lives in the DB row,
+the operator can read + edit the actual code in the form modal, and
+the eventual goal is to delete ``backend/tools/custom/blog_agent_tools.py``
+once the DB-side is verified.
 
-The seeder is idempotent: it skips any sample whose ``name`` already
-exists in the table (regardless of ``is_sample`` — once an operator
-forks ``blog_agent_status`` into a user copy named
-``blog_agent_status_copy``, the original keeps its slot). Disabled
-sample rows are *not* re-enabled, so an operator who hides a sample
-keeps it hidden.
+Each of the five blog tools gets its own row. The five rows share the
+same ``source_code`` body (the entire blog_agent_tools.py contents);
+only ``class_name`` differs, telling the adapter which class to
+instantiate from the exec'd namespace. Helpers + capability presets
+get defined once per row at exec time — wasteful but acceptable for
+five samples, and it keeps each sample self-contained in the web UI
+(an operator inspecting the source sees the helpers it depends on).
 
-Each sample's tool body still flows through the regular ToolLoader
-roster from the filesystem, so removing the sample row from the DB
-only hides it from the UI — the actual blog tools stay callable from
-manifests / sessions until the underlying Python file is removed.
+The seeder is idempotent: existing rows with a sample's name (sample
+or user-edited) stay put. The seeder also actively *upgrades* legacy
+``builtin_alias`` rows (from the previous PR) to ``python_inline`` so
+the operator's existing samples flip to the new editable form
+automatically on the next boot.
 """
 
 from __future__ import annotations
 
 import uuid
 from logging import getLogger
+from pathlib import Path
 from typing import List
 
 from service.custom_tools.models import (
     BuiltinAliasConfig,
     CustomToolDefinition,
+    PythonInlineConfig,
     ToolCapabilities,
 )
 from service.custom_tools.store import (
@@ -40,38 +45,52 @@ from service.custom_tools.store import (
 logger = getLogger(__name__)
 
 
-# ── Sample definitions ──────────────────────────────────────────
+# Path to the in-repo blog_agent_tools.py — its contents become the
+# source body of every blog sample row. Kept here as the SOT so when
+# the operator edits the source in the web UI, the next reboot won't
+# clobber their edits (the seeder only inserts new rows / upgrades
+# legacy alias rows — never overwrites existing python_inline rows).
+_BLOG_TOOLS_PY = (
+    Path(__file__).resolve().parent.parent.parent
+    / "tools" / "custom" / "blog_agent_tools.py"
+)
+
+
+def _read_blog_source() -> str:
+    """Load the in-repo blog tools source. Returns empty string when
+    the file has been removed (post-cleanup state) so the seeder skips
+    silently rather than crashing on boot."""
+    try:
+        return _BLOG_TOOLS_PY.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
 
 
 def _blog_samples() -> List[CustomToolDefinition]:
-    """The 5 blog_agent_* tools as builtin_alias samples.
+    """The 5 blog_agent_* tools as ``python_inline`` samples.
 
-    Each entry duplicates the LLM-facing description from
-    ``blog_agent_tools.py``'s class — the alias points back to the
-    same Python class for execution. ``capabilities`` mirror the
-    ``_LOOKUP`` / ``_DELEGATE`` / ``_CANCEL`` profiles declared on
-    the original classes.
+    Each row carries the full blog_agent_tools.py source (with helpers
+    + every class definition); ``class_name`` selects which
+    BaseTool subclass the adapter instantiates. The shared service
+    code (BlogTaskRegistry, AsyncBlogAgentClient, deliver_external_result)
+    lives in ``service/blog_agent/*`` and is reachable via normal
+    ``import service.blog_agent.*`` from inside the inline source.
     """
+    src = _read_blog_source()
+    if not src:
+        return []
+
     cap_lookup = ToolCapabilities(
-        concurrency_safe=True,
-        read_only=True,
-        idempotent=True,
-        network_egress=True,
-        max_result_chars=20_000,
+        concurrency_safe=True, read_only=True, idempotent=True,
+        network_egress=True, max_result_chars=20_000,
     )
     cap_delegate = ToolCapabilities(
-        concurrency_safe=False,
-        read_only=False,
-        idempotent=False,
-        network_egress=True,
-        max_result_chars=4_000,
+        concurrency_safe=False, read_only=False, idempotent=False,
+        network_egress=True, max_result_chars=4_000,
     )
     cap_cancel = ToolCapabilities(
-        concurrency_safe=False,
-        read_only=False,
-        idempotent=True,
-        network_egress=True,
-        max_result_chars=2_000,
+        concurrency_safe=False, read_only=False, idempotent=True,
+        network_egress=True, max_result_chars=2_000,
     )
 
     base = [
@@ -115,21 +134,21 @@ def _blog_samples() -> List[CustomToolDefinition]:
                 id=uuid.uuid4().hex,
                 name=name,
                 description=desc,
-                # Empty schema — the underlying BaseTool's own
+                # Empty schema — the inline BaseTool subclass's own
                 # auto-generated schema (post PR #847 hygiene) is what
-                # actually gets exposed to the LLM via the alias
-                # adapter. The DB row's schema is informational only
-                # for the UI to display "no args" cleanly.
+                # the LLM sees once the row is registered with the
+                # ToolLoader. The DB-row schema is informational only
+                # for the form-modal preview.
                 input_schema={
                     "type": "object",
                     "properties": {},
                     "required": [],
                     "additionalProperties": False,
                 },
-                backend_kind="builtin_alias",
-                config=BuiltinAliasConfig(
-                    source_module="blog_agent_tools",
-                    source_class=source_class,
+                backend_kind="python_inline",
+                config=PythonInlineConfig(
+                    source_code=src,
+                    class_name=source_class,
                 ),
                 capabilities=caps,
                 is_sample=True,
@@ -139,21 +158,64 @@ def _blog_samples() -> List[CustomToolDefinition]:
     return out
 
 
-def seed_samples(store: CustomToolStore) -> int:
-    """Insert Geny-shipped sample rows. Returns the number actually
-    inserted (skipping any that already exist).
+def _upgrade_legacy_alias(
+    store: CustomToolStore,
+    sample: CustomToolDefinition,
+) -> bool:
+    """Replace an existing ``builtin_alias`` row for the same name with
+    the new ``python_inline`` form. Returns True if an upgrade happened.
 
-    Called from ``main.py`` after :meth:`CustomToolStore.set_database`.
-    Safe to call multiple times — name collisions are skipped, so an
-    operator-edited sample copy or an existing seed row stays intact.
+    The previous PR shipped these as ``builtin_alias`` — overlays on
+    top of the in-repo Python. The user pushback was correct: that
+    doesn't move the implementation to the web. This upgrade flips
+    legacy rows to ``python_inline`` automatically so operators don't
+    have to re-seed manually. User-edited ``python_inline`` rows are
+    NOT touched (we only upgrade rows that still carry the legacy
+    alias config + sample marker).
     """
-    inserted = 0
+    existing = store.get_by_name(sample.name)
+    if existing is None:
+        return False
+    if existing.backend_kind != "builtin_alias":
+        return False
+    if not isinstance(existing.config, BuiltinAliasConfig):
+        return False
+    # Same name → preserve the row's id + is_sample status; flip
+    # backend_kind + config to the new python_inline form. ``replace``
+    # in the store keeps ``is_sample`` and ``id`` pinned anyway.
+    sample.id = existing.id
+    sample.is_sample = existing.is_sample
+    store.replace(existing.id, sample)
+    return True
+
+
+def seed_samples(store: CustomToolStore) -> int:
+    """Insert Geny-shipped python_inline sample rows + upgrade legacy
+    ``builtin_alias`` rows from the previous PR.
+
+    Returns the number of rows actually changed (inserts + upgrades).
+    Safe to call multiple times — a row whose name already maps to a
+    ``python_inline`` row is left alone, so operator edits survive.
+    """
+    changed = 0
     for sample in _blog_samples():
+        # 1) upgrade legacy alias row in place if present.
+        if _upgrade_legacy_alias(store, sample):
+            logger.info(
+                "CustomToolStore: upgraded legacy alias → python_inline (%s)",
+                sample.name,
+            )
+            changed += 1
+            continue
+
+        # 2) skip if a row (any kind) already exists for this name.
         if store.get_by_name(sample.name) is not None:
             continue
+
+        # 3) fresh insert.
         try:
             store.create(sample)
-            inserted += 1
+            changed += 1
         except CustomToolNameTaken:
             # Race with another worker / cold-start replay — fine.
             continue
@@ -162,8 +224,9 @@ def seed_samples(store: CustomToolStore) -> int:
                 "CustomToolStore: failed to seed sample %s: %s",
                 sample.name, exc,
             )
-    if inserted:
+
+    if changed:
         logger.info(
-            "CustomToolStore: seeded %d sample tool(s)", inserted,
+            "CustomToolStore: seeded/upgraded %d sample tool(s)", changed,
         )
-    return inserted
+    return changed

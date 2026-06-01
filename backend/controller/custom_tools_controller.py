@@ -25,6 +25,7 @@ from service.custom_tools import (
     HttpToolConfig,
     McpProxyConfig,
     BuiltinAliasConfig,
+    PythonInlineConfig,
     get_custom_tool_store,
 )
 from service.custom_tools.models import ToolCapabilities
@@ -48,7 +49,7 @@ class CustomToolPayload(BaseModel):
     name: str
     description: str
     input_schema: Dict[str, Any] = Field(default_factory=dict)
-    backend_kind: Literal["http", "mcp_proxy", "builtin_alias"]
+    backend_kind: Literal["http", "mcp_proxy", "builtin_alias", "python_inline"]
     config: Dict[str, Any]
     capabilities: Optional[Dict[str, Any]] = None
     enabled: bool = True
@@ -107,6 +108,7 @@ def _parse_config(kind: str, raw: Dict[str, Any]):
         "http": HttpToolConfig,
         "mcp_proxy": McpProxyConfig,
         "builtin_alias": BuiltinAliasConfig,
+        "python_inline": PythonInlineConfig,
     }
     cls = cls_map.get(kind)
     if cls is None:
