@@ -48,7 +48,7 @@ interface SkillRow {
   examples?: string[];
   /** Phase 10 follow-up — origin classification. Drives the badge
    *  + which section the skill lives in. */
-  source_kind?: 'executor' | 'geny' | 'user' | 'mcp' | 'unknown';
+  source_kind?: 'executor' | 'geny' | 'sample' | 'user' | 'mcp' | 'unknown';
 }
 
 export interface SkillsTabProps {
@@ -125,6 +125,7 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
   const grouped = useMemo(() => {
     const executor: SkillRow[] = [];
     const geny: SkillRow[] = [];
+    const sample: SkillRow[] = [];
     const user: SkillRow[] = [];
     const other: SkillRow[] = [];
     skills.forEach((s) => {
@@ -133,6 +134,8 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
         executor.push(s);
       } else if (kind === 'geny') {
         geny.push(s);
+      } else if (kind === 'sample') {
+        sample.push(s);
       } else if (kind === 'user') {
         user.push(s);
       } else if (kind === 'mcp' || kind === 'unknown') {
@@ -144,7 +147,7 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
         else geny.push(s);
       }
     });
-    return { executor, geny, user, other };
+    return { executor, geny, sample, user, other };
   }, [skills, userIds]);
 
   const openCreate = () => {
@@ -353,6 +356,29 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
               {grouped.geny.map((s, i) => (
                 <SkillCard
                   key={s.id ?? `geny-${i}`}
+                  skill={s}
+                  isUser={false}
+                  onView={() => s.id && openView(s.id)}
+                  onCopy={() => s.id && openCopyById(s.id)}
+                />
+              ))}
+            </RegistrySection>
+          )}
+          {grouped.sample.length > 0 && (
+            <RegistrySection
+              label={
+                t('envManagement.registry.skills.sectionSample', {}) ||
+                'CUSTOM 샘플'
+              }
+              count={grouped.sample.length}
+              description={
+                t('envManagement.registry.skills.sectionSampleHint', {}) ||
+                'Geny가 제공하는 학습용 템플릿 — Copy 버튼으로 내 skills 로 가져가서 편집하세요'
+              }
+            >
+              {grouped.sample.map((s, i) => (
+                <SkillCard
+                  key={s.id ?? `sample-${i}`}
                   skill={s}
                   isUser={false}
                   onView={() => s.id && openView(s.id)}

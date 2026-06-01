@@ -279,7 +279,21 @@ Full API reference → `/docs` (FastAPI auto-generated) when the backend is runn
 
 ---
 
-## 🔌 MCP & custom tools
+## 🔌 Tools & Skills
+
+### DB-backed Custom Tools (UI-driven — recommended)
+
+Register HTTP APIs as tools without writing Python. **환경관리 → 커스텀 도구** 탭:
+
+| Backend kind | What it does |
+|---|---|
+| `http` | Make an HTTP request. `${arg:foo}` / `${secret:KEY}` / `${session:session_id}` placeholders in URL, headers, body |
+| `mcp_proxy` | Re-expose an upstream MCP server's tool under a new name with optional schema overlay |
+| `builtin_alias` | Metadata overlay on an existing `backend/tools/custom/*_tools.py` Python tool — Geny ships the `blog_agent_*` family as samples this way |
+
+Full guide → [`docs/custom_tools.md`](docs/custom_tools.md).
+
+Stored as JSONB rows in the `custom_tools` table (model: [`backend/service/database/models/custom_tool.py`](backend/service/database/models/custom_tool.py)) and hot-reloaded into the live `ToolLoader` on every CRUD mutation — no process restart.
 
 ### Auto-loaded MCP servers
 
@@ -298,7 +312,7 @@ See [`backend/mcp/README.md`](backend/mcp/README.md).
 
 ### Auto-registered Python tools
 
-Drop a `*_tool.py` into `backend/tools/custom/`:
+Drop a `*_tools.py` into `backend/tools/custom/`:
 
 ```python
 # backend/tools/custom/search_db_tools.py
@@ -312,7 +326,18 @@ def search_database(query: str) -> str:
 TOOLS = [search_database]
 ```
 
-See [`backend/tools/README.md`](backend/tools/README.md).
+See [`backend/tools/README.md`](backend/tools/README.md). For richer ergonomics (description / schema editing / dry-run from UI) prefer the **DB-backed custom tools** path above.
+
+### Skills (SKILL.md)
+
+Slash-command-style skills bundled with each session. Geny ships three tiers:
+
+- `executor` — bundled inside `geny-executor` itself.
+- `geny` — first-party Geny skills (`backend/skills/bundled/`).
+- `sample` — Geny-shipped *templates* (`backend/skills/samples/`) you can copy into your own skills.
+- `user` — operator-supplied under `~/.geny/skills/` (opt-in via `skills.user_skills_enabled`).
+
+Manage via **환경관리 → SKILLS** tab.
 
 ### Per-session MCP wrap (Claude Code CLI)
 

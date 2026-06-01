@@ -51,8 +51,8 @@ class SkillSummary(BaseModel):
     source_kind: str = Field(
         "unknown",
         description=(
-            "executor | geny | user | mcp | unknown — where the skill "
-            "originated. Drives the SkillsTab badge."
+            "executor | geny | sample | user | mcp | unknown — where the "
+            "skill originated. Drives the SkillsTab badge."
         ),
     )
 
