@@ -67,6 +67,27 @@ import './tool_help/content';
 export interface GenyToolsExplorerProps {
   value: string[];
   onChange: (next: string[]) => void;
+  /**
+   * Restrict the catalog to a single ``category`` bucket from
+   * ``/api/tools/catalog/external``:
+   *
+   *   * ``"built_in"`` — Geny in-repo built-in tools
+   *     (``backend/tools/built_in/*_tools.py`` — memory_*, knowledge_*,
+   *     session/room/messaging, geny_tools).
+   *   * ``"custom"`` — Geny custom tools, including both
+   *     ``backend/tools/custom/*_tools.py`` (browser, web_search,
+   *     web_fetch, blog_agent_*) and DB-backed ``python_inline`` rows
+   *     from the Custom Tools tab.
+   *
+   * Omit (``undefined``) to show every tool the loader exposes —
+   * the legacy behaviour.
+   *
+   * The picker's editing target is still the same manifest field
+   * (``manifest.tools.external[]``) regardless of which bucket is
+   * shown — the operator is just choosing WHICH catalog window to
+   * edit through.
+   */
+  filterCategory?: 'built_in' | 'custom';
 }
 
 const FAMILY_ICONS: Record<
@@ -110,6 +131,7 @@ function familyIcon(id: string): React.ComponentType<{ className?: string }> {
 export default function GenyToolsExplorer({
   value,
   onChange,
+  filterCategory,
 }: GenyToolsExplorerProps) {
   const { t } = useI18n();
   const locale = useI18n((s) => s.locale);
@@ -143,10 +165,20 @@ export default function GenyToolsExplorer({
 
   const selectedSet = useMemo(() => new Set(value), [value]);
 
+  // Optional category filter — Stage 10 splits the picker into "Geny
+  // Built-in" (category === "built_in") and "Custom Tools"
+  // (category === "custom") windows. Stage 0 (legacy) callers don't
+  // pass ``filterCategory`` and see everything.
+  const visibleTools = useMemo<ExternalToolEntry[] | null>(() => {
+    if (tools == null) return null;
+    if (!filterCategory) return tools;
+    return tools.filter((t) => t.category === filterCategory);
+  }, [tools, filterCategory]);
+
   const grouped = useMemo(() => {
     const m = new Map<string, ExternalToolEntry[]>();
-    if (!tools) return m;
-    for (const tool of tools) {
+    if (!visibleTools) return m;
+    for (const tool of visibleTools) {
       const fam = familyOf(tool.name);
       if (!m.has(fam)) m.set(fam, []);
       m.get(fam)!.push(tool);
@@ -163,10 +195,10 @@ export default function GenyToolsExplorer({
       list.sort((a, b) => a.name.localeCompare(b.name));
     }
     return ordered;
-  }, [tools]);
+  }, [visibleTools]);
 
   const filteredGroups = useMemo(() => {
-    if (!tools) return new Map<string, ExternalToolEntry[]>();
+    if (!visibleTools) return new Map<string, ExternalToolEntry[]>();
     const q = search.trim().toLowerCase();
     if (!q) return grouped;
     const out = new Map<string, ExternalToolEntry[]>();
@@ -178,9 +210,9 @@ export default function GenyToolsExplorer({
       if (hits.length > 0) out.set(family, hits);
     }
     return out;
-  }, [grouped, search, tools]);
+  }, [grouped, search, visibleTools]);
 
-  const totalCount = tools?.length ?? 0;
+  const totalCount = visibleTools?.length ?? 0;
   const selectedCount = value.length;
 
   const toggleTool = (name: string) => {
@@ -210,10 +242,23 @@ export default function GenyToolsExplorer({
   };
 
   const handleSelectAll = () => {
-    if (!tools) return;
-    onChange(tools.map((t) => t.name));
+    if (!visibleTools) return;
+    // Select everything in the *visible* window so a category-filtered
+    // picker doesn't accidentally sweep in tools from the other bucket.
+    const set = new Set(value);
+    for (const t of visibleTools) set.add(t.name);
+    onChange(Array.from(set));
   };
-  const handleClear = () => onChange([]);
+  const handleClear = () => {
+    if (!filterCategory) {
+      onChange([]);
+      return;
+    }
+    // Drop only this window's tools — leave the other category's
+    // selection intact.
+    const visible = new Set((visibleTools ?? []).map((t) => t.name));
+    onChange(value.filter((n) => !visible.has(n)));
+  };
 
   if (loading) {
     return (
@@ -243,7 +288,7 @@ export default function GenyToolsExplorer({
     );
   }
 
-  if (!tools || tools.length === 0) {
+  if (!visibleTools || visibleTools.length === 0) {
     return (
       <div className="text-[0.8125rem] italic text-[hsl(var(--muted-foreground))] py-4">
         {t('envManagement.genyTools.empty')}

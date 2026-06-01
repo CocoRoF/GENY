@@ -1,32 +1,54 @@
 'use client';
 
 /**
- * Stage10ToolsEditor — curated editor for s10_tools (the tool
- * execution stage).
+ * Stage10ToolsEditor — the single source of truth for "which tools does
+ * this env expose".
  *
- * The user wants a single screen that answers: "어떤 도구를 사용 가능
- * 하게 할까?" Instead of two slightly-different layers (manifest tools
- * registry + per-stage tool_binding) we surface them as:
+ * Cycle 20260525_1 consolidation: Stage 0's three tool sub-panels
+ * (Executor Built-in / Geny Built-in / MCP) were removed; their
+ * editing surface lives here now, organised under a 4-category
+ * sidebar so the operator can move between catalogs without leaving
+ * the stage editor.
  *
- *   1. "도구 사용 가능 목록" — checkbox grid for manifest.tools.built_in
- *      (the global registry every stage inherits from).
- *   2. "MCP 서버" — checkbox toggles for each entry in
- *      manifest.tools.mcp_servers (currently registered MCP servers;
- *      add/edit happens in the existing MCP Servers tab).
- *   3. "이 단계만 따로 제한" — collapsed disclosure for
- *      stage.tool_binding (allowed/blocked sets). Most users never
- *      open this; it's a power-user filter.
+ *   ┌─ Stage 10 — 도구 ────────────────────────────────────────────┐
+ *   │  ┌─ 카테고리 ─────────┐ ┌─ Picker ────────────────────────┐ │
+ *   │  │ Executor Built-in │ │ (selected category's catalog)    │ │
+ *   │  │ Geny Built-in     │ │                                  │ │
+ *   │  │ Custom Tools      │ │                                  │ │
+ *   │  │ MCP Servers       │ │                                  │ │
+ *   │  └───────────────────┘ └──────────────────────────────────┘ │
+ *   │                                                              │
+ *   │  ──────────────────────────────────────────────────────────  │
+ *   │  ▸ 이 단계만 따로 제한 (allowed / blocked) ─ collapsed       │
+ *   └──────────────────────────────────────────────────────────────┘
  *
- * Active toggle stays in its own card.
+ * manifest mapping:
+ *
+ *   Executor Built-in → manifest.tools.built_in[]      (framework BUILT_IN_TOOL_CLASSES)
+ *   Geny Built-in     → manifest.tools.external[]      (catalog category="built_in")
+ *   Custom Tools      → manifest.tools.external[]      (catalog category="custom" — file + DB python_inline)
+ *   MCP Servers       → manifest.tools.mcp_servers[]   (full snapshot copy)
+ *
+ * The stage-active toggle (`이 단계 실행`) and stage-local
+ * ``tool_binding`` (allowed / blocked) are stage-specific concerns
+ * and live further down the page.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
+  Box,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   Filter,
+  Globe,
+  Layers,
+  Link2,
+  Network,
+  Sparkles,
+  Wrench,
+  type LucideIcon,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -35,6 +57,8 @@ import type {
   StageToolBinding,
 } from '@/types/environment';
 import ToolCheckboxGrid from '../ToolCheckboxGrid';
+import GenyToolsExplorer from '../GenyToolsExplorer';
+import MCPServerEditor, { type MCPServerEntry } from '../MCPServerEditor';
 import SectionHelpButton from '../section_help/SectionHelpButton';
 
 interface Props {
@@ -42,14 +66,68 @@ interface Props {
   entry: StageManifestEntry;
 }
 
+// Local fallback for the catalog category type — keep the prop value
+// in sync with GenyToolsExplorer's ``filterCategory`` union.
+type GenyCategory = 'built_in' | 'custom';
+
+type CategoryId = 'executor' | 'geny' | 'custom' | 'mcp';
+
+interface CategoryDef {
+  id: CategoryId;
+  icon: LucideIcon;
+  /** i18n leaf under ``envManagement.stage10.cat.<id>``. */
+  i18nKey: string;
+  /** Fallback Korean label when the i18n bundle is missing the key. */
+  fallbackLabel: string;
+  /** Short subtitle / fallback. */
+  fallbackHint: string;
+}
+
+const CATEGORIES: CategoryDef[] = [
+  {
+    id: 'executor',
+    icon: Box,
+    i18nKey: 'executor',
+    fallbackLabel: 'Executor Built-in',
+    fallbackHint:
+      'geny-executor 프레임워크의 BUILT_IN_TOOL_CLASSES — Read / Write / Bash / WebFetch ...',
+  },
+  {
+    id: 'geny',
+    icon: Sparkles,
+    i18nKey: 'geny',
+    fallbackLabel: 'Geny Built-in',
+    fallbackHint:
+      'Geny 호스트의 in-repo 도구 — memory / knowledge / session / messaging / geny_tools',
+  },
+  {
+    id: 'custom',
+    icon: Wrench,
+    i18nKey: 'custom',
+    fallbackLabel: 'Custom Tools',
+    fallbackHint:
+      'tools/custom/*_tools.py + DB python_inline (커스텀 도구 탭에서 정의)',
+  },
+  {
+    id: 'mcp',
+    icon: Network,
+    i18nKey: 'mcp',
+    fallbackLabel: 'MCP Servers',
+    fallbackHint: '환경관리 → MCP 탭에서 등록된 서버 중 이 env 가 사용할 것',
+  },
+];
+
 export default function Stage10ToolsEditor({ order, entry }: Props) {
   const { t } = useI18n();
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
+
+  const [category, setCategory] = useState<CategoryId>('executor');
   const [bindingOpen, setBindingOpen] = useState(false);
 
   const builtInList = (draft?.tools?.built_in ?? []) as string[];
+  const externalList = (draft?.tools?.external ?? []) as string[];
   const mcpServers = (draft?.tools?.mcp_servers ?? []) as Array<
     Record<string, unknown>
   >;
@@ -94,90 +172,166 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
     });
   };
 
-  // Mcp helpers
-  const mcpIncluded = (name: string) => {
-    // We treat mcp_servers as "if the server is in the snapshot, the
-    // stage uses it". There's no per-server include flag in the
-    // manifest yet; surfacing the list here is a step toward that.
-    return mcpServers.some((s) => s.name === name);
+  // ── Per-category badges (right side of each sidebar button) ──
+  // Wildcard ``["*"]`` collapses to a length of 1 in JS, which would
+  // render as "1 / N" — misleading when the manifest actually means
+  // "every tool in this category". Render ★ in that mode.
+  const wildcardBuiltIn = builtInList.includes('*');
+  const badge = (selected: number, total: number, wildcard: boolean) => {
+    if (wildcard) return '★';
+    return `${selected} / ${total}`;
   };
-  // Toggling MCP servers is currently a global-snapshot concern (add /
-  // remove via the MCP Servers tab). We surface them here read-only
-  // with a cross-link.
+
+  // The geny/custom catalogs share manifest.tools.external — we can't
+  // compute the per-category selected count without knowing each
+  // tool's catalog category. Render a simple "n selected" badge as a
+  // best-effort. The picker itself shows the exact count.
+  const genyBadge =
+    externalList.length > 0 ? `${externalList.length}` : '0';
+  const customBadge = genyBadge; // same field; picker breaks it down
+  const executorBadge = wildcardBuiltIn
+    ? '★'
+    : `${builtInList.length} / 38`;
+  const mcpBadge = `${mcpServers.length}`;
+
+  const catLabel = (cat: CategoryDef) =>
+    t(`envManagement.stage10.cat.${cat.i18nKey}.label`, {}) ||
+    cat.fallbackLabel;
+  const catHint = (cat: CategoryDef) =>
+    t(`envManagement.stage10.cat.${cat.i18nKey}.hint`, {}) || cat.fallbackHint;
+
+  const activeCat = CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0];
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Tools registry (manifest.tools.built_in) ── */}
-      <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <header className="flex items-center gap-2">
-          <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-            {t('envManagement.stage10.builtInTitle')}
-          </h4>
-          <SectionHelpButton helpId="stage10.builtIn" />
-        </header>
-        <ToolCheckboxGrid
-          value={builtInList}
-          onChange={(names) => patchTools({ built_in: names })}
-          mode="allowlist"
-          hint={t('envManagement.stage10.builtInHint')}
-        />
-      </section>
-
-      {/* ── MCP servers ── */}
-      <section className="flex flex-col gap-2 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <header className="flex items-center justify-between gap-2">
+      {/* ── Category sidebar + picker ── */}
+      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+        <header className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[hsl(var(--border))]">
           <div className="flex items-center gap-2">
+            <Layers className="w-3.5 h-3.5 text-[hsl(var(--primary))]" />
             <h4 className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))]">
-              {t('envManagement.stage10.mcpTitle')}
+              {t('envManagement.stage10.toolSourcesTitle', {}) ||
+                '도구 소스'}
             </h4>
-            <SectionHelpButton helpId="stage10.mcp" />
-            <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] tabular-nums">
-              ({mcpServers.length})
-            </span>
+            <SectionHelpButton helpId="stage10.builtIn" />
           </div>
-          <Link
-            href="/environments?tab=mcp"
-            className="inline-flex items-center gap-1 text-[0.7rem] text-[hsl(var(--primary))] hover:underline no-underline"
-          >
-            {t('envManagement.stage10.mcpManage')}
-            <ExternalLink className="w-3 h-3" />
-          </Link>
-        </header>
-        {mcpServers.length === 0 ? (
-          <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] italic py-2">
-            {t('envManagement.stage10.mcpEmpty')}
+          <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
+            {catHint(activeCat)}
           </p>
-        ) : (
-          <ul className="flex flex-col gap-0.5 max-h-[160px] overflow-y-auto">
-            {mcpServers.map((server, i) => {
-              const name = (server.name as string) ?? `server_${i}`;
-              const transport = (server.transport as string) ?? 'stdio';
+        </header>
+
+        <div className="flex gap-0 min-h-[300px]">
+          {/* Left sidebar */}
+          <nav className="flex flex-col w-56 shrink-0 border-r border-[hsl(var(--border))]">
+            {CATEGORIES.map((cat) => {
+              const active = cat.id === category;
+              const Icon = cat.icon;
+              const labelBadge =
+                cat.id === 'executor'
+                  ? executorBadge
+                  : cat.id === 'geny'
+                    ? genyBadge
+                    : cat.id === 'custom'
+                      ? customBadge
+                      : mcpBadge;
               return (
-                <li
-                  key={`${name}_${i}`}
-                  className="flex items-center gap-2 py-1 px-1.5 rounded text-[0.75rem]"
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setCategory(cat.id)}
+                  className={[
+                    'flex items-center justify-between gap-2 px-3 py-2 text-left text-[0.8125rem] border-l-2 transition-colors',
+                    active
+                      ? 'border-l-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.06)] text-[hsl(var(--foreground))] font-medium'
+                      : 'border-l-transparent text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]',
+                  ].join(' ')}
                 >
-                  <input
-                    type="checkbox"
-                    checked={mcpIncluded(name)}
-                    readOnly
-                    disabled
-                    className="w-3 h-3 accent-[hsl(var(--primary))] opacity-60"
-                  />
-                  <code className="text-[hsl(var(--foreground))] font-mono text-[0.7rem] flex-1">
-                    {name}
-                  </code>
-                  <span className="text-[0.625rem] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-                    {transport}
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{catLabel(cat)}</span>
                   </span>
-                </li>
+                  <span
+                    className={[
+                      'text-[0.625rem] tabular-nums px-1.5 py-0.5 rounded',
+                      active
+                        ? 'bg-[hsl(var(--primary)/0.16)] text-[hsl(var(--primary))]'
+                        : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+                    ].join(' ')}
+                  >
+                    {labelBadge}
+                  </span>
+                </button>
               );
             })}
-          </ul>
-        )}
-        <p className="text-[0.6875rem] text-[hsl(var(--muted-foreground))] italic">
-          {t('envManagement.stage10.mcpHint')}
-        </p>
+          </nav>
+
+          {/* Right picker */}
+          <div className="flex-1 min-w-0 p-3">
+            {category === 'executor' && (
+              <ToolCheckboxGrid
+                value={builtInList}
+                onChange={(names) => patchTools({ built_in: names })}
+                mode="allowlist"
+                hint={
+                  t('envManagement.stage10.cat.executor.pickerHint', {}) ||
+                  'BUILT_IN_TOOL_CLASSES — Read / Write / Bash / Glob / Grep / WebFetch / WebSearch / TodoWrite / Agent / Cron / Task ...'
+                }
+              />
+            )}
+
+            {category === 'geny' && (
+              <GenyToolsExplorer
+                value={externalList}
+                onChange={(names) => patchTools({ external: names })}
+                filterCategory={'built_in' satisfies GenyCategory}
+              />
+            )}
+
+            {category === 'custom' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-end">
+                  <Link
+                    href="/environments?tab=custom_tools"
+                    className="inline-flex items-center gap-1 text-[0.7rem] text-[hsl(var(--primary))] hover:underline no-underline"
+                  >
+                    {t('envManagement.stage10.cat.custom.manageLink', {}) ||
+                      '커스텀 도구 정의 / 편집'}
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+                <GenyToolsExplorer
+                  value={externalList}
+                  onChange={(names) => patchTools({ external: names })}
+                  filterCategory={'custom' satisfies GenyCategory}
+                />
+              </div>
+            )}
+
+            {category === 'mcp' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-end">
+                  <Link
+                    href="/environments?tab=mcp"
+                    className="inline-flex items-center gap-1 text-[0.7rem] text-[hsl(var(--primary))] hover:underline no-underline"
+                  >
+                    {t('envManagement.stage10.mcpManage')}
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+                <MCPServerEditor
+                  value={mcpServers as unknown as MCPServerEntry[]}
+                  onChange={(next) =>
+                    patchTools({
+                      mcp_servers: next as unknown as Array<
+                        Record<string, unknown>
+                      >,
+                    })
+                  }
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* ── Stage-specific binding (allowed / blocked) ── */}
@@ -246,7 +400,6 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
           </div>
         )}
       </section>
-
     </div>
   );
 }

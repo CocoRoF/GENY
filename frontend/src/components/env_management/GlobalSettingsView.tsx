@@ -3,31 +3,24 @@
 /**
  * GlobalSettingsView — body view for "stage 0" (env-wide globals).
  *
- * Lives in the same body slot as StageDetailView. Cycle 20260429
- * Phase 5 simplified the host-shared sections to pure pickers —
- * the host CRUD that used to ride along inside a collapsible was
- * promoted to top-level tabs (#553 / Phase 2), and a slim
- * `RegistryEditorLink` row points the user there when they need
- * to register or edit a host item.
+ * Cycle 20260525_1 trim: tool selection (executor / geny / custom /
+ * MCP) is owned by Stage 10 now. Stage 0 retains only the *truly
+ * global* manifest concerns:
  *
- *   All env-scoped (lives in `manifest.*`):
- *     1. 기본 모델 설정       → ModelConfigEditor
- *     2. 스테이지 기본 설정   → PipelineConfigEditor
- *     3. Executor Built-in    → BuiltinToolsExplorer  (manifest.tools.built_in)
- *     4. Geny Built-in        → GenyToolsExplorer     (manifest.tools.external)
- *     5. MCP                  → MCPServerEditor       (manifest.tools.mcp_servers)
- *     6. 훅                   → HookEnvPicker         (manifest.host_selections.hooks)
- *     7. 권한                 → PermissionEnvPicker   (manifest.host_selections.permissions)
- *     8. 스킬                 → SkillEnvPicker        (manifest.host_selections.skills)
+ *     1. 기본 모델 설정       → ModelConfigEditor   (manifest.model)
+ *     2. 스테이지 기본 설정   → PipelineConfigEditor (manifest.pipeline)
+ *     3. 훅                   → HookEnvPicker        (manifest.host_selections.hooks)
+ *     4. 권한                 → PermissionEnvPicker  (manifest.host_selections.permissions)
+ *     5. 스킬                 → SkillEnvPicker       (manifest.host_selections.skills)
  *
- * Phase 9.9 — permission narrowing is now wired through the backend
- * (`install_permission_rules(host_selection=...)`); the picker fetches
- * real host rules + persists to the manifest.
+ * The host-shared sections (hooks / skills / permissions) stay here
+ * because they are not "tools" — they are pre/post hooks, prompt
+ * bundles, and runtime gates that belong to the env, not to a stage.
  *
  * The new-draft seeder (`seedDefaultToolLists` in the draft store)
  * pre-populates `host_selections.{hooks,skills,permissions}` from
- * `/api/env-defaults` (Phase 1), so a fresh env opens with
- * whatever the operator has marked ★ on the host registry tabs.
+ * `/api/env-defaults` (Phase 1), so a fresh env opens with whatever
+ * the operator has marked ★ on the host registry tabs.
  */
 
 import { useState } from 'react';
@@ -36,13 +29,10 @@ import {
   Cpu,
   ExternalLink,
   Layers,
-  Network,
   Plug,
   Settings2,
   Shield,
   Sparkles,
-  Wrench,
-  Boxes,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -56,9 +46,6 @@ import {
   inferProvider,
   type ProviderId,
 } from '@/lib/modelCatalog';
-import GenyToolsExplorer from './GenyToolsExplorer';
-import MCPServerEditor, { type MCPServerEntry } from './MCPServerEditor';
-import BuiltinToolsExplorer from './BuiltinToolsExplorer';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import {
   HookEnvPicker,
@@ -68,12 +55,14 @@ import {
 
 const S06_API_ORDER = 6;
 
+// Cycle 20260525_1 — tool selection (executor / geny / custom / MCP) was
+// moved out of Stage 0 entirely into Stage 10 ("도구"). Stage 10 is the
+// single source for "which tools does this env expose"; Stage 0 keeps
+// only the truly *global* manifest concerns (default model, pipeline,
+// host-selection of hooks/permissions/skills).
 type Panel =
   | 'model'
   | 'pipeline'
-  | 'executorTools'
-  | 'genyTools'
-  | 'mcp'
   | 'hooks'
   | 'permissions'
   | 'skills';
@@ -81,9 +70,6 @@ type Panel =
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
   pipeline: 'globals.pipeline',
-  executorTools: 'globals.executorTools',
-  genyTools: 'globals.genyTools',
-  mcp: 'globals.mcp',
   hooks: 'globals.hooks',
   permissions: 'globals.permissions',
   skills: 'globals.skills',
@@ -109,7 +95,6 @@ export default function GlobalSettingsView() {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchModel = useEnvironmentDraftStore((s) => s.patchModel);
   const patchPipeline = useEnvironmentDraftStore((s) => s.patchPipeline);
-  const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
 
   const [panel, setPanel] = useState<Panel>('model');
@@ -118,17 +103,14 @@ export default function GlobalSettingsView() {
 
   // ── Sidebar badges ──
   // Wildcard `["*"]` reads as a single-element list to `.length`,
-  // which would print "1" next to "Executor Built-in" — misleading
-  // when the manifest actually means "every tool". Render ★ in that
-  // mode and reserve the count for explicit lists.
+  // which would print "1" next to a panel — misleading when the
+  // manifest actually means "every entry". Render ★ in that mode
+  // and reserve the count for explicit lists.
   const selectionBadge = (sel: string[] | undefined): string => {
     if (!sel) return '0';
     if (sel.includes('*')) return '★';
     return `${sel.length}`;
   };
-  const builtInBadge = selectionBadge(draft.tools?.built_in);
-  const genyBadge = selectionBadge(draft.tools?.external);
-  const mcpCount = (draft.tools?.mcp_servers ?? []).length;
   // Pre-1.3.3 manifests have no host_selections object; treat that
   // as wildcard so the badge doesn't read "0" for a section that
   // historically applied in full.
@@ -153,23 +135,6 @@ export default function GlobalSettingsView() {
     const inCatalog = MODEL_CATALOG[next].some((o) => o.id === currentModel);
     if (!inCatalog) {
       patchModel({ model: PROVIDER_DEFAULT_MODEL[next] });
-    }
-  };
-
-  // Phase 6: legacy goToLibrary helper. The Library tab is gone — the
-  // host registries live as /environments?tab={mcp|skills|hooks|permissions}
-  // top-level tabs. Keep the helper signature so existing call sites
-  // don't need a second-pass refactor; under the hood it just navigates.
-  const goToLibrary = (sub: string) => {
-    const map: Record<string, string> = {
-      mcpServers: 'mcp',
-      hooks: 'hooks',
-      skills: 'skills',
-      permissions: 'permissions',
-    };
-    const tab = map[sub];
-    if (tab) {
-      window.location.href = `/environments?tab=${tab}`;
     }
   };
 
@@ -224,27 +189,6 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('pipeline')}
             />
             <SubTabButton
-              icon={Wrench}
-              label={t('envManagement.globals.navExecutorTools')}
-              active={panel === 'executorTools'}
-              onClick={() => setPanel('executorTools')}
-              badge={builtInBadge}
-            />
-            <SubTabButton
-              icon={Boxes}
-              label={t('envManagement.globals.navGenyTools')}
-              active={panel === 'genyTools'}
-              onClick={() => setPanel('genyTools')}
-              badge={genyBadge}
-            />
-            <SubTabButton
-              icon={Network}
-              label={t('envManagement.globals.navMcp')}
-              active={panel === 'mcp'}
-              onClick={() => setPanel('mcp')}
-              badge={`${mcpCount}`}
-            />
-            <SubTabButton
               icon={Plug}
               label={t('envManagement.globals.navHooks')}
               active={panel === 'hooks'}
@@ -291,72 +235,6 @@ export default function GlobalSettingsView() {
                 onSave={(changes) => patchPipeline(changes)}
                 onClearError={() => {}}
               />
-            )}
-
-            {panel === 'executorTools' && (
-              <div className="flex flex-col gap-4">
-                <PanelHeader
-                  title={t('envManagement.globals.executorTools.title')}
-                  description={t(
-                    'envManagement.globals.executorTools.description',
-                  )}
-                />
-                <BuiltinToolsExplorer
-                  value={(draft.tools?.built_in ?? []) as string[]}
-                  onChange={(names) => patchTools({ built_in: names })}
-                />
-              </div>
-            )}
-
-            {panel === 'genyTools' && (
-              <div className="flex flex-col gap-4">
-                <PanelHeader
-                  title={t('envManagement.globals.genyTools.title')}
-                  description={t('envManagement.globals.genyTools.description')}
-                />
-                <GenyToolsExplorer
-                  value={(draft.tools?.external ?? []) as string[]}
-                  onChange={(names) => patchTools({ external: names })}
-                />
-              </div>
-            )}
-
-            {panel === 'mcp' && (
-              <div className="flex flex-col gap-4">
-                <PanelHeader
-                  title={t('envManagement.globals.mcp.title')}
-                  description={t('envManagement.globals.mcp.description')}
-                />
-                <MCPServerEditor
-                  value={
-                    (draft.tools?.mcp_servers ?? []) as unknown as MCPServerEntry[]
-                  }
-                  onChange={(next) =>
-                    patchTools({
-                      mcp_servers: next as unknown as Array<
-                        Record<string, unknown>
-                      >,
-                    })
-                  }
-                />
-                <div className="pt-3 border-t border-[hsl(var(--border))] flex items-center justify-between gap-3">
-                  <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
-                    {mcpCount === 0
-                      ? t('envManagement.globals.mcp.envCountZero')
-                      : t('envManagement.globals.mcp.envCount', {
-                          n: String(mcpCount),
-                        })}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => goToLibrary('mcpServers')}
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    {t('envManagement.globals.mcp.manageLink')}
-                  </button>
-                </div>
-              </div>
             )}
 
             {panel === 'hooks' && (
