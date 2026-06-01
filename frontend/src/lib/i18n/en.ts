@@ -1834,6 +1834,28 @@ const en = {
     stage10: {
       activeTitle: 'Run this stage',
       activeDesc: 'Stage 10 executes tools requested by the LLM. Turn off only for sandboxes that should never call any tool.',
+      // Cycle 20260525_1 — 4-category sidebar at the top of Stage 10.
+      toolSourcesTitle: 'Tool sources',
+      cat: {
+        executor: {
+          label: 'Executor Built-in',
+          hint: 'geny-executor framework BUILT_IN_TOOL_CLASSES — Read / Write / Bash / WebFetch ...',
+          pickerHint: 'The executor\'s BUILT_IN_TOOL_CLASSES catalog. The wildcard "Select all" inherits every current + future tool (recommended for general-purpose agents).',
+        },
+        geny: {
+          label: 'Geny Built-in',
+          hint: 'Geny in-repo host tools — memory / knowledge / session / messaging / geny_tools',
+        },
+        custom: {
+          label: 'Custom Tools',
+          hint: 'tools/custom/*_tools.py + DB python_inline (defined in the Custom Tools tab)',
+          manageLink: 'Define / edit custom tools',
+        },
+        mcp: {
+          label: 'MCP Servers',
+          hint: 'Which of the host-registered MCP servers this env should attach to',
+        },
+      },
       builtInTitle: 'Available framework tools',
       builtInHint: 'Pick which built-in tools the agent can call. The list mirrors the executor\'s BUILT_IN_TOOL_CLASSES catalog. The wildcard "Select all" inherits everything (recommended for general-purpose agents).',
       mcpTitle: 'MCP servers',

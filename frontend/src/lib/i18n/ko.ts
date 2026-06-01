@@ -1877,6 +1877,28 @@ const ko: Translations = {
     stage10: {
       activeTitle: '이 단계 실행',
       activeDesc: '10단계는 LLM이 요청한 도구를 실행합니다. 어떤 도구도 호출하지 못하게 막을 샌드박스가 아니라면 켜두세요.',
+      // Cycle 20260525_1 — 4-category sidebar at the top of Stage 10.
+      toolSourcesTitle: '도구 소스',
+      cat: {
+        executor: {
+          label: 'Executor Built-in',
+          hint: 'geny-executor 프레임워크의 BUILT_IN_TOOL_CLASSES — Read / Write / Bash / WebFetch ...',
+          pickerHint: '실행기의 BUILT_IN_TOOL_CLASSES 카탈로그. "전체 선택" 와일드카드는 현재 + 추가될 모든 도구를 상속합니다 (범용 에이전트에 권장).',
+        },
+        geny: {
+          label: 'Geny Built-in',
+          hint: 'Geny 호스트의 in-repo 도구 — memory / knowledge / session / messaging / geny_tools',
+        },
+        custom: {
+          label: 'Custom Tools',
+          hint: 'tools/custom/*_tools.py + DB python_inline (커스텀 도구 탭에서 정의)',
+          manageLink: '커스텀 도구 정의 / 편집',
+        },
+        mcp: {
+          label: 'MCP Servers',
+          hint: '환경관리 → MCP 탭에서 등록된 서버 중 이 env 가 사용할 것',
+        },
+      },
       builtInTitle: '사용 가능한 프레임워크 도구',
       builtInHint: '에이전트가 호출할 수 있는 빌트인 도구를 고릅니다. 실행기의 BUILT_IN_TOOL_CLASSES 카탈로그가 그대로 노출됩니다. "전체 선택" 와일드카드는 모든 도구를 상속합니다 (범용 에이전트에 권장).',
       mcpTitle: 'MCP 서버',
