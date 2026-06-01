@@ -74,7 +74,7 @@ class JsonRpcResponse(BaseModel):
 
 _PROTOCOL_VERSION = "2024-11-05"
 _SERVER_NAME = "geny"
-_SERVER_VERSION = "1.0.0"
+_SERVER_VERSION = "1.1.0"
 
 
 # ─── Token utilities ────────────────────────────────────────────
@@ -121,8 +121,21 @@ def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
 
     Pulls from the shared ``ToolLoader`` on the agent manager (the
     same source ``s10_tool`` consults) and adapts each tool's
-    ``input_schema`` to MCP's ``inputSchema`` field naming. Filters
-    by the session's allowed-tool preset if available.
+    ``input_schema`` to MCP's ``inputSchema`` field naming.
+
+    Notes:
+      * The legacy ``agent._allowed_tools`` filter was removed in PR #1
+        (Phase A2) — nothing in Geny ever set the attribute, so the
+        gate was a no-op that suggested a filter that wasn't there.
+        The single source of truth for tool exposure is the env
+        manifest's ``tools.external`` (consumed at pipeline build
+        time); the MCP bridge intentionally advertises everything
+        registered with the loader and lets dispatch decide whether
+        a given call is honoured.
+      * Schemas come straight from the tool — ``BaseTool``'s schema
+        generator now hides host-injected params (``session_id``)
+        and sets ``additionalProperties: False``, so the
+        registered schema is already LLM-safe.
     """
     from service.executor.agent_session_manager import get_agent_session_manager
 
@@ -131,33 +144,19 @@ def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     if loader is None:
         return []
 
-    agent = manager.get_agent(session_id)
-    allowed_set = None
-    if agent is not None:
-        # Session keeps the resolved allowed-tools list on
-        # ``_allowed_tools`` (set by AgentSession.create from
-        # tool preset / explicit allowlist). When present, gate
-        # the MCP roster to that subset so the LLM only sees
-        # what the session is supposed to call.
-        explicit = getattr(agent, "_allowed_tools", None)
-        if explicit:
-            allowed_set = set(explicit)
-
     tools: List[Dict[str, Any]] = []
     for name in loader.get_all_names():
-        if allowed_set is not None and name not in allowed_set:
-            continue
         tool = loader.get_tool(name)
         if tool is None:
             continue
         description = getattr(tool, "description", "") or ""
         # Geny ``BaseTool`` exposes JSON-Schema params either as a
-        # ``parameters`` dict (legacy) or a ``input_schema`` dict
+        # ``parameters`` dict (legacy) or an ``input_schema`` dict
         # (newer). Adapt to MCP's ``inputSchema`` field.
         schema: Dict[str, Any] = (
             getattr(tool, "input_schema", None)
             or getattr(tool, "parameters", None)
-            or {"type": "object", "properties": {}}
+            or {"type": "object", "properties": {}, "additionalProperties": False}
         )
         tools.append(
             {
@@ -175,11 +174,26 @@ async def _execute_tool(
     """Execute a Geny tool by name. Returns an MCP-shaped result.
 
     Mirrors the dispatch s10_tool performs minus the per-stage
-    permission / audit machinery (Phase 2 wires those in). Tools
-    that accept a ``session_id`` kwarg get it injected so VTuber↔
-    Sub-Worker messaging tools work.
+    permission / audit machinery. Hardened in PR #1:
+      * Host-injected params (``session_id``) overwrite whatever the
+        LLM supplied — the registered schema hides them from the LLM
+        in the first place, so any value reaching here is hallucinated
+        and must not displace the trusted caller's session id.
+      * Tools that raise :class:`~tools.base.ToolError` get a clean
+        user-facing message with ``isError: True`` — no class names,
+        no tracebacks.
+      * Tools that return ``{"error": "..."}`` JSON strings (the
+        legacy soft-failure pattern used by ``blog_agent_*``) are
+        promoted to ``isError: True`` instead of the silent success
+        envelope that previously surfaced as
+        ``isError: false`` + error-text content. That envelope was
+        the root cause of the "맡겼어, 잠깐만" / nothing happens
+        symptom reported on the claude_code_cli backend.
+      * Unexpected exceptions still set ``isError: True`` but the
+        ``text`` field is sanitised (full detail goes to logger).
     """
     from service.executor.agent_session_manager import get_agent_session_manager
+    from tools.base import INJECTED_PARAM_NAMES, ToolError
 
     manager = get_agent_session_manager()
     loader = getattr(manager, "_tool_loader", None)
@@ -194,11 +208,14 @@ async def _execute_tool(
         }
 
     call_input = dict(arguments or {})
-    # Best-effort session_id injection — same logic as
-    # ``_GenyToolAdapter._probe_session_id_support``. Many tools
-    # accept ``session_id`` kwarg (e.g. messaging tools that key
-    # on the caller). Inject only when the signature accepts it
-    # so we don't break stricter tools.
+    # Strip any host-injected param names the LLM may have hallucinated.
+    # The registered schema hides these from the LLM, but a misbehaving
+    # client could still smuggle one through — never honour it.
+    for hidden in INJECTED_PARAM_NAMES:
+        call_input.pop(hidden, None)
+
+    # Now inject from the trusted session context. Probe the signature
+    # once per call (cheap; tool resolution is the hot path, not this).
     try:
         import inspect
 
@@ -208,7 +225,7 @@ async def _execute_tool(
             accepts_sid = "session_id" in sig.parameters or any(
                 p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             )
-            if accepts_sid and "session_id" not in call_input:
+            if accepts_sid:
                 call_input["session_id"] = session_id
     except (TypeError, ValueError):
         pass
@@ -231,22 +248,69 @@ async def _execute_tool(
                 ],
                 "isError": True,
             }
+    except ToolError as exc:
+        logger.info("mcp_bridge: tool '%s' raised ToolError: %s", name, exc.user_message)
+        return {
+            "content": [{"type": "text", "text": exc.user_message}],
+            "isError": True,
+        }
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "mcp_bridge: tool '%s' raised: %s", name, exc, exc_info=True,
         )
         return {
-            "content": [{"type": "text", "text": f"Tool error: {exc}"}],
+            "content": [{"type": "text", "text": _sanitize_exception_message(name, exc)}],
             "isError": True,
         }
 
-    text = result if isinstance(result, str) else None
-    if text is None:
+    if isinstance(result, str):
+        text = result
+    else:
         try:
             text = json.dumps(result, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             text = str(result)
-    return {"content": [{"type": "text", "text": text}], "isError": False}
+
+    is_err = _detect_legacy_error_envelope(text)
+    return {"content": [{"type": "text", "text": text}], "isError": is_err}
+
+
+def _detect_legacy_error_envelope(text: str) -> bool:
+    """Return True iff ``text`` parses to a dict with an ``error`` key.
+
+    Mirrors :func:`tool_bridge._detect_legacy_error_envelope` — same
+    detector for the MCP path. Catches the legacy
+    ``json.dumps({"error": "..."})`` soft-failure that
+    ``blog_agent_*`` and similar tools historically used. Once those
+    holdouts migrate to :class:`ToolError`, this helper can be
+    retired; until then it prevents the silent-success envelope from
+    reaching the LLM.
+    """
+    s = text.lstrip()
+    if not s.startswith("{"):
+        return False
+    try:
+        body = json.loads(s)
+    except (ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(body, dict) and "error" in body
+
+
+def _sanitize_exception_message(tool_name: str, exc: BaseException) -> str:
+    """Produce a clean, LLM-safe message for an unexpected exception.
+
+    Python class names, module paths, and method names are noise for
+    the LLM and a footgun for ops (they hint at internals to anyone
+    poking at the surface). The operator-facing detail lives in
+    ``logger.warning`` at the call site; the LLM only ever sees this
+    short string.
+    """
+    msg = str(exc)
+    if "got an unexpected keyword argument" in msg:
+        return f"Tool '{tool_name}' rejected an unknown argument."
+    if "missing" in msg and "required positional argument" in msg:
+        return f"Tool '{tool_name}' was called without a required argument."
+    return f"Tool '{tool_name}' failed: {type(exc).__name__}"
 
 
 # ─── RPC dispatcher ─────────────────────────────────────────────
@@ -282,20 +346,30 @@ async def mcp_rpc(
     params = request.params or {}
 
     if method == "initialize":
-        # Echo back the client's requested protocol version when present
-        # so we can handshake against whatever Claude Code CLI 2.1.x
-        # ships with — the MCP spec lets the server pick, but echoing
-        # the client's choice is the maximally-compatible path.
-        client_version = str(params.get("protocolVersion") or _PROTOCOL_VERSION)
+        # Advertise the version *we* support. The MCP spec is explicit
+        # that the server picks the protocol version; previous revisions
+        # echoed back the client's value, which meant the server claimed
+        # support for anything the client asked for and then 404'd on
+        # the methods that version actually requires.
+        client_requested = params.get("protocolVersion")
         logger.info(
-            "mcp_bridge: initialize session=%s client_protocolVersion=%s client_caps=%s",
-            session_id, client_version, params.get("capabilities"),
+            "mcp_bridge: initialize session=%s client_requested=%s client_caps=%s",
+            session_id, client_requested, params.get("capabilities"),
         )
         return JsonRpcResponse(
             id=request.id,
             result={
-                "protocolVersion": client_version,
-                "capabilities": {"tools": {"listChanged": False}},
+                "protocolVersion": _PROTOCOL_VERSION,
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    # We advertise empty resources/prompts so clients
+                    # that probe these surfaces (Claude Code CLI 2.1+
+                    # does) see a coherent "yes, supported but empty"
+                    # answer rather than method-not-found errors.
+                    "resources": {"listChanged": False, "subscribe": False},
+                    "prompts": {"listChanged": False},
+                    "logging": {},
+                },
                 "serverInfo": {"name": _SERVER_NAME, "version": _SERVER_VERSION},
             },
         )
@@ -303,6 +377,30 @@ async def mcp_rpc(
     if method == "notifications/initialized":
         # Notification — no response body required by spec, but the
         # bridge always awaits a response. Return an empty success.
+        return JsonRpcResponse(id=request.id, result={})
+
+    # Probe surfaces newer Claude Code CLI versions hit during capability
+    # discovery. We don't actually expose resources / prompts / logging
+    # changes (yet), but a coherent empty answer keeps the CLI logs
+    # quiet and avoids a noisy retry loop.
+    if method == "resources/list":
+        return JsonRpcResponse(id=request.id, result={"resources": []})
+    if method == "resources/templates/list":
+        return JsonRpcResponse(id=request.id, result={"resourceTemplates": []})
+    if method == "prompts/list":
+        return JsonRpcResponse(id=request.id, result={"prompts": []})
+    if method == "logging/setLevel":
+        # Accept silently — we don't route MCP log levels to anything.
+        return JsonRpcResponse(id=request.id, result={})
+    if method == "completion/complete":
+        # No completion surface; return an empty completion list so
+        # the CLI just shows no autocomplete suggestions.
+        return JsonRpcResponse(
+            id=request.id,
+            result={"completion": {"values": [], "total": 0, "hasMore": False}},
+        )
+    if method == "ping":
+        # MCP ping → empty result is the spec answer.
         return JsonRpcResponse(id=request.id, result={})
 
     if method == "tools/list":

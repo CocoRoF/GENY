@@ -178,14 +178,26 @@ async def test_execute_session_tool_receives_injected_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_session_tool_respects_explicit_input() -> None:
-    """If the LLM already supplied session_id in input, adapter must
-    not overwrite it — ``setdefault`` semantics, not assignment."""
+async def test_execute_session_tool_overrides_llm_supplied_id() -> None:
+    """If the LLM hallucinates a ``session_id`` in input, adapter must
+    **overwrite** it with the trusted ``ToolContext.session_id``.
+
+    Pre-PR-#1 (Phase A2) this used ``setdefault`` — meaning a
+    hallucinated session_id from the LLM would survive into the tool
+    call. The schema generator now hides ``session_id`` from the LLM
+    in the first place (see :data:`tools.base.INJECTED_PARAM_NAMES`),
+    but a misbehaving client could still smuggle one through; this
+    test pins the new contract that we never honour LLM-supplied
+    injected params.
+    """
     adapter = _GenyToolAdapter(_BaseToolWithSessionId())
     result = await adapter.execute(
-        {"session_id": "llm-chosen", "key": "notes"}, _SimpleContext("ctx-sess")
+        {"session_id": "llm-hallucinated", "key": "notes"},
+        _SimpleContext("ctx-sess"),
     )
-    assert "with-session:llm-chosen:notes" in str(result.content)
+    # The trusted context wins; the hallucinated value is dropped.
+    assert "with-session:ctx-sess:notes" in str(result.content)
+    assert "llm-hallucinated" not in str(result.content)
 
 
 @pytest.mark.asyncio

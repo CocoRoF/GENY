@@ -39,6 +39,39 @@ _SESSION_ID = os.environ.get("GENY_MCP_SESSION_ID", "")
 _TIMEOUT = float(os.environ.get("GENY_MCP_TIMEOUT_S", "300"))
 
 
+def _arm_parent_death_signal() -> None:
+    """Best-effort: tell the kernel to send us SIGTERM if our parent dies.
+
+    The spawning process is ``claude`` (Claude Code CLI). If it crashes
+    or is killed while we're mid-RPC, the parent FD closes but Python's
+    line-buffered ``for raw in sys.stdin`` loop sometimes wedges on
+    epoll instead of cleanly observing EOF — leaving an orphaned bridge
+    holding a port-3xxxx HTTP connection open until the kernel reaper
+    notices. ``PR_SET_PDEATHSIG`` makes the kernel send SIGTERM to us
+    the instant the parent exits, regardless of stdin state.
+
+    Linux-only; on macOS / Windows this is a no-op and the existing
+    EOF-driven cleanup remains the only path.
+    """
+    try:
+        import ctypes
+        import signal
+
+        # Linux PR_SET_PDEATHSIG = 1
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+            err = ctypes.get_errno()
+            sys.stderr.write(
+                f"geny_mcp_bridge: prctl(PR_SET_PDEATHSIG) failed errno={err}\n"
+            )
+    except Exception:
+        # Not Linux (or libc.so.6 missing) — fall back to EOF detection.
+        pass
+
+
+_arm_parent_death_signal()
+
+
 def _write_response(response: dict) -> None:
     """Emit one MCP response line on stdout. Flush so the CLI sees
     it without buffering delay."""

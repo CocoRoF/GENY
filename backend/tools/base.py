@@ -26,7 +26,38 @@ import functools
 import inspect
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union, get_type_hints
+from typing import Any, Callable, ClassVar, Dict, FrozenSet, List, Optional, Union, get_type_hints
+
+
+# Names the host injects into a tool call from runtime context (NOT from the
+# LLM). The schema generator strips these from `properties` and `required`
+# so the LLM never sees — or hallucinates — them; the adapter overwrites
+# them from the trusted `ToolContext` before dispatch.
+#
+# Adding a name here is the *only* place a new injected parameter needs to
+# be registered; both BaseTool and ToolWrapper read it.
+INJECTED_PARAM_NAMES: FrozenSet[str] = frozenset({"session_id"})
+
+
+class ToolError(Exception):
+    """Raised by tools to signal a structured failure to the LLM.
+
+    The adapter (Stage-10 dispatch + MCP bridge) catches this and surfaces
+    a clean ``isError=true`` envelope with the message text. Use this
+    instead of returning ``json.dumps({"error": ...})`` — that pattern
+    historically came back to the LLM as ``isError=false`` (a silent
+    success containing an error string), which the LLM happily
+    paraphrased as "맡겼어, 잠깐만" while nothing actually happened.
+
+    Pass ``user_message`` for the safe text shown to the LLM (no class
+    names, no module paths, no tracebacks). Diagnostic detail goes to
+    logger.error via the adapter — never to the LLM.
+    """
+
+    def __init__(self, message: str, *, code: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.user_message = message
+        self.code = code
 
 
 class BaseTool(ABC):
@@ -58,6 +89,10 @@ class BaseTool(ABC):
     # Stored as `Any` to avoid an import-time dependency on geny_executor at
     # tools/base.py load — the adapter does the typed read.
     CAPABILITIES: Optional[Any] = None
+    # Per-tool override for the host-injected parameter set. Defaults to
+    # the module-level `INJECTED_PARAM_NAMES`. A tool that genuinely wants
+    # the LLM to pick a parameter named "session_id" (rare) can clear it.
+    INJECTED_PARAMS: ClassVar[FrozenSet[str]] = INJECTED_PARAM_NAMES
 
     def __init__(self):
         if not self.name:
@@ -68,12 +103,24 @@ class BaseTool(ABC):
             self.parameters = self._generate_parameters_schema()
 
     def _generate_parameters_schema(self) -> Dict[str, Any]:
-        """Generate parameter schema from run method signature and docstring."""
-        schema = {
+        """Generate parameter schema from run method signature and docstring.
+
+        Excludes :class:`INJECTED_PARAM_NAMES` (e.g. ``session_id``) from
+        both ``properties`` and ``required`` — those are filled by the
+        host adapter from trusted context, never by the LLM. Sets
+        ``additionalProperties: False`` so hallucinated args are rejected
+        by the schema validator before they reach :meth:`run` (avoiding
+        the ``TypeError: unexpected keyword argument`` traceback that
+        used to surface to the LLM).
+        """
+        schema: Dict[str, Any] = {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False,
         }
+
+        injected = self.INJECTED_PARAMS
 
         try:
             sig = inspect.signature(self.run)
@@ -84,6 +131,9 @@ class BaseTool(ABC):
 
             for param_name, param in sig.parameters.items():
                 if param_name == 'self':
+                    continue
+                if param_name in injected:
+                    # Host-injected from ToolContext — hide from LLM.
                     continue
 
                 # Type inference
@@ -198,6 +248,10 @@ class ToolWrapper:
     Wraps regular functions to be compatible with BaseTool interface.
     """
 
+    # Mirror BaseTool's INJECTED_PARAMS so the schema generator hides
+    # host-injected parameters from the LLM here too.
+    INJECTED_PARAMS: ClassVar[FrozenSet[str]] = INJECTED_PARAM_NAMES
+
     def __init__(self, func: Callable, name: Optional[str] = None, description: Optional[str] = None):
         self.func = func
         self.name = name or func.__name__
@@ -209,18 +263,28 @@ class ToolWrapper:
         functools.update_wrapper(self, func)
 
     def _generate_parameters_schema(self) -> Dict[str, Any]:
-        """Generate parameter schema from function signature"""
-        schema = {
+        """Generate parameter schema from function signature.
+
+        Hides :data:`INJECTED_PARAMS` (e.g. ``session_id``) from the LLM
+        and sets ``additionalProperties: False`` — same treatment as
+        :meth:`BaseTool._generate_parameters_schema`.
+        """
+        schema: Dict[str, Any] = {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False,
         }
+
+        injected = self.INJECTED_PARAMS
 
         try:
             sig = inspect.signature(self.func)
             hints = get_type_hints(self.func) if hasattr(self.func, '__annotations__') else {}
 
             for param_name, param in sig.parameters.items():
+                if param_name in injected:
+                    continue
                 param_type = hints.get(param_name, str)
                 json_type = BaseTool._python_type_to_json(param_type)
 
