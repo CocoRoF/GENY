@@ -139,12 +139,22 @@ class _GenyToolAdapter:
     ) -> Any:
         """Execute the Geny tool and wrap result as ToolResult.
 
-        Injects ``session_id`` from the Pipeline ``ToolContext`` only
-        when the wrapped tool's signature accepts it — decided once
-        at construction time by :meth:`_probe_session_id_support` and
-        cached on ``self._accepts_session_id``.
+        Overwrites host-injected parameters (``session_id`` etc.) from the
+        Pipeline ``ToolContext`` regardless of what the LLM supplied —
+        the schema generator strips them from the LLM's view (see
+        :data:`tools.base.INJECTED_PARAM_NAMES`), so any value the LLM
+        managed to pass is a hallucination and must not win over the
+        trusted ``ToolContext``.
+
+        Errors are normalised:
+          * :class:`ToolError` (and tool-returned ``{"error": "..."}``
+            JSON, which earlier blog tools used) → ``is_error=True``
+            with a clean message. No tracebacks, no Python class names.
+          * Unexpected exceptions → ``is_error=True`` with a generic
+            message; full detail goes to logger.error.
         """
         from geny_executor.tools.base import ToolResult
+        from tools.base import ToolError
 
         # Copy the caller's dict so our injection doesn't mutate the
         # state.pending_tool_calls entry Stage 10 passed in. Adapters
@@ -156,7 +166,8 @@ class _GenyToolAdapter:
             and context
             and getattr(context, "session_id", None)
         ):
-            call_input.setdefault("session_id", context.session_id)
+            # Overwrite, not setdefault — see docstring above.
+            call_input["session_id"] = context.session_id
 
         try:
             # Try async first (arun), fall back to sync (run)
@@ -174,19 +185,72 @@ class _GenyToolAdapter:
                     is_error=True,
                 )
 
-            # Normalize result to string
+            # Normalise result to string
             if not isinstance(result, str):
-                import json
+                import json as _json
                 try:
-                    result = json.dumps(result, ensure_ascii=False, default=str)
+                    result_str = _json.dumps(result, ensure_ascii=False, default=str)
                 except (TypeError, ValueError):
-                    result = str(result)
+                    result_str = str(result)
+            else:
+                result_str = result
 
-            return ToolResult(content=result)
+            # Legacy compat: tools that return ``{"error": "..."}`` JSON
+            # strings as a soft-failure signal. Detect that pattern and
+            # surface it as a real error envelope so downstream stages
+            # (and the LLM) don't treat it as success.
+            is_err = _detect_legacy_error_envelope(result_str)
+            return ToolResult(content=result_str, is_error=is_err)
+
+        except ToolError as exc:
+            logger.info("tool_bridge: '%s' raised ToolError: %s", self._name, exc.user_message)
+            return ToolResult(content=exc.user_message, is_error=True)
 
         except Exception as exc:
-            logger.warning("tool_bridge: '%s' execution failed: %s", self._name, exc, exc_info=True)
+            # Full traceback to logs; sanitised message to the LLM.
+            logger.warning(
+                "tool_bridge: '%s' execution failed: %s", self._name, exc, exc_info=True,
+            )
             return ToolResult(
-                content=f"Error executing {self._name}: {exc}",
+                content=_sanitize_exception_message(self._name, exc),
                 is_error=True,
             )
+
+
+def _detect_legacy_error_envelope(result_str: str) -> bool:
+    """Return True iff ``result_str`` parses to a dict with an ``error`` key.
+
+    Pre-PR-#1 tools (notably ``blog_agent_*``) returned
+    ``json.dumps({"error": "..."})`` to signal failure while keeping
+    the host's success/error envelope at "OK" — which the LLM then
+    paraphrased as "맡겼어, 잠깐만" while nothing actually happened.
+    New code raises :class:`ToolError`; this detector handles the
+    holdouts until they migrate.
+    """
+    s = result_str.lstrip()
+    if not s.startswith("{"):
+        return False
+    import json as _json
+    try:
+        body = _json.loads(s)
+    except (ValueError, _json.JSONDecodeError):
+        return False
+    return isinstance(body, dict) and "error" in body
+
+
+def _sanitize_exception_message(tool_name: str, exc: BaseException) -> str:
+    """Surface a clean, LLM-safe error message for an unexpected exception.
+
+    Strips Python class names and module paths — the LLM doesn't need
+    "BlogAgentStatusTool.run() got an unexpected keyword argument
+    'fake_arg'" leaking through. The operator-facing detail goes to
+    ``logger.warning`` at the call site.
+    """
+    msg = str(exc)
+    # Best-effort cleanup of common Python noise.
+    if "got an unexpected keyword argument" in msg:
+        return f"Tool '{tool_name}' rejected an unknown argument."
+    if "missing" in msg and "required positional argument" in msg:
+        return f"Tool '{tool_name}' was called without a required argument."
+    # Generic fallback — short and free of class/module names.
+    return f"Tool '{tool_name}' failed: {type(exc).__name__}"
