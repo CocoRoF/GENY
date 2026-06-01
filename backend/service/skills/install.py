@@ -68,9 +68,21 @@ _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
 _BUNDLED_REL = Path(__file__).resolve().parent.parent.parent / "skills" / "bundled"
 BUNDLED_SKILLS_DIR: Path = _BUNDLED_REL
 
+# Sample skills (PR #5 / Phase D) — Geny-shipped, *not* auto-registered
+# as roles' allowed skills. Their job is to be educational templates
+# the operator can copy into ``~/.geny/skills/`` and customise. They
+# get their own ``source_kind="sample"`` so the SkillsTab can badge
+# them separately and surface a "Copy to my skills" action.
+_SAMPLES_REL = Path(__file__).resolve().parent.parent.parent / "skills" / "samples"
+SAMPLE_SKILLS_DIR: Path = _SAMPLES_REL
+
 
 def bundled_skills_dir() -> Path:
     return BUNDLED_SKILLS_DIR
+
+
+def sample_skills_dir() -> Path:
+    return SAMPLE_SKILLS_DIR
 
 
 def user_skills_dir() -> Path:
@@ -217,6 +229,30 @@ def install_skill_registry(
             for path, err in report.errors:
                 logger.warning("install_skill_registry: bundled skill error %s: %s", path, err)
 
+    # 2.5. Geny-shipped samples (PR #5 / Phase D) — always loaded so
+    # the operator can see them in the SkillsTab CUSTOM 샘플 section
+    # and duplicate into ``~/.geny/skills/``. Marked via
+    # ``skill_source_kind`` returning ``"sample"``.
+    if SAMPLE_SKILLS_DIR.exists():
+        report = load_skills_dir(SAMPLE_SKILLS_DIR, strict=False)
+        for skill in report.loaded:
+            if not _skill_allowed_for_role(skill, role):
+                continue
+            try:
+                registry.register(skill)
+                loaded.append(skill)
+            except ValueError as exc:
+                logger.warning(
+                    "install_skill_registry: sample %s collided with an "
+                    "existing skill: %s",
+                    skill.id, exc,
+                )
+        if report.errors:
+            for path, err in report.errors:
+                logger.warning(
+                    "install_skill_registry: sample skill error %s: %s", path, err,
+                )
+
     # 3. User — opt-in.
     if _user_skills_opted_in():
         user_dir = user_skills_dir()
@@ -297,6 +333,22 @@ def _is_executor_bundled_skill(skill: Any) -> bool:
         return False
 
 
+def _is_sample_skill(skill: Any) -> bool:
+    """Return True when the skill was loaded from SAMPLE_SKILLS_DIR
+    (PR #5 / Phase D — Geny-shipped templates the operator can fork)."""
+    source = getattr(skill, "source", None)
+    if source is None:
+        meta = getattr(skill, "metadata", None)
+        if meta is not None:
+            source = getattr(meta, "source", None)
+    if source is None:
+        return False
+    try:
+        return SAMPLE_SKILLS_DIR in Path(source).parents
+    except Exception:
+        return False
+
+
 def skill_source_kind(skill: Any) -> str:
     """Classify where a skill came from.
 
@@ -305,6 +357,9 @@ def skill_source_kind(skill: Any) -> str:
         (the 8-skill bundled catalog).
       * ``"geny"`` — first-party Geny-specific skill under
         ``backend/skills/bundled/``.
+      * ``"sample"`` — Geny-shipped *template* under
+        ``backend/skills/samples/`` (PR #5 / Phase D). Meant to be
+        duplicated into ``~/.geny/skills/`` and customised.
       * ``"user"`` — operator-supplied skill under
         ``~/.geny/skills/``.
       * ``"mcp"`` — bridged from an MCP server's prompts (Phase
@@ -319,6 +374,8 @@ def skill_source_kind(skill: Any) -> str:
         return "mcp"
     if _is_executor_bundled_skill(skill):
         return "executor"
+    if _is_sample_skill(skill):
+        return "sample"
     if _is_bundled_skill(skill):
         return "geny"
     source = getattr(skill, "source", None)

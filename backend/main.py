@@ -297,12 +297,16 @@ async def lifespan(app: FastAPI):
     # builtin_alias rows. The loader's ``reload_custom_tools_db``
     # path is the runtime hot-reload entry used by the CRUD controller.
     from service.custom_tools import get_custom_tool_store
+    from service.custom_tools.samples import seed_samples
     custom_tool_store = get_custom_tool_store()
     if app_db is not None:
         custom_tool_store.set_database(app_db)
+        # Phase D — seed the Geny-shipped sample rows (blog_agent_*
+        # as builtin_alias). Idempotent: existing rows are skipped.
+        seeded = seed_samples(custom_tool_store)
         # Overlay DB-backed custom tools onto the filesystem roster.
         added = tool_loader.load_custom_tools_from_db()
-        logger.info(f"   - Custom tools (DB): {added}")
+        logger.info(f"   - Custom tools (DB): {added} loaded (seeded {seeded} new sample)")
     else:
         logger.info("   - Custom tools (DB): skipped — database unavailable")
 
