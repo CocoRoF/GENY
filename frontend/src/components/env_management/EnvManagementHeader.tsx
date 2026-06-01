@@ -39,6 +39,7 @@ import {
   Plug,
   Shield,
   Sparkles,
+  Wrench,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ export type EnvManagementTab =
   | 'environments'
   | 'mcp'
   | 'skills'
+  | 'custom_tools'
   | 'hooks'
   | 'permissions'
   | 'triggers';
@@ -56,6 +58,7 @@ const TAB_ORDER: EnvManagementTab[] = [
   'environments',
   'mcp',
   'skills',
+  'custom_tools',
   'hooks',
   'permissions',
   'triggers',
@@ -90,6 +93,13 @@ const TABS: TabDef[] = [
     fallbackLabel: 'SKILLS',
     fallbackHint: '호스트에 등록된 스킬',
     key: 'skills',
+  },
+  {
+    id: 'custom_tools',
+    icon: Wrench,
+    fallbackLabel: '커스텀 도구',
+    fallbackHint: 'DB 등록된 사용자 도구 (HTTP / MCP 프록시 / 별칭)',
+    key: 'custom_tools',
   },
   {
     id: 'hooks',

@@ -1166,6 +1166,76 @@ export const customMcpApi = {
     }),
 };
 
+// ==================== Custom Tools (Phase B — DB-backed) ==========
+
+export type CustomToolBackendKind = 'http' | 'mcp_proxy' | 'builtin_alias';
+
+export interface CustomToolSummary {
+  id: string;
+  name: string;
+  description: string;
+  backend_kind: CustomToolBackendKind;
+  enabled: boolean;
+  is_sample: boolean;
+}
+
+export interface CustomToolDetail extends CustomToolSummary {
+  input_schema: Record<string, unknown>;
+  config: Record<string, unknown>;
+  capabilities: Record<string, unknown>;
+}
+
+export interface CustomToolPayload {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  backend_kind: CustomToolBackendKind;
+  config: Record<string, unknown>;
+  capabilities?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface CustomToolTestResponse {
+  ok: boolean;
+  result?: string;
+  error?: string;
+  duration_ms?: number;
+}
+
+export const customToolsApi = {
+  list: () => apiCall<{ tools: CustomToolSummary[] }>('/api/custom-tools'),
+  get: (toolId: string) =>
+    apiCall<CustomToolDetail>(`/api/custom-tools/${encodeURIComponent(toolId)}`),
+  create: (payload: CustomToolPayload) =>
+    apiCall<CustomToolDetail>('/api/custom-tools', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  replace: (toolId: string, payload: CustomToolPayload) =>
+    apiCall<CustomToolDetail>(`/api/custom-tools/${encodeURIComponent(toolId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  remove: (toolId: string) =>
+    apiCall<{ ok: boolean }>(`/api/custom-tools/${encodeURIComponent(toolId)}`, {
+      method: 'DELETE',
+    }),
+  setEnabled: (toolId: string, enabled: boolean) =>
+    apiCall<CustomToolDetail>(`/api/custom-tools/${encodeURIComponent(toolId)}/enabled`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  duplicate: (toolId: string) =>
+    apiCall<CustomToolDetail>(`/api/custom-tools/${encodeURIComponent(toolId)}/duplicate`, {
+      method: 'POST',
+    }),
+  test: (toolId: string, args: Record<string, unknown>, dryRun = true) =>
+    apiCall<CustomToolTestResponse>(`/api/custom-tools/${encodeURIComponent(toolId)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ arguments: args, dry_run: dryRun }),
+    }),
+};
+
 // ==================== Subagent Types (PR-F.3.1) ==================
 
 export interface SubagentTypeRow {
