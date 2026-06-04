@@ -31,21 +31,24 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 2.1.1 — Anthropic API boundary robustness:
-    # AnthropicClient now expands the short aliases the ``claude`` CLI
-    # accepts (``opus`` / ``sonnet`` / ``haiku``) to canonical model
-    # IDs before calling the SDK, and drops temperature / top_p /
-    # top_k when ``thinking`` is set (the Messages API rejects them
-    # under thinking with 400 "temperature is deprecated…"). These
-    # two boundary fixes mean a Geny env that pins ``thinking_enabled``
-    # + an explicit temperature, or that was edited on the CLI flow
-    # with a short alias, no longer round-trips 400/404 from
-    # ``api.anthropic.com``. CLI surface unchanged — alias semantics
-    # there are intentional.
+    # geny-executor 2.1.2 — Opus 4.7 unconditional sampling-param
+    # rejection + retry-on-deprecation safety net.
     #
-    # 2.1.0 baseline: 5 providers, CredentialBundle, MCP Phase I,
-    # ExecutorErrorCode taxonomy. See CHANGELOG.md.
-    "geny-executor>=2.1.1,<3.0.0",
+    # 2.1.1 dropped temperature/top_p/top_k when ``thinking`` was set;
+    # 2.1.2 adds two more layers:
+    #   1. Static prefix list — ``_TEMPERATURE_DEPRECATED_PREFIXES``
+    #      currently {``claude-opus-4-7``} — drops the three sampling
+    #      params unconditionally, even without ``thinking``. Closes the
+    #      ``AdaptiveModelRouter`` path that auto-promotes thinking
+    #      calls to Opus, AND the plain ``memory_distill``-pins-Opus
+    #      path that 2.1.1 still 400'd on.
+    #   2. Retry-on-deprecation — when the API returns
+    #      ``... is deprecated for this model.`` for a known sampling
+    #      field, _send / create_message_stream strip it and retry
+    #      once. Future model deprecations self-heal without a bump.
+    #
+    # CLI surface unchanged — alias semantics there are intentional.
+    "geny-executor>=2.1.2,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
