@@ -17,16 +17,16 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor 2.0.0 — LLM backend overhaul cycle. ClientRegistry
-# ships 5 providers (anthropic / openai / google / vllm +
-# claude_code_cli; copilot_cli was removed in cycle 20260520).
-# Credentials flow through a single
-# CredentialBundle channel. SubagentTypeDescriptor gains provider/
-# parallel/max_concurrent for multi-provider sub-agents.
+# geny-executor 2.1.1 — Anthropic API boundary robustness:
+# AnthropicClient expands ``opus``/``sonnet``/``haiku`` aliases to
+# canonical model IDs before the SDK call, and drops temperature /
+# top_p / top_k when ``thinking`` is set (the Messages API rejects
+# them under thinking with 400). CLI surface unchanged.
+#
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor>=2.1.0,<3.0.0
+geny-executor>=2.1.1,<3.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

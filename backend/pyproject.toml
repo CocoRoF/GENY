@@ -31,18 +31,21 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 2.0.0 — LLM backend overhaul cycle. ClientRegistry
-    # ships 5 providers (anthropic / openai / google / vllm +
-    # claude_code_cli; copilot_cli was removed in cycle 20260520).
-    # Credentials flow through a single
-    # CredentialBundle channel (auto-wrapped from api_key= for legacy
-    # call sites). Provider location is unified at
-    # manifest.stages[6].config["provider"] — strategies['provider']
-    # is rejected at strict load. SubagentTypeDescriptor gains
-    # provider/parallel/max_concurrent for multi-provider sub-agents.
-    # Earlier 1.21.0 surfaces (bounded root _index.json, provider-driven
-    # Stage 2 / Stage 18, etc.) all retained.
-    "geny-executor>=2.1.0,<3.0.0",
+    # geny-executor 2.1.1 — Anthropic API boundary robustness:
+    # AnthropicClient now expands the short aliases the ``claude`` CLI
+    # accepts (``opus`` / ``sonnet`` / ``haiku``) to canonical model
+    # IDs before calling the SDK, and drops temperature / top_p /
+    # top_k when ``thinking`` is set (the Messages API rejects them
+    # under thinking with 400 "temperature is deprecated…"). These
+    # two boundary fixes mean a Geny env that pins ``thinking_enabled``
+    # + an explicit temperature, or that was edited on the CLI flow
+    # with a short alias, no longer round-trips 400/404 from
+    # ``api.anthropic.com``. CLI surface unchanged — alias semantics
+    # there are intentional.
+    #
+    # 2.1.0 baseline: 5 providers, CredentialBundle, MCP Phase I,
+    # ExecutorErrorCode taxonomy. See CHANGELOG.md.
+    "geny-executor>=2.1.1,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
