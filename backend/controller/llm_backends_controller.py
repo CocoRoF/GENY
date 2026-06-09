@@ -270,60 +270,64 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
     if rc == 0 and out:
         version = out.splitlines()[0].strip()
 
-    # Auth detection. Prefer the explicit API key path; if absent, look
-    # for an active subscription by asking the CLI itself.
+    # Auth detection — OAuth subscription is the primary mode whenever the
+    # user has completed ``claude auth login``. API-key auth (per-card
+    # field or the ``ANTHROPIC_API_KEY`` env var the Anthropic provider's
+    # ``env_sync`` hook maintains) is only used as a fallback when no
+    # active subscription is present.
     #
-    # Only honour the per-card ``claude_cli.api_key`` field (carried on
-    # the bundle). The previous code also fell back to
-    # ``os.environ['ANTHROPIC_API_KEY']`` — but that env var is owned by
-    # the Anthropic provider's apply_change=env_sync(...) hook, not by
-    # the Claude Code (CLI) card. With an Anthropic key configured and
-    # the CLI card left blank for OAuth login, the env-var fallback
-    # mis-labelled the card as ``auth=api_key / 준비됨`` while the auth
-    # modal correctly reported ``로그인됨 / auth_method: claude.ai``.
-    # The actual session-run path is unaffected — the executor's
-    # ``CLIProcessRunner._spawn`` scrubs ``ANTHROPIC_API_KEY`` out of
-    # the subprocess env via ``DEFAULT_ENV_WHITELIST`` — but the
-    # mis-labelled card was a constant source of confusion.
-    bundle_creds = bundle.get("claude_code_cli")
-    api_key = bundle_creds.api_key
+    # The previous order (API key first, subscription only as fallback)
+    # silently demoted OAuth: any user with an Anthropic key configured
+    # — the common case — saw ``auth=api_key / 준비됨`` on the card even
+    # though they had just logged in via the modal and the auth status
+    # probe correctly reported ``로그인됨 / auth_method: claude.ai``.
+    # Two views of the same backend, disagreeing — and the wrong-one was
+    # the visible one.
     auth_method: Optional[str] = None
     auth_ok: Optional[bool] = None
-
     auth_expired = False
     auth_expires_at_ms: Optional[int] = None
 
-    if api_key:
-        auth_method = "api_key"
-        auth_ok = True
-    else:
-        # Try a quick auth status probe. The CLI's exact subcommand
-        # surface evolves; we try a couple of conservative forms and
-        # never block on long timeouts.
-        for probe in (["auth", "status"], ["auth", "whoami"], ["--auth-status"]):
-            rc, _o, _e = await _run_cmd([binary, *probe], timeout=3.0)
-            if rc == 0:
-                auth_method = "subscription"
-                auth_ok = True
-                break
-        if auth_ok is None:
+    # 1) Subscription probe first. The CLI's exact subcommand surface
+    #    evolves; we try a couple of conservative forms and never block
+    #    on long timeouts.
+    for probe in (["auth", "status"], ["auth", "whoami"], ["--auth-status"]):
+        rc, _o, _e = await _run_cmd([binary, *probe], timeout=3.0)
+        if rc == 0:
+            auth_method = "subscription"
+            auth_ok = True
+            break
+
+    # 2) Expiry cross-check on the OAuth credential file. The CLI returns
+    #    ``loggedIn: true`` whenever the file is present, even if its
+    #    ``accessToken`` has expired and refresh has been failing. That's
+    #    the case the user hit on 2026-05-18 — the card showed "준비됨"
+    #    while every session execution crashed with a stream-json 401.
+    #    Stay on ``auth_method = "subscription"`` so the UI surfaces a
+    #    "다시 로그인" hint rather than silently re-binding to a stale
+    #    API key.
+    if auth_method == "subscription":
+        auth_expires_at_ms = _read_claude_oauth_expires_at_ms()
+        if auth_expires_at_ms is not None:
+            now_ms = int(time.time() * 1000)
+            if now_ms >= auth_expires_at_ms:
+                auth_ok = False
+                auth_expired = True
+
+    # 3) API-key fallback — only when no live subscription was detected.
+    #    A stale ``ANTHROPIC_API_KEY`` in the process env (set by the
+    #    Anthropic provider's ``env_sync`` hook) must not pre-empt a
+    #    working OAuth session, but it remains a legitimate auth source
+    #    for users who never logged in.
+    if auth_method is None:
+        bundle_creds = bundle.get("claude_code_cli")
+        api_key = bundle_creds.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        if api_key:
+            auth_method = "api_key"
+            auth_ok = True
+        else:
             auth_method = None
             auth_ok = False
-
-        # The CLI returns ``loggedIn: true`` whenever the credential
-        # file is present, even if its ``accessToken`` has expired
-        # and refresh has been failing. That's the case the user hit
-        # on 2026-05-18 — the card showed "준비됨" while every
-        # session execution crashed with a stream-json 401. Cross-
-        # check ``expiresAt`` against the wall clock so the card
-        # surfaces the real state.
-        if auth_ok and auth_method == "subscription":
-            auth_expires_at_ms = _read_claude_oauth_expires_at_ms()
-            if auth_expires_at_ms is not None:
-                now_ms = int(time.time() * 1000)
-                if now_ms >= auth_expires_at_ms:
-                    auth_ok = False
-                    auth_expired = True
 
     if auth_expired:
         # Render a Korean message identifying the precise next step
