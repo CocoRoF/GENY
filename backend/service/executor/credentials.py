@@ -198,21 +198,22 @@ class CredentialBundleBuilder:
             or os.environ.get("CLAUDE_CODE_BINARY", "")
             or (shutil.which("claude") or "")
         )
-        # Only honour the per-card ``claude_cli.api_key`` field. Cascading
-        # from ``creds.anthropic_api_key`` (the Anthropic provider's key)
-        # silently forces API-key auth on the CLI even when the user has
-        # completed OAuth login — the executor's ``_env_extras`` then
-        # injects that key as ``ANTHROPIC_API_KEY`` into the subprocess,
-        # and Claude Code prefers env-var auth over the OAuth credential
-        # file at ``~/.claude/.credentials.json``. If the Anthropic key is
-        # stale / wrong (very common — the user pasted it once, it later
-        # got rotated, and they switched to Claude.ai subscription), every
-        # session crashes with ``401 invalid x-api-key`` and the LLM
-        # Backends card misleadingly shows ``auth=api_key`` while the
-        # auth modal correctly shows ``로그인됨 / auth_method: claude.ai``.
-        # Leave the field empty when the user wants OAuth — the CLI binary
-        # will then read its own credential file.
-        api_key = claude_cli.api_key
+        # Strictly honour the auth mode the user picked in the modal.
+        # Only the ``api_key`` mode feeds ``ANTHROPIC_API_KEY`` to the
+        # spawned ``claude --print`` subprocess; every other mode
+        # (host_mount / in_modal_login / setup_token) leaves the env
+        # var unset so the CLI binary uses its own credential
+        # persistence (OAuth file at ``~/.claude/.credentials.json``
+        # for the first two, the long-lived setup token for the third).
+        # Cross-binding ANTHROPIC_API_KEY in subscription modes is what
+        # caused the 401 storm — Claude Code prefers env-var auth over
+        # its OAuth file, and any stale Anthropic key (very common —
+        # user pasted once, later rotated) crashes every session.
+        mode = (getattr(claude_cli, "auth_mode", "") or "host_mount").strip()
+        if mode == "api_key":
+            api_key = claude_cli.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        else:
+            api_key = ""
         # Allow-tools CSV from the settings card lets the operator
         # opt back in to specific CLI built-ins (e.g. ``Bash`` for
         # debugging). Executor 2.0.5 honours this — when allow_tools

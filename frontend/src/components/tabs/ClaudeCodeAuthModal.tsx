@@ -124,7 +124,10 @@ export default function ClaudeCodeAuthModal({
   const { t } = useI18n();
   // Seed from localStorage at state-creation time so the modal opens
   // directly on the user's last-picked tab — no first-render flash to
-  // host_mount before a useEffect catches up.
+  // host_mount before a useEffect catches up. The authoritative value
+  // lives on the backend at ``cli_backend_claude_code.auth_mode`` and
+  // is fetched on mount (next useEffect); localStorage is now a render
+  // cache, not the source of truth.
   const [authMode, setAuthMode] = useState<AuthMode>(() => readPersistedAuthMode());
   const [status, setStatus] = useState<ClaudeCodeAuthStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -246,10 +249,46 @@ export default function ClaudeCodeAuthModal({
   }, [job?.job_id]);
 
   // Persist the user's last-picked auth mode so the modal opens on
-  // the same tab next time.
+  // the same tab next time. Also write to the backend config so the
+  // health probe / credential bundle honour the choice instead of
+  // guessing from available material.
   useEffect(() => {
     persistAuthMode(authMode);
   }, [authMode]);
+
+  // On mount, fetch the authoritative auth_mode from the backend.
+  // Overrides the localStorage seed (which is just a perf cache).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await configApi.get('cli_backend_claude_code');
+        const remote = (res as { values?: Record<string, unknown> })?.values?.auth_mode;
+        if (
+          !cancelled
+          && typeof remote === 'string'
+          && (VALID_AUTH_MODES as readonly string[]).includes(remote)
+        ) {
+          setAuthMode(remote as AuthMode);
+        }
+      } catch {
+        /* config endpoint unreachable — keep the localStorage seed */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Push the user's radio selection to the backend so the next session
+  // create + the health card both reflect the explicit choice.
+  const persistAuthModeToBackend = useCallback(async (mode: AuthMode) => {
+    try {
+      await configApi.update('cli_backend_claude_code', { auth_mode: mode });
+      onChange?.();
+    } catch {
+      /* surface via existing statusError? for now: silent — the radio
+         still works locally; next mount will retry from server */
+    }
+  }, [onChange]);
 
   const logout = useCallback(async () => {
     if (!confirm(t('settings.llmBackends.claudeCodeModal.signOutConfirm'))) return;
@@ -286,7 +325,14 @@ export default function ClaudeCodeAuthModal({
   const saveToken = useCallback(async () => {
     if (!tokenInput.trim()) return;
     try {
-      await configApi.update('cli_backend_claude_code', { api_key: tokenInput, enabled: true });
+      // Submitting a setup-token pins the user's auth_mode to
+      // setup_token — that's the act of choosing this method.
+      await configApi.update('cli_backend_claude_code', {
+        api_key: tokenInput,
+        enabled: true,
+        auth_mode: 'setup_token',
+      });
+      setAuthMode('setup_token');
       setTokenInput('');
       onChange?.();
       refreshStatus();
@@ -298,7 +344,13 @@ export default function ClaudeCodeAuthModal({
   const saveApiKey = useCallback(async () => {
     if (!apiKeyInput.trim()) return;
     try {
-      await configApi.update('cli_backend_claude_code', { api_key: apiKeyInput, enabled: true });
+      // Submitting an API key pins auth_mode to api_key.
+      await configApi.update('cli_backend_claude_code', {
+        api_key: apiKeyInput,
+        enabled: true,
+        auth_mode: 'api_key',
+      });
+      setAuthMode('api_key');
       setApiKeyInput('');
       onChange?.();
       refreshStatus();
@@ -400,7 +452,7 @@ export default function ClaudeCodeAuthModal({
                     name="auth-mode"
                     value={id}
                     checked={authMode === id}
-                    onChange={() => setAuthMode(id)}
+                    onChange={() => { setAuthMode(id); persistAuthModeToBackend(id); }}
                     className="mt-1"
                   />
                   <div>

@@ -35,6 +35,38 @@ PERMISSION_MODE_OPTIONS = [
 ]
 
 
+# The four auth methods the LLM Backends → Claude Code (CLI) modal lets
+# the user pick from. Stored as a single source-of-truth on the config
+# so the health probe + credential bundle both honour the user's
+# explicit choice instead of guessing from whatever credential material
+# happens to be present.
+#
+#   host_mount     — re-use the host's ``~/.claude/`` (mounted RW into
+#                    the container). Auth method = subscription, source =
+#                    OAuth credential file under HOME.
+#   in_modal_login — ran ``claude auth login`` from inside the modal;
+#                    OAuth credentials live in the container's
+#                    ``~/.claude/.credentials.json``. Auth method =
+#                    subscription, source = same file as host_mount.
+#   setup_token    — pasted a long-lived ``claude setup-token`` value.
+#                    The CLI binary itself reads it through its own
+#                    credential persistence; we treat the auth method
+#                    as subscription for UI purposes (the CLI's
+#                    ``--bare`` short-circuit only applies to the
+#                    ``api_key`` mode).
+#   api_key        — explicit ``ANTHROPIC_API_KEY`` (per-card field or
+#                    inherited from the Anthropic provider's key). The
+#                    only mode where the spawned subprocess gets
+#                    ``ANTHROPIC_API_KEY`` injected into its env.
+AUTH_MODE_OPTIONS = [
+    {"value": "host_mount", "label": "Host mount"},
+    {"value": "in_modal_login", "label": "Modal login"},
+    {"value": "setup_token", "label": "Setup token"},
+    {"value": "api_key", "label": "API key (Console)"},
+]
+AUTH_MODE_VALUES = {opt["value"] for opt in AUTH_MODE_OPTIONS}
+
+
 @register_config
 @dataclass
 class CLIBackendClaudeCodeConfig(BaseConfig):
@@ -50,7 +82,16 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
     bare_mode: bool = True
     default_permission_mode: str = "default"
     max_budget_usd: float = 0.0            # 0 = no cap
-    api_key: str = ""                      # blank → fall back to LLMCredentialsConfig.anthropic_api_key
+    # User's explicit auth choice from the LLM Backends → Claude Code (CLI)
+    # modal. Drives BOTH the health card's auth-method label AND what the
+    # ``CredentialBundleBuilder`` feeds to ``ClaudeCodeCLIClient`` — when
+    # the user picks ``in_modal_login`` we MUST not inject ANTHROPIC_API_KEY
+    # into the subprocess env, because the CLI binary prefers env-var
+    # auth over its own OAuth credential file and a stale key would 401
+    # an otherwise valid session. Default ``host_mount`` mirrors the
+    # original "reuse host's ~/.claude" behaviour.
+    auth_mode: str = "host_mount"
+    api_key: str = ""                      # only consumed when auth_mode == "api_key"
     settings_path: str = ""                # --settings file
     mcp_config_path: str = ""              # --mcp-config <path>
     allow_tools_csv: str = ""              # comma-separated --allowedTools
@@ -165,10 +206,24 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
                 group="claude_code",
             ),
             ConfigField(
+                name="auth_mode",
+                field_type=FieldType.SELECT,
+                label="Auth Mode",
+                description=(
+                    "Which Claude Code auth method to use. Picked from the "
+                    "LLM Backends modal's four radio buttons; persisted "
+                    "here so the backend honours the user's explicit "
+                    "choice instead of guessing from available credentials."
+                ),
+                default="host_mount",
+                options=AUTH_MODE_OPTIONS,
+                group="claude_code",
+            ),
+            ConfigField(
                 name="api_key",
                 field_type=FieldType.PASSWORD,
-                label="ANTHROPIC_API_KEY (override)",
-                description="Optional. Blank = inherit LLMCredentialsConfig.anthropic_api_key.",
+                label="ANTHROPIC_API_KEY (api_key mode only)",
+                description="Consumed only when auth_mode == 'api_key'. Other modes ignore this field.",
                 default="",
                 group="claude_code",
                 secure=True,

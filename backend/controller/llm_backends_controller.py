@@ -270,64 +270,57 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
     if rc == 0 and out:
         version = out.splitlines()[0].strip()
 
-    # Auth detection — OAuth subscription is the primary mode whenever the
-    # user has completed ``claude auth login``. API-key auth (per-card
-    # field or the ``ANTHROPIC_API_KEY`` env var the Anthropic provider's
-    # ``env_sync`` hook maintains) is only used as a fallback when no
-    # active subscription is present.
-    #
-    # The previous order (API key first, subscription only as fallback)
-    # silently demoted OAuth: any user with an Anthropic key configured
-    # — the common case — saw ``auth=api_key / 준비됨`` on the card even
-    # though they had just logged in via the modal and the auth status
-    # probe correctly reported ``로그인됨 / auth_method: claude.ai``.
-    # Two views of the same backend, disagreeing — and the wrong-one was
-    # the visible one.
+    # Auth detection — strictly honour the mode the user picked in the
+    # LLM Backends → Claude Code (CLI) modal (persisted as
+    # ``claude_cli.auth_mode``). No heuristics, no "guess from what's
+    # available": if the user picked OAuth login, the card reflects
+    # OAuth even with an API key configured elsewhere; if the user
+    # picked api_key, the card reflects api_key even with a logged-in
+    # OAuth session present. The previous heuristic-based detection
+    # caused the card to disagree with the modal — see PR history
+    # (#863 / #864) for the dead ends.
     auth_method: Optional[str] = None
     auth_ok: Optional[bool] = None
     auth_expired = False
     auth_expires_at_ms: Optional[int] = None
 
-    # 1) Subscription probe first. The CLI's exact subcommand surface
-    #    evolves; we try a couple of conservative forms and never block
-    #    on long timeouts.
-    for probe in (["auth", "status"], ["auth", "whoami"], ["--auth-status"]):
-        rc, _o, _e = await _run_cmd([binary, *probe], timeout=3.0)
-        if rc == 0:
+    mode = (getattr(claude_cfg, "auth_mode", "") or "host_mount").strip()
+
+    if mode == "api_key":
+        # User chose API key explicitly. Only this path forwards
+        # ``ANTHROPIC_API_KEY`` to the spawned subprocess.
+        api_key = claude_cfg.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        auth_method = "api_key"
+        auth_ok = bool(api_key)
+    else:
+        # All three subscription-style modes (host_mount /
+        # in_modal_login / setup_token) read auth state from the CLI's
+        # own credential persistence. Probe + expiry cross-check.
+        for probe in (["auth", "status"], ["auth", "whoami"], ["--auth-status"]):
+            rc, _o, _e = await _run_cmd([binary, *probe], timeout=3.0)
+            if rc == 0:
+                auth_method = "subscription"
+                auth_ok = True
+                break
+        if auth_method is None:
+            # Mode says "subscription" but the CLI reports nothing.
+            # Don't silently fall through to api_key — surface the
+            # mismatch so the user knows they need to (re-)login.
             auth_method = "subscription"
-            auth_ok = True
-            break
-
-    # 2) Expiry cross-check on the OAuth credential file. The CLI returns
-    #    ``loggedIn: true`` whenever the file is present, even if its
-    #    ``accessToken`` has expired and refresh has been failing. That's
-    #    the case the user hit on 2026-05-18 — the card showed "준비됨"
-    #    while every session execution crashed with a stream-json 401.
-    #    Stay on ``auth_method = "subscription"`` so the UI surfaces a
-    #    "다시 로그인" hint rather than silently re-binding to a stale
-    #    API key.
-    if auth_method == "subscription":
-        auth_expires_at_ms = _read_claude_oauth_expires_at_ms()
-        if auth_expires_at_ms is not None:
-            now_ms = int(time.time() * 1000)
-            if now_ms >= auth_expires_at_ms:
-                auth_ok = False
-                auth_expired = True
-
-    # 3) API-key fallback — only when no live subscription was detected.
-    #    A stale ``ANTHROPIC_API_KEY`` in the process env (set by the
-    #    Anthropic provider's ``env_sync`` hook) must not pre-empt a
-    #    working OAuth session, but it remains a legitimate auth source
-    #    for users who never logged in.
-    if auth_method is None:
-        bundle_creds = bundle.get("claude_code_cli")
-        api_key = bundle_creds.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if api_key:
-            auth_method = "api_key"
-            auth_ok = True
-        else:
-            auth_method = None
             auth_ok = False
+
+        # CLI returns ``loggedIn: true`` whenever the credential file
+        # is present, even with an expired access token whose refresh
+        # has been failing (the case the user hit on 2026-05-18 —
+        # card said "준비됨", every session crashed with stream-json
+        # 401). Cross-check ``expiresAt`` against the wall clock.
+        if auth_ok:
+            auth_expires_at_ms = _read_claude_oauth_expires_at_ms()
+            if auth_expires_at_ms is not None:
+                now_ms = int(time.time() * 1000)
+                if now_ms >= auth_expires_at_ms:
+                    auth_ok = False
+                    auth_expired = True
 
     if auth_expired:
         # Render a Korean message identifying the precise next step
@@ -553,8 +546,10 @@ async def _stream_subprocess(job: _AuthJob) -> None:
     # but does not flip our backend-enabled gate — without that flip the
     # next session create still fails the bundle.has(claude_code_cli)
     # check and returns the misleading "자격증명이 설정되지 않았습니다"
-    # error. Promote the enable flag here so "log in once → it just
-    # works" matches what the user reasonably expects.
+    # error. Promote the enable flag here, and pin ``auth_mode`` to the
+    # method the user just completed (modal login) so the health card +
+    # subprocess wiring reflect the explicit choice without the user
+    # having to also click the radio.
     if job.kind == "claude_code" and rc == 0:
         try:
             from service.config import get_config_manager
@@ -564,8 +559,14 @@ async def _stream_subprocess(job: _AuthJob) -> None:
 
             cm = get_config_manager()
             cfg = cm.load_config(CLIBackendClaudeCodeConfig)
+            mutated = False
             if not cfg.enabled:
                 cfg.enabled = True
+                mutated = True
+            if getattr(cfg, "auth_mode", "") != "in_modal_login":
+                cfg.auth_mode = "in_modal_login"
+                mutated = True
+            if mutated:
                 cm.save_config(cfg)
         except Exception:  # noqa: BLE001
             pass
