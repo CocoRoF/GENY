@@ -257,3 +257,55 @@ def test_extract_primary_provider_falls_back_to_env_when_no_default(tmp_path):
         return_value=_StubConfigManager(default_provider=""),
     ):
         assert mgr._extract_primary_provider("test-env-default-provider") == "openai"
+
+
+# ─────────────────────────────────── no anthropic-key cascade ─
+
+
+def test_claude_code_bundle_does_not_cascade_anthropic_api_key():
+    """Regression: ``_build_claude_code`` used to fall back to
+    ``creds.anthropic_api_key`` when the per-card ``claude_cli.api_key``
+    was empty. That silently baked an Anthropic API key into the CLI
+    provider, which ``_env_extras`` would then inject as
+    ``ANTHROPIC_API_KEY`` in the spawned subprocess — and Claude Code
+    prefers env-var auth over the OAuth credential file, so a stale
+    Anthropic key crashes every OAuth-logged-in session with
+    ``401 invalid x-api-key``. The cascade is removed; OAuth users
+    should see ``ProviderCredentials.api_key == ""``."""
+    from service.config.sub_config.general.cli_backends_config import (
+        CLIBackendClaudeCodeConfig,
+    )
+
+    cm = _StubConfigManager(
+        default_provider="claude_code_cli",
+        cli_enabled=True,
+        anthropic_api_key="sk-ant-leftover-but-invalid",
+    )
+    bundle = CredentialBundleBuilder(config_manager=cm).build()
+    cc_creds = bundle.get("claude_code_cli")
+    assert cc_creds.api_key == "", (
+        f"Anthropic key leaked into claude_code_cli bundle: {cc_creds.api_key!r}"
+    )
+
+
+def test_claude_code_bundle_honours_explicit_cli_api_key():
+    """When the user *does* paste an API key into the Claude Code (CLI)
+    card, that explicit choice is preserved — the operator opted in to
+    API-key auth instead of subscription."""
+    from service.config.sub_config.general.cli_backends_config import (
+        CLIBackendClaudeCodeConfig,
+    )
+
+    class _CMWithCLIKey(_StubConfigManager):
+        def __init__(self, cli_api_key: str, **kwargs):
+            super().__init__(**kwargs)
+            self._cli = CLIBackendClaudeCodeConfig(enabled=True, api_key=cli_api_key)
+
+    cm = _CMWithCLIKey(
+        cli_api_key="sk-ant-explicit-claude-code-card-entry",
+        default_provider="claude_code_cli",
+        cli_enabled=True,
+    )
+    bundle = CredentialBundleBuilder(config_manager=cm).build()
+    cc_creds = bundle.get("claude_code_cli")
+    assert cc_creds.api_key == "sk-ant-explicit-claude-code-card-entry"
