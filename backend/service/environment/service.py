@@ -714,10 +714,19 @@ class EnvironmentService:
         before the pipeline is returned, and ``adhoc_providers`` get a
         chance to register their tools against
         ``manifest.tools.external``.
+
+        ``LLMCredentialsConfig.default_provider`` — when set, every
+        Stage-6 entry has its ``config['provider']`` rewritten to the
+        chosen backend (in-memory only; the stored manifest is not
+        touched). Lets the user pin a single backend (e.g.
+        ``claude_code_cli`` for OAuth-only Pro/Max) without editing
+        each env manifest. Template envs that the boot path re-seeds
+        are unaffected on disk.
         """
         manifest = self.load_manifest(env_id)
         if manifest is None:
             raise EnvironmentNotFoundError(env_id)
+        self._apply_default_provider_override(manifest)
         return await Pipeline.from_manifest_async(
             manifest,
             credentials=credentials,
@@ -726,6 +735,43 @@ class EnvironmentService:
             strict=strict,
             adhoc_providers=adhoc_providers,
         )
+
+    def _apply_default_provider_override(self, manifest) -> None:
+        """Rewrite Stage 6's provider to ``LLMCredentialsConfig.default_provider``
+        when that setting is non-empty.
+
+        In-memory mutation only — the manifest on disk is not touched,
+        so the boot-time template re-seed remains the source of truth
+        for the env's own provider choice. Flipping the setting back to
+        empty restores the env's original provider on the next session.
+        """
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.llm_credentials_config import (
+                LLMCredentialsConfig,
+            )
+
+            default_provider = (
+                get_config_manager().load_config(LLMCredentialsConfig).default_provider
+                or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            return
+        if not default_provider:
+            return
+        entries = manifest.stage_entries()
+        changed = False
+        for entry in entries:
+            if entry.order != 6 or entry.name != "api" or not entry.active:
+                continue
+            cfg = dict(entry.config or {})
+            if cfg.get("provider") == default_provider:
+                continue
+            cfg["provider"] = default_provider
+            entry.config = cfg
+            changed = True
+        if changed:
+            manifest.set_stage_entries(entries)
 
     # ── Reconcile ──────────────────────────────────────────────
 

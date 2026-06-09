@@ -532,6 +532,27 @@ async def _stream_subprocess(job: _AuthJob) -> None:
     except asyncio.QueueFull:
         pass
 
+    # A successful ``claude auth login`` writes the OAuth credentials
+    # but does not flip our backend-enabled gate — without that flip the
+    # next session create still fails the bundle.has(claude_code_cli)
+    # check and returns the misleading "자격증명이 설정되지 않았습니다"
+    # error. Promote the enable flag here so "log in once → it just
+    # works" matches what the user reasonably expects.
+    if job.kind == "claude_code" and rc == 0:
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.cli_backends_config import (
+                CLIBackendClaudeCodeConfig,
+            )
+
+            cm = get_config_manager()
+            cfg = cm.load_config(CLIBackendClaudeCodeConfig)
+            if not cfg.enabled:
+                cfg.enabled = True
+                cm.save_config(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+
 
 # ── Common job spawn ──────────────────────────────────────────────────
 
