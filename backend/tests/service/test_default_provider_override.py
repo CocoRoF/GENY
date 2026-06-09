@@ -85,12 +85,18 @@ class _StubConfigManager:
         default_provider: str = "",
         cli_enabled: bool = False,
         anthropic_api_key: str = "",
+        cli_auth_mode: str = "host_mount",
+        cli_api_key: str = "",
     ) -> None:
         self._llm = LLMCredentialsConfig(
             anthropic_api_key=anthropic_api_key,
             default_provider=default_provider,
         )
-        self._cli = CLIBackendClaudeCodeConfig(enabled=cli_enabled)
+        self._cli = CLIBackendClaudeCodeConfig(
+            enabled=cli_enabled,
+            auth_mode=cli_auth_mode,
+            api_key=cli_api_key,
+        )
 
     def load_config(self, cls):
         if cls is LLMCredentialsConfig:
@@ -272,13 +278,10 @@ def test_claude_code_bundle_does_not_cascade_anthropic_api_key():
     Anthropic key crashes every OAuth-logged-in session with
     ``401 invalid x-api-key``. The cascade is removed; OAuth users
     should see ``ProviderCredentials.api_key == ""``."""
-    from service.config.sub_config.general.cli_backends_config import (
-        CLIBackendClaudeCodeConfig,
-    )
-
     cm = _StubConfigManager(
         default_provider="claude_code_cli",
         cli_enabled=True,
+        cli_auth_mode="in_modal_login",
         anthropic_api_key="sk-ant-leftover-but-invalid",
     )
     bundle = CredentialBundleBuilder(config_manager=cm).build()
@@ -288,24 +291,33 @@ def test_claude_code_bundle_does_not_cascade_anthropic_api_key():
     )
 
 
-def test_claude_code_bundle_honours_explicit_cli_api_key():
-    """When the user *does* paste an API key into the Claude Code (CLI)
-    card, that explicit choice is preserved — the operator opted in to
-    API-key auth instead of subscription."""
-    from service.config.sub_config.general.cli_backends_config import (
-        CLIBackendClaudeCodeConfig,
-    )
+# ─────────────────────────────────── auth_mode strict honour ─
 
-    class _CMWithCLIKey(_StubConfigManager):
-        def __init__(self, cli_api_key: str, **kwargs):
-            super().__init__(**kwargs)
-            self._cli = CLIBackendClaudeCodeConfig(enabled=True, api_key=cli_api_key)
 
-    cm = _CMWithCLIKey(
-        cli_api_key="sk-ant-explicit-claude-code-card-entry",
-        default_provider="claude_code_cli",
+def test_bundle_no_api_key_for_subscription_modes():
+    """The three subscription-style modes (host_mount / in_modal_login /
+    setup_token) must NOT plumb ANTHROPIC_API_KEY into the subprocess,
+    or Claude Code will prefer env-var auth over its own OAuth file."""
+    for mode in ("host_mount", "in_modal_login", "setup_token"):
+        cm = _StubConfigManager(
+            cli_enabled=True,
+            cli_auth_mode=mode,
+            cli_api_key="sk-ant-ignored-in-subscription-modes",
+            anthropic_api_key="sk-ant-also-ignored",
+        )
+        bundle = CredentialBundleBuilder(config_manager=cm).build()
+        cc_creds = bundle.get("claude_code_cli")
+        assert cc_creds.api_key == "", (
+            f"mode={mode!r}: api_key leaked into bundle as {cc_creds.api_key!r}"
+        )
+
+
+def test_bundle_passes_api_key_only_in_api_key_mode():
+    cm = _StubConfigManager(
         cli_enabled=True,
+        cli_auth_mode="api_key",
+        cli_api_key="sk-ant-explicit-console-key",
     )
     bundle = CredentialBundleBuilder(config_manager=cm).build()
     cc_creds = bundle.get("claude_code_cli")
-    assert cc_creds.api_key == "sk-ant-explicit-claude-code-card-entry"
+    assert cc_creds.api_key == "sk-ant-explicit-console-key"
