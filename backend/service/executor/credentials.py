@@ -170,7 +170,14 @@ class CredentialBundleBuilder:
             ),
         }
 
-        if claude_cli.enabled:
+        # Include ``claude_code_cli`` either when the operator explicitly
+        # toggled it on OR when ``LLMCredentialsConfig.default_provider``
+        # pins it as the global backend. Without the second condition,
+        # setting ``default_provider="claude_code_cli"`` does nothing
+        # because the session-create validator still sees an empty
+        # bundle entry and rejects the session before pipeline build.
+        default_provider = (creds.default_provider or "").strip()
+        if claude_cli.enabled or default_provider == "claude_code_cli":
             by_provider["claude_code_cli"] = self._build_claude_code(
                 creds, claude_cli, mcp_bridge=self._mcp_bridge,
             )

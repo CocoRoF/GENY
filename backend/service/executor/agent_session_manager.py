@@ -373,7 +373,27 @@ class AgentSessionManager:
         ``strategies['provider']`` location so manifests created before
         the executor 2.0.0 reseeding still resolve. Returns ``None``
         when the manifest is missing or Stage 6 is inactive.
+
+        ``LLMCredentialsConfig.default_provider`` always wins when set —
+        the validation path must agree with what ``instantiate_pipeline``
+        will actually wire, otherwise the bundle check at session
+        creation rejects a perfectly serviceable session.
         """
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.llm_credentials_config import (
+                LLMCredentialsConfig,
+            )
+
+            default_provider = (
+                get_config_manager().load_config(LLMCredentialsConfig).default_provider
+                or ""
+            ).strip()
+            if default_provider:
+                return default_provider
+        except Exception:  # noqa: BLE001
+            pass
+
         if self._environment_service is None:
             return None
         manifest = self._environment_service.load_manifest(env_id)
