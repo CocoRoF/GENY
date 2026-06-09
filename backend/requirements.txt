@@ -17,17 +17,18 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor 2.1.3 — Opus 4.7 thinking-shape migration. After
-# 2.1.2 dropped temperature for Opus, the next call surfaced
-# ``thinking.type.enabled is not supported for this model``. 2.1.3
-# translates ``{type:"enabled", budget_tokens:N}`` → ``{type:"adaptive"}``
-# at the boundary for ``claude-opus-4-7*`` and self-heals the same
-# 400 for any future model via the retry path.
+# geny-executor 2.1.4 — Claude Code CLI 2.1.x token-level streaming.
+# The CLI emits per-token deltas inside ``{"type":"stream_event"}``
+# wrappers under ``--include-partial-messages``; 2.1.3 only knew the
+# legacy delta + full-envelope shapes, so every Geny chat showed the
+# whole answer in one chunk at the end. 2.1.4 teaches the parser the
+# new shape and de-duplicates the terminal envelope that arrives
+# after the per-token deltas.
 #
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor>=2.1.3,<3.0.0
+geny-executor>=2.1.4,<3.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
