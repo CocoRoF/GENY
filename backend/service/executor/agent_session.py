@@ -639,13 +639,23 @@ class AgentSession:
 
     @property
     def llm_client(self) -> Optional[Any]:
-        """Shared LLM client built by ``_build_pipeline`` (cycle 20260421_4).
+        """Shared Anthropic SDK fallback client for out-of-pipeline tool
+        calls only (``memory_distill`` narrative, future memory tools
+        that need a raw SDK handle outside Stage 6).
 
-        The same client is injected as ``state.llm_client`` for every
-        stage; out-of-pipeline tool calls (cycle 20260501_1 B —
-        ``memory_distill`` narrative, future memory tools) reuse this
-        handle so credentials / base_url / provider stay consistent.
-        Returns ``None`` before ``_build_pipeline`` runs.
+        Originally — cycle 20260421_4 — this client was *also* injected
+        into ``state.llm_client`` via ``Pipeline.attach_runtime``. That
+        path pre-empted the per-Environment Stage-6 provider choice:
+        the manifest could say ``claude_code_cli`` but every session
+        would hit ``api.anthropic.com`` because the executor's
+        ``_resolve_llm_client`` honours the attach-time client first.
+        The injection was removed (see ``_build_pipeline``); this
+        handle is now an *out-of-pipeline* helper only. Stage 6 is
+        wired strictly from the manifest's provider + the
+        ``CredentialBundle``.
+
+        Returns ``None`` before ``_build_pipeline`` runs, or when the
+        session has no Anthropic key configured at all.
         """
         return self._llm_client_handle
 
@@ -2177,7 +2187,21 @@ class AgentSession:
                 storage_path=self.storage_path,
                 extras=_tool_extras,
             ),
-            "llm_client": llm_client,
+            # Intentionally NOT passing ``llm_client`` here.
+            #
+            # ``Pipeline._resolve_llm_client`` checks ``attach_runtime``'s
+            # llm_client *first* and only falls back to the manifest's
+            # Stage-6 provider when that's None. So an Anthropic
+            # fallback client passed here pre-empted the per-Environment
+            # ``claude_code_cli`` choice for *every* session — manifest
+            # said claude_code_cli, state.llm_client said AnthropicClient,
+            # Stage 6 hit api.anthropic.com with a stale key, 401.
+            #
+            # The fallback Anthropic SDK client we build above is only
+            # consulted by out-of-pipeline tools that call
+            # ``session.llm_client`` directly (e.g. ``memory_distill``);
+            # it lives on ``self._llm_client_handle`` for that purpose
+            # and must NOT enter the pipeline state.
         }
 
         # Forward the executor MemoryProvider on `state.session_runtime`
