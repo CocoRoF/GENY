@@ -145,6 +145,37 @@ def test_bundle_passes_api_key_only_in_api_key_mode():
     assert bundle.get("claude_code_cli").api_key == "sk-ant-explicit"
 
 
+def test_bundle_disables_bare_mode_for_subscription_auth():
+    """``--bare`` forces ANTHROPIC_API_KEY auth and bypasses the OAuth
+    credential file. The per-card ``bare_mode`` toggle (default True
+    for legacy reasons) must be silently overridden when the user
+    picked a subscription auth mode, or every session returns
+    ``error=authentication_failed`` right after a successful login."""
+    for mode in ("host_mount", "in_modal_login", "setup_token"):
+        cm = _StubConfigManager(cli_enabled=True, cli_auth_mode=mode)
+        # _StubConfigManager doesn't expose bare_mode setter, but the
+        # config default is bare_mode=True (legacy). Confirm the bundle
+        # forces it off anyway.
+        bundle = CredentialBundleBuilder(config_manager=cm).build()
+        cc = bundle.get("claude_code_cli")
+        assert cc.extras["bare_mode"] is False, (
+            f"mode={mode}: bare_mode must be False for OAuth-based modes "
+            f"(got {cc.extras['bare_mode']})"
+        )
+
+
+def test_bundle_honours_bare_mode_in_api_key_mode():
+    """When the user is on api_key auth, ``--bare`` is the only safe
+    mode and the per-card toggle should be honoured (defaults True)."""
+    cm = _StubConfigManager(
+        cli_enabled=True,
+        cli_auth_mode="api_key",
+        cli_api_key="sk-ant-x",
+    )
+    bundle = CredentialBundleBuilder(config_manager=cm).build()
+    assert bundle.get("claude_code_cli").extras["bare_mode"] is True
+
+
 # ─────────────────────────────────── primary provider extraction ─
 
 
