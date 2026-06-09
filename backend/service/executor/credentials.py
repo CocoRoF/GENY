@@ -219,9 +219,23 @@ class CredentialBundleBuilder:
         # is set, the auto-``--tools ""`` disable is skipped so the
         # MCP server + curated built-ins both surface to the LLM.
         allow_tools = _split_csv(claude_cli.allow_tools_csv)
+        # ``--bare`` is fundamentally incompatible with OAuth. The CLI
+        # docs are explicit: "Anthropic auth is strictly
+        # ``ANTHROPIC_API_KEY`` or ``apiKeyHelper`` ... OAuth and keychain
+        # are never read." So when the user picked a subscription auth
+        # mode (host_mount / in_modal_login / setup_token), ``--bare``
+        # silently bypasses the credential file the user just wrote and
+        # the subprocess returns ``error=authentication_failed`` every
+        # call — the symptom the user hit immediately after a
+        # successful ``claude auth login``.
+        #
+        # Honour the operator's ``bare_mode`` toggle only when it
+        # actually works (api_key mode). Subscription modes force it
+        # off regardless of the per-card setting so OAuth has a chance.
+        effective_bare_mode = bool(claude_cli.bare_mode) and mode == "api_key"
         extras: Dict[str, Any] = {
             "workspace_root": claude_cli.workspace_root or None,
-            "bare_mode": bool(claude_cli.bare_mode),
+            "bare_mode": effective_bare_mode,
             "default_permission_mode": claude_cli.default_permission_mode or "default",
             "allow_tools": allow_tools,
             "disallow_tools": _split_csv(claude_cli.disallow_tools_csv),
