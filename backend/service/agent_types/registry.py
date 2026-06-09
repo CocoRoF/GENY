@@ -30,9 +30,20 @@ except ImportError:  # pragma: no cover — only triggers on stale exec
     SubagentTypeRegistry = None  # type: ignore[assignment]
 
 
-# Phase E1 — seeds gain a ``provider`` slot so the multi-provider
-# sub-agent path in geny-executor 2.0.0 can route each sub-agent to
-# the right LLM backend. ``provider=None`` means "inherit parent".
+# Seed sub-agent descriptors. ``provider=None`` means "inherit parent's
+# Stage-6 provider" (resolved by ``_default_subagent_factory``); any
+# non-None value pins a specific backend because the agent's tool
+# requirements demand it (e.g. ``critic`` is fundamentally a
+# Claude-Code-CLI agent).
+#
+# The previous values (``researcher → "anthropic"``,
+# ``summarizer → "openai"``) were hardcoded preferences for "deep
+# reasoning" vs "cheap model". They broke users who never configured
+# those backends — a user logged into Claude Code with no Anthropic
+# key would still see the researcher try to call Anthropic and 401.
+# The choice of "which model is cheap / which is deep" belongs in
+# ``model_override`` (or a future routing layer), not in a hardcoded
+# vendor pin that ignores what the user actually has access to.
 _SEED = (
     (
         "worker",
@@ -45,18 +56,18 @@ _SEED = (
         "Read-only investigation. Read / Grep / Glob / WebFetch / "
         "WebSearch only — no write/edit/bash so research can't "
         "accidentally mutate state.",
-        "anthropic",                    # deep reasoning default
+        None,                           # inherit parent provider
     ),
     (
         "summarizer",
         "Cheap summarisation worker. Suited for stage 19 / context "
         "compaction overflow.",
-        "openai",                       # cheap model
+        None,                           # inherit parent provider
     ),
     (
         "critic",
         "Code-aware review using the local Claude Code CLI.",
-        "claude_code_cli",
+        "claude_code_cli",              # genuinely CLI-specific
     ),
     (
         "vtuber-narrator",

@@ -189,17 +189,24 @@ def test_empty_memory_model_falls_back_to_main(stub_full_pipeline, monkeypatch, 
 # ─────────────────────────────────────────────────────────────────
 
 
-def test_attach_runtime_receives_base_client(stub_full_pipeline, monkeypatch, tmp_path):
-    from geny_executor.llm_client import BaseClient
-
+def test_attach_runtime_does_not_inject_llm_client(stub_full_pipeline, monkeypatch, tmp_path):
+    """Regression for the 401 loop fixed by PR #866 + the source-of-truth
+    refactor: passing the Anthropic SDK fallback client to
+    ``attach_runtime(llm_client=...)`` pre-empted the manifest's Stage-6
+    provider in ``Pipeline._resolve_llm_client`` (attach-time client wins
+    over manifest). Geny now keeps the Anthropic SDK handle on
+    ``self._llm_client_handle`` for out-of-pipeline tools only; the
+    pipeline state resolves its client strictly from the manifest's
+    Stage-6 provider + the CredentialBundle."""
     _clear_cycle4_env(monkeypatch, tmp_path)
     session = _make_session(stub_full_pipeline)
     session._build_pipeline()
 
     captured = stub_full_pipeline.attach_calls[-1]
-    assert "llm_client" in captured
-    assert isinstance(captured["llm_client"], BaseClient)
-    assert captured["llm_client"].provider == "anthropic"
+    assert "llm_client" not in captured, (
+        "attach_runtime must not receive llm_client — that bypassed the "
+        "manifest provider and routed every session through Anthropic."
+    )
 
 
 # Phase H — provider selection moved to per-Environment manifest. The
@@ -279,7 +286,10 @@ def test_missing_memory_stages_is_warning_not_failure(
         session._build_pipeline()  # must not raise
 
     captured = stub_minimal_pipeline.attach_calls[-1]
-    assert "llm_client" in captured
+    # Build succeeded — attach_runtime received the system_builder /
+    # tool_context bundle. llm_client is intentionally absent (see
+    # ``test_attach_runtime_does_not_inject_llm_client``).
+    assert "system_builder" in captured
     joined = " ".join(rec.message for rec in caplog.records)
     assert "memory wiring: s02 context stage absent" in joined
     assert "memory wiring: s18 memory stage absent" in joined

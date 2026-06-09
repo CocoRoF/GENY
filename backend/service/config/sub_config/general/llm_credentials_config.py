@@ -30,12 +30,6 @@ class LLMCredentialsConfig(BaseConfig):
     openai_api_key: str = ""
     google_api_key: str = ""
     base_url: str = ""
-    # When non-empty, every session's Stage-6 provider is overridden to
-    # this value at pipeline instantiation time, regardless of the env's
-    # stored ``stage6.config.provider``. Lets the user pick one backend
-    # (e.g. ``claude_code_cli`` for OAuth-based Pro/Max usage) without
-    # editing each env individually. Empty = honour the env's own choice.
-    default_provider: str = ""
 
     @classmethod
     def get_default_instance(cls) -> "LLMCredentialsConfig":
@@ -110,19 +104,5 @@ class LLMCredentialsConfig(BaseConfig):
                 placeholder="http://host:8000/v1",
                 group="credentials",
                 apply_change=env_sync("LLM_BASE_URL"),
-            ),
-            ConfigField(
-                name="default_provider",
-                field_type=FieldType.STRING,
-                label="Default LLM Backend",
-                description=(
-                    "When set, overrides every environment's Stage-6 provider "
-                    "at session start. Use for the OAuth-only ``claude_code_cli`` "
-                    "backend so the user does not have to edit each env "
-                    "manifest individually. Empty = honour each env's own "
-                    "choice (legacy behaviour)."
-                ),
-                placeholder="claude_code_cli",
-                group="credentials",
             ),
         ]

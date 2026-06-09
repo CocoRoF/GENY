@@ -290,7 +290,7 @@ def _merge_sorted(*entry_lists: List["object"]) -> List["object"]:
     return merged
 
 
-def _build_stage_entries(preset: str) -> List["object"]:
+def _build_stage_entries(preset: str, *, provider: str = "anthropic") -> List["object"]:
     """Emit the :class:`StageManifestEntry` list for *preset*.
 
     Stage identities, artifact names, and slot choices mirror the
@@ -319,9 +319,9 @@ def _build_stage_entries(preset: str) -> List["object"]:
     from geny_executor.core.environment import StageManifestEntry
 
     if preset == _VTUBER:
-        base = _vtuber_stage_entries(StageManifestEntry)
+        base = _vtuber_stage_entries(StageManifestEntry, provider=provider)
     else:
-        base = _worker_adaptive_stage_entries(StageManifestEntry)
+        base = _worker_adaptive_stage_entries(StageManifestEntry, provider=provider)
 
     overrides = _PRESET_SCAFFOLD_OVERRIDES.get(preset, {})
     return _merge_sorted(
@@ -329,7 +329,7 @@ def _build_stage_entries(preset: str) -> List["object"]:
     )
 
 
-def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
+def _worker_adaptive_stage_entries(StageManifestEntry, *, provider: str = "anthropic") -> List["object"]:
     """Mirror :meth:`GenyPresets.worker_adaptive` stage chain."""
     return [
         StageManifestEntry(
@@ -375,7 +375,7 @@ def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
             # source). strategies carries only the real strategy slots
             # (retry, router). The frontend (modelCatalog) writes here
             # and Pipeline._resolve_llm_client reads here.
-            config={"provider": "anthropic"},
+            config={"provider": provider},
             strategies={
                 "retry": "exponential_backoff",
                 # G12 / S7.8: capability-aware adaptive router. Default
@@ -495,7 +495,7 @@ def _worker_adaptive_stage_entries(StageManifestEntry) -> List["object"]:
     ]
 
 
-def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
+def _vtuber_stage_entries(StageManifestEntry, *, provider: str = "anthropic") -> List["object"]:
     """Mirror :meth:`GenyPresets.vtuber` stage chain.
 
     Diff vs worker_adaptive: Stage 8 (think) ships ``active=False``
@@ -547,7 +547,7 @@ def _vtuber_stage_entries(StageManifestEntry) -> List["object"]:
             # Phase E3 — Provider lives at config['provider'] (single
             # source). VTuber preset uses passthrough router so the
             # session's bound model is honoured verbatim.
-            config={"provider": "anthropic"},
+            config={"provider": provider},
             strategies={
                 "retry": "exponential_backoff",
                 "router": "passthrough",
@@ -631,6 +631,7 @@ def build_default_manifest(
     preset: str,
     *,
     model: Optional[str] = None,
+    provider: Optional[str] = None,
     external_tool_names: Optional[List[str]] = None,
     built_in_tool_names: Optional[List[str]] = None,
 ) -> "object":
@@ -645,6 +646,14 @@ def build_default_manifest(
             manifest carries an empty ``model`` block and the caller
             is expected to set it via ``PipelineConfig`` at session
             build time.
+        provider: Override for the Stage-6 ``config['provider']``.
+            When ``None`` the manifest falls back to ``"anthropic"``
+            for backwards compatibility — but the boot-time template
+            installer (``install_environment_templates``) now passes
+            ``backend_resolver.pick_default_backend_provider()`` here
+            so the template envs follow whatever backend the user has
+            actually configured (Claude Code CLI when logged in,
+            otherwise whichever API key is present).
         external_tool_names: Names of Geny-provider tools to include
             in ``manifest.tools.external``. When a
             :class:`GenyToolProvider` is passed to
@@ -702,7 +711,7 @@ def build_default_manifest(
 
     model_block: Dict[str, Any] = {"model": model} if model else {}
 
-    entries = _build_stage_entries(effective)
+    entries = _build_stage_entries(effective, provider=provider or "anthropic")
 
     return EnvironmentManifest(
         metadata=metadata,

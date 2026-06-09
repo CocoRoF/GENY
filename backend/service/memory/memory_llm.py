@@ -1,16 +1,16 @@
 """Unified memory-path LLM helper.
 
 Builds a ``BaseClient`` + ``ModelConfig`` and wraps them in a small
-``MemoryLLM`` adapter. Phase H — the memory path is hardcoded to the
-Anthropic client because ``memory_model`` is always a Claude model
-in defaults, and there is no longer a global "current provider"
-setting (provider selection is per-Environment at the manifest
-level). The API key comes from the hidden ``LLMCredentialsConfig``
-(edited via the LLM Backends panel), and the model name from
-``APIConfig.memory_model`` / ``anthropic_model``.
+``MemoryLLM`` adapter for offline memory-curation jobs that run
+outside any session and therefore have no manifest to consult.
 
-Offline memory-path callers (curation scheduler / controller) use
-this instead of instantiating ``ChatAnthropic`` directly.
+Provider resolution mirrors ``backend_resolver.pick_default_backend_provider``
+— Claude Code CLI when the user has it enabled, otherwise whichever
+API-key backend they configured. Credentials flow through the same
+``CredentialBundleBuilder`` Geny uses to feed live sessions, so a
+user logged into Claude Code via OAuth gets their memory curation
+run on the same backend as their chat sessions — no separate
+``ANTHROPIC_API_KEY`` requirement.
 """
 
 from __future__ import annotations
@@ -57,36 +57,39 @@ class MemoryLLM:
 
 
 def build_memory_llm() -> Optional[MemoryLLM]:
-    """Build a memory-path LLM adapter.
+    """Build a memory-path LLM adapter for offline curation.
 
-    Hardcoded to the Anthropic client — see module docstring. Returns
-    ``None`` when no API key / model is configured so callers already
-    prepared for a falsy value (``CurationEngine`` gates every LLM
-    stage on ``self._llm``) degrade cleanly to rule-based paths.
-    Empty ``memory_model`` falls back to ``anthropic_model`` — same
-    semantics as ``AgentSession._build_pipeline``.
+    Resolves the active backend via ``pick_default_backend_provider``
+    and constructs the matching client through
+    ``CredentialBundleBuilder`` — the same channel live sessions use,
+    so a Claude-Code-CLI user has their memory curated through the CLI
+    too, not silently routed to a stale Anthropic key.
+
+    Returns ``None`` when no backend has usable credentials so callers
+    (``CurationEngine`` already gates every LLM stage on ``self._llm``)
+    degrade cleanly to rule-based paths.
     """
     try:
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.api_config import APIConfig
-        from service.config.sub_config.general.llm_credentials_config import (
-            LLMCredentialsConfig,
-        )
+        from service.executor.backend_resolver import pick_default_backend_provider
+        from service.executor.credentials import CredentialBundleBuilder
+        from geny_executor.core.pipeline import _creds_to_client_kwargs
 
         cm = get_config_manager()
         api_cfg = cm.load_config(APIConfig)
-        creds = cm.load_config(LLMCredentialsConfig)
-
-        api_key = creds.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
+        provider = pick_default_backend_provider(cm)
+        bundle = CredentialBundleBuilder(cm).build()
+        creds = bundle.get(provider)
+        if creds.is_empty():
             return None
 
         model_name = (api_cfg.memory_model or "").strip() or api_cfg.anthropic_model
         if not model_name:
             return None
 
-        client_cls = ClientRegistry.get("anthropic")
-        client = client_cls(api_key=api_key)
+        client_cls = ClientRegistry.get(provider)
+        client = client_cls(**_creds_to_client_kwargs(provider, creds))
 
         model_config = ModelConfig(
             model=model_name,

@@ -105,20 +105,32 @@ async def _default_subagent_factory(ctx: Any) -> Any:
 
     Receives a :class:`SubAgentBuildContext`; returns a built Pipeline.
     The provider comes from ``ctx.descriptor.provider`` (None ⇒ inherit
-    parent — we read parent's Stage 6 provider from the workspace
-    snapshot or fall back to anthropic). Credentials flow straight
-    from ``ctx.credentials``.
+    parent). Credentials flow straight from ``ctx.credentials``.
+
+    Provider resolution order:
+      1. ``descriptor.provider`` — explicit pin on the seed (e.g. the
+         ``critic`` agent requires the Claude Code CLI). Honoured first
+         because the seed author knows their tool needs a specific
+         backend.
+      2. ``ctx.parent_state_shared['primary_provider']`` — what the
+         parent session is actually using right now (Phase E2 wiring).
+         Lets ``worker`` / ``researcher`` / ``summarizer`` inherit the
+         user's configured backend instead of hardcoding Anthropic.
+      3. ``backend_resolver.pick_default_backend_provider()`` — global
+         fallback for the very first session after boot, before any
+         real parent state exists. Reads the user's actual
+         credentials (Claude Code login / Anthropic key / OpenAI key
+         / ...) and picks accordingly. Previously hardcoded to
+         ``"anthropic"`` even when the user had no Anthropic key
+         configured.
     """
     desc = ctx.descriptor
     provider = desc.provider
     if not provider:
-        # Inherit parent — best-effort. ``ctx.parent_state_shared`` may
-        # carry the parent's Stage 6 provider via
-        # ``primary_provider`` (Phase E2 wiring on the parent's host).
-        provider = (
-            (ctx.parent_state_shared or {}).get("primary_provider")
-            or "anthropic"
-        )
+        provider = (ctx.parent_state_shared or {}).get("primary_provider")
+    if not provider:
+        from service.executor.backend_resolver import pick_default_backend_provider
+        provider = pick_default_backend_provider()
 
     model_override = desc.model_override or None
     allowed_tools = tuple(desc.allowed_tools or ())

@@ -269,6 +269,8 @@ def _vtuber_tool_roster(
 
 def create_worker_env(
     external_tool_names: Optional[List[str]] = None,
+    *,
+    provider: Optional[str] = None,
 ) -> EnvironmentManifest:
     """Default worker environment manifest.
 
@@ -301,6 +303,7 @@ def create_worker_env(
     filtered = [n for n in (external_tool_names or []) if n not in deny]
     manifest = build_default_manifest(
         preset="worker_adaptive",
+        provider=provider,
         external_tool_names=filtered,
         built_in_tool_names=list(_WORKER_BUILT_IN_TOOL_NAMES),
     )
@@ -316,6 +319,8 @@ def create_worker_env(
 def create_vtuber_env(
     all_tool_names: Optional[List[str]] = None,
     tool_loader: Optional["ToolLoader"] = None,
+    *,
+    provider: Optional[str] = None,
 ) -> EnvironmentManifest:
     """Default VTuber environment manifest.
 
@@ -352,6 +357,7 @@ def create_vtuber_env(
 
     manifest = build_default_manifest(
         preset="vtuber",
+        provider=provider,
         external_tool_names=external,
         built_in_tool_names=list(_VTUBER_BUILT_IN_TOOL_NAMES),
     )
@@ -391,9 +397,19 @@ def install_environment_templates(
     the seed count after the write loop completes).
     """
     all_names = list(external_tool_names or [])
+    # Resolve the active backend ONCE per install so both seeds agree
+    # on what the user's current default is. This is what makes the
+    # boot-time template re-seed reflect "I logged in to Claude Code"
+    # without the user having to also create a separate env manually.
+    from service.executor.backend_resolver import pick_default_backend_provider
+    active_provider = pick_default_backend_provider()
     seeds: List[EnvironmentManifest] = [
-        create_worker_env(external_tool_names=all_names),
-        create_vtuber_env(all_tool_names=all_names, tool_loader=tool_loader),
+        create_worker_env(external_tool_names=all_names, provider=active_provider),
+        create_vtuber_env(
+            all_tool_names=all_names,
+            tool_loader=tool_loader,
+            provider=active_provider,
+        ),
     ]
     for manifest in seeds:
         env_id = manifest.metadata.id
