@@ -374,26 +374,12 @@ class AgentSessionManager:
         the executor 2.0.0 reseeding still resolve. Returns ``None``
         when the manifest is missing or Stage 6 is inactive.
 
-        ``LLMCredentialsConfig.default_provider`` always wins when set —
-        the validation path must agree with what ``instantiate_pipeline``
-        will actually wire, otherwise the bundle check at session
-        creation rejects a perfectly serviceable session.
+        The manifest is the only source — the legacy
+        ``LLMCredentialsConfig.default_provider`` global override was
+        removed; the active backend now flows through
+        ``install_environment_templates`` baking it into the seeds at
+        boot. Environment = single source of truth.
         """
-        try:
-            from service.config import get_config_manager
-            from service.config.sub_config.general.llm_credentials_config import (
-                LLMCredentialsConfig,
-            )
-
-            default_provider = (
-                get_config_manager().load_config(LLMCredentialsConfig).default_provider
-                or ""
-            ).strip()
-            if default_provider:
-                return default_provider
-        except Exception:  # noqa: BLE001
-            pass
-
         if self._environment_service is None:
             return None
         manifest = self._environment_service.load_manifest(env_id)

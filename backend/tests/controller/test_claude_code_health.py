@@ -357,10 +357,10 @@ def test_test_endpoint_happy_path_returns_response_received(
 def test_health_probe_api_key_path_skips_expires_check(
     _temp_home: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When ANTHROPIC_API_KEY is set, the expires-check shouldn't
-    matter — that's a different auth method. Even with an expired
-    credentials file lingering on disk, the API-key path stays
-    healthy."""
+    """When the user picked the API key auth mode, the expires-check on
+    the OAuth credential file is irrelevant — that's a different auth
+    method. Even with a stale OAuth file lingering on disk, the
+    api_key mode stays healthy."""
     from controller.llm_backends_controller import _check_claude_code
     from service.config.sub_config.general.cli_backends_config import (
         CLIBackendClaudeCodeConfig,
@@ -371,7 +371,10 @@ def test_health_probe_api_key_path_skips_expires_check(
         expires_at_ms=int(time.time() * 1000) - 3_600_000,
     )
     _install_probe_stubs(monkeypatch)
-    cfg = CLIBackendClaudeCodeConfig(enabled=True)
+    # New behaviour: auth detection follows ``auth_mode`` strictly.
+    # Selecting api_key here is the explicit "I want API key auth" pick
+    # from the LLM Backends modal radio.
+    cfg = CLIBackendClaudeCodeConfig(enabled=True, auth_mode="api_key", api_key="sk-fake")
     health = _run(_check_claude_code(_FakeBundle(api_key="sk-fake"), cfg))
 
     assert health.auth_method == "api_key"
