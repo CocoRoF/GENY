@@ -272,8 +272,21 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
 
     # Auth detection. Prefer the explicit API key path; if absent, look
     # for an active subscription by asking the CLI itself.
+    #
+    # Only honour the per-card ``claude_cli.api_key`` field (carried on
+    # the bundle). The previous code also fell back to
+    # ``os.environ['ANTHROPIC_API_KEY']`` — but that env var is owned by
+    # the Anthropic provider's apply_change=env_sync(...) hook, not by
+    # the Claude Code (CLI) card. With an Anthropic key configured and
+    # the CLI card left blank for OAuth login, the env-var fallback
+    # mis-labelled the card as ``auth=api_key / 준비됨`` while the auth
+    # modal correctly reported ``로그인됨 / auth_method: claude.ai``.
+    # The actual session-run path is unaffected — the executor's
+    # ``CLIProcessRunner._spawn`` scrubs ``ANTHROPIC_API_KEY`` out of
+    # the subprocess env via ``DEFAULT_ENV_WHITELIST`` — but the
+    # mis-labelled card was a constant source of confusion.
     bundle_creds = bundle.get("claude_code_cli")
-    api_key = bundle_creds.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = bundle_creds.api_key
     auth_method: Optional[str] = None
     auth_ok: Optional[bool] = None
 
