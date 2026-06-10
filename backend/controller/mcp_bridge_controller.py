@@ -431,8 +431,8 @@ async def mcp_rpc(
             )
 
         # Tool display in Geny session log. Geny's Stage 10 no-ops for
-        # claude_code_cli sessions (the executor's accumulator strip
-        # in ``llm_patches.py`` removes ``tool_use`` blocks so the
+        # claude_code_cli sessions (the executor's accumulator strips
+        # ``tool_use`` blocks from the terminal response so the
         # downstream pipeline doesn't re-dispatch CLI-handled tools);
         # without an explicit emit here the session log would be
         # silent about the actual tool work the CLI does via MCP.

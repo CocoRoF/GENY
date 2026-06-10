@@ -134,17 +134,10 @@ async def lifespan(app: FastAPI):
     print_step_banner("START", "GENY AGENT STARTUP", "Initializing agent session management system")
     logger.info("Starting Geny Agent")
 
-    # ── Step 0: LLM client runtime patches ────────────────────────────
-    # geny-executor 2.0.1 builds the Claude Code CLI argv without
-    # ``--verbose``, but the newer Claude CLI rejects
-    # ``--print --output-format stream-json`` unless ``--verbose`` is
-    # also passed. This patch wraps the argv builder to inject the
-    # missing flag before any Developer / Claude-Code session starts.
-    try:
-        from service.llm_patches import install_llm_patches
-        install_llm_patches()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"   - LLM patches install failed: {exc}")
+    # (Step 0 removed — geny-executor 2.2.0 absorbed the llm_patches
+    # compensation layer: CLI tool-call observability and structured
+    # error envelopes are first-class ``api.*`` pipeline events now,
+    # bridged in ``service.executor.agent_session``.)
 
     # ── Step 1: Initialize PostgreSQL Database ─────────────────────────
     app_db = None
@@ -390,7 +383,7 @@ async def lifespan(app: FastAPI):
 
     # Seed default environment manifests (WORKER + VTUBER). The two
     # template seed ids are rewritten every boot from the canonical
-    # build_default_manifest output — custom envs (any other id) are
+    # geny_executor.build_manifest output — custom envs (any other id) are
     # untouched. Keeps seeds in lockstep with manifest-builder changes
     # without a migration framework. The worker env binds to every
     # tool the loader knows about — both platform builtins (``geny_*``,

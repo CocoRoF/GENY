@@ -467,7 +467,7 @@ def populate_guard_chain(pipeline, chain: Optional[list] = None) -> int:
     it) or the chain doesn't exist.
 
     The default chain (when *chain* is None) matches the manifest
-    declaration in ``default_manifest._worker_adaptive_stage_entries``:
+    declaration in the library's worker_adaptive preset (geny_executor.build_manifest):
     ``["token_budget", "cost_budget", "iteration", "permission"]``.
     Hosts can pass their own list to install a different mix.
     """

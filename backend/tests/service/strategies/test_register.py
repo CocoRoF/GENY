@@ -16,7 +16,7 @@ pytest.importorskip("geny_executor")
 
 from geny_executor.core.pipeline import Pipeline  # noqa: E402
 
-from service.executor.default_manifest import build_default_manifest  # noqa: E402
+from geny_executor import build_manifest  # noqa: E402
 from service.strategies import register_mcp_resource_retriever  # noqa: E402
 
 
@@ -56,7 +56,7 @@ def test_register_returns_false_when_stage_2_missing() -> None:
 def _build_real_pipeline():
     """Build a real Pipeline.from_manifest using worker_adaptive so
     Stage 2 is present with its actual slot registry."""
-    manifest = build_default_manifest("worker_adaptive", model="claude-haiku-4-5-20251001")
+    manifest = build_manifest("worker_adaptive", model="claude-haiku-4-5-20251001", provider="anthropic")
     return Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
 
 

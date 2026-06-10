@@ -28,13 +28,13 @@ pytest.importorskip("geny_executor")
 
 from geny_executor.core.pipeline import Pipeline  # noqa: E402
 
-from service.executor.default_manifest import build_default_manifest  # noqa: E402
+from geny_executor import build_manifest  # noqa: E402
 
 
 def test_worker_adaptive_uses_partition_executor() -> None:
     """The manifest emits the partition slot id and the configured
     max_concurrency for the worker_adaptive preset."""
-    manifest = build_default_manifest("worker_adaptive")
+    manifest = build_manifest("worker_adaptive", provider="anthropic")
     tool_entry = next(e for e in manifest.stages if e["order"] == 10)
     assert tool_entry["strategies"]["executor"] == "partition"
     assert tool_entry["config"]["max_concurrency"] == 8
@@ -43,7 +43,7 @@ def test_worker_adaptive_uses_partition_executor() -> None:
 def test_vtuber_keeps_sequential_executor() -> None:
     """vtuber preset doesn't run general-purpose tools — staying
     sequential keeps the affect_tag emission path predictable."""
-    manifest = build_default_manifest("vtuber")
+    manifest = build_manifest("vtuber", provider="anthropic")
     tool_entry = next(e for e in manifest.stages if e["order"] == 10)
     assert tool_entry["strategies"]["executor"] == "sequential"
     # No max_concurrency override on the sequential branch.
@@ -53,7 +53,7 @@ def test_vtuber_keeps_sequential_executor() -> None:
 def test_pipeline_resolves_partition_strategy() -> None:
     """End-to-end wiring check — the partition slot id resolves through
     `Pipeline.from_manifest` to the executor's PartitionExecutor class."""
-    manifest = build_default_manifest("worker_adaptive", model="claude-haiku-4-5-20251001")
+    manifest = build_manifest("worker_adaptive", model="claude-haiku-4-5-20251001", provider="anthropic")
     pipeline = Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
 
     tool_stage = next(s for s in pipeline.stages if s.order == 10)

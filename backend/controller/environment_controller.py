@@ -338,6 +338,10 @@ async def replace_manifest(
         record = _env_svc(request).update_manifest(env_id, manifest)
     except EnvironmentNotFoundError:
         raise HTTPException(404, "Environment not found")
+    except ValueError as exc:
+        # StageValidationError — write-time validate_manifest findings,
+        # one "[code] message" line per error (geny-executor 2.2.0).
+        raise HTTPException(400, str(exc))
     detail = _detail_response(record)
     # D.3 — see update_environment.
     detail.affected_sessions = _affected_sessions_summary(env_id)
@@ -363,6 +367,8 @@ async def patch_pipeline(
         record = _env_svc(request).update_pipeline(env_id, changes)
     except EnvironmentNotFoundError:
         raise HTTPException(404, "Environment not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     detail = _detail_response(record)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
@@ -381,6 +387,8 @@ async def patch_model(
         record = _env_svc(request).update_model(env_id, changes)
     except EnvironmentNotFoundError:
         raise HTTPException(404, "Environment not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     detail = _detail_response(record)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
@@ -447,7 +455,10 @@ async def import_environment(
     body: ImportEnvironmentRequest,
     auth: dict = Depends(require_auth),
 ):
-    env_id = _env_svc(request).import_json(body.data)
+    try:
+        env_id = _env_svc(request).import_json(body.data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return CreateEnvironmentResponse(id=env_id)
 
 

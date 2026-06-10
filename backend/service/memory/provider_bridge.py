@@ -46,7 +46,27 @@ def _embedding_config(ltm_config: Any) -> Optional[Dict[str, Any]]:
     to the provider's standard env var (``OPENAI_API_KEY`` etc.) so
     a host that already configured the LLM key doesn't need to enter
     the same secret twice.
+
+    2.2.0 split: the returned spec carries only *what* to build
+    (``provider`` / ``model``). The API key — the *how to
+    authenticate* half — travels in the :class:`CredentialBundle`
+    built by :func:`_embedding_credentials` and passed to
+    ``MemoryProviderFactory(credentials=...)``. LTMConfig stays the
+    single source of the values; only the transport changed, closing
+    the parallel env-ladder channel inside the executor's embedding
+    clients (which now logs a one-time deprecation warning when hit).
     """
+    resolved = _resolve_embedding_values(ltm_config)
+    if resolved is None:
+        return None
+    provider, model, _api_key = resolved
+    return {"provider": provider, "model": model}
+
+
+def _resolve_embedding_values(ltm_config: Any) -> Optional[tuple]:
+    """Resolve ``(provider, model, api_key)`` from LTMConfig (+ env
+    value fallbacks). ``None`` when LTM is off, the spec is incomplete,
+    or no key can be sourced — the vector layer is then omitted."""
     if not getattr(ltm_config, "enabled", False):
         return None
 
@@ -57,10 +77,11 @@ def _embedding_config(ltm_config: Any) -> Optional[Dict[str, Any]]:
 
     api_key = (getattr(ltm_config, "embedding_api_key", "") or "").strip()
     if not api_key:
-        # Provider-specific env fallbacks. The executor's embedding
-        # clients also fall back to env if api_key is empty, but we
-        # surface it here too so the LTM-disabled path can still log a
-        # clear "no key configured" diagnostic.
+        # Provider-specific env fallbacks — Geny-side *value* sourcing
+        # (the user pasted the key once for the LLM; don't make them
+        # paste it twice). Distinct from the executor-internal env
+        # ladder, which is the deprecated transport this bridge now
+        # bypasses by shipping the resolved key in the bundle.
         import os
 
         env_keys = {
@@ -88,7 +109,28 @@ def _embedding_config(ltm_config: Any) -> Optional[Dict[str, Any]]:
     if provider == "anthropic":
         provider = "voyage"
 
-    return {"provider": provider, "model": model, "api_key": api_key}
+    return provider, model, api_key
+
+
+def _embedding_credentials(ltm_config: Any):
+    """Build the :class:`CredentialBundle` carrying the ``'embedding'``
+    entry for ``MemoryProviderFactory(credentials=...)`` (2.2.0 §2.6).
+
+    ``None`` when no embedding is configured — the factory then builds
+    no embedding client at all (config remains the opt-in switch).
+    """
+    resolved = _resolve_embedding_values(ltm_config)
+    if resolved is None:
+        return None
+    provider, model, api_key = resolved
+    from geny_executor import CredentialBundle, ProviderCredentials
+
+    return CredentialBundle(by_provider={
+        "embedding": ProviderCredentials(
+            api_key=api_key,
+            extras={"provider": provider, "model": model},
+        ),
+    })
 
 
 def _curated_root(storage_path: str | Path, username: str) -> Path:
@@ -233,7 +275,10 @@ async def build_memory_provider(
         username=username,
         ltm_config=ltm_config,
     )
-    factory = MemoryProviderFactory()
+    # 2.2.0 — the embedding API key rides the CredentialBundle's
+    # 'embedding' entry (single credential channel), not the config
+    # dict / env ladder.
+    factory = MemoryProviderFactory(credentials=_embedding_credentials(ltm_config))
     provider = factory.build(config)
     await provider.initialize()
     return provider
@@ -300,12 +345,15 @@ async def build_single_tenant_provider(
         "session_id": scope_id,
         "scope": scope,
     }
+    credentials = None
     if enable_embedding and ltm_config is not None:
         embedding = _embedding_config(ltm_config)
         if embedding is not None:
             config["embedding"] = embedding
+            # 2.2.0 — key travels in the bundle, not the config dict.
+            credentials = _embedding_credentials(ltm_config)
 
-    factory = MemoryProviderFactory()
+    factory = MemoryProviderFactory(credentials=credentials)
     provider = factory.build(config)
     await provider.initialize()
     return provider

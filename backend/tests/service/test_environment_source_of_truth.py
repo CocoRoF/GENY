@@ -16,13 +16,16 @@ Invariants:
 3. ``AgentSessionManager._extract_primary_provider`` returns whatever
    the env manifest's ``stage6.config['provider']`` says — no global
    override layer in front of it.
-4. ``pick_default_backend_provider`` reads the user's configured
-   backend and returns it, falling back conservatively.
+4. ``CredentialBundle.preferred_provider()`` (geny-executor 2.2.0 —
+   replaces the deleted ``backend_resolver`` module) reads the user's
+   configured backend and returns it, ``None`` when nothing is
+   configured (call sites keep the anthropic last-resort).
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict
 from unittest.mock import patch
 
@@ -35,8 +38,16 @@ from service.config.sub_config.general.llm_credentials_config import (
     LLMCredentialsConfig,
 )
 from service.environment.service import EnvironmentService
-from service.executor.backend_resolver import pick_default_backend_provider
 from service.executor.credentials import CredentialBundleBuilder
+
+
+def _preferred(cm) -> str | None:
+    """Bundle-derived provider choice, isolated from ambient env keys."""
+    scrub = {k: "" for k in (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY",
+    )}
+    with patch.dict(os.environ, scrub):
+        return CredentialBundleBuilder(config_manager=cm).build().preferred_provider()
 
 
 def _minimal_env_manifest_dict(provider: str = "anthropic") -> Dict[str, Any]:
@@ -198,49 +209,49 @@ def test_extract_primary_provider_reads_manifest_only(tmp_path):
     assert mgr._extract_primary_provider("test-env") == "claude_code_cli"
 
 
-# ─────────────────────────────────── backend_resolver ─
+# ─────────────────────────────── preferred_provider (ex backend_resolver) ─
 
 
 def test_resolver_picks_cli_when_enabled():
     cm = _StubConfigManager(cli_enabled=True, anthropic_api_key="sk-ant-x")
-    assert pick_default_backend_provider(cm) == "claude_code_cli"
+    assert _preferred(cm) == "claude_code_cli"
 
 
 def test_resolver_picks_anthropic_when_only_anthropic_key():
     cm = _StubConfigManager(cli_enabled=False, anthropic_api_key="sk-ant-x")
-    assert pick_default_backend_provider(cm) == "anthropic"
+    assert _preferred(cm) == "anthropic"
 
 
 def test_resolver_picks_openai_when_only_openai_key():
     cm = _StubConfigManager(cli_enabled=False, openai_api_key="sk-proj-x")
-    assert pick_default_backend_provider(cm) == "openai"
+    assert _preferred(cm) == "openai"
 
 
-def test_resolver_falls_back_to_anthropic_when_nothing_configured():
+def test_resolver_returns_none_when_nothing_configured():
+    """The library never silently defaults — ``None`` forces call sites
+    to own the fallback (templates keep Geny's anthropic last-resort)."""
     cm = _StubConfigManager()
-    assert pick_default_backend_provider(cm) == "anthropic"
+    assert _preferred(cm) is None
 
 
-# ─────────────────────────────────── default_manifest provider plumbing ─
+# ─────────────────────────────── build_manifest provider plumbing ─
 
 
-def test_build_default_manifest_threads_provider():
-    """Phase 1 of the refactor: ``build_default_manifest`` now accepts a
-    provider arg so the boot-time template installer can stamp the
-    user's active backend into Stage 6 directly."""
-    from service.executor.default_manifest import build_default_manifest
+def test_build_manifest_threads_provider():
+    """The library factory stamps the provider into Stage 6 directly —
+    same single-source contract the old build_default_manifest had."""
+    from geny_executor import build_manifest
 
-    m = build_default_manifest(preset="vtuber", provider="claude_code_cli")
-    s6 = next(s for s in m.stages if s["name"] == "api")
+    m = build_manifest("vtuber", provider="claude_code_cli").to_dict()
+    s6 = next(s for s in m["stages"] if s["name"] == "api")
     assert s6["config"]["provider"] == "claude_code_cli"
 
 
-def test_build_default_manifest_defaults_to_anthropic():
-    """Backward-compat: callers that don't pass a provider still get
-    a working manifest (anthropic) — same behaviour as before the
-    refactor for any test fixture or script that hasn't migrated."""
-    from service.executor.default_manifest import build_default_manifest
+def test_template_factories_default_to_anthropic():
+    """Backward-compat: template factories called without a provider
+    still produce a working (anthropic) manifest."""
+    from service.environment.templates import create_vtuber_env
 
-    m = build_default_manifest(preset="vtuber")
-    s6 = next(s for s in m.stages if s["name"] == "api")
+    m = create_vtuber_env().to_dict()
+    s6 = next(s for s in m["stages"] if s["name"] == "api")
     assert s6["config"]["provider"] == "anthropic"

@@ -25,7 +25,7 @@ pytest.importorskip("geny_executor")
 
 from geny_executor.core.pipeline import Pipeline  # noqa: E402
 
-from service.executor.default_manifest import build_default_manifest  # noqa: E402
+from geny_executor import build_manifest  # noqa: E402
 
 
 # ── Strategy availability matrix ───────────────────────────────────
@@ -52,7 +52,7 @@ def test_phase7_strategy_registered_in_slot(
     """Every Phase-7 strategy this cycle adopted must be reachable
     by ``impl_name`` on the named slot. Fails loud if a future
     executor pin renames or unregisters the strategy."""
-    manifest = build_default_manifest("worker_adaptive", model="claude-haiku-4-5-20251001")
+    manifest = build_manifest("worker_adaptive", model="claude-haiku-4-5-20251001", provider="anthropic")
     pipeline = Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
 
     # G9.1 (mcp_resource) is registered by the agent_session install
@@ -87,7 +87,7 @@ def test_g9_9_worker_adaptive_uses_adaptive_thinking_budget() -> None:
     """G9.9: worker_adaptive opts s08's budget_planner in to
     ``adaptive`` so chatty turns get a budget step-down without
     losing first-turn deep planning."""
-    manifest = build_default_manifest("worker_adaptive")
+    manifest = build_manifest("worker_adaptive", provider="anthropic")
     think = next(e for e in manifest.stages if e["order"] == 8)
     assert think["strategies"]["budget_planner"] == "adaptive"
 
@@ -95,7 +95,7 @@ def test_g9_9_worker_adaptive_uses_adaptive_thinking_budget() -> None:
 def test_g9_9_vtuber_keeps_static_thinking_budget() -> None:
     """vtuber preset doesn't have a Stage 8 entry (think dropped on
     VTuber) — the assertion is just that the absence is preserved."""
-    manifest = build_default_manifest("vtuber")
+    manifest = build_manifest("vtuber", provider="anthropic")
     think_orders = {e["order"] for e in manifest.stages if e["order"] == 8}
     # vtuber omits Stage 8 entirely — assert it's not declared.
     assert 8 not in think_orders or all(

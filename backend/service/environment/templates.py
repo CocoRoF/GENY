@@ -19,20 +19,22 @@ The seeds are **materialized on disk** at app boot via
 - Matches the user's directive: the default envs are *the envs
   users see in the UI*, not invisible defaults.
 
-The manifests themselves come from
-:func:`service.executor.default_manifest.build_default_manifest` — the
-same factory the session path uses. So "what the seed looks like" and
-"what an ephemeral session looks like" never diverge.
+The manifests themselves come from the library-owned
+:func:`geny_executor.build_manifest` factory (2.2.0) — the canonical
+preset → manifest builder. So "what the seed looks like" and "what an
+ephemeral session looks like" never diverge, and Geny no longer
+hand-mirrors the stage catalogue (the old
+``service.executor.default_manifest`` compensation module is gone).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional
 
-from geny_executor import EnvironmentManifest
+from geny_executor import EnvironmentManifest, build_manifest
+from geny_executor import known_manifest_presets as known_presets
 
 from service.environment.service import EnvironmentService
-from service.executor.default_manifest import build_default_manifest
 
 if TYPE_CHECKING:
     from service.tool_loader import ToolLoader
@@ -43,6 +45,9 @@ __all__ = [
     "create_worker_env",
     "create_vtuber_env",
     "install_environment_templates",
+    # Re-export of the library's known_manifest_presets() under the
+    # historical Geny name (frontend validation hook).
+    "known_presets",
 ]
 
 
@@ -301,11 +306,14 @@ def create_worker_env(
     """
     deny = _resolve_worker_custom_deny()
     filtered = [n for n in (external_tool_names or []) if n not in deny]
-    manifest = build_default_manifest(
-        preset="worker_adaptive",
-        provider=provider,
-        external_tool_names=filtered,
-        built_in_tool_names=list(_WORKER_BUILT_IN_TOOL_NAMES),
+    manifest = build_manifest(
+        "worker_adaptive",
+        # build_manifest requires an explicit provider; keep Geny's
+        # historical "anthropic" last-resort default for callers that
+        # pass None (the install path resolves the real one).
+        provider=provider or "anthropic",
+        external_tools=filtered,
+        built_in_tools=list(_WORKER_BUILT_IN_TOOL_NAMES),
     )
     manifest.metadata.id = WORKER_ENV_ID
     manifest.metadata.name = "Worker Environment"
@@ -355,11 +363,11 @@ def create_vtuber_env(
     else:
         external = ["web_search", "news_search", "web_fetch"]
 
-    manifest = build_default_manifest(
-        preset="vtuber",
-        provider=provider,
-        external_tool_names=external,
-        built_in_tool_names=list(_VTUBER_BUILT_IN_TOOL_NAMES),
+    manifest = build_manifest(
+        "vtuber",
+        provider=provider or "anthropic",
+        external_tools=external,
+        built_in_tools=list(_VTUBER_BUILT_IN_TOOL_NAMES),
     )
     manifest.metadata.id = VTUBER_ENV_ID
     manifest.metadata.name = "VTuber Environment"
@@ -367,6 +375,25 @@ def create_vtuber_env(
         "Lightweight conversational environment for the VTuber persona."
     )
     return manifest
+
+
+def _resolve_active_provider() -> str:
+    """Pick the Stage-6 provider for the boot-time template reseed.
+
+    Builds the same :class:`geny_executor.CredentialBundle` live
+    sessions use and asks the library which configured backend should
+    win (``preferred_provider`` — claude_code_cli first, then vendor
+    APIs). Never raises: config-unavailable early-boot callers and an
+    empty bundle both land on Geny's conservative ``"anthropic"``
+    default so ``install_environment_templates`` cannot crash boot.
+    """
+    try:
+        from service.executor.credentials import CredentialBundleBuilder
+
+        provider = CredentialBundleBuilder().build().preferred_provider()
+    except Exception:  # noqa: BLE001 — defensive, very early-boot callers
+        provider = None
+    return provider or "anthropic"
 
 
 def install_environment_templates(
@@ -387,7 +414,7 @@ def install_environment_templates(
 
     The two template seed envs (``template-worker-env`` /
     ``template-vtuber-env``) are rewritten every boot from the
-    canonical :func:`build_default_manifest` output. Custom envs —
+    canonical :func:`geny_executor.build_manifest` output. Custom envs —
     any id other than the two template seeds — are never touched.
     This keeps the seeds in lockstep with manifest-builder changes
     (e.g. a new stage added to the default chain) without needing a
@@ -401,8 +428,13 @@ def install_environment_templates(
     # on what the user's current default is. This is what makes the
     # boot-time template re-seed reflect "I logged in to Claude Code"
     # without the user having to also create a separate env manually.
-    from service.executor.backend_resolver import pick_default_backend_provider
-    active_provider = pick_default_backend_provider()
+    #
+    # 2.2.0: the heuristic lives in the library now
+    # (CredentialBundle.preferred_provider — same order the old
+    # backend_resolver encoded: claude_code_cli, anthropic, openai,
+    # google, vllm). ``None`` means "nothing configured"; keep Geny's
+    # historical anthropic last-resort so the boot reseed never fails.
+    active_provider = _resolve_active_provider()
     seeds: List[EnvironmentManifest] = [
         create_worker_env(external_tool_names=all_names, provider=active_provider),
         create_vtuber_env(
