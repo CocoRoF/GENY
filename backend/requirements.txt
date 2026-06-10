@@ -17,18 +17,20 @@ psycopg-pool>=3.2.0
 ddgs==9.11.4
 # Web fetch & browser automation
 playwright>=1.49.0
-# geny-executor 2.1.4 — Claude Code CLI 2.1.x token-level streaming.
-# The CLI emits per-token deltas inside ``{"type":"stream_event"}``
-# wrappers under ``--include-partial-messages``; 2.1.3 only knew the
-# legacy delta + full-envelope shapes, so every Geny chat showed the
-# whole answer in one chunk at the end. 2.1.4 teaches the parser the
-# new shape and de-duplicates the terminal envelope that arrives
-# after the per-token deltas.
+# geny-executor 2.2.0 — "Environment is the single source of truth"
+# release. Fixes the prod bug where manifest strategy_configs were
+# silently dropped (empty evaluation chain terminated the worker loop
+# after one iteration); adds build_manifest/validate_manifest, the
+# session lifecycle surface (aclose/refresh_runtime/ModelOverrides),
+# the typed event contract + pipeline.events() tap, full streaming
+# chunk forwarding, manifest-expressible subagents+memory, and the
+# embedding-credential bundle channel with a 401 circuit breaker.
+# Geny compat verified zero-regression vs 2.1.4.
 #
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor>=2.1.4,<3.0.0
+geny-executor>=2.2.0,<3.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
