@@ -31,20 +31,20 @@ dependencies = [
     "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
-    # geny-executor 2.1.4 — Claude Code CLI 2.1.x token-level
-    # streaming. The CLI emits per-token deltas inside
-    # ``{"type":"stream_event"}`` wrappers under
-    # ``--include-partial-messages``; the parser previously only knew
-    # the legacy delta + full-envelope shapes and dropped every
-    # per-token line, leaving Geny chat showing the answer in one
-    # chunk at the end. 2.1.4 teaches the parser the new shape and
-    # de-duplicates the terminal envelope that arrives after the
-    # deltas.
-    #   2.1.1 — alias resolution + drop sampling params under thinking
-    #   2.1.2 — Opus 4.7 drops sampling params unconditionally
-    #   2.1.3 — thinking.type=enabled → adaptive migration
-    #   2.1.4 — stream_event line type → real token streaming
-    "geny-executor>=2.1.4,<3.0.0",
+    # geny-executor 2.2.0 — the "Environment is the single source of
+    # truth" release. Strategy configure() trio (fixes the prod bug
+    # where evaluation_chain/multi_dim_budget strategy_configs were
+    # silently dropped, terminating the worker loop after one
+    # iteration), build_manifest()/validate_manifest(), Pipeline
+    # session lifecycle (aclose/refresh_runtime/ModelOverrides/
+    # begin_turn), typed EventTypes catalogue + pipeline.events() tap,
+    # full streaming chunk forwarding (thinking.delta / api.tool_use /
+    # api.tool_result), manifest-expressible subagents+memory,
+    # CLI auth_mode + golden wire fixtures, OpenAI streamed-usage fix,
+    # embedding credential bundle channel + 401 circuit breaker.
+    # Geny compat verified zero-regression (byte-identical failure
+    # list vs 2.1.4). Migration guide: executor docs/migration-2.2.md.
+    "geny-executor>=2.2.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
