@@ -292,6 +292,9 @@ services:
       - NEXT_PUBLIC_BASE_PATH=/avatar-editor
       - NEXT_PUBLIC_GENY_HOST=true
       - GENY_BAKED_EXPORTS_DIR=/exports
+      # API 설정 모달이 쓰는 config.json — 전용 볼륨에 두어 이미지
+      # 재빌드/컨테이너 재생성에도 키 설정이 유지되게 한다.
+      - GENY_AVATAR_CONFIG_PATH=/config/config.json
       # AI provider keys consumed by the editor's Generate panel API
       # routes (lib/ai/providers/registry.ts). Empty default means the
       # provider shows up as "<KEY> not set" in the dropdown without
@@ -304,6 +307,7 @@ services:
       - NODE_ENV=production
     volumes:
       - geny-baked-exports-prod:/exports
+      - geny-avatar-config-prod:/config
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/avatar-editor/ || exit 1"]
       interval: 30s
@@ -382,6 +386,9 @@ networks:
 
 volumes:
   geny-pgdata-prod:
+    driver: local
+  # avatar-editor 의 런타임 config.json (API 키 설정 모달)
+  geny-avatar-config-prod:
     driver: local
   geny-tts-cache-prod:
     driver: local
