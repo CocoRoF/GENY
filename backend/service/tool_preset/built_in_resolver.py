@@ -4,7 +4,7 @@ Bridges the new ``built_in_mode`` / ``built_in_tools`` / ``built_in_deny``
 fields (PR-F.5.1) with the executor's ``BUILT_IN_TOOL_CLASSES`` registry.
 Manifest builders that want preset-aware built-ins call
 :func:`resolve_built_in_tool_names` and pass the result to
-``build_default_manifest(built_in_tool_names=...)``.
+``geny_executor.build_manifest(built_in_tools=...)``.
 
 The legacy default behaviour ("expose every framework built-in") is
 preserved when ``built_in_mode='inherit'`` — same shape as the existing

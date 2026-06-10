@@ -28,6 +28,7 @@ Usage::
 """
 
 import asyncio
+import json
 from logging import getLogger
 import os
 import time
@@ -201,6 +202,145 @@ def _extract_executor_error_meta(exc: BaseException) -> Tuple[Optional[str], str
     except Exception:  # noqa: BLE001 — diagnostics must never crash the catch block
         pass
     return code_str, exc_type
+
+
+# ── 2.2.0 events-tap bridge (replaces service.llm_patches) ──────────
+#
+# geny-executor 2.2.0 publishes CLI-handled tool calls and structured
+# error envelopes as first-class pipeline events (``api.cli_tool_call``
+# / ``api.tool_result`` / ``api.error``), so the old
+# ``StreamJsonAccumulator.feed`` monkey-patch and the contextvar that
+# routed the SessionLogger into it are gone. The helpers below
+# reproduce exactly what the patch logged: TOOL_USE / TOOL_RESULT
+# entries (with tool_name metadata + duration) for CLI built-ins, and
+# the Korean-friendly auth-expired message the assembler patch raised.
+
+
+# Human-readable message shown to the end user when the Claude CLI
+# reports an authentication failure. Surfaces the actionable next step
+# ("re-login in the settings card") instead of the raw error text.
+_AUTH_EXPIRED_MESSAGE = (
+    "Claude Code 인증이 만료됐어요. "
+    "설정 → LLM 백엔드 → Claude Code 카드의 "
+    "‘다시 로그인 / Sign in’ 을 눌러 인증을 갱신해주세요."
+)
+
+# api.error codes / categories that mean "the CLI's credentials are
+# bad" — the case the old assembler patch special-cased in Korean.
+_AUTH_ERROR_CODES = frozenset({
+    "exec.cli.auth_failed",
+    "exec.api.auth.invalid_key",
+    "exec.api.auth.expired",
+})
+_AUTH_ERROR_CATEGORIES = frozenset({"auth", "cli_auth_failed"})
+
+
+def _friendly_api_error_message(data: Dict[str, Any]) -> str:
+    """Turn an ``api.error`` event payload ({code, category, provider,
+    message, cli_version?}) into the human-friendly line the old
+    ``llm_patches`` assembler patch produced for ``is_error`` result
+    envelopes."""
+    code = str(data.get("code") or "")
+    category = str(data.get("category") or "")
+    message = str(data.get("message") or "").strip()
+    if code in _AUTH_ERROR_CODES or category in _AUTH_ERROR_CATEGORIES:
+        suffix = f" (원본: {message})" if message else ""
+        return _AUTH_EXPIRED_MESSAGE + suffix
+    provider = str(data.get("provider") or "")
+    label = "Claude Code" if provider == "claude_code_cli" else (provider or "LLM")
+    return f"{label} API 에러 [{code or category or 'unknown'}]: {message or 'unknown'}"
+
+
+def _tool_result_text(raw_result: Any) -> Optional[str]:
+    """Normalise an ``api.tool_result`` ``content`` payload into the
+    string shape ``SessionLogger.log_tool_result`` expects. The CLI
+    emits both plain strings and ``content_block`` lists here."""
+    if raw_result is None:
+        return None
+    if isinstance(raw_result, str):
+        return raw_result
+    if isinstance(raw_result, list):
+        parts: List[str] = []
+        for c in raw_result:
+            if isinstance(c, dict) and c.get("type") == "text":
+                parts.append(str(c.get("text", "")))
+            elif isinstance(c, dict):
+                parts.append(json.dumps(c, ensure_ascii=False))
+            else:
+                parts.append(str(c))
+        return "\n".join(parts) if parts else None
+    try:
+        return json.dumps(raw_result, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(raw_result)
+
+
+def _bridge_cli_stream_event(
+    session_logger: Any,
+    event_type: str,
+    event_data: Dict[str, Any],
+    cli_tools_in_progress: Dict[str, Tuple[str, float]],
+) -> None:
+    """Bridge one 2.2.0 CLI-observability event to the SessionLogger.
+
+    Handles ``api.cli_tool_call`` / ``api.tool_result`` (CLI source
+    only) / ``api.error``. ``mcp__*`` tool names are skipped — the MCP
+    bridge controller already logs those with real dispatch outcomes;
+    duplicating would double-render in the UI. API-source tool events
+    are skipped too: Stage 10 dispatch already logs them through
+    ``tool.call_start`` / ``tool.call_complete``.
+
+    Best-effort by contract — observability must never break the turn.
+    """
+    try:
+        if event_type == "api.cli_tool_call":
+            tu_id = str(event_data.get("id") or "")
+            tu_name = str(event_data.get("name") or "")
+            tu_input = event_data.get("input") or {}
+            if not tu_id or not tu_name:
+                return
+            if tu_name.startswith("mcp__"):
+                return
+            if tu_id in cli_tools_in_progress:
+                return  # duplicate envelope
+            cli_tools_in_progress[tu_id] = (tu_name, time.monotonic())
+            session_logger.log_tool_use(
+                tool_name=tu_name,
+                tool_input=tu_input if isinstance(tu_input, dict) else {},
+                tool_id=tu_id,
+            )
+        elif event_type == "api.tool_result":
+            if str(event_data.get("source") or "") != "cli":
+                return  # Stage-10 dispatch path logs api-source results
+            tu_id = str(event_data.get("tool_use_id") or "")
+            entry = cli_tools_in_progress.pop(tu_id, None) if tu_id else None
+            if entry is None:
+                return  # unmatched (e.g. mcp__ skipped above)
+            tu_name, start_time = entry
+            session_logger.log_tool_result(
+                tool_name=tu_name,
+                tool_id=tu_id,
+                result=_tool_result_text(event_data.get("content")),
+                is_error=bool(event_data.get("is_error", False)),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+            )
+        elif event_type == "api.error":
+            session_logger.log(
+                level=LogLevel.ERROR,
+                message=_friendly_api_error_message(event_data),
+                metadata={
+                    "source": "api",
+                    "error_code": event_data.get("code"),
+                    "category": event_data.get("category"),
+                    "provider": event_data.get("provider"),
+                    "cli_version": event_data.get("cli_version"),
+                },
+            )
+    except Exception:  # noqa: BLE001 — observability must never break execution
+        logger.debug(
+            "CLI stream-event bridge failed for %s (continuing)",
+            event_type, exc_info=True,
+        )
 
 
 _DEFAULT_WORKER_PROMPT = """\
@@ -1475,12 +1615,14 @@ class AgentSession:
         """Drain the refresh queue at the top of ``invoke`` / ``astream``.
 
         Re-reads fresh permission rules / hook runner from settings.json
-        and swaps them on the bound Pipeline using the executor's stage
-        slot setters (``_set_tool_stage_permission_matrix`` /
-        ``_set_tool_stage_hook_runner``) — the same path
-        ``attach_runtime`` uses internally. We bypass attach_runtime
-        itself because it errors after ``_has_started`` is True; that
-        guard is for *mid-execution* swaps, which we never do here.
+        and swaps them on the bound Pipeline via the *public*
+        :meth:`Pipeline.refresh_runtime` (geny-executor 2.2.0) — the
+        library-owned between-turn variant of ``attach_runtime`` (same
+        kwargs, no construction-time gate; raises if a run is in
+        flight, which can't happen here because Geny only drains the
+        queue at the turn boundary). Replaces the old private-setter
+        bypass (``_set_tool_stage_permission_matrix`` /
+        ``_set_tool_stage_hook_runner``).
 
         Each branch logs success / failure independently — a failed
         permissions reload doesn't block the hooks reload (and vice
@@ -1516,14 +1658,14 @@ class AgentSession:
                 # mode resolved through the enforcement gate so
                 # runtime refresh applies the same coercion as boot.
                 effective_mode = _resolve_effective_executor_mode(runner_mode)
-                setter = getattr(pipeline, "_set_tool_stage_permission_matrix", None)
-                if setter is not None:
-                    setter(permission_rules=rules, permission_mode=effective_mode)
-                    logger.info(
-                        "[%s] runtime refresh applied: permissions reloaded "
-                        "(%d rule(s), runner=%s, executor=%s)",
-                        self._session_id, len(rules), runner_mode, effective_mode,
-                    )
+                pipeline.refresh_runtime(
+                    permission_rules=rules, permission_mode=effective_mode,
+                )
+                logger.info(
+                    "[%s] runtime refresh applied: permissions reloaded "
+                    "(%d rule(s), runner=%s, executor=%s)",
+                    self._session_id, len(rules), runner_mode, effective_mode,
+                )
             except Exception:
                 logger.exception(
                     "[%s] runtime refresh: permissions reload failed",
@@ -1535,9 +1677,8 @@ class AgentSession:
                 from service.hooks.install import install_hook_runner
 
                 runner = install_hook_runner()
-                setter = getattr(pipeline, "_set_tool_stage_hook_runner", None)
-                if setter is not None and runner is not None:
-                    setter(runner)
+                if runner is not None:
+                    pipeline.refresh_runtime(hook_runner=runner)
                     logger.info(
                         "[%s] runtime refresh applied: hooks reloaded",
                         self._session_id,
@@ -2770,6 +2911,11 @@ class AgentSession:
         # appended to the ordered completion list on `tool.call_complete`.
         tool_calls_in_progress: Dict[str, Dict[str, Any]] = {}
         tool_calls_completed: List[Dict[str, Any]] = []
+        # 2.2.0 events tap — CLI-handled tool calls (Bash / Read / Write
+        # / Edit / …) keyed by tool_use_id while in flight so the paired
+        # ``api.tool_result`` can be timed. Replaces the per-accumulator
+        # side table the llm_patches monkey-patch kept.
+        cli_tools_in_progress: Dict[str, Tuple[str, float]] = {}
 
         # Create PipelineState with session context.
         #
@@ -3145,6 +3291,18 @@ class AgentSession:
                         data=dict(event_data),
                     )
 
+                # ── 2.2.0 events tap (replaces llm_patches) ──
+                # CLI-handled tool calls + structured error envelopes
+                # arrive as first-class events now; bridge them to the
+                # same SessionLogger entries the monkey-patch emitted.
+                elif event_type in (
+                    "api.cli_tool_call", "api.tool_result", "api.error",
+                ):
+                    _bridge_cli_stream_event(
+                        session_logger, event_type, event_data,
+                        cli_tools_in_progress,
+                    )
+
             # Accumulate output + log to session_logger for streaming
             if event_type == "text.delta":
                 text = event_data.get("text", "")
@@ -3309,6 +3467,9 @@ class AgentSession:
                 pending_metadata = {}
 
         accumulated_output = ""
+        # 2.2.0 events tap — see _invoke_pipeline (same per-turn table
+        # for CLI-handled tool call timing).
+        cli_tools_in_progress: Dict[str, Tuple[str, float]] = {}
         total_cost = 0.0
         iterations = 0
         success = True
@@ -3482,6 +3643,18 @@ class AgentSession:
                             except Exception:  # noqa: BLE001
                                 pass
 
+                # ── 2.2.0 events tap (replaces llm_patches) ──
+                # Mirror of the _invoke_pipeline bridge: CLI-handled
+                # tool calls + structured error envelopes to the
+                # SessionLogger.
+                elif event_type in (
+                    "api.cli_tool_call", "api.tool_result", "api.error",
+                ):
+                    _bridge_cli_stream_event(
+                        session_logger, event_type, event_data,
+                        cli_tools_in_progress,
+                    )
+
             # ── Yield events to caller ──
             if event_type == "text.delta":
                 text = event_data.get("text", "")
@@ -3646,19 +3819,16 @@ class AgentSession:
                     f"[{self._session_id}] Pipeline not initialized. "
                     f"Call initialize() before invoke()."
                 )
-            # Surface CLI-handled tool calls (Bash / Read / Write /
-            # Edit / …) to this session's logger via the contextvar
-            # the stream-observability patch in ``llm_patches`` reads.
-            # ``ContextVar`` is async-safe — every task spawned under
-            # this scope inherits the value.
-            from service.llm_patches import cli_stream_logger_ctx as _cli_log_ctx
-            _cli_log_token = _cli_log_ctx.set(session_logger)
+            # CLI-handled tool calls (Bash / Read / Write / Edit / …)
+            # surface as first-class ``api.cli_tool_call`` /
+            # ``api.tool_result`` events since geny-executor 2.2.0 —
+            # bridged to the SessionLogger inside ``_invoke_pipeline``'s
+            # event switch (the llm_patches contextvar is gone).
             try:
                 return await self._invoke_pipeline(
                     input_text, start_time, session_logger, **kwargs
                 )
             finally:
-                _cli_log_ctx.reset(_cli_log_token)
                 self._is_executing = False
                 self._execution_start_time = datetime.now()
                 self._freshness.reset_revive_counter()
@@ -3756,11 +3926,8 @@ class AgentSession:
                 f"Call initialize() before astream()."
             )
 
-        # See ``invoke()`` for rationale — surfaces CLI-handled tools
-        # (Bash / Read / Write / Edit / …) to this session's logger
-        # via the stream-observability patch in ``llm_patches``.
-        from service.llm_patches import cli_stream_logger_ctx as _cli_log_ctx
-        _cli_log_token = _cli_log_ctx.set(session_logger)
+        # See ``invoke()`` for rationale — CLI-handled tools surface as
+        # first-class 2.2.0 events, bridged inside ``_astream_pipeline``.
         try:
             async for event in self._astream_pipeline(
                 input_text, start_time, session_logger, **kwargs
@@ -3794,7 +3961,6 @@ class AgentSession:
 
             raise
         finally:
-            _cli_log_ctx.reset(_cli_log_token)
             self._is_executing = False
             self._execution_start_time = datetime.now()
             self._freshness.reset_revive_counter()
@@ -3806,9 +3972,14 @@ class AgentSession:
     async def cleanup(self):
         """Clean up the AgentSession and release all resources.
 
-        Flushes short-term memory to long-term and closes the executor
+        Flushes short-term memory to long-term, closes the executor
         ``MemoryProvider`` so vector backends, FAISS handles, and
-        embedding-client connections drop their resources.
+        embedding-client connections drop their resources, and calls
+        ``Pipeline.aclose()`` (geny-executor 2.2.0) so the pipeline's
+        own teardown runs — cancels pending HITL futures, closes
+        ``events()`` taps, disconnects MCP servers (reaping the stdio
+        bridge child Geny used to leak per stopped session), and shuts
+        down tool providers.
         """
         logger.info(f"[{self._session_id}] Cleaning up AgentSession...")
 
@@ -3833,6 +4004,17 @@ class AgentSession:
                     exc_info=True,
                 )
             self._memory_provider = None
+
+        # 2.2.0 teardown contract — aggregate close before dropping the
+        # reference. Without it the MCP stdio bridge child outlived the
+        # session (one leaked process per stopped session).
+        if self._pipeline is not None:
+            try:
+                await self._pipeline.aclose()
+            except Exception:
+                logger.debug(
+                    "Pipeline.aclose failed — non-critical", exc_info=True,
+                )
 
         self._pipeline = None
         self._initialized = False

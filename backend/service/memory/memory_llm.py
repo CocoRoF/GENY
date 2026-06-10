@@ -4,8 +4,9 @@ Builds a ``BaseClient`` + ``ModelConfig`` and wraps them in a small
 ``MemoryLLM`` adapter for offline memory-curation jobs that run
 outside any session and therefore have no manifest to consult.
 
-Provider resolution mirrors ``backend_resolver.pick_default_backend_provider``
-— Claude Code CLI when the user has it enabled, otherwise whichever
+Provider resolution uses the library-owned
+``CredentialBundle.preferred_provider()`` (geny-executor 2.2.0) —
+Claude Code CLI when the user has it enabled, otherwise whichever
 API-key backend they configured. Credentials flow through the same
 ``CredentialBundleBuilder`` Geny uses to feed live sessions, so a
 user logged into Claude Code via OAuth gets their memory curation
@@ -59,11 +60,12 @@ class MemoryLLM:
 def build_memory_llm() -> Optional[MemoryLLM]:
     """Build a memory-path LLM adapter for offline curation.
 
-    Resolves the active backend via ``pick_default_backend_provider``
-    and constructs the matching client through
-    ``CredentialBundleBuilder`` — the same channel live sessions use,
-    so a Claude-Code-CLI user has their memory curated through the CLI
-    too, not silently routed to a stale Anthropic key.
+    Resolves the active backend via the library's
+    ``CredentialBundle.preferred_provider()`` and constructs the
+    matching client through ``CredentialBundleBuilder`` — the same
+    channel live sessions use, so a Claude-Code-CLI user has their
+    memory curated through the CLI too, not silently routed to a stale
+    Anthropic key.
 
     Returns ``None`` when no backend has usable credentials so callers
     (``CurationEngine`` already gates every LLM stage on ``self._llm``)
@@ -72,14 +74,19 @@ def build_memory_llm() -> Optional[MemoryLLM]:
     try:
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.api_config import APIConfig
-        from service.executor.backend_resolver import pick_default_backend_provider
         from service.executor.credentials import CredentialBundleBuilder
+        # NOTE: ``_creds_to_client_kwargs`` is still private in
+        # geny-executor 2.2.0 — flagged upstream for promotion to a
+        # public client factory in 2.2.x. Revisit this import when that
+        # lands.
         from geny_executor.core.pipeline import _creds_to_client_kwargs
 
         cm = get_config_manager()
         api_cfg = cm.load_config(APIConfig)
-        provider = pick_default_backend_provider(cm)
         bundle = CredentialBundleBuilder(cm).build()
+        provider = bundle.preferred_provider()
+        if provider is None:
+            return None
         creds = bundle.get(provider)
         if creds.is_empty():
             return None

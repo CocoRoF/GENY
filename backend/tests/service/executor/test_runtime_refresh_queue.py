@@ -4,6 +4,10 @@ Verifies the queue + drain semantics of
 ``AgentSession.queue_runtime_refresh`` /
 ``AgentSession._apply_pending_runtime_refresh``. Direct method tests
 against a fake Pipeline avoid spinning the full ``initialize`` path.
+
+geny-executor 2.2.0: the drain step now goes through the *public*
+``Pipeline.refresh_runtime(**attach_runtime_kwargs)`` instead of the
+old private stage-slot setters, so the fakes expose ``refresh_runtime``.
 """
 
 from __future__ import annotations
@@ -26,11 +30,9 @@ def _bare_session(*, initialized: bool = True, with_pipeline: bool = True) -> Ag
     s = AgentSession.__new__(AgentSession)
     s._session_id = "sx"
     s._initialized = initialized
+    s._env_id = None  # _load_permission_host_selection reads this
     s._pipeline = (
-        SimpleNamespace(
-            _set_tool_stage_permission_matrix=MagicMock(),
-            _set_tool_stage_hook_runner=MagicMock(),
-        )
+        SimpleNamespace(refresh_runtime=MagicMock())
         if with_pipeline
         else None
     )
@@ -64,8 +66,7 @@ def test_apply_no_op_when_queue_empty() -> None:
     s = _bare_session()
     # Should not raise even when nothing's queued.
     s._apply_pending_runtime_refresh()
-    s._pipeline._set_tool_stage_permission_matrix.assert_not_called()
-    s._pipeline._set_tool_stage_hook_runner.assert_not_called()
+    s._pipeline.refresh_runtime.assert_not_called()
 
 
 def test_apply_clears_flag_even_on_failure(monkeypatch) -> None:
@@ -77,7 +78,7 @@ def test_apply_clears_flag_even_on_failure(monkeypatch) -> None:
     # Stub install_permission_rules to raise.
     import service.permission.install as perm_install
 
-    def boom():
+    def boom(host_selection=None):
         raise RuntimeError("permission install failed")
 
     monkeypatch.setattr(perm_install, "install_permission_rules", boom)
@@ -100,16 +101,20 @@ def test_apply_calls_permissions_setter(monkeypatch) -> None:
     monkeypatch.setattr(
         perm_install,
         "install_permission_rules",
-        lambda: (fake_rules, fake_mode),
+        lambda host_selection=None: (fake_rules, fake_mode),
+    )
+    # Identity-map the enforcement-gate coercion so the assert below
+    # can pin the exact permission_mode forwarded to the pipeline.
+    monkeypatch.setattr(
+        perm_install, "_resolve_effective_executor_mode", lambda m: m,
     )
 
     s._apply_pending_runtime_refresh()
 
-    s._pipeline._set_tool_stage_permission_matrix.assert_called_once_with(
+    s._pipeline.refresh_runtime.assert_called_once_with(
         permission_rules=fake_rules,
         permission_mode=fake_mode,
     )
-    s._pipeline._set_tool_stage_hook_runner.assert_not_called()
 
 
 def test_apply_with_scope_all_calls_both_setters(monkeypatch) -> None:
@@ -120,15 +125,20 @@ def test_apply_with_scope_all_calls_both_setters(monkeypatch) -> None:
     import service.hooks.install as hook_install
 
     monkeypatch.setattr(
-        perm_install, "install_permission_rules", lambda: ([], "advisory"),
+        perm_install,
+        "install_permission_rules",
+        lambda host_selection=None: ([], "advisory"),
     )
     monkeypatch.setattr(
         hook_install, "install_hook_runner", lambda: object(),
     )
 
     s._apply_pending_runtime_refresh()
-    s._pipeline._set_tool_stage_permission_matrix.assert_called_once()
-    s._pipeline._set_tool_stage_hook_runner.assert_called_once()
+    # One refresh_runtime call per branch: permissions, then hooks.
+    assert s._pipeline.refresh_runtime.call_count == 2
+    kwarg_sets = [set(c.kwargs) for c in s._pipeline.refresh_runtime.call_args_list]
+    assert {"permission_rules", "permission_mode"} in kwarg_sets
+    assert {"hook_runner"} in kwarg_sets
 
 
 def test_apply_skips_hook_when_install_returns_none(monkeypatch) -> None:
@@ -142,7 +152,7 @@ def test_apply_skips_hook_when_install_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(hook_install, "install_hook_runner", lambda: None)
 
     s._apply_pending_runtime_refresh()
-    s._pipeline._set_tool_stage_hook_runner.assert_not_called()
+    s._pipeline.refresh_runtime.assert_not_called()
 
 
 # ── O.1 (cycle 20260426_3) — extended scopes ────────────────────
@@ -160,8 +170,7 @@ def _stage(name: str, slot_strategy=None, slot_name="retriever"):
 def _pipeline_with_stages(stages):
     """Wrap stages in a fake pipeline whose ``_stages.values()`` returns them."""
     p = SimpleNamespace(
-        _set_tool_stage_permission_matrix=MagicMock(),
-        _set_tool_stage_hook_runner=MagicMock(),
+        refresh_runtime=MagicMock(),
         _stages=SimpleNamespace(values=lambda: stages),
     )
     return p
@@ -301,10 +310,6 @@ def test_all_scope_includes_new_branches(monkeypatch) -> None:
             get_strategy_slots=lambda: {},
         ),
     ])
-    # Add the existing setter MagicMocks so the permissions/hooks
-    # branches don't fail.
-    s._pipeline._set_tool_stage_permission_matrix = MagicMock()
-    s._pipeline._set_tool_stage_hook_runner = MagicMock()
     s._role = "worker"
 
     import service.memory.tuning as mem_cfg
@@ -322,7 +327,11 @@ def test_all_scope_includes_new_branches(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr(ci, "_resolve_max_tags", lambda _default: 42)
-    monkeypatch.setattr(perm_install, "install_permission_rules", lambda: ([], "advisory"))
+    monkeypatch.setattr(
+        perm_install,
+        "install_permission_rules",
+        lambda host_selection=None: ([], "advisory"),
+    )
     monkeypatch.setattr(hook_install, "install_hook_runner", lambda: object())
 
     s.queue_runtime_refresh("all")
@@ -331,6 +340,5 @@ def test_all_scope_includes_new_branches(monkeypatch) -> None:
     # Memory + affect both updated.
     assert retriever._max_inject == 99999
     assert emitter._max_tags_per_turn == 42
-    # Permissions + hooks setters fired.
-    s._pipeline._set_tool_stage_permission_matrix.assert_called_once()
-    s._pipeline._set_tool_stage_hook_runner.assert_called_once()
+    # Permissions + hooks branches each went through refresh_runtime.
+    assert s._pipeline.refresh_runtime.call_count == 2

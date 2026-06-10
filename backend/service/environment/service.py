@@ -29,6 +29,7 @@ from geny_executor import (
     PipelineMutator,
     PipelinePresets,
     PipelineSnapshot,
+    validate_manifest,
 )
 
 from service.environment.exceptions import (
@@ -50,15 +51,6 @@ _PRESET_FACTORIES = {
     "evaluator": PipelinePresets.evaluator,
     "geny_vtuber": PipelinePresets.geny_vtuber,
 }
-
-
-# Stage orders that are structurally required for any pipeline. Mirrors
-# ``geny_executor.core.introspection._STAGE_REQUIRED`` (s01_input, s06_api,
-# s09_parse, s21_yield). Enforced on every write so a client that sends
-# ``active=False`` — whether by accident, via a stale payload, or by
-# editing the JSON directly — cannot persist a pipeline that the runtime
-# would refuse to build.
-_REQUIRED_ORDERS: frozenset[int] = frozenset({1, 6, 9, 21})
 
 
 def _iso_now() -> str:
@@ -217,10 +209,10 @@ class EnvironmentService:
         """Return the stored environment as a v2 :class:`EnvironmentManifest`.
 
         Accepts both the current ``manifest`` layout and the legacy
-        ``snapshot`` layout written by v0.7.x. Manifests written before
-        geny-executor 0.13.5 may carry ``provider: mock`` on the s06_api
-        stage because introspection used MockProvider; those are rewritten
-        to ``anthropic`` on load so runtime sessions hit the real API.
+        ``snapshot`` layout written by v0.7.x. Legacy quirks (e.g.
+        pre-0.13.5 ``provider: mock`` entries) are migrated inside
+        ``EnvironmentManifest.from_dict`` since geny-executor 2.2.0 —
+        the load path needs no host-side coercion shims anymore.
         """
         raw = self._read_raw(env_id)
         if raw is None:
@@ -239,50 +231,35 @@ class EnvironmentService:
                 description=raw.get("description", ""),
                 tags=raw.get("tags", []),
             )
-
-        self._migrate_legacy_mock_provider(manifest)
         return manifest
 
     @staticmethod
-    def _force_required_stages_active(manifest: EnvironmentManifest) -> None:
-        """Coerce every required stage's ``active`` flag to ``True``.
+    def _validate_for_write(manifest: EnvironmentManifest) -> None:
+        """Write-time contract check (geny-executor 2.2.0).
 
-        Runs on every write so a client payload (or edited JSON) cannot
-        persist a required stage in an inactive state. The UI already hides
-        the toggle for required stages; this is the last-line defence
-        behind it.
+        Replaces the old ``_force_required_stages_active`` silent
+        rewrite: instead of coercing a bad payload into shape, the
+        write is *rejected* with the library's findings so the editor
+        surfaces them (a required stage flipped inactive is now a 400
+        naming ``stage.required_inactive``, not a silently-undone
+        toggle). Warning-severity findings log and never block.
+
+        Raises:
+            StageValidationError: one ``[code] message`` line per
+                error-severity :class:`geny_executor.ManifestIssue`.
         """
-        entries = manifest.stage_entries()
-        changed = False
-        for entry in entries:
-            if entry.order in _REQUIRED_ORDERS and not entry.active:
-                entry.active = True
-                changed = True
-        if changed:
-            manifest.set_stage_entries(entries)
-
-    @staticmethod
-    def _migrate_legacy_mock_provider(manifest: EnvironmentManifest) -> None:
-        """Rewrite pre-0.13.5 ``s06_api.strategies.provider = 'mock'`` entries.
-
-        Older blank manifests recorded ``mock`` because introspection used
-        MockProvider to instantiate APIStage session-lessly. At runtime that
-        meant ``PipelineMutator.restore()`` swapped the real AnthropicProvider
-        for MockProvider, producing ``"Mock response"`` instead of real API
-        calls. The library is fixed forward; this rewrites the on-load view
-        of stale manifests so existing envs behave correctly without a
-        manual re-save.
-        """
-        entries = manifest.stage_entries()
-        changed = False
-        for entry in entries:
-            if entry.order != 6 or entry.artifact != "default":
-                continue
-            if entry.strategies.get("provider") == "mock":
-                entry.strategies["provider"] = "anthropic"
-                changed = True
-        if changed:
-            manifest.set_stage_entries(entries)
+        issues = validate_manifest(manifest)
+        errors = [i for i in issues if i.severity == "error"]
+        for issue in issues:
+            if issue.severity != "error":
+                logger.warning(
+                    "manifest validation warning [%s] %s", issue.code, issue.message,
+                )
+        if errors:
+            raise StageValidationError(
+                "manifest validation failed:\n"
+                + "\n".join(f"[{i.code}] {i.message}" for i in errors)
+            )
 
     def _write_manifest(
         self,
@@ -292,9 +269,13 @@ class EnvironmentService:
         created_at: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Persist *manifest* to disk in v2 layout and return the full record."""
+        """Persist *manifest* to disk in v2 layout and return the full record.
+
+        Raises :class:`StageValidationError` when the manifest carries
+        error-severity findings (write-time validation rule).
+        """
         manifest.metadata.id = env_id
-        self._force_required_stages_active(manifest)
+        self._validate_for_write(manifest)
         now = _iso_now()
         record: Dict[str, Any] = {
             "id": env_id,
@@ -480,13 +461,13 @@ class EnvironmentService:
                 tags=data.get("tags", []),
             )
             manifest.metadata.id = env_id
-            self._force_required_stages_active(manifest)
+            self._validate_for_write(manifest)
             data["manifest"] = manifest.to_dict()
             data.pop("snapshot", None)
         elif "manifest" in data and isinstance(data["manifest"], dict):
             migrated = EnvironmentManifest.from_dict(data["manifest"])
             migrated.metadata.id = env_id
-            self._force_required_stages_active(migrated)
+            self._validate_for_write(migrated)
             data["manifest"] = migrated.to_dict()
 
         self._write_raw(env_id, data)

@@ -10,7 +10,7 @@ to runtime and the manifest's ``"executor": "sequential"``
 stops resolving.
 
 This test builds a real ``Pipeline`` from the canonical
-``build_default_manifest("worker_adaptive")`` output, registers
+``build_manifest("worker_adaptive", provider="anthropic")`` output, registers
 one fake tool into its tool registry, primes a pipeline state
 with a pending call for that tool, runs Stage 10, and asserts
 the fake tool actually executed. If this passes, we have proof
@@ -77,11 +77,9 @@ async def test_tool_stage_executes_pending_calls_for_worker_manifest() -> None:
     from geny_executor.core.pipeline import Pipeline
     from geny_executor.core.state import PipelineState
 
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(
-        "worker_adaptive", model="claude-haiku-4-5-20251001"
-    )
+    manifest = build_manifest("worker_adaptive", model="claude-haiku-4-5-20251001", provider="anthropic")
     pipeline = Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
 
     tool_stage = next(s for s in pipeline.stages if s.order == 10)
@@ -118,10 +116,10 @@ async def test_tool_stage_bypasses_when_no_pending_calls() -> None:
     from geny_executor.core.pipeline import Pipeline
     from geny_executor.core.state import PipelineState
 
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
     pipeline = Pipeline.from_manifest(
-        build_default_manifest("worker_adaptive", model="claude-haiku-4-5-20251001"),
+        build_manifest("worker_adaptive", model="claude-haiku-4-5-20251001", provider="anthropic"),
         api_key="sk-test",
         strict=False,
     )

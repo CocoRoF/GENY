@@ -1,4 +1,8 @@
-"""Unit tests for :func:`service.executor.default_manifest.build_default_manifest`.
+"""Unit tests for the library manifest factory (:func:`geny_executor.build_manifest`).
+
+geny-executor 2.2.0 absorbed Geny's ``service.executor.default_manifest``
+builder; these tests now pin the library factory output from the Geny
+side (the same invariants the deleted builder guaranteed).
 
 Regression protection for PR #1 of the 20260420_4 cycle
 (`fix/manifest-tool-stages`). If a future change drops stages
@@ -24,9 +28,9 @@ def _known_preset_ids():
 
 @pytest.mark.parametrize("preset", _known_preset_ids())
 def test_manifest_declares_tool_stage(preset: str) -> None:
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     orders = {entry["order"] for entry in manifest.stages}
 
     # 21-stage layout: tool=10, agent=12 (was 11), emit=17 (was 14).
@@ -59,9 +63,9 @@ def test_manifest_declares_21_stage_layout(preset: str) -> None:
     :data:`_ACTIVE_SCAFFOLDS_BY_PRESET` — each G2.x sprint flips one
     or more scaffold stages from default inactive to active.
     """
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     orders = {entry["order"] for entry in manifest.stages}
 
     expected = set(range(1, 22))
@@ -85,10 +89,10 @@ def test_summarize_uses_real_strategies_on_both_presets() -> None:
     picks. The structured turn record they publish to
     state.shared['turn_summary'] feeds the GenyMemoryStrategy that
     attach_runtime installs."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
     for preset in ("worker_adaptive", "vtuber"):
-        m = build_default_manifest(preset)
+        m = build_manifest(preset, provider="anthropic")
         summarize = next(e for e in m.stages if e["order"] == 19)
         assert summarize["active"] is True, f"{preset}: summarize must be active"
         assert summarize["strategies"]["summarizer"] == "rule_based"
@@ -100,9 +104,9 @@ def test_worker_adaptive_activates_full_tool_review_chain() -> None:
     in with the full chain default (schema → sensitive → destructive
     → network → size); flag events are forwarded to the session_logger
     by the agent_session event loop."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    m = build_default_manifest("worker_adaptive")
+    m = build_manifest("worker_adaptive", provider="anthropic")
     review = next(e for e in m.stages if e["order"] == 11)
     assert review["active"] is True
     assert review["chain_order"]["reviewers"] == [
@@ -120,9 +124,9 @@ def test_vtuber_activates_lightweight_tool_review_chain() -> None:
     schema (arg validation) + sensitive (PII / secret leak) reviewers
     are kept. destructive / network / size add cost without value
     on a web_search / news_search / web_fetch surface."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    m = build_default_manifest("vtuber")
+    m = build_manifest("vtuber", provider="anthropic")
     review = next(e for e in m.stages if e["order"] == 11)
     assert review["active"] is True
     assert review["chain_order"]["reviewers"] == ["schema", "sensitive"]
@@ -136,16 +140,16 @@ def test_worker_adaptive_activates_hitl_with_null_requester_placeholder() -> Non
     build time because it needs a Pipeline reference. Active
     state with the always-approve null requester is a free no-op
     until something writes to ``state.shared['hitl_request']``."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    m = build_default_manifest("worker_adaptive")
+    m = build_manifest("worker_adaptive", provider="anthropic")
     hitl = next(e for e in m.stages if e["order"] == 15)
     assert hitl["active"] is True
     assert hitl["strategies"]["requester"] == "null"
     assert hitl["strategies"]["timeout"] == "indefinite"
 
     # vtuber keeps hitl off — VTuber sessions have no approval surface.
-    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 15)
+    s = next(e for e in build_manifest("vtuber", provider="anthropic").stages if e["order"] == 15)
     assert s["active"] is False
 
 
@@ -157,16 +161,16 @@ def test_worker_adaptive_activates_task_registry() -> None:
     that ``main.py`` configures at ``app.state.task_registry`` for cron
     and /tasks endpoints. vtuber stays off — single-agent persona has
     no delegation surface."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    m = build_default_manifest("worker_adaptive")
+    m = build_manifest("worker_adaptive", provider="anthropic")
     registry = next(e for e in m.stages if e["order"] == 13)
     assert registry["active"] is True
     assert registry["strategies"]["registry"] == "in_memory"
     assert registry["strategies"]["policy"] == "fire_and_forget"
 
     # vtuber keeps task_registry off — no delegation surface.
-    s = next(e for e in build_default_manifest("vtuber").stages if e["order"] == 13)
+    s = next(e for e in build_manifest("vtuber", provider="anthropic").stages if e["order"] == 13)
     assert s["active"] is False
 
 
@@ -177,10 +181,10 @@ def test_persist_active_on_both_presets_with_on_significant_frequency() -> None:
     ``service.persist.install_file_persister`` at session-build time
     once the storage_path is known. The helper is preset-agnostic
     so the same wiring applies to vtuber sessions."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
     for preset in ("worker_adaptive", "vtuber"):
-        m = build_default_manifest(preset)
+        m = build_manifest(preset, provider="anthropic")
         persist = next(e for e in m.stages if e["order"] == 20)
         assert persist["active"] is True, f"{preset}: persist must be active"
         # Real persister is runtime-wired; manifest carries the placeholder.
@@ -193,9 +197,9 @@ def test_tool_stage_has_default_strategies(preset: str) -> None:
     """G6.2: worker_adaptive flips to capability-aware ``partition``
     execution; vtuber stays sequential because it doesn't run
     general-purpose tools."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     entry = next(e for e in manifest.stages if e["order"] == 10)
 
     assert entry["name"] == "tool"
@@ -209,9 +213,9 @@ def test_tool_stage_has_default_strategies(preset: str) -> None:
 @pytest.mark.parametrize("preset", _known_preset_ids())
 def test_agent_stage_has_single_agent_orchestrator(preset: str) -> None:
     """Agent moved 11 → 12 in the 21-stage layout."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     entry = next(e for e in manifest.stages if e["order"] == 12)
 
     assert entry["name"] == "agent"
@@ -222,9 +226,9 @@ def test_agent_stage_has_single_agent_orchestrator(preset: str) -> None:
 @pytest.mark.parametrize("preset", _known_preset_ids())
 def test_emit_stage_uses_empty_chain(preset: str) -> None:
     """Emit moved 14 → 17 in the 21-stage layout."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     entry = next(e for e in manifest.stages if e["order"] == 17)
 
     assert entry["name"] == "emit"
@@ -240,10 +244,10 @@ def test_vtuber_manifest_declares_think_inactive() -> None:
     in the manifest with ``active=False`` so the slot behaves like
     every other inactive stage and a host can opt the persona into
     Extended Thinking by flipping the flag."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
     think = next(
-        (e for e in build_default_manifest("vtuber").stages if e["order"] == 8),
+        (e for e in build_manifest("vtuber", provider="anthropic").stages if e["order"] == 8),
         None,
     )
     assert think is not None, "VTuber must declare Stage 8 (think) entry"
@@ -262,9 +266,9 @@ def test_manifest_built_in_is_empty(preset: str) -> None:
     against re-introducing a hardcoded builtin list (e.g. the old
     ``["Read", "Write", "Edit", ...]`` that pointed at names no
     provider supplied)."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     assert list(manifest.tools.built_in) == [], (
         f"{preset}: manifest.tools.built_in must be empty — the "
         f"executor does not consume it; populating it creates dead "
@@ -277,10 +281,10 @@ def test_manifest_external_is_caller_supplied(preset: str) -> None:
     """Everything the caller passes as ``external_tool_names`` lands
     verbatim in ``manifest.tools.external`` — this is the single
     registration path the executor honours."""
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
     names = ["send_direct_message_external", "memory_read", "web_search"]
-    manifest = build_default_manifest(preset, external_tool_names=names)
+    manifest = build_manifest(preset, provider="anthropic", external_tools=names)
     assert list(manifest.tools.external) == names
 
 
@@ -292,9 +296,9 @@ def test_pipeline_from_manifest_registers_tool_stages(preset: str) -> None:
     pair no longer resolves through ``create_stage``."""
     from geny_executor.core.pipeline import Pipeline
 
-    from service.executor.default_manifest import build_default_manifest
+    from geny_executor import build_manifest
 
-    manifest = build_default_manifest(preset, model="claude-haiku-4-5-20251001")
+    manifest = build_manifest(preset, provider="anthropic", model="claude-haiku-4-5-20251001")
     pipeline = Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
 
     registered_orders = {s.order for s in pipeline.stages}

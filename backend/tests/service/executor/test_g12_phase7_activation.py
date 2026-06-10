@@ -14,11 +14,11 @@ import pytest
 
 pytest.importorskip("geny_executor")
 
-from service.executor.default_manifest import build_default_manifest  # noqa: E402
+from geny_executor import build_manifest  # noqa: E402
 
 
 def _entry(preset: str, order: int) -> dict:
-    manifest = build_default_manifest(preset)
+    manifest = build_manifest(preset, provider="anthropic")
     return next(e for e in manifest.stages if e["order"] == order)
 
 
@@ -98,7 +98,7 @@ def test_pipeline_builds_with_new_strategies(preset: str) -> None:
     here with a clear ValueError."""
     from geny_executor.core.pipeline import Pipeline
 
-    manifest = build_default_manifest(preset, model="claude-haiku-4-5-20251001")
+    manifest = build_manifest(preset, provider="anthropic", model="claude-haiku-4-5-20251001")
     pipeline = Pipeline.from_manifest(manifest, api_key="sk-test", strict=False)
     # Sanity: stages we flipped are all registered.
     orders = {s.order for s in pipeline.stages}

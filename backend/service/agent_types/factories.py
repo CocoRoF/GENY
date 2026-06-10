@@ -22,7 +22,6 @@ long-running parallel session.
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import Any, List, Optional
 
@@ -107,30 +106,30 @@ async def _default_subagent_factory(ctx: Any) -> Any:
     The provider comes from ``ctx.descriptor.provider`` (None ⇒ inherit
     parent). Credentials flow straight from ``ctx.credentials``.
 
-    Provider resolution order:
-      1. ``descriptor.provider`` — explicit pin on the seed (e.g. the
-         ``critic`` agent requires the Claude Code CLI). Honoured first
-         because the seed author knows their tool needs a specific
-         backend.
-      2. ``ctx.parent_state_shared['primary_provider']`` — what the
-         parent session is actually using right now (Phase E2 wiring).
-         Lets ``worker`` / ``researcher`` / ``summarizer`` inherit the
-         user's configured backend instead of hardcoding Anthropic.
-      3. ``backend_resolver.pick_default_backend_provider()`` — global
-         fallback for the very first session after boot, before any
-         real parent state exists. Reads the user's actual
-         credentials (Claude Code login / Anthropic key / OpenAI key
-         / ...) and picks accordingly. Previously hardcoded to
-         ``"anthropic"`` even when the user had no Anthropic key
-         configured.
+    Provider resolution (geny-executor 2.2.0): delegated wholesale to
+    :func:`geny_executor.stages.s12_agent.subagent_type.
+    resolve_subagent_provider` — THE single library home for the
+    resolution order (descriptor pin → typed ``ctx.parent_provider`` →
+    legacy ``parent_state_shared['primary_provider']`` → the bundle's
+    ``preferred_provider()``). The old hardcoded ``"anthropic"``
+    last-resort is gone: when nothing resolves we now raise a loud
+    :class:`ConfigError` instead of silently building a sub-agent on a
+    backend the user never configured.
     """
+    from geny_executor.llm_client.credentials import ConfigError
+    from geny_executor.stages.s12_agent.subagent_type import (
+        resolve_subagent_provider,
+    )
+
     desc = ctx.descriptor
-    provider = desc.provider
+    provider = resolve_subagent_provider(ctx)
     if not provider:
-        provider = (ctx.parent_state_shared or {}).get("primary_provider")
-    if not provider:
-        from service.executor.backend_resolver import pick_default_backend_provider
-        provider = pick_default_backend_provider()
+        raise ConfigError(
+            f"subagent {desc.agent_type!r}: no provider could be resolved — "
+            "the descriptor declares none, the parent published no "
+            "primary_provider, and the credential bundle is empty. "
+            "Configure an LLM backend before delegating."
+        )
 
     model_override = desc.model_override or None
     allowed_tools = tuple(desc.allowed_tools or ())
