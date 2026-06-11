@@ -52,6 +52,50 @@ _mcp_loader_instance: Optional["MCPLoader"] = None
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
+def resolve_custom_mcp_dir(mcp_dir: Optional[Path] = None) -> Path:
+    """Where user-registered (custom) MCP server JSONs live.
+
+    Resolution: ``MCP_CUSTOM_STORAGE_PATH`` env var when set, else the
+    legacy ``<backend>/mcp/custom``. The env var exists because the
+    legacy path sits INSIDE the container image filesystem — every
+    ``docker compose up -d backend`` recreated the container and wiped
+    every server the user had registered through the MCP tab (the
+    2026-06-10 incident: ``gapt-service`` kept vanishing after deploys
+    while its per-env manifest snapshot, stored on the /data volume,
+    survived). Production compose now points this at
+    ``/data/mcp/custom`` on the ``geny-mcp-credentials-prod`` volume.
+
+    One-time migration: if the resolved dir is empty and the legacy
+    dir has server JSONs (e.g. first boot after the compose change,
+    or a dev tree carrying old files), they are copied over — never
+    moved, so a rollback to an older image keeps working.
+    """
+    legacy = (mcp_dir or PROJECT_ROOT / "mcp") / "custom"
+    override = (os.environ.get("MCP_CUSTOM_STORAGE_PATH") or "").strip()
+    if not override:
+        return legacy
+    target = Path(override)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        if legacy.exists() and legacy != target:
+            existing = {f.name for f in target.glob("*.json")}
+            for f in legacy.glob("*.json"):
+                if f.name not in existing:
+                    (target / f.name).write_text(
+                        f.read_text(encoding="utf-8"), encoding="utf-8"
+                    )
+                    logger.info(
+                        "custom MCP migration: copied %s → %s", f.name, target
+                    )
+    except OSError as exc:
+        logger.warning(
+            "MCP_CUSTOM_STORAGE_PATH=%r unusable (%s) — falling back to %s",
+            override, exc, legacy,
+        )
+        return legacy
+    return target
+
+
 def get_global_mcp_config() -> Optional[MCPConfig]:
     """
     Return global MCP config
@@ -182,7 +226,7 @@ class MCPLoader:
         """
         self.mcp_dir = mcp_dir or PROJECT_ROOT / "mcp"
         self.builtin_dir = self.mcp_dir / "built_in"
-        self.custom_dir = self.mcp_dir / "custom"
+        self.custom_dir = resolve_custom_mcp_dir(self.mcp_dir)
         self.tools_dir = tools_dir or PROJECT_ROOT / "tools"
         self.servers: Dict[str, MCPServerConfig] = {}  # custom MCP servers
         self.builtin_servers: Dict[str, MCPServerConfig] = {}  # built-in MCP servers

@@ -85,6 +85,11 @@ services:
       # vars the stores fall back to in-repo defaults that live on
       # the container's writable layer and get wiped on rebuild.
       - ENVIRONMENT_STORAGE_PATH=${ENVIRONMENT_STORAGE_PATH:-/data/environments}
+      # Custom MCP server definitions must outlive container recreation —
+      # the legacy in-image path (/app/mcp/custom) was wiped on every
+      # deploy, silently deleting every server registered through the
+      # MCP tab. Rides the existing geny-mcp-credentials-prod volume.
+      - MCP_CUSTOM_STORAGE_PATH=${MCP_CUSTOM_STORAGE_PATH:-/data/mcp/custom}
       - TRIGGER_PRESET_STORAGE_PATH=${TRIGGER_PRESET_STORAGE_PATH:-/data/trigger_presets}
       - GENY_TOOL_PRESETS_DIR=/data/tool_presets
       - GENY_CHAT_CONVERSATIONS_DIR=/data/chat_conversations

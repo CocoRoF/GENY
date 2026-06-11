@@ -28,9 +28,14 @@ router = APIRouter(prefix="/api/mcp/custom", tags=["mcp"])
 
 
 def _custom_dir() -> Path:
-    # Mirror MCPLoader's default: <PROJECT_ROOT>/mcp/custom/
-    here = Path(__file__).resolve().parent.parent
-    return here / "mcp" / "custom"
+    # Single source of truth shared with MCPLoader — honours
+    # MCP_CUSTOM_STORAGE_PATH (the /data volume in prod) so registered
+    # servers survive container recreation. Writing here while the
+    # loader read somewhere else would be the silent split-brain
+    # version of the 2026-06-10 vanishing-servers incident.
+    from service.mcp_loader import resolve_custom_mcp_dir
+
+    return resolve_custom_mcp_dir()
 
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
