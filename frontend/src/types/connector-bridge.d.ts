@@ -14,6 +14,7 @@ declare global {
         refresh(): void
         openSettings(): void
         setClickThrough(ignore: boolean): void
+        moveBy(dx: number, dy: number): void
       }
     }
   }
