@@ -14,6 +14,12 @@ directories:
 files:
   - out/**/*
   - package.json
+# Native .node addons (keytar, nut.js, libnut) must be unpacked from the asar
+# or they fail to load at runtime ("cannot find module .node").
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/@nut-tree-fork/**'
+  - '**/node_modules/keytar/**'
 # Phase 0: unsigned dev builds. Signing/notarization land in Phase 7
 # (PLAN §4.3) — macOS Developer ID + @electron/notarize, Win EV/OV cert.
 linux:

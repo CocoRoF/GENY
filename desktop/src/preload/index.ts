@@ -63,6 +63,28 @@ export interface ConnectorBridge {
     /** Manually check now (downloads + prompts if an update exists). */
     check(): void
   }
+
+  /** Phase 4 — desktop awareness (read-only). */
+  capture: {
+    listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>
+  }
+
+  /** Phase 6 — guarded actuation. Each call is gated by the master switch + a
+   *  native confirm in main; returns {ok, result?, denied?, error?}. */
+  actuate: {
+    openApp(target: string): Promise<ActuationResult>
+    clipboardWrite(text: string): Promise<ActuationResult>
+    type(text: string): Promise<ActuationResult>
+    key(keys: string): Promise<ActuationResult>
+    click(x: number, y: number, button?: string): Promise<ActuationResult>
+  }
+}
+
+export interface ActuationResult {
+  ok: boolean
+  result?: string
+  denied?: boolean
+  error?: string
 }
 
 const _wk = new URLSearchParams(location.search).get('window')
@@ -90,6 +112,16 @@ const api: ConnectorBridge = {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),
     setEnabled: (enabled) => ipcRenderer.invoke('updater:set-enabled', enabled),
     check: () => ipcRenderer.send('updater:check'),
+  },
+  capture: {
+    listSources: () => ipcRenderer.invoke('capture:list-sources'),
+  },
+  actuate: {
+    openApp: (target) => ipcRenderer.invoke('actuate:open-app', target),
+    clipboardWrite: (text) => ipcRenderer.invoke('actuate:clipboard-write', text),
+    type: (text) => ipcRenderer.invoke('actuate:type', text),
+    key: (keys) => ipcRenderer.invoke('actuate:key', keys),
+    click: (x, y, button) => ipcRenderer.invoke('actuate:click', x, y, button),
   },
   hotkeys: {
     getPushToTalk: () => ipcRenderer.invoke('hotkey:get-ptt'),

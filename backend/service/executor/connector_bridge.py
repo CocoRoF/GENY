@@ -14,6 +14,7 @@ reinstall needed.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Dict, List, Optional
 
@@ -86,22 +87,166 @@ class ConnectorCapabilityTool(Tool):
         return ToolResult(content=content)
 
 
+class DesktopGlanceTool(ConnectorCapabilityTool):
+    """Capture a fresh frame of the user's screen via the connector, caption it
+    with the vision LLM, and return the caption text (the agent can't read raw
+    bytes). Read-only; uses the existing screen-observation caption path WITHOUT
+    firing the proactive [USER_OBSERVATION] trigger (no cooldown-bypass spam)."""
+
+    async def execute(self, input: Dict[str, Any], context: ToolContext) -> ToolResult:
+        reg = get_connector_registry()
+        conn = reg.get(context.session_id)
+        if conn is None:
+            return ToolResult(content="connector offline — no desktop session is connected", is_error=True)
+        if "screen_capture" not in conn.accepted_capabilities:
+            return ToolResult(content="screen capture is not available on this connector", is_error=True)
+        try:
+            payload = await conn.capability_call("screen_capture", input, "agent desktop glance", timeout=30.0)
+        except Exception as exc:
+            return ToolResult(content=f"connector transport error: {exc}", is_error=True)
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            msg = (payload or {}).get("error") or ("denied by the user" if (payload or {}).get("denied") else "capture failed")
+            return ToolResult(content=str(msg), is_error=True)
+        result = payload.get("result") or {}
+        b64 = result.get("image_b64")
+        if not b64:
+            return ToolResult(content="connector returned no image", is_error=True)
+        mime = result.get("mime", "image/png")
+        label = result.get("source_name") or "screen"
+        try:
+            raw = base64.b64decode(b64.split(",", 1)[-1])  # tolerate a data: URL prefix
+            from service.vtuber.screen_observation import _caption_image
+
+            caption, source = await _caption_image(raw, mime_type=mime)
+        except Exception as exc:
+            return ToolResult(content=f"caption failed: {exc}", is_error=True)
+        if caption:
+            return ToolResult(content=f"[desktop glance — {label}] {caption}")
+        return ToolResult(content=f"[desktop glance — {label}] (no caption available; vision {source})")
+
+
 def _build_tools() -> Dict[str, ConnectorCapabilityTool]:
-    """The capability tools advertised to sessions. Phase-4/6 tools land here."""
-    return {
+    """The capability tools advertised to sessions. ``manifest.tools.external``
+    selects which a given session actually exposes."""
+    tools: Dict[str, ConnectorCapabilityTool] = {
+        # ── bridge health ──
         "connector_ping": ConnectorCapabilityTool(
             name="connector_ping",
-            description=(
-                "Ping the user's desktop connector to confirm the capability bridge is live. "
-                "Returns the connector's pong payload."
-            ),
+            description="Ping the user's desktop connector to confirm the capability bridge is live.",
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             capability="ping",
             read_only=True,
             reason="capability-bridge health check",
             timeout=10.0,
         ),
+        # ── Phase 4: desktop awareness (read-only) ──
+        "desktop_glance": DesktopGlanceTool(
+            name="desktop_glance",
+            description=(
+                "Look at the user's screen right now: captures a frame and returns a description "
+                "of what is visible. Use when the user refers to what's on their screen."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"source_id": {"type": "string", "description": "Optional capture source id from desktop_window_list; defaults to the primary screen."}},
+                "additionalProperties": False,
+            },
+            capability="screen_capture",
+            read_only=True,
+            reason="agent desktop glance",
+            timeout=30.0,
+        ),
+        "desktop_window_list": ConnectorCapabilityTool(
+            name="desktop_window_list",
+            description="List the user's open windows and screens (titles + capture source ids).",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            capability="window_list",
+            read_only=True,
+            reason="agent enumerates windows",
+            timeout=10.0,
+        ),
+        # ── Phase 6: guarded actuation (destructive → ASK/HITL + connector master switch) ──
+        "desktop_open_app": ConnectorCapabilityTool(
+            name="desktop_open_app",
+            description="Open an application or URL/path on the user's desktop.",
+            input_schema={
+                "type": "object",
+                "properties": {"target": {"type": "string", "description": "App name, file path, or URL to open."}},
+                "required": ["target"],
+                "additionalProperties": False,
+            },
+            capability="open_app",
+            read_only=False,
+            destructive=True,
+            reason="agent opens an app",
+            timeout=20.0,
+        ),
+        "desktop_clipboard_write": ConnectorCapabilityTool(
+            name="desktop_clipboard_write",
+            description="Write text to the user's clipboard.",
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            capability="clipboard_write",
+            read_only=False,
+            destructive=True,
+            reason="agent writes the clipboard",
+            timeout=10.0,
+        ),
+        "desktop_type": ConnectorCapabilityTool(
+            name="desktop_type",
+            description="Type text at the user's current keyboard focus (native input synthesis).",
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            capability="type",
+            read_only=False,
+            destructive=True,
+            reason="agent types on the user's machine",
+            timeout=20.0,
+        ),
+        "desktop_key": ConnectorCapabilityTool(
+            name="desktop_key",
+            description="Press a key or chord (e.g. 'enter', 'ctrl+s') on the user's machine.",
+            input_schema={
+                "type": "object",
+                "properties": {"keys": {"type": "string", "description": "e.g. 'enter' or 'ctrl+s'"}},
+                "required": ["keys"],
+                "additionalProperties": False,
+            },
+            capability="key",
+            read_only=False,
+            destructive=True,
+            reason="agent presses keys",
+            timeout=15.0,
+        ),
+        "desktop_click": ConnectorCapabilityTool(
+            name="desktop_click",
+            description="Move the mouse and click at absolute screen coordinates.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
+                },
+                "required": ["x", "y"],
+                "additionalProperties": False,
+            },
+            capability="click",
+            read_only=False,
+            destructive=True,
+            reason="agent clicks on the user's machine",
+            timeout=15.0,
+        ),
     }
+    return tools
 
 
 class ConnectorToolProvider:
