@@ -9,6 +9,42 @@ A multi-agent VTuber + autonomous worker platform. Pair a chatty Live2D / Spine 
 
 ---
 
+## ⬇️ 데스크탑 접속기 다운로드 (Desktop connector)
+
+데스크탑 하단에 떠 있는 **VTuber 접속기** — 서버는 그대로 두고, 화면 하단에 살아있는 아바타를 띄웁니다.
+
+### 1) 설치 파일 — **[➡️ 최신 릴리스(Releases)에서 받기](https://github.com/CocoRoF/Geny/releases/latest)**
+
+| OS | 파일 | 설치 / 첫 실행 |
+|---|---|---|
+| 🪟 **Windows** | `Geny-Setup-*.exe` | 더블클릭 → SmartScreen 경고 시 **자세히 → 실행** (현재 무서명) |
+| 🍎 **macOS** | `Geny-*.dmg` | 열어서 Applications 로 드래그 → 첫 실행은 **우클릭 → 열기** (Gatekeeper) |
+| 🐧 **Linux** | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x Geny-*.AppImage && ./Geny-*.AppImage` · deb: `sudo dpkg -i Geny-*.deb` |
+
+> 설치 파일이 안 보이면 릴리스가 빌드 중입니다 — 공개 repo라서 GitHub Actions 가 macOS/Windows/Linux 설치 파일을 자동 생성합니다.
+
+### 2) 실행 후 — **3가지만 입력하면 바로 사용**
+
+1. **Geny 서버 주소** — 기본값 `https://geny-x.hrletsgo.me` 가 채워져 있습니다 (직접 호스팅 중이면 그 주소).
+2. **admin 아이디**
+3. **admin 비밀번호**
+
+→ **로그인** 하면 토큰이 OS 키체인에 저장되고 하단에 아바타가 떠서 바로 사용 가능합니다. (핸들 드래그 = 이동, 더블클릭 = 컨트롤 창)
+
+### 소스에서 직접 빌드
+
+```bash
+git clone https://github.com/CocoRoF/Geny.git
+cd Geny/desktop
+npm install
+npm run dev          # 개발 실행
+npm run dist:win     # / dist:mac / dist:linux — 설치 파일 직접 생성
+```
+
+자세히: [`desktop/README.md`](desktop/README.md) · 설계: [`dev_docs/vtuber-desktop/PLAN.md`](dev_docs/vtuber-desktop/PLAN.md)
+
+---
+
 ## What Geny is
 
 | Concept | What it does |
