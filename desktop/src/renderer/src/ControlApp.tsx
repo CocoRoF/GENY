@@ -30,7 +30,7 @@ export function ControlApp() {
     try {
       const r = await fetch(`${serverUrl}/api/auth/status`)
       const j = await r.json()
-      setStatus(`has_users=${j.has_users} authenticated=${j.authenticated}`)
+      setStatus(`연결 OK · 계정존재=${j.has_users} · 로그인됨=${j.is_authenticated}`)
     } catch (e) {
       setStatus(`unreachable: ${(e as Error).message}`)
     }
@@ -52,7 +52,9 @@ export function ControlApp() {
       // Desktop stores the account JWT in the OS keychain (not the password).
       await window.connector?.secureStore.set(TOKEN_KEY, j.access_token)
       setHasToken(true)
-      setStatus(`logged in as ${j.username}`)
+      setStatus(`${j.username} 로그인됨 — 아바타를 불러옵니다`)
+      // Reload the overlay so it loads the server's avatar page with the token.
+      window.connector?.windowControl.refreshOverlay()
     } catch (e) {
       setStatus(`error: ${(e as Error).message}`)
     }
@@ -61,7 +63,8 @@ export function ControlApp() {
   const logout = async () => {
     await window.connector?.secureStore.delete(TOKEN_KEY)
     setHasToken(false)
-    setStatus('logged out')
+    setStatus('로그아웃됨')
+    window.connector?.windowControl.refreshOverlay()
   }
 
   return (
