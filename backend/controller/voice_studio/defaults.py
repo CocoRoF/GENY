@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from service.auth.auth_middleware import require_auth
 
 router = APIRouter()
 
@@ -51,7 +53,9 @@ async def get_omnivoice_defaults() -> OmniVoiceDefaults:
 
 
 @router.put("/settings/omnivoice-defaults")
-async def put_omnivoice_defaults(body: OmniVoiceDefaults) -> OmniVoiceDefaults:
+async def put_omnivoice_defaults(
+    body: OmniVoiceDefaults, auth: dict = Depends(require_auth)
+) -> OmniVoiceDefaults:
     mgr, OmniVoiceConfig = _load_cfg()
     cfg = mgr.load_config(OmniVoiceConfig)
     cfg.num_step = body.num_step

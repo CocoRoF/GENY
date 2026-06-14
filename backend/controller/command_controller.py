@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
+
+from service.auth.auth_middleware import require_auth
 
 from service.execution.agent_executor import (
     execute_command,
@@ -102,7 +104,7 @@ class SessionLogsResponse(BaseModel):
 # ========== Batch Command Endpoints ==========
 
 @router.post("/batch", response_model=BatchCommandResponse)
-async def execute_batch_command(request: BatchCommandRequest):
+async def execute_batch_command(request: BatchCommandRequest, auth: dict = Depends(require_auth)):
     """
     Execute a command across multiple sessions.
 

@@ -308,7 +308,7 @@ export const voiceStudioApi = {
   async setDefaultEngine(name: string): Promise<{ ok: true; default: string }> {
     const res = await fetch(ENGINES_DEFAULT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ name }),
     });
     if (!res.ok) {
@@ -327,7 +327,7 @@ export const voiceStudioApi = {
   async putOmniVoiceDefaults(body: OmniVoiceDefaults): Promise<OmniVoiceDefaults> {
     const res = await fetch(OMNI_DEFAULTS_URL, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!res.ok) {

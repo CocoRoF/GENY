@@ -24,10 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from logging import getLogger
 
+from service.auth.auth_middleware import require_auth
 from service.vtuber.live2d_model_manager import Live2dModelInfo
 
 logger = getLogger(__name__)
@@ -149,7 +150,7 @@ async def list_baked_imports(request: Request) -> dict[str, Any]:
 
 
 @router.delete("/{filename}")
-async def delete_baked_import(filename: str) -> dict[str, Any]:
+async def delete_baked_import(filename: str, auth: dict = Depends(require_auth)) -> dict[str, Any]:
     """Drop a pending zip. Path-traversal-safe."""
     if not _is_safe_filename(filename):
         raise HTTPException(400, f"unsafe filename: {filename!r}")
@@ -298,7 +299,7 @@ def _resolve_inside(root: Path, files: list[str], suffixes: tuple[str, ...]) -> 
 
 
 @router.post("/install")
-async def install_baked_import(req: InstallRequest, request: Request) -> dict[str, Any]:
+async def install_baked_import(req: InstallRequest, request: Request, auth: dict = Depends(require_auth)) -> dict[str, Any]:
     """Unzip a pending baked puppet, register it in the model registry
     with an `(Editor)` suffix, and move the source zip into the
     `installed/` subdirectory of the inbox.
