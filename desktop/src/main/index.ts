@@ -88,12 +88,15 @@ function createOverlay(): void {
     overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
 
-  // Start fully click-through; the renderer re-enables hit-testing over the
-  // avatar silhouette + dock handle via the 'overlay:set-ignore-mouse' channel
-  // (pixel-accurate hotspots land in Phase 2).
-  overlay.setIgnoreMouseEvents(true, { forward: true })
+  // External links open in the OS browser, never inside the overlay.
+  overlay.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
 
-  loadRoute(overlay, 'overlay')
+  // Content depends on login state: the remote transparent /overlay avatar page
+  // once a token exists, otherwise a local "log in first" placeholder.
+  applyOverlayContent()
 
   overlay.on('moved', persistOverlayBounds)
   overlay.on('resized', persistOverlayBounds)
@@ -142,6 +145,39 @@ function loadRoute(win: BrowserWindow, route: 'overlay' | 'control'): void {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+}
+
+// Read the account JWT the control window stored in the OS keychain.
+async function getStoredToken(): Promise<string | null> {
+  try {
+    const keytar = await import('keytar')
+    return await keytar.default.getPassword('geny-connector', 'geny_auth_token')
+  } catch {
+    return null
+  }
+}
+
+// Point the overlay at the server's transparent /overlay avatar page when logged
+// in (reusing the proven browser Live2D+TTS+WS stack), else a local placeholder.
+// Called on launch and again after login/logout (overlay:refresh).
+async function applyOverlayContent(): Promise<void> {
+  if (!overlay) return
+  const token = await getStoredToken()
+  const { serverUrl } = loadConfig()
+  if (token && serverUrl) {
+    overlay.setIgnoreMouseEvents(false)
+    const base = serverUrl.replace(/\/+$/, '')
+    await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}`)
+    // Drag the floating avatar to reposition the OS window; keep interactive
+    // elements clickable. (Pixel-accurate click-through is a later phase.)
+    overlay.webContents.insertCSS(
+      'html,body{-webkit-app-region:drag !important;background:transparent !important;}' +
+        'canvas,button,a,input,select,textarea{-webkit-app-region:no-drag;}',
+    )
+  } else {
+    overlay.setIgnoreMouseEvents(false)
+    loadRoute(overlay, 'overlay')
+  }
 }
 
 let appQuitting = false
@@ -208,6 +244,11 @@ function registerIpc(): void {
   ipcMain.on('control:toggle', () => {
     if (!control) return
     control.isVisible() ? control.hide() : control.show()
+  })
+
+  // Re-evaluate overlay content after login/logout (token changed in keychain).
+  ipcMain.on('overlay:refresh', () => {
+    applyOverlayContent()
   })
 
   // Secure token storage via the OS keychain (keytar). Falls back to the JSON
