@@ -135,3 +135,22 @@ body,
   color: #6ee7a8;
   font-size: 13px;
 }
+.control-root .updater .toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.control-root .updater .toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #5b63ff;
+  cursor: pointer;
+}
+.control-root .updater .hint {
+  font-size: 11px;
+  opacity: 0.6;
+  margin: 0 0 10px;
+}

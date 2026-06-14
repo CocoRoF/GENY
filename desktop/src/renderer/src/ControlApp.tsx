@@ -18,11 +18,18 @@ export function ControlApp() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [hasToken, setHasToken] = useState(false)
+  const [autoUpdate, setAutoUpdate] = useState(true)
 
   useEffect(() => {
     window.connector?.serverConfig.get().then((c) => setServerUrl(c.serverUrl))
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
+    window.connector?.updater.getEnabled().then(setAutoUpdate)
   }, [])
+
+  const toggleAutoUpdate = async (next: boolean) => {
+    setAutoUpdate(next)
+    await window.connector?.updater.setEnabled(next)
+  }
 
   const checkStatus = async () => {
     setStatus('checking…')
@@ -96,6 +103,20 @@ export function ControlApp() {
         </>
       )}
       <p className="status">{status}</p>
+
+      <hr />
+      <div className="updater">
+        <label className="toggle">
+          <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAutoUpdate(e.target.checked)} />
+          <span>자동 업데이트</span>
+        </label>
+        <p className="hint">
+          {autoUpdate
+            ? '새 버전을 자동으로 내려받아 재시작 시 설치합니다.'
+            : '자동 설치는 끄고, 새 버전이 있으면 알림만 띄웁니다.'}
+        </p>
+        <button onClick={() => window.connector?.updater.check()}>지금 업데이트 확인</button>
+      </div>
     </div>
   )
 }

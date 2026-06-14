@@ -41,6 +41,16 @@ export interface ConnectorBridge {
     /** Re-load the overlay after login/logout (token changed in keychain). */
     refreshOverlay(): void
   }
+
+  /** GitHub Releases auto-update controls. */
+  updater: {
+    /** Is auto-update enabled? (default true) */
+    getEnabled(): Promise<boolean>
+    /** Toggle auto-update; when re-enabled, an immediate check runs. */
+    setEnabled(enabled: boolean): Promise<boolean>
+    /** Manually check now (downloads + prompts if an update exists). */
+    check(): void
+  }
 }
 
 const api: ConnectorBridge = {
@@ -59,6 +69,11 @@ const api: ConnectorBridge = {
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
     refreshOverlay: () => ipcRenderer.send('overlay:refresh'),
+  },
+  updater: {
+    getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),
+    setEnabled: (enabled) => ipcRenderer.invoke('updater:set-enabled', enabled),
+    check: () => ipcRenderer.send('updater:check'),
   },
 }
 
