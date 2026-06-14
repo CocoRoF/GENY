@@ -15,6 +15,8 @@ interface AvatarCanvasProps {
    *  ignores it (its enhancement system is structurally different
    *  and not in V1 scope). */
   enhancedConfig?: Partial<Live2DEnhancedConfig>;
+  /** Live2D-only — persist/restore user pan+zoom under this key (per session). */
+  viewStorageKey?: string;
 }
 
 /**
@@ -83,6 +85,7 @@ export default function AvatarCanvas(props: AvatarCanvasProps) {
       background={props.background}
       backgroundAlpha={props.backgroundAlpha}
       enhancedConfig={props.enhancedConfig}
+      viewStorageKey={props.viewStorageKey}
     />
   );
 }

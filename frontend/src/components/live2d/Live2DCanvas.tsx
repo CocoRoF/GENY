@@ -45,6 +45,9 @@ interface Live2DCanvasProps {
   background?: number;
   backgroundAlpha?: number;
   enhancedConfig?: Partial<Live2DEnhancedConfig>;
+  /** When set, persist + restore the user's pan/zoom under this localStorage key
+   *  (e.g. per Geny session) so the view survives reloads. */
+  viewStorageKey?: string;
 }
 
 export default function Live2DCanvas({
@@ -54,6 +57,7 @@ export default function Live2DCanvas({
   background = 0x000000,
   backgroundAlpha = 0,
   enhancedConfig: configOverrides,
+  viewStorageKey,
 }: Live2DCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +95,38 @@ export default function Live2DCanvas({
     startPanY: 0,
   });
   const applyTransformRef = useRef<() => void>(() => {});
+
+  // Persist/restore the user's pan+zoom under viewStorageKey (per session). Reads
+  // via a ref so the event handlers always see the current key.
+  const viewKeyRef = useRef(viewStorageKey);
+  useEffect(() => {
+    viewKeyRef.current = viewStorageKey;
+  }, [viewStorageKey]);
+  const saveView = useRef(() => {
+    const k = viewKeyRef.current;
+    if (!k) return;
+    try {
+      localStorage.setItem(
+        k,
+        JSON.stringify({ z: userZoomRef.current, x: userPanRef.current.x, y: userPanRef.current.y }),
+      );
+    } catch {
+      /* storage may be unavailable */
+    }
+  });
+  const loadView = useRef(() => {
+    const k = viewKeyRef.current;
+    if (!k) return null;
+    try {
+      const v = JSON.parse(localStorage.getItem(k) || 'null');
+      if (v && typeof v.z === 'number' && typeof v.x === 'number' && typeof v.y === 'number') {
+        return { z: Math.max(0.2, Math.min(5, v.z)), x: v.x, y: v.y };
+      }
+    } catch {
+      /* ignore corrupt value */
+    }
+    return null;
+  });
 
   // Update config when overrides change
   useEffect(() => {
@@ -212,9 +248,15 @@ export default function Live2DCanvas({
       baseScaleRef.current = Math.min(scaleX, scaleY) * (model.kScale || 0.85);
       live2dModel.anchor.set(0.5, 0.5);
 
-      // ── Reset user-controlled zoom/pan on model swap ──
+      // ── Reset user-controlled zoom/pan on model swap, then restore the saved
+      //    per-session view (if any) so reloads keep the user's framing. ──
       userZoomRef.current = 1;
       userPanRef.current = { x: 0, y: 0 };
+      const savedView = loadView.current();
+      if (savedView) {
+        userZoomRef.current = savedView.z;
+        userPanRef.current = { x: savedView.x, y: savedView.y };
+      }
       dragRef.current.active = false;
       dragRef.current.moved = false;
 
@@ -681,6 +723,7 @@ export default function Live2DCanvas({
       };
       userZoomRef.current = newZoom;
       applyTransformRef.current();
+      saveView.current();
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -728,6 +771,7 @@ export default function Live2DCanvas({
       if (!d.active || e.pointerId !== d.pointerId) return;
       try { container.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
       d.active = false;
+      if (d.moved) saveView.current(); // persist the new pan after a real drag
       // Keep `d.moved` set — handleClick (onClick) will read and consume it.
       container.style.cursor = interactive ? 'grab' : 'default';
     };
