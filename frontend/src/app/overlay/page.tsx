@@ -143,7 +143,13 @@ export default function OverlayPage() {
       {/* Avatar — the renderer's OWN crisp pan/zoom (drag = pan, wheel = zoom),
           active when the window is interactive (unlocked). No CSS scaling. */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        <AvatarCanvas sessionId={resolved.sid} interactive backgroundAlpha={0} className="w-full h-full" />
+        <AvatarCanvas
+          sessionId={resolved.sid}
+          interactive
+          backgroundAlpha={0}
+          className="w-full h-full"
+          viewStorageKey={`geny_overlay_view_${resolved.sid}`}
+        />
       </div>
 
       {/* The bar is the MOVE handle: drag its background → move the whole window.
@@ -156,12 +162,12 @@ export default function OverlayPage() {
         </div>
       ) : (
         <div style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
-          <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
-          {/* Drag handle — a NON-button so bar-drag fires on it; widens the grab
-              area and signals the window is movable. */}
+          {/* Drag handle (left of TTS) — a NON-button so bar-drag fires on it;
+              widens the grab area and signals the window is movable. */}
           <span style={GRIP} title="드래그하여 아바타 이동">
             <GripIcon />
           </span>
+          <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
