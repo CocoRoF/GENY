@@ -46,6 +46,28 @@ export function withAuthHeaders(
   return { ...base };
 }
 
+// ==================== STT (on-demand transcribe) ====================
+export interface TranscribeResult {
+  text: string;
+  language?: string;
+  source?: string;
+}
+export const sttApi = {
+  /** POST /api/stt/transcribe — transcribe an audio blob (push-to-talk). */
+  transcribe: async (blob: Blob, language?: string): Promise<TranscribeResult> => {
+    const fd = new FormData();
+    fd.append('file', blob, 'utterance.webm');
+    if (language) fd.append('language', language);
+    const res = await fetch(`${getBackendUrl()}/api/stt/transcribe`, {
+      method: 'POST',
+      headers: withAuthHeaders(), // no Content-Type → multipart boundary auto
+      body: fd,
+    });
+    if (!res.ok) throw new Error(`stt/transcribe HTTP ${res.status}`);
+    return res.json() as Promise<TranscribeResult>;
+  },
+};
+
 // ==================== Backend Direct URL ====================
 // In production behind a reverse proxy (nginx), NEXT_PUBLIC_API_URL should be
 // set to '' (empty) so that the browser uses relative paths through nginx.

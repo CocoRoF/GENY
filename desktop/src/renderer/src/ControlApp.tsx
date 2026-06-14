@@ -19,16 +19,24 @@ export function ControlApp() {
   const [password, setPassword] = useState('')
   const [hasToken, setHasToken] = useState(false)
   const [autoUpdate, setAutoUpdate] = useState(true)
+  const [pttHotkey, setPttHotkey] = useState('CommandOrControl+Shift+Space')
+  const [pttMsg, setPttMsg] = useState('')
 
   useEffect(() => {
     window.connector?.serverConfig.get().then((c) => setServerUrl(c.serverUrl))
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
+    window.connector?.hotkeys.getPushToTalk().then((h) => h && setPttHotkey(h))
   }, [])
 
   const toggleAutoUpdate = async (next: boolean) => {
     setAutoUpdate(next)
     await window.connector?.updater.setEnabled(next)
+  }
+
+  const savePtt = async () => {
+    const ok = await window.connector?.hotkeys.setPushToTalk(pttHotkey)
+    setPttMsg(ok ? '✓ 등록됨' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
   }
 
   const checkStatus = async () => {
@@ -116,6 +124,16 @@ export function ControlApp() {
             : '자동 설치는 끄고, 새 버전이 있으면 알림만 띄웁니다.'}
         </p>
         <button onClick={() => window.connector?.updater.check()}>지금 업데이트 확인</button>
+      </div>
+
+      <hr />
+      <div className="updater">
+        <label className="row">
+          <span>푸시투토크 단축키 (탭하면 마이크 켜짐 / 말 끊기)</span>
+          <input value={pttHotkey} onChange={(e) => setPttHotkey(e.target.value)} placeholder="CommandOrControl+Shift+Space" />
+        </label>
+        <button onClick={savePtt}>단축키 저장</button>
+        {pttMsg && <p className="hint">{pttMsg}</p>}
       </div>
     </div>
   )

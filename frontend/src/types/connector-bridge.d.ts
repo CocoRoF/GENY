@@ -16,6 +16,12 @@ declare global {
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
       }
+      hotkeys?: {
+        getPushToTalk(): Promise<string | null>
+        setPushToTalk(accelerator: string): Promise<boolean>
+        /** Subscribe to global push-to-talk presses; returns a disposer. */
+        onPushToTalk(cb: () => void): () => void
+      }
     }
   }
 }
