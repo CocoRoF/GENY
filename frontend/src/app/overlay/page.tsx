@@ -75,23 +75,40 @@ export default function OverlayPage() {
     const wantRoom = qs.get('room');
 
     let cancelled = false;
-    (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Poll until a session exists, so the avatar self-heals when one is created
+    // on the server (no connector restart needed).
+    const attempt = async () => {
+      if (cancelled) return;
       try {
         const sessions = await agentApi.list();
         const target = wantSession
           ? sessions.find((s) => s.session_id === wantSession)
           : sessions.find((s) => s.role === 'vtuber') ?? sessions[0];
-        if (!target) {
-          if (!cancelled) setError('표시할 VTuber 세션이 없습니다. 서버에서 VTuber 세션을 먼저 만들어 주세요.');
-          return;
+        if (target) {
+          if (!cancelled) {
+            setError(null);
+            setResolved({ sid: target.session_id, rid: wantRoom ?? target.chat_room_id ?? null });
+          }
+          return; // resolved — stop polling
         }
-        if (!cancelled) setResolved({ sid: target.session_id, rid: wantRoom ?? target.chat_room_id ?? null });
+        if (!cancelled) {
+          setError('VTuber 세션을 기다리는 중…\n서버에서 세션을 만들면 자동으로 떠요.');
+          timer = setTimeout(attempt, 6000);
+        }
       } catch (e) {
-        if (!cancelled) setError(`세션을 불러오지 못했습니다: ${(e as Error).message}`);
+        if (!cancelled) {
+          setError(`세션 연결 재시도 중…\n(${(e as Error).message})`);
+          timer = setTimeout(attempt, 6000);
+        }
       }
-    })();
+    };
+    attempt();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
@@ -257,7 +274,7 @@ function Loading({ label, error }: { label: string; error?: boolean }) {
           <div style={SPINNER} />
         )}
         <div style={{ fontWeight: 700, fontSize: 13, letterSpacing: 0.3 }}>Geny</div>
-        <div style={{ fontSize: 11, opacity: 0.65, maxWidth: 240, textAlign: 'center', lineHeight: 1.5 }}>{label}</div>
+        <div style={{ fontSize: 11, opacity: 0.65, maxWidth: 260, textAlign: 'center', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{label}</div>
       </div>
     </div>
   );
