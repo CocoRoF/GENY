@@ -26,6 +26,10 @@ linux:
 win:
   target:
     - nsis
+  # No spaces: the default "Geny Setup x.exe" gets renamed 3 different ways
+  # (built→spaces, latest.yml→hyphens, GitHub asset→dots), so electron-updater
+  # 404s on download. A hyphenated name is identical everywhere.
+  artifactName: ${productName}-Setup-${version}.${ext}
 mac:
   target:
     - dmg
