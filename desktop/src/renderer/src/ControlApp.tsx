@@ -135,6 +135,9 @@ export function ControlApp() {
         <button onClick={savePtt}>단축키 저장</button>
         {pttMsg && <p className="hint">{pttMsg}</p>}
       </div>
+
+      <hr />
+      <button onClick={() => window.connector?.windowControl.restart()}>접속기 재시작</button>
     </div>
   )
 }

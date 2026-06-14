@@ -123,14 +123,24 @@ export default function ConnectorPage() {
               them out of here prevents double audio. This window is chat-only. */}
           {/* Settings (server URL / account / auto-update) — desktop only. */}
           {typeof window !== 'undefined' && window.connector && (
-            <button
-              type="button"
-              title="설정 (서버/계정/자동업데이트)"
-              onClick={() => window.connector?.windowControl.openSettings()}
-              className="px-2 py-1 text-[0.75rem] rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
-            >
-              ⚙ 설정
-            </button>
+            <>
+              <button
+                type="button"
+                title="설정 (서버/계정/자동업데이트)"
+                onClick={() => window.connector?.windowControl.openSettings()}
+                className="px-2 py-1 text-[0.75rem] rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+              >
+                ⚙ 설정
+              </button>
+              <button
+                type="button"
+                title="접속기 재시작"
+                onClick={() => window.connector?.windowControl.restart()}
+                className="px-2 py-1 text-[0.75rem] rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+              >
+                ↻ 재시작
+              </button>
+            </>
           )}
         </div>
       </div>
