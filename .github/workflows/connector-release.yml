@@ -1,0 +1,100 @@
+name: Connector Installers
+
+# Builds the Geny desktop connector for macOS, Windows and Linux and publishes
+# the installers to a GitHub Release. Public repo → macOS/Windows/Linux runners
+# are free. Triggered by pushing a `connector-v*` tag, or manually.
+#
+# Installers are UNSIGNED in Phase 0 (PLAN §4.3 / R15): macOS users right-click →
+# Open to bypass Gatekeeper; Windows users click "More info → Run anyway" past
+# SmartScreen. Signing/notarization land in Phase 7.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'connector-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            flag: --linux
+            glob: |
+              desktop/dist/*.AppImage
+              desktop/dist/*.deb
+          - os: windows-latest
+            flag: --win
+            glob: desktop/dist/*.exe
+          - os: macos-latest
+            flag: --mac
+            glob: desktop/dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Build renderer + main
+        working-directory: desktop
+        run: npm run build
+
+      - name: Package installer
+        working-directory: desktop
+        run: npx --no-install electron-builder ${{ matrix.flag }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned mac build — don't attempt to auto-discover signing certs.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: ${{ matrix.glob }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read connector version
+        id: ver
+        run: echo "version=$(node -p "require('./desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: connector-v${{ steps.ver.outputs.version }}
+          name: Geny Connector v${{ steps.ver.outputs.version }}
+          files: artifacts/**/*
+          fail_on_unmatched_files: true
+          body: |
+            **Geny VTuber 데스크탑 접속기** — installers (unsigned, Phase 0).
+
+            | OS | 파일 | 설치 |
+            |---|---|---|
+            | Windows | `Geny-Setup-*.exe` | 실행 → SmartScreen 뜨면 **자세히 → 실행** |
+            | macOS | `Geny-*.dmg` | 열어서 드래그 → 첫 실행 시 **우클릭 → 열기** (Gatekeeper) |
+            | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` 후 실행 / deb: `sudo dpkg -i` |
+
+            실행 후: **서버 주소** + **admin 아이디/비밀번호** 입력 → 바로 사용.
+            기본 서버는 `https://geny-x.hrletsgo.me` 로 채워져 있습니다.
