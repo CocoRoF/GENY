@@ -83,9 +83,15 @@ export default function OverlayPage() {
       if (cancelled) return;
       try {
         const sessions = await agentApi.list();
-        const target = wantSession
-          ? sessions.find((s) => s.session_id === wantSession)
-          : sessions.find((s) => s.role === 'vtuber') ?? sessions[0];
+        // Prefer the requested session, but if it's missing (a stale/deleted id
+        // saved from a prior run) fall back to auto-detecting a VTuber session,
+        // so the overlay SELF-HEALS instead of waiting forever on a dead id.
+        // Never fall back to a non-VTuber (e.g. worker) session — it has no
+        // avatar/model to render.
+        const target =
+          (wantSession && sessions.find((s) => s.session_id === wantSession)) ||
+          sessions.find((s) => s.role === 'vtuber') ||
+          null;
         if (target) {
           if (!cancelled) {
             setError(null);

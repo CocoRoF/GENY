@@ -47,16 +47,25 @@ export default function ConnectorPage() {
     (async () => {
       await loadSessions();
       if (!modelsLoaded) fetchModels();
-      if (wantSession) pickSession(wantSession);
+      // Honour ?session only if it still exists — a stale/deleted id would
+      // otherwise block the auto-select below. The correction effect heals it.
+      if (wantSession && useAppStore.getState().sessions.some((s) => s.session_id === wantSession)) {
+        pickSession(wantSession);
+      }
       setBooted(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Default-select the first VTuber session once loaded, if none chosen.
+  // Auto-select a VTuber session AND correct a stale/invalid selection (e.g. a
+  // ?session preselect or persisted id pointing at a deleted/old session, or a
+  // non-VTuber session) so the panel + overlay self-heal onto a real VTuber
+  // instead of getting stuck on "VTuber 세션을 선택하세요".
   useEffect(() => {
-    if (!booted || selectedSessionId) return;
-    const v = sessions.find((s) => s.role === 'vtuber') ?? sessions[0];
+    if (!booted) return;
+    const cur = sessions.find((s) => s.session_id === selectedSessionId);
+    if (cur?.role === 'vtuber') return; // already on a valid VTuber
+    const v = sessions.find((s) => s.role === 'vtuber');
     if (v) pickSession(v.session_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, sessions, selectedSessionId]);
