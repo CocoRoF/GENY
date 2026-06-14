@@ -38,6 +38,8 @@ export interface ConnectorBridge {
     moveBy(dx: number, dy: number): void
     /** Show/hide the control (chat/settings) window. */
     toggleControl(): void
+    /** Re-load the overlay after login/logout (token changed in keychain). */
+    refreshOverlay(): void
   }
 }
 
@@ -56,6 +58,7 @@ const api: ConnectorBridge = {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
+    refreshOverlay: () => ipcRenderer.send('overlay:refresh'),
   },
 }
 

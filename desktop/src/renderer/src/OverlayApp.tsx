@@ -55,9 +55,9 @@ export function OverlayApp() {
       {/* Avatar stage — <AvatarCanvas backgroundAlpha={0}> mounts here next. */}
       <div id="avatar-stage" className="avatar-stage" onMouseEnter={enterInteractive} onMouseLeave={leaveInteractive}>
         <div className="parity-card">
-          <div className="parity-title">Geny connector</div>
-          <div className="parity-sub">server: {serverUrl || '…'}</div>
-          <div className="parity-hint">Phase 0 shell — avatar renderer mounts here next</div>
+          <div className="parity-title">Geny</div>
+          <div className="parity-sub">{serverUrl || '…'}</div>
+          <div className="parity-hint">로그인하면 여기에 아바타가 떠요 — 트레이 아이콘 → 설정/채팅 열기</div>
         </div>
       </div>
 
