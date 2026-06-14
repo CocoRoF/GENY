@@ -16,9 +16,12 @@ import { setToken } from '@/lib/authApi';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
-import AudioControls from '@/components/live2d/AudioControls';
-import STTControls from '@/components/live2d/STTControls';
-import ScreenObservationControls from '@/components/live2d/ScreenObservationControls';
+
+// CRITICAL: this is the chat window, a SEPARATE renderer process from the avatar
+// overlay. If TTS ran here too, audio would play twice (two AudioManagers). Voice
+// (TTS/STT) and screen-scan live ONLY in the avatar window; here we force TTS off
+// at module load (before any message can arrive) so chat is silent view+send.
+useVTuberStore.setState({ ttsEnabled: false });
 
 export default function ConnectorPage() {
   const sessions = useAppStore((s) => s.sessions);
@@ -108,13 +111,8 @@ export default function ConnectorPage() {
         )}
 
         <div className="flex items-center gap-3 ml-auto">
-          {isVTuber && sid && (
-            <>
-              <AudioControls sessionId={sid} />
-              <STTControls sessionId={sid} />
-              <ScreenObservationControls sessionId={sid} />
-            </>
-          )}
+          {/* Voice (TTS/STT) + screen-scan live in the AVATAR window only — keeping
+              them out of here prevents double audio. This window is chat-only. */}
           {/* Settings (server URL / account / auto-update) — desktop only. */}
           {typeof window !== 'undefined' && window.connector && (
             <button
