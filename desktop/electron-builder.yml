@@ -13,6 +13,8 @@ linux:
     - AppImage
     - deb
   category: Utility
+  maintainer: Geny <noreply@hrletsgo.me>
+  synopsis: Geny VTuber desktop connector
 win:
   target:
     - nsis

@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "description": "Geny VTuber desktop connector — a thin, always-on-top overlay that renders the live avatar from a running Geny server. The server stays the brain; this is the face.",
   "type": "module",
-  "author": "Geny",
+  "author": {
+    "name": "Geny",
+    "email": "noreply@hrletsgo.me"
+  },
+  "homepage": "https://github.com/CocoRoF/Geny",
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {

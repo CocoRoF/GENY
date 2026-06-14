@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 const TOKEN_KEY = 'geny_auth_token'
 
 export function ControlApp() {
-  const [serverUrl, setServerUrl] = useState('http://localhost:8000')
+  const [serverUrl, setServerUrl] = useState('https://geny-x.hrletsgo.me')
   const [status, setStatus] = useState<string>('idle')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

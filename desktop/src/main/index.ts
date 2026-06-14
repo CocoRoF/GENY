@@ -36,7 +36,7 @@ function loadConfig(): ConnectorConfig {
   try {
     return JSON.parse(readFileSync(configPath(), 'utf-8'))
   } catch {
-    return { serverUrl: process.env.GENY_SERVER_URL || 'http://localhost:8000' }
+    return { serverUrl: process.env.GENY_SERVER_URL || 'https://geny-x.hrletsgo.me' }
   }
 }
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
