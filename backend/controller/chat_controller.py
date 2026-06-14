@@ -121,6 +121,17 @@ def _filter_observation_frames_for_send(
     return kept or None
 
 
+def _has_observation_frame(
+    attachments: Optional[List[Dict[str, Any]]],
+) -> bool:
+    """True if the turn already carries a screen-observation frame (the
+    frontend grabbed one from the live overlay stream) — so the backend
+    doesn't capture a second one."""
+    return bool(attachments) and any(
+        a.get("source") == _OBSERVATION_SOURCE for a in attachments
+    )
+
+
 def _attachments_for_storage(
     attachments: Optional[List[Dict[str, Any]]],
 ) -> Optional[List[Dict[str, Any]]]:
@@ -833,6 +844,29 @@ async def _run_broadcast(
 
             log_poll_task = asyncio.create_task(_poll_logs())
 
+        # Real-time vision (P3b): for a VTuber turn that didn't already carry a
+        # screen frame (e.g. typed in the /connector window, which has no live
+        # stream), grab the CURRENT screen from the connector so the persona
+        # judges what's literally on screen now. Gated (toggle on + vision model
+        # + kill-switch + connector present) and fully best-effort — never
+        # blocks or fails the turn. The frame is sent to the executor for THIS
+        # turn only; it is not persisted into chat history.
+        sess_attachments = attachments
+        if role == "vtuber" and not _has_observation_frame(attachments):
+            try:
+                from service.vtuber.screen_observation import (
+                    capture_current_screen_attachment,
+                )
+                fresh = await capture_current_screen_attachment(session_id)
+                if fresh:
+                    sess_attachments = list(attachments or []) + [fresh]
+                    logger.info(
+                        "[Broadcast:%s] attached live screen frame for session=%s",
+                        room_id[:8], session_id[:8],
+                    )
+            except Exception:  # noqa: BLE001
+                logger.debug("[Broadcast] live screen capture skipped", exc_info=True)
+
         try:
             # THE core call -- with broadcast context
             logger.info(
@@ -843,7 +877,7 @@ async def _run_broadcast(
                 session_id=session_id,
                 prompt=message,
                 is_chat_message=True,
-                attachments=attachments,
+                attachments=sess_attachments,
             )
             logger.info(
                 "[Broadcast:%s] execute_command returned for session=%s: success=%s, output_len=%d, duration=%dms, cost=%s",

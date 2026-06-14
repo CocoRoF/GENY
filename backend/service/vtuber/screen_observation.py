@@ -105,7 +105,31 @@ _last_caption: Dict[str, str] = {}
 # Per-storage-root throttle for the retention sweep — the rglob is cheap on a
 # pruned tree but pointless to run on every ~3-min upload.
 _last_prune_at: Dict[str, float] = {}
+# Per-session "screen observation toggle is ON" marker, refreshed on every
+# upload. Lets the backend decide whether a conversation turn may grab a fresh
+# screen frame from the connector — gated on the user's toggle, never captures
+# silently when observation is off.
+_screen_active_until: Dict[str, float] = {}
 _lock = asyncio.Lock()
+
+
+def _screen_active_window() -> float:
+    """How long after the last upload a session counts as 'observing'. A bit
+    over 2× the 3-min capture interval so a missed tick doesn't flap it off."""
+    try:
+        return float(os.environ.get("GENY_SCREEN_OBS_ACTIVE_WINDOW_S", "400"))
+    except ValueError:
+        return 400.0
+
+
+def _mark_screen_active(session_id: str) -> None:
+    _screen_active_until[session_id] = time.monotonic() + _screen_active_window()
+
+
+def is_screen_active(session_id: str) -> bool:
+    """True when screen observation is currently ON for the session (a frame
+    was uploaded within the active window)."""
+    return time.monotonic() < _screen_active_until.get(session_id, 0.0)
 
 
 async def _claim_trigger_slot(session_id: str) -> bool:
@@ -131,10 +155,11 @@ async def _release_trigger_slot(session_id: str) -> None:
 
 
 def reset_cooldown_state_for_tests() -> None:
-    """Test hook — clear the per-session cooldown + dedup + prune tables."""
+    """Test hook — clear the per-session cooldown + dedup + prune + active tables."""
     _last_fire_at.clear()
     _last_caption.clear()
     _last_prune_at.clear()
+    _screen_active_until.clear()
 
 
 def cleanup_session_state(session_id: str) -> None:
@@ -143,6 +168,7 @@ def cleanup_session_state(session_id: str) -> None:
     unbounded across the process lifetime."""
     _last_fire_at.pop(session_id, None)
     _last_caption.pop(session_id, None)
+    _screen_active_until.pop(session_id, None)
 
 
 # ── Sensitive-content redaction ───────────────────────────────────────
@@ -258,6 +284,25 @@ def _ext_to_mime(path: Path) -> str:
     }.get(path.suffix.lower().lstrip("."), "image/png")
 
 
+def _session_vision_capable(session_id: str) -> bool:
+    """Whether the session's model can take images. Falls back to the
+    configured default model when the session didn't pin one, so we don't
+    silently degrade when the real default IS vision-capable (Claude)."""
+    try:
+        from service.whiteboard.vision_capability import is_vision_capable
+    except Exception:  # noqa: BLE001
+        return False
+    agent = _resolve_agent(session_id)
+    model = getattr(agent, "model_name", None) if agent is not None else None
+    if not model:
+        model = (
+            os.environ.get("ANTHROPIC_MODEL")
+            or os.environ.get("GENY_DEFAULT_MODEL")
+            or ""
+        )
+    return is_vision_capable(model)
+
+
 def _maybe_image_attachment(
     session_id: str, image_path: Path,
 ) -> Optional[list]:
@@ -273,26 +318,8 @@ def _maybe_image_attachment(
     of this module + out of the chat-history JSON)."""
     if not _send_image_enabled():
         return None
-    try:
-        from service.whiteboard.vision_capability import is_vision_capable
-    except Exception:  # noqa: BLE001
-        return None
-    agent = _resolve_agent(session_id)
-    model = getattr(agent, "model_name", None) if agent is not None else None
-    if not model:
-        # Session didn't pin a model → fall back to the configured default
-        # so we don't silently degrade to caption-only when the real default
-        # IS vision-capable (the VTuber default is Claude).
-        model = (
-            os.environ.get("ANTHROPIC_MODEL")
-            or os.environ.get("GENY_DEFAULT_MODEL")
-            or ""
-        )
-    if not is_vision_capable(model):
-        logger.info(
-            "[USER_OBSERVATION] model %r not vision-capable — caption-only",
-            model,
-        )
+    if not _session_vision_capable(session_id):
+        logger.info("[USER_OBSERVATION] model not vision-capable — caption-only")
         return None
     try:
         return [{
@@ -303,6 +330,65 @@ def _maybe_image_attachment(
     except Exception:  # noqa: BLE001
         logger.debug("[USER_OBSERVATION] attachment build failed", exc_info=True)
         return None
+
+
+async def capture_current_screen_attachment(
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Real-time per-turn capture (P3b): grab the CURRENT screen from the
+    session's connector and return a chat attachment so the persona judges
+    what's literally on screen right now. Returns ``None`` (turn proceeds
+    without an image) unless ALL gates pass — never captures silently:
+
+      * the screen-image kill-switch is on (``GENY_SCREEN_OBS_SEND_IMAGE``),
+      * the session model is vision-capable,
+      * screen observation is currently ON (a frame was uploaded recently —
+        the connector reuses that already-open live stream, so this is fast),
+      * a connector is registered and advertises ``screen_capture``.
+
+    Fully guarded: any transport/timeout/parse error → ``None``."""
+    if not _send_image_enabled():
+        return None
+    if not is_screen_active(session_id):
+        return None
+    if not _session_vision_capable(session_id):
+        return None
+    try:
+        from service.executor.connector_registry import get_connector_registry
+    except Exception:  # noqa: BLE001
+        return None
+    conn = get_connector_registry().get(session_id)
+    if conn is None or "screen_capture" not in getattr(conn, "accepted_capabilities", set()):
+        return None
+    try:
+        payload = await conn.capability_call(
+            # live_only: the connector must capture from the already-open
+            # observation stream and refuse if it's gone — so a turn never
+            # grabs the screen after the user toggled observation off.
+            # Short timeout: the live-stream grab is ~instant; this only bites
+            # if the connector is hung, and it's fully additive to the turn's
+            # time-to-first-token, so fail fast rather than stall the reply.
+            "screen_capture", {"live_only": True}, "live turn vision", timeout=2.5,
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[turn-vision] connector capture failed", exc_info=True)
+        return None
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return None
+    result = payload.get("result") or {}
+    b64 = result.get("image_b64")
+    if not b64:
+        return None
+    # Tolerate a data: URL prefix → RAW base64 for the executor normalizer.
+    raw = b64.split(",", 1)[-1]
+    mime = result.get("mime", "image/jpeg")
+    return {
+        "kind": "image",
+        "mime_type": mime,
+        "data": raw,
+        "name": "screen.jpg",
+        "source": "screen_observation",
+    }
 
 
 def _build_observation_paths(
@@ -543,6 +629,9 @@ async def save_and_maybe_trigger(
     """
     observation_id = uuid.uuid4().hex[:12]
     captured_at = datetime.now(timezone.utc)
+    # Every upload refreshes the "observing" marker so conversation turns may
+    # grab a fresh frame from the connector (P3b) only while the toggle is ON.
+    _mark_screen_active(session_id)
     result = ObservationResult(
         observation_id=observation_id, session_id=session_id,
     )

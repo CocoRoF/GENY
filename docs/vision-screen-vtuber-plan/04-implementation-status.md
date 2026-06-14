@@ -15,6 +15,7 @@
 | **P2-pre** | `VALID_CATEGORIES`에 `observations` 등록 (회상 가능 카테고리) | `backend/service/memory/note_utils.py` | — |
 | **P2** | 관찰을 **회상 가능 볼트 `memory/observations/`에 `awrite_note`로 기록** + caption dedup + 이미지 retention prune + manager 없으면 raw 폴백 | `backend/.../screen_observation.py` `_record_observation_note`/`_prune_old_observations` | 6 신규 |
 | **P3** | 음성(PTT)·키보드 턴에 **현재 화면 프레임 첨부**(toggle ON 시) — `screenFrameAccess` 싱글톤 | `screenFrameAccess.ts`(신규), `PushToTalkDriver.tsx`, `VTuberChatPanel.tsx` | FE tsc |
+| **P3b** | **실시간 모든-턴 화면 인지**: 프론트 프레임이 없는 vtuber 턴(예: `/connector` 타이핑)은 **백엔드가 broadcast 시점에 커넥터로 live capture 요청** → 커넥터가 **열려있는 관찰 스트림에서 즉시** 반환. 게이트(킬스위치+vision+토글ON+커넥터). **live-only**: 토글 OFF면 절대 캡처 안 함(새 스트림 안 엶). 프레임은 그 턴 executor에만 전달(기록 X) | `chat_controller._invoke_one`, `screen_observation.capture_current_screen_attachment`, `ConnectorBridgeClient.captureScreen` | 8 신규 |
 | **P4** | 커넥터에서 **desktopCapturer(chromeMediaSource) 무프롬프트 캡처**, 브라우저는 getDisplayMedia 폴백 | `useScreenObservation.ts` `_acquireScreenStream` | FE tsc |
 
 테스트: `test_screen_observation.py` **22 passed** (기존 11 보존 + 신규 11). 백엔드 import OK, 프론트 tsc clean.
@@ -65,7 +66,7 @@
 
 ## 4. 알려진 한계 / 의사결정 (검토 요망)
 
-1. **P3 타이핑 경로는 overlay 창에서만 화면 첨부.** `/connector` 채팅 창은 화면 스트림이 없는 별도 프로세스라, 거기서 타이핑한 턴엔 화면이 안 붙음(스트림 있는 overlay의 음성/타이핑은 붙음). `/connector` 타이핑의 화면 인지는 **ambient 관찰(P1) + 메모리 회상(P2)**로 커버. *완전 커버하려면* 백엔드가 broadcast 시점에 커넥터로 fresh capture 요청하는 **P3b**가 필요(코어 broadcast 경로에 지연·결합 추가 → 별도 승인 권장). ← **남은 한계**
+1. **(해소됨) `/connector` 타이핑 턴 화면 인지** → **P3b** 구현. 이제 모든 vtuber 턴이 실시간 현재 화면을 봄(토글 ON + 커넥터 시). 토글 OFF면 live-only 게이트로 캡처 안 함. 단, 브라우저-only(커넥터 없음) `/connector`는 여전히 ambient+회상 커버(브라우저엔 backend가 잡을 스트림이 없음 — 데스크톱 커넥터 전용 실시간).
 2. **P5(idle 프로액티브)는 미구현** — ambient 관찰이 준-프로액티브 역할을 이미 하므로 보류(03 플랜대로). 원하면 추가.
 3. **(해소됨) 캡션 시크릿 유출** → §3b #2 redaction으로 마스킹. (단 redaction은 베스트-에포트 패턴이라 완벽 보장은 아님 — 민감 화면은 토글 OFF 권장.)
 4. **(해소됨) chat history base64 비대화 / 킬스위치 / dict 누적 / vision 폴백** → §3b #1/#3/#10/#6.

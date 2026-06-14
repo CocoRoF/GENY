@@ -23,13 +23,11 @@ import type { ChatAttachment } from '@/types';
 export type ScreenFrameGrabber = () => Promise<{ data: string; mime_type: string } | null>;
 
 let _grabber: ScreenFrameGrabber | null = null;
-let _lastSentRaw: string | null = null;
 
 /** Called by useScreenObservation: pass a grabber while the stream is live,
  *  or ``null`` on teardown. Last writer wins. */
 export function registerScreenGrabber(grabber: ScreenFrameGrabber | null): void {
   _grabber = grabber;
-  if (!grabber) _lastSentRaw = null; // stream gone → forget dedup baseline
 }
 
 /** True when a live screen stream is available in this window. */
@@ -37,36 +35,46 @@ export function isScreenFrameAvailable(): boolean {
   return _grabber !== null;
 }
 
-/** Grab the current screen frame as a chat attachment, or null when no
- *  stream is live / capture fails. Never throws. */
-export async function grabCurrentScreenAttachment(): Promise<ChatAttachment | null> {
+/** Grab the current screen frame as RAW base64 (no dedup), or null when no
+ *  stream is live / capture fails. Never throws. Used by the connector
+ *  bridge's ``screen_capture`` so a backend-orchestrated turn capture reuses
+ *  the already-open live stream (instant) instead of opening a new one. */
+export async function grabCurrentScreenRaw(): Promise<{ data: string; mime_type: string } | null> {
   const g = _grabber;
   if (!g) return null;
   try {
     const r = await g();
     if (!r || !r.data) return null;
-    // The grabber returns a full data URL ("data:image/jpeg;base64,<b64>")
-    // but the backend BroadcastAttachment.data / executor MultimodalNormalizer
-    // expect RAW base64 in the ``data`` field (it builds an Anthropic
-    // {type:base64,...,data:<b64>} block verbatim). Strip the data-URL
-    // header so we don't double-prefix and get rejected by the vendor SDK.
+    // The grabber returns a full data URL ("data:image/jpeg;base64,<b64>");
+    // strip the header to RAW base64 (the executor MultimodalNormalizer +
+    // BroadcastAttachment.data expect raw base64, not a data: URL).
     const comma = r.data.indexOf(',');
     const raw = comma >= 0 ? r.data.slice(comma + 1) : r.data;
     if (!raw) return null;
-    // Change-dedup: don't resend an identical frame on rapid-fire turns
-    // (the persona already saw it). Distinct screens still attach.
-    if (raw === _lastSentRaw) return null;
-    _lastSentRaw = raw;
-    return {
-      kind: 'image',
-      mime_type: r.mime_type,
-      data: raw,
-      name: 'screen.jpg',
-      // Provenance: lets the backend keep this out of persisted chat history
-      // and honour the screen-image kill-switch (it's ambient context).
-      source: 'screen_observation',
-    };
+    return { data: raw, mime_type: r.mime_type };
   } catch {
     return null;
   }
+}
+
+/** Grab the current screen frame as a chat attachment, or null when no
+ *  stream is live / capture fails. Never throws.
+ *
+ *  No change-dedup: every turn attaches the CURRENT frame so the persona
+ *  always judges what's literally on screen now. (The executor dehydrates
+ *  image base64 out of history after the turn, so a prior turn's frame is
+ *  gone — skipping an "unchanged" frame would leave the persona blind for
+ *  that turn rather than save it from re-reading.) */
+export async function grabCurrentScreenAttachment(): Promise<ChatAttachment | null> {
+  const r = await grabCurrentScreenRaw();
+  if (!r) return null;
+  return {
+    kind: 'image',
+    mime_type: r.mime_type,
+    data: r.data,
+    name: 'screen.jpg',
+    // Provenance: lets the backend keep this out of persisted chat history
+    // and honour the screen-image kill-switch (it's ambient context).
+    source: 'screen_observation',
+  };
 }
