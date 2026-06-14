@@ -111,7 +111,7 @@ class DesktopGlanceTool(ConnectorCapabilityTool):
         b64 = result.get("image_b64")
         if not b64:
             return ToolResult(content="connector returned no image", is_error=True)
-        mime = result.get("mime", "image/png")
+        mime = result.get("mime", "image/jpeg")
         label = result.get("source_name") or "screen"
         try:
             raw = base64.b64decode(b64.split(",", 1)[-1])  # tolerate a data: URL prefix

@@ -723,6 +723,132 @@ def test_cleanup_session_state_drops_tables() -> None:
     assert "sess-x" not in so._last_caption
 
 
+# ── P3b: real-time per-turn capture via connector ─────────────────────
+
+
+class _FakeConn:
+    def __init__(self, *, caps=("screen_capture",), result=None, raise_exc=None):
+        self.accepted_capabilities = set(caps)
+        self._result = result
+        self._raise = raise_exc
+        self.calls = []
+
+    async def capability_call(self, tool, args, reason="", timeout=30.0):
+        self.calls.append((tool, args, reason, timeout))
+        if self._raise:
+            raise self._raise
+        return self._result
+
+
+def _install_connector(monkeypatch, conn):
+    """Patch the lazily-imported get_connector_registry inside
+    capture_current_screen_attachment."""
+    import service.executor.connector_registry as creg
+
+    class _Reg:
+        def get(self, _sid):
+            return conn
+
+    monkeypatch.setattr(creg, "get_connector_registry", lambda: _Reg())
+
+
+def _arm_capture(monkeypatch, session_id="sess-1", vision=True):
+    from service.vtuber import screen_observation as so
+    monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: vision)
+    so._mark_screen_active(session_id)  # toggle "ON"
+
+
+def test_turn_capture_returns_attachment_when_all_gates_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+
+    _arm_capture(monkeypatch)
+    conn = _FakeConn(result={
+        "ok": True,
+        "result": {"image_b64": "data:image/jpeg;base64,QUJD", "mime": "image/jpeg",
+                   "source_name": "screen (live)"},
+    })
+    _install_connector(monkeypatch, conn)
+
+    att = _run(so.capture_current_screen_attachment("sess-1"))
+    assert att is not None
+    assert att["kind"] == "image"
+    assert att["mime_type"] == "image/jpeg"
+    assert att["data"] == "QUJD"          # data: URL prefix stripped → raw b64
+    assert att["source"] == "screen_observation"
+    assert conn.calls[0][0] == "screen_capture"
+
+
+def test_turn_capture_none_when_not_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+    monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: True)
+    # NOT marked active → no capture even if a connector exists.
+    _install_connector(monkeypatch, _FakeConn(result={"ok": True, "result": {}}))
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+
+
+def test_turn_capture_none_when_killswitch_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+    monkeypatch.setenv("GENY_SCREEN_OBS_SEND_IMAGE", "0")
+    _arm_capture(monkeypatch)
+    _install_connector(monkeypatch, _FakeConn(result={
+        "ok": True, "result": {"image_b64": "QUJD"}}))
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+
+
+def test_turn_capture_none_when_non_vision_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+    _arm_capture(monkeypatch, vision=False)
+    _install_connector(monkeypatch, _FakeConn(result={
+        "ok": True, "result": {"image_b64": "QUJD"}}))
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+
+
+def test_turn_capture_none_when_no_connector_or_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+    _arm_capture(monkeypatch)
+    # No connector registered.
+    _install_connector(monkeypatch, None)
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+    # Connector present but doesn't advertise screen_capture.
+    _install_connector(monkeypatch, _FakeConn(caps=("ping",)))
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+
+
+def test_turn_capture_none_on_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+    _arm_capture(monkeypatch)
+    _install_connector(monkeypatch, _FakeConn(raise_exc=TimeoutError("slow")))
+    assert _run(so.capture_current_screen_attachment("sess-1")) is None
+
+
+def test_is_screen_active_tracks_uploads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber.screen_observation import save_and_maybe_trigger, is_screen_active
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch)
+    _install_trigger_recorder(monkeypatch)
+
+    assert is_screen_active("sess-1") is False
+    _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F", mime_type="image/jpeg",
+    ))
+    assert is_screen_active("sess-1") is True
+
+
 def test_prune_removes_old_images_keeps_notes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
