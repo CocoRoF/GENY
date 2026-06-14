@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { initAutoUpdate, checkForUpdatesManually } from './updater'
 
 // Tray icon (32px), embedded so it works regardless of packaging layout.
 const TRAY_ICON_B64 =
@@ -203,6 +204,9 @@ function createTray(): void {
         },
       },
       { type: 'separator' },
+      { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
+      { label: `버전 v${app.getVersion()}`, enabled: false },
+      { type: 'separator' },
       {
         label: '종료',
         click: () => {
@@ -289,6 +293,9 @@ app.whenReady().then(() => {
   // Phase 0: show the control window on launch so settings/login are immediately
   // visible (no more "where do I configure it?"). It hides to the tray on close.
   control?.show()
+
+  // GitHub Releases auto-update (Windows/Linux; macOS once signed).
+  initAutoUpdate()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()

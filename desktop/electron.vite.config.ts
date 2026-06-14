@@ -13,8 +13,9 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        // keytar is a native addon — never bundle it.
-        external: ['keytar'],
+        // keytar is a native addon; electron-updater must stay external so it
+        // resolves from node_modules at runtime (packaged by electron-builder).
+        external: ['keytar', 'electron-updater'],
       },
     },
   },
