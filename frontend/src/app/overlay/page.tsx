@@ -135,8 +135,8 @@ export default function OverlayPage() {
     window.addEventListener('mouseup', onUp);
   };
 
-  if (error) return <div style={MSG}>{error}</div>;
-  if (!resolved) return <div style={MSG}>아바타 불러오는 중…</div>;
+  if (error) return <Loading label={error} error />;
+  if (!resolved) return <Loading label="아바타 불러오는 중…" />;
 
   return (
     <div style={ROOT}>
@@ -157,6 +157,11 @@ export default function OverlayPage() {
       ) : (
         <div style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
           <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
+          {/* Drag handle — a NON-button so bar-drag fires on it; widens the grab
+              area and signals the window is movable. */}
+          <span style={GRIP} title="드래그하여 아바타 이동">
+            <GripIcon />
+          </span>
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
@@ -194,6 +199,36 @@ function LockIcon({ open }: { open: boolean }) {
     </svg>
   );
 }
+function GripIcon() {
+  return (
+    <svg width="13" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      {[6, 12, 18].map((cy) => (
+        <g key={cy}>
+          <circle cx="9" cy={cy} r="1.7" />
+          <circle cx="15" cy={cy} r="1.7" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// Proper loading / error screen (the overlay window is transparent).
+function Loading({ label, error }: { label: string; error?: boolean }) {
+  return (
+    <div style={LOAD_WRAP}>
+      <style>{'@keyframes geny-spin{to{transform:rotate(360deg)}}'}</style>
+      <div style={LOAD_CARD}>
+        {error ? (
+          <div style={{ fontSize: 22 }}>⚠️</div>
+        ) : (
+          <div style={SPINNER} />
+        )}
+        <div style={{ fontWeight: 700, fontSize: 13, letterSpacing: 0.3 }}>Geny</div>
+        <div style={{ fontSize: 11, opacity: 0.65, maxWidth: 240, textAlign: 'center', lineHeight: 1.5 }}>{label}</div>
+      </div>
+    </div>
+  );
+}
 // ── styles ───────────────────────────────────────────────────────────────────
 const ROOT: CSSProperties = { width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' };
 
@@ -214,8 +249,8 @@ const BAR: CSSProperties = {
 };
 
 const LOCK_ONLY: CSSProperties = {
-  alignSelf: 'flex-end',
-  margin: '0 10px 10px',
+  alignSelf: 'center',
+  margin: '0 auto 10px',
   borderRadius: 999,
   background: 'rgba(18,18,24,0.7)',
   backdropFilter: 'blur(8px)',
@@ -238,6 +273,43 @@ const ICON_BTN: CSSProperties = {
 };
 
 const DIVIDER: CSSProperties = { width: 1, height: 18, background: 'rgba(255,255,255,0.14)', margin: '0 2px' };
+
+const GRIP: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '4px 4px',
+  color: 'rgba(255,255,255,0.5)',
+  cursor: 'grab',
+};
+
+const LOAD_WRAP: CSSProperties = {
+  width: '100vw',
+  height: '100vh',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+};
+const LOAD_CARD: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 10,
+  padding: '20px 26px',
+  borderRadius: 16,
+  background: 'rgba(18,18,24,0.78)',
+  backdropFilter: 'blur(10px)',
+  boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+  color: '#e8e8f0',
+};
+const SPINNER: CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: '50%',
+  border: '3px solid rgba(255,255,255,0.15)',
+  borderTopColor: '#7c84ff',
+  animation: 'geny-spin 0.8s linear infinite',
+};
 
 function pill(active: boolean): CSSProperties {
   return {
@@ -265,16 +337,3 @@ function dot(active: boolean): CSSProperties {
 }
 const HIDDEN: CSSProperties = { position: 'fixed', left: -99999, top: 0, width: 380, height: 380, opacity: 0, pointerEvents: 'none' };
 
-const MSG: CSSProperties = {
-  width: '100vw',
-  height: '100vh',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: 'transparent',
-  color: '#e8e8f0',
-  fontFamily: 'system-ui, sans-serif',
-  fontSize: 13,
-  textAlign: 'center',
-  padding: 24,
-};
