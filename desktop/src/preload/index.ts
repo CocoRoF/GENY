@@ -44,6 +44,8 @@ export interface ConnectorBridge {
     setOverlaySession(sessionId: string): void
     /** Open the settings window (server URL / account / auto-update). */
     openSettings(): void
+    /** Restart the whole connector app (reloads overlay/panel + native code). */
+    restart(): void
   }
 
   /** Global push-to-talk hotkey. */
@@ -107,6 +109,7 @@ const api: ConnectorBridge = {
     refresh: () => ipcRenderer.send('app:refresh'),
     setOverlaySession: (sessionId) => ipcRenderer.send('overlay:set-session', sessionId),
     openSettings: () => ipcRenderer.send('settings:open'),
+    restart: () => ipcRenderer.send('app:restart'),
   },
   updater: {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),

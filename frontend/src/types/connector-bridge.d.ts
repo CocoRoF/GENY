@@ -15,6 +15,7 @@ declare global {
         openSettings(): void
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
+        restart(): void
       }
       hotkeys?: {
         getPushToTalk(): Promise<string | null>

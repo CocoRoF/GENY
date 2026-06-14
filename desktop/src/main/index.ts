@@ -305,6 +305,14 @@ function createTray(): void {
       { type: 'separator' },
       { label: '로그아웃', click: () => void logout() },
       {
+        label: '재시작',
+        click: () => {
+          appQuitting = true
+          app.relaunch()
+          app.quit()
+        },
+      },
+      {
         label: '종료',
         click: () => {
           appQuitting = true
@@ -428,6 +436,13 @@ function registerIpc(): void {
   // Open the settings window (from the panel's gear button or app menu).
   ipcMain.on('settings:open', () => showSettings())
 
+  // Restart the whole connector (reloads the remote overlay/panel + native code).
+  ipcMain.on('app:restart', () => {
+    appQuitting = true
+    app.relaunch()
+    app.quit()
+  })
+
   // Global push-to-talk hotkey config.
   ipcMain.handle('hotkey:get-ptt', () => loadConfig().pttHotkey ?? DEFAULT_PTT)
   ipcMain.handle('hotkey:set-ptt', (_e, acc: string) => {
@@ -543,6 +558,7 @@ function buildAppMenu(): void {
         { label: '제어판 / 채팅', click: () => showControl() },
         { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
         { type: 'separator' },
+        { label: '재시작', click: () => { appQuitting = true; app.relaunch(); app.quit() } },
         { label: '로그아웃', click: () => void logout() },
         { role: 'quit', label: '종료' },
       ],
