@@ -19,7 +19,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
-import { agentApi } from '@/lib/api';
+import { agentApi, chatApi } from '@/lib/api';
 import { useVTuberStore } from '@/store/useVTuberStore';
 
 // Browser-only (pixi.js + Spine/Live2D runtime) — never SSR.
@@ -29,6 +29,7 @@ const VTuberChatPanel = dynamic(() => import('@/components/live2d/VTuberChatPane
 // Mounted hidden (off-screen) — they run getUserMedia / getDisplayMedia / TTS
 // based on store state; the visible compact bar below toggles that same state.
 const STTControls = dynamic(() => import('@/components/live2d/STTControls'), { ssr: false });
+const PushToTalkDriver = dynamic(() => import('@/components/live2d/PushToTalkDriver'), { ssr: false });
 const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
   { ssr: false },
@@ -40,6 +41,9 @@ export default function OverlayPage() {
   // Locked (default): the avatar is click-through + fixed (no move/resize); only
   // the control bar is interactive. Unlocked: whole window draggable to reposition.
   const [locked, setLocked] = useState(true);
+  // Push-to-talk (global hotkey toggles this). Tap on → mic listens; tapping
+  // again (or the same hotkey) toggles off. On the down-edge we also barge in.
+  const [pttActive, setPttActive] = useState(false);
 
   const fetchModels = useVTuberStore((s) => s.fetchModels);
   const fetchAssignment = useVTuberStore((s) => s.fetchAssignment);
@@ -111,6 +115,22 @@ export default function OverlayPage() {
     window.connector?.windowControl.setClickThrough(locked);
   }, [locked]);
 
+  // Global push-to-talk hotkey (from the connector). On each press: if the avatar
+  // is mid-TTS, barge in (cut audio + cancel the agent turn), then toggle the mic.
+  useEffect(() => {
+    if (!resolved) return;
+    const handle = () => {
+      const st = useVTuberStore.getState();
+      if (st.ttsSpeaking[resolved.sid]) {
+        st.stopSpeaking(resolved.sid);
+        if (resolved.rid) chatApi.cancelBroadcast(resolved.rid).catch(() => undefined);
+      }
+      setPttActive((v) => !v);
+    };
+    const off = window.connector?.hotkeys?.onPushToTalk(handle);
+    return () => off?.();
+  }, [resolved]);
+
   // While locked, hovering the (tiny) control re-enables input so it is clickable;
   // leaving returns to click-through.
   const onBarEnter = () => {
@@ -140,6 +160,9 @@ export default function OverlayPage() {
 
   return (
     <div style={ROOT}>
+      {/* Push-to-talk "listening" indicator (visual only). */}
+      {pttActive && <div style={PTT_PILL}>🎙 듣는 중…</div>}
+
       {/* Avatar — the renderer's OWN crisp pan/zoom (drag = pan, wheel = zoom),
           active when the window is interactive (unlocked). No CSS scaling. */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -181,6 +204,7 @@ export default function OverlayPage() {
           run off-screen, toggled by the bar above via shared store state. */}
       <div aria-hidden style={HIDDEN}>
         {resolved.rid && <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />}
+        {resolved.rid && <PushToTalkDriver sessionId={resolved.sid} roomId={resolved.rid} active={pttActive} />}
         <STTControls sessionId={resolved.sid} />
         <ScreenObservationControls sessionId={resolved.sid} />
       </div>
@@ -342,4 +366,20 @@ function dot(active: boolean): CSSProperties {
   };
 }
 const HIDDEN: CSSProperties = { position: 'fixed', left: -99999, top: 0, width: 380, height: 380, opacity: 0, pointerEvents: 'none' };
+
+const PTT_PILL: CSSProperties = {
+  position: 'absolute',
+  top: 10,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 5,
+  padding: '4px 12px',
+  borderRadius: 999,
+  background: 'rgba(220,38,38,0.85)',
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: 700,
+  boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+  pointerEvents: 'none',
+};
 

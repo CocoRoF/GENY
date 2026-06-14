@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -32,6 +32,8 @@ interface ConnectorConfig {
   serverUrl: string
   /** Auto-update toggle (default true). When false, updates only notify. */
   autoUpdate?: boolean
+  /** Global push-to-talk accelerator (Electron format). */
+  pttHotkey?: string
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
@@ -251,6 +253,7 @@ let appQuitting = false
 app.on('before-quit', () => {
   appQuitting = true
 })
+app.on('will-quit', () => globalShortcut.unregisterAll())
 
 // ── system tray: the always-available way to open settings / quit ───────────
 let tray: Tray | null = null
@@ -316,6 +319,21 @@ async function logout(): Promise<void> {
   await refreshAll() // logged out → hides panel, shows settings/login
 }
 
+// ── global push-to-talk hotkey ──────────────────────────────────────────────
+const DEFAULT_PTT = 'CommandOrControl+Shift+Space'
+function registerPtt(acc?: string | null): boolean {
+  globalShortcut.unregisterAll()
+  const hk = acc ?? loadConfig().pttHotkey ?? DEFAULT_PTT
+  if (!hk) return true
+  try {
+    // press-only (globalShortcut has no key-up) → the overlay treats it as a
+    // tap-to-toggle for the mic. Target the overlay: it owns the WS + audio.
+    return globalShortcut.register(hk, () => overlay?.webContents.send('connector:ptt-toggle'))
+  } catch {
+    return false
+  }
+}
+
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
 function registerIpc(): void {
   ipcMain.handle('config:get', () => loadConfig())
@@ -343,6 +361,14 @@ function registerIpc(): void {
 
   // Open the settings window (from the panel's gear button or app menu).
   ipcMain.on('settings:open', () => showSettings())
+
+  // Global push-to-talk hotkey config.
+  ipcMain.handle('hotkey:get-ptt', () => loadConfig().pttHotkey ?? DEFAULT_PTT)
+  ipcMain.handle('hotkey:set-ptt', (_e, acc: string) => {
+    const ok = registerPtt(acc)
+    if (ok) saveConfig({ pttHotkey: acc })
+    return ok
+  })
 
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
@@ -463,6 +489,9 @@ app.whenReady().then(() => {
   // GitHub Releases auto-update. Default ON; the toggle is read fresh on every
   // check, so changes take effect immediately.
   initAutoUpdate(() => loadConfig().autoUpdate !== false)
+
+  // Register the global push-to-talk hotkey.
+  registerPtt(loadConfig().pttHotkey ?? DEFAULT_PTT)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()

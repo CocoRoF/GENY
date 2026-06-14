@@ -46,6 +46,14 @@ export interface ConnectorBridge {
     openSettings(): void
   }
 
+  /** Global push-to-talk hotkey. */
+  hotkeys: {
+    getPushToTalk(): Promise<string | null>
+    setPushToTalk(accelerator: string): Promise<boolean>
+    /** Subscribe to global push-to-talk presses; returns a disposer. */
+    onPushToTalk(cb: () => void): () => void
+  }
+
   /** GitHub Releases auto-update controls. */
   updater: {
     /** Is auto-update enabled? (default true) */
@@ -82,6 +90,15 @@ const api: ConnectorBridge = {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),
     setEnabled: (enabled) => ipcRenderer.invoke('updater:set-enabled', enabled),
     check: () => ipcRenderer.send('updater:check'),
+  },
+  hotkeys: {
+    getPushToTalk: () => ipcRenderer.invoke('hotkey:get-ptt'),
+    setPushToTalk: (acc) => ipcRenderer.invoke('hotkey:set-ptt', acc),
+    onPushToTalk: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('connector:ptt-toggle', h)
+      return () => ipcRenderer.removeListener('connector:ptt-toggle', h)
+    },
   },
 }
 
