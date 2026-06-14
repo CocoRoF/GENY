@@ -16,8 +16,8 @@ export interface ConnectorConfig {
 }
 
 export interface ConnectorBridge {
-  /** Which window this renderer instance is: 'overlay' (avatar) or 'control'. */
-  windowKind: 'overlay' | 'control'
+  /** Which window this renderer is: 'overlay' (avatar) or 'settings'/'control'. */
+  windowKind: 'overlay' | 'control' | 'settings'
 
   serverConfig: {
     get(): Promise<ConnectorConfig>
@@ -42,6 +42,8 @@ export interface ConnectorBridge {
     refresh(): void
     /** Set which session the floating overlay renders, and reload it. */
     setOverlaySession(sessionId: string): void
+    /** Open the settings window (server URL / account / auto-update). */
+    openSettings(): void
   }
 
   /** GitHub Releases auto-update controls. */
@@ -55,8 +57,10 @@ export interface ConnectorBridge {
   }
 }
 
+const _wk = new URLSearchParams(location.search).get('window')
+
 const api: ConnectorBridge = {
-  windowKind: new URLSearchParams(location.search).get('window') === 'control' ? 'control' : 'overlay',
+  windowKind: _wk === 'settings' ? 'settings' : _wk === 'control' ? 'control' : 'overlay',
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch),
@@ -72,6 +76,7 @@ const api: ConnectorBridge = {
     toggleControl: () => ipcRenderer.send('control:toggle'),
     refresh: () => ipcRenderer.send('app:refresh'),
     setOverlaySession: (sessionId) => ipcRenderer.send('overlay:set-session', sessionId),
+    openSettings: () => ipcRenderer.send('settings:open'),
   },
   updater: {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),

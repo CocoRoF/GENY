@@ -4,10 +4,10 @@ import { OverlayApp } from './OverlayApp'
 import { ControlApp } from './ControlApp'
 import './styles.css'
 
-// One renderer build serves both windows; ?window=overlay|control picks which
-// React tree to mount (see main/index.ts loadRoute).
+// One renderer build serves the local windows; ?window=overlay → avatar
+// placeholder, ?window=settings → the settings/login panel (ControlApp).
 const kind = window.connector?.windowKind ?? 'overlay'
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <React.StrictMode>{kind === 'control' ? <ControlApp /> : <OverlayApp />}</React.StrictMode>,
+  <React.StrictMode>{kind === 'overlay' ? <OverlayApp /> : <ControlApp />}</React.StrictMode>,
 )

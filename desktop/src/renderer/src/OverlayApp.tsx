@@ -68,8 +68,8 @@ export function OverlayApp() {
         onMouseEnter={enterInteractive}
         onMouseLeave={leaveInteractive}
         onMouseDown={onHandleDown}
-        onDoubleClick={() => window.connector?.windowControl.toggleControl()}
-        title="드래그: 이동 · 더블클릭: 컨트롤 창"
+        onDoubleClick={() => window.connector?.windowControl.openSettings()}
+        title="드래그: 이동 · 더블클릭: 설정 열기"
       >
         <span className="dock-dot" />
       </button>

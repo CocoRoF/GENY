@@ -107,13 +107,26 @@ export default function ConnectorPage() {
           </div>
         )}
 
-        {isVTuber && sid && (
-          <div className="flex items-center gap-3 ml-auto">
-            <AudioControls sessionId={sid} />
-            <STTControls sessionId={sid} />
-            <ScreenObservationControls sessionId={sid} />
-          </div>
-        )}
+        <div className="flex items-center gap-3 ml-auto">
+          {isVTuber && sid && (
+            <>
+              <AudioControls sessionId={sid} />
+              <STTControls sessionId={sid} />
+              <ScreenObservationControls sessionId={sid} />
+            </>
+          )}
+          {/* Settings (server URL / account / auto-update) — desktop only. */}
+          {typeof window !== 'undefined' && window.connector && (
+            <button
+              type="button"
+              title="설정 (서버/계정/자동업데이트)"
+              onClick={() => window.connector?.windowControl.openSettings()}
+              className="px-2 py-1 text-[0.75rem] rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+            >
+              ⚙ 설정
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Chat */}

@@ -12,6 +12,7 @@ declare global {
       windowControl: {
         setOverlaySession(sessionId: string): void
         refresh(): void
+        openSettings(): void
       }
     }
   }
