@@ -1,0 +1,137 @@
+/* Overlay must composite onto the desktop — never paint an opaque background. */
+:root {
+  color-scheme: dark;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── overlay ──────────────────────────────────────────────────────────────── */
+.overlay-root {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  overflow: hidden;
+}
+
+.avatar-stage {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Soft floor shadow lives here as a CSS layer (PLAN §6.1) once the avatar
+     mounts; in-canvas DropShadow is disabled for pixi-v7. */
+}
+
+.parity-card {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(18, 18, 24, 0.72);
+  backdrop-filter: blur(8px);
+  color: #e8e8f0;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+.parity-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.parity-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+.parity-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.45;
+}
+
+/* Always-interactive dock handle (the only non-click-through region in Phase 0). */
+.dock-handle {
+  margin-bottom: 6px;
+  width: 56px;
+  height: 18px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(120, 130, 255, 0.55);
+  box-shadow: 0 0 12px rgba(120, 130, 255, 0.6);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dock-handle:active {
+  cursor: grabbing;
+}
+.dock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.85;
+}
+
+/* ── control window ───────────────────────────────────────────────────────── */
+.control-root {
+  background: #14141a;
+  color: #e8e8f0;
+  min-height: 100vh;
+  padding: 20px;
+  box-sizing: border-box;
+}
+.control-root h1 {
+  font-size: 20px;
+  margin: 0 0 16px;
+}
+.control-root .row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.control-root input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #1d1d26;
+  color: #e8e8f0;
+}
+.control-root button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: none;
+  background: #5b63ff;
+  color: #fff;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.control-root hr {
+  border: none;
+  border-top: 1px solid #2a2a35;
+  margin: 16px 0;
+}
+.control-root .status {
+  margin-top: 14px;
+  font-size: 12px;
+  opacity: 0.7;
+  word-break: break-all;
+}
+.control-root .ok {
+  color: #6ee7a8;
+  font-size: 13px;
+}

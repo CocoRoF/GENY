@@ -1,0 +1,22 @@
+appId: me.hrletsgo.geny.connector
+productName: Geny
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+# Phase 0: unsigned dev builds. Signing/notarization land in Phase 7
+# (PLAN §4.3) — macOS Developer ID + @electron/notarize, Win EV/OV cert.
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+  category: public.app-category.utilities
