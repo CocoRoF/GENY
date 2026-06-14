@@ -13,9 +13,9 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        // keytar is a native addon; electron-updater must stay external so it
-        // resolves from node_modules at runtime (packaged by electron-builder).
-        external: ['keytar', 'electron-updater'],
+        // Native addons (keytar, nut.js) + electron-updater stay external so they
+        // resolve from node_modules at runtime (packaged by electron-builder).
+        external: ['keytar', 'electron-updater', '@nut-tree-fork/nut-js'],
       },
     },
   },

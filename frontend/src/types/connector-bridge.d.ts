@@ -22,6 +22,16 @@ declare global {
         /** Subscribe to global push-to-talk presses; returns a disposer. */
         onPushToTalk(cb: () => void): () => void
       }
+      capture: {
+        listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>
+      }
+      actuate: {
+        openApp(target: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+        clipboardWrite(text: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+        type(text: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+        key(keys: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+        click(x: number, y: number, button?: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+      }
     }
   }
 }

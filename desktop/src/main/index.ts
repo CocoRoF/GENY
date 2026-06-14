@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -34,6 +34,10 @@ interface ConnectorConfig {
   autoUpdate?: boolean
   /** Global push-to-talk accelerator (Electron format). */
   pttHotkey?: string
+  /** Allow the agent to capture the screen (Phase 4). Default true. */
+  captureArmed?: boolean
+  /** Allow the agent to actuate the desktop — type/click/open (Phase 6). Default false. */
+  automationEnabled?: boolean
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
@@ -275,6 +279,19 @@ function createTray(): void {
       },
       { type: 'separator' },
       {
+        label: '화면 캡처 허용 (에이전트가 화면 보기)',
+        type: 'checkbox',
+        checked: loadConfig().captureArmed !== false,
+        click: (item) => saveConfig({ captureArmed: item.checked }),
+      },
+      {
+        label: '데스크톱 제어 허용 (자동화 — 타이핑/클릭/앱 열기)',
+        type: 'checkbox',
+        checked: loadConfig().automationEnabled === true,
+        click: (item) => saveConfig({ automationEnabled: item.checked }),
+      },
+      { type: 'separator' },
+      {
         label: '자동 업데이트',
         type: 'checkbox',
         checked: loadConfig().autoUpdate !== false,
@@ -334,6 +351,55 @@ function registerPtt(acc?: string | null): boolean {
   }
 }
 
+// ── Phase 6 actuation gate: master switch (default OFF) + native confirm ─────
+type ActuationResult = { ok: boolean; result?: string; denied?: boolean; error?: string }
+async function runActuation(label: string, detail: string, fn: () => Promise<string>): Promise<ActuationResult> {
+  if (loadConfig().automationEnabled !== true) {
+    return { ok: false, denied: true, error: '자동화가 꺼져 있습니다 (트레이 → 데스크톱 제어 허용)' }
+  }
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['허용', '거부'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Geny 데스크톱 제어',
+    message: `Geny 가 실행하려고 합니다: ${label}`,
+    detail,
+  })
+  if (response !== 0) return { ok: false, denied: true, error: '사용자가 거부함' }
+  try {
+    return { ok: true, result: await fn() }
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message) }
+  }
+}
+
+// Native input synthesis (nut.js) — lazy + graceful: if the addon is missing
+// on this build/platform, the import throws and runActuation reports it cleanly.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _nut: any = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadNut(): Promise<any> {
+  if (_nut) return _nut
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m: any = await import('@nut-tree-fork/nut-js')
+  const K = m.Key
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const keyMap: Record<string, any> = {
+    ctrl: K.LeftControl, control: K.LeftControl, alt: K.LeftAlt, shift: K.LeftShift,
+    cmd: K.LeftCmd, meta: K.LeftSuper, win: K.LeftSuper, super: K.LeftSuper,
+    enter: K.Enter, return: K.Return, tab: K.Tab, esc: K.Escape, escape: K.Escape,
+    space: K.Space, backspace: K.Backspace, delete: K.Delete, del: K.Delete,
+    up: K.Up, down: K.Down, left: K.Left, right: K.Right, home: K.Home, end: K.End,
+    a: K.A, b: K.B, c: K.C, d: K.D, e: K.E, f: K.F, g: K.G, h: K.H, i: K.I, j: K.J, k: K.K, l: K.L, m: K.M,
+    n: K.N, o: K.O, p: K.P, q: K.Q, r: K.R, s: K.S, t: K.T, u: K.U, v: K.V, w: K.W, x: K.X, y: K.Y, z: K.Z,
+    '0': K.Num0, '1': K.Num1, '2': K.Num2, '3': K.Num3, '4': K.Num4,
+    '5': K.Num5, '6': K.Num6, '7': K.Num7, '8': K.Num8, '9': K.Num9,
+  }
+  _nut = { keyboard: m.keyboard, mouse: m.mouse, Button: m.Button, Point: m.Point, Key: K, keyMap }
+  return _nut
+}
+
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
 function registerIpc(): void {
   ipcMain.handle('config:get', () => loadConfig())
@@ -369,6 +435,58 @@ function registerIpc(): void {
     if (ok) saveConfig({ pttHotkey: acc })
     return ok
   })
+
+  // ── Phase 4: desktop awareness (read-only capture) ──
+  ipcMain.handle('capture:list-sources', async () => {
+    if (loadConfig().captureArmed === false) return [] // user paused capture
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 1, height: 1 },
+    })
+    return sources.map((s) => ({ id: s.id, name: s.name, display_id: s.display_id }))
+  })
+
+  // ── Phase 6: guarded actuation. Master switch (default OFF) + native confirm
+  //    are the load-bearing local gate, independent of the server's decision. ──
+  ipcMain.handle('actuate:open-app', (_e, target: string) =>
+    runActuation('앱/링크 열기', `대상: ${target}`, async () => {
+      if (/^https?:\/\//i.test(target)) await shell.openExternal(target)
+      else await shell.openPath(target)
+      return `opened ${target}`
+    }),
+  )
+  ipcMain.handle('actuate:clipboard-write', (_e, text: string) =>
+    runActuation('클립보드 쓰기', text.slice(0, 80), async () => {
+      clipboard.writeText(text)
+      return 'clipboard written'
+    }),
+  )
+  ipcMain.handle('actuate:type', (_e, text: string) =>
+    runActuation('타이핑', text.slice(0, 80), async () => {
+      const nut = await loadNut()
+      await nut.keyboard.type(text)
+      return `typed ${text.length} chars`
+    }),
+  )
+  ipcMain.handle('actuate:key', (_e, keys: string) =>
+    runActuation('키 입력', keys, async () => {
+      const nut = await loadNut()
+      const parts = keys.toLowerCase().split('+').map((p) => p.trim())
+      const mapped = parts.map((p) => nut.keyMap[p]).filter((k: unknown) => k !== undefined)
+      if (mapped.length === 0) throw new Error(`unknown keys: ${keys}`)
+      await nut.keyboard.pressKey(...mapped)
+      await nut.keyboard.releaseKey(...mapped)
+      return `pressed ${keys}`
+    }),
+  )
+  ipcMain.handle('actuate:click', (_e, x: number, y: number, button?: string) =>
+    runActuation('마우스 클릭', `(${x}, ${y}) ${button ?? 'left'}`, async () => {
+      const nut = await loadNut()
+      await nut.mouse.setPosition(new nut.Point(x, y))
+      await nut.mouse.click(nut.Button[(button ?? 'left').toUpperCase() as 'LEFT' | 'RIGHT' | 'MIDDLE'])
+      return `clicked (${x},${y})`
+    }),
+  )
 
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
