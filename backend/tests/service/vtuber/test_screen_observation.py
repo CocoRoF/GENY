@@ -676,6 +676,53 @@ def test_e2e_save_records_to_vault(
     assert result.note_path == "observations/" + mm.calls[0]["filename_override"]
 
 
+def test_redact_sensitive_masks_secrets_keeps_prose() -> None:
+    from service.vtuber.screen_observation import _redact_sensitive
+
+    assert "[REDACTED]" in _redact_sensitive("password: hunter2thequickbrown")
+    assert "[REDACTED]" in _redact_sensitive("API_KEY=sk-abcdef0123456789ABCDEF")
+    assert "[REDACTED]" in _redact_sensitive("key AKIAIOSFODNN7EXAMPLE here")
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123456"
+    assert "[REDACTED]" in _redact_sensitive(jwt)
+    # Normal prose with short words is untouched.
+    plain = "User is editing main.py in VSCode and reading the docs."
+    assert _redact_sensitive(plain) == plain
+
+
+def test_redaction_applied_to_caption_in_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A secret transcribed by the captioner must be masked before the
+    caption is recorded or fed to the trigger."""
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(
+        monkeypatch,
+        caption="terminal shows password: hunter2theverylongsecret123",
+    )
+    fired = _install_trigger_recorder(monkeypatch)
+
+    result = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"FRAME", mime_type="image/jpeg",
+    ))
+
+    assert "[REDACTED]" in result.caption
+    assert "hunter2theverylongsecret123" not in result.caption
+    # The trigger receives the redacted caption too.
+    assert "hunter2theverylongsecret123" not in fired[0]["caption"]
+
+
+def test_cleanup_session_state_drops_tables() -> None:
+    from service.vtuber import screen_observation as so
+
+    so._last_fire_at["sess-x"] = 123.0
+    so._last_caption["sess-x"] = "something"
+    so.cleanup_session_state("sess-x")
+    assert "sess-x" not in so._last_fire_at
+    assert "sess-x" not in so._last_caption
+
+
 def test_prune_removes_old_images_keeps_notes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

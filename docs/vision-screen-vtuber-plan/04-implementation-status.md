@@ -47,13 +47,28 @@
 
 리뷰가 "Verified OK"로 확인한 것: P1 file:// attachment dict 형태, `awrite_note` 시그니처, `observations` 카테고리 회상 가능성, 프론트/백 필드명(`kind`/`mime_type`/`data`) 일치.
 
+### 3b. 2차 리뷰(확정 10건) 추가 반영
+
+| 심각도 | 이슈 | 수정 |
+|---|---|---|
+| **HIGH #1** | P3 화면 프레임 raw base64가 **chat history(DB+JSON)에 verbatim 영구 저장** + 매 턴 무게이트 | 화면 프레임은 `source:"screen_observation"`로 표시 → **저장 시 제외**(`_attachments_for_storage`, 채팅 기록 비대화 해소), executor엔 전달. + 프론트 **동일 프레임 change-dedup** (rapid-fire 같은 화면 재전송 안 함) |
+| **HIGH #2** | 캡션이 화면 텍스트(비번/키)를 verbatim 기록 → 검색 노트·페르소나로 유출 | `_redact_sensitive`로 **저장/전송 전 시크릿 마스킹**(password=/sk-/AKIA/JWT/ghp_/long-base64) |
+| **MED #3** | `GENY_SCREEN_OBS_SEND_IMAGE` 킬스위치가 P1만, P3 미적용 | broadcast에서 `source` 기반으로 **킬스위치 off 시 화면 프레임 drop**(`_filter_observation_frames_for_send`) |
+| LOW #6 | `model_name` 미설정 시 silently 캡션-only | 설정 기본 모델(ANTHROPIC_MODEL 등) 폴백 후 vision 판정 |
+| nit #9 | getDisplayMedia 없는 브라우저에서 raw TypeError | 커넥터·getDisplayMedia 둘 다 없으면 친화 메시지 |
+| nit #10 | per-session dict 미정리 | `cleanup_session_state` + `delete_session` 훅 연결 |
+
+이미 1차에서 수정: data-URL→raw base64, dedup-after-write, 이중쓰기 제거, prune 1h 스로틀, black frame 방지.
+수용/문서화(저위험): #5 orphan 이미지(retention이 정리), #7 embed가 Obsidian basename 전역 해소에 의존, #8 note_path 상대/절대 혼용(정보용).
+
+테스트(추가 반영 후): **backend 39 passed** (screen_obs 26 + broadcast 5 + connector 8), FE tsc clean.
+
 ## 4. 알려진 한계 / 의사결정 (검토 요망)
 
-1. **P3 타이핑 경로는 overlay 창에서만 화면 첨부.** `/connector` 채팅 창은 화면 스트림이 없는 별도 프로세스라, 거기서 타이핑한 턴엔 화면이 안 붙음(스트림 있는 overlay의 음성/타이핑은 붙음). `/connector` 타이핑의 화면 인지는 **ambient 관찰(P1) + 메모리 회상(P2)**로 커버. *완전 커버하려면* 백엔드가 broadcast 시점에 커넥터로 fresh capture 요청하는 P3b가 필요(코어 broadcast 경로에 지연·결합 추가 → 별도 승인 권장).
-2. **P3 vision 게이팅은 실질 디폴트에 의존.** P1(트리거)은 모델 vision 능력으로 게이팅하지만, P3 턴 첨부는 게이팅 없이 broadcast로 감 → **VTuber 기본 모델이 vision(claude-sonnet 등)이라 실무상 OK**. 비-vision 모델로 바꾸면 P3 이미지가 실패할 수 있음(문서화).
-3. **프라이버시: caption은 화면 텍스트를 verbatim 기록**하고 검색 가능 노트로 **영구 보존**(이미지만 retention prune). 비번/키가 화면에 있으면 caption에 남을 수 있음. 페르소나 발화엔 민감정보 가드가 있으나 *저장된 caption 자체*엔 미적용. → 필요 시 caption 작성 프롬프트에 redaction 지시 또는 노트 retention 추가 검토.
-4. **dedup/cooldown/prune 딕셔너리는 세션 종료 시 미정리** (세션 수만큼 누적). hobby 규모에선 무시 가능, 장기적으로 teardown 훅에서 정리 권장.
-5. **P5(idle 프로액티브)는 미구현** — ambient 관찰이 준-프로액티브 역할을 이미 하므로 보류(03 플랜대로). 원하면 추가.
+1. **P3 타이핑 경로는 overlay 창에서만 화면 첨부.** `/connector` 채팅 창은 화면 스트림이 없는 별도 프로세스라, 거기서 타이핑한 턴엔 화면이 안 붙음(스트림 있는 overlay의 음성/타이핑은 붙음). `/connector` 타이핑의 화면 인지는 **ambient 관찰(P1) + 메모리 회상(P2)**로 커버. *완전 커버하려면* 백엔드가 broadcast 시점에 커넥터로 fresh capture 요청하는 **P3b**가 필요(코어 broadcast 경로에 지연·결합 추가 → 별도 승인 권장). ← **남은 한계**
+2. **P5(idle 프로액티브)는 미구현** — ambient 관찰이 준-프로액티브 역할을 이미 하므로 보류(03 플랜대로). 원하면 추가.
+3. **(해소됨) 캡션 시크릿 유출** → §3b #2 redaction으로 마스킹. (단 redaction은 베스트-에포트 패턴이라 완벽 보장은 아님 — 민감 화면은 토글 OFF 권장.)
+4. **(해소됨) chat history base64 비대화 / 킬스위치 / dict 누적 / vision 폴백** → §3b #1/#3/#10/#6.
 
 ## 5. 설정 (env)
 

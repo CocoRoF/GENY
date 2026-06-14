@@ -11,6 +11,7 @@ Provides:
 """
 import asyncio
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -94,6 +95,44 @@ def _rewrite_local_attachment_url(att: Dict[str, Any]) -> Dict[str, Any]:
         )
     out["url"] = abs_path.as_uri()  # "file:///..."
     return out
+
+
+_OBSERVATION_SOURCE = "screen_observation"
+
+
+def _screen_image_send_enabled() -> bool:
+    """Mirror of ``screen_observation._send_image_enabled`` — whether
+    auto-captured screen frames are allowed to reach the persona."""
+    return os.environ.get(
+        "GENY_SCREEN_OBS_SEND_IMAGE", "true"
+    ).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _filter_observation_frames_for_send(
+    attachments: Optional[List[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Drop auto-captured screen frames before they reach the executor when
+    the screen-image kill-switch is off (honours GENY_SCREEN_OBS_SEND_IMAGE
+    for the P3 turn-attach path, mirroring the P1 trigger path). User-uploaded
+    attachments always pass through."""
+    if not attachments or _screen_image_send_enabled():
+        return attachments
+    kept = [a for a in attachments if a.get("source") != _OBSERVATION_SOURCE]
+    return kept or None
+
+
+def _attachments_for_storage(
+    attachments: Optional[List[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Storage copy of the turn's attachments. Auto-captured screen frames are
+    ambient CONTEXT (not user content) and carry raw base64 — exclude them so
+    chat history (DB + JSON backup) is never bloated with hundreds of KB per
+    turn. User uploads (url / attachment_id references) are kept verbatim."""
+    if not attachments:
+        return None
+    kept = [a for a in attachments if a.get("source") != _OBSERVATION_SOURCE]
+    return kept or None
+
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -324,6 +363,11 @@ class BroadcastAttachment(BaseModel):
     attachment_id: Optional[str] = None  # sha256 hex from POST /api/uploads
     url: Optional[str] = None             # /static/uploads/.../<sha>.<ext>
     data: Optional[str] = None            # base64 fallback (small inline pastes)
+    # Provenance discriminator. ``screen_observation`` marks an auto-captured
+    # screen frame attached to a turn (VTuber vision) — it is ambient context,
+    # not user content: it must NOT be persisted into chat history (raw bytes),
+    # and is dropped when the screen-image kill-switch is off.
+    source: Optional[str] = None
 
 
 class RoomBroadcastRequest(BaseModel):
@@ -495,6 +539,16 @@ async def broadcast_to_room(
             _rewrite_local_attachment_url(a.model_dump(exclude_none=True))
             for a in request.attachments
         ]
+        # VTuber screen-vision: auto-captured screen frames are ambient
+        # CONTEXT, not user content. (a) Honour the screen-image kill-switch
+        # by dropping them before they reach the executor; (b) never persist
+        # their raw base64 into chat history (it bloats the DB + JSON backup
+        # — the BroadcastAttachment contract says raw bytes don't travel).
+        attachments_payload = _filter_observation_frames_for_send(attachments_payload)
+
+    # Storage copy: strip auto-screen frames entirely (ambient context, not
+    # user content) so chat history never carries hundreds of KB of base64.
+    attachments_for_storage = _attachments_for_storage(attachments_payload)
 
     # 1. Save user message
     try:
@@ -502,12 +556,12 @@ async def broadcast_to_room(
             "type": "user",
             "content": request.message,
         }
-        if attachments_payload:
+        if attachments_for_storage:
             # Store attachment metadata on the user turn for replay /
             # rendering. Raw bytes are NOT stored here — only the URL
             # / attachment_id references that point back at
-            # ``backend/static/uploads``.
-            user_msg_data["attachments"] = attachments_payload
+            # ``backend/static/uploads`` (and auto-screen frames are excluded).
+            user_msg_data["attachments"] = attachments_for_storage
         user_msg = store.add_message(room_id, user_msg_data)
     except Exception as e:
         logger.error("Failed to save user message: %s", e, exc_info=True)

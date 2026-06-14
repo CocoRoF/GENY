@@ -329,7 +329,15 @@ export function useScreenObservation(
     let cancelled = false;
 
     const start = async () => {
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
+      const hasConnectorCapture =
+        typeof window !== 'undefined' &&
+        !!(window as unknown as { connector?: { capture?: { listSources?: unknown } } })
+          .connector?.capture?.listSources;
+      if (
+        typeof navigator === 'undefined' ||
+        !navigator.mediaDevices ||
+        (!hasConnectorCapture && !navigator.mediaDevices.getDisplayMedia)
+      ) {
         setPhase('error');
         setError('Screen sharing not supported in this browser');
         onAutoDisableRef.current?.();

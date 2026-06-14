@@ -219,6 +219,10 @@ export interface ChatAttachment {
   url?: string;
   /** Inline base64 fallback (for tiny pasted images). */
   data?: string;
+  /** Provenance discriminator. ``screen_observation`` = an auto-captured
+   *  screen frame (ambient context); the backend keeps it out of chat
+   *  history and honours the screen-image kill-switch. */
+  source?: string;
 }
 
 export interface ChatRoomMessageListResponse {
