@@ -8,6 +8,10 @@
     "email": "noreply@hrletsgo.me"
   },
   "homepage": "https://github.com/CocoRoF/Geny",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CocoRoF/Geny.git"
+  },
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {

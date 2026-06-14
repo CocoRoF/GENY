@@ -1,5 +1,13 @@
 appId: me.hrletsgo.geny.connector
 productName: Geny
+# Explicit publish provider so electron-builder can resolve update-info even with
+# GH_TOKEN present (without it, the monorepo's parent .git isn't detected and it
+# null-crashes on 'channel'/'provider'). Actual upload is done by the release job
+# via action-gh-release; the build step runs with `--publish never`.
+publish:
+  provider: github
+  owner: CocoRoF
+  repo: Geny
 directories:
   output: dist
   buildResources: build
