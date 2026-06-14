@@ -32,6 +32,8 @@ interface ConnectorConfig {
   serverUrl: string
   /** Auto-update toggle (default true). When false, updates only notify. */
   autoUpdate?: boolean
+  /** Which session the floating overlay renders (chosen in the control panel). */
+  overlaySession?: string
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
 }
 function configPath(): string {
@@ -127,7 +129,11 @@ function createControl(): void {
       nodeIntegration: false,
     },
   })
-  loadRoute(control, 'control')
+  control.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  applyControlContent()
   control.on('close', (e) => {
     // Hide instead of destroy so the single renderer process persists.
     if (!appQuitting) {
@@ -135,6 +141,21 @@ function createControl(): void {
       control?.hide()
     }
   })
+}
+
+// Control window content: the server's /connector panel (session + chat +
+// TTS/STT + model) once logged in, else the local login screen.
+async function applyControlContent(): Promise<void> {
+  if (!control) return
+  const token = await getStoredToken()
+  const { serverUrl, overlaySession } = loadConfig()
+  if (token && serverUrl) {
+    const base = serverUrl.replace(/\/+$/, '')
+    const sessQ = overlaySession ? `&session=${encodeURIComponent(overlaySession)}` : ''
+    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}`)
+  } else {
+    loadRoute(control, 'control')
+  }
 }
 
 function loadRoute(win: BrowserWindow, route: 'overlay' | 'control'): void {
@@ -170,7 +191,9 @@ async function applyOverlayContent(): Promise<void> {
   if (token && serverUrl) {
     overlay.setIgnoreMouseEvents(false)
     const base = serverUrl.replace(/\/+$/, '')
-    await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}`)
+    const sess = loadConfig().overlaySession
+    const sessQ = sess ? `&session=${encodeURIComponent(sess)}` : ''
+    await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
     // Drag the floating avatar to reposition the OS window; keep interactive
     // elements clickable. (Pixel-accurate click-through is a later phase.)
     overlay.webContents.insertCSS(
@@ -206,9 +229,19 @@ function createTray(): void {
         },
       },
       { type: 'separator' },
+      {
+        label: '자동 업데이트',
+        type: 'checkbox',
+        checked: loadConfig().autoUpdate !== false,
+        click: (item) => {
+          saveConfig({ autoUpdate: item.checked })
+          if (item.checked) triggerBackgroundCheck()
+        },
+      },
       { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
       { label: `버전 v${app.getVersion()}`, enabled: false },
       { type: 'separator' },
+      { label: '로그아웃', click: () => void logout() },
       {
         label: '종료',
         click: () => {
@@ -228,6 +261,19 @@ function showControl(): void {
   if (!control) createControl()
   control?.show()
   control?.focus()
+}
+
+// Clear the stored JWT and send both windows back to their logged-out state.
+async function logout(): Promise<void> {
+  try {
+    const keytar = await import('keytar')
+    await keytar.default.deletePassword('geny-connector', 'geny_auth_token')
+  } catch {
+    /* ignore */
+  }
+  await applyOverlayContent()
+  await applyControlContent()
+  showControl()
 }
 
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
@@ -252,8 +298,15 @@ function registerIpc(): void {
     control.isVisible() ? control.hide() : control.show()
   })
 
-  // Re-evaluate overlay content after login/logout (token changed in keychain).
-  ipcMain.on('overlay:refresh', () => {
+  // Re-evaluate BOTH windows after login/logout (token changed in keychain).
+  ipcMain.on('app:refresh', () => {
+    applyOverlayContent()
+    applyControlContent()
+  })
+
+  // Control panel picked a session → point the overlay at it.
+  ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
+    saveConfig({ overlaySession: sessionId })
     applyOverlayContent()
   })
 
