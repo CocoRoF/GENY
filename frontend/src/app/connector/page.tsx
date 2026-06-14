@@ -90,6 +90,14 @@ export default function ConnectorPage() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={() => loadSessions()}
+            title="세션 목록 새로고침"
+            className="px-2 py-1 text-[0.8rem] rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+          >
+            ↻
+          </button>
         </div>
 
         {isVTuber && (
