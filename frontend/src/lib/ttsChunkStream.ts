@@ -11,7 +11,7 @@
  */
 
 import { getAudioManager } from './audioManager';
-import { getBackendUrl } from './api';
+import { getBackendUrl, withAuthHeaders } from './api';
 
 interface ChunkFrame {
   seq?: number;
@@ -82,7 +82,7 @@ export async function dispatchSpeakChunks(
     `${backendUrl}/api/tts/agents/${opts.sessionId}/speak/chunks`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
       signal,
     },

@@ -145,6 +145,46 @@ async def login(request: LoginRequest, response: Response):
     return AuthTokenResponse(**token_data)
 
 
+@router.post("/refresh", response_model=AuthTokenResponse)
+async def refresh(response: Response, auth: dict = Depends(require_auth)):
+    """
+    Issue a fresh JWT for the current valid user.
+
+    Additive endpoint for always-on clients (e.g. the desktop connector):
+    present a still-valid token via require_auth and receive a new token with
+    a fresh expiry, avoiding a full re-login. Returns the same shape as
+    /login (body token + refreshed cookie). The browser is unaffected unless
+    it explicitly calls this.
+    """
+    auth_service = get_auth_service()
+
+    if auth_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service not available (database required)"
+        )
+
+    username = auth.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    token_data = auth_service.refresh_token(
+        username=username,
+        display_name=auth.get("display_name"),
+    )
+
+    # Refresh the cookie so same-origin browser clients also extend.
+    response.set_cookie(
+        key="geny_auth_token",
+        value=token_data["access_token"],
+        max_age=86400 * 7,  # 7 days
+        samesite="lax",
+        httponly=False,
+    )
+
+    return AuthTokenResponse(**token_data)
+
+
 @router.post("/logout", response_model=AuthMessageResponse)
 async def logout(response: Response):
     """

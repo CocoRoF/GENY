@@ -24,6 +24,8 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from service.auth.auth_middleware import ws_auth_or_close
+
 logger = getLogger(__name__)
 
 router = APIRouter()
@@ -67,8 +69,20 @@ async def ws_avatar_state_stream(websocket: WebSocket, session_id: str):
     motion changes.
     """
     logger.info("[AvatarWS:%s] connection attempt", session_id[:8])
-    await websocket.accept()
-    logger.info("[AvatarWS:%s] accepted", session_id[:8])
+
+    # Auth gate — validate the JWT before accepting. On failure the helper
+    # closes the socket with code 4401 and we return immediately.
+    auth = await ws_auth_or_close(websocket)
+    if auth is None:
+        logger.info("[AvatarWS:%s] rejected (unauthorized)", session_id[:8])
+        return
+
+    await websocket.accept(subprotocol=auth.subprotocol)
+    logger.info(
+        "[AvatarWS:%s] accepted (sub=%s)",
+        session_id[:8],
+        (auth.payload or {}).get("sub", "?"),
+    )
 
     app_state = websocket.app.state
     if not hasattr(app_state, "avatar_state_manager"):

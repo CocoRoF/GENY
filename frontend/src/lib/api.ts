@@ -3,7 +3,7 @@
  * Mirrors all legacy frontend-legacy/static/components/api.js endpoints
  */
 
-import { getToken } from '@/lib/authApi';
+import { getToken, removeToken } from '@/lib/authApi';
 
 // ==================== Base Fetch Wrapper ====================
 
@@ -29,6 +29,21 @@ async function apiCall<T = unknown>(endpoint: string, options: RequestInit = {})
     throw new Error(message);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * Merge an Authorization: Bearer header into a fetch headers object when a
+ * token exists. Used by the raw-`fetch` helpers (TTS speak/chunks, voice
+ * studio synth) that bypass `apiCall` because they need the streaming/blob
+ * Response directly. Same-origin prod also carries the cookie, but the Bearer
+ * header works cross-origin (dev :8000) too, so it is the robust path.
+ */
+export function withAuthHeaders(
+  base: Record<string, string> = {},
+): Record<string, string> {
+  const token = getToken();
+  if (token) return { ...base, Authorization: `Bearer ${token}` };
+  return { ...base };
 }
 
 // ==================== Backend Direct URL ====================
@@ -72,6 +87,38 @@ function getWsUrl(sessionId: string): string {
 
 function getChatWsUrl(roomId: string): string {
   return `${_getWsBase()}/ws/chat/rooms/${roomId}`;
+}
+
+// ==================== Authenticated WebSocket ====================
+// Browsers cannot set arbitrary headers on `new WebSocket(...)`, but they CAN
+// pass subprotocols. We smuggle the JWT through as the second subprotocol after
+// a 'geny-auth' marker: the server validates it during the handshake and echoes
+// 'geny-auth' back via accept(subprotocol='geny-auth'). When no token is present
+// (dev / no-auth mode) we fall back to an unauthenticated connect, which the
+// server still accepts when auth is not configured.
+const WS_AUTH_SUBPROTOCOL = 'geny-auth';
+
+/** Custom close code the server uses to signal "unauthorized". */
+export const WS_UNAUTHORIZED_CODE = 4401;
+
+function makeAuthedWs(url: string): WebSocket {
+  const token = getToken();
+  if (token) {
+    return new WebSocket(url, [WS_AUTH_SUBPROTOCOL, token]);
+  }
+  return new WebSocket(url);
+}
+
+/**
+ * Handle a 4401 WS close. The token is stale/invalid, so clear it and emit a
+ * global signal the UI can listen for to prompt re-login — rather than letting
+ * reconnect loops hammer the server forever with a dead token.
+ */
+function handleWsAuthFailure(): void {
+  removeToken();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('geny:auth-failed'));
+  }
 }
 
 // ==================== Agent API ====================
@@ -149,7 +196,7 @@ export const agentApi = {
     console.debug(`${_tag} executeStream called, wsUrl=${wsUrl}, prompt=${data.prompt.slice(0, 60)}...`);
 
     return new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(wsUrl);
+      const ws = makeAuthedWs(wsUrl);
       let resolved = false;
 
       const finish = () => {
@@ -197,6 +244,11 @@ export const agentApi = {
 
       ws.onclose = (ev) => {
         console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
+        if (ev.code === WS_UNAUTHORIZED_CODE) {
+          console.warn(`${_tag} authentication failed (4401) — clearing token`);
+          handleWsAuthFailure();
+          onEvent('error', { error: 'Authentication failed', code: WS_UNAUTHORIZED_CODE });
+        }
         finish();
       };
     });
@@ -227,7 +279,7 @@ export const agentApi = {
     const wsUrl = getWsUrl(id);
     const _tag = `[ReconnWS:${id.slice(0, 8)}]`;
     console.debug(`${_tag} reconnectStream called, wsUrl=${wsUrl}`);
-    let ws: WebSocket | null = new WebSocket(wsUrl);
+    let ws: WebSocket | null = makeAuthedWs(wsUrl);
 
     ws.onopen = () => {
       console.debug(`${_tag} connected, sending reconnect`);
@@ -254,6 +306,11 @@ export const agentApi = {
 
     ws.onclose = (ev) => {
       console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
+      if (ev.code === WS_UNAUTHORIZED_CODE) {
+        console.warn(`${_tag} authentication failed (4401) — clearing token`);
+        handleWsAuthFailure();
+        onEvent('error', { error: 'Authentication failed', code: WS_UNAUTHORIZED_CODE });
+      }
       ws = null;
     };
 
@@ -1872,7 +1929,7 @@ export const chatApi = {
       console.info(`${_tag} connecting to ${wsUrl} (attempt=${attempts})...`);
 
       try {
-        ws = new WebSocket(wsUrl);
+        ws = makeAuthedWs(wsUrl);
       } catch (err) {
         console.error(`${_tag} WebSocket constructor failed for ${wsUrl}:`, err);
         return;
@@ -1921,6 +1978,16 @@ export const chatApi = {
         }
         ws = null;
         if (closed) return;
+
+        // Auth failure: the token is dead. Stop the reconnect loop, clear the
+        // token and surface a re-login signal instead of hammering forever.
+        if (ev.code === WS_UNAUTHORIZED_CODE) {
+          console.warn(`${_tag} authentication failed (4401) — stopping reconnect, clearing token`);
+          closed = true;
+          handleWsAuthFailure();
+          onEvent('_ws_auth_failed', { code: WS_UNAUTHORIZED_CODE, url: wsUrl });
+          return;
+        }
 
         if (attempts < maxAttempts) {
           attempts++;
@@ -2500,7 +2567,7 @@ export const vtuberApi = {
       if (closed) return;
       reconnectTimer = null;
       try {
-        ws = new WebSocket(wsUrl);
+        ws = makeAuthedWs(wsUrl);
       } catch {
         console.error(`${_tag} WebSocket constructor failed`);
         return;
@@ -2533,6 +2600,13 @@ export const vtuberApi = {
           console.warn(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
         }
         ws = null;
+        // Auth failure: stop reconnecting and clear the dead token.
+        if (!closed && ev.code === WS_UNAUTHORIZED_CODE) {
+          console.warn(`${_tag} authentication failed (4401) — stopping reconnect, clearing token`);
+          closed = true;
+          handleWsAuthFailure();
+          return;
+        }
         if (!closed && attempts < maxAttempts) {
           attempts++;
           connect();
@@ -2844,7 +2918,7 @@ export const ttsApi = {
     const backendUrl = getBackendUrl();
     return fetch(`${backendUrl}/api/tts/agents/${sessionId}/speak`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text, emotion, language, engine }),
       signal,
     });
@@ -2871,7 +2945,7 @@ export const ttsApi = {
     const backendUrl = getBackendUrl();
     return fetch(`${backendUrl}/api/tts/agents/${sessionId}/speak/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text, emotion, language, engine }),
       signal,
     });

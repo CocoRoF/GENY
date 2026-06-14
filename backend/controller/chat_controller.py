@@ -18,8 +18,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from service.auth.auth_middleware import require_auth
 from service.chat.conversation_store import get_chat_store
 from service.executor import get_agent_session_manager
 from service.utils.text_sanitizer import sanitize_for_display
@@ -455,7 +456,11 @@ async def cleanup_old_messages():
 # ============================================================================
 
 @router.post("/rooms/{room_id}/broadcast")
-async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
+async def broadcast_to_room(
+    room_id: str,
+    request: RoomBroadcastRequest,
+    auth: dict = Depends(require_auth),
+):
     """
     Send a message to all sessions in a chat room.
 

@@ -19,10 +19,11 @@ from logging import getLogger
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.history_store import _resolve_data_dir
 from service.voice_studio.synthesis_preview import PreviewParams
 from service.voice_studio.tools.language_detect import detect_language
@@ -37,12 +38,12 @@ class DetectLanguageRequest(BaseModel):
 
 
 @router.post("/tools/detect-language")
-async def detect_language_route(body: DetectLanguageRequest) -> dict:
+async def detect_language_route(body: DetectLanguageRequest, auth: dict = Depends(require_auth)) -> dict:
     return detect_language(body.text).to_dict()
 
 
 @router.post("/tools/analyze-ref")
-async def analyze_ref_route(file: UploadFile = File(...)) -> dict:
+async def analyze_ref_route(file: UploadFile = File(...), auth: dict = Depends(require_auth)) -> dict:
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="empty upload")
@@ -79,7 +80,7 @@ def _seed_search_dir() -> Path:
 
 
 @router.post("/tools/seed-search")
-async def seed_search_route(body: SeedSearchRequest) -> dict:
+async def seed_search_route(body: SeedSearchRequest, auth: dict = Depends(require_auth)) -> dict:
     from service.vtuber.tts.tts_service import get_tts_service
 
     engine = get_tts_service().get_engine("omnivoice")

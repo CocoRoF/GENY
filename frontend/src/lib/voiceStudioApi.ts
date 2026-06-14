@@ -6,6 +6,8 @@
  * in ``./api.ts`` keeps owning ``/api/tts/*`` and is untouched.
  */
 
+import { withAuthHeaders } from './api';
+
 export type PreviewMode = 'clone' | 'design' | 'auto';
 export type PreviewAudioFormat = 'wav' | 'mp3' | 'ogg' | 'pcm';
 
@@ -217,7 +219,7 @@ export const voiceStudioApi = {
   async synthesizePreview(params: PreviewParams, signal?: AbortSignal): Promise<PreviewResult> {
     const res = await fetch(PREVIEW_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(params),
       signal,
     });
@@ -259,7 +261,10 @@ export const voiceStudioApi = {
   },
 
   async deleteHistory(id: string): Promise<void> {
-    const res = await fetch(`${HISTORY_URL}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const res = await fetch(`${HISTORY_URL}/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: withAuthHeaders(),
+    });
     if (!res.ok && res.status !== 404) {
       throw new Error(`delete history ${res.status}: ${res.statusText}`);
     }
@@ -273,6 +278,7 @@ export const voiceStudioApi = {
   async replayHistory(id: string, signal?: AbortSignal): Promise<PreviewResult> {
     const res = await fetch(`${HISTORY_URL}/${encodeURIComponent(id)}/replay`, {
       method: 'POST',
+      headers: withAuthHeaders(),
       signal,
     });
     if (!res.ok) {
@@ -350,7 +356,7 @@ export const voiceStudioApi = {
   async startBatch(body: BatchStartParams): Promise<{ job_id: string; state: string; total_lines: number }> {
     const res = await fetch(BATCH_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -384,7 +390,10 @@ export const voiceStudioApi = {
   },
 
   async cancelBatch(id: string): Promise<{ ok: boolean }> {
-    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+      headers: withAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`cancel batch ${res.status}: ${res.statusText}`);
     return res.json();
   },
@@ -398,7 +407,7 @@ export const voiceStudioApi = {
   async detectLanguage(text: string, signal?: AbortSignal): Promise<LangDetectResult> {
     const res = await fetch(TOOLS_LANG_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text }),
       signal,
     });
@@ -409,7 +418,12 @@ export const voiceStudioApi = {
   async analyzeRef(file: Blob, signal?: AbortSignal): Promise<RefAnalysisResult> {
     const fd = new FormData();
     fd.append('file', file, 'ref.wav');
-    const res = await fetch(TOOLS_REF_URL, { method: 'POST', body: fd, signal });
+    const res = await fetch(TOOLS_REF_URL, {
+      method: 'POST',
+      headers: withAuthHeaders(),
+      body: fd,
+      signal,
+    });
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
       throw new Error(`analyze-ref ${res.status}: ${text}`);
@@ -429,7 +443,7 @@ export const voiceStudioApi = {
   }, signal?: AbortSignal): Promise<SeedSearchResult> {
     const res = await fetch(TOOLS_SEED_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
       signal,
     });
@@ -443,7 +457,7 @@ export const voiceStudioApi = {
   async saveAsRef(body: SaveAsRefParams): Promise<{ ok: true; profile: string; emotion: string }> {
     const res = await fetch(SAVE_AS_REF_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!res.ok) {
