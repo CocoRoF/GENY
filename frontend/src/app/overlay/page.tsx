@@ -16,7 +16,7 @@
  *   room    — chat room_id for TTS (default: the session's chat_room_id).
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
 import { agentApi } from '@/lib/api';
@@ -55,18 +55,6 @@ export default function OverlayPage() {
   const toggleTTS = useVTuberStore((s) => s.toggleTTS);
   const toggleSTT = useVTuberStore((s) => s.toggleSTT);
   const toggleScreen = useVTuberStore((s) => s.toggleScreenObservation);
-
-  // Avatar zoom (CSS scale, anchored at the feet) — persisted across reloads.
-  const [zoom, setZoom] = useState(1);
-  useEffect(() => {
-    const z = parseFloat(localStorage.getItem('geny_overlay_zoom') || '1');
-    if (z >= 0.3 && z <= 3) setZoom(z);
-  }, []);
-  const applyZoom = (next: number) => {
-    const z = Math.min(3, Math.max(0.3, Math.round(next * 100) / 100));
-    setZoom(z);
-    localStorage.setItem('geny_overlay_zoom', String(z));
-  };
 
   // 1) token + transparency + resolve the target session (once).
   useEffect(() => {
@@ -132,60 +120,46 @@ export default function OverlayPage() {
     if (locked) window.connector?.windowControl.setClickThrough(true);
   };
 
-  // Move (unlocked): drag the avatar → move the OS window via the bridge.
-  const dragging = useRef(false);
-  const onAvatarDown = () => {
-    dragging.current = true;
-    const onMove = (ev: MouseEvent) => {
-      if (dragging.current) window.connector?.windowControl.moveBy(ev.movementX, ev.movementY);
-    };
+  // Drag the BOTTOM BAR to move the whole window. (The avatar itself keeps the
+  // renderer's native pan/zoom — see AvatarCanvas interactive — so dragging the
+  // avatar pans it, dragging the bar moves the window.) Clicks on buttons are
+  // excluded so toggles still work.
+  const onBarDrag = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    const onMove = (ev: MouseEvent) => window.connector?.windowControl.moveBy(ev.movementX, ev.movementY);
     const onUp = () => {
-      dragging.current = false;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
-  // Zoom (unlocked): wheel over the avatar scales it (anchored at the feet).
-  const onWheel = (e: React.WheelEvent) => applyZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9));
 
   if (error) return <div style={MSG}>{error}</div>;
   if (!resolved) return <div style={MSG}>아바타 불러오는 중…</div>;
 
   return (
     <div style={ROOT}>
-      {/* Avatar — CSS-scaled (zoom), anchored at the feet. */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', inset: 0, transform: `scale(${zoom})`, transformOrigin: 'bottom center' }}>
-          <AvatarCanvas sessionId={resolved.sid} backgroundAlpha={0} className="w-full h-full" />
-        </div>
-        {/* Unlocked: a transparent layer over the canvas captures drag-to-move
-            and wheel-to-zoom (so pixi hit-areas don't swallow them). */}
-        {!locked && (
-          <div style={{ position: 'absolute', inset: 0, cursor: 'move' }} onMouseDown={onAvatarDown} onWheel={onWheel} />
-        )}
+      {/* Avatar — the renderer's OWN crisp pan/zoom (drag = pan, wheel = zoom),
+          active when the window is interactive (unlocked). No CSS scaling. */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <AvatarCanvas sessionId={resolved.sid} interactive backgroundAlpha={0} className="w-full h-full" />
       </div>
 
-      {/* Locked → just a small lock chip. Unlocked → the full compact bar. */}
+      {/* The bar is the MOVE handle: drag its background → move the whole window.
+          Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
-        <div style={LOCK_ONLY} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
-          <button type="button" onClick={() => setLocked(false)} title="잠금 해제 — 이동·확대·설정" style={ICON_BTN}>
+        <div style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
+          <button type="button" onClick={() => setLocked(false)} title="잠금 해제 — 이동·설정" style={ICON_BTN}>
             <LockIcon open={false} />
           </button>
         </div>
       ) : (
-        <div style={BAR} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
+        <div style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
           <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
-          <button type="button" onClick={() => applyZoom(zoom * 0.9)} title="축소" style={ICON_BTN}>
-            <MinusIcon />
-          </button>
-          <button type="button" onClick={() => applyZoom(zoom * 1.1)} title="확대" style={ICON_BTN}>
-            <PlusIcon />
-          </button>
           <button type="button" onClick={() => setLocked(true)} title="잠금" style={ICON_BTN}>
             <LockIcon open />
           </button>
@@ -220,13 +194,6 @@ function LockIcon({ open }: { open: boolean }) {
     </svg>
   );
 }
-const MinusIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14" /></svg>
-);
-const PlusIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-);
-
 // ── styles ───────────────────────────────────────────────────────────────────
 const ROOT: CSSProperties = { width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' };
 
