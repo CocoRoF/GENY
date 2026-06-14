@@ -153,12 +153,54 @@ async function applyControlContent(): Promise<void> {
     const base = serverUrl.replace(/\/+$/, '')
     const sessQ = overlaySession ? `&session=${encodeURIComponent(overlaySession)}` : ''
     await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}`)
+  }
+  // No token → the panel stays hidden; the Settings window handles login.
+}
+
+// ── settings window: server URL / account / auto-update (local, always open) ─
+let settings: BrowserWindow | null = null
+function createSettings(): void {
+  settings = new BrowserWindow({
+    width: 460,
+    height: 660,
+    show: false,
+    title: 'Geny 설정',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  loadRoute(settings, 'settings')
+  settings.on('close', (e) => {
+    if (!appQuitting) {
+      e.preventDefault()
+      settings?.hide()
+    }
+  })
+}
+function showSettings(): void {
+  if (!settings) createSettings()
+  settings?.show()
+  settings?.focus()
+}
+
+// Re-evaluate everything after login/logout/url-change: window content + which
+// window is visible.
+async function refreshAll(): Promise<void> {
+  await applyOverlayContent()
+  await applyControlContent()
+  const token = await getStoredToken()
+  if (token) {
+    settings?.hide()
+    control?.show()
   } else {
-    loadRoute(control, 'control')
+    control?.hide()
+    showSettings()
   }
 }
 
-function loadRoute(win: BrowserWindow, route: 'overlay' | 'control'): void {
+function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings'): void {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/index.html?window=${route}`)
   } else {
@@ -219,7 +261,8 @@ function createTray(): void {
   tray.setToolTip('Geny')
   const rebuildMenu = () => {
     const menu = Menu.buildFromTemplate([
-      { label: 'Geny 설정 / 채팅 열기', click: () => showControl() },
+      { label: '제어판 / 채팅 열기', click: () => showControl() },
+      { label: '설정 열기', click: () => showSettings() },
       {
         label: overlay?.isVisible() ? '아바타 숨기기' : '아바타 보이기',
         click: () => {
@@ -271,9 +314,7 @@ async function logout(): Promise<void> {
   } catch {
     /* ignore */
   }
-  await applyOverlayContent()
-  await applyControlContent()
-  showControl()
+  await refreshAll() // logged out → hides panel, shows settings/login
 }
 
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
@@ -298,11 +339,11 @@ function registerIpc(): void {
     control.isVisible() ? control.hide() : control.show()
   })
 
-  // Re-evaluate BOTH windows after login/logout (token changed in keychain).
-  ipcMain.on('app:refresh', () => {
-    applyOverlayContent()
-    applyControlContent()
-  })
+  // Re-evaluate everything after login/logout (token changed in keychain).
+  ipcMain.on('app:refresh', () => void refreshAll())
+
+  // Open the settings window (from the panel's gear button or app menu).
+  ipcMain.on('settings:open', () => showSettings())
 
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
@@ -348,6 +389,48 @@ function registerIpc(): void {
   })
 }
 
+// Native application menu — keeps copy/paste accelerators (chat input) and
+// surfaces 설정 / 업데이트 / 로그아웃 so options are always reachable.
+function buildAppMenu(): void {
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Geny',
+      submenu: [
+        { label: '설정', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
+        { label: '제어판 / 채팅', click: () => showControl() },
+        { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
+        { type: 'separator' },
+        { label: '로그아웃', click: () => void logout() },
+        { role: 'quit', label: '종료' },
+      ],
+    },
+    {
+      label: '편집',
+      submenu: [
+        { role: 'undo', label: '실행 취소' },
+        { role: 'redo', label: '다시 실행' },
+        { type: 'separator' },
+        { role: 'cut', label: '잘라내기' },
+        { role: 'copy', label: '복사' },
+        { role: 'paste', label: '붙여넣기' },
+        { role: 'selectAll', label: '전체 선택' },
+      ],
+    },
+    {
+      label: '보기',
+      submenu: [
+        { role: 'reload', label: '새로고침' },
+        { role: 'toggleDevTools', label: '개발자 도구' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '기본 배율' },
+        { role: 'zoomIn', label: '확대' },
+        { role: 'zoomOut', label: '축소' },
+      ],
+    },
+  ])
+  Menu.setApplicationMenu(menu)
+}
+
 app.whenReady().then(() => {
   // Screen-observation uses getDisplayMedia, which in Electron needs the app to
   // satisfy the display-media request (unlike a browser's built-in picker).
@@ -363,16 +446,18 @@ app.whenReady().then(() => {
   )
 
   registerIpc()
+  buildAppMenu()
   createOverlay()
   createControl()
+  createSettings()
   createTray()
 
-  // Phase 0: show the control window on launch so settings/login are immediately
-  // visible (no more "where do I configure it?"). It hides to the tray on close.
-  control?.show()
+  // Show the right window for the current state: logged in → the /connector
+  // panel; logged out → the settings/login window. (Avatar overlay always runs.)
+  void refreshAll()
 
-  // GitHub Releases auto-update. Default ON; the toggle lives in the control
-  // window and is read fresh on every check, so changes take effect immediately.
+  // GitHub Releases auto-update. Default ON; the toggle is read fresh on every
+  // check, so changes take effect immediately.
   initAutoUpdate(() => loadConfig().autoUpdate !== false)
 
   app.on('activate', () => {
