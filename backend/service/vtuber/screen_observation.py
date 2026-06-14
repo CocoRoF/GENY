@@ -37,6 +37,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -134,6 +135,50 @@ def reset_cooldown_state_for_tests() -> None:
     _last_fire_at.clear()
     _last_caption.clear()
     _last_prune_at.clear()
+
+
+def cleanup_session_state(session_id: str) -> None:
+    """Drop a session's per-session screen-observation state (cooldown +
+    dedup). Wire into session teardown so the in-memory tables don't grow
+    unbounded across the process lifetime."""
+    _last_fire_at.pop(session_id, None)
+    _last_caption.pop(session_id, None)
+
+
+# ── Sensitive-content redaction ───────────────────────────────────────
+
+# The vision captioner is asked for on-screen text "verbatim" (so the
+# persona can read code/errors), which means a password / API key / token
+# visible on screen would otherwise be transcribed into a caption that is
+# (a) sent to the persona and (b) persisted in a searchable memory note.
+# Mask the obvious secret shapes BEFORE the caption is stored or sent.
+# Conservative patterns — aimed at high-confidence secret shapes so normal
+# prose isn't mangled.
+_REDACT_PATTERNS = [
+    re.compile(
+        r"(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key|"
+        r"token|authorization|auth|bearer)\b\s*[:=]\s*\S+"
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),            # OpenAI-style keys
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                  # AWS access key id
+    re.compile(r"\bghp_[A-Za-z0-9]{30,}\b"),              # GitHub PAT
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"),  # JWT
+    re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),          # long base64-ish blob
+]
+
+
+def _redact_sensitive(text: str) -> str:
+    """Mask high-confidence secret shapes in *text*. Best-effort — returns
+    the input unchanged on any error."""
+    if not text:
+        return text
+    try:
+        out = text
+        for pat in _REDACT_PATTERNS:
+            out = pat.sub("[REDACTED]", out)
+        return out
+    except Exception:  # noqa: BLE001
+        return text
 
 
 # ── Result types ──────────────────────────────────────────────────────
@@ -234,6 +279,15 @@ def _maybe_image_attachment(
         return None
     agent = _resolve_agent(session_id)
     model = getattr(agent, "model_name", None) if agent is not None else None
+    if not model:
+        # Session didn't pin a model → fall back to the configured default
+        # so we don't silently degrade to caption-only when the real default
+        # IS vision-capable (the VTuber default is Claude).
+        model = (
+            os.environ.get("ANTHROPIC_MODEL")
+            or os.environ.get("GENY_DEFAULT_MODEL")
+            or ""
+        )
     if not is_vision_capable(model):
         logger.info(
             "[USER_OBSERVATION] model %r not vision-capable — caption-only",
@@ -517,6 +571,9 @@ async def save_and_maybe_trigger(
     caption, vision_source = await _caption_image(
         image_bytes, mime_type=mime_type,
     )
+    # Mask secrets the captioner may have transcribed verbatim BEFORE the
+    # caption is stored in a searchable note or sent to the persona.
+    caption = _redact_sensitive(caption)
     result.caption = caption
     result.vision_source = vision_source
 

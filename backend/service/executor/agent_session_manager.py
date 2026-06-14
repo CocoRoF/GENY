@@ -1299,6 +1299,15 @@ class AgentSessionManager:
             except Exception:
                 pass  # best-effort — provider must not block deletion
 
+            # Drop the session's screen-observation in-memory state
+            # (cooldown + caption dedup) so those tables don't grow
+            # unbounded across the process lifetime.
+            try:
+                from service.vtuber.screen_observation import cleanup_session_state
+                cleanup_session_state(session_id)
+            except Exception:
+                pass  # best-effort
+
             # Remove session logger
             remove_session_logger(session_id)
 
