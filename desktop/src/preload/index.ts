@@ -38,8 +38,10 @@ export interface ConnectorBridge {
     moveBy(dx: number, dy: number): void
     /** Show/hide the control (chat/settings) window. */
     toggleControl(): void
-    /** Re-load the overlay after login/logout (token changed in keychain). */
-    refreshOverlay(): void
+    /** Re-load BOTH windows after login/logout (token changed in keychain). */
+    refresh(): void
+    /** Set which session the floating overlay renders, and reload it. */
+    setOverlaySession(sessionId: string): void
   }
 
   /** GitHub Releases auto-update controls. */
@@ -68,7 +70,8 @@ const api: ConnectorBridge = {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
-    refreshOverlay: () => ipcRenderer.send('overlay:refresh'),
+    refresh: () => ipcRenderer.send('app:refresh'),
+    setOverlaySession: (sessionId) => ipcRenderer.send('overlay:set-session', sessionId),
   },
   updater: {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),

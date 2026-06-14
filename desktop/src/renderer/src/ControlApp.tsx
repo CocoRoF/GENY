@@ -61,7 +61,7 @@ export function ControlApp() {
       setHasToken(true)
       setStatus(`${j.username} 로그인됨 — 아바타를 불러옵니다`)
       // Reload the overlay so it loads the server's avatar page with the token.
-      window.connector?.windowControl.refreshOverlay()
+      window.connector?.windowControl.refresh()
     } catch (e) {
       setStatus(`error: ${(e as Error).message}`)
     }
@@ -71,7 +71,7 @@ export function ControlApp() {
     await window.connector?.secureStore.delete(TOKEN_KEY)
     setHasToken(false)
     setStatus('로그아웃됨')
-    window.connector?.windowControl.refreshOverlay()
+    window.connector?.windowControl.refresh()
   }
 
   return (
