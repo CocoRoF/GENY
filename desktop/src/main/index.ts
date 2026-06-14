@@ -231,18 +231,17 @@ async function applyOverlayContent(): Promise<void> {
   const token = await getStoredToken()
   const { serverUrl } = loadConfig()
   if (token && serverUrl) {
-    overlay.setIgnoreMouseEvents(false)
     const base = serverUrl.replace(/\/+$/, '')
     const sess = loadConfig().overlaySession
     const sessQ = sess ? `&session=${encodeURIComponent(sess)}` : ''
     await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
-    // Drag the floating avatar to reposition the OS window; keep interactive
-    // elements clickable. (Pixel-accurate click-through is a later phase.)
-    overlay.webContents.insertCSS(
-      'html,body{-webkit-app-region:drag !important;background:transparent !important;}' +
-        'canvas,button,a,input,select,textarea{-webkit-app-region:no-drag;}',
-    )
+    overlay.webContents.insertCSS('html,body{background:transparent !important;}')
+    // Locked by default: the avatar is click-through (clicks reach the desktop),
+    // and only the /overlay control bar re-enables input on hover via
+    // windowControl.setClickThrough. The page owns -webkit-app-region (drag).
+    overlay.setIgnoreMouseEvents(true, { forward: true })
   } else {
+    // Logged-out placeholder needs its dock handle clickable.
     overlay.setIgnoreMouseEvents(false)
     loadRoute(overlay, 'overlay')
   }
@@ -444,6 +443,11 @@ app.whenReady().then(() => {
     },
     { useSystemPicker: true },
   )
+
+  // Grant mic (STT) + screen (observation) + clipboard to our own pages.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(['media', 'display-capture', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission))
+  })
 
   registerIpc()
   buildAppMenu()

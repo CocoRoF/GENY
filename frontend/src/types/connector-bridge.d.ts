@@ -13,6 +13,7 @@ declare global {
         setOverlaySession(sessionId: string): void
         refresh(): void
         openSettings(): void
+        setClickThrough(ignore: boolean): void
       }
     }
   }
