@@ -18,8 +18,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from service.auth.auth_middleware import require_auth
 from service.chat.conversation_store import get_chat_store
 from service.executor import get_agent_session_manager
 from service.utils.text_sanitizer import sanitize_for_display
@@ -349,7 +350,7 @@ async def list_rooms():
 
 
 @router.post("/rooms", response_model=RoomResponse)
-async def create_room(request: CreateRoomRequest):
+async def create_room(request: CreateRoomRequest, auth: dict = Depends(require_auth)):
     """Create a new chat room with selected sessions."""
     store = get_chat_store()
     room = store.create_room(name=request.name, session_ids=request.session_ids)
@@ -384,7 +385,7 @@ async def update_room(room_id: str, request: UpdateRoomRequest):
 
 
 @router.delete("/rooms/{room_id}")
-async def delete_room(room_id: str):
+async def delete_room(room_id: str, auth: dict = Depends(require_auth)):
     """Delete a chat room and all its history."""
     store = get_chat_store()
     deleted = store.delete_room(room_id)
@@ -439,7 +440,7 @@ async def get_room_messages(
 
 
 @router.post("/messages/cleanup")
-async def cleanup_old_messages():
+async def cleanup_old_messages(auth: dict = Depends(require_auth)):
     """Delete messages older than the configured retention period."""
     from service.config.sub_config.general.chat_config import ChatConfig
     cfg = ChatConfig.get_default_instance()
@@ -455,7 +456,11 @@ async def cleanup_old_messages():
 # ============================================================================
 
 @router.post("/rooms/{room_id}/broadcast")
-async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
+async def broadcast_to_room(
+    room_id: str,
+    request: RoomBroadcastRequest,
+    auth: dict = Depends(require_auth),
+):
     """
     Send a message to all sessions in a chat room.
 
@@ -610,7 +615,7 @@ async def broadcast_to_room(room_id: str, request: RoomBroadcastRequest):
 
 
 @router.post("/rooms/{room_id}/broadcast/cancel")
-async def cancel_broadcast(room_id: str):
+async def cancel_broadcast(room_id: str, auth: dict = Depends(require_auth)):
     """Cancel an active broadcast, stopping pending and running agents."""
     bstate = _active_broadcasts.get(room_id)
     if not bstate or bstate.finished:

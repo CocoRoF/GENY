@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { usePlayground2DStore } from '@/store/usePlayground2DStore';
 import { useI18n } from '@/lib/i18n';
+import { getToken } from '@/lib/authApi';
 
 
 import type { WorldState, WorldEvent, GenySessionRole, WorldLayout } from '@/lib/playground2d/types';
@@ -660,7 +661,10 @@ export default function Playground2DTab() {
       let closed = false;
 
       try {
-        ws = new WebSocket(wsUrl);
+        // Pass the JWT via the 'geny-auth' subprotocol so the server can
+        // authenticate the WS handshake (mirrors lib/api.ts makeAuthedWs).
+        const token = getToken();
+        ws = token ? new WebSocket(wsUrl, ['geny-auth', token]) : new WebSocket(wsUrl);
       } catch { continue; }
 
       ws.onopen = () => {

@@ -28,6 +28,8 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from service.auth.auth_middleware import ws_auth_or_close
+
 logger = getLogger(__name__)
 
 router = APIRouter()
@@ -109,8 +111,20 @@ async def ws_chat_room_stream(websocket: WebSocket, room_id: str):
     agent_progress, broadcast_done, heartbeat.
     """
     logger.info("[ChatWS:%s] WebSocket connection attempt", room_id[:8])
-    await websocket.accept()
-    logger.info("[ChatWS:%s] WebSocket accepted", room_id[:8])
+
+    # Auth gate — validate the JWT before accepting. On failure the helper
+    # closes the socket with code 4401 and we return immediately.
+    auth = await ws_auth_or_close(websocket)
+    if auth is None:
+        logger.info("[ChatWS:%s] rejected (unauthorized)", room_id[:8])
+        return
+
+    await websocket.accept(subprotocol=auth.subprotocol)
+    logger.info(
+        "[ChatWS:%s] WebSocket accepted (sub=%s)",
+        room_id[:8],
+        (auth.payload or {}).get("sub", "?"),
+    )
 
     from service.chat.conversation_store import get_chat_store
     from controller.chat_controller import (

@@ -19,9 +19,10 @@ from logging import getLogger
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.history_store import get_history_store
 
 router = APIRouter()
@@ -43,7 +44,7 @@ class SaveAsRefRequest(BaseModel):
 
 
 @router.post("/synth/save-as-ref")
-async def save_as_ref(body: SaveAsRefRequest) -> dict:
+async def save_as_ref(body: SaveAsRefRequest, auth: dict = Depends(require_auth)) -> dict:
     # Late imports to keep the controller package's import graph cheap.
     from controller.tts_controller import (
         VOICES_DIR,

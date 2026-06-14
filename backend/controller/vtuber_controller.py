@@ -13,11 +13,13 @@ Avatar state streaming is handled by ws/avatar_stream.py (WebSocket).
 
 import asyncio
 import json
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from logging import getLogger
+
+from service.auth.auth_middleware import require_auth
 
 logger = getLogger(__name__)
 
@@ -137,7 +139,12 @@ async def get_model(name: str, request: Request):
 
 
 @router.put("/agents/{session_id}/model")
-async def assign_model(session_id: str, req: ModelAssignRequest, request: Request):
+async def assign_model(
+    session_id: str,
+    req: ModelAssignRequest,
+    request: Request,
+    auth: dict = Depends(require_auth),
+):
     """Assign a Live2D model to an agent session."""
     manager = request.app.state.live2d_model_manager
     try:
@@ -212,7 +219,11 @@ async def get_agent_model(session_id: str, request: Request):
 
 
 @router.delete("/agents/{session_id}/model")
-async def unassign_model(session_id: str, request: Request):
+async def unassign_model(
+    session_id: str,
+    request: Request,
+    auth: dict = Depends(require_auth),
+):
     """Remove model assignment from an agent session."""
     manager = request.app.state.live2d_model_manager
     manager.unassign_model(session_id)
@@ -242,7 +253,10 @@ async def get_avatar_state(session_id: str, request: Request):
 
 @router.post("/agents/{session_id}/interact")
 async def interact_with_avatar(
-    session_id: str, req: InteractRequest, request: Request
+    session_id: str,
+    req: InteractRequest,
+    request: Request,
+    auth: dict = Depends(require_auth),
 ):
     """Handle touch/click interaction with the Live2D avatar."""
     model_manager = request.app.state.live2d_model_manager
@@ -272,7 +286,10 @@ async def interact_with_avatar(
 
 @router.post("/agents/{session_id}/emotion")
 async def override_emotion(
-    session_id: str, req: EmotionOverrideRequest, request: Request
+    session_id: str,
+    req: EmotionOverrideRequest,
+    request: Request,
+    auth: dict = Depends(require_auth),
 ):
     """
     Manually set avatar emotion (for debugging and demo purposes).

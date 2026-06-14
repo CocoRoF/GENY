@@ -69,7 +69,7 @@ class SpeakRequest(BaseModel):
 
 
 @router.post("/agents/{session_id}/speak")
-async def speak(session_id: str, body: SpeakRequest):
+async def speak(session_id: str, body: SpeakRequest, auth: dict = Depends(require_auth)):
     """
     Synthesize text to speech and return streaming audio.
 
@@ -164,7 +164,7 @@ async def speak(session_id: str, body: SpeakRequest):
 
 
 @router.post("/agents/{session_id}/speak/stream")
-async def speak_stream(session_id: str, body: SpeakRequest):
+async def speak_stream(session_id: str, body: SpeakRequest, auth: dict = Depends(require_auth)):
     """Sentence-streaming TTS — NDJSON envelope.
 
     Each line is a complete JSON object:
@@ -371,7 +371,7 @@ class SpeakChunksRequest(BaseModel):
 
 
 @router.post("/agents/{session_id}/speak/chunks")
-async def speak_chunks(session_id: str, body: SpeakChunksRequest):
+async def speak_chunks(session_id: str, body: SpeakChunksRequest, auth: dict = Depends(require_auth)):
     """Batched frontend-fed sentence streaming.
 
     The frontend watches the LLM's incremental output, detects
@@ -579,7 +579,7 @@ class SpeakChunksRequest(BaseModel):
 
 
 @router.post("/agents/{session_id}/speak/chunks")
-async def speak_chunks(session_id: str, body: SpeakChunksRequest):
+async def speak_chunks(session_id: str, body: SpeakChunksRequest, auth: dict = Depends(require_auth)):
     """Batched frontend-fed sentence streaming.
 
     The frontend watches the LLM's incremental output, detects

@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from logging import getLogger
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.synthesis_preview import PreviewParams
 
 router = APIRouter()
@@ -32,7 +33,7 @@ _MIME_BY_FORMAT = {
 
 
 @router.post("/synth/preview")
-async def synth_preview(params: PreviewParams) -> Response:
+async def synth_preview(params: PreviewParams, auth: dict = Depends(require_auth)) -> Response:
     from service.vtuber.tts.tts_service import get_tts_service
 
     engine = get_tts_service().get_engine("omnivoice")

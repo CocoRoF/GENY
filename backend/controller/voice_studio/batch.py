@@ -18,10 +18,11 @@ from __future__ import annotations
 from logging import getLogger
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.batch_runner import get_batch_runner
 from service.voice_studio.batch_store import get_batch_store
 
@@ -77,7 +78,7 @@ def _serialize_job(row: dict) -> dict:
 
 
 @router.post("/batch")
-async def start_batch(body: BatchStartRequest) -> dict:
+async def start_batch(body: BatchStartRequest, auth: dict = Depends(require_auth)) -> dict:
     if not body.lines:
         raise HTTPException(status_code=400, detail="lines must not be empty")
     if len(body.lines) > MAX_LINES_PER_JOB:
@@ -120,7 +121,7 @@ async def get_batch(job_id: str) -> dict:
 
 
 @router.post("/batch/{job_id}/cancel")
-async def cancel_batch(job_id: str) -> dict:
+async def cancel_batch(job_id: str, auth: dict = Depends(require_auth)) -> dict:
     store = get_batch_store()
     row = store.get(job_id)
     if not row:

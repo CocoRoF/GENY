@@ -221,6 +221,20 @@ class AuthService:
             "display_name": display_name,
         }
 
+    def refresh_token(self, username: str, display_name: Optional[str] = None) -> Dict[str, Any]:
+        """Issue a fresh JWT for an already-authenticated user.
+
+        Used by POST /api/auth/refresh — the caller has already proven a
+        valid (non-expired) token via require_auth, so we simply mint a new
+        token with a fresh expiry. No new token *kind* is created: this is the
+        same account JWT, just extended. ``display_name`` falls back to the
+        stored value (or the username) when not supplied.
+        """
+        if display_name is None:
+            user = self.get_user_by_username(username)
+            display_name = (user or {}).get("display_name", username) if user else username
+        return self._create_token(username, display_name or username)
+
     def verify_token(self, token: str) -> Dict[str, Any]:
         """
         Verify JWT token and return decoded payload.

@@ -12,9 +12,11 @@ import json
 from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from pydantic import BaseModel, Field
+
+from service.auth.auth_middleware import require_auth
 
 from service.executor import get_agent_session_manager
 
@@ -321,6 +323,7 @@ async def create_memory_file(
     request: Request,
     session_id: str = Path(...),
     req: WriteNoteRequest = ...,
+    auth: dict = Depends(require_auth),
 ):
     """Create a new structured memory note via ``provider.notes().write``."""
     from geny_executor.memory.provider import NoteDraft
@@ -344,6 +347,7 @@ async def update_memory_file(
     session_id: str = Path(...),
     filename: str = Path(...),
     req: UpdateNoteRequest = ...,
+    auth: dict = Depends(require_auth),
 ):
     """Update an existing memory note."""
     from geny_executor.memory.provider import NotePatch
@@ -366,6 +370,7 @@ async def delete_memory_file(
     request: Request,
     session_id: str = Path(...),
     filename: str = Path(...),
+    auth: dict = Depends(require_auth),
 ):
     """Delete a memory note."""
     provider = _get_provider(session_id)
@@ -475,6 +480,7 @@ async def search_memory_post(
     request: Request,
     session_id: str = Path(...),
     req: SearchRequest = ...,
+    auth: dict = Depends(require_auth),
 ):
     """Search memory (POST variant for complex queries)."""
     provider = _get_provider(session_id)
@@ -504,6 +510,7 @@ async def create_memory_link(
     request: Request,
     session_id: str = Path(...),
     req: LinkNotesRequest = ...,
+    auth: dict = Depends(require_auth),
 ):
     """Create a wikilink between two notes."""
     provider = _get_provider(session_id)
@@ -518,7 +525,11 @@ async def create_memory_link(
 # ============================================================================
 
 @router.post("/{session_id}/memory/reindex")
-async def reindex_memory(request: Request, session_id: str = Path(...)):
+async def reindex_memory(
+    request: Request,
+    session_id: str = Path(...),
+    auth: dict = Depends(require_auth),
+):
     """Force a full rebuild of the memory index."""
     from service.memory.note_utils import aget_index_snapshot_with_dms
     provider, memory_dir = _get_provider_and_memory_dir(session_id)
@@ -534,7 +545,10 @@ async def reindex_memory(request: Request, session_id: str = Path(...)):
 
 
 @router.post("/{session_id}/memory/migrate")
-async def migrate_memory(session_id: str = Path(...)):
+async def migrate_memory(
+    session_id: str = Path(...),
+    auth: dict = Depends(require_auth),
+):
     """Legacy migration endpoint — retired. Sessions land directly in
     the executor-owned layout from boot.
     """
@@ -569,6 +583,7 @@ async def list_memory_categories(
 async def promote_to_global(
     session_id: str = Path(...),
     req: dict = ...,
+    auth: dict = Depends(require_auth),
 ):
     """Promote a session memory note to global memory."""
     filename = req.get("filename")

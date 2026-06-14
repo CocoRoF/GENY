@@ -9,9 +9,10 @@ Voice Studio engine endpoints.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.engine_registry import (
     get_default_engine_name,
     list_engine_cards,
@@ -35,7 +36,7 @@ class SetDefaultRequest(BaseModel):
 
 
 @router.post("/engines/default")
-async def set_default(body: SetDefaultRequest) -> dict:
+async def set_default(body: SetDefaultRequest, auth: dict = Depends(require_auth)) -> dict:
     cards = await list_engine_cards()
     valid = {c.id for c in cards}
     if body.name not in valid:

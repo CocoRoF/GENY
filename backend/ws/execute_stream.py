@@ -28,6 +28,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from service.auth.auth_middleware import ws_auth_or_close
 from service.execution.agent_executor import (
     start_command_background,
     get_execution_holder,
@@ -314,8 +315,20 @@ async def ws_execute_stream(websocket: WebSocket, session_id: str):
     commands (multi-turn conversation over a single WebSocket).
     """
     logger.info("[ExecWS:%s] WebSocket connection attempt", session_id[:8])
-    await websocket.accept()
-    logger.info("[ExecWS:%s] WebSocket accepted", session_id[:8])
+
+    # Auth gate — validate the JWT before accepting. On failure the helper
+    # closes the socket with code 4401 and we return immediately.
+    auth = await ws_auth_or_close(websocket)
+    if auth is None:
+        logger.info("[ExecWS:%s] rejected (unauthorized)", session_id[:8])
+        return
+
+    await websocket.accept(subprotocol=auth.subprotocol)
+    logger.info(
+        "[ExecWS:%s] WebSocket accepted (sub=%s)",
+        session_id[:8],
+        (auth.payload or {}).get("sub", "?"),
+    )
     app_state = websocket.app.state
 
     # Cycle 20260421_8 PR-X2-6 — WS abandoned detector. When this is the

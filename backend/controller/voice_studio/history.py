@@ -13,9 +13,10 @@ import json
 from logging import getLogger
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 
+from service.auth.auth_middleware import require_auth
 from service.voice_studio.history_store import get_history_store
 from service.voice_studio.synthesis_preview import PreviewParams
 
@@ -51,7 +52,7 @@ async def stream_history_audio(id: str) -> FileResponse:
 
 
 @router.delete("/synth/history/{id}")
-async def delete_history(id: str) -> dict:
+async def delete_history(id: str, auth: dict = Depends(require_auth)) -> dict:
     store = get_history_store()
     ok = store.delete(id)
     if not ok:
@@ -60,7 +61,7 @@ async def delete_history(id: str) -> dict:
 
 
 @router.post("/synth/history/{id}/replay")
-async def replay_history(id: str) -> Response:
+async def replay_history(id: str, auth: dict = Depends(require_auth)) -> Response:
     """Re-synthesize using the stored parameters (seed included).
 
     Returns ``audio/<fmt>`` bytes with the same ``X-VoiceStudio-*``
