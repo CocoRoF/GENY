@@ -30,6 +30,7 @@ const VTuberChatPanel = dynamic(() => import('@/components/live2d/VTuberChatPane
 // based on store state; the visible compact bar below toggles that same state.
 const STTControls = dynamic(() => import('@/components/live2d/STTControls'), { ssr: false });
 const PushToTalkDriver = dynamic(() => import('@/components/live2d/PushToTalkDriver'), { ssr: false });
+const ConnectorBridgeClient = dynamic(() => import('@/components/live2d/ConnectorBridgeClient'), { ssr: false });
 const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
   { ssr: false },
@@ -207,6 +208,8 @@ export default function OverlayPage() {
         {resolved.rid && <PushToTalkDriver sessionId={resolved.sid} roomId={resolved.rid} active={pttActive} />}
         <STTControls sessionId={resolved.sid} />
         <ScreenObservationControls sessionId={resolved.sid} />
+        {/* Inverse-MCP capability bridge (desktop only; no-op in a browser). */}
+        <ConnectorBridgeClient sessionId={resolved.sid} />
       </div>
     </div>
   );
