@@ -734,6 +734,12 @@ class AgentSessionManager:
 
             adhoc_providers.append(GenyToolProvider(self._tool_loader))
 
+        # Capability bridge (inverse MCP): advertise connector capability tools.
+        # Inert unless a manifest's tools.external selects one (e.g. connector_ping).
+        from service.executor.connector_bridge import ConnectorToolProvider
+
+        adhoc_providers.append(ConnectorToolProvider())
+
         # G7.3 + G14: skill registry. Always build (bundled skills load
         # without opt-in); only register the SkillToolProvider when at
         # least one skill resolved. Hold the registry on the manager so

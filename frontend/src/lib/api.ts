@@ -131,6 +131,11 @@ function makeAuthedWs(url: string): WebSocket {
   return new WebSocket(url);
 }
 
+/** Open the connector capability-bridge WS (inverse MCP) for a session. */
+export function openConnectorBridgeWs(sessionId: string): WebSocket {
+  return makeAuthedWs(`${_getWsBase()}/ws/connector/${encodeURIComponent(sessionId)}`);
+}
+
 /**
  * Handle a 4401 WS close. The token is stale/invalid, so clear it and emit a
  * global signal the UI can listen for to prompt re-login — rather than letting

@@ -80,6 +80,7 @@ from routers.playground2d import router as playground2d_router
 from ws.execute_stream import router as ws_execute_router
 from ws.chat_stream import router as ws_chat_router
 from ws.avatar_stream import router as ws_avatar_router
+from ws.connector_stream import router as ws_connector_router
 from service.config import get_config_manager
 from service.mcp_loader import MCPLoader, get_global_mcp_config
 import uvicorn
@@ -471,6 +472,9 @@ async def lifespan(app: FastAPI):
     avatar_state_manager = AvatarStateManager()
     app.state.live2d_model_manager = live2d_model_manager
     app.state.avatar_state_manager = avatar_state_manager
+    # Capability-bridge registry — same singleton the executor capability Tool reads.
+    from service.executor.connector_registry import get_connector_registry
+    app.state.connector_registry = get_connector_registry()
     logger.info(f"   - Live2D models: {len(live2d_model_manager.models)}")
     logger.info(f"   - Default model: {live2d_model_manager.default_model_name}")
 
@@ -812,6 +816,7 @@ app.include_router(playground2d_router)  # Playground 2D world layout & state
 app.include_router(ws_execute_router)   # WebSocket: agent execution streaming
 app.include_router(ws_chat_router)      # WebSocket: chat room event streaming
 app.include_router(ws_avatar_router)    # WebSocket: avatar state streaming
+app.include_router(ws_connector_router) # WebSocket: connector capability bridge (inverse MCP)
 
 # Mount static files for Web UI Dashboard
 static_dir = Path(__file__).parent / "static"
