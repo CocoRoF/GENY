@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -349,6 +349,19 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  // Screen-observation uses getDisplayMedia, which in Electron needs the app to
+  // satisfy the display-media request (unlike a browser's built-in picker).
+  // Prefer the OS picker where available; fall back to the primary screen.
+  session.defaultSession.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      desktopCapturer
+        .getSources({ types: ['screen', 'window'] })
+        .then((sources) => callback(sources[0] ? { video: sources[0] } : {}))
+        .catch(() => callback({}))
+    },
+    { useSystemPicker: true },
+  )
+
   registerIpc()
   createOverlay()
   createControl()
