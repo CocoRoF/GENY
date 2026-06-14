@@ -59,6 +59,27 @@ def _cooldown_seconds() -> float:
     )
 
 
+def _send_image_enabled() -> bool:
+    """Whether the persona receives the REAL captured frame (multimodal)
+    on the ``[USER_OBSERVATION]`` trigger, not just the text caption.
+    Default ON. Set ``GENY_SCREEN_OBS_SEND_IMAGE=0`` to fall back to
+    caption-only (cheaper, or for caption_only privacy mode)."""
+    return os.environ.get(
+        "GENY_SCREEN_OBS_SEND_IMAGE", "true"
+    ).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _retention_days() -> int:
+    """How long observation IMAGE files are kept on disk before
+    best-effort pruning. The markdown notes (caption text) are kept
+    regardless so the persona can still recall what it saw. Default 7
+    days. ``0`` disables pruning."""
+    try:
+        return int(os.environ.get("GENY_SCREEN_OBS_RETENTION_DAYS", "7"))
+    except ValueError:
+        return 7
+
+
 # Mime → file extension. Browser MediaRecorder + canvas.toBlob
 # defaults to PNG; we accept JPEG as well for clients that prefer
 # size over fidelity. Anything else falls back to ``.bin`` and gets
@@ -75,6 +96,14 @@ _MIME_TO_EXT: Dict[str, str] = {
 
 
 _last_fire_at: Dict[str, float] = {}
+# Per-session last recorded caption — skips writing a near-identical
+# observation note when the screen hasn't meaningfully changed (the
+# vision LLM returns the same caption), so the vault doesn't fill with
+# hundreds of "User is editing Python" duplicates.
+_last_caption: Dict[str, str] = {}
+# Per-storage-root throttle for the retention sweep — the rglob is cheap on a
+# pruned tree but pointless to run on every ~3-min upload.
+_last_prune_at: Dict[str, float] = {}
 _lock = asyncio.Lock()
 
 
@@ -101,8 +130,10 @@ async def _release_trigger_slot(session_id: str) -> None:
 
 
 def reset_cooldown_state_for_tests() -> None:
-    """Test hook — clear the per-session cooldown table."""
+    """Test hook — clear the per-session cooldown + dedup + prune tables."""
     _last_fire_at.clear()
+    _last_caption.clear()
+    _last_prune_at.clear()
 
 
 # ── Result types ──────────────────────────────────────────────────────
@@ -159,14 +190,84 @@ def _resolve_session_storage(session_id: str) -> Optional[Path]:
     return Path(storage)
 
 
+def _resolve_agent(session_id: str) -> Optional[Any]:
+    """Best-effort live ``AgentSession`` lookup (or ``None``). Used for
+    the session's model name (vision gating) and its memory manager
+    (recall-able note recording)."""
+    try:
+        from service.executor import get_agent_session_manager
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        return get_agent_session_manager().get_agent(session_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ext_to_mime(path: Path) -> str:
+    return {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+    }.get(path.suffix.lower().lstrip("."), "image/png")
+
+
+def _maybe_image_attachment(
+    session_id: str, image_path: Path,
+) -> Optional[list]:
+    """Build the multimodal attachment that hands the persona the REAL
+    captured frame — but only when the session's model supports vision
+    and image-sending is enabled. Returns ``None`` (caption-only
+    fallback) otherwise, so a non-vision model never gets an image it
+    would choke on.
+
+    Shape mirrors the chat-broadcast attachment the executor's
+    ``MultimodalNormalizer`` already consumes: a ``file://`` URI that the
+    normalizer inlines as a base64 image block (keeping huge base64 out
+    of this module + out of the chat-history JSON)."""
+    if not _send_image_enabled():
+        return None
+    try:
+        from service.whiteboard.vision_capability import is_vision_capable
+    except Exception:  # noqa: BLE001
+        return None
+    agent = _resolve_agent(session_id)
+    model = getattr(agent, "model_name", None) if agent is not None else None
+    if not is_vision_capable(model):
+        logger.info(
+            "[USER_OBSERVATION] model %r not vision-capable — caption-only",
+            model,
+        )
+        return None
+    try:
+        return [{
+            "kind": "image",
+            "mime_type": _ext_to_mime(image_path),
+            "url": Path(image_path).as_uri(),
+        }]
+    except Exception:  # noqa: BLE001
+        logger.debug("[USER_OBSERVATION] attachment build failed", exc_info=True)
+        return None
+
+
 def _build_observation_paths(
     storage_root: Path, observation_id: str, mime_type: Optional[str],
 ) -> Tuple[Path, Path]:
     """Compute ``(image_path, note_path)`` under
-    ``<storage>/observations/<YYYY-MM-DD>/`` so a long-running session
-    doesn't pile thousands of files into one directory."""
+    ``<storage>/memory/observations/<YYYY-MM-DD>/``.
+
+    The image lives **inside the memory vault** (``memory/observations/``)
+    — not a sibling dir — so (a) the ``![[image]]`` wikilink resolves in
+    an Obsidian client, (b) retention can find + prune old frames, and
+    (c) the recall-able note (written flat under the ``observations``
+    category by the memory provider) sits in the same tree. Date-bucketing
+    keeps a long-running session from piling thousands of images into one
+    directory. The ``note_path`` here is only the *fallback* sidecar used
+    when the live memory manager is unavailable; the normal path writes
+    the note through the provider so it is indexed + searchable."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    bucket = storage_root / "observations" / today
+    bucket = storage_root / "memory" / "observations" / today
     bucket.mkdir(parents=True, exist_ok=True)
     ext = _MIME_TO_EXT.get((mime_type or "").lower(), "png")
     return bucket / f"{observation_id}.{ext}", bucket / f"{observation_id}.md"
@@ -202,6 +303,141 @@ def _write_observation_note(
         + (f"> **Auto-caption:** {caption.strip()}\n" if caption else "_(no caption)_\n")
     )
     note_path.write_text(body, encoding="utf-8")
+
+
+async def _record_observation_note(
+    *,
+    session_id: str,
+    image_path: Path,
+    note_path: Path,
+    caption: str,
+    vision_source: str,
+    captured_at: datetime,
+    observation_id: str,
+    force: bool = False,
+) -> Optional[str]:
+    """Record the observation into the session's **recall-able** memory
+    vault so the persona can later answer "what was on my screen
+    earlier?" via its normal ``memory_search`` / ``memory_list`` tools.
+
+    Path of record: ``agent.memory_manager.awrite_note`` →
+    ``memory/observations/<file>.md`` (provider-indexed). Falls back to a
+    raw sidecar next to the image when the live memory manager isn't
+    available (e.g. during tests or before the agent finishes init), so
+    the observation is never lost.
+
+    Caption-dedup: an identical consecutive caption for the same session
+    is skipped (returns ``None``) unless *force* — keeps the vault from
+    filling with duplicate "User is editing Python" notes when the screen
+    sits still. ``force`` (the "Show Now" button) always records."""
+    cap = (caption or "").strip()
+    if not force and cap and _last_caption.get(session_id) == cap:
+        logger.debug(
+            "[USER_OBSERVATION] duplicate caption for %s — skipping note",
+            session_id,
+        )
+        return None
+
+    body = (
+        f"![[{image_path.name}]]\n\n"
+        + (
+            f"> **Auto-caption:** {cap}\n\n" if cap
+            else "_(no caption)_\n\n"
+        )
+        + f"- captured_at: {captured_at.isoformat()}\n"
+        + f"- vision_source: {vision_source}\n"
+        + f"- observation_id: {observation_id}\n"
+    )
+
+    ref: Optional[str] = None
+    agent = _resolve_agent(session_id)
+    mm = getattr(agent, "memory_manager", None) if agent is not None else None
+    if mm is not None:
+        # Live memory manager present → record into the recall-able vault.
+        # We TRUST it (success → ref; failure → None) and never also write a
+        # raw sidecar, so the observation isn't written twice.
+        try:
+            stamp = captured_at.strftime("%Y%m%d-%H%M%S")
+            ref = await mm.awrite_note(
+                title=(
+                    "Screen observation "
+                    f"{captured_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                ),
+                content=body,
+                category="observations",
+                tags=["screen", "observation"],
+                importance="low",
+                source="screen_observation",
+                filename_override=f"{stamp}-{observation_id}.md",
+            )
+            if not ref:
+                logger.debug(
+                    "[USER_OBSERVATION] awrite_note returned None "
+                    "(no provider) — observation kept via manager's legacy path",
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[USER_OBSERVATION] vault note write failed", exc_info=True,
+            )
+            ref = None
+    else:
+        # No live manager (tests, or agent still initialising) → raw sidecar
+        # so the observation is never lost. Degraded: not provider-indexed.
+        try:
+            _write_observation_note(
+                note_path=note_path,
+                image_path=image_path,
+                caption=caption,
+                vision_source=vision_source,
+                captured_at=captured_at,
+            )
+            ref = str(note_path)
+        except OSError:
+            logger.warning(
+                "screen_observation: fallback note write failed", exc_info=True,
+            )
+            ref = None
+
+    # Mark the caption as "seen" for dedup ONLY after a successful write, so a
+    # transient write failure doesn't permanently drop the next identical
+    # capture.
+    if ref and cap:
+        _last_caption[session_id] = cap
+    return ref
+
+
+def _prune_old_observations(storage_root: Path) -> None:
+    """Best-effort: delete observation IMAGE files older than the
+    retention window so disk doesn't grow unbounded. The markdown notes
+    (caption text) are kept regardless — they're tiny and carry the
+    recall value. Fully guarded; any failure is swallowed."""
+    days = _retention_days()
+    if days <= 0:
+        return
+    # Throttle: at most once an hour per storage root (the sweep walks the
+    # whole observations tree; running it every 3-min upload is wasteful).
+    key = str(storage_root)
+    now = time.monotonic()
+    if now - _last_prune_at.get(key, 0.0) < 3600:
+        return
+    _last_prune_at[key] = now
+    try:
+        root = storage_root / "memory" / "observations"
+        if not root.exists():
+            return
+        cutoff = time.time() - days * 86400
+        for img in root.rglob("*"):
+            try:
+                if not img.is_file():
+                    continue
+                if img.suffix.lower() in (".md",):
+                    continue
+                if img.stat().st_mtime < cutoff:
+                    img.unlink()
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        logger.debug("screen_observation: prune skipped", exc_info=True)
 
 
 # ── Vision LLM caption ───────────────────────────────────────────────
@@ -284,19 +520,19 @@ async def save_and_maybe_trigger(
     result.caption = caption
     result.vision_source = vision_source
 
-    try:
-        _write_observation_note(
-            note_path=note_path,
-            image_path=image_path,
-            caption=caption,
-            vision_source=vision_source,
-            captured_at=captured_at,
-        )
-        result.note_path = str(note_path)
-    except OSError as exc:
-        logger.warning(
-            "screen_observation: note write failed (%s)", exc,
-        )
+    result.note_path = await _record_observation_note(
+        session_id=session_id,
+        image_path=image_path,
+        note_path=note_path,
+        caption=caption,
+        vision_source=vision_source,
+        captured_at=captured_at,
+        observation_id=observation_id,
+        force=force_trigger,
+    )
+    # Best-effort disk hygiene — old frames age out; notes (caption
+    # text) stay for recall.
+    _prune_old_observations(storage_root)
 
     # Trigger only when the vision LLM produced a real caption AND
     # the cooldown allows (or the caller forces). No-caption captures
@@ -393,13 +629,18 @@ async def _run_trigger(
         captured_at=captured_at,
     )
 
+    # P1 — hand the persona the REAL captured frame (multimodal), not
+    # just the text caption, when the session's model is vision-capable.
+    # The caption stays in the prompt as a cheap "what I saw" anchor +
+    # the sensitive-content guard; the image lets the persona reason over
+    # pixels the caption can't fully convey (small text, layout, colours).
+    attachments = _maybe_image_attachment(session_id, image_path)
+    exec_kwargs: Dict[str, Any] = {"is_trigger": True, "timeout": 180}
+    if attachments:
+        exec_kwargs["attachments"] = attachments
+
     try:
-        result = await execute_command(
-            session_id,
-            prompt,
-            is_trigger=True,
-            timeout=180,
-        )
+        result = await execute_command(session_id, prompt, **exec_kwargs)
     except Exception:  # noqa: BLE001
         logger.warning(
             "[USER_OBSERVATION] execute_command failed", exc_info=True,

@@ -373,3 +373,332 @@ def test_silent_token_collapses_to_empty_via_sanitizer() -> None:
     assert sanitize_for_display("[silent]") == ""
     # And longer responses lose the leading token too:
     assert sanitize_for_display("[SILENT] just kidding") == "just kidding"
+
+
+# ── P1: real-image attachment + vision gating ─────────────────────────
+
+
+class _FakeAgent:
+    def __init__(self, *, model_name=None, memory_manager=None):
+        self.model_name = model_name
+        self.memory_manager = memory_manager
+        self.storage_path = None
+
+
+def _install_agent(monkeypatch, agent) -> None:
+    from service.vtuber import screen_observation as so
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: agent)
+
+
+def test_attachment_built_for_vision_capable_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+
+    _install_agent(monkeypatch, _FakeAgent(model_name="claude-sonnet-4-20250514"))
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"FAKEJPEG")
+
+    att = so._maybe_image_attachment("sess-1", img)
+    assert att is not None and len(att) == 1
+    assert att[0]["kind"] == "image"
+    assert att[0]["mime_type"] == "image/jpeg"
+    assert att[0]["url"].startswith("file://")
+    assert att[0]["url"].endswith("frame.jpg")
+
+
+def test_attachment_omitted_for_non_vision_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+
+    _install_agent(monkeypatch, _FakeAgent(model_name="some-local-text-only"))
+    img = tmp_path / "frame.png"
+    img.write_bytes(b"FAKE")
+
+    assert so._maybe_image_attachment("sess-1", img) is None
+
+
+def test_attachment_omitted_when_send_image_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber import screen_observation as so
+
+    monkeypatch.setenv("GENY_SCREEN_OBS_SEND_IMAGE", "0")
+    _install_agent(monkeypatch, _FakeAgent(model_name="claude-sonnet-4-20250514"))
+    img = tmp_path / "frame.png"
+    img.write_bytes(b"FAKE")
+
+    assert so._maybe_image_attachment("sess-1", img) is None
+
+
+def test_run_trigger_passes_attachments_when_vision_capable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The synthetic ``[USER_OBSERVATION]`` execute_command call must
+    carry the real frame as a multimodal attachment for a vision model."""
+    import sys
+    import types
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    captured: dict = {}
+
+    fake_mod = types.ModuleType("service.execution.agent_executor")
+
+    async def _fake_exec(session_id, prompt, **kwargs):  # noqa: ANN001
+        captured["session_id"] = session_id
+        captured["prompt"] = prompt
+        captured["kwargs"] = kwargs
+
+        class _R:
+            success = True
+            output = "[SILENT]"
+            duration_ms = 1
+            cost_usd = 0.0
+
+        return _R()
+
+    fake_mod.execute_command = _fake_exec  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "service.execution.agent_executor", fake_mod)
+    monkeypatch.setattr(so, "_save_trigger_response_to_chat", lambda **k: None)
+    _install_agent(monkeypatch, _FakeAgent(model_name="claude-opus-4"))
+
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"FAKEJPEG")
+
+    _run(so._run_trigger(
+        session_id="sess-1",
+        observation_id="obs-1",
+        caption="vscode editing python",
+        captured_at=datetime.now(timezone.utc),
+        image_path=img,
+    ))
+
+    assert "attachments" in captured["kwargs"]
+    att = captured["kwargs"]["attachments"]
+    assert att[0]["kind"] == "image" and att[0]["url"].startswith("file://")
+    assert captured["kwargs"]["is_trigger"] is True
+
+
+def test_run_trigger_caption_only_for_non_vision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    import types
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    captured: dict = {}
+    fake_mod = types.ModuleType("service.execution.agent_executor")
+
+    async def _fake_exec(session_id, prompt, **kwargs):  # noqa: ANN001
+        captured["kwargs"] = kwargs
+
+        class _R:
+            success = True
+            output = ""
+            duration_ms = 1
+            cost_usd = 0.0
+
+        return _R()
+
+    fake_mod.execute_command = _fake_exec  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "service.execution.agent_executor", fake_mod)
+    monkeypatch.setattr(so, "_save_trigger_response_to_chat", lambda **k: None)
+    _install_agent(monkeypatch, _FakeAgent(model_name="local-llama-text"))
+
+    img = tmp_path / "frame.png"
+    img.write_bytes(b"FAKE")
+
+    _run(so._run_trigger(
+        session_id="sess-1", observation_id="o", caption="c",
+        captured_at=datetime.now(timezone.utc), image_path=img,
+    ))
+
+    assert "attachments" not in captured["kwargs"]
+
+
+# ── P2: recall-able vault recording + dedup ───────────────────────────
+
+
+class _FakeMemoryManager:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def awrite_note(self, title, content, *, category, tags,
+                          importance, source, filename_override):  # noqa: ANN001
+        self.calls.append({
+            "title": title, "content": content, "category": category,
+            "tags": list(tags), "source": source,
+            "filename_override": filename_override,
+        })
+        return f"{category}/{filename_override}"
+
+
+def test_record_note_writes_to_vault_via_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    mm = _FakeMemoryManager()
+    _install_agent(monkeypatch, _FakeAgent(memory_manager=mm))
+    img = tmp_path / "f.jpg"
+    img.write_bytes(b"x")
+
+    ref = _run(so._record_observation_note(
+        session_id="sess-1", image_path=img, note_path=tmp_path / "f.md",
+        caption="User editing main.py", vision_source="vision",
+        captured_at=datetime.now(timezone.utc), observation_id="obs-1",
+    ))
+
+    assert len(mm.calls) == 1
+    call = mm.calls[0]
+    assert call["category"] == "observations"
+    assert "screen" in call["tags"] and "observation" in call["tags"]
+    assert "![[f.jpg]]" in call["content"]
+    assert "User editing main.py" in call["content"]
+    assert ref == "observations/" + call["filename_override"]
+
+
+def test_record_note_dedups_identical_caption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    mm = _FakeMemoryManager()
+    _install_agent(monkeypatch, _FakeAgent(memory_manager=mm))
+    img = tmp_path / "f.jpg"
+    img.write_bytes(b"x")
+
+    def _write(force=False):
+        return _run(so._record_observation_note(
+            session_id="sess-1", image_path=img, note_path=tmp_path / "f.md",
+            caption="same caption", vision_source="vision",
+            captured_at=datetime.now(timezone.utc), observation_id="o",
+            force=force,
+        ))
+
+    assert _write() is not None        # first records
+    assert _write() is None            # identical caption → deduped
+    assert len(mm.calls) == 1
+    assert _write(force=True) is not None  # force ("Show Now") bypasses dedup
+    assert len(mm.calls) == 2
+
+
+def test_record_note_write_failure_does_not_poison_dedup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient write failure must NOT mark the caption as seen — the
+    next identical capture has to be allowed to retry, not silently
+    dropped for the rest of the session."""
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    class _FlakyMM:
+        def __init__(self):
+            self.n = 0
+
+        async def awrite_note(self, *a, **k):  # noqa: ANN001
+            self.n += 1
+            if self.n == 1:
+                raise RuntimeError("provider down")
+            return "observations/ok.md"
+
+    mm = _FlakyMM()
+    _install_agent(monkeypatch, _FakeAgent(memory_manager=mm))
+    img = tmp_path / "f.jpg"
+    img.write_bytes(b"x")
+
+    def _write():
+        return _run(so._record_observation_note(
+            session_id="sess-1", image_path=img, note_path=tmp_path / "f.md",
+            caption="retry me", vision_source="vision",
+            captured_at=datetime.now(timezone.utc), observation_id="o",
+        ))
+
+    assert _write() is None        # first write raised → not recorded
+    assert _write() == "observations/ok.md"  # identical caption retried (not deduped)
+    assert mm.n == 2
+
+
+def test_record_note_falls_back_to_raw_sidecar_without_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No live memory manager (e.g. agent still initialising) → the
+    observation is still written to a raw sidecar so it's never lost."""
+    from datetime import datetime, timezone
+    from service.vtuber import screen_observation as so
+
+    _install_agent(monkeypatch, None)  # no agent → no manager
+    img = tmp_path / "f.jpg"
+    img.write_bytes(b"x")
+    note = tmp_path / "f.md"
+
+    ref = _run(so._record_observation_note(
+        session_id="sess-1", image_path=img, note_path=note,
+        caption="fallback caption", vision_source="vision",
+        captured_at=datetime.now(timezone.utc), observation_id="o",
+    ))
+
+    assert ref == str(note)
+    assert note.exists()
+    assert "fallback caption" in note.read_text(encoding="utf-8")
+
+
+def test_e2e_save_records_to_vault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full upload path with a live (fake) memory manager records the
+    observation into the recall-able vault under category=observations."""
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber import screen_observation as so
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="terminal showing a stack trace")
+    _install_trigger_recorder(monkeypatch)
+    mm = _FakeMemoryManager()
+    _install_agent(monkeypatch, _FakeAgent(
+        model_name="claude-sonnet-4", memory_manager=mm,
+    ))
+
+    result = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"FRAME", mime_type="image/jpeg",
+    ))
+
+    assert result.image_path is not None and Path(result.image_path).exists()
+    # Image lands inside the vault so the embed resolves + retention finds it.
+    assert "memory" in result.image_path and "observations" in result.image_path
+    assert len(mm.calls) == 1
+    assert mm.calls[0]["category"] == "observations"
+    assert result.note_path == "observations/" + mm.calls[0]["filename_override"]
+
+
+def test_prune_removes_old_images_keeps_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import time as _time
+    from service.vtuber import screen_observation as so
+
+    monkeypatch.setenv("GENY_SCREEN_OBS_RETENTION_DAYS", "7")
+    obs = tmp_path / "memory" / "observations" / "2020-01-01"
+    obs.mkdir(parents=True)
+    old_img = obs / "old.jpg"
+    old_img.write_bytes(b"x")
+    old_note = obs / "old.md"
+    old_note.write_text("caption", encoding="utf-8")
+    fresh_img = obs / "fresh.jpg"
+    fresh_img.write_bytes(b"y")
+
+    old = _time.time() - 30 * 86400
+    os.utime(old_img, (old, old))
+    os.utime(old_note, (old, old))
+
+    so._prune_old_observations(tmp_path)
+
+    assert not old_img.exists()   # old image pruned
+    assert old_note.exists()      # note kept (recall value)
+    assert fresh_img.exists()     # recent image kept

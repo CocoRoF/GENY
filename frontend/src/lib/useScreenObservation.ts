@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { vtuberApi } from '@/lib/api';
+import { registerScreenGrabber } from '@/lib/screenFrameAccess';
 
 export type ScreenObservationPhase =
   | 'idle'          // disabled
@@ -72,12 +73,31 @@ export interface UseScreenObservationState {
 }
 
 
-/** Pull a single frame from a live ``MediaStream`` as a PNG ``Blob``.
- *  Mirrors the existing ``screen_capture`` source's helper but
- *  doesn't release the stream — the caller owns the stream lifetime. */
-async function _captureFrameAsBlob(
+// Capture spec (16:9, ~1600×900, JPEG q0.85). A glance frame doesn't
+// need pixel-perfect fidelity — downscaling caps the per-frame token
+// cost when the image reaches the vision/persona LLM, and JPEG keeps
+// the upload small. Long edge is capped at 1600w / 900h preserving the
+// source aspect, so a 1920×1080 monitor lands exactly at 1600×900 and
+// an ultrawide fits within the box without distortion.
+const CAP_W = 1600;
+const CAP_H = 900;
+const CAP_QUALITY = 0.85;
+
+/** Scale (vw×vh) into the CAP_W×CAP_H box preserving aspect; never
+ *  upscale. Returns integer canvas dims. */
+function _fitWithin(vw: number, vh: number): { w: number; h: number } {
+  if (!vw || !vh) return { w: CAP_W, h: CAP_H };
+  const scale = Math.min(CAP_W / vw, CAP_H / vh, 1);
+  return { w: Math.round(vw * scale), h: Math.round(vh * scale) };
+}
+
+/** Draw one frame of a live ``MediaStream`` onto a fresh canvas,
+ *  downscaled to fit within 1600×900 (16:9 cap). Doesn't release the
+ *  stream — the caller owns the stream lifetime. Returns null on any
+ *  failure (no track, no context, play rejected). */
+async function _grabCanvas(
   stream: MediaStream,
-): Promise<Blob | null> {
+): Promise<HTMLCanvasElement | null> {
   const track = stream.getVideoTracks()[0];
   if (!track) return null;
 
@@ -91,20 +111,106 @@ async function _captureFrameAsBlob(
     return null;
   }
 
+  // Wait until the video reports real dimensions (metadata loaded) so a
+  // freshly-acquired stream doesn't yield a 0-size / black first frame.
+  // Bounded so we never hang if metadata never arrives.
+  if (!video.videoWidth || !video.videoHeight) {
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      video.addEventListener('loadedmetadata', finish, { once: true });
+      setTimeout(finish, 600);
+    });
+  }
+
   // One animation frame ensures compositing has happened so we
   // don't grab a black frame on some browsers.
   await new Promise((r) => requestAnimationFrame(r));
 
+  const { w, h } = _fitWithin(video.videoWidth, video.videoHeight);
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0, w, h);
+  return canvas;
+}
 
+/** Single frame as a JPEG ``Blob`` (for the periodic upload). */
+async function _captureFrameAsBlob(
+  stream: MediaStream,
+): Promise<Blob | null> {
+  const canvas = await _grabCanvas(stream);
+  if (!canvas) return null;
   return new Promise<Blob | null>((resolve) =>
-    canvas.toBlob((blob) => resolve(blob), 'image/png', 0.92),
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', CAP_QUALITY),
   );
+}
+
+/** Single frame as a JPEG data URL (for attaching to a conversation
+ *  turn — see ``screenFrameAccess``). */
+async function _captureFrameAsDataUrl(
+  stream: MediaStream,
+): Promise<string | null> {
+  const canvas = await _grabCanvas(stream);
+  if (!canvas) return null;
+  return canvas.toDataURL('image/jpeg', CAP_QUALITY);
+}
+
+/** Acquire a live screen MediaStream, kept alive for the whole "ON"
+ *  period. In the desktop connector (Electron) we use the connector's
+ *  ``desktopCapturer`` sources + ``chromeMediaSource`` so there is NO
+ *  permission/picker prompt — the primary screen is grabbed directly
+ *  (OLV desktop-pet model). In a plain browser we fall back to
+ *  ``getDisplayMedia`` (the standard share-picker prompt). */
+async function _acquireScreenStream(): Promise<MediaStream> {
+  const conn =
+    typeof window !== 'undefined'
+      ? (window as unknown as { connector?: { capture?: {
+          listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>;
+        } } }).connector
+      : undefined;
+
+  if (conn?.capture?.listSources) {
+    try {
+      const sources = await conn.capture.listSources();
+      const src =
+        sources.find((s) => String(s.id).startsWith('screen:')) ?? sources[0];
+      if (src) {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            // Electron desktop-capture constraint (legacy mandatory form).
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: src.id,
+              maxWidth: 1920,
+              maxHeight: 1080,
+            },
+          } as unknown as MediaTrackConstraints,
+        });
+      }
+    } catch (e) {
+      // Connector capture unavailable/paused → fall back to the browser
+      // picker so the feature still works.
+      console.warn(
+        '[useScreenObservation] connector capture failed; falling back to getDisplayMedia',
+        e,
+      );
+    }
+  }
+
+  return navigator.mediaDevices.getDisplayMedia({
+    video: { displaySurface: 'monitor' } as MediaTrackConstraints,
+    audio: false,
+  });
 }
 
 
@@ -162,7 +268,7 @@ export function useScreenObservation(
         const res = await vtuberApi.uploadScreenObservation({
           sessionId: sid,
           blob,
-          filename: `screen-${stamp}.png`,
+          filename: `screen-${stamp}.jpg`,
           forceTrigger: force,
         });
         setLastCapturedAt(Date.now());
@@ -191,6 +297,7 @@ export function useScreenObservation(
   }, [doUpload]);
 
   const teardown = useCallback(() => {
+    registerScreenGrabber(null);
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -222,10 +329,7 @@ export function useScreenObservation(
     let cancelled = false;
 
     const start = async () => {
-      if (
-        typeof navigator === 'undefined' ||
-        !navigator.mediaDevices?.getDisplayMedia
-      ) {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
         setPhase('error');
         setError('Screen sharing not supported in this browser');
         onAutoDisableRef.current?.();
@@ -234,10 +338,7 @@ export function useScreenObservation(
       setPhase('requesting');
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { displaySurface: 'monitor' } as MediaTrackConstraints,
-          audio: false,
-        });
+        stream = await _acquireScreenStream();
       } catch (e) {
         if (cancelled) return;
         setPhase('error');
@@ -258,6 +359,17 @@ export function useScreenObservation(
       }
       streamRef.current = stream;
       setPhase('observing');
+
+      // Expose a live-frame grabber so a conversation turn (voice/keyboard
+      // in THIS window) can attach the current screen — OLV's "see what's
+      // on screen when you talk to me" model, reusing this same stream so
+      // there's no second permission prompt.
+      registerScreenGrabber(async () => {
+        const s = streamRef.current;
+        if (!s) return null;
+        const data = await _captureFrameAsDataUrl(s);
+        return data ? { data, mime_type: 'image/jpeg' } : null;
+      });
 
       // Detect the user clicking the browser's "Stop sharing"
       // button: every track's ``onended`` fires; we flip the

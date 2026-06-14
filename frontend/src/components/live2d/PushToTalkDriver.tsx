@@ -16,6 +16,7 @@ import { useVoiceActivityRecorder } from '@/lib/useVoiceActivityRecorder';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import { sttApi, chatApi } from '@/lib/api';
+import { grabCurrentScreenAttachment } from '@/lib/screenFrameAccess';
 
 export default function PushToTalkDriver({
   sessionId,
@@ -37,7 +38,17 @@ export default function PushToTalkDriver({
           getAudioManager().ensureResumed();
           useVTuberStore.getState().beginTTSTurn(sessionId);
         }
-        await chatApi.broadcastToRoom(roomId, { message: msg });
+        // When screen observation is ON, attach the CURRENT frame so the
+        // avatar sees what's on screen as you speak (OLV turn-attach model).
+        // Reuses the already-open observation stream — no extra prompt; null
+        // when the toggle is off or no stream in this window.
+        const screen = useVTuberStore.getState().screenObservationEnabled
+          ? await grabCurrentScreenAttachment()
+          : null;
+        await chatApi.broadcastToRoom(roomId, {
+          message: msg,
+          attachments: screen ? [screen] : undefined,
+        });
       } catch (e) {
         console.error('[push-to-talk]', e);
       }

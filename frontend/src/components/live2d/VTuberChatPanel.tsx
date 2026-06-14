@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from '@/lib/api';
+import { grabCurrentScreenAttachment } from '@/lib/screenFrameAccess';
 import { resizeImageIfNeeded, isImageFile } from '@/lib/imageAttachments';
 import { getChatWSManager } from '@/lib/chatWsManager';
 import { getAudioManager } from '@/lib/audioManager';
@@ -419,12 +420,21 @@ export default function VTuberChatPanel({
     }
 
     setInput('');
-    const attachmentsToSend = pendingAttachments;
+    const attachmentsToSend = [...pendingAttachments];
     setPendingAttachments([]);
     setAttachmentError(null);
     setSending(true);
 
     try {
+      // When screen observation is ON, attach the current frame so the
+      // avatar sees the screen as you talk (OLV turn-attach). No-op in
+      // windows without a live stream (e.g. the /connector chat window) —
+      // those rely on the ambient observation + memory recall instead.
+      if (useVTuberStore.getState().screenObservationEnabled) {
+        const screen = await grabCurrentScreenAttachment();
+        if (screen) attachmentsToSend.push(screen);
+      }
+
       const resp = await chatApi.broadcastToRoom(roomId, {
         message: text,
         attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,

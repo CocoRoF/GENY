@@ -50,6 +50,7 @@ VALID_CATEGORIES = {
     "dms", "conversations", "compactions",
     "executions",
     "inbox",  # whiteboard P0 — raw captures awaiting refinement
+    "observations",  # VTuber screen-observation notes (vision plan P2)
     "root",
 }
 
