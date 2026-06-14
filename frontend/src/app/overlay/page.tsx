@@ -16,7 +16,7 @@
  *   room    — chat room_id for TTS (default: the session's chat_room_id).
  */
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
 import { agentApi } from '@/lib/api';
@@ -25,8 +25,9 @@ import { useVTuberStore } from '@/store/useVTuberStore';
 // Browser-only (pixi.js + Spine/Live2D runtime) — never SSR.
 const AvatarCanvas = dynamic(() => import('@/components/avatar/AvatarCanvas'), { ssr: false });
 const VTuberChatPanel = dynamic(() => import('@/components/live2d/VTuberChatPanel'), { ssr: false });
-// Voice + screen drivers live ONLY here (the avatar window), so audio plays once.
-const AudioControls = dynamic(() => import('@/components/live2d/AudioControls'), { ssr: false });
+// Voice + screen DRIVERS live ONLY here (the avatar window), so audio plays once.
+// Mounted hidden (off-screen) — they run getUserMedia / getDisplayMedia / TTS
+// based on store state; the visible compact bar below toggles that same state.
 const STTControls = dynamic(() => import('@/components/live2d/STTControls'), { ssr: false });
 const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
@@ -45,6 +46,27 @@ export default function OverlayPage() {
   const subscribeAvatar = useVTuberStore((s) => s.subscribeAvatar);
   const unsubscribeAvatar = useVTuberStore((s) => s.unsubscribeAvatar);
   const assignedModel = useVTuberStore((s) => (resolved ? s.assignments[resolved.sid] : undefined));
+
+  // Compact control state (the bar's toggles read/drive the same store the
+  // hidden driver components use).
+  const ttsEnabled = useVTuberStore((s) => s.ttsEnabled);
+  const sttEnabled = useVTuberStore((s) => s.sttEnabled);
+  const screenOn = useVTuberStore((s) => s.screenObservationEnabled);
+  const toggleTTS = useVTuberStore((s) => s.toggleTTS);
+  const toggleSTT = useVTuberStore((s) => s.toggleSTT);
+  const toggleScreen = useVTuberStore((s) => s.toggleScreenObservation);
+
+  // Avatar zoom (CSS scale, anchored at the feet) — persisted across reloads.
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    const z = parseFloat(localStorage.getItem('geny_overlay_zoom') || '1');
+    if (z >= 0.3 && z <= 3) setZoom(z);
+  }, []);
+  const applyZoom = (next: number) => {
+    const z = Math.min(3, Math.max(0.3, Math.round(next * 100) / 100));
+    setZoom(z);
+    localStorage.setItem('geny_overlay_zoom', String(z));
+  };
 
   // 1) token + transparency + resolve the target session (once).
   useEffect(() => {
@@ -101,8 +123,8 @@ export default function OverlayPage() {
     window.connector?.windowControl.setClickThrough(locked);
   }, [locked]);
 
-  // While locked, hovering the control bar makes the window briefly interactive
-  // so its buttons are clickable; leaving it returns to click-through.
+  // While locked, hovering the (tiny) control re-enables input so it is clickable;
+  // leaving returns to click-through.
   const onBarEnter = () => {
     if (locked) window.connector?.windowControl.setClickThrough(false);
   };
@@ -110,74 +132,171 @@ export default function OverlayPage() {
     if (locked) window.connector?.windowControl.setClickThrough(true);
   };
 
+  // Move (unlocked): drag the avatar → move the OS window via the bridge.
+  const dragging = useRef(false);
+  const onAvatarDown = () => {
+    dragging.current = true;
+    const onMove = (ev: MouseEvent) => {
+      if (dragging.current) window.connector?.windowControl.moveBy(ev.movementX, ev.movementY);
+    };
+    const onUp = () => {
+      dragging.current = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+  // Zoom (unlocked): wheel over the avatar scales it (anchored at the feet).
+  const onWheel = (e: React.WheelEvent) => applyZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9));
+
   if (error) return <div style={MSG}>{error}</div>;
   if (!resolved) return <div style={MSG}>아바타 불러오는 중…</div>;
 
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' }}>
-      {/* Avatar fills the window; draggable to reposition only when unlocked. */}
-      <div
-        style={{ flex: 1, minHeight: 0, position: 'relative', WebkitAppRegion: locked ? 'no-drag' : 'drag' } as CSSProperties}
-      >
-        <AvatarCanvas sessionId={resolved.sid} backgroundAlpha={0} className="w-full h-full" />
+    <div style={ROOT}>
+      {/* Avatar — CSS-scaled (zoom), anchored at the feet. */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, transform: `scale(${zoom})`, transformOrigin: 'bottom center' }}>
+          <AvatarCanvas sessionId={resolved.sid} backgroundAlpha={0} className="w-full h-full" />
+        </div>
+        {/* Unlocked: a transparent layer over the canvas captures drag-to-move
+            and wheel-to-zoom (so pixi hit-areas don't swallow them). */}
+        {!locked && (
+          <div style={{ position: 'absolute', inset: 0, cursor: 'move' }} onMouseDown={onAvatarDown} onWheel={onWheel} />
+        )}
       </div>
 
-      {/* Control bar — always interactive (no-drag). TTS/STT/screen toggles +
-          lock. This is where voice + screen actually run (single audio source). */}
-      <div onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} style={BAR}>
-        <AudioControls sessionId={resolved.sid} />
-        <STTControls sessionId={resolved.sid} />
-        <ScreenObservationControls sessionId={resolved.sid} />
-        <button
-          type="button"
-          onClick={() => setLocked((v) => !v)}
-          title={locked ? '고정됨 — 클릭하면 이동/크기조절 가능' : '이동 모드 — 클릭하면 고정'}
-          style={LOCK_BTN}
-        >
-          {locked ? '🔒' : '🔓'}
-        </button>
-      </div>
-
-      {/* Hidden orchestrator: subscribes to the room's chat WS and drives
-          TTS + lip-sync. Off-screen + inert so its effects run without UI. */}
-      {resolved.rid && (
-        <div
-          aria-hidden
-          style={{ position: 'fixed', left: -99999, top: 0, width: 380, height: 380, opacity: 0, pointerEvents: 'none' }}
-        >
-          <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />
+      {/* Locked → just a small lock chip. Unlocked → the full compact bar. */}
+      {locked ? (
+        <div style={LOCK_ONLY} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
+          <button type="button" onClick={() => setLocked(false)} title="잠금 해제 — 이동·확대·설정" style={ICON_BTN}>
+            <LockIcon open={false} />
+          </button>
+        </div>
+      ) : (
+        <div style={BAR} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
+          <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
+          <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
+          <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
+          <span style={DIVIDER} />
+          <button type="button" onClick={() => applyZoom(zoom * 0.9)} title="축소" style={ICON_BTN}>
+            <MinusIcon />
+          </button>
+          <button type="button" onClick={() => applyZoom(zoom * 1.1)} title="확대" style={ICON_BTN}>
+            <PlusIcon />
+          </button>
+          <button type="button" onClick={() => setLocked(true)} title="잠금" style={ICON_BTN}>
+            <LockIcon open />
+          </button>
         </div>
       )}
+
+      {/* Hidden drivers: TTS+lip-sync (chat WS), STT recorder, screen capture —
+          run off-screen, toggled by the bar above via shared store state. */}
+      <div aria-hidden style={HIDDEN}>
+        {resolved.rid && <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />}
+        <STTControls sessionId={resolved.sid} />
+        <ScreenObservationControls sessionId={resolved.sid} />
+      </div>
     </div>
   );
 }
 
+// ── compact bar pieces ───────────────────────────────────────────────────────
+function Toggle({ active, onClick, label, title }: { active: boolean; onClick: () => void; label: string; title: string }) {
+  return (
+    <button type="button" onClick={onClick} title={title} style={pill(active)}>
+      <span style={dot(active)} />
+      {label}
+    </button>
+  );
+}
+function LockIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d={open ? 'M7 11V7a5 5 0 0 1 9.9-1' : 'M7 11V7a5 5 0 0 1 10 0v4'} />
+    </svg>
+  );
+}
+const MinusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14" /></svg>
+);
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+);
+
+// ── styles ───────────────────────────────────────────────────────────────────
+const ROOT: CSSProperties = { width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' };
+
 const BAR: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
+  gap: 6,
   justifyContent: 'center',
-  flexWrap: 'wrap',
-  padding: '6px 10px',
-  margin: '0 8px 8px',
-  borderRadius: 12,
-  background: 'rgba(18,18,24,0.78)',
-  backdropFilter: 'blur(8px)',
-  boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+  padding: '5px 8px',
+  margin: '0 auto 8px',
+  width: 'fit-content',
+  maxWidth: 'calc(100% - 16px)',
+  borderRadius: 999,
+  background: 'rgba(18,18,24,0.82)',
+  backdropFilter: 'blur(10px)',
+  boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
   color: '#e8e8f0',
-  // The bar must stay clickable even when the avatar above is in drag mode.
-  WebkitAppRegion: 'no-drag',
-} as CSSProperties;
+};
 
-const LOCK_BTN: CSSProperties = {
-  border: '1px solid rgba(255,255,255,0.18)',
+const LOCK_ONLY: CSSProperties = {
+  alignSelf: 'flex-end',
+  margin: '0 10px 10px',
+  borderRadius: 999,
+  background: 'rgba(18,18,24,0.7)',
+  backdropFilter: 'blur(8px)',
+  boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+  color: '#cfd0e0',
+  padding: 2,
+};
+
+const ICON_BTN: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 28,
+  height: 28,
+  border: 'none',
   background: 'transparent',
   borderRadius: 8,
-  padding: '4px 8px',
-  fontSize: 14,
+  color: '#cfd0e0',
   cursor: 'pointer',
-  lineHeight: 1,
 };
+
+const DIVIDER: CSSProperties = { width: 1, height: 18, background: 'rgba(255,255,255,0.14)', margin: '0 2px' };
+
+function pill(active: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '5px 10px',
+    border: 'none',
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    color: active ? '#0c0c10' : '#cfd0e0',
+    background: active ? '#5be39a' : 'rgba(255,255,255,0.08)',
+  };
+}
+function dot(active: boolean): CSSProperties {
+  return {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: active ? '#0a7d44' : 'rgba(255,255,255,0.35)',
+    boxShadow: active ? '0 0 6px #5be39a' : 'none',
+  };
+}
+const HIDDEN: CSSProperties = { position: 'fixed', left: -99999, top: 0, width: 380, height: 380, opacity: 0, pointerEvents: 'none' };
 
 const MSG: CSSProperties = {
   width: '100vw',
