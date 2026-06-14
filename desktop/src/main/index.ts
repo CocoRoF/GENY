@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
-import { initAutoUpdate, checkForUpdatesManually } from './updater'
+import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 
 // Tray icon (32px), embedded so it works regardless of packaging layout.
 const TRAY_ICON_B64 =
@@ -30,6 +30,8 @@ let control: BrowserWindow | null = null
 // ── tiny JSON config (server URL, last geometry) in userData ────────────────
 interface ConnectorConfig {
   serverUrl: string
+  /** Auto-update toggle (default true). When false, updates only notify. */
+  autoUpdate?: boolean
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
 }
 function configPath(): string {
@@ -255,6 +257,15 @@ function registerIpc(): void {
     applyOverlayContent()
   })
 
+  // Auto-update toggle (default ON) + manual check.
+  ipcMain.handle('updater:get-enabled', () => loadConfig().autoUpdate !== false)
+  ipcMain.handle('updater:set-enabled', (_e, enabled: boolean) => {
+    saveConfig({ autoUpdate: enabled })
+    if (enabled) triggerBackgroundCheck() // re-enabled → check right away
+    return enabled
+  })
+  ipcMain.on('updater:check', () => checkForUpdatesManually())
+
   // Secure token storage via the OS keychain (keytar). Falls back to the JSON
   // config only if keytar is unavailable (logged), so dev still works.
   ipcMain.handle('secure:get', async (_e, key: string) => {
@@ -294,8 +305,9 @@ app.whenReady().then(() => {
   // visible (no more "where do I configure it?"). It hides to the tray on close.
   control?.show()
 
-  // GitHub Releases auto-update (Windows/Linux; macOS once signed).
-  initAutoUpdate()
+  // GitHub Releases auto-update. Default ON; the toggle lives in the control
+  // window and is read fresh on every check, so changes take effect immediately.
+  initAutoUpdate(() => loadConfig().autoUpdate !== false)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()
