@@ -24,17 +24,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # latest*.yml + blockmaps are the electron-updater feed — upload them
+          # alongside the installers so auto-update can find new releases.
           - os: ubuntu-latest
             flag: --linux
             glob: |
               desktop/dist/*.AppImage
               desktop/dist/*.deb
+              desktop/dist/latest-linux.yml
           - os: windows-latest
             flag: --win
-            glob: desktop/dist/*.exe
+            glob: |
+              desktop/dist/*.exe
+              desktop/dist/*.blockmap
+              desktop/dist/latest.yml
           - os: macos-latest
             flag: --mac
-            glob: desktop/dist/*.dmg
+            glob: |
+              desktop/dist/*.dmg
+              desktop/dist/*.blockmap
+              desktop/dist/latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
