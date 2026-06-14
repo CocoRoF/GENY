@@ -1,6 +1,10 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+
+// Tray icon (32px), embedded so it works regardless of packaging layout.
+const TRAY_ICON_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqUlEQVR4nO2XQQ5AQAxF24kjuB07jmV23M4dWE1CUzM6aCPpX/7Q/6ZoFIFRN2wb5z/VEhGpdzK+Cs6BBO1wmhW0wylEKF34tdDi9EeZd8ABHKCpvXGeYKVeP0IrrVPVAS48578KUAqRQogA7haXQJi/hA7wL4C737lkHog7UCouHUZVj+AqpGYS+g+JA9gDcOuSlpaIaN+BRKIdnDIDNTTDAch2nKS5nu+UHjk+m3zZzgAAAABJRU5ErkJggg=='
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Geny connector — main process.
@@ -68,7 +72,7 @@ function createOverlay(): void {
     hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       // Keep the avatar ticking at full FPS even when occluded/unfocused —
@@ -112,7 +116,7 @@ function createControl(): void {
     show: false,
     title: 'Geny',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -144,6 +148,45 @@ let appQuitting = false
 app.on('before-quit', () => {
   appQuitting = true
 })
+
+// ── system tray: the always-available way to open settings / quit ───────────
+let tray: Tray | null = null
+function createTray(): void {
+  const icon = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_B64}`)
+  tray = new Tray(icon)
+  tray.setToolTip('Geny')
+  const rebuildMenu = () => {
+    const menu = Menu.buildFromTemplate([
+      { label: 'Geny 설정 / 채팅 열기', click: () => showControl() },
+      {
+        label: overlay?.isVisible() ? '아바타 숨기기' : '아바타 보이기',
+        click: () => {
+          if (!overlay) return
+          overlay.isVisible() ? overlay.hide() : overlay.show()
+          rebuildMenu()
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '종료',
+        click: () => {
+          appQuitting = true
+          app.quit()
+        },
+      },
+    ])
+    tray?.setContextMenu(menu)
+  }
+  rebuildMenu()
+  // Left-click the tray toggles the control window (Windows/Linux convention).
+  tray.on('click', () => showControl())
+}
+
+function showControl(): void {
+  if (!control) createControl()
+  control?.show()
+  control?.focus()
+}
 
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
 function registerIpc(): void {
@@ -200,12 +243,20 @@ app.whenReady().then(() => {
   registerIpc()
   createOverlay()
   createControl()
+  createTray()
+
+  // Phase 0: show the control window on launch so settings/login are immediately
+  // visible (no more "where do I configure it?"). It hides to the tray on close.
+  control?.show()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()
   })
 })
 
+// The overlay is always-on-top with no taskbar entry; closing the control window
+// must NOT quit the app (it hides to tray). Quit is via the tray menu. So we do
+// NOT auto-quit on window-all-closed except as a safety net when the tray is gone.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })

@@ -18,7 +18,19 @@ export default defineConfig({
       },
     },
   },
-  preload: {},
+  preload: {
+    build: {
+      rollupOptions: {
+        // Emit CommonJS .cjs: a sandboxed renderer (contextIsolation default)
+        // cannot load an ESM (.mjs) preload, and package.json "type":"module"
+        // would otherwise make electron-vite emit .mjs. .cjs is unambiguous CJS.
+        output: {
+          format: 'cjs',
+          entryFileNames: 'index.cjs',
+        },
+      },
+    },
+  },
   renderer: {
     resolve: {
       alias: {
