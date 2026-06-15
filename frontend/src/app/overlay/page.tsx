@@ -36,21 +36,6 @@ const ScreenObservationControls = dynamic(
   { ssr: false },
 );
 
-// localStorage key the overlay sets before opening the control window so the
-// /connector panel knows which tab (chat|settings) to show. Same origin →
-// the panel picks it up via its own storage listener.
-const CONNECTOR_VIEW_KEY = 'geny_connector_view';
-function openControlView(view: 'chat' | 'settings') {
-  try {
-    localStorage.setItem(CONNECTOR_VIEW_KEY, view);
-  } catch {
-    /* ignore */
-  }
-  const conn = window.connector;
-  if (conn?.windowControl?.openControl) conn.windowControl.openControl();
-  else window.open('/connector', '_blank', 'noopener'); // plain-browser fallback
-}
-
 export default function OverlayPage() {
   const [resolved, setResolved] = useState<{ sid: string; rid: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +139,38 @@ export default function OverlayPage() {
     window.connector?.windowControl.setClickThrough(locked);
   }, [locked]);
 
+  // Capability tuning lives in the SETTINGS window (계정·음성·앱). It's a
+  // different origin, so it arrives via the native config bridge: read it on
+  // load and re-apply on every config:changed broadcast → the hidden TTS/STT/
+  // screen drivers pick it up live (no reload).
+  useEffect(() => {
+    const conn = window.connector;
+    if (!conn?.serverConfig) return;
+    const apply = (t?: {
+      ttsVolume?: number; sttSensitivity?: number; sttSilenceMs?: number;
+      sttEchoCancellation?: boolean; sttNoiseSuppression?: boolean; sttAutoGain?: boolean;
+      screenIntervalMs?: number; screenSourceId?: string | null;
+    }) => {
+      if (!t) return;
+      const st = useVTuberStore.getState();
+      if (typeof t.ttsVolume === 'number') st.setTTSVolume(t.ttsVolume);
+      st.setSttSettings({
+        ...(typeof t.sttSensitivity === 'number' ? { sttSensitivity: t.sttSensitivity } : {}),
+        ...(typeof t.sttSilenceMs === 'number' ? { sttSilenceMs: t.sttSilenceMs } : {}),
+        ...(typeof t.sttEchoCancellation === 'boolean' ? { sttEchoCancellation: t.sttEchoCancellation } : {}),
+        ...(typeof t.sttNoiseSuppression === 'boolean' ? { sttNoiseSuppression: t.sttNoiseSuppression } : {}),
+        ...(typeof t.sttAutoGain === 'boolean' ? { sttAutoGain: t.sttAutoGain } : {}),
+      });
+      st.setScreenSettings({
+        ...(typeof t.screenIntervalMs === 'number' ? { screenIntervalMs: t.screenIntervalMs } : {}),
+        ...('screenSourceId' in t ? { screenSourceId: t.screenSourceId ?? null } : {}),
+      });
+    };
+    conn.serverConfig.get().then((c) => apply(c.overlayTuning)).catch(() => undefined);
+    const off = conn.serverConfig.onChange((c) => apply(c.overlayTuning));
+    return () => off?.();
+  }, []);
+
   // Global push-to-talk hotkey (from the connector). On each press: if the avatar
   // is mid-TTS, barge in (cut audio + cancel the agent turn), then toggle the mic.
   useEffect(() => {
@@ -233,12 +250,12 @@ export default function OverlayPage() {
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
-          {/* 말풍선 — open the chat window (control window, chat tab). */}
-          <button type="button" onClick={() => openControlView('chat')} title="채팅 창 열기" style={ICON_BTN}>
+          {/* 말풍선 — open the chat window (the control/chat window). */}
+          <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
             <ChatIcon />
           </button>
-          {/* 톱니바퀴 — open the settings window (control window, settings tab). */}
-          <button type="button" onClick={() => openControlView('settings')} title="설정 창 열기 — TTS·STT·화면" style={ICON_BTN}>
+          {/* 톱니바퀴 — open the settings window (계정·음성·앱: TTS/STT/화면 tuning). */}
+          <button type="button" onClick={() => window.connector?.windowControl.openSettings()} title="설정 창 열기" style={ICON_BTN}>
             <GearIcon />
           </button>
           <button type="button" onClick={() => setLocked(true)} title="잠금" style={ICON_BTN}>

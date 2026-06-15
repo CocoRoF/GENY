@@ -10,10 +10,22 @@ import { contextBridge, ipcRenderer } from 'electron'
 // declared as the surface grows (Phases 3–6) but only wired when implemented.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface OverlayTuning {
+  ttsVolume?: number
+  sttSensitivity?: number
+  sttSilenceMs?: number
+  sttEchoCancellation?: boolean
+  sttNoiseSuppression?: boolean
+  sttAutoGain?: boolean
+  screenIntervalMs?: number
+  screenSourceId?: string | null
+}
+
 export interface ConnectorConfig {
   serverUrl: string
   theme?: 'system' | 'dark' | 'light'
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
+  overlayTuning?: OverlayTuning
 }
 
 export interface ConnectorBridge {
@@ -26,6 +38,9 @@ export interface ConnectorBridge {
   serverConfig: {
     get(): Promise<ConnectorConfig>
     set(patch: Partial<ConnectorConfig>): Promise<ConnectorConfig>
+    /** Subscribe to live config changes (main broadcasts after every set);
+     *  used by the overlay to apply overlayTuning without a reload. */
+    onChange(cb: (cfg: ConnectorConfig) => void): () => void
   }
 
   /** OS keychain (keytar) — stores the account JWT, not the password. */
@@ -107,6 +122,11 @@ const api: ConnectorBridge = {
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch),
+    onChange: (cb) => {
+      const h = (_e: unknown, cfg: ConnectorConfig) => cb(cfg)
+      ipcRenderer.on('config:changed', h)
+      return () => ipcRenderer.removeListener('config:changed', h)
+    },
   },
   secureStore: {
     get: (key) => ipcRenderer.invoke('secure:get', key),
