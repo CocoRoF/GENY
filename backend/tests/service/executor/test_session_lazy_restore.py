@@ -31,9 +31,13 @@ class _FakeAgent:
 class _FakePersona:
     def __init__(self):
         self.overrides = {}
+        self.resets = []
 
     def set_static_override(self, sid, prompt):
         self.overrides[sid] = prompt
+
+    def reset(self, sid):
+        self.resets.append(sid)
 
 
 class _FakeBus:
@@ -48,6 +52,12 @@ class _FakeStore:
     def __init__(self, records):
         self._records = records
         self.updates = {}
+        self.soft_deleted = []
+
+    def soft_delete(self, sid):
+        self.soft_deleted.append(sid)
+        if sid in self._records:
+            self._records[sid]["is_deleted"] = True
 
     def get(self, sid):
         return self._records.get(sid)
@@ -135,6 +145,24 @@ async def test_ensure_live_skips_deleted_and_unknown():
     mgr._rehydrate = _boom
     assert await mgr.ensure_session_live("dead") is None  # explicitly deleted
     assert await mgr.ensure_session_live("ghost") is None  # unknown id
+
+
+@pytest.mark.asyncio
+async def test_delete_dormant_session_soft_deletes_store_record():
+    # The bug: a dormant (post-restart) session isn't in _local_agents, so
+    # the old delete_session returned False → 404 "not found" and the
+    # session was stuck visible-and-undeletable.
+    mgr = _skeleton({"s1": {"session_id": "s1", "is_deleted": False, "storage_path": "/x"}})
+    ok = await mgr.delete_session("s1")
+    assert ok is True
+    assert "s1" in mgr._store.soft_deleted
+    assert mgr._store.get("s1")["is_deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_unknown_session_returns_false():
+    mgr = _skeleton({})
+    assert await mgr.delete_session("ghost") is False
 
 
 @pytest.mark.asyncio
