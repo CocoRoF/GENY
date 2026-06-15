@@ -1,10 +1,14 @@
 'use client';
 
 /**
- * OverlayOptions — the gear-icon settings panel for the avatar overlay.
+ * OverlayOptions — the avatar's capability-tuning settings.
  *
- * Exposes the three live capabilities' tuning, all persisted in
- * useVTuberStore (→ localStorage), read by the hidden driver components:
+ * Lives in the control window's "설정" tab (the overlay's 톱니바퀴 button opens
+ * that window). Kept same-origin as the avatar overlay so its writes —
+ * persisted in useVTuberStore (→ localStorage) — reach the overlay's hidden
+ * driver components live via the store's `storage` listener.
+ *
+ * Exposes the three live capabilities' tuning:
  *
  *   TTS  — output volume.
  *   STT  — mic sensitivity, end-of-speech wait, and the getUserMedia
@@ -95,7 +99,7 @@ export default function OverlayOptions() {
             style={SLIDER}
           />
         </Row>
-        <div style={{ fontSize: 11, color: '#9a9bb0', margin: '2px 0 4px' }}>사운드 보정</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 4px' }}>사운드 보정</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Chip active={sttEcho} onClick={() => setSttSettings({ sttEchoCancellation: !sttEcho })}>에코 제거</Chip>
           <Chip active={sttNoise} onClick={() => setSttSettings({ sttNoiseSuppression: !sttNoise })}>노이즈 억제</Chip>
@@ -158,25 +162,25 @@ function Row({ label, value, children }: { label: string; value?: string; childr
   return (
     <div style={ROW}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontSize: 12, color: '#cfd0e0' }}>{label}</span>
-        {value && <span style={{ fontSize: 11, color: '#8b8ca0', fontVariantNumeric: 'tabular-nums' }}>{value}</span>}
+        <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{label}</span>
+        {value && <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{value}</span>}
       </div>
       {children}
     </div>
   );
 }
 function Hint({ children }: { children: ReactNode }) {
-  return <div style={{ fontSize: 10.5, color: '#76778c', lineHeight: 1.45, marginTop: 4 }}>{children}</div>;
+  return <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 4 }}>{children}</div>;
 }
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button" onClick={onClick}
       style={{
-        padding: '4px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-        border: '1px solid ' + (active ? 'transparent' : 'rgba(255,255,255,0.14)'),
-        color: active ? '#0c0c10' : '#cfd0e0',
-        background: active ? '#5be39a' : 'rgba(255,255,255,0.06)',
+        padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        border: '1px solid ' + (active ? 'transparent' : 'var(--border-color)'),
+        color: active ? '#fff' : 'var(--text-secondary)',
+        background: active ? 'var(--primary-color)' : 'var(--bg-tertiary)',
       }}
     >
       {children}
@@ -185,22 +189,24 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 }
 
 // ── styles ───────────────────────────────────────────────────────────────────
+// Theme-aware (CSS vars) — rendered in the themed control window, not the
+// dark overlay. The parent (settings tab) handles scrolling.
 const CARD: CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 10,
-  padding: 14, maxHeight: '52vh', overflowY: 'auto',
-  color: '#e8e8f0',
+  display: 'flex', flexDirection: 'column', gap: 16,
+  padding: 18, width: '100%', maxWidth: 540, margin: '0 auto',
+  color: 'var(--text-primary)',
 };
 const SECTION: CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 6,
-  paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.08)',
+  display: 'flex', flexDirection: 'column', gap: 8,
+  paddingBottom: 14, borderBottom: '1px solid var(--border-color)',
 };
 const SECTION_TITLE: CSSProperties = {
-  fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: '#a9aac0',
+  fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--text-muted)',
 };
-const ROW: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 5 };
-const SLIDER: CSSProperties = { width: '100%', accentColor: '#5be39a', cursor: 'pointer' };
+const ROW: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+const SLIDER: CSSProperties = { width: '100%', accentColor: 'var(--primary-color)', cursor: 'pointer' };
 const SELECT: CSSProperties = {
-  width: '100%', padding: '5px 8px', borderRadius: 8, fontSize: 12,
-  background: 'rgba(255,255,255,0.06)', color: '#e8e8f0',
-  border: '1px solid rgba(255,255,255,0.14)', cursor: 'pointer',
+  width: '100%', padding: '7px 10px', borderRadius: 8, fontSize: 13,
+  background: 'var(--bg-tertiary)', color: 'var(--text-primary)',
+  border: '1px solid var(--border-color)', cursor: 'pointer',
 };
