@@ -1729,6 +1729,20 @@ export interface ClaudeCodeAuthStatus {
   org_name?: string | null;
 }
 
+export interface ClaudeCodeVersionStatus {
+  package: string;
+  current: string | null;
+  latest: string | null;
+  pinned: string | null;
+  previous: string | null;
+  history: string[];
+  update_available: boolean;
+  can_rollback: boolean;
+  ok?: boolean;
+  installed?: string;
+  error?: string;
+}
+
 export interface AuthLoginStartResponse {
   job_id: string;
   kind: 'claude_code';
@@ -1761,6 +1775,22 @@ export const llmBackendsApi = {
 
   /** GET /api/llm-backends/subagents */
   subagents: () => apiCall<SubagentsResponse>('/api/llm-backends/subagents'),
+
+  // ── Claude Code CLI version management (keep-latest + rollback) ──
+
+  claudeCodeVersion: () =>
+    apiCall<ClaudeCodeVersionStatus>('/api/llm-backends/claude-code/version'),
+
+  claudeCodeUpdate: (version = 'latest') =>
+    apiCall<ClaudeCodeVersionStatus>('/api/llm-backends/claude-code/version/update', {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    }),
+
+  claudeCodeRollback: () =>
+    apiCall<ClaudeCodeVersionStatus>('/api/llm-backends/claude-code/version/rollback', {
+      method: 'POST',
+    }),
 
   // ── Phase G — Claude Code auth ────────────────────────────────
 
