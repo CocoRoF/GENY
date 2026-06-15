@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Copy, Pencil, Plus, Sparkles, Star } from 'lucide-react';
+import { Boxes, Copy, Pencil, Plus, Sparkles, Star, Trash2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -102,6 +102,19 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
     }
   };
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await environmentApi.delete(id);
+      setEnvs((prev) => prev.filter((e) => e.id !== id));
+    } catch {
+      /* keep the card; backend rejects (e.g. in-use) — surfaced via toast layer */
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* ── Blank ── (suppressed when the parent surface owns the primary CTA) */}
@@ -182,7 +195,9 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
                 env={env}
                 onEdit={() => handleEdit(env.id)}
                 onClone={() => handleFromExisting(env.id)}
-                disabled={seeding}
+                onDelete={() => handleDelete(env.id)}
+                disabled={seeding || deletingId === env.id}
+                deleting={deletingId === env.id}
               />
             ))}
           </div>
@@ -280,14 +295,21 @@ function UserEnvCard({
   env,
   onEdit,
   onClone,
+  onDelete,
   disabled,
+  deleting,
 }: {
   env: EnvironmentSummary;
   onEdit: () => void;
   onClone: () => void;
+  onDelete: () => void;
   disabled: boolean;
+  deleting: boolean;
 }) {
   const { t } = useI18n();
+  // Inline 2-click confirm — first click arms, second click deletes. Avoids a
+  // jarring native confirm() while keeping a destructive action behind a guard.
+  const [confirming, setConfirming] = useState(false);
   // Layout invariants (Phase H polish):
   //   - ``h-full``    Every card stretches to the row's tallest card
   //                   so a 1-line and a 2-line description don't end
@@ -361,6 +383,30 @@ function UserEnvCard({
         >
           <Copy className="w-3 h-3" />
           {t('envManagement.startFrom.clone')}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (disabled) return;
+            if (confirming) onDelete();
+            else setConfirming(true);
+          }}
+          onMouseLeave={() => setConfirming(false)}
+          disabled={disabled}
+          aria-label={t('envManagement.startFrom.deleteAriaLabel', { name: env.name })}
+          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium ml-auto transition-colors disabled:opacity-50 ${
+            confirming
+              ? 'text-red-50 bg-red-600 hover:bg-red-700'
+              : 'text-red-600 dark:text-red-400 hover:bg-red-500/10'
+          }`}
+        >
+          <Trash2 className="w-3 h-3" />
+          {deleting
+            ? '…'
+            : confirming
+              ? t('envManagement.startFrom.deleteConfirm')
+              : t('envManagement.startFrom.delete')}
         </button>
       </div>
     </div>
