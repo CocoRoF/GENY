@@ -13,6 +13,8 @@ declare global {
         setOverlaySession(sessionId: string): void
         refresh(): void
         openSettings(): void
+        toggleControl(): void
+        openControl(): void
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
         restart(): void

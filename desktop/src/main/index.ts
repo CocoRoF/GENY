@@ -440,6 +440,15 @@ function registerIpc(): void {
     control.isVisible() ? control.hide() : control.show()
   })
 
+  // Always show + focus the control window (never hides). The overlay's
+  // chat/options buttons use this; the desired view (chat|settings) is
+  // signalled via same-origin localStorage so the panel switches tabs.
+  ipcMain.on('control:open', () => {
+    if (!control) createControl()
+    control?.show()
+    control?.focus()
+  })
+
   // Re-evaluate everything after login/logout (token changed in keychain).
   ipcMain.on('app:refresh', () => void refreshAll())
 

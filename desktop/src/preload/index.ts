@@ -42,6 +42,8 @@ export interface ConnectorBridge {
     moveBy(dx: number, dy: number): void
     /** Show/hide the control (chat/settings) window. */
     toggleControl(): void
+    /** Always show + focus the control window (chat/settings); never hides. */
+    openControl(): void
     /** Re-load BOTH windows after login/logout (token changed in keychain). */
     refresh(): void
     /** Set which session the floating overlay renders, and reload it. */
@@ -115,6 +117,7 @@ const api: ConnectorBridge = {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
+    openControl: () => ipcRenderer.send('control:open'),
     refresh: () => ipcRenderer.send('app:refresh'),
     setOverlaySession: (sessionId) => ipcRenderer.send('overlay:set-session', sessionId),
     openSettings: () => ipcRenderer.send('settings:open'),
