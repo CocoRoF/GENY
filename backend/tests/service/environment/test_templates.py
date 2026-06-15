@@ -126,6 +126,11 @@ def test_vtuber_env_has_internal_dm_and_inbox_only() -> None:
         "session_list",
         "session_info",
         "session_create",
+        # memory_* / knowledge_* are platform-sourced too (matches prod's
+        # real ToolLoader — see the vtuber env served in production).
+        "memory_read",
+        "memory_write",
+        "knowledge_search",
     }
     loader = _loader_for(platform_names)
     manifest = create_vtuber_env(all_tool_names=all_names, tool_loader=loader)
@@ -256,7 +261,7 @@ def test_install_templates_propagates_to_vtuber(tmp_path) -> None:
         "web_search",
         "browser_navigate",
     ]
-    loader = _loader_for({"send_direct_message_internal", "read_inbox"})
+    loader = _loader_for({"send_direct_message_internal", "read_inbox", "memory_read"})
     install_environment_templates(
         service,
         external_tool_names=all_names,
@@ -295,6 +300,7 @@ def test_vtuber_env_denies_full_address_primitives_set() -> None:
         "session_info",
         "send_direct_message_external",
         "send_direct_message_internal",
+        "memory_read",
     })
     manifest = create_vtuber_env(all_tool_names=all_names, tool_loader=loader)
     external = list(manifest.tools.external)
@@ -359,17 +365,25 @@ def test_worker_env_declares_all_executor_built_ins() -> None:
     )
 
 
-def test_vtuber_env_declares_no_executor_built_ins() -> None:
-    """Cycle 20260420_7 / PR-3: VTuber seeds keep
-    ``manifest.tools.built_in = []``. The conversational persona has
-    no business touching files — every file action is delegated to
-    its bound Sub-Worker via ``send_direct_message_internal``."""
-    from service.environment.templates import create_vtuber_env
+def test_vtuber_env_declares_read_plan_built_ins_only() -> None:
+    """PR #654 (env-vtuber: read/plan/ask built-in opt-ins): the VTuber
+    seed declares the read-only / planning built-ins
+    (:data:`_VTUBER_BUILT_IN_TOOL_NAMES` — Read / Glob / Grep / TodoWrite /
+    EnterPlanMode / ExitPlanMode / AskUserQuestion / PushNotification) but
+    **no mutating file tools** (Write / Edit / Bash). Mutating file work is
+    still delegated to the bound Sub-Worker."""
+    from service.environment.templates import (
+        create_vtuber_env,
+        _VTUBER_BUILT_IN_TOOL_NAMES,
+    )
 
     manifest = create_vtuber_env(all_tool_names=["web_search"])
-    assert list(manifest.tools.built_in) == [], (
-        "VTuber env must not declare any built-in; file ops go via Sub-Worker"
-    )
+    built_in = list(manifest.tools.built_in)
+    assert built_in == list(_VTUBER_BUILT_IN_TOOL_NAMES)
+    for mutating in ("Write", "Edit", "Bash"):
+        assert mutating not in built_in, (
+            f"VTuber must not declare the mutating built-in {mutating}"
+        )
 
 
 def test_install_templates_persists_role_built_in_choices(tmp_path) -> None:
@@ -382,6 +396,7 @@ def test_install_templates_persists_role_built_in_choices(tmp_path) -> None:
     from service.environment.templates import (
         VTUBER_ENV_ID,
         WORKER_ENV_ID,
+        _VTUBER_BUILT_IN_TOOL_NAMES,
         install_environment_templates,
     )
 
@@ -395,7 +410,8 @@ def test_install_templates_persists_role_built_in_choices(tmp_path) -> None:
     vtuber = service.load_manifest(VTUBER_ENV_ID)
     assert worker is not None and vtuber is not None
     assert list(worker.tools.built_in) == ["*"]
-    assert list(vtuber.tools.built_in) == []
+    # PR #654: vtuber keeps the read/plan/ask built-ins (no mutating tools).
+    assert list(vtuber.tools.built_in) == list(_VTUBER_BUILT_IN_TOOL_NAMES)
 
 
 def test_install_environment_templates_passes_all_names(tmp_path) -> None:
