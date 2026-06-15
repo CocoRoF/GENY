@@ -1,5 +1,26 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import genyIcon from './assets/geny_character.png'
+import type { OverlayTuning } from '../../preload/index'
+
+// Defaults mirror the web store (useVTuberStore) so the sliders show sensible
+// positions before the user has changed anything.
+const TUNING_DEFAULTS = {
+  ttsVolume: 0.7,
+  sttSensitivity: 0.04,
+  sttSilenceMs: 1200,
+  sttEchoCancellation: true,
+  sttNoiseSuppression: true,
+  sttAutoGain: true,
+  screenIntervalMs: 180_000,
+  screenSourceId: null as string | null,
+}
+const INTERVAL_OPTIONS = [
+  { ms: 60_000, label: '1분' },
+  { ms: 180_000, label: '3분' },
+  { ms: 300_000, label: '5분' },
+  { ms: 600_000, label: '10분' },
+]
+type CaptureSource = { id: string; name: string; display_id: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings window — a tabbed control surface (계정 · 음성 · 앱). Cohesive with
@@ -48,17 +69,35 @@ export function ControlApp() {
   const [version, setVersion] = useState('')
   const [theme, setThemeState] = useState<ThemeMode>('system')
   const [sysDark, setSysDark] = useState(true)
+  // Avatar capability tuning (TTS/STT/screen) — persisted in the connector
+  // config + pushed live to the overlay's drivers via the config:changed event.
+  const [tuning, setTuning] = useState<OverlayTuning>({})
+  const [sources, setSources] = useState<CaptureSource[]>([])
 
   useEffect(() => {
     window.connector?.serverConfig.get().then((c) => {
       setServerUrl(c.serverUrl)
       setThemeState(c.theme ?? 'system')
+      setTuning(c.overlayTuning ?? {})
     })
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
     window.connector?.hotkeys.getPushToTalk().then((h) => h && setPttHotkey(h))
     window.connector?.appVersion?.().then(setVersion).catch(() => undefined)
+    window.connector?.capture?.listSources?.().then(setSources).catch(() => undefined)
   }, [])
+
+  // Merge + persist a tuning change; sends the FULL object so main's shallow
+  // config merge replaces overlayTuning cleanly.
+  const patchTuning = (p: Partial<OverlayTuning>) => {
+    setTuning((prev) => {
+      const next = { ...TUNING_DEFAULTS, ...prev, ...p }
+      window.connector?.serverConfig.set({ overlayTuning: next })
+      return next
+    })
+  }
+  const tget = <K extends keyof typeof TUNING_DEFAULTS>(k: K): (typeof TUNING_DEFAULTS)[K] =>
+    (tuning[k] ?? TUNING_DEFAULTS[k]) as (typeof TUNING_DEFAULTS)[K]
 
   // Track the OS theme so 'system' resolves live.
   useEffect(() => {
@@ -249,29 +288,92 @@ export function ControlApp() {
 
         {/* ─────────────── 음성 ─────────────── */}
         {tab === 'voice' && (
-          <section className="gy-card">
-            <div className="gy-card-h">{I.mic} 푸시투토크 단축키</div>
-            <p className="gy-hint" style={{ margin: '0 0 10px' }}>
-              탭하면 마이크가 켜지고, 다시 탭하면 꺼지거나 아바타의 말을 끊습니다.
-            </p>
-            <input
-              className="gy-input mono"
-              value={pttHotkey}
-              onChange={(e) => setPttHotkey(e.target.value)}
-              placeholder="CommandOrControl+Shift+Space"
-              spellCheck={false}
-            />
-            <div className="gy-spacer" />
-            <div className="gy-row">
-              <button className="gy-btn gy-btn--primary gy-btn--sm" onClick={savePtt}>단축키 저장</button>
-              {pttMsg && <span className="gy-hint" style={{ margin: 0 }}>{pttMsg}</span>}
-            </div>
-          </section>
+          <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.mic} 푸시투토크 단축키</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>
+                탭하면 마이크가 켜지고, 다시 탭하면 꺼지거나 아바타의 말을 끊습니다.
+              </p>
+              <input
+                className="gy-input mono"
+                value={pttHotkey}
+                onChange={(e) => setPttHotkey(e.target.value)}
+                placeholder="CommandOrControl+Shift+Space"
+                spellCheck={false}
+              />
+              <div className="gy-spacer" />
+              <div className="gy-row">
+                <button className="gy-btn gy-btn--primary gy-btn--sm" onClick={savePtt}>단축키 저장</button>
+                {pttMsg && <span className="gy-hint" style={{ margin: 0 }}>{pttMsg}</span>}
+              </div>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.mic} TTS · 음성 출력</div>
+              <TuneSlider
+                label="볼륨" min={0} max={1} step={0.05}
+                value={tget('ttsVolume')} display={`${Math.round(tget('ttsVolume') * 100)}%`}
+                onChange={(v) => patchTuning({ ttsVolume: v })}
+              />
+              <p className="gy-hint" style={{ margin: 0 }}>아바타 창의 음성 출력 볼륨입니다.</p>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.mic} STT · 음성 입력</div>
+              <TuneSlider
+                label="민감도 (낮을수록 더 민감)" min={0.01} max={0.1} step={0.005}
+                value={tget('sttSensitivity')} display={tget('sttSensitivity').toFixed(3)}
+                onChange={(v) => patchTuning({ sttSensitivity: v })}
+              />
+              <TuneSlider
+                label="발화 종료 대기" min={400} max={3000} step={100}
+                value={tget('sttSilenceMs')} display={`${(tget('sttSilenceMs') / 1000).toFixed(1)}s`}
+                onChange={(v) => patchTuning({ sttSilenceMs: v })}
+              />
+              <div className="gy-field-label" style={{ marginTop: 4 }}>사운드 보정</div>
+              <ToggleLine label="에코 제거" checked={tget('sttEchoCancellation')} onChange={(c) => patchTuning({ sttEchoCancellation: c })} />
+              <ToggleLine label="노이즈 억제" checked={tget('sttNoiseSuppression')} onChange={(c) => patchTuning({ sttNoiseSuppression: c })} />
+              <ToggleLine label="자동 게인" checked={tget('sttAutoGain')} onChange={(c) => patchTuning({ sttAutoGain: c })} />
+            </section>
+          </>
         )}
 
         {/* ─────────────── 앱 ─────────────── */}
         {tab === 'app' && (
           <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.monitor} 화면 캡처 관찰</div>
+              <label className="gy-field-label" htmlFor="gy-cap-int">캡처 주기</label>
+              <select
+                id="gy-cap-int" className="gy-input" style={{ appearance: 'auto' }}
+                value={String(tget('screenIntervalMs'))}
+                onChange={(e) => patchTuning({ screenIntervalMs: Number(e.target.value) })}
+              >
+                {INTERVAL_OPTIONS.map((o) => (
+                  <option key={o.ms} value={String(o.ms)}>{o.label}</option>
+                ))}
+              </select>
+              <div className="gy-spacer" />
+              <label className="gy-field-label" htmlFor="gy-cap-src">볼 화면/창</label>
+              {sources.length > 0 ? (
+                <select
+                  id="gy-cap-src" className="gy-input" style={{ appearance: 'auto' }}
+                  value={tget('screenSourceId') ?? ''}
+                  onChange={(e) => patchTuning({ screenSourceId: e.target.value || null })}
+                >
+                  <option value="">자동 (첫 번째 화면)</option>
+                  {sources.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {(s.id.startsWith('screen:') ? '🖥 ' : '🪟 ') + (s.name || s.id)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="gy-hint" style={{ margin: 0 }}>화면 목록을 불러오는 중…</p>
+              )}
+              <p className="gy-hint">캡처는 16:9 · 약 1600×900으로 축소되어 업로드됩니다.</p>
+            </section>
+
             <section className="gy-card">
               <div className="gy-card-h">{I.sliders} 화면 테마</div>
               <nav className="gy-tabs" style={{ margin: 0 }} role="tablist">
@@ -328,6 +430,41 @@ export function ControlApp() {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── tuning sub-components ─────────────────────────────────────────────────────
+function TuneSlider({ label, value, min, max, step, display, onChange }: {
+  label: string; value: number; min: number; max: number; step: number; display: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span className="gy-field-label" style={{ margin: 0 }}>{label}</span>
+        <span className="gy-hint" style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>{display}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: 'var(--gy-accent, #4f7cff)', cursor: 'pointer' }}
+      />
+    </div>
+  )
+}
+
+function ToggleLine({ label, checked, onChange }: {
+  label: string; checked: boolean; onChange: (c: boolean) => void;
+}) {
+  return (
+    <div className="gy-toggle-line">
+      <span className="label">{label}</span>
+      <label className="gy-switch">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="track" />
+        <span className="thumb" />
+      </label>
     </div>
   )
 }

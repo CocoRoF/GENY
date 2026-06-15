@@ -791,25 +791,3 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   },
 }));
 
-// Cross-window live sync: the settings panel (control window) and the avatar
-// (overlay window) are separate renderers but the SAME origin, so localStorage
-// + the `storage` event bridge them. When tuning changes in one window, re-
-// hydrate it in the others so the overlay's drivers apply it without a reload.
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.key === OVERLAY_SETTINGS_KEY) {
-      const s = loadOverlaySettings();
-      useVTuberStore.setState({
-        ttsVolume: s.ttsVolume,
-        sttSensitivity: s.sttSensitivity,
-        sttSilenceMs: s.sttSilenceMs,
-        sttEchoCancellation: s.sttEchoCancellation,
-        sttNoiseSuppression: s.sttNoiseSuppression,
-        sttAutoGain: s.sttAutoGain,
-        screenIntervalMs: s.screenIntervalMs,
-        screenSourceId: s.screenSourceId,
-      });
-      getAudioManager().setVolume(s.ttsVolume);
-    }
-  });
-}

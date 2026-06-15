@@ -44,6 +44,19 @@ interface ConnectorConfig {
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
+  /** Avatar capability tuning (set in the 음성/앱 settings tabs, applied live to
+   *  the overlay's TTS/STT/screen drivers via the config:changed broadcast). */
+  overlayTuning?: OverlayTuning
+}
+export interface OverlayTuning {
+  ttsVolume?: number
+  sttSensitivity?: number
+  sttSilenceMs?: number
+  sttEchoCancellation?: boolean
+  sttNoiseSuppression?: boolean
+  sttAutoGain?: boolean
+  screenIntervalMs?: number
+  screenSourceId?: string | null
 }
 function configPath(): string {
   const dir = app.getPath('userData')
@@ -421,7 +434,13 @@ async function loadNut(): Promise<any> {
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
 function registerIpc(): void {
   ipcMain.handle('config:get', () => loadConfig())
-  ipcMain.handle('config:set', (_e, patch: Partial<ConnectorConfig>) => saveConfig(patch))
+  ipcMain.handle('config:set', (_e, patch: Partial<ConnectorConfig>) => {
+    const next = saveConfig(patch)
+    // Push the merged config to the avatar overlay so its capability drivers
+    // (TTS/STT/screen) apply overlayTuning changes live — no reload.
+    overlay?.webContents.send('config:changed', next)
+    return next
+  })
 
   // Click-through toggle from the renderer's hit-test loop.
   ipcMain.on('overlay:set-ignore-mouse', (_e, ignore: boolean) => {

@@ -10,13 +10,12 @@
  * Query: ?token (→localStorage), ?session (preselect).
  */
 
-import { useEffect, useState, type SVGProps, type ReactNode } from 'react';
+import { useEffect, useState, type SVGProps } from 'react';
 import { setToken } from '@/lib/authApi';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useTheme, type Theme } from '@/lib/theme';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
-import OverlayOptions from '@/components/live2d/OverlayOptions';
 
 // CRITICAL: this is the chat window, a SEPARATE renderer process from the avatar
 // overlay. If TTS ran here too, audio would play twice (two AudioManagers). Voice
@@ -97,26 +96,6 @@ export default function ConnectorPage() {
 
   const { setTheme } = useTheme();
   const [booted, setBooted] = useState(false);
-  // Chat vs. Settings (TTS/STT/화면 tuning). The overlay's 말풍선/톱니바퀴
-  // buttons set ``geny_connector_view`` (same origin) before showing this
-  // window; we read it on mount and react to the storage event + focus.
-  const [view, setView] = useState<'chat' | 'settings'>('chat');
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = localStorage.getItem('geny_connector_view');
-        if (v === 'settings' || v === 'chat') setView(v);
-      } catch { /* ignore */ }
-    };
-    read();
-    const onStorage = (e: StorageEvent) => { if (e.key === 'geny_connector_view') read(); };
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('focus', read);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', read);
-    };
-  }, []);
 
   // Sync the connector's ?theme into the ThemeProvider store (module-load
   // already painted the class for no-flash; this keeps React state in sync).
@@ -239,18 +218,7 @@ export default function ConnectorPage() {
         </div>
       </header>
 
-      {/* View tabs — chat vs the overlay TTS/STT/화면 tuning. */}
-      <div className="flex items-center gap-1 px-3 py-1.5 shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
-        <TabButton active={view === 'chat'} onClick={() => setView('chat')}>채팅</TabButton>
-        <TabButton active={view === 'settings'} onClick={() => setView('settings')}>설정</TabButton>
-      </div>
-
-      {view === 'settings' ? (
-        <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--bg-secondary)]">
-          <OverlayOptions />
-        </div>
-      ) : (
-      /* Chat */
+      {/* Chat */}
       <div className="flex-1 min-h-0 bg-[var(--bg-secondary)]">
         {ready ? (
           <VTuberChatPanel sessionId={sid} roomId={current!.chat_room_id!} />
@@ -281,24 +249,6 @@ export default function ConnectorPage() {
           </div>
         )}
       </div>
-      )}
     </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        'px-3.5 py-1.5 text-[0.8rem] font-semibold rounded-lg transition-colors ' +
-        (active
-          ? 'bg-[var(--primary-color)] text-white'
-          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]')
-      }
-    >
-      {children}
-    </button>
   );
 }
