@@ -53,10 +53,10 @@ def test_manifest_override_is_used_verbatim(svc: EnvironmentService) -> None:
     loaded = svc.load_manifest(env_id)
     assert loaded is not None
     # Stage 6 mutation came through — proves blank_manifest() did NOT
-    # silently re-seed.
-    stage_six = next(s for s in loaded.stages if s.order == 6)
-    assert stage_six.active is True
-    assert stage_six.config.get("test_marker") == "from-draft"
+    # silently re-seed. (geny-executor 2.3.0+: manifest.stages are dicts.)
+    stage_six = next(s for s in loaded.stages if s["order"] == 6)
+    assert stage_six["active"] is True
+    assert stage_six["config"].get("test_marker") == "from-draft"
 
 
 def test_manifest_override_forces_metadata(svc: EnvironmentService) -> None:
@@ -86,7 +86,7 @@ def test_manifest_override_assigns_fresh_id_when_blank(
     svc: EnvironmentService,
 ) -> None:
     """The draft's metadata.id is empty by default. Service should mint a
-    fresh env_<8-hex> id rather than persist the empty string."""
+    fresh id rather than persist the empty string."""
     draft = _draft_manifest()
     draft["metadata"]["id"] = ""
 
@@ -94,7 +94,9 @@ def test_manifest_override_assigns_fresh_id_when_blank(
         name="autoid", manifest_override=draft
     )
 
-    assert env_id.startswith("env_")
+    # A non-empty id is minted (Geny's _fresh_id — bare hex, not the
+    # executor's "env_"-prefixed factory id) and persisted onto the manifest.
+    assert env_id and isinstance(env_id, str)
     loaded = svc.load_manifest(env_id)
     assert loaded is not None
     assert loaded.metadata.id == env_id

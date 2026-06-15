@@ -309,6 +309,8 @@ def test_vtuber_pipeline_registers_legacy_three_when_called_without_roster() -> 
 
     from service.environment.templates import create_vtuber_env
 
+    from service.environment.templates import _VTUBER_BUILT_IN_TOOL_NAMES
+
     manifest = create_vtuber_env()
     pipeline = Pipeline.from_manifest(
         manifest,
@@ -316,11 +318,14 @@ def test_vtuber_pipeline_registers_legacy_three_when_called_without_roster() -> 
         strict=False,
         adhoc_providers=[_FakeProvider(_REPRESENTATIVE_ROSTER)],
     )
-    assert set(pipeline.tool_registry.list_names()) == {
-        "web_search",
-        "news_search",
-        "web_fetch",
-    }
+    registered = set(pipeline.tool_registry.list_names())
+    # The legacy three web tools survive...
+    assert {"web_search", "news_search", "web_fetch"} <= registered
+    # ...alongside the VTuber read/plan built-ins (PR #654), and never the
+    # mutating file built-ins.
+    assert set(_VTUBER_BUILT_IN_TOOL_NAMES) <= registered
+    for mutating in ("Write", "Edit", "Bash"):
+        assert mutating not in registered
 
 
 def test_worker_pipeline_registers_all_executor_built_ins() -> None:
@@ -355,15 +360,17 @@ def test_worker_pipeline_registers_all_executor_built_ins() -> None:
     assert "memory_read" in registered
 
 
-def test_vtuber_pipeline_registers_no_executor_built_ins() -> None:
-    """Cycle 20260420_7 / PR-3: the VTuber seed env keeps
-    ``manifest.tools.built_in = []``, so no framework built-in names
-    appear in the registry. File actions must always route through
-    the Sub-Worker via ``send_direct_message_internal``."""
+def test_vtuber_pipeline_registers_only_read_plan_built_ins() -> None:
+    """PR #654: the VTuber seed declares the read/plan/ask built-ins
+    (:data:`_VTUBER_BUILT_IN_TOOL_NAMES`) — those appear in the registry —
+    but the MUTATING file built-ins (``Write`` / ``Edit`` / ``Bash``) must
+    never leak; mutating file work routes through the Sub-Worker."""
     from geny_executor.core.pipeline import Pipeline
-    from geny_executor.tools.built_in import BUILT_IN_TOOL_CLASSES
 
-    from service.environment.templates import create_vtuber_env
+    from service.environment.templates import (
+        create_vtuber_env,
+        _VTUBER_BUILT_IN_TOOL_NAMES,
+    )
 
     manifest = create_vtuber_env(
         all_tool_names=_REPRESENTATIVE_ROSTER,
@@ -377,8 +384,11 @@ def test_vtuber_pipeline_registers_no_executor_built_ins() -> None:
     )
 
     registered = set(pipeline.tool_registry.list_names())
-    for name in BUILT_IN_TOOL_CLASSES:
-        assert name not in registered, (
-            f"VTuber pipeline leaked framework built-in {name!r}. "
+    # Declared read/plan built-ins are present...
+    assert set(_VTUBER_BUILT_IN_TOOL_NAMES) <= registered
+    # ...but no mutating file tools leaked.
+    for mutating in ("Write", "Edit", "Bash"):
+        assert mutating not in registered, (
+            f"VTuber pipeline leaked mutating built-in {mutating!r}. "
             f"Got: {sorted(registered)}"
         )
