@@ -390,3 +390,78 @@ body,
 .gy-spacer {
   height: 10px;
 }
+
+/* Icon sizing safety net — every settings icon is 16px unless a context
+   overrides, so a button/header icon never balloons to fill its flex box. */
+.control-root svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.gy-card-h svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Centred content column (the window is now wider). */
+.gy-wrap {
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+/* Tabs (segmented control) */
+.gy-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 4px 0 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--gy-card-border);
+  border-radius: 12px;
+}
+.gy-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  color: var(--gy-text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.gy-tab svg {
+  width: 15px;
+  height: 15px;
+}
+.gy-tab:hover {
+  color: var(--gy-text);
+  background: rgba(255, 255, 255, 0.045);
+}
+.gy-tab.is-active {
+  color: #fff;
+  background: var(--gy-accent-grad);
+  box-shadow: 0 4px 12px rgba(79, 124, 255, 0.28);
+}
+
+/* Subtle key=value info row (App tab footer) */
+.gy-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 7px 2px;
+}
+.gy-kv .k {
+  color: var(--gy-text-3);
+}
+.gy-kv .v {
+  color: var(--gy-text-2);
+  font-variant-numeric: tabular-nums;
+}
