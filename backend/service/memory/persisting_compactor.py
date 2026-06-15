@@ -42,6 +42,14 @@ class PersistingLLMSummaryCompactor(LLMSummaryCompactor):
     ``record_compaction`` call after a successful compaction.
     """
 
+    # This wrapper writes its own compaction snapshot via
+    # ``SessionMemoryManager.record_compaction`` below. Tell the executor's
+    # shared ``run_compaction`` helper (2.5.0) NOT to also persist through
+    # the attached provider — otherwise both the proactive (Stage 2) and
+    # the new guard-recovery (Stage 4) paths would record the same snapshot
+    # twice.
+    persists_own_compaction = True
+
     def __init__(
         self,
         *args: Any,
