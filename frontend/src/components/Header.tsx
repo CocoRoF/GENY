@@ -52,6 +52,15 @@ export default function Header() {
         >
           <Menu size={20} />
         </button>
+        {/* Geny mascot — also the favicon + desktop app icon */}
+        <img
+          src="/geny_character.png"
+          alt="Geny"
+          width={32}
+          height={32}
+          className="w-7 h-7 md:w-8 md:h-8 shrink-0 object-contain select-none"
+          draggable={false}
+        />
         <span className="text-[0.9rem] text-[var(--text-tertiary)] tracking-[0.08em] italic hidden sm:inline">
           {t('header.subtitle')}
         </span>

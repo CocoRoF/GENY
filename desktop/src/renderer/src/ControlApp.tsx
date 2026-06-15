@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import genyIcon from './assets/geny_character.png'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings window — a tabbed control surface (계정 · 음성 · 앱). Cohesive with
@@ -155,7 +156,7 @@ export function ControlApp() {
     <div className={`control-root gy ${resolvedDark ? '' : 'gy--light'}`}>
       <div className="gy-wrap">
         <header className="gy-head">
-          <div className="gy-logo">G</div>
+          <img className="gy-logo" src={genyIcon} alt="Geny" draggable={false} />
           <div>
             <h1>Geny</h1>
             <div className="gy-sub">VTuber 데스크톱 접속기</div>

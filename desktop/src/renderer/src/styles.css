@@ -130,7 +130,7 @@ body,
   --gy-track: #cdd3df;
 }
 .gy.gy--light .gy-logo {
-  box-shadow: 0 6px 18px rgba(79, 124, 255, 0.3);
+  box-shadow: none;
 }
 .gy.gy--light .gy-input:focus {
   box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.16);
@@ -156,17 +156,11 @@ body,
   margin: 2px 2px 18px;
 }
 .gy-logo {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: var(--gy-accent-grad);
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 17px;
-  color: #fff;
-  box-shadow: 0 6px 18px rgba(79, 124, 255, 0.4);
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
   flex: none;
+  user-select: none;
 }
 .gy-head h1 {
   font-size: 16px;
