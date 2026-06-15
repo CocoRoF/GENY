@@ -167,8 +167,10 @@ async function applyControlContent(): Promise<void> {
 let settings: BrowserWindow | null = null
 function createSettings(): void {
   settings = new BrowserWindow({
-    width: 460,
-    height: 660,
+    width: 640,
+    height: 720,
+    minWidth: 560,
+    minHeight: 600,
     show: false,
     title: 'Geny 설정',
     webPreferences: {
@@ -435,6 +437,9 @@ function registerIpc(): void {
 
   // Open the settings window (from the panel's gear button or app menu).
   ipcMain.on('settings:open', () => showSettings())
+
+  // App version (settings window "앱" tab).
+  ipcMain.handle('app:version', () => app.getVersion())
 
   // Restart the whole connector (reloads the remote overlay/panel + native code).
   ipcMain.on('app:restart', () => {

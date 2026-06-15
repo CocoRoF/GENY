@@ -19,6 +19,9 @@ export interface ConnectorBridge {
   /** Which window this renderer is: 'overlay' (avatar) or 'settings'/'control'. */
   windowKind: 'overlay' | 'control' | 'settings'
 
+  /** Connector app version (package.json), for the settings window. */
+  appVersion(): Promise<string>
+
   serverConfig: {
     get(): Promise<ConnectorConfig>
     set(patch: Partial<ConnectorConfig>): Promise<ConnectorConfig>
@@ -93,6 +96,7 @@ const _wk = new URLSearchParams(location.search).get('window')
 
 const api: ConnectorBridge = {
   windowKind: _wk === 'settings' ? 'settings' : _wk === 'control' ? 'control' : 'overlay',
+  appVersion: () => ipcRenderer.invoke('app:version'),
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch),
