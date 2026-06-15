@@ -78,11 +78,23 @@ export default function STTControls({ sessionId }: { sessionId: string }) {
     [sessionId, addLog],
   );
 
+  // STT tuning from the overlay options panel (persisted in the store).
+  const sttSensitivity = useVTuberStore((s) => s.sttSensitivity);
+  const sttSilenceMs = useVTuberStore((s) => s.sttSilenceMs);
+  const sttEchoCancellation = useVTuberStore((s) => s.sttEchoCancellation);
+  const sttNoiseSuppression = useVTuberStore((s) => s.sttNoiseSuppression);
+  const sttAutoGain = useVTuberStore((s) => s.sttAutoGain);
+
   const { phase, error, level, utteranceMs } = useVoiceActivityRecorder({
     enabled: sttEnabled,
     onUtterance,
     pauseWhileSpeaking: true,
     isAgentSpeaking: ttsSpeaking,
+    speechThreshold: sttSensitivity,
+    silenceTrailMs: sttSilenceMs,
+    echoCancellation: sttEchoCancellation,
+    noiseSuppression: sttNoiseSuppression,
+    autoGainControl: sttAutoGain,
   });
 
   const isErroring = phase === 'error' || !!error;

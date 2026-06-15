@@ -9,6 +9,50 @@ import type { Live2dModelInfo, AvatarState, VTuberLogEntry } from '@/types';
 const MAX_LOGS = 500;
 let _logIdCounter = 0;
 
+// ── Overlay tuning settings — persisted to localStorage so the avatar
+//    window remembers TTS volume / STT tuning / screen-capture choices
+//    across reloads + connector restarts. ──
+const OVERLAY_SETTINGS_KEY = 'geny_vtuber_overlay_settings';
+export interface OverlaySettings {
+  ttsVolume: number;          // 0..1 output volume
+  sttSensitivity: number;     // VAD speech threshold (lower = more sensitive)
+  sttSilenceMs: number;       // silence trail before an utterance ends (ms)
+  sttEchoCancellation: boolean;
+  sttNoiseSuppression: boolean;
+  sttAutoGain: boolean;
+  screenIntervalMs: number;   // auto-capture cadence (ms)
+  screenSourceId: string | null; // chosen capture source id (null = first screen)
+}
+const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
+  ttsVolume: 0.7,
+  sttSensitivity: 0.04,
+  sttSilenceMs: 1200,
+  sttEchoCancellation: true,
+  sttNoiseSuppression: true,
+  sttAutoGain: true,
+  screenIntervalMs: 180_000,
+  screenSourceId: null,
+};
+function loadOverlaySettings(): OverlaySettings {
+  if (typeof window === 'undefined') return { ...OVERLAY_SETTINGS_DEFAULTS };
+  try {
+    const raw = window.localStorage.getItem(OVERLAY_SETTINGS_KEY);
+    if (!raw) return { ...OVERLAY_SETTINGS_DEFAULTS };
+    return { ...OVERLAY_SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+  } catch {
+    return { ...OVERLAY_SETTINGS_DEFAULTS };
+  }
+}
+function persistOverlaySettings(patch: Partial<OverlaySettings>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const merged = { ...loadOverlaySettings(), ...patch };
+    window.localStorage.setItem(OVERLAY_SETTINGS_KEY, JSON.stringify(merged));
+  } catch {
+    /* ignore quota / privacy-mode errors */
+  }
+}
+
 // TTS fetch 취소용 AbortController (세션별)
 const _ttsAbortControllers: Map<string, AbortController> = new Map();
 
@@ -133,6 +177,15 @@ interface VTuberState {
   // enabled per session, browser permission requested once.
   screenObservationEnabled: boolean;
 
+  // ── Persisted overlay tuning (see OverlaySettings) ──
+  sttSensitivity: number;
+  sttSilenceMs: number;
+  sttEchoCancellation: boolean;
+  sttNoiseSuppression: boolean;
+  sttAutoGain: boolean;
+  screenIntervalMs: number;
+  screenSourceId: string | null;
+
   // Actions
   fetchModels: () => Promise<void>;
   assignModel: (sessionId: string, modelName: string) => Promise<void>;
@@ -160,6 +213,11 @@ interface VTuberState {
   toggleScreenObservation: () => void;
   setScreenObservationEnabled: (enabled: boolean) => void;
 
+  // Persisted overlay tuning setters (write-through to localStorage)
+  setSttSettings: (patch: Partial<Pick<VTuberState,
+    'sttSensitivity' | 'sttSilenceMs' | 'sttEchoCancellation' | 'sttNoiseSuppression' | 'sttAutoGain'>>) => void;
+  setScreenSettings: (patch: Partial<Pick<VTuberState, 'screenIntervalMs' | 'screenSourceId'>>) => void;
+
   // ── Live chat-stream pre-emit TTS ──
   /** 새 유저 메시지 시작 시 호출 — 턴 인덱스 증가 + 이전 턴 잔여 클립 폐기. */
   beginTTSTurn: (sessionId: string) => void;
@@ -179,9 +237,10 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   _modelsStreamSub: null,
   ttsEnabled: true,
   ttsSpeaking: {},
-  ttsVolume: 0.7,
   sttEnabled: false,  // default OFF — user must opt in per session
   screenObservationEnabled: false,  // V3 — default OFF, mic-style opt-in
+  // Persisted tuning (TTS volume + STT/screen knobs) hydrated from localStorage.
+  ...loadOverlaySettings(),
 
   fetchModels: async () => {
     try {
@@ -344,6 +403,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     const clamped = Math.max(0, Math.min(1, vol));
     set({ ttsVolume: clamped });
     getAudioManager().setVolume(clamped);
+    persistOverlaySettings({ ttsVolume: clamped });
   },
 
   // ─── STT Actions ───
@@ -364,6 +424,18 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
 
   setScreenObservationEnabled: (enabled) => {
     set({ screenObservationEnabled: enabled });
+  },
+
+  // ─── Persisted overlay tuning ───
+
+  setSttSettings: (patch) => {
+    set(patch);
+    persistOverlaySettings(patch);
+  },
+
+  setScreenSettings: (patch) => {
+    set(patch);
+    persistOverlaySettings(patch);
   },
 
   speakResponse: async (sessionId, text, emotion) => {
