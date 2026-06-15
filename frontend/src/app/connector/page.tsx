@@ -150,9 +150,10 @@ export default function ConnectorPage() {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      {/* Toolbar */}
+      {/* Toolbar — auto-height (min-h + flex-wrap) so it never clips when it
+          wraps on a narrow window; one clean row at the default width. */}
       <header
-        className="flex items-center gap-2.5 px-3.5 h-[52px] shrink-0 flex-wrap border-b border-[var(--border-color)]"
+        className="flex items-center gap-x-2.5 gap-y-2 px-3.5 py-2.5 min-h-[56px] shrink-0 flex-wrap border-b border-[var(--border-color)]"
         style={{ background: 'linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 140%)' }}
       >
         {/* session */}
@@ -202,6 +203,7 @@ export default function ConnectorPage() {
           {/* desktop-only controls */}
           {isDesktop && (
             <>
+              <span className="w-px h-5 bg-[var(--border-color)] mx-0.5" aria-hidden />
               <button type="button" title="브라우저에서 Geny 서버 열기" onClick={() => window.connector?.windowControl.openExternal(window.location.origin)} className={ICON_BTN}>
                 <ExternalIcon className="w-4 h-4" />
               </button>

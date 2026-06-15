@@ -129,8 +129,10 @@ function persistOverlayBounds(): void {
 // ── control window: chat / settings / login (hidden until toggled) ──────────
 function createControl(): void {
   control = new BrowserWindow({
-    width: 480,
-    height: 720,
+    width: 640,
+    height: 760,
+    minWidth: 460,
+    minHeight: 560,
     show: false,
     title: 'Geny',
     webPreferences: {
