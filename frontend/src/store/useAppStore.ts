@@ -94,6 +94,7 @@ interface AppState {
   createSession: (data: Parameters<typeof agentApi.create>[0]) => Promise<SessionInfo>;
   deleteSession: (id: string) => Promise<void>;
   permanentDeleteSession: (id: string) => Promise<void>;
+  purgeDeletedSessions: () => Promise<void>;
   restoreSession: (id: string) => Promise<void>;
   resumeSession: (id: string) => Promise<void>;
   setActiveTab: (tab: string) => void;
@@ -203,6 +204,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   permanentDeleteSession: async (id) => {
     await agentApi.permanentDelete(id);
+    await get().loadDeletedSessions();
+  },
+
+  purgeDeletedSessions: async () => {
+    // Empty the trash — permanently delete every soft-deleted session.
+    await agentApi.purgeDeleted();
     await get().loadDeletedSessions();
   },
 

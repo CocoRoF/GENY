@@ -190,6 +190,13 @@ export const agentApi = {
   permanentDelete: (id: string) =>
     apiCall<{ success: boolean }>(`/api/agents/${id}/permanent`, { method: 'DELETE' }),
 
+  /** DELETE /api/agents/store/deleted — permanently purge ALL soft-deleted sessions */
+  purgeDeleted: () =>
+    apiCall<{ success: boolean; purged: number; errors: number }>(
+      '/api/agents/store/deleted',
+      { method: 'DELETE' },
+    ),
+
   /** POST /api/agents/{id}/restore — restore deleted session */
   restore: (id: string) =>
     apiCall<{ success: boolean }>(`/api/agents/${id}/restore`, { method: 'POST' }),
