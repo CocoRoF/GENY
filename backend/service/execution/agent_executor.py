@@ -1047,13 +1047,17 @@ def _get_session_store():
 
 async def _resolve_agent(session_id: str):
     """
-    Look up the agent, auto-revive if its process died.
+    Look up the agent, lazily re-hydrating a dormant (post-restart) session
+    and auto-reviving a live-but-dead process.
 
     Returns the live AgentSession.
     Raises AgentNotFoundError / AgentNotAliveError on failure.
     """
     agent_manager = _get_agent_manager()
-    agent = agent_manager.get_agent(session_id)
+    # ensure_session_live re-hydrates a dormant session from the store (lazy
+    # restore after redeploy/restart/crash) before we touch it; falls back to
+    # the in-memory lookup when already live or unknown.
+    agent = await agent_manager.ensure_session_live(session_id)
     if not agent:
         raise AgentNotFoundError(f"AgentSession not found: {session_id}")
 

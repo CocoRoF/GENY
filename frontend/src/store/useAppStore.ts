@@ -95,6 +95,7 @@ interface AppState {
   deleteSession: (id: string) => Promise<void>;
   permanentDeleteSession: (id: string) => Promise<void>;
   restoreSession: (id: string) => Promise<void>;
+  resumeSession: (id: string) => Promise<void>;
   setActiveTab: (tab: string) => void;
   setEnvSubTab: (id: string) => void;
   setSessionEnvSubTab: (id: string) => void;
@@ -167,6 +168,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       updates.activeTab = 'main';
     }
     set(updates);
+
+    // Lazy restore: opening a dormant (post-restart) session proactively
+    // re-hydrates it server-side so it's live by the time the user types.
+    // Idempotent + fire-and-forget; messaging would resume it anyway.
+    if (id) {
+      const session = sessions.find(s => s.session_id === id);
+      if (session && session.status !== 'running' && session.status !== 'error') {
+        void get().resumeSession(id);
+      }
+    }
   },
 
   createSession: async (data) => {
@@ -205,6 +216,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     await agentApi.restore(id);
     await get().loadSessions();
     await get().loadDeletedSessions();
+  },
+
+  resumeSession: async (id) => {
+    // Lazy re-hydrate a dormant (post-restart) session, then refresh the
+    // list so its status flips to live. Best-effort — the next poll would
+    // reconcile anyway, and messaging the session resumes it server-side.
+    try {
+      await agentApi.resume(id);
+      await get().loadSessions();
+    } catch (e) {
+      console.error('Failed to resume session:', e);
+    }
   },
 
   setActiveTab: (tab) => {
