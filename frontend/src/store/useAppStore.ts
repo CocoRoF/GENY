@@ -168,16 +168,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       updates.activeTab = 'main';
     }
     set(updates);
-
-    // Lazy restore: opening a dormant (post-restart) session proactively
-    // re-hydrates it server-side so it's live by the time the user types.
-    // Idempotent + fire-and-forget; messaging would resume it anyway.
-    if (id) {
-      const session = sessions.find(s => s.session_id === id);
-      if (session && session.status !== 'running' && session.status !== 'error') {
-        void get().resumeSession(id);
-      }
-    }
+    // NOTE: no auto-resume on select. Re-hydration is triggered explicitly
+    // (resumeSession / a Resume button) or implicitly on the first message
+    // (server-side hydrate-on-access). Auto-resuming on every click stormed
+    // re-hydration across dormant sessions after a restart.
   },
 
   createSession: async (data) => {

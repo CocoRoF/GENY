@@ -302,9 +302,20 @@ async def get_agent_session(
 ):
     """
     Get specific AgentSession information.
+
+    Tolerates dormant (post-restart) sessions: if not live in memory, falls
+    back to the persisted store record (status "stopped") instead of 404ing,
+    so opening a session that hasn't been re-hydrated yet still shows its
+    metadata. Actual re-hydration happens on message / explicit resume.
     """
     agent = agent_manager.get_agent(session_id)
     if not agent:
+        store = get_session_store()
+        rec = store.get(session_id)
+        if rec and not rec.get("is_deleted"):
+            info = _dormant_session_info(rec)
+            if info is not None:
+                return info
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
 
     info = agent.get_session_info()

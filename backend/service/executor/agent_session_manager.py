@@ -1453,8 +1453,44 @@ class AgentSessionManager:
             logger.info(f"[{session_id}] ✅ AgentSession deleted (soft)")
             return True
 
-        # Not in the local AgentSession store — nothing to delete. No
-        # legacy ClaudeProcess fallback since cycle 20260424_2 PR-2.
+        # Dormant session (post-restart): not live in memory, but a
+        # non-deleted record exists in the store. Without this branch the
+        # delete silently no-ops ("AgentSession not found"), leaving the
+        # session visible-and-undeletable. Soft-delete the store record
+        # directly (store.soft_delete cascades to the linked peer).
+        record = self._store.get(session_id)
+        if record and not record.get("is_deleted"):
+            logger.info(f"[{session_id}] Deleting dormant session (store-only)...")
+            try:
+                self._persona_provider.reset(session_id)
+            except Exception:
+                pass  # best-effort
+            remove_session_logger(session_id)
+
+            if cleanup_storage:
+                storage_path = record.get("storage_path")
+                if storage_path:
+                    import shutil
+                    from pathlib import Path as FilePath
+
+                    sp = FilePath(storage_path)
+                    if sp.is_dir():
+                        try:
+                            shutil.rmtree(sp)
+                            logger.info(f"[{session_id}] Storage cleaned up: {storage_path}")
+                        except Exception as e:
+                            logger.warning(f"[{session_id}] Failed to cleanup storage: {e}")
+
+            self._store.soft_delete(session_id)
+            await self._lifecycle_bus.emit(
+                LifecycleEvent.SESSION_DELETED,
+                session_id,
+                hard=bool(cleanup_storage),
+            )
+            logger.info(f"[{session_id}] ✅ Dormant session deleted (soft)")
+            return True
+
+        # Unknown session id — nothing anywhere to delete.
         return False
 
     async def cleanup_dead_sessions(self):
