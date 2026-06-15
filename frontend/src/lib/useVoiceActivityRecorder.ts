@@ -81,6 +81,11 @@ export interface UseVoiceActivityRecorderOptions {
   maxUtteranceMs?: number;
   /** Minimum length to emit. Default 400 ms. */
   minUtteranceMs?: number;
+
+  /** getUserMedia "sound correction" constraints. All default true. */
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
 }
 
 export interface UseVoiceActivityRecorderState {
@@ -126,6 +131,9 @@ export function useVoiceActivityRecorder(
     silenceTrailMs = 1200,
     maxUtteranceMs = 30000,
     minUtteranceMs = 400,
+    echoCancellation = true,
+    noiseSuppression = true,
+    autoGainControl = true,
   } = opts;
 
   const [phase, setPhase] = useState<VoiceActivityPhase>('idle');
@@ -322,9 +330,9 @@ export function useVoiceActivityRecorder(
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation,
+            noiseSuppression,
+            autoGainControl,
           } as MediaTrackConstraints,
         });
       } catch (e) {
@@ -462,6 +470,9 @@ export function useVoiceActivityRecorder(
     speechSustainMs,
     silenceTrailMs,
     maxUtteranceMs,
+    echoCancellation,
+    noiseSuppression,
+    autoGainControl,
   ]);
 
   return { phase, error, level, utteranceMs };

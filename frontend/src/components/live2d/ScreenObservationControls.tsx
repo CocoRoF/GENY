@@ -57,12 +57,17 @@ export default function ScreenObservationControls({
     [sessionId, addLog],
   );
 
+  const screenIntervalMs = useVTuberStore((s) => s.screenIntervalMs);
+  const screenSourceId = useVTuberStore((s) => s.screenSourceId);
+
   const {
     phase, error, lastCapturedAt, lastTriggerFired, uploadsInFlight,
     captureNow,
   } = useScreenObservation({
     enabled,
     sessionId,
+    intervalMs: screenIntervalMs,
+    sourceId: screenSourceId,
     onAutoDisable,
     onUploadResult,
   });

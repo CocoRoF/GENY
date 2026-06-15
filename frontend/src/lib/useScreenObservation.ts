@@ -47,6 +47,10 @@ export interface UseScreenObservationOptions {
    *  3 minutes. Set higher for less-frequent observation, lower
    *  (e.g. 60s for debugging) to test the trigger pipeline. */
   intervalMs?: number;
+  /** Capture source id (from ``connector.capture.listSources()``) to grab.
+   *  Null/undefined → auto-pick the first screen. Connector (Electron) only;
+   *  ignored by the browser ``getDisplayMedia`` picker fallback. */
+  sourceId?: string | null;
   /** Called when the hook flips itself off — e.g. the user clicked
    *  the browser's "Stop sharing" button — so the consumer can
    *  reconcile its toggle state. */
@@ -169,7 +173,7 @@ async function _captureFrameAsDataUrl(
  *  permission/picker prompt — the primary screen is grabbed directly
  *  (OLV desktop-pet model). In a plain browser we fall back to
  *  ``getDisplayMedia`` (the standard share-picker prompt). */
-async function _acquireScreenStream(): Promise<MediaStream> {
+async function _acquireScreenStream(sourceId?: string | null): Promise<MediaStream> {
   const conn =
     typeof window !== 'undefined'
       ? (window as unknown as { connector?: { capture?: {
@@ -180,8 +184,11 @@ async function _acquireScreenStream(): Promise<MediaStream> {
   if (conn?.capture?.listSources) {
     try {
       const sources = await conn.capture.listSources();
+      // Prefer the user-chosen source; fall back to the first screen, then any.
       const src =
-        sources.find((s) => String(s.id).startsWith('screen:')) ?? sources[0];
+        (sourceId && sources.find((s) => s.id === sourceId)) ||
+        sources.find((s) => String(s.id).startsWith('screen:')) ||
+        sources[0];
       if (src) {
         return await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -221,6 +228,7 @@ export function useScreenObservation(
     enabled,
     sessionId,
     intervalMs = 180_000,  // 3 min
+    sourceId = null,
     onAutoDisable,
     onUploadResult,
   } = opts;
@@ -346,7 +354,7 @@ export function useScreenObservation(
       setPhase('requesting');
       let stream: MediaStream;
       try {
-        stream = await _acquireScreenStream();
+        stream = await _acquireScreenStream(sourceId);
       } catch (e) {
         if (cancelled) return;
         setPhase('error');
@@ -405,7 +413,7 @@ export function useScreenObservation(
       cancelled = true;
       teardown();
     };
-  }, [enabled, intervalMs, teardown, doUpload]);
+  }, [enabled, intervalMs, sourceId, teardown, doUpload]);
 
   return {
     phase,

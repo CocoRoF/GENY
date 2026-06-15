@@ -35,6 +35,8 @@ const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
   { ssr: false },
 );
+// Gear-panel settings (TTS/STT/screen). Connector-aware → client only.
+const OverlayOptions = dynamic(() => import('@/components/live2d/OverlayOptions'), { ssr: false });
 
 export default function OverlayPage() {
   const [resolved, setResolved] = useState<{ sid: string; rid: string | null } | null>(null);
@@ -42,6 +44,8 @@ export default function OverlayPage() {
   // Locked (default): the avatar is click-through + fixed (no move/resize); only
   // the control bar is interactive. Unlocked: whole window draggable to reposition.
   const [locked, setLocked] = useState(true);
+  // Which floating panel is open above the bar (chat bubble / gear options).
+  const [panel, setPanel] = useState<'none' | 'chat' | 'options'>('none');
   // Push-to-talk (global hotkey toggles this). Tap on → mic listens; tapping
   // again (or the same hotkey) toggles off. On the down-edge we also barge in.
   const [pttActive, setPttActive] = useState(false);
@@ -135,9 +139,11 @@ export default function OverlayPage() {
   // Apply the lock state to the OS window. Locked → click-through (the avatar
   // ignores the mouse; only the control bar, via hover below, re-enables input).
   // Unlocked → the whole window captures input so it can be dragged to reposition.
+  // While a panel (chat/options) is open, force input ON so sliders/inputs
+  // stay interactive regardless of hover; otherwise honour the lock.
   useEffect(() => {
-    window.connector?.windowControl.setClickThrough(locked);
-  }, [locked]);
+    window.connector?.windowControl.setClickThrough(locked && panel === 'none');
+  }, [locked, panel]);
 
   // Global push-to-talk hotkey (from the connector). On each press: if the avatar
   // is mid-TTS, barge in (cut audio + cancel the agent turn), then toggle the mic.
@@ -161,7 +167,8 @@ export default function OverlayPage() {
     if (locked) window.connector?.windowControl.setClickThrough(false);
   };
   const onBarLeave = () => {
-    if (locked) window.connector?.windowControl.setClickThrough(true);
+    // Keep input on while a panel is open (its own region stays interactive).
+    if (locked && panel === 'none') window.connector?.windowControl.setClickThrough(true);
   };
 
   // Drag the BOTTOM BAR to move the whole window. (The avatar itself keeps the
@@ -199,6 +206,22 @@ export default function OverlayPage() {
         />
       </div>
 
+      {/* Chat card — VTuberChatPanel is ALWAYS mounted (it drives TTS + lip-sync
+          off the chat WS); shown as a card above the bar when the 말풍선 is
+          active, parked off-screen otherwise so audio keeps working. */}
+      <div style={panel === 'chat' ? CHAT_CARD : HIDDEN} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
+        {resolved.rid
+          ? <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />
+          : <div style={{ padding: 16, fontSize: 12, color: '#9a9bb0' }}>채팅방을 찾는 중…</div>}
+      </div>
+
+      {/* Options card — gear panel (TTS/STT/화면 tuning). Mounted only when open. */}
+      {panel === 'options' && (
+        <div style={OPTIONS_CARD} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave}>
+          <OverlayOptions />
+        </div>
+      )}
+
       {/* The bar is the MOVE handle: drag its background → move the whole window.
           Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
@@ -218,16 +241,35 @@ export default function OverlayPage() {
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
-          <button type="button" onClick={() => setLocked(true)} title="잠금" style={ICON_BTN}>
+          {/* 말풍선 — toggle the chat card. */}
+          <button
+            type="button"
+            onClick={() => setPanel((p) => (p === 'chat' ? 'none' : 'chat'))}
+            title="채팅 열기/닫기"
+            style={panel === 'chat' ? ICON_BTN_ACTIVE : ICON_BTN}
+          >
+            <ChatIcon />
+          </button>
+          {/* 톱니바퀴 — toggle the options card. */}
+          <button
+            type="button"
+            onClick={() => setPanel((p) => (p === 'options' ? 'none' : 'options'))}
+            title="옵션 — TTS·STT·화면 설정"
+            style={panel === 'options' ? ICON_BTN_ACTIVE : ICON_BTN}
+          >
+            <GearIcon />
+          </button>
+          <button type="button" onClick={() => { setLocked(true); setPanel('none'); }} title="잠금" style={ICON_BTN}>
             <LockIcon open />
           </button>
         </div>
       )}
 
-      {/* Hidden drivers: TTS+lip-sync (chat WS), STT recorder, screen capture —
-          run off-screen, toggled by the bar above via shared store state. */}
+      {/* Hidden drivers: STT recorder, screen capture, push-to-talk — run
+          off-screen, toggled by the bar above via shared store state. The chat
+          panel (which also drives TTS) lives in the chat card above so it can
+          be shown/hidden without unmounting. */}
       <div aria-hidden style={HIDDEN}>
-        {resolved.rid && <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />}
         {resolved.rid && <PushToTalkDriver sessionId={resolved.sid} roomId={resolved.rid} active={pttActive} />}
         <STTControls sessionId={resolved.sid} />
         <ScreenObservationControls sessionId={resolved.sid} />
@@ -264,6 +306,21 @@ function GripIcon() {
           <circle cx="15" cy={cy} r="1.7" />
         </g>
       ))}
+    </svg>
+  );
+}
+function ChatIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 9.5 9.5 0 0 1-4-.9L3 21l1.9-5.5a8.38 8.38 0 0 1-.9-4 8.5 8.5 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z" />
+    </svg>
+  );
+}
+function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
@@ -326,6 +383,35 @@ const ICON_BTN: CSSProperties = {
   borderRadius: 8,
   color: '#cfd0e0',
   cursor: 'pointer',
+};
+const ICON_BTN_ACTIVE: CSSProperties = {
+  ...ICON_BTN,
+  background: 'rgba(124,132,255,0.92)',
+  color: '#fff',
+};
+
+// Floating panels above the bar. Both are in-flow flex items so they push the
+// avatar up; the chat card keeps a fixed height (its inner panel scrolls).
+const CHAT_CARD: CSSProperties = {
+  flex: '0 0 auto',
+  height: 'min(340px, 50vh)',
+  margin: '0 8px 8px',
+  borderRadius: 14,
+  background: 'rgba(18,18,24,0.92)',
+  backdropFilter: 'blur(12px)',
+  boxShadow: '0 6px 24px rgba(0,0,0,0.5)',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+};
+const OPTIONS_CARD: CSSProperties = {
+  flex: '0 0 auto',
+  margin: '0 8px 8px',
+  borderRadius: 14,
+  background: 'rgba(18,18,24,0.92)',
+  backdropFilter: 'blur(12px)',
+  boxShadow: '0 6px 24px rgba(0,0,0,0.5)',
+  overflow: 'hidden',
 };
 
 const DIVIDER: CSSProperties = { width: 1, height: 18, background: 'rgba(255,255,255,0.14)', margin: '0 2px' };
