@@ -143,6 +143,20 @@ async def list_environments(request: Request, auth: dict = Depends(require_auth)
     )
 
 
+@router.get("/preset-catalog")
+async def get_preset_catalog(auth: dict = Depends(require_auth)):
+    """The geny-executor base preset catalog (worker / vtuber + Claude Code
+    presets). Geny's own environment templates are built on top of these —
+    the library provides the generalised base, Geny customises (tools,
+    providers) into the seeded templates the user sees in the list."""
+    try:
+        from geny_executor import preset_catalog
+        catalog = [d.to_dict() for d in preset_catalog()]
+    except Exception:  # noqa: BLE001 — older executor without the catalog
+        catalog = []
+    return {"presets": catalog}
+
+
 @router.get("/session-counts", response_model=EnvironmentSessionCountsResponse)
 async def list_environment_session_counts(
     request: Request,

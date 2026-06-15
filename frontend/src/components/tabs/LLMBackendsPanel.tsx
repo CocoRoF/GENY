@@ -12,10 +12,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key,
-  ExternalLink, Settings as SettingsIcon,
+  ExternalLink, Settings as SettingsIcon, ArrowUpCircle, RotateCcw,
 } from 'lucide-react';
 
-import { llmBackendsApi, type ProviderHealth } from '@/lib/api';
+import { llmBackendsApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import ApiBackendModal from './ApiBackendModal';
@@ -213,6 +213,114 @@ function ProviderCard({
 
 
 export default function LLMBackendsPanel() {
+  return <LLMBackendsPanelInner />;
+}
+
+// ── Claude Code CLI version manager (keep-latest + rollback) ─────────
+function ClaudeCodeVersionCard() {
+  const [st, setSt] = useState<ClaudeCodeVersionStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<'' | 'update' | 'rollback'>('');
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      setSt(await llmBackendsApi.claudeCodeVersion());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const doUpdate = async () => {
+    setBusy('update'); setErr(null);
+    try { setSt(await llmBackendsApi.claudeCodeUpdate('latest')); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(''); }
+  };
+  const doRollback = async () => {
+    setBusy('rollback'); setErr(null);
+    try { setSt(await llmBackendsApi.claudeCodeRollback()); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(''); }
+  };
+
+  const upToDate = st && st.current && st.latest && st.current === st.latest;
+
+  return (
+    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3.5 flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Terminal className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
+          <span className="text-[0.875rem] font-semibold">Claude Code CLI 버전</span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {st && (
+            <Badge tone={upToDate ? 'good' : st.update_available ? 'warn' : 'info'}>
+              {loading ? '…' : st.current ? `v${st.current}` : '미설치'}
+            </Badge>
+          )}
+          <button
+            type="button"
+            className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-color)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+            onClick={refresh}
+            disabled={loading || !!busy}
+            title="새로고침"
+          >
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      <div className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
+        {st?.current
+          ? upToDate
+            ? '최신 버전을 사용 중입니다.'
+            : st.latest
+              ? <>최신 버전 <span className="font-medium text-[var(--text-primary)]">v{st.latest}</span> 사용 가능합니다.</>
+              : '최신 버전 정보를 확인할 수 없습니다.'
+          : 'Claude Code CLI가 설치되어 있지 않습니다.'}
+        {st?.pinned && (
+          <span className="text-[var(--text-tertiary)]"> · 고정: {st.pinned === 'latest' ? '최신' : `v${st.pinned}`}</span>
+        )}
+      </div>
+
+      {err && (
+        <div className="text-[0.75rem] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded p-2 break-all">
+          {err}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          onClick={doUpdate}
+          disabled={!!busy || loading || !!upToDate}
+        >
+          {busy === 'update' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
+          최신으로 업데이트
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          onClick={doRollback}
+          disabled={!!busy || loading || !st?.can_rollback}
+          title={st?.previous ? `v${st.previous} 으로 롤백` : '롤백할 이전 버전이 없습니다'}
+        >
+          {busy === 'rollback' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+          롤백{st?.previous ? ` (v${st.previous})` : ''}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LLMBackendsPanelInner() {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [loading, setLoading] = useState(false);
@@ -313,6 +421,9 @@ export default function LLMBackendsPanel() {
           />
         ))}
       </div>
+
+      {/* Claude Code CLI version management */}
+      <ClaudeCodeVersionCard />
 
       {/* Modals */}
       {openProvider === 'claude_code_cli' && (

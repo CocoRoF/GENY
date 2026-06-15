@@ -613,6 +613,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"   ❌ session_list: execution failed: {e}")
 
+    # Claude Code CLI: re-apply the persisted version pin in the background
+    # (manual + apply-pin-on-boot — a rollback or 'keep latest' choice
+    # survives a container restart). Best-effort; never blocks startup.
+    try:
+        import asyncio as _asyncio
+        from service.claude_code.version_service import apply_pin_on_boot
+        _asyncio.create_task(apply_pin_on_boot())
+    except Exception:  # noqa: BLE001
+        logger.debug("claude_code: pin-on-boot scheduling skipped", exc_info=True)
+
     print_step_banner("READY", "GENY AGENT READY", "All systems operational!")
     logger.info("Geny Agent startup complete! Ready to serve requests.")
 

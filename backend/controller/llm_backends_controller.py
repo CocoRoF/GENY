@@ -939,3 +939,40 @@ async def auth_login_state(job_id: str) -> Dict[str, Any]:
         "exit_code": job.exit_code,
         "history": list(job.history),
     }
+
+
+# ── Claude Code CLI version management (keep-latest + rollback) ───────
+#
+# The ``claude`` binary backs the claude_code_cli provider; the image
+# pins @latest at build time. These endpoints let an operator update /
+# roll back at runtime, with the choice persisted + re-applied on boot.
+
+class ClaudeCodeUpdateRequest(BaseModel):
+    version: str = "latest"  # "latest" or "x.y.z"
+
+
+@router.get("/claude-code/version", dependencies=[Depends(require_auth)])
+async def get_claude_code_version() -> dict:
+    """Installed vs. latest Claude Code version + pin/history."""
+    from service.claude_code import version_service
+    return await version_service.status()
+
+
+@router.post("/claude-code/version/update", dependencies=[Depends(require_auth)])
+async def update_claude_code_version(body: ClaudeCodeUpdateRequest) -> dict:
+    """Install a specific version (or 'latest') and persist the pin."""
+    from service.claude_code import version_service
+    result = await version_service.install(body.version)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "update failed"))
+    return {**result, **(await version_service.status())}
+
+
+@router.post("/claude-code/version/rollback", dependencies=[Depends(require_auth)])
+async def rollback_claude_code_version() -> dict:
+    """Reinstall the previously-installed version."""
+    from service.claude_code import version_service
+    result = await version_service.rollback()
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "rollback failed"))
+    return {**result, **(await version_service.status())}

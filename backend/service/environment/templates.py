@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional
 
-from geny_executor import EnvironmentManifest, build_manifest
+from geny_executor import EnvironmentManifest, build_manifest, build_manifest_for
 from geny_executor import known_manifest_presets as known_presets
 
 from service.environment.service import EnvironmentService
@@ -42,8 +42,12 @@ if TYPE_CHECKING:
 __all__ = [
     "WORKER_ENV_ID",
     "VTUBER_ENV_ID",
+    "CLAUDE_CODE_WORKER_ENV_ID",
+    "CLAUDE_CODE_VTUBER_ENV_ID",
     "create_worker_env",
     "create_vtuber_env",
+    "create_claude_code_worker_env",
+    "create_claude_code_vtuber_env",
     "install_environment_templates",
     # Re-export of the library's known_manifest_presets() under the
     # historical Geny name (frontend validation hook).
@@ -53,6 +57,13 @@ __all__ = [
 
 WORKER_ENV_ID = "template-worker-env"
 VTUBER_ENV_ID = "template-vtuber-env"
+# Dedicated Claude Code engine presets — the worker/vtuber stage blueprints
+# locked to the ``claude_code_cli`` provider (geny-executor 2.4.0 catalog).
+# Distinct from the default worker/vtuber seeds (which use whichever provider
+# is *preferred*), so a user can run an API-backed worker AND a Claude-Code
+# worker side by side.
+CLAUDE_CODE_WORKER_ENV_ID = "template-claude-code-worker-env"
+CLAUDE_CODE_VTUBER_ENV_ID = "template-claude-code-vtuber-env"
 
 
 # Custom tools the VTuber persona should keep access to. Distinct
@@ -377,6 +388,61 @@ def create_vtuber_env(
     return manifest
 
 
+def create_claude_code_worker_env(
+    external_tool_names: Optional[List[str]] = None,
+) -> EnvironmentManifest:
+    """Worker environment backed by the Claude Code CLI provider.
+
+    Same ``worker_adaptive`` stage blueprint + tool roster as
+    :func:`create_worker_env`, but the provider is locked to
+    ``claude_code_cli`` by the geny-executor catalog
+    (``claude_code_worker`` preset). Lets a user run a Claude-Code-backed
+    worker regardless of which provider is the global default.
+    """
+    deny = _resolve_worker_custom_deny()
+    filtered = [n for n in (external_tool_names or []) if n not in deny]
+    manifest = build_manifest_for(
+        "claude_code_worker",
+        external_tools=filtered,
+        built_in_tools=list(_WORKER_BUILT_IN_TOOL_NAMES),
+    )
+    manifest.metadata.id = CLAUDE_CODE_WORKER_ENV_ID
+    manifest.metadata.name = "Claude Code · Worker"
+    manifest.metadata.description = (
+        "Worker environment backed by the Claude Code CLI (subscription "
+        "auth). Same adaptive loop + tools as the default worker, on the "
+        "claude_code_cli provider."
+    )
+    return manifest
+
+
+def create_claude_code_vtuber_env(
+    all_tool_names: Optional[List[str]] = None,
+    tool_loader: Optional["ToolLoader"] = None,
+) -> EnvironmentManifest:
+    """VTuber environment backed by the Claude Code CLI provider.
+
+    Same ``vtuber`` blueprint + narrowed roster as
+    :func:`create_vtuber_env`, locked to ``claude_code_cli`` via the
+    catalog (``claude_code_vtuber`` preset).
+    """
+    if all_tool_names:
+        external = _vtuber_tool_roster(all_tool_names, tool_loader=tool_loader)
+    else:
+        external = ["web_search", "news_search", "web_fetch"]
+    manifest = build_manifest_for(
+        "claude_code_vtuber",
+        external_tools=external,
+        built_in_tools=list(_VTUBER_BUILT_IN_TOOL_NAMES),
+    )
+    manifest.metadata.id = CLAUDE_CODE_VTUBER_ENV_ID
+    manifest.metadata.name = "Claude Code · VTuber"
+    manifest.metadata.description = (
+        "Conversational VTuber environment backed by the Claude Code CLI."
+    )
+    return manifest
+
+
 def _resolve_active_provider() -> str:
     """Pick the Stage-6 provider for the boot-time template reseed.
 
@@ -442,6 +508,9 @@ def install_environment_templates(
             tool_loader=tool_loader,
             provider=active_provider,
         ),
+        # Dedicated Claude Code engine presets (always claude_code_cli).
+        create_claude_code_worker_env(external_tool_names=all_names),
+        create_claude_code_vtuber_env(all_tool_names=all_names, tool_loader=tool_loader),
     ]
     for manifest in seeds:
         env_id = manifest.metadata.id
