@@ -259,6 +259,47 @@ async def list_all_stored_sessions(auth: dict = Depends(require_auth)):
     return store.list_all()
 
 
+@router.delete("/store/deleted")
+async def purge_deleted_sessions(auth: dict = Depends(require_auth)):
+    """
+    Permanently delete ALL soft-deleted sessions — empties the trash.
+
+    Irreversible: each record is removed from the store (DB + JSON) and its
+    on-disk storage directory (memory, transcripts, checkpoints) is deleted.
+    Powers the "전체 삭제 / Delete all" button in the deleted-sessions list.
+    Live (non-deleted) sessions are never touched.
+    """
+    import shutil
+    from pathlib import Path as FilePath
+
+    store = get_session_store()
+    deleted_records = store.list_deleted()
+
+    purged = 0
+    errors = 0
+    for rec in deleted_records:
+        sid = rec.get("session_id")
+        if not sid:
+            continue
+        try:
+            storage_path = rec.get("storage_path")
+            if storage_path:
+                sp = FilePath(storage_path)
+                if sp.is_dir():
+                    try:
+                        shutil.rmtree(sp)
+                    except Exception as e:  # noqa: BLE001 — best effort
+                        logger.warning(f"Failed to cleanup storage {storage_path}: {e}")
+            if store.permanent_delete(sid):
+                purged += 1
+        except Exception as e:  # noqa: BLE001 — never let one bad record abort the purge
+            errors += 1
+            logger.warning(f"Failed to purge deleted session {sid}: {e}")
+
+    logger.info(f"🗑️ Purged {purged} soft-deleted sessions ({errors} errors)")
+    return {"success": True, "purged": purged, "errors": errors}
+
+
 @router.get("/store/{session_id}")
 async def get_stored_session_info(
     session_id: str = Path(..., description="Session ID"),

@@ -89,7 +89,8 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
   const {
     sessions, deletedSessions, selectedSessionId, selectSession,
     toggleSidebar, deletedSectionOpen, toggleDeletedSection,
-    permanentDeleteSession, restoreSession, mobileSidebarOpen, setMobileSidebarOpen,
+    permanentDeleteSession, purgeDeletedSessions, restoreSession,
+    mobileSidebarOpen, setMobileSidebarOpen,
   } = useAppStore();
   const { isAuthenticated, hasUsers } = useAuthStore();
   const { t } = useI18n();
@@ -100,6 +101,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SessionInfo | null>(null);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<SessionInfo | null>(null);
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
 
   // Hide Sub-Worker sessions that are paired with a VTuber
   const visibleSessions = sessions.filter(s => !(s.session_type === 'sub' && s.linked_session_id));
@@ -235,6 +237,17 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
             </span>
           </div>
           {deletedSectionOpen && (
+            <>
+            <div className="px-4 pb-2">
+              <button
+                onClick={() => setPurgeConfirmOpen(true)}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--danger-color)] bg-transparent text-[var(--danger-color)] hover:bg-[var(--danger-color)] hover:text-white cursor-pointer transition-colors duration-150 text-[0.75rem] font-medium"
+                title={t('sidebar.deleteAllTitle')}
+              >
+                <Trash2 size={12} />
+                {t('sidebar.deleteAll')}
+              </button>
+            </div>
             <div className="max-h-[240px] overflow-y-auto">
               {visibleDeleted.map(session => (
                 <div key={session.session_id} className="flex items-center gap-2 px-4 py-1.5 text-[0.8125rem] opacity-70 hover:opacity-100 transition-opacity">
@@ -258,6 +271,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
                 </div>
               ))}
             </div>
+            </>
           )}
         </div>
         );
@@ -274,6 +288,15 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
           note={t('confirmModal.permanentDeleteNote')}
           onConfirm={() => permanentDeleteSession(permanentDeleteTarget.session_id)}
           onClose={() => setPermanentDeleteTarget(null)}
+        />
+      )}
+      {purgeConfirmOpen && (
+        <ConfirmModal
+          title={t('sidebar.deleteAllTitle')}
+          message={<>{t('confirmModal.purgeDeletedConfirm', { count: String(deletedSessions.length) })}</>}
+          note={t('confirmModal.permanentDeleteNote')}
+          onConfirm={() => purgeDeletedSessions()}
+          onClose={() => setPurgeConfirmOpen(false)}
         />
       )}
 
