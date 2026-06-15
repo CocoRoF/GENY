@@ -175,20 +175,61 @@ async def create_agent_session(request: CreateAgentRequest, auth: dict = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _dormant_session_info(rec: dict) -> Optional[SessionInfo]:
+    """Build a ``SessionInfo`` for a session that exists in the persistent
+    store but is not currently live in memory (dormant after a restart).
+
+    Records are serialized ``SessionInfo`` dumps (+ store bookkeeping keys),
+    so we filter to known fields and validate. Status is normalized to
+    ``stopped`` (restorable) except ``error`` is preserved so failed sessions
+    still surface in the UI's error count.
+    """
+    try:
+        fields = set(SessionInfo.model_fields.keys())
+        data = {k: v for k, v in rec.items() if k in fields}
+        if not data.get("session_id"):
+            return None
+        stored = str(rec.get("status") or "stopped")
+        data["status"] = "error" if stored == "error" else "stopped"
+        return SessionInfo.model_validate(data)
+    except Exception as e:  # noqa: BLE001 — never let one bad record break the list
+        logger.debug(f"Skipping dormant session record: {e}")
+        return None
+
+
 @router.get("", response_model=List[SessionInfo])
 async def list_agent_sessions(auth: dict = Depends(require_auth)):
     """
-    List all AgentSessions.
+    List all sessions — live (in memory) + dormant (persisted, awaiting
+    lazy re-hydration after a restart).
 
-    Returns only AgentSession instances (not regular sessions).
+    Lazy restore (session-persistence): the live registry starts empty on
+    every boot, so the list is the UNION of in-memory ``AgentSession``s and
+    non-deleted store records that aren't live yet. Dormant sessions render
+    with ``status="stopped"`` and re-hydrate on first access (open / message
+    / ``POST /{id}/resume``). This is what makes sessions survive a redeploy,
+    restart, or crash.
 
     Auth (R7 / audit 20260425_3 §1.5): the listing exposes session
     names + roles + statuses, which is operator-relevant metadata.
-    Sibling read endpoints (``/{session_id}``, ``/{session_id}/state``,
-    etc.) all require auth; this one was an oversight.
     """
     agents = agent_manager.list_agents()
-    return [agent.get_session_info() for agent in agents]
+    live = {a.session_id: a.get_session_info() for a in agents}
+
+    merged: List[SessionInfo] = list(live.values())
+    try:
+        store = get_session_store()
+        for rec in store.list_active():
+            sid = rec.get("session_id")
+            if not sid or sid in live:
+                continue
+            info = _dormant_session_info(rec)
+            if info is not None:
+                merged.append(info)
+    except Exception as e:  # noqa: BLE001 — degrade to live-only on store failure
+        logger.warning(f"Could not merge dormant sessions into list: {e}")
+
+    return merged
 
 
 # ============================================================================
@@ -502,17 +543,45 @@ async def permanent_delete_session(
     return {"success": True, "session_id": session_id}
 
 
+@router.post("/{session_id}/resume", response_model=SessionInfo)
+async def resume_session(
+    session_id: str = Path(..., description="Session ID to resume"),
+    auth: dict = Depends(require_auth),
+):
+    """
+    Resume a dormant session — idempotent lazy re-hydration.
+
+    After a redeploy / restart / crash the live registry is empty but the
+    session still exists in the store (non-deleted). This reconstructs the
+    ``AgentSession`` from its on-disk storage (memory, transcripts,
+    checkpoints) so the conversation continues, and cascades to the linked
+    peer. If the session is already live it just returns the current info.
+    The frontend calls this when the user opens a ``stopped`` session.
+    """
+    if agent_manager.has_agent(session_id):
+        return agent_manager.get_agent(session_id).get_session_info()
+
+    agent = await agent_manager.ensure_session_live(session_id)
+    if agent is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found or was deleted — nothing to resume",
+        )
+    logger.info(f"✅ Session resumed: {session_id}")
+    return agent.get_session_info()
+
+
 @router.post("/{session_id}/restore")
 async def restore_session(
     session_id: str = Path(..., description="Session ID to restore"),
     auth: dict = Depends(require_auth),
 ):
     """
-    Restore a soft-deleted session.
+    Restore a soft-deleted (explicitly removed) session.
 
-    Re-creates the AgentSession using the original creation parameters
-    stored in sessions.json, with the same session_name and settings.
-    Cascades to linked sessions (VTuber ↔ CLI pairs).
+    Un-deletes the store record, then re-creates the AgentSession with the
+    same session_id (preserving storage_path) via the shared re-hydration
+    path used by lazy restore. Cascades to linked sessions (VTuber ↔ CLI).
     """
     store = get_session_store()
     record = store.get(session_id)
@@ -525,124 +594,21 @@ async def restore_session(
     if agent_manager.has_agent(session_id):
         raise HTTPException(status_code=400, detail="Session is already running")
 
-    # Find linked session for cascade restore
+    # Un-delete first so the shared re-hydration path (which refuses deleted
+    # records) accepts it; cascade un-delete the linked peer too.
+    store.restore(session_id)
     linked_id = record.get("linked_session_id")
-
-    # Build creation params from stored record
-    params = store.get_creation_params(session_id)
-    if not params:
-        raise HTTPException(status_code=500, detail="Could not extract creation params")
-
-    # Capture stored system_prompt before create overwrites the record
-    stored_system_prompt = record.get("system_prompt")
+    if linked_id:
+        linked_rec = store.get(linked_id)
+        if linked_rec and linked_rec.get("is_deleted"):
+            store.restore(linked_id)
 
     try:
-        request = CreateSessionRequest(
-            session_name=params.get("session_name"),
-            working_dir=params.get("working_dir"),
-            model=params.get("model"),
-            max_turns=params.get("max_turns", 100),
-            timeout=params.get("timeout", 21600),
-            max_iterations=params.get("max_iterations", params.get("autonomous_max_iterations", 100)),
-            role=SessionRole(params["role"]) if params.get("role") else SessionRole.WORKER,
-            graph_name=params.get("graph_name"),
-            workflow_id=params.get("workflow_id"),
-            tool_preset_id=params.get("tool_preset_id"),
-            linked_session_id=params.get("linked_session_id"),
-            session_type=params.get("session_type"),
-        )
-
-        # Reuse the SAME session_id → preserves storage_path. Forward
-        # the persisted ``env_id`` as a kwarg — CreateSessionRequest
-        # has no ``env_id`` field, so passing it to the constructor
-        # gets silently dropped by Pydantic and the session would
-        # restore against ``resolve_env_id(role, None)`` instead of
-        # the manifest the user originally picked.
-        agent = await agent_manager.create_agent_session(
-            request=request,
-            session_id=session_id,
-            env_id=params.get("env_id"),
-            trigger_preset_id=params.get("trigger_preset_id"),
-        )
-
-        # Restore the previously stored system prompt (user customization).
-        # Route through the PersonaProvider (cycle 20260421_7 PR-X1-3) — the
-        # newly-created AgentSession's DynamicPersonaSystemBuilder reads from
-        # the same provider on its first turn.
-        if stored_system_prompt:
-            agent_manager.persona_provider.set_static_override(
-                session_id, stored_system_prompt
-            )
-            store.update(session_id, {"system_prompt": stored_system_prompt})
-
-        # Restore chat_room_id from stored record (chat room persists across delete/restore)
-        stored_chat_room_id = params.get("chat_room_id")
-        if stored_chat_room_id:
-            agent._chat_room_id = stored_chat_room_id
-
+        agent = await agent_manager._rehydrate(session_id)
+        if agent is None:
+            raise RuntimeError("re-hydration returned no session")
         session_info = agent.get_session_info()
         logger.info(f"✅ Session restored: {session_id} (same ID, storage preserved)")
-
-        # Cascade restore to linked session (VTuber ↔ CLI pair)
-        if linked_id:
-            linked_rec = store.get(linked_id)
-            if linked_rec and linked_rec.get("is_deleted") and not agent_manager.has_agent(linked_id):
-                try:
-                    linked_params = store.get_creation_params(linked_id)
-                    if linked_params:
-                        linked_system_prompt = linked_rec.get("system_prompt")
-                        linked_request = CreateSessionRequest(
-                            session_name=linked_params.get("session_name"),
-                            working_dir=linked_params.get("working_dir"),
-                            model=linked_params.get("model"),
-                            max_turns=linked_params.get("max_turns", 100),
-                            timeout=linked_params.get("timeout", 21600),
-                            max_iterations=linked_params.get("max_iterations", linked_params.get("autonomous_max_iterations", 100)),
-                            role=SessionRole(linked_params["role"]) if linked_params.get("role") else SessionRole.WORKER,
-                            graph_name=linked_params.get("graph_name"),
-                            workflow_id=linked_params.get("workflow_id"),
-                            tool_preset_id=linked_params.get("tool_preset_id"),
-                            linked_session_id=linked_params.get("linked_session_id"),
-                            session_type=linked_params.get("session_type"),
-                        )
-                        linked_agent = await agent_manager.create_agent_session(
-                            request=linked_request,
-                            session_id=linked_id,
-                            # env_id is a sibling kwarg on
-                            # create_agent_session (not a field on
-                            # CreateSessionRequest). Forward the
-                            # persisted value so the restored
-                            # sub-worker uses the same env the user
-                            # picked at creation time instead of
-                            # silently falling back to
-                            # template-worker-env via resolve_env_id.
-                            env_id=linked_params.get("env_id"),
-                        )
-                        if linked_system_prompt:
-                            agent_manager.persona_provider.set_static_override(
-                                linked_id, linked_system_prompt
-                            )
-                            store.update(linked_id, {"system_prompt": linked_system_prompt})
-                        logger.info(f"✅ Linked session restored: {linked_id}")
-                        await agent_manager.lifecycle_bus.emit(
-                            LifecycleEvent.SESSION_RESTORED,
-                            linked_id,
-                            cascade="linked_peer",
-                            peer=session_id,
-                        )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to cascade restore to linked session {linked_id}: {e}")
-
-        # Main restore emit comes last so subscribers see the pair as
-        # consistent (linked_id already alive) by the time the VTuber
-        # event fires.
-        await agent_manager.lifecycle_bus.emit(
-            LifecycleEvent.SESSION_RESTORED,
-            session_id,
-            cascade="main",
-            linked_id=linked_id,
-        )
-
         return session_info
     except Exception as e:
         logger.error(f"❌ Failed to restore session {session_id}: {e}", exc_info=True)
@@ -665,7 +631,9 @@ async def invoke_agent(
 
     If checkpointing is enabled, state is restored/saved using thread_id.
     """
-    agent = agent_manager.get_agent(session_id)
+    # Hydrate-on-access: transparently re-hydrate a dormant (post-restart)
+    # session so messaging a "stopped" session just resumes it.
+    agent = await agent_manager.ensure_session_live(session_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
 

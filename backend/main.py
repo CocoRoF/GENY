@@ -700,8 +700,12 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"   - CreatureState provider close failed: {e}")
 
-    # Stop all active sessions (processes only — storage preserved)
-    # Soft-delete all active sessions so they appear in "deleted sessions" on restart
+    # Stop all active sessions (processes only — storage + metadata preserved).
+    # Mark each as ``stopped`` (NOT soft-deleted) so it survives the restart
+    # and reappears in the session list, lazily re-hydrated on next access.
+    # soft_delete is now reserved for explicit user delete. A crash skips this
+    # hook entirely — the store still holds the sessions as non-deleted, so the
+    # same lazy-restore path covers crash and graceful shutdown identically.
     async def stop_all_sessions():
         from service.sessions.store import get_session_store
         store = get_session_store()
@@ -711,8 +715,8 @@ async def lifespan(app: FastAPI):
         for agent in agents:
             sid = agent.session_id
             stop_tasks.append(agent.cleanup())
-            # Mark as soft-deleted so the session shows up in "deleted sessions"
-            store.soft_delete(sid)
+            # Interrupted, not deleted — restorable on next boot.
+            store.update(sid, {"status": "stopped"})
         if stop_tasks:
             await asyncio.gather(*stop_tasks, return_exceptions=True)
 

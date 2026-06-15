@@ -194,6 +194,11 @@ export const agentApi = {
   restore: (id: string) =>
     apiCall<{ success: boolean }>(`/api/agents/${id}/restore`, { method: 'POST' }),
 
+  /** POST /api/agents/{id}/resume — lazily re-hydrate a dormant (post-restart)
+   *  session. Idempotent: returns the live session info. */
+  resume: (id: string) =>
+    apiCall<SessionInfo>(`/api/agents/${id}/resume`, { method: 'POST' }),
+
   /** GET /api/agents/{id} — get session details */
   get: (id: string) => apiCall<SessionInfo>(`/api/agents/${id}`),
 

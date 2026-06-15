@@ -129,6 +129,11 @@ class AgentSessionManager:
         # AgentSession store (local)
         self._local_agents: Dict[str, AgentSession] = {}
 
+        # Per-session locks guarding lazy re-hydration so two concurrent
+        # accesses to a dormant (post-restart) session don't reconstruct
+        # it twice. Created on demand, removed once the session is live.
+        self._rehydrate_locks: Dict[str, asyncio.Lock] = {}
+
         # Persistent session metadata store (sessions.json)
         self._store = get_session_store()
 
@@ -1248,6 +1253,129 @@ class AgentSessionManager:
             return agent
         # Fallback to name match
         return self.get_agent_by_name(name_or_id)
+
+    # ========================================================================
+    # Lazy session restore (survive redeploy / restart / crash)
+    # ========================================================================
+
+    async def ensure_session_live(self, session_id: str) -> Optional[AgentSession]:
+        """Return the live ``AgentSession``, lazily re-hydrating a dormant
+        (non-deleted, on-disk) session from the persistent store on first
+        access.
+
+        This is the heart of lazy session restore. The session LIST is served
+        from the store (so sessions survive restarts and reappear in the UI),
+        and the heavy ``AgentSession`` — pipeline, memory provider, VTuber
+        loops — is reconstructed only when something actually touches the
+        session (open / message / WS connect). Returns ``None`` when the id is
+        unknown or the session was explicitly deleted.
+        """
+        agent = self._local_agents.get(session_id)
+        if agent is not None:
+            return agent
+
+        record = self._store.get(session_id)
+        if not record or record.get("is_deleted"):
+            return None
+
+        lock = self._rehydrate_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            # Re-check inside the lock — a concurrent caller may have won.
+            agent = self._local_agents.get(session_id)
+            if agent is not None:
+                return agent
+            try:
+                return await self._rehydrate(session_id)
+            finally:
+                self._rehydrate_locks.pop(session_id, None)
+
+    async def _rehydrate(
+        self, session_id: str, *, cascade: bool = True
+    ) -> Optional[AgentSession]:
+        """Reconstruct an ``AgentSession`` from its stored creation params,
+        reusing the SAME ``session_id`` so the on-disk ``storage_path``
+        (memory vault, transcripts, checkpoints) reloads and the conversation
+        continues. Cascades to the linked VTuber ↔ Sub-Worker peer.
+
+        Shared by :meth:`ensure_session_live` (lazy access) and the
+        ``POST /{id}/restore`` endpoint (explicit un-delete + restore), so
+        there is one reconstruction implementation. Mirrors the gate in
+        ``create_agent_session``: passing ``linked_session_id`` on the request
+        suppresses the VTuber auto-sub-worker spawn, so the peer is restored
+        explicitly here with its original id instead of a fresh duplicate.
+        """
+        record = self._store.get(session_id)
+        if not record:
+            return None
+        params = self._store.get_creation_params(session_id)
+        if not params:
+            return None
+
+        stored_system_prompt = record.get("system_prompt")
+        linked_id = record.get("linked_session_id")
+
+        request = CreateSessionRequest(
+            session_name=params.get("session_name"),
+            working_dir=params.get("working_dir"),
+            model=params.get("model"),
+            max_turns=params.get("max_turns", 100),
+            timeout=params.get("timeout", 21600),
+            max_iterations=params.get(
+                "max_iterations", params.get("autonomous_max_iterations", 100)
+            ),
+            role=SessionRole(params["role"]) if params.get("role") else SessionRole.WORKER,
+            graph_name=params.get("graph_name"),
+            workflow_id=params.get("workflow_id"),
+            tool_preset_id=params.get("tool_preset_id"),
+            linked_session_id=params.get("linked_session_id"),
+            session_type=params.get("session_type"),
+        )
+
+        agent = await self.create_agent_session(
+            request=request,
+            session_id=session_id,
+            env_id=params.get("env_id"),
+            trigger_preset_id=params.get("trigger_preset_id"),
+        )
+
+        # Restore the user's customized system prompt through the persona
+        # provider (the new session's DynamicPersonaSystemBuilder reads it on
+        # its first turn).
+        if stored_system_prompt:
+            self._persona_provider.set_static_override(session_id, stored_system_prompt)
+            self._store.update(session_id, {"system_prompt": stored_system_prompt})
+
+        # chat_room_id persists across restart so the messenger thread reattaches.
+        stored_chat_room_id = params.get("chat_room_id")
+        if stored_chat_room_id:
+            agent._chat_room_id = stored_chat_room_id
+
+        logger.info(f"♻️ Session re-hydrated: {session_id} (same ID, storage preserved)")
+
+        # Cascade to the linked peer (VTuber ↔ Sub-Worker) with its own id.
+        if cascade and linked_id and not self.has_agent(linked_id):
+            linked_rec = self._store.get(linked_id)
+            if linked_rec and not linked_rec.get("is_deleted"):
+                try:
+                    await self._rehydrate(linked_id, cascade=False)
+                    await self._lifecycle_bus.emit(
+                        LifecycleEvent.SESSION_RESTORED,
+                        linked_id,
+                        cascade="linked_peer",
+                        peer=session_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ Failed to cascade re-hydrate to linked session {linked_id}: {e}"
+                    )
+
+        await self._lifecycle_bus.emit(
+            LifecycleEvent.SESSION_RESTORED,
+            session_id,
+            cascade="main",
+            linked_id=linked_id,
+        )
+        return agent
 
     # ========================================================================
     # Session Management (Override for AgentSession support)
