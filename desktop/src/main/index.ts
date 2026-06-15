@@ -30,6 +30,8 @@ let control: BrowserWindow | null = null
 // ── tiny JSON config (server URL, last geometry) in userData ────────────────
 interface ConnectorConfig {
   serverUrl: string
+  /** UI theme for the settings + chat windows. 'system' follows the OS. */
+  theme?: 'system' | 'dark' | 'light'
   /** Auto-update toggle (default true). When false, updates only notify. */
   autoUpdate?: boolean
   /** Global push-to-talk accelerator (Electron format). */
@@ -156,11 +158,12 @@ function createControl(): void {
 async function applyControlContent(): Promise<void> {
   if (!control) return
   const token = await getStoredToken()
-  const { serverUrl, overlaySession } = loadConfig()
+  const { serverUrl, overlaySession, theme } = loadConfig()
   if (token && serverUrl) {
     const base = serverUrl.replace(/\/+$/, '')
     const sessQ = overlaySession ? `&session=${encodeURIComponent(overlaySession)}` : ''
-    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}`)
+    const themeQ = `&theme=${encodeURIComponent(theme || 'system')}`
+    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}${themeQ}`)
   }
   // No token → the panel stays hidden; the Settings window handles login.
 }
@@ -442,6 +445,15 @@ function registerIpc(): void {
 
   // App version (settings window "앱" tab).
   ipcMain.handle('app:version', () => app.getVersion())
+
+  // Open a URL in the user's default browser (e.g. "Geny 서버 열기").
+  ipcMain.on('app:open-external', (_e, url: string) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
+  })
+
+  // Reload ONLY the chat/control panel (e.g. after a theme change) — leaves the
+  // avatar overlay untouched so it doesn't flicker.
+  ipcMain.on('app:reload-control', () => { void applyControlContent() })
 
   // Restart the whole connector (reloads the remote overlay/panel + native code).
   ipcMain.on('app:restart', () => {

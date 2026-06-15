@@ -16,6 +16,7 @@ declare global {
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
         restart(): void
+        openExternal(url: string): void
       }
       hotkeys?: {
         getPushToTalk(): Promise<string | null>

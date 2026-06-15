@@ -24,7 +24,13 @@ const I = {
   refresh: <Svg><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" /></Svg>,
   sliders: <Svg><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></Svg>,
   power: <Svg><path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04" /></Svg>,
+  external: <Svg><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></Svg>,
+  sun: <Svg><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
+  moon: <Svg><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></Svg>,
+  monitor: <Svg><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></Svg>,
 }
+
+type ThemeMode = 'system' | 'dark' | 'light'
 
 export function ControlApp() {
   const [tab, setTab] = useState<Tab>('account')
@@ -39,14 +45,37 @@ export function ControlApp() {
   const [pttMsg, setPttMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState('')
+  const [theme, setThemeState] = useState<ThemeMode>('system')
+  const [sysDark, setSysDark] = useState(true)
 
   useEffect(() => {
-    window.connector?.serverConfig.get().then((c) => setServerUrl(c.serverUrl))
+    window.connector?.serverConfig.get().then((c) => {
+      setServerUrl(c.serverUrl)
+      setThemeState(c.theme ?? 'system')
+    })
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
     window.connector?.hotkeys.getPushToTalk().then((h) => h && setPttHotkey(h))
     window.connector?.appVersion?.().then(setVersion).catch(() => undefined)
   }, [])
+
+  // Track the OS theme so 'system' resolves live.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setSysDark(mq.matches)
+    const onChange = (e: MediaQueryListEvent) => setSysDark(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  const resolvedDark = theme === 'system' ? sysDark : theme === 'dark'
+
+  const changeTheme = (t: ThemeMode) => {
+    setThemeState(t)
+    window.connector?.serverConfig.set({ theme: t })
+    // Reload the chat panel so the remote /connector page picks up ?theme.
+    window.connector?.windowControl.reloadPanel()
+  }
 
   const stat = (msg: string, kind: StatusKind) => {
     setStatus(msg)
@@ -123,7 +152,7 @@ export function ControlApp() {
     statusKind === 'ok' ? 'is-ok' : statusKind === 'err' ? 'is-err' : statusKind === 'working' ? 'is-working' : ''
 
   return (
-    <div className="control-root gy">
+    <div className={`control-root gy ${resolvedDark ? '' : 'gy--light'}`}>
       <div className="gy-wrap">
         <header className="gy-head">
           <div className="gy-logo">G</div>
@@ -156,7 +185,7 @@ export function ControlApp() {
                 className="gy-input"
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
-                placeholder="https://example.com"
+                placeholder="https://your-geny-server.com"
                 spellCheck={false}
               />
               <div className="gy-spacer" />
@@ -169,6 +198,17 @@ export function ControlApp() {
                   {I.refresh} 연결 확인
                 </button>
               </div>
+              {serverUrl.trim() && (
+                <>
+                  <div className="gy-spacer" />
+                  <button
+                    className="gy-btn gy-btn--ghost gy-btn--block gy-btn--sm"
+                    onClick={() => window.connector?.windowControl.openExternal(serverUrl.trim())}
+                  >
+                    {I.external} 브라우저에서 Geny 서버 열기
+                  </button>
+                </>
+              )}
             </section>
 
             <section className="gy-card">
@@ -231,6 +271,24 @@ export function ControlApp() {
         {/* ─────────────── 앱 ─────────────── */}
         {tab === 'app' && (
           <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.sliders} 화면 테마</div>
+              <nav className="gy-tabs" style={{ margin: 0 }} role="tablist">
+                <button className={`gy-tab ${theme === 'system' ? 'is-active' : ''}`} onClick={() => changeTheme('system')}>
+                  {I.monitor} 시스템
+                </button>
+                <button className={`gy-tab ${theme === 'dark' ? 'is-active' : ''}`} onClick={() => changeTheme('dark')}>
+                  {I.moon} 다크
+                </button>
+                <button className={`gy-tab ${theme === 'light' ? 'is-active' : ''}`} onClick={() => changeTheme('light')}>
+                  {I.sun} 라이트
+                </button>
+              </nav>
+              <p className="gy-hint" style={{ margin: '11px 0 0' }}>
+                설정·채팅 창에 함께 적용됩니다. ‘시스템’은 OS 설정을 따릅니다.
+              </p>
+            </section>
+
             <section className="gy-card">
               <div className="gy-card-h">{I.download} 자동 업데이트</div>
               <div className="gy-toggle-line">
