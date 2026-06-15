@@ -12,6 +12,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 export interface ConnectorConfig {
   serverUrl: string
+  theme?: 'system' | 'dark' | 'light'
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
 }
 
@@ -49,6 +50,10 @@ export interface ConnectorBridge {
     openSettings(): void
     /** Restart the whole connector app (reloads overlay/panel + native code). */
     restart(): void
+    /** Open a URL in the user's default browser (e.g. the Geny web app). */
+    openExternal(url: string): void
+    /** Reload only the chat/control panel (e.g. after a theme change). */
+    reloadPanel(): void
   }
 
   /** Global push-to-talk hotkey. */
@@ -114,6 +119,8 @@ const api: ConnectorBridge = {
     setOverlaySession: (sessionId) => ipcRenderer.send('overlay:set-session', sessionId),
     openSettings: () => ipcRenderer.send('settings:open'),
     restart: () => ipcRenderer.send('app:restart'),
+    openExternal: (url) => ipcRenderer.send('app:open-external', url),
+    reloadPanel: () => ipcRenderer.send('app:reload-control'),
   },
   updater: {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),

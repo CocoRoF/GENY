@@ -14,6 +14,7 @@ import { useEffect, useState, type SVGProps } from 'react';
 import { setToken } from '@/lib/authApi';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
+import { useTheme, type Theme } from '@/lib/theme';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 
 // CRITICAL: this is the chat window, a SEPARATE renderer process from the avatar
@@ -21,6 +22,31 @@ import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 // (TTS/STT) and screen-scan live ONLY in the avatar window; here we force TTS off
 // at module load (before any message can arrive) so chat is silent view+send.
 useVTuberStore.setState({ ttsEnabled: false });
+
+/** Resolve the connector's ?theme (dark|light|system) to a concrete theme. */
+function resolveConnectorTheme(): Theme | null {
+  if (typeof window === 'undefined') return null;
+  const t = new URLSearchParams(window.location.search).get('theme');
+  if (!t) return null; // plain browser → leave the user's own preference alone
+  if (t === 'light' || t === 'dark') return t;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+// Apply the connector theme at module load too, so there's no dark→light flash
+// before React mounts (the ThemeProvider FOUC script defaults to dark).
+(() => {
+  const resolved = resolveConnectorTheme();
+  if (!resolved) return;
+  try {
+    localStorage.setItem('geny-theme-preference', resolved);
+    const r = document.documentElement;
+    r.classList.remove('light', 'dark');
+    r.classList.add(resolved);
+    r.style.colorScheme = resolved;
+  } catch {
+    /* ignore */
+  }
+})();
 
 // ── icons (1.6 stroke, currentColor) ─────────────────────────────────────────
 const ic = (p: SVGProps<SVGSVGElement>) => ({
@@ -42,11 +68,14 @@ const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
 const MonitorIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...ic(p)}><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
 );
+const ExternalIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...ic(p)}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+);
 
 const TOOLBAR_SELECT =
-  'appearance-none pl-3 pr-7 py-1.5 text-[0.78rem] rounded-lg bg-[var(--bg-tertiary)]/50 ' +
+  'appearance-none h-8 pl-2.5 pr-7 text-[0.78rem] rounded-lg bg-[var(--bg-tertiary)]/60 ' +
   'border border-[var(--border-color)] text-[var(--text-primary)] outline-none cursor-pointer ' +
-  'min-w-[150px] transition-colors hover:border-[var(--border-subtle)] ' +
+  'min-w-[120px] max-w-[210px] transition-colors hover:border-[var(--border-subtle)] ' +
   'focus:border-[var(--primary-color)] focus:ring-2 focus:ring-[var(--primary-subtle)]';
 const ICON_BTN =
   'w-8 h-8 grid place-items-center rounded-lg border border-[var(--border-color)] ' +
@@ -65,7 +94,15 @@ export default function ConnectorPage() {
   const assignModel = useVTuberStore((s) => s.assignModel);
   const assignedModelName = useVTuberStore((s) => (selectedSessionId ? s.assignments[selectedSessionId] : undefined));
 
+  const { setTheme } = useTheme();
   const [booted, setBooted] = useState(false);
+
+  // Sync the connector's ?theme into the ThemeProvider store (module-load
+  // already painted the class for no-flash; this keeps React state in sync).
+  useEffect(() => {
+    const resolved = resolveConnectorTheme();
+    if (resolved) setTheme(resolved);
+  }, [setTheme]);
 
   // token + initial data + session preselect (once).
   useEffect(() => {
@@ -165,7 +202,10 @@ export default function ConnectorPage() {
           {/* desktop-only controls */}
           {isDesktop && (
             <>
-              <button type="button" title="설정 (서버 · 계정 · 자동 업데이트)" onClick={() => window.connector?.windowControl.openSettings()} className={ICON_BTN}>
+              <button type="button" title="브라우저에서 Geny 서버 열기" onClick={() => window.connector?.windowControl.openExternal(window.location.origin)} className={ICON_BTN}>
+                <ExternalIcon className="w-4 h-4" />
+              </button>
+              <button type="button" title="설정 (서버 · 계정 · 테마)" onClick={() => window.connector?.windowControl.openSettings()} className={ICON_BTN}>
                 <GearIcon className="w-4 h-4" />
               </button>
               <button type="button" title="접속기 재시작" onClick={() => window.connector?.windowControl.restart()} className={ICON_BTN}>

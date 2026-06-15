@@ -104,6 +104,36 @@ body,
   --gy-ok: #34d399;
   --gy-warn: #fbbf24;
   --gy-err: #f87171;
+  /* surface tints (re-themed for light below) */
+  --gy-tint: rgba(255, 255, 255, 0.04);
+  --gy-tint-hover: rgba(255, 255, 255, 0.08);
+  --gy-track: #2c2c39;
+}
+
+/* Light theme — applied when ControlApp resolves the OS/user choice to light. */
+.gy.gy--light {
+  --gy-bg: #f3f5f9;
+  --gy-bg-grad: radial-gradient(120% 90% at 50% -10%, #ffffff 0%, #eceff4 62%);
+  --gy-card: rgba(15, 23, 42, 0.022);
+  --gy-card-border: rgba(15, 23, 42, 0.1);
+  --gy-card-border-hover: rgba(15, 23, 42, 0.18);
+  --gy-field: #ffffff;
+  --gy-field-border: #d4d9e3;
+  --gy-text: #14171f;
+  --gy-text-2: #4a5160;
+  --gy-text-3: #8a91a2;
+  --gy-ok: #0ea371;
+  --gy-warn: #d97706;
+  --gy-err: #dc2626;
+  --gy-tint: rgba(15, 23, 42, 0.04);
+  --gy-tint-hover: rgba(15, 23, 42, 0.07);
+  --gy-track: #cdd3df;
+}
+.gy.gy--light .gy-logo {
+  box-shadow: 0 6px 18px rgba(79, 124, 255, 0.3);
+}
+.gy.gy--light .gy-input:focus {
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.16);
 }
 
 .control-root {
@@ -241,7 +271,7 @@ body,
   filter: brightness(1.08);
 }
 .gy-btn--ghost {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--gy-tint);
   border-color: var(--gy-field-border);
   color: var(--gy-text-2);
 }
@@ -284,7 +314,7 @@ body,
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 500;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--gy-tint);
   border: 1px solid var(--gy-card-border);
   color: var(--gy-text-2);
   max-width: 100%;
@@ -346,7 +376,7 @@ body,
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: #2c2c39;
+  background: var(--gy-track);
   transition: background 0.2s ease;
 }
 .gy-switch .thumb {
@@ -415,7 +445,7 @@ body,
   gap: 4px;
   padding: 4px;
   margin: 4px 0 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--gy-tint);
   border: 1px solid var(--gy-card-border);
   border-radius: 12px;
 }
@@ -442,7 +472,7 @@ body,
 }
 .gy-tab:hover {
   color: var(--gy-text);
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--gy-tint-hover);
 }
 .gy-tab.is-active {
   color: #fff;
