@@ -28,7 +28,7 @@ const I = {
 
 export function ControlApp() {
   const [tab, setTab] = useState<Tab>('account')
-  const [serverUrl, setServerUrl] = useState('https://geny-x.hrletsgo.me')
+  const [serverUrl, setServerUrl] = useState('')
   const [status, setStatus] = useState('연결 상태를 확인하세요')
   const [statusKind, setStatusKind] = useState<StatusKind>('idle')
   const [username, setUsername] = useState('')
@@ -156,7 +156,7 @@ export function ControlApp() {
                 className="gy-input"
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
-                placeholder="https://your-geny-server"
+                placeholder="https://example.com"
                 spellCheck={false}
               />
               <div className="gy-spacer" />
@@ -197,8 +197,8 @@ export function ControlApp() {
                     autoComplete="current-password"
                   />
                   <div className="gy-spacer" />
-                  <button className="gy-btn gy-btn--primary gy-btn--block" onClick={login} disabled={busy || !username || !password}>
-                    {host} 에 로그인
+                  <button className="gy-btn gy-btn--primary gy-btn--block" onClick={login} disabled={busy || !username || !password || !serverUrl.trim()}>
+                    {host ? `${host} 에 로그인` : '로그인'}
                   </button>
                 </>
               )}
@@ -259,7 +259,7 @@ export function ControlApp() {
               </div>
               <div className="gy-kv">
                 <span className="k">서버</span>
-                <span className="v">{host}</span>
+                <span className="v">{host || '—'}</span>
               </div>
               <div className="gy-spacer" />
               <button className="gy-btn gy-btn--ghost gy-btn--block" onClick={() => window.connector?.windowControl.restart()}>

@@ -51,7 +51,9 @@ function loadConfig(): ConnectorConfig {
   try {
     return JSON.parse(readFileSync(configPath(), 'utf-8'))
   } catch {
-    return { serverUrl: process.env.GENY_SERVER_URL || 'https://geny-x.hrletsgo.me' }
+    // No personal default — the user enters their own Geny server on first run.
+    // GENY_SERVER_URL lets a deployment pre-seed it without editing code.
+    return { serverUrl: process.env.GENY_SERVER_URL || '' }
   }
 }
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
