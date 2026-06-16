@@ -108,6 +108,11 @@ class Live2dModelManager:
         # (add/replace/remove/reload) so SSE clients can push the new
         # model list to the browser without polling.
         self._change_listeners: Set["asyncio.Queue[None]"] = set()
+        # Assignment listeners — same idea but for session→model BINDINGS, so
+        # the web / connector / avatar all learn of a model (re)assignment at
+        # the exact moment it happens (event-driven, no polling). Each queue
+        # carries a (session_id, model_name | None) tuple.
+        self._assignment_listeners: Set["asyncio.Queue"] = set()
         self._load_registry()
 
     def _load_registry(self):
@@ -204,6 +209,7 @@ class Live2dModelManager:
         # so the persistent session store (DB) is what survives a redeploy and
         # lets get_agent_model_name() restore the binding after a reload.
         self._persist_session_assignment(session_id, model_name)
+        self._notify_assignment_change(session_id, model_name)
         logger.info(f"Assigned model '{model_name}' to session '{session_id}'")
 
     def get_agent_model(self, session_id: str) -> Optional[Live2dModelInfo]:
@@ -235,6 +241,7 @@ class Live2dModelManager:
         if self._agent_assignments.pop(session_id, None) is not None:
             self._persist_assignments()
         self._persist_session_assignment(session_id, None)
+        self._notify_assignment_change(session_id, None)
 
     def get_all_assignments(self) -> Dict[str, str]:
         """Return all agent-model assignments."""
@@ -270,6 +277,29 @@ class Live2dModelManager:
 
     def unsubscribe_changes(self, q: "asyncio.Queue[None]") -> None:
         self._change_listeners.discard(q)
+
+    # ── Assignment-change stream (session → model bindings) ──────────────────
+    def subscribe_assignment_changes(self) -> "asyncio.Queue":
+        """Hand back a queue that receives a ``(session_id, model_name|None)``
+        tuple every time a model is (un)assigned, so SSE clients can update the
+        binding without polling. Pair with ``unsubscribe_assignment_changes``."""
+        q: "asyncio.Queue" = asyncio.Queue(maxsize=32)
+        self._assignment_listeners.add(q)
+        return q
+
+    def unsubscribe_assignment_changes(self, q: "asyncio.Queue") -> None:
+        self._assignment_listeners.discard(q)
+
+    def _notify_assignment_change(self, session_id: str, model_name: Optional[str]) -> None:
+        """Wake every assignment subscriber with the exact change. Best-effort:
+        full queues are skipped (the consumer refetches on reconnect)."""
+        for q in list(self._assignment_listeners):
+            try:
+                q.put_nowait((session_id, model_name))
+            except asyncio.QueueFull:
+                pass
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[model_registry] assignment notify failed: {e}")
 
     def _notify_change(self) -> None:
         """Wake every subscriber. Best-effort: queues at capacity are

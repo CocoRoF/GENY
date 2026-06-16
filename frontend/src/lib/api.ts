@@ -2472,6 +2472,80 @@ export const vtuberApi = {
     };
   },
 
+  /**
+   * Subscribe to model-ASSIGNMENT changes (session → model bindings). Emits the
+   * exact change the moment any client (re)assigns, so web / connector / overlay
+   * stay in sync without polling. Mirrors subscribeToModelChanges (unauth SSE).
+   */
+  subscribeToAssignmentChanges: (
+    onChange: (sessionId: string, modelName: string | null) => void,
+  ): { close: () => void } => {
+    const base = getBackendUrl();
+    const url = `${base}/api/vtuber/assignments/stream`;
+    let closed = false;
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        es = new EventSource(url);
+      } catch (err) {
+        console.warn('[VTuber] assignments stream construct failed:', err);
+        scheduleReconnect();
+        return;
+      }
+      es.onopen = () => {
+        attempts = 0;
+      };
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as {
+            event?: string;
+            session_id?: string;
+            model_name?: string | null;
+          };
+          if (data.event === 'assignment_changed' && data.session_id) {
+            onChange(data.session_id, data.model_name ?? null);
+          }
+        } catch (err) {
+          console.warn('[VTuber] assignments stream parse failed:', err);
+        }
+      };
+      es.onerror = () => {
+        try {
+          es?.close();
+        } catch {
+          // ignore
+        }
+        es = null;
+        scheduleReconnect();
+      };
+    };
+
+    const scheduleReconnect = () => {
+      if (closed) return;
+      attempts = Math.min(attempts + 1, 8);
+      const delay = Math.min(500 * 2 ** (attempts - 1), 10_000);
+      reconnectTimer = setTimeout(connect, delay);
+    };
+
+    connect();
+
+    return {
+      close: () => {
+        closed = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        try {
+          es?.close();
+        } catch {
+          // ignore
+        }
+      },
+    };
+  },
+
   /** GET /api/vtuber/models/{name} — get single model details */
   getModel: (name: string) =>
     apiCall<Live2dModelInfo>(`/api/vtuber/models/${encodeURIComponent(name)}`),

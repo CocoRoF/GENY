@@ -125,6 +125,48 @@ async def stream_models(request: Request) -> StreamingResponse:
     )
 
 
+@router.get("/assignments/stream")
+async def stream_assignments(request: Request) -> StreamingResponse:
+    """Server-sent stream that emits an ``assignment_changed`` event the
+    instant a session's avatar model is (un)assigned. Web / connector /
+    overlay subscribe once and update their binding immediately — so changing
+    the model anywhere syncs everywhere with NO polling.
+
+    Payload: ``{"event":"assignment_changed","session_id":..,"model_name":..}``
+    (``model_name`` is null on unassign).
+    """
+    manager = request.app.state.live2d_model_manager
+    queue = manager.subscribe_assignment_changes()
+
+    async def gen():
+        yield ": connected\n\n"
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    session_id, model_name = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    payload = json.dumps(
+                        {
+                            "event": "assignment_changed",
+                            "session_id": session_id,
+                            "model_name": model_name,
+                        },
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            manager.unsubscribe_assignment_changes(queue)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/models/{name}")
 async def get_model(name: str, request: Request):
     """Get details for a specific Live2D model."""
