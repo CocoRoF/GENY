@@ -105,6 +105,50 @@ def _hamming(a: str, b: str) -> Optional[int]:
         return None
 
 
+def _same_screen_threshold() -> int:
+    """dHash Hamming distance BELOW which the screen counts as "the same
+    situation" for proactive-comment de-dup. Deliberately LENIENT (default
+    10/64, vs the change-gate's ~4) so the captured avatar overlay's idle
+    animation (a few flipped bits in its corner) never reads as a new
+    situation — only a substantial screen change earns a fresh comment."""
+    try:
+        return int(os.environ.get("GENY_SCREEN_OBS_SAME_THRESHOLD", "10"))
+    except ValueError:
+        return 10
+
+
+# Per-session dHash of the frame at the LAST proactive screen comment. Lets the
+# thinking-trigger skip repeating itself when the screen hasn't meaningfully
+# changed since it last spoke (robust to the avatar overlay being in-frame).
+_last_comment_hash: Dict[str, str] = {}
+
+
+def screen_changed_since_last_comment(session_id: str) -> bool:
+    """True when the screen meaningfully changed since the last proactive screen
+    comment for this session — so the persona doesn't keep narrating an
+    unchanged screen. Returns True (allow) when there's no prior comment or no
+    hash yet. Lenient threshold ignores the captured avatar's idle animation."""
+    cur = _last_hash.get(session_id)
+    if not cur:
+        return True
+    prev = _last_comment_hash.get(session_id)
+    if not prev:
+        return True
+    dist = _hamming(prev, cur)
+    if dist is None:
+        return True
+    return dist >= _same_screen_threshold()
+
+
+def mark_screen_comment(session_id: str) -> None:
+    """Record the current frame's hash as 'already commented on', so the next
+    near-identical frame is de-duped. Called when a screen comment fires (even
+    on [SILENT] — we don't want to re-ask about the same screen)."""
+    cur = _last_hash.get(session_id)
+    if cur:
+        _last_comment_hash[session_id] = cur
+
+
 def _send_image_enabled() -> bool:
     """Whether the persona receives the REAL captured frame (multimodal)
     on the ``[USER_OBSERVATION]`` trigger, not just the text caption.
@@ -254,6 +298,7 @@ def reset_cooldown_state_for_tests() -> None:
     _last_fire_at.clear()
     _last_caption.clear()
     _last_hash.clear()
+    _last_comment_hash.clear()
     _last_prune_at.clear()
     _screen_active_until.clear()
     _latest_frame.clear()
@@ -266,6 +311,7 @@ def cleanup_session_state(session_id: str) -> None:
     _last_fire_at.pop(session_id, None)
     _last_caption.pop(session_id, None)
     _last_hash.pop(session_id, None)
+    _last_comment_hash.pop(session_id, None)
     _screen_active_until.pop(session_id, None)
     _latest_frame.pop(session_id, None)
 

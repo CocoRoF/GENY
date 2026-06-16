@@ -440,6 +440,18 @@ class ThinkingTriggerService:
             # eligible once the share ends).
             screen_attachment = None
             if getattr(chosen_category, "requires_screen_active", False):
+                from service.vtuber.screen_observation import (
+                    screen_changed_since_last_comment,
+                    mark_screen_comment,
+                )
+                # De-dup: don't narrate an unchanged screen again. Robust to the
+                # captured avatar overlay (lenient hash threshold).
+                if not screen_changed_since_last_comment(session_id):
+                    logger.info(
+                        "[ThinkingTrigger] screen unchanged since last comment — "
+                        "skipping for %s", session_id,
+                    )
+                    return
                 try:
                     from service.vtuber.screen_observation import (
                         capture_current_screen_attachment,
@@ -462,6 +474,10 @@ class ThinkingTriggerService:
                         session_id,
                     )
                     return
+                # Mark this screen as commented BEFORE firing — even a [SILENT]
+                # response means "nothing new to say about THIS screen", so the
+                # same frame shouldn't re-trigger.
+                mark_screen_comment(session_id)
 
             import re
             _tag_match = re.search(r'\[(THINKING|ACTIVITY)_TRIGGER(?::\w+)?\]', prompt)
