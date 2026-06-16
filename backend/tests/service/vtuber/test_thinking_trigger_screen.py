@@ -142,3 +142,73 @@ def test_screen_category_eligibility_gated_on_active() -> None:
 
     assert _elig(True) is True
     assert _elig(False) is False
+
+
+# ── scan_all: screen-active union + backoff bypass ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_scan_fires_screen_active_session_not_in_activity(monkeypatch) -> None:
+    """A screen-sharing session that was never registered via a normal turn
+    (e.g. lazily rehydrated after a restart) still gets scanned + fired."""
+    from unittest.mock import AsyncMock
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.vtuber import screen_observation as so
+
+    svc = ThinkingTriggerService()
+    svc._fire_trigger = AsyncMock()  # type: ignore[assignment]
+    monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
+    monkeypatch.setattr(so, "list_active_sessions", lambda: ["sid-screen"])
+
+    assert "sid-screen" not in svc._activity   # never registered
+    await svc.scan_all()
+    svc._fire_trigger.assert_awaited_once_with("sid-screen")
+
+
+@pytest.mark.asyncio
+async def test_screen_active_bypasses_adaptive_backoff(monkeypatch) -> None:
+    """A high consecutive-trigger count would push the adaptive threshold toward
+    max_idle (~1h); while sharing the screen we ignore it and use base_idle."""
+    import time
+    from unittest.mock import AsyncMock
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.vtuber import screen_observation as so
+
+    svc = ThinkingTriggerService()
+    svc._fire_trigger = AsyncMock()  # type: ignore[assignment]
+    monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
+    monkeypatch.setattr(so, "list_active_sessions", lambda: ["sid"])
+
+    svc._activity["sid"] = time.time() - 120     # idle 120s
+    svc._consecutive_triggers["sid"] = 100       # adaptive threshold would be ~3600s
+    # Sanity: without the bypass this would NOT fire.
+    assert svc._get_adaptive_threshold("sid") > 120
+
+    await svc.scan_all()
+    svc._fire_trigger.assert_awaited_once_with("sid")   # fired anyway (base_idle 60 < 120)
+
+
+@pytest.mark.asyncio
+async def test_fire_falls_back_to_cached_upload_when_ws_grab_none(monkeypatch) -> None:
+    """WS live-grab returns None (connector doesn't implement it) → use the
+    most recent UPLOADED frame so the screen comment still fires."""
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.vtuber import screen_observation as so
+
+    svc = ThinkingTriggerService()
+    captured = _patch_common(
+        monkeypatch, svc, category=_SCREEN_CAT,
+        prompt="[THINKING_TRIGGER:screen_observation] 화면 보고 반응해",
+    )
+
+    cached = {"kind": "image", "mime_type": "image/jpeg", "data": "Q0FDSEVE", "source": "screen_observation"}
+
+    async def _ws_none(_sid):
+        return None
+
+    monkeypatch.setattr(so, "capture_current_screen_attachment", _ws_none)
+    monkeypatch.setattr(so, "get_recent_frame_attachment", lambda _sid: cached)
+
+    await svc._fire_trigger("sid-fallback")
+
+    assert captured["kwargs"].get("attachments") == [cached]

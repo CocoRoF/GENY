@@ -365,7 +365,18 @@ class ThinkingTriggerService:
     async def scan_all(self) -> None:
         now = time.time()
         trigger_tasks = []
-        for sid, last in list(self._activity.items()):
+        # Sessions to consider: those with recorded activity PLUS any actively
+        # sharing their screen. The latter must keep getting screen commentary
+        # even if they were never registered via a normal turn (e.g. lazily
+        # rehydrated after a restart) or the idle backoff has grown.
+        screen_active: set = set()
+        try:
+            from service.vtuber.screen_observation import list_active_sessions
+            screen_active = set(list_active_sessions())
+        except Exception:  # noqa: BLE001
+            screen_active = set()
+        sids = set(self._activity) | screen_active
+        for sid in sids:
             if sid in self._disabled_sessions:
                 continue
             manifest = self._resolve_manifest(sid)
@@ -375,8 +386,15 @@ class ThinkingTriggerService:
                 trigger_tasks.append((sid, self._kick_inbox_drain(sid)))
                 self._activity[sid] = now
                 continue
+            last = self._activity.get(sid, 0.0)
             idle = now - last
-            threshold = self._get_adaptive_threshold(sid)
+            # While sharing the screen, IGNORE the adaptive backoff — commentary
+            # should keep flowing (the screen category's own cooldown rate-limits
+            # it). Otherwise use the growing adaptive threshold as before.
+            if sid in screen_active:
+                threshold = manifest.timing.base_idle_seconds
+            else:
+                threshold = self._get_adaptive_threshold(sid)
             if idle < threshold:
                 continue
             trigger_tasks.append((sid, self._fire_trigger(sid)))
@@ -425,15 +443,23 @@ class ThinkingTriggerService:
                 try:
                     from service.vtuber.screen_observation import (
                         capture_current_screen_attachment,
+                        get_recent_frame_attachment,
                     )
+                    # Prefer a fresh WS live-grab; fall back to the most recent
+                    # UPLOADED frame (always arriving via HTTP) so this works
+                    # even when the connector doesn't implement the live-grab
+                    # capability.
                     screen_attachment = await capture_current_screen_attachment(session_id)
+                    if screen_attachment is None:
+                        screen_attachment = get_recent_frame_attachment(session_id)
                 except Exception:  # noqa: BLE001
                     logger.debug("thinking trigger: screen capture failed", exc_info=True)
                     screen_attachment = None
                 if screen_attachment is None:
-                    logger.debug(
-                        "thinking trigger: screen category chosen but no live frame — "
-                        "skipping fire for %s", session_id,
+                    logger.info(
+                        "[ThinkingTrigger] screen category chosen but no frame "
+                        "(WS grab + upload cache both empty) — skipping for %s",
+                        session_id,
                     )
                     return
 

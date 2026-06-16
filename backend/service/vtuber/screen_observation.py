@@ -160,6 +160,13 @@ _last_prune_at: Dict[str, float] = {}
 # screen frame from the connector — gated on the user's toggle, never captures
 # silently when observation is off.
 _screen_active_until: Dict[str, float] = {}
+# Per-session latest uploaded frame: (image_bytes, mime_type, monotonic_ts).
+# The HTTP upload is the frame source that ALWAYS arrives (vs the WS live-grab
+# capability, which the connector may not implement). The thinking-trigger's
+# screen category attaches this to the persona's own vision model, so screen
+# commentary works even when the caption LLM is unavailable and the WS grab
+# isn't supported.
+_latest_frame: Dict[str, Tuple[bytes, str, float]] = {}
 _lock = asyncio.Lock()
 
 
@@ -180,6 +187,45 @@ def is_screen_active(session_id: str) -> bool:
     """True when screen observation is currently ON for the session (a frame
     was uploaded within the active window)."""
     return time.monotonic() < _screen_active_until.get(session_id, 0.0)
+
+
+def list_active_sessions() -> list:
+    """Session ids currently sharing their screen (a frame within the active
+    window). The thinking-trigger unions these into its scan so screen-active
+    sessions keep getting commentary even if they weren't registered via a
+    normal turn (e.g. lazily rehydrated after a restart)."""
+    now = time.monotonic()
+    return [sid for sid, exp in list(_screen_active_until.items()) if now < exp]
+
+
+def get_recent_frame_attachment(session_id: str) -> Optional[Dict[str, Any]]:
+    """Return the most-recently UPLOADED frame as a chat attachment (raw b64),
+    or ``None``. Reliable fallback to the WS live-grab: the HTTP upload always
+    arrives. Gated on the kill-switch, freshness (active window), and the
+    session model being vision-capable — never hands a non-vision model an
+    image it would choke on."""
+    if not _send_image_enabled():
+        return None
+    if not is_screen_active(session_id):
+        return None
+    cached = _latest_frame.get(session_id)
+    if not cached:
+        return None
+    data, mime, ts = cached
+    if time.monotonic() - ts > _screen_active_window():
+        return None
+    if not _session_vision_capable(session_id):
+        return None
+    try:
+        return {
+            "kind": "image",
+            "mime_type": mime or "image/jpeg",
+            "data": base64.b64encode(data).decode("ascii"),
+            "name": "screen.jpg",
+            "source": "screen_observation",
+        }
+    except Exception:  # noqa: BLE001
+        return None
 
 
 async def _claim_trigger_slot(session_id: str, min_gap: float) -> bool:
@@ -210,6 +256,7 @@ def reset_cooldown_state_for_tests() -> None:
     _last_hash.clear()
     _last_prune_at.clear()
     _screen_active_until.clear()
+    _latest_frame.clear()
 
 
 def cleanup_session_state(session_id: str) -> None:
@@ -220,6 +267,7 @@ def cleanup_session_state(session_id: str) -> None:
     _last_caption.pop(session_id, None)
     _last_hash.pop(session_id, None)
     _screen_active_until.pop(session_id, None)
+    _latest_frame.pop(session_id, None)
 
 
 # ── Sensitive-content redaction ───────────────────────────────────────
@@ -736,6 +784,11 @@ async def save_and_maybe_trigger(
     if not image_bytes:
         result.skipped_reason = "empty_image"
         return result
+
+    # Cache the latest frame for the thinking-trigger's screen category (which
+    # attaches it straight to the persona's vision model). Done before the
+    # change-gate so even an "unchanged" frame keeps the cache fresh.
+    _latest_frame[session_id] = (image_bytes, mime_type, time.monotonic())
 
     # ── Change-gate ──────────────────────────────────────────────────
     # Skip the vision call + trigger when the frame is ~identical to the last
