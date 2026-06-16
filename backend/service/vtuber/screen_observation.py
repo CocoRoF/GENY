@@ -290,6 +290,20 @@ class ObservationResult:
 # ── Persistence ───────────────────────────────────────────────────────
 
 
+async def _ensure_session_live(session_id: str) -> None:
+    """Lazily wake a dormant (non-deleted) session so an actively-observing
+    connector keeps the persona alive across backend restarts — otherwise every
+    uploaded frame 404s (session not in memory) until the user manually
+    re-opens the session, and the thinking-trigger never re-registers it.
+    Best-effort + safe: ``ensure_session_live`` returns None (no-op) for
+    unknown/deleted sessions, so this never resurrects a deleted one."""
+    try:
+        from service.executor import get_agent_session_manager
+        await get_agent_session_manager().ensure_session_live(session_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("screen_observation: ensure_session_live failed", exc_info=True)
+
+
 def _resolve_session_storage(session_id: str) -> Optional[Path]:
     """Return the absolute ``<storage_path>`` for the live agent
     session, or ``None`` when the session isn't running.
@@ -707,6 +721,9 @@ async def save_and_maybe_trigger(
     # Every upload refreshes the "observing" marker so conversation turns may
     # grab a fresh frame from the connector (P3b) only while the toggle is ON.
     _mark_screen_active(session_id)
+    # Wake a dormant session (e.g. after a backend restart) so observation keeps
+    # working without a manual re-open. No-op when already live or deleted.
+    await _ensure_session_live(session_id)
     result = ObservationResult(
         observation_id=observation_id, session_id=session_id,
     )
