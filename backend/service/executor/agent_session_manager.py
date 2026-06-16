@@ -18,6 +18,7 @@ Usage example:
 from logging import getLogger
 from typing import Any, Dict, List, Optional
 import asyncio
+import json
 import os
 import uuid
 
@@ -1371,26 +1372,34 @@ class AgentSessionManager:
         if stored_chat_room_id:
             agent._chat_room_id = stored_chat_room_id
 
-        # Ensure a VTuber has a chat room. Creation normally happens in the
-        # auto-sub-worker block, which _rehydrate skips (linked_session_id is
-        # set), so a VTuber that lacks a room — never had one, or creation
-        # failed at first build — would otherwise resume WITHOUT a chat_room_id
-        # and the chat panel would sit on "채팅방을 준비하고 있어요…" forever.
+        # Ensure a VTuber points at its REAL chat room. Reconcile to the
+        # session's best existing room (the one with the most messages) — so a
+        # stale / missing chat_room_id RECOVERS the conversation instead of
+        # stranding it behind a fresh empty room. Only create one when the
+        # session has no room at all. (The earlier "always create when missing"
+        # version orphaned a 46-message room behind an empty duplicate.)
         is_vtuber = (params.get("role") == SessionRole.VTUBER.value) or (
             params.get("session_type") == "vtuber"
         )
-        if is_vtuber and not getattr(agent, "_chat_room_id", None):
+        if is_vtuber:
             try:
                 from service.chat.conversation_store import get_chat_store
 
                 chat_store = get_chat_store()
-                room_name = f"{params.get('session_name') or 'VTuber'} Chat"
-                room = chat_store.create_room(room_name, [session_id])
-                room_id = room.get("id") or room.get("room_id")
-                if room_id:
-                    agent._chat_room_id = room_id
-                    self._store.update(session_id, {"chat_room_id": room_id})
-                    logger.info(f"[{session_id}] 💬 Chat room ensured on reload: {room_id}")
+                best = self._best_chat_room_for(session_id)
+                if best:
+                    if best != getattr(agent, "_chat_room_id", None):
+                        agent._chat_room_id = best
+                        self._store.update(session_id, {"chat_room_id": best})
+                        logger.info(f"[{session_id}] 💬 Reattached existing chat room: {best}")
+                elif not getattr(agent, "_chat_room_id", None):
+                    room_name = f"{params.get('session_name') or 'VTuber'} Chat"
+                    room = chat_store.create_room(room_name, [session_id])
+                    room_id = room.get("id") or room.get("room_id")
+                    if room_id:
+                        agent._chat_room_id = room_id
+                        self._store.update(session_id, {"chat_room_id": room_id})
+                        logger.info(f"[{session_id}] 💬 Chat room created on reload: {room_id}")
             except Exception as e:  # noqa: BLE001 — chat room is best-effort
                 logger.warning(f"[{session_id}] Failed to ensure chat room on reload: {e}")
 
@@ -1424,6 +1433,37 @@ class AgentSessionManager:
     # ========================================================================
     # Environment propagation — apply an edited manifest to live sessions
     # ========================================================================
+
+    def _best_chat_room_for(self, session_id: str) -> Optional[str]:
+        """Return this session's existing chat room id — the one with the MOST
+        messages (tiebreak: most recently updated) among rooms that list this
+        session. Reused on reload so the conversation is never orphaned behind a
+        fresh empty room. Returns None when the session has no room yet.
+        """
+        try:
+            from service.chat.conversation_store import get_chat_store
+
+            rooms = get_chat_store().list_rooms()
+        except Exception:  # noqa: BLE001
+            return None
+        candidates = []
+        for r in rooms or []:
+            sids = r.get("session_ids")
+            if isinstance(sids, str):
+                try:
+                    sids = json.loads(sids)
+                except Exception:  # noqa: BLE001
+                    sids = []
+            if session_id in (sids or []):
+                candidates.append(r)
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda r: (int(r.get("message_count") or 0), str(r.get("updated_at") or "")),
+            reverse=True,
+        )
+        top = candidates[0]
+        return top.get("room_id") or top.get("id")
 
     def _session_busy(self, session_id: str, agent: AgentSession) -> bool:
         """A turn is in-flight on this session, so a manifest reload must wait.
