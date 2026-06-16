@@ -501,7 +501,15 @@ class DatabaseManager:
                         cur.execute(query, params)
                     else:
                         cur.execute(query)
-                    result = cur.fetchone()
+                    # Only fetch when the statement actually produced a result
+                    # set (i.e. has a RETURNING clause). An INSERT ... ON CONFLICT
+                    # without RETURNING leaves cur.description None, and calling
+                    # fetchone() then RAISES ("didn't produce records") BEFORE the
+                    # commit below — silently rolling the row back. That was
+                    # breaking DB persistence for every reconcile service
+                    # (environments / tool presets / trigger presets), which all
+                    # UPSERT without RETURNING and so ran file-only.
+                    result = cur.fetchone() if cur.description is not None else None
                     conn.commit()
                     if result:
                         if isinstance(result, dict):
