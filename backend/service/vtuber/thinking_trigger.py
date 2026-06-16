@@ -62,6 +62,19 @@ _TICK_SPEC_NAME = "thinking_trigger"
 # bundled default manifest's ``sub_worker_working`` category.
 _SUB_WORKER_WORKING_COOLDOWN_SECONDS = 90.0
 
+# Appended to an idle-reflection prompt when the user is sharing their screen,
+# so the reflection reacts to the attached live frame instead of generic
+# small-talk. The sensitive-content guard mirrors the screen-observation path.
+_SCREEN_REFLECTION_SUFFIX = (
+    "[지금 화면] 사용자가 화면을 공유 중이라 방금 화면을 첨부했어. 위 reflection "
+    "주제에 매이지 말고, 가능하면 *화면에서 실제로 보이는 것*에 반응해 — 지금 하는 "
+    "작업, 진행 상황, 막혀 보이는 부분, 눈에 띄는 변화 등을 구체적으로 짚어서 자연스럽게 "
+    "한마디 해. \"화면 공유해 주셨네요\" 같은 메타 발언은 금지 (너가 옆에서 보고 있는 "
+    "거다). 비밀번호 / API 키 / 개인 메시지 / 결제 정보 등 민감한 텍스트는 절대 입에 "
+    "올리지 마 — 그럴 땐 추상적으로 우회해. 화면에 정말 반응할 게 없으면(빈 바탕화면 등) "
+    "원래 reflection 그대로 해도 된다."
+)
+
 
 # ── Default manifest (singleton, lazy) ────────────────────────────
 
@@ -399,6 +412,27 @@ class ThinkingTriggerService:
             if prompt is None:
                 return
 
+            # Screen-aware reflection: when the user has screen observation ON,
+            # ground this idle reflection in what's literally on screen *right
+            # now* — attach the live frame and bias the persona to react to the
+            # actual work instead of generic time-of-day small-talk. The frame
+            # goes straight to the persona's own (vision) model, so this works
+            # even when the caption-LLM path is unavailable. Best-effort: any
+            # failure just falls back to the normal text-only reflection.
+            screen_attachment = None
+            try:
+                from service.vtuber.screen_observation import (
+                    is_screen_active,
+                    capture_current_screen_attachment,
+                )
+                if is_screen_active(session_id):
+                    screen_attachment = await capture_current_screen_attachment(session_id)
+            except Exception:  # noqa: BLE001
+                logger.debug("thinking trigger: screen capture skipped", exc_info=True)
+                screen_attachment = None
+            if screen_attachment is not None:
+                prompt = prompt + "\n\n" + _SCREEN_REFLECTION_SUFFIX
+
             import re
             _tag_match = re.search(r'\[(THINKING|ACTIVITY)_TRIGGER(?::\w+)?\]', prompt)
             _tag_end = _tag_match.end() if _tag_match else 20
@@ -408,12 +442,15 @@ class ThinkingTriggerService:
             trigger_timeout = 600.0 if is_activity else 180.0
             source_metadata = self._build_reflection_metadata(prompt)
 
-            result = await execute_command(
-                session_id, prompt,
-                is_trigger=True,
-                timeout=trigger_timeout,
-                source_metadata=source_metadata,
-            )
+            exec_kwargs: dict = {
+                "is_trigger": True,
+                "timeout": trigger_timeout,
+                "source_metadata": source_metadata,
+            }
+            if screen_attachment is not None:
+                exec_kwargs["attachments"] = [screen_attachment]
+
+            result = await execute_command(session_id, prompt, **exec_kwargs)
 
             self._consecutive_triggers[session_id] = (
                 self._consecutive_triggers.get(session_id, 0) + 1
