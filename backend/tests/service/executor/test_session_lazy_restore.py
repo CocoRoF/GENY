@@ -280,3 +280,23 @@ async def test_ensure_live_defers_reload_while_session_busy():
     out = await mgr.ensure_session_live("s1")
     assert out is busy                      # deferred — same agent returned
     assert busy._needs_manifest_reload is True  # flag retained for next access
+
+
+def test_best_chat_room_prefers_most_messages(monkeypatch):
+    # The orphan-recovery rule: among a session's rooms, pick the one with the
+    # most messages — NOT a fresh empty duplicate — so reload reattaches the
+    # real conversation instead of stranding it.
+    import service.chat.conversation_store as cs
+
+    class _FakeChat:
+        def list_rooms(self):
+            return [
+                {"room_id": "empty", "session_ids": ["s1"], "message_count": 0, "updated_at": "2026-06-16T13:52"},
+                {"room_id": "real", "session_ids": ["s1"], "message_count": 46, "updated_at": "2026-06-16T10:24"},
+                {"room_id": "other", "session_ids": ["s2"], "message_count": 99, "updated_at": "2026-06-16T11:00"},
+            ]
+
+    monkeypatch.setattr(cs, "get_chat_store", lambda: _FakeChat())
+    mgr = _skeleton({})
+    assert mgr._best_chat_room_for("s1") == "real"   # message-bearing, not the empty dup
+    assert mgr._best_chat_room_for("nope") is None   # session has no room
