@@ -538,6 +538,82 @@ class ThinkingTriggerService:
                 self._consecutive_triggers.get(session_id, 0) + 1
             )
 
+    async def fire_screen_now(self, session_id: str) -> bool:
+        """Force an immediate screen comment — the "Show Now" button. Bypasses
+        the idle threshold, the category roulette, and the unchanged-dedup:
+        directly renders the manifest's ``screen_observation`` category prompt,
+        attaches the current frame (WS live-grab → cached upload fallback), and
+        fires one turn. Returns True iff a turn was actually dispatched.
+
+        This is the single forced entry point into screen path B, so the
+        upload endpoint no longer needs its own trigger machinery.
+        """
+        try:
+            from service.execution.agent_executor import execute_command
+            from service.vtuber.screen_observation import (
+                capture_current_screen_attachment,
+                get_recent_frame_attachment,
+                mark_screen_comment,
+            )
+        except Exception:  # noqa: BLE001
+            return False
+
+        manifest = self._resolve_manifest(session_id)
+        if not manifest.enabled:
+            return False
+        cat = next(
+            (c for c in manifest.categories
+             if getattr(c, "requires_screen_active", False)),
+            None,
+        )
+        if cat is None:
+            return False
+
+        # Pick a prompt from the screen category (stage-2 roulette).
+        prompt_index = {p.id: p for p in manifest.prompts}
+        ref_pool = [
+            (r.weight, r) for r in cat.prompt_refs
+            if r.weight > 0 and r.prompt_id in prompt_index
+        ] or [(1.0, r) for r in cat.prompt_refs if r.prompt_id in prompt_index]
+        chosen = _weighted_pick(ref_pool)
+        prompt_obj = prompt_index.get(getattr(chosen, "prompt_id", "")) if chosen else None
+        if prompt_obj is None:
+            return False
+        locale = self._get_locale()
+        content = (
+            prompt_obj.content.get(locale)
+            or prompt_obj.content.get("en")
+            or next(iter(prompt_obj.content.values()), "")
+        )
+        if not content.strip():
+            return False
+        prompt = render_prompt(cat, content)
+
+        # Grab a frame: prefer a fresh WS live-grab, else the cached upload.
+        try:
+            att = await capture_current_screen_attachment(session_id)
+            if att is None:
+                att = get_recent_frame_attachment(session_id)
+        except Exception:  # noqa: BLE001
+            att = None
+        if att is None:
+            logger.info("[ThinkingTrigger] fire_screen_now: no frame for %s", session_id)
+            return False
+
+        try:
+            result = await execute_command(
+                session_id, prompt, is_trigger=True, timeout=180,
+                attachments=[att],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("[ThinkingTrigger] fire_screen_now failed for %s", session_id, exc_info=True)
+            return False
+
+        mark_screen_comment(session_id)
+        if getattr(result, "success", False) and (getattr(result, "output", "") or "").strip():
+            self._save_to_chat_room(session_id, result)
+        return True
+
     @staticmethod
     def _build_reflection_metadata(prompt: str):
         import re as _re
