@@ -3,6 +3,10 @@ import type { SessionInfo, PromptInfo } from '@/types';
 import { agentApi, commandApi, healthApi, configApi } from '@/lib/api';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 
+// Sessions with an in-flight resume() — dedupes rapid opens so selecting the
+// same dormant session repeatedly can't storm re-hydration.
+const _resumingIds = new Set<string>();
+
 // Session-scoped tab IDs (must match TabNavigation)
 const SESSION_TAB_IDS = new Set([
   'command',
@@ -169,10 +173,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       updates.activeTab = 'main';
     }
     set(updates);
-    // NOTE: no auto-resume on select. Re-hydration is triggered explicitly
-    // (resumeSession / a Resume button) or implicitly on the first message
-    // (server-side hydrate-on-access). Auto-resuming on every click stormed
-    // re-hydration across dormant sessions after a restart.
+    // Activate a dormant / idle session the moment it's opened, so its
+    // pipeline + chat room come live and the chat stops sitting on
+    // "채팅방을 준비하고 있어요…". Scoped to the ONE opened session and guarded
+    // (resumeSession is in-flight-deduped + idempotent server-side), so this
+    // can't storm re-hydration the way an unscoped version once did.
+    if (id) {
+      const session = sessions.find((s) => s.session_id === id);
+      if (session && session.status !== 'running' && session.status !== 'error') {
+        void get().resumeSession(id);
+      }
+    }
   },
 
   createSession: async (data) => {
@@ -220,14 +231,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   resumeSession: async (id) => {
-    // Lazy re-hydrate a dormant (post-restart) session, then refresh the
-    // list so its status flips to live. Best-effort — the next poll would
-    // reconcile anyway, and messaging the session resumes it server-side.
+    // Lazy re-hydrate a dormant (post-restart / idle) session, then refresh
+    // the list so its status flips to live + its chat_room_id surfaces (this
+    // is what unblocks the chat's "채팅방을 준비하고 있어요…" gate). The
+    // in-flight guard makes repeated opens of the same session idempotent so
+    // rapid selection can't storm re-hydration.
+    if (_resumingIds.has(id)) return;
+    _resumingIds.add(id);
     try {
       await agentApi.resume(id);
       await get().loadSessions();
     } catch (e) {
       console.error('Failed to resume session:', e);
+    } finally {
+      _resumingIds.delete(id);
     }
   },
 

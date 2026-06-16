@@ -30,6 +30,12 @@ declare global {
         set(patch: Partial<ConnectorConfig>): Promise<ConnectorConfig>
         onChange(cb: (cfg: ConnectorConfig) => void): () => void
       }
+      /** OS keychain — used to drop the stale JWT on token expiry. */
+      secureStore?: {
+        get(key: string): Promise<string | null>
+        set(key: string, value: string): Promise<boolean>
+        delete(key: string): Promise<boolean>
+      }
       windowControl: {
         setOverlaySession(sessionId: string): void
         refresh(): void

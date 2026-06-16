@@ -1371,6 +1371,29 @@ class AgentSessionManager:
         if stored_chat_room_id:
             agent._chat_room_id = stored_chat_room_id
 
+        # Ensure a VTuber has a chat room. Creation normally happens in the
+        # auto-sub-worker block, which _rehydrate skips (linked_session_id is
+        # set), so a VTuber that lacks a room — never had one, or creation
+        # failed at first build — would otherwise resume WITHOUT a chat_room_id
+        # and the chat panel would sit on "채팅방을 준비하고 있어요…" forever.
+        is_vtuber = (params.get("role") == SessionRole.VTUBER.value) or (
+            params.get("session_type") == "vtuber"
+        )
+        if is_vtuber and not getattr(agent, "_chat_room_id", None):
+            try:
+                from service.chat.conversation_store import get_chat_store
+
+                chat_store = get_chat_store()
+                room_name = f"{params.get('session_name') or 'VTuber'} Chat"
+                room = chat_store.create_room(room_name, [session_id])
+                room_id = room.get("id") or room.get("room_id")
+                if room_id:
+                    agent._chat_room_id = room_id
+                    self._store.update(session_id, {"chat_room_id": room_id})
+                    logger.info(f"[{session_id}] 💬 Chat room ensured on reload: {room_id}")
+            except Exception as e:  # noqa: BLE001 — chat room is best-effort
+                logger.warning(f"[{session_id}] Failed to ensure chat room on reload: {e}")
+
         logger.info(f"♻️ Session re-hydrated: {session_id} (same ID, storage preserved)")
 
         # Cascade to the linked peer (VTuber ↔ Sub-Worker) with its own id.

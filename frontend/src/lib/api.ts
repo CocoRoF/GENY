@@ -16,6 +16,12 @@ async function apiCall<T = unknown>(endpoint: string, options: RequestInit = {})
     headers: { 'Content-Type': 'application/json', ...authHeaders, ...options.headers },
     ...options,
   });
+  if (res.status === 401) {
+    // Expired / invalid token → clear it + signal re-login (same path as the
+    // 4401 WS close), so the connector opens its login window instead of
+    // silently rendering empty data.
+    handleAuthFailure();
+  }
   if (!res.ok) {
     const body = await res.text();
     let message: string;
@@ -137,11 +143,12 @@ export function openConnectorBridgeWs(sessionId: string): WebSocket {
 }
 
 /**
- * Handle a 4401 WS close. The token is stale/invalid, so clear it and emit a
- * global signal the UI can listen for to prompt re-login — rather than letting
- * reconnect loops hammer the server forever with a dead token.
+ * Token is stale/invalid (REST 401 or 4401 WS close). Clear it and emit a
+ * global ``geny:auth-failed`` signal the UI listens for to prompt re-login
+ * (connector: open the login window; browser: drop to logged-out) — rather
+ * than letting reconnect loops hammer the server with a dead token.
  */
-function handleWsAuthFailure(): void {
+function handleAuthFailure(): void {
   removeToken();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('geny:auth-failed'));
@@ -285,7 +292,7 @@ export const agentApi = {
         console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
         if (ev.code === WS_UNAUTHORIZED_CODE) {
           console.warn(`${_tag} authentication failed (4401) — clearing token`);
-          handleWsAuthFailure();
+          handleAuthFailure();
           onEvent('error', { error: 'Authentication failed', code: WS_UNAUTHORIZED_CODE });
         }
         finish();
@@ -347,7 +354,7 @@ export const agentApi = {
       console.info(`${_tag} closed (code=${ev.code}, reason=${ev.reason || 'none'})`);
       if (ev.code === WS_UNAUTHORIZED_CODE) {
         console.warn(`${_tag} authentication failed (4401) — clearing token`);
-        handleWsAuthFailure();
+        handleAuthFailure();
         onEvent('error', { error: 'Authentication failed', code: WS_UNAUTHORIZED_CODE });
       }
       ws = null;
@@ -2053,7 +2060,7 @@ export const chatApi = {
         if (ev.code === WS_UNAUTHORIZED_CODE) {
           console.warn(`${_tag} authentication failed (4401) — stopping reconnect, clearing token`);
           closed = true;
-          handleWsAuthFailure();
+          handleAuthFailure();
           onEvent('_ws_auth_failed', { code: WS_UNAUTHORIZED_CODE, url: wsUrl });
           return;
         }
@@ -2673,7 +2680,7 @@ export const vtuberApi = {
         if (!closed && ev.code === WS_UNAUTHORIZED_CODE) {
           console.warn(`${_tag} authentication failed (4401) — stopping reconnect, clearing token`);
           closed = true;
-          handleWsAuthFailure();
+          handleAuthFailure();
           return;
         }
         if (!closed && attempts < maxAttempts) {
