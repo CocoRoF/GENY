@@ -61,20 +61,20 @@ def test_ambient_body_uses_overheard_framing() -> None:
     item = _spotlight(metadata={"source": "vtuber_stt_stream"})
     prompt = _compose_trigger_prompt(item, seen_before=False)
     # Must NOT use the deliberate-share framing string.
-    assert "사용자가 방금 위 자료를 공유했습니다" not in prompt
+    assert "The user just shared the material above" not in prompt
     # MUST cue the persona that this is ambient / overheard.
-    assert "마이크에서 우연히" in prompt or "옆에서" in prompt
+    assert "happened to pick up from the mic" in prompt or "overheard" in prompt
     # Must explicitly authorize silence as a valid response.
-    assert "침묵" in prompt
+    assert "staying silent" in prompt
 
 
 def test_ambient_body_forbids_share_language() -> None:
-    """The persona must NOT use "공유해 주셨네요" / "보내주신" phrasing
+    """The persona must NOT use "you shared ~ with me" phrasing
     for STT stream captures — those don't match the actual user
     intent (ambient mic, not a deliberate share)."""
     item = _spotlight(metadata={"source": "vtuber_stt_stream"})
     prompt = _compose_trigger_prompt(item, seen_before=False)
-    assert "공유해" in prompt and "금지" in prompt
+    assert "you shared" in prompt and "Never use" in prompt
 
 
 def test_ambient_body_coalesces_bursts() -> None:
@@ -82,7 +82,7 @@ def test_ambient_body_coalesces_bursts() -> None:
     prompt = _compose_trigger_prompt(item, seen_before=False)
     # Must instruct the persona to consolidate multiple spotlight
     # items in the same burst into one reaction.
-    assert "한 번에" in prompt
+    assert "all of them at once" in prompt
 
 
 # ── Deliberate (manual share, microphone_record) framing ─────────────
@@ -93,9 +93,9 @@ def test_deliberate_share_uses_existing_framing() -> None:
     prompt = _compose_trigger_prompt(item, seen_before=False)
     payload = _payload_from(prompt)
     assert payload["ambient"] is False
-    assert "사용자가 방금 위 자료를 공유했습니다" in prompt
+    assert "The user just shared the material above" in prompt
     # No ambient-specific language sneaks into deliberate framing.
-    assert "우연히 잡은" not in prompt
+    assert "happened to pick up from the mic" not in prompt
 
 
 def test_unknown_source_falls_through_to_deliberate() -> None:
@@ -104,7 +104,7 @@ def test_unknown_source_falls_through_to_deliberate() -> None:
     payload = _payload_from(prompt)
     assert payload["ambient"] is False
     assert payload["share_source"] == "something_else"
-    assert "사용자가 방금 위 자료를 공유했습니다" in prompt
+    assert "The user just shared the material above" in prompt
 
 
 def test_missing_metadata_falls_through_to_deliberate() -> None:

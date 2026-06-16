@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, translate } from '@/lib/i18n';
 import { catalogApi } from '@/lib/environmentApi';
 import { localizeIntrospection } from '../stage_locale';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -183,16 +183,24 @@ export default function Stage03SystemEditor({ order, entry }: Props) {
             </div>
             <div className="flex flex-wrap gap-1">
               {STARTER_CHIPS.map((chip) => {
-                const text = t(chip.textKey);
+                // `label` is the localized chip caption/tooltip (visual only).
+                // `value` is forced to the ENGLISH instruction text via the
+                // explicit-locale `translate('en', …)` overload, so what gets
+                // committed into stage.config.prompt — the text actually SENT
+                // to the backend on every LLM call — is English regardless of
+                // the selected UI locale. The persona replies in Korean via
+                // the backend persona contract, not via a Korean default here.
+                const label = t(chip.textKey);
+                const value = translate('en', chip.textKey);
                 return (
                   <button
                     key={chip.id}
                     type="button"
-                    onClick={() => insertChip(text)}
+                    onClick={() => insertChip(value)}
                     className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-dashed border-[hsl(var(--border))] text-[0.7rem] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary))] transition-colors"
-                    title={text}
+                    title={label}
                   >
-                    + {text.length > 32 ? text.slice(0, 32) + '…' : text}
+                    + {label.length > 32 ? label.slice(0, 32) + '…' : label}
                   </button>
                 );
               })}
