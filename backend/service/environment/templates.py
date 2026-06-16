@@ -77,9 +77,9 @@ CLAUDE_CODE_VTUBER_ENV_ID = "template-claude-code-vtuber-env"
 _VTUBER_CUSTOM_TOOL_WHITELIST = frozenset(
     {
         "web_search", "news_search", "web_fetch",
-        # Blog AI Agent delegation tools — VTuber 가 외부 블로그 AI 에 위임.
-        # BLOG_AGENT_DELEGATION_PLAN.md § Phase 4. Sub-Worker 는
-        # _WORKER_CUSTOM_TOOL_DENY 로 차단.
+        # Blog AI Agent delegation tools — the VTuber delegates to an
+        # external blog AI. BLOG_AGENT_DELEGATION_PLAN.md § Phase 4.
+        # Sub-Workers are blocked via _WORKER_CUSTOM_TOOL_DENY.
         "blog_agent_delegate",
         "blog_agent_status",
         "blog_agent_cancel",

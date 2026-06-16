@@ -35,7 +35,7 @@ PERSONA_GUIDANCE = (
     "treat each item with a ⚑ 'previously seen' hint as continuing "
     "an earlier conversation: do not introduce it as if it were "
     "brand new. Items marked '처음 보는 자료 / first time' are "
-    "genuinely new — acknowledge them explicitly and ask if the "
+    "genuinely new — acknowledge them explicitly and ask whether the "
     "user wants you to discuss them."
 )
 

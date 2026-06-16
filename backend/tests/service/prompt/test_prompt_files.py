@@ -9,6 +9,7 @@ PR2 acclimation guidance is caught at CI time before it hits the model.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -16,15 +17,31 @@ import pytest
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 
+_INCLUDE_RE = re.compile(r"\{\{\s*include:\s*([^}]+?)\s*\}\}")
+
+
+def _read_resolved(name: str) -> str:
+    """Read a role prompt and inline its ``{{include: <path>}}`` directives,
+    mirroring how the prompt builder assembles the file — so these tests assert
+    against the prompt the model actually receives (e.g. the shared
+    memory_ladder template), not the raw file with literal include markers."""
+    text = (_PROMPTS_DIR / name).read_text(encoding="utf-8")
+
+    def _sub(m: "re.Match[str]") -> str:
+        inc = (_PROMPTS_DIR / m.group(1).strip()).read_text(encoding="utf-8")
+        return inc
+
+    return _INCLUDE_RE.sub(_sub, text)
+
 
 @pytest.fixture(scope="module")
 def worker_md() -> str:
-    return (_PROMPTS_DIR / "worker.md").read_text(encoding="utf-8")
+    return _read_resolved("worker.md")
 
 
 @pytest.fixture(scope="module")
 def vtuber_md() -> str:
-    return (_PROMPTS_DIR / "vtuber.md").read_text(encoding="utf-8")
+    return _read_resolved("vtuber.md")
 
 
 # ── PR4 worker.md — Sub-Worker pair info moved out of code ──────────

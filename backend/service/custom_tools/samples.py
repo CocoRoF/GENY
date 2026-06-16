@@ -80,8 +80,9 @@ _SAMPLE_SPECS: List[_SampleSpec] = [
         source_file="blog/blog_agent_delegate.py",
         class_name="BlogAgentDelegateTool",
         description=(
-            "외부 블로그 AI Agent 에게 글쓰기 / 편집 / 관리 작업을 비동기 위임. "
-            "fire-and-poll 패턴 — 즉시 task_id 만 반환하고 결과는 inbox 로 도착."
+            "Asynchronously delegate writing / editing / management tasks to an "
+            "external blog AI Agent. Fire-and-poll pattern — returns a task_id "
+            "immediately, and the result arrives in the inbox."
         ),
         capabilities=_BLOG_CAP_DELEGATE,
     ),
@@ -89,28 +90,28 @@ _SAMPLE_SPECS: List[_SampleSpec] = [
         name="blog_agent_status",
         source_file="blog/blog_agent_status.py",
         class_name="BlogAgentStatusTool",
-        description="blog_agent_delegate 로 시작된 위임 작업의 진행 상황 조회.",
+        description="Check the progress of a delegated task started via blog_agent_delegate.",
         capabilities=_BLOG_CAP_LOOKUP,
     ),
     _SampleSpec(
         name="blog_agent_cancel",
         source_file="blog/blog_agent_cancel.py",
         class_name="BlogAgentCancelTool",
-        description="진행 중인 위임 task 를 취소.",
+        description="Cancel an in-progress delegated task.",
         capabilities=_BLOG_CAP_CANCEL,
     ),
     _SampleSpec(
         name="blog_agent_list_posts",
         source_file="blog/blog_agent_list_posts.py",
         class_name="BlogAgentListPostsTool",
-        description="블로그 포스트 목록 조회 — 카테고리/태그/검색 필터링.",
+        description="List blog posts — filter by category / tag / search.",
         capabilities=_BLOG_CAP_LOOKUP,
     ),
     _SampleSpec(
         name="blog_agent_get_post",
         source_file="blog/blog_agent_get_post.py",
         class_name="BlogAgentGetPostTool",
-        description="블로그 포스트 상세 조회 (slug 기준).",
+        description="Get the details of a blog post (by slug).",
         capabilities=_BLOG_CAP_LOOKUP,
     ),
 ]
