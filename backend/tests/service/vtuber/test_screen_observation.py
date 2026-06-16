@@ -844,6 +844,30 @@ def test_ambient_fires_despite_unchanged_after_max_silence(
     assert len(fired) == 1
 
 
+def test_upload_wakes_dormant_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every upload calls ensure_session_live so an observing connector
+    keeps the persona alive across a backend restart (no manual re-open)."""
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber import screen_observation as so
+
+    woken: list[str] = []
+
+    async def _record(sid: str) -> None:
+        woken.append(sid)
+
+    monkeypatch.setattr(so, "_ensure_session_live", _record)
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="working")
+    _install_trigger_recorder(monkeypatch)
+
+    _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F", mime_type="image/png",
+    ))
+    assert woken == ["sess-1"]
+
+
 def test_prompt_bias_varies_by_talkativeness() -> None:
     from datetime import datetime, timezone
     from service.vtuber.screen_observation import _compose_prompt
