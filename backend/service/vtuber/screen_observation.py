@@ -785,6 +785,14 @@ async def save_and_maybe_trigger(
         result.skipped_reason = (
             "no_real_caption" if vision_source != "vision" else "empty_caption"
         )
+        # Diagnostic (only on a CHANGED frame — the gate already dropped static
+        # ones, so this isn't per-tick noise): a persistent "no_real_caption"
+        # means the vision captioner is unavailable/erroring, which would
+        # otherwise silently keep the persona from reacting to the screen.
+        logger.info(
+            "[USER_OBSERVATION] no trigger for %s — %s (vision_source=%s, caption_len=%d)",
+            session_id, result.skipped_reason, vision_source, len(caption or ""),
+        )
         return result
 
     if not force_trigger:
