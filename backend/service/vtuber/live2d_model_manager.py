@@ -198,22 +198,43 @@ class Live2dModelManager:
         if model_name not in self._models:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self._models.keys())}")
         self._agent_assignments[session_id] = model_name
+        self._persist_assignments()
+        # DURABLE record on the session itself. model_registry.json lives on the
+        # ephemeral image layer (regenerated from baked-imports on every restart),
+        # so the persistent session store (DB) is what survives a redeploy and
+        # lets get_agent_model_name() restore the binding after a reload.
+        self._persist_session_assignment(session_id, model_name)
         logger.info(f"Assigned model '{model_name}' to session '{session_id}'")
 
     def get_agent_model(self, session_id: str) -> Optional[Live2dModelInfo]:
-        """Get the model assigned to an agent session."""
-        model_name = self._agent_assignments.get(session_id)
+        """Get the model assigned to an agent session (store-backed fallback)."""
+        model_name = self.get_agent_model_name(session_id)
         if not model_name:
             return None
         return self._models.get(model_name)
 
     def get_agent_model_name(self, session_id: str) -> Optional[str]:
-        """Get the model name assigned to an agent session."""
-        return self._agent_assignments.get(session_id)
+        """Get the model name assigned to an agent session.
+
+        Falls back to the persistent session store when the in-memory binding
+        is missing — e.g. after a redeploy wiped the ephemeral registry, or a
+        session was re-hydrated — so the VTuber tab/overlay recover the avatar
+        instead of showing "할당된 모델이 없습니다".
+        """
+        model_name = self._agent_assignments.get(session_id)
+        if model_name:
+            return model_name
+        stored = self._load_session_assignment(session_id)
+        if stored and stored in self._models:
+            self._agent_assignments[session_id] = stored  # re-cache
+            return stored
+        return None
 
     def unassign_model(self, session_id: str):
         """Remove model assignment for a session."""
-        self._agent_assignments.pop(session_id, None)
+        if self._agent_assignments.pop(session_id, None) is not None:
+            self._persist_assignments()
+        self._persist_session_assignment(session_id, None)
 
     def get_all_assignments(self) -> Dict[str, str]:
         """Return all agent-model assignments."""
@@ -371,6 +392,49 @@ class Live2dModelManager:
             self._persist_remove(name)
         self._notify_change()
         return True
+
+    def _persist_session_assignment(self, session_id: str, model_name: Optional[str]) -> None:
+        """Record (or clear) the session→model binding on the persistent
+        session store (DB) — the redeploy-durable home for the assignment."""
+        try:
+            from service.sessions.store import get_session_store
+
+            get_session_store().update(session_id, {"assigned_model": model_name})
+        except Exception as e:  # noqa: BLE001 — best effort
+            logger.debug(f"[model] session-store assignment update skipped for {session_id}: {e}")
+
+    def _load_session_assignment(self, session_id: str) -> Optional[str]:
+        """Read the persisted session→model binding, if any."""
+        try:
+            from service.sessions.store import get_session_store
+
+            rec = get_session_store().get(session_id)
+            return rec.get("assigned_model") if rec else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _persist_assignments(self) -> None:
+        """Mirror the in-memory session→model assignments onto disk so a
+        session's avatar model survives a backend restart / session reload.
+
+        Assignments used to be in-memory only on this process singleton, so a
+        redeploy (or any process restart) dropped them and the VTuber tab fell
+        back to "할당된 모델이 없습니다". The loader reads ``agent_model_assignments``
+        from this same model_registry.json on init, so writing them here is all
+        it takes to make them stick.
+        """
+        try:
+            data = {}
+            if self._registry_path.exists():
+                with open(self._registry_path, "r", encoding="utf-8") as f:
+                    data = json.load(f) or {}
+            data["agent_model_assignments"] = dict(self._agent_assignments)
+            self._registry_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._registry_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+        except Exception as e:  # noqa: BLE001 — persistence is best-effort
+            logger.warning(f"[model_registry] failed to persist assignments: {e}")
 
     def _persist_remove(self, name: str) -> None:
         """Mirror remove_model() onto disk — drop the entry from `models`
