@@ -868,6 +868,47 @@ def test_upload_wakes_dormant_session(
     assert woken == ["sess-1"]
 
 
+def test_uploaded_frame_cached_and_served_even_without_caption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The HTTP-uploaded frame is cached + served as an attachment even when the
+    caption LLM fails (placeholder) — this is the path the thinking-trigger uses
+    to comment on the screen without depending on captions."""
+    from service.vtuber.screen_observation import (
+        save_and_maybe_trigger, get_recent_frame_attachment, list_active_sessions,
+    )
+    from service.vtuber import screen_observation as so
+    import base64
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="", source="placeholder")  # caption fails (like prod)
+    _install_trigger_recorder(monkeypatch)
+    monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: True)
+
+    _run(save_and_maybe_trigger(session_id="s1", image_bytes=b"FRAMEBYTES", mime_type="image/jpeg"))
+
+    assert "s1" in list_active_sessions()
+    att = get_recent_frame_attachment("s1")
+    assert att is not None
+    assert att["kind"] == "image" and att["source"] == "screen_observation"
+    assert base64.b64decode(att["data"]) == b"FRAMEBYTES"
+
+
+def test_recent_frame_none_for_non_vision_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber.screen_observation import save_and_maybe_trigger, get_recent_frame_attachment
+    from service.vtuber import screen_observation as so
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="x")
+    _install_trigger_recorder(monkeypatch)
+    monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: False)
+
+    _run(save_and_maybe_trigger(session_id="s2", image_bytes=b"F", mime_type="image/jpeg"))
+    assert get_recent_frame_attachment("s2") is None
+
+
 def test_prompt_bias_varies_by_talkativeness() -> None:
     from datetime import datetime, timezone
     from service.vtuber.screen_observation import _compose_prompt
