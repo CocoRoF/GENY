@@ -1272,15 +1272,22 @@ class AgentSessionManager:
         """
         agent = self._local_agents.get(session_id)
         if agent is not None:
-            # Environment edited while live → rebuild from the fresh manifest
-            # on this next access (safe: between turns, not mid-turn). A
-            # dormant session below already loads the current manifest when
-            # _rehydrate runs, so only live sessions carry the flag.
-            if getattr(agent, "_needs_manifest_reload", False):
+            # Environment edited while live → rebuild from the fresh manifest.
+            # CRITICAL: defer while a turn is in-flight — _reload tears the
+            # pipeline down (cleanup → pipeline.aclose() kills MCP / HITL /
+            # event taps), which would corrupt a running turn. The flag stays
+            # set, so the rebuild lands on the next IDLE access (i.e. the next
+            # turn after the current one finishes). A dormant session below
+            # already loads the current manifest when _rehydrate runs.
+            if getattr(agent, "_needs_manifest_reload", False) and not self._session_busy(session_id, agent):
                 lock = self._rehydrate_locks.setdefault(session_id, asyncio.Lock())
                 async with lock:
                     cur = self._local_agents.get(session_id)
-                    if cur is not None and getattr(cur, "_needs_manifest_reload", False):
+                    if (
+                        cur is not None
+                        and getattr(cur, "_needs_manifest_reload", False)
+                        and not self._session_busy(session_id, cur)
+                    ):
                         try:
                             return await self._reload_session_manifest(session_id)
                         finally:
@@ -1394,6 +1401,24 @@ class AgentSessionManager:
     # ========================================================================
     # Environment propagation — apply an edited manifest to live sessions
     # ========================================================================
+
+    def _session_busy(self, session_id: str, agent: AgentSession) -> bool:
+        """A turn is in-flight on this session, so a manifest reload must wait.
+
+        Checks the agent's own ``_is_executing`` (set across invoke + astream)
+        AND the executor-level holder (registered before invoke for every
+        command / chat / trigger path) so a concurrent turn — even one between
+        resolve and invoke — defers the rebuild instead of tearing its pipeline
+        down mid-stream.
+        """
+        if getattr(agent, "_is_executing", False):
+            return True
+        try:
+            from service.execution.agent_executor import is_executing
+
+            return bool(is_executing(session_id))
+        except Exception:  # noqa: BLE001 — be conservative only on real signals
+            return False
 
     async def propagate_env_update(self, env_id: str) -> List[str]:
         """Flag every LIVE session bound to ``env_id`` so it rebuilds its
