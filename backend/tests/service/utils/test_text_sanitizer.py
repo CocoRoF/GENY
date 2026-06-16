@@ -235,6 +235,28 @@ def test_sanitize_for_tts_strips_horizontal_rules() -> None:
     assert sanitize_for_tts("text\n___\nmore") == "text more"
 
 
+def test_sanitize_for_tts_strips_inline_separators() -> None:
+    """Topic dividers the persona drops *inline* (not on their own line) —
+    ``a --- b``, em/en dashes, ``~~~`` — must not be voiced, while
+    word-internal hyphens / identifiers survive.
+    """
+    from service.utils.text_sanitizer import sanitize_for_tts
+    # The exact shape from the user's screenshot (inline --- between topics).
+    assert sanitize_for_tts("직전입니다 😅 --- 🤖 AI 모델 쪽은") == "직전입니다 AI 모델 쪽은"
+    assert sanitize_for_tts("a --- b") == "a b"
+    assert sanitize_for_tts("a — b") == "a b"        # em-dash
+    assert sanitize_for_tts("a – b") == "a b"        # en-dash
+    assert sanitize_for_tts("a - b") == "a b"        # lone hyphen separator
+    assert sanitize_for_tts("foo ~~~ bar") == "foo bar"
+    assert sanitize_for_tts("one --- two --- three") == "one two three"
+    assert sanitize_for_tts("--- 시작") == "시작"     # leading divider
+    # Word-internal hyphens / identifiers / arrows must be preserved.
+    assert sanitize_for_tts("e-mail 보내요") == "e-mail 보내요"
+    assert sanitize_for_tts("GPT-4 와 Llama-5") == "GPT-4 와 Llama-5"
+    assert sanitize_for_tts("test_file.py") == "test_file.py"
+    assert "→" in sanitize_for_tts("분기 → 주")
+
+
 def test_sanitize_for_tts_unwraps_links_and_wikilinks() -> None:
     from service.utils.text_sanitizer import sanitize_for_tts
     assert sanitize_for_tts("[link text](https://example.com)") == "link text"
