@@ -150,6 +150,10 @@ class TriggerCategory(BaseModel):
     consec_max: Optional[int] = Field(None, ge=0)
     requires_sub_worker_busy: bool = False
     requires_sub_worker_idle: bool = False
+    # When true, this situation only fires while the user is actively sharing
+    # their screen (a frame was uploaded recently). The runtime attaches the
+    # live screen frame to the turn so the persona reacts to what's on screen.
+    requires_screen_active: bool = False
     time_window: Optional[TimeWindow] = None
     cooldown_seconds: float = Field(0.0, ge=0.0)
 

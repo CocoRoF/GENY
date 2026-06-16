@@ -136,6 +136,7 @@ export default function TriggerPresetEditor({
     timeWindow: currentTimeWindow(
       seed?.manifest ? cloneManifest(seed.manifest) : emptyManifest(),
     ),
+    screenActive: false,
     honourCooldowns: false,
   }));
 

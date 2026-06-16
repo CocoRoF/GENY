@@ -364,6 +364,26 @@ function ConditionsBlock({
 
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
+            화면 관찰
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              onPatch({ requires_screen_active: !category.requires_screen_active })
+            }
+            title="켜면 사용자가 화면 공유 중일 때만 발동하고, 라이브 화면 프레임이 자동 첨부됩니다"
+            className={`h-8 px-2.5 rounded-md text-[0.75rem] font-medium border transition-colors ${
+              category.requires_screen_active
+                ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/40'
+                : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
+            }`}
+          >
+            {category.requires_screen_active ? '화면 공유 중일 때만' : '제한 없음'}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">
             시간대
           </label>
           <select

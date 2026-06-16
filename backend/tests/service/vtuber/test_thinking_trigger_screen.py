@@ -1,22 +1,25 @@
-"""Screen-aware idle reflections in ThinkingTriggerService.
+"""Screen-observation as a first-class trigger CATEGORY.
 
-When the user has screen observation ON, an idle [THINKING_TRIGGER] should
-attach the live screen frame and bias the reflection toward what's actually on
-screen — so the persona reacts to the work instead of generic small-talk. When
-observation is OFF (or no frame is available) the trigger behaves exactly as
-before: text-only, no attachments.
+The proactive screen commentary is driven by the trigger-preset system (트리거
+관리), not a hardcoded prompt: a category with ``requires_screen_active=True`` is
+only eligible while the user shares their screen, and when it fires the runtime
+attaches the live frame so the persona reacts to what's on screen. The prompt
+text comes from the (editable) preset. Categories without that flag behave
+exactly as before — text-only, no attachment.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from service.trigger_preset.schemas import TriggerCategory
 
-def _patch_common(monkeypatch, svc) -> dict:
-    """Stub everything _fire_trigger touches except the screen path, and
-    capture the execute_command call. Returns the capture dict."""
+
+def _patch_common(monkeypatch, svc, *, category: TriggerCategory, prompt: str) -> dict:
+    """Stub everything _fire_trigger touches except the screen path; pin which
+    category/prompt the roulette 'chose'. Returns the execute_command capture."""
     monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
-    monkeypatch.setattr(svc, "_build_trigger_prompt", lambda _sid, _fn: "[THINKING_TRIGGER:x] 잠깐 쉬어가는 생각")
+    monkeypatch.setattr(svc, "_pick_category_and_prompt", lambda _sid, _fn: (prompt, category))
     monkeypatch.setattr(svc, "_save_to_chat_room", lambda _sid, _r: None)
 
     captured: dict = {}
@@ -30,7 +33,7 @@ def _patch_common(monkeypatch, svc) -> dict:
 
         class _R:
             success = True
-            output = "사장님, 그 함수 잘 풀리고 있네요?"
+            output = "사장님, 그 import 에러 거기서 막히셨네요?"
 
         return _R()
 
@@ -38,16 +41,24 @@ def _patch_common(monkeypatch, svc) -> dict:
     return captured
 
 
+_SCREEN_CAT = TriggerCategory(
+    id="screen_observation", label="화면 관찰", requires_screen_active=True, weight=800.0,
+)
+_IDLE_CAT = TriggerCategory(id="first_idle", label="첫 침묵", weight=55.0)
+
+
 @pytest.mark.asyncio
-async def test_idle_reflection_attaches_screen_when_observation_active(monkeypatch) -> None:
-    from service.vtuber.thinking_trigger import ThinkingTriggerService, _SCREEN_REFLECTION_SUFFIX
+async def test_screen_category_attaches_live_frame(monkeypatch) -> None:
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
     from service.vtuber import screen_observation as so
 
     svc = ThinkingTriggerService()
-    captured = _patch_common(monkeypatch, svc)
+    captured = _patch_common(
+        monkeypatch, svc, category=_SCREEN_CAT,
+        prompt="[THINKING_TRIGGER:screen_observation] 화면 보고 반응해",
+    )
 
     fake_frame = {"kind": "image", "mime_type": "image/jpeg", "data": "QUJD", "source": "screen_observation"}
-    monkeypatch.setattr(so, "is_screen_active", lambda _sid: True)
 
     async def _fake_capture(_sid):
         return fake_frame
@@ -56,44 +67,45 @@ async def test_idle_reflection_attaches_screen_when_observation_active(monkeypat
 
     await svc._fire_trigger("sid-1")
 
-    # The live frame rode along, and the prompt got the screen-reaction bias.
     assert captured["kwargs"].get("attachments") == [fake_frame]
-    assert _SCREEN_REFLECTION_SUFFIX in captured["prompt"]
     assert captured["kwargs"]["is_trigger"] is True
+    # Prompt is verbatim from the preset — no hardcoded suffix appended.
+    assert captured["prompt"] == "[THINKING_TRIGGER:screen_observation] 화면 보고 반응해"
 
 
 @pytest.mark.asyncio
-async def test_idle_reflection_text_only_when_observation_off(monkeypatch) -> None:
-    from service.vtuber.thinking_trigger import ThinkingTriggerService, _SCREEN_REFLECTION_SUFFIX
+async def test_non_screen_category_never_captures(monkeypatch) -> None:
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
     from service.vtuber import screen_observation as so
 
     svc = ThinkingTriggerService()
-    captured = _patch_common(monkeypatch, svc)
+    captured = _patch_common(
+        monkeypatch, svc, category=_IDLE_CAT,
+        prompt="[THINKING_TRIGGER:first_idle] 잠깐 생각",
+    )
 
-    monkeypatch.setattr(so, "is_screen_active", lambda _sid: False)
-
-    async def _should_not_run(_sid):  # capture must never be attempted
-        raise AssertionError("captured screen despite observation OFF")
+    async def _should_not_run(_sid):
+        raise AssertionError("captured screen for a non-screen category")
 
     monkeypatch.setattr(so, "capture_current_screen_attachment", _should_not_run)
 
     await svc._fire_trigger("sid-2")
 
     assert "attachments" not in captured["kwargs"]
-    assert _SCREEN_REFLECTION_SUFFIX not in captured["prompt"]
 
 
 @pytest.mark.asyncio
-async def test_idle_reflection_falls_back_when_no_frame(monkeypatch) -> None:
-    """Observation ON but the connector returned no frame (stream gone) →
-    proceed text-only, never block the reflection."""
-    from service.vtuber.thinking_trigger import ThinkingTriggerService, _SCREEN_REFLECTION_SUFFIX
+async def test_screen_category_skips_fire_when_no_frame(monkeypatch) -> None:
+    """Screen category chosen but the connector returned no frame → skip the
+    fire entirely (don't send a screen prompt the persona can't ground)."""
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
     from service.vtuber import screen_observation as so
 
     svc = ThinkingTriggerService()
-    captured = _patch_common(monkeypatch, svc)
-
-    monkeypatch.setattr(so, "is_screen_active", lambda _sid: True)
+    captured = _patch_common(
+        monkeypatch, svc, category=_SCREEN_CAT,
+        prompt="[THINKING_TRIGGER:screen_observation] 화면 보고 반응해",
+    )
 
     async def _no_frame(_sid):
         return None
@@ -102,5 +114,31 @@ async def test_idle_reflection_falls_back_when_no_frame(monkeypatch) -> None:
 
     await svc._fire_trigger("sid-3")
 
-    assert "attachments" not in captured["kwargs"]
-    assert _SCREEN_REFLECTION_SUFFIX not in captured["prompt"]
+    assert captured == {}  # execute_command never called
+
+
+def test_default_manifest_has_screen_category() -> None:
+    """The bundled default (what '새 드래프트' clones) carries the screen
+    category gated on screen-active, with prompts — so it's editable in the UI."""
+    from service.trigger_preset.defaults import default_manifest
+
+    m = default_manifest()
+    screen = next((c for c in m.categories if c.id == "screen_observation"), None)
+    assert screen is not None
+    assert screen.requires_screen_active is True
+    assert screen.prompt_refs  # references real prompts
+    ids = {p.id for p in m.prompts}
+    assert all(r.prompt_id in ids for r in screen.prompt_refs)
+
+
+def test_screen_category_eligibility_gated_on_active() -> None:
+    from service.vtuber.thinking_trigger import _category_eligible
+
+    def _elig(active: bool) -> bool:
+        return _category_eligible(
+            _SCREEN_CAT, consec=0, sub_worker_busy=False, sub_worker_linked=False,
+            time_window="afternoon", last_fire_at=0.0, now=10_000.0, screen_active=active,
+        )
+
+    assert _elig(True) is True
+    assert _elig(False) is False

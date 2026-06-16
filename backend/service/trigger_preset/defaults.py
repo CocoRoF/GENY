@@ -265,6 +265,48 @@ _SITUATION_PROMPTS: Dict[str, List[Tuple[str, str]]] = {
             "리소스, 기사, 도구를 찾아봐. 발견한 걸 알려줘!",
         ),
     ],
+    # Fires only while the user is sharing their screen — the runtime attaches
+    # the live frame, so these prompts tell the persona to react to what it can
+    # literally SEE right now. Concrete, not generic small-talk.
+    "screen_observation": [
+        (
+            "I'm glancing at the user's screen right now (attached). React to "
+            "what they're ACTUALLY doing — the app/file in focus, their "
+            "progress, an error, something they look stuck on, or a notable "
+            "change. Say one short, specific, natural line about it. Don't say "
+            "'you shared your screen' — I'm watching over their shoulder. Never "
+            "read out passwords / API keys / private messages / payment info; "
+            "if such text is visible, steer around it abstractly.",
+            "지금 사용자 화면을 곁눈질로 보고 있어 (첨부됨). 화면에서 *실제로* "
+            "하고 있는 걸 보고 반응해 — 지금 띄운 앱/파일, 진행 상황, 에러, "
+            "막혀 보이는 부분, 눈에 띄는 변화 중 하나를 구체적으로 짚어서 짧고 "
+            "자연스럽게 한마디. \"화면 공유해 주셨네요\" 같은 말은 금지 (난 옆에서 "
+            "보고 있는 거다). 비밀번호 / API 키 / 개인 메시지 / 결제 정보는 절대 "
+            "입에 올리지 말고, 보이면 추상적으로 우회해.",
+        ),
+        (
+            "Looking at the user's screen (attached). Comment on the specific "
+            "thing in front of them — what they're building, reading, or "
+            "wrestling with — like a friend sitting next to them. One concise, "
+            "specific line; skip generic 'need help?' filler. Don't voice any "
+            "sensitive text (secrets, private chats, payment details).",
+            "사용자 화면을 보고 있어 (첨부됨). 지금 만들고 있는 것/읽는 것/씨름하는 "
+            "것 등 눈앞의 구체적인 대상에 대해 옆자리 친구처럼 한마디 해. 짧고 "
+            "구체적으로 — 영혼 없는 \"도와줄까?\"는 금지. 민감한 텍스트(비밀, "
+            "개인 대화, 결제 정보)는 입에 올리지 마.",
+        ),
+        (
+            "The user's screen is in view (attached). If something genuinely "
+            "changed or stands out — a new error, a finished build, an "
+            "interesting page — call it out specifically and briefly. If the "
+            "screen is essentially empty or there's truly nothing to react to, "
+            "just respond with [SILENT]. Never repeat sensitive on-screen text.",
+            "사용자 화면이 보여 (첨부됨). 정말 바뀌었거나 눈에 띄는 게 있으면 "
+            "(새 에러, 빌드 완료, 흥미로운 페이지 등) 구체적이고 짧게 짚어. 화면이 "
+            "거의 비었거나 반응할 게 정말 없으면 [SILENT] 만 답해. 민감한 화면 "
+            "텍스트는 절대 따라 읽지 마.",
+        ),
+    ],
 }
 
 
@@ -342,6 +384,22 @@ def default_manifest() -> TriggerPresetManifest:
             cooldown_seconds=90.0,
             autonomous_signal="linked_agent_busy, source=sub_worker",
             prompt_refs=refs("sub_worker_working"),
+        ),
+        # Screen observation — dominates (high weight) WHILE the user shares
+        # their screen, so idle reflections become grounded in what's on screen
+        # instead of generic small-talk. Only eligible when observation is
+        # active; the runtime attaches the live frame. A short cooldown keeps it
+        # from monopolising every single tick while still being the primary
+        # voice during a screen-share session.
+        TriggerCategory(
+            id="screen_observation",
+            label="화면 관찰",
+            kind="thinking",
+            weight=800.0,
+            requires_screen_active=True,
+            cooldown_seconds=45.0,
+            autonomous_signal="screen_observation, source=live_frame",
+            prompt_refs=refs("screen_observation"),
         ),
         TriggerCategory(
             id="time_morning",

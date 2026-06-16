@@ -31,6 +31,8 @@ export interface RuntimeScenario {
   consecutive: number;
   subWorker: SubWorkerState;
   timeWindow: TimeWindow;
+  /** Whether the user is sharing their screen (gates requires_screen_active). */
+  screenActive: boolean;
   honourCooldowns: boolean;
 }
 
@@ -40,6 +42,7 @@ export interface BlockedReason {
     | 'consec_above'
     | 'sub_worker_busy_required'
     | 'sub_worker_idle_required'
+    | 'screen_required'
     | 'wrong_time_window'
     | 'cooldown'
     | 'no_prompt_refs'
@@ -124,6 +127,12 @@ export function evaluateConditions(
             : 'Sub-Worker가 idle일 때만 발사',
       };
     }
+  }
+  if (category.requires_screen_active && !scenario.screenActive) {
+    return {
+      code: 'screen_required',
+      message: '사용자가 화면 공유 중일 때만 발사',
+    };
   }
   if (
     category.time_window !== null &&
