@@ -35,6 +35,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import CompactMetaBar from './CompactMetaBar';
 import OverviewView from './OverviewView';
@@ -62,6 +63,7 @@ type ViewMode = { mode: 'overview' } | { mode: 'stage'; order: number };
 export default function EnvManagementShell({
   onSaved,
 }: EnvManagementShellProps = {}) {
+  const { t } = useI18n();
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const isDirty = useEnvironmentDraftStore((s) => s.isDirty);
   const resetDraft = useEnvironmentDraftStore((s) => s.resetDraft);
@@ -82,6 +84,25 @@ export default function EnvManagementShell({
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
+
+  // Back button while editing → return to the env-management overview (drop the
+  // draft) instead of leaving /environments. We arm a history sentinel when the
+  // editor opens; the Back press pops it and we reset to the overview, with a
+  // dirty-confirm so unsaved edits aren't lost silently.
+  useEffect(() => {
+    if (!draft) return;
+    window.history.pushState({ envEditor: true }, '');
+    const onPopState = () => {
+      if (isDirty() && !confirm(t('envManagement.confirmDiscard'))) {
+        // Cancelled — re-arm so the editor stays put.
+        window.history.pushState({ envEditor: true }, '');
+        return;
+      }
+      resetDraft();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [draft, isDirty, resetDraft, t]);
 
   useEffect(() => {
     if (!draft && view.mode === 'stage') {

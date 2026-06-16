@@ -19,19 +19,18 @@
  */
 
 import { Suspense } from 'react';
-import { useRouter } from 'next/navigation';
-import { useEnvironmentStore } from '@/store/useEnvironmentStore';
+import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
 import EnvManagementShell from '@/components/env_management/EnvManagementShell';
 
 export default function EnvironmentManagementPage() {
-  const router = useRouter();
-  const requestOpenEnvDrawer = useEnvironmentStore(
-    (s) => s.requestOpenEnvDrawer,
-  );
+  const { t } = useI18n();
 
-  const handleSaved = (newEnvId: string) => {
-    requestOpenEnvDrawer(newEnvId);
-    router.push('/');
+  // Post-save: stay inside환경 관리. saveDraft already cleared the draft, so the
+  // shell drops back to the overview (the env management first page) — we do
+  // NOT redirect to home anymore. A toast confirms the save.
+  const handleSaved = () => {
+    toast.success(t('envManagement.savedToast'));
   };
 
   return (

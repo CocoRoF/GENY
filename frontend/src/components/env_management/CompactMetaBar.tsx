@@ -43,6 +43,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ActionButton } from '@/components/layout';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
+import { environmentApi } from '@/lib/environmentApi';
+import type { EnvironmentSessionSummary } from '@/types/environment';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   TabSwitcherDropdown,
   type EnvManagementTab,
@@ -72,10 +75,15 @@ export default function CompactMetaBar({
   const isDirty = useEnvironmentDraftStore((s) => s.isDirty);
   const stageDirty = useEnvironmentDraftStore((s) => s.stageDirty);
   const clearError = useEnvironmentDraftStore((s) => s.clearError);
+  const editingId = useEnvironmentDraftStore((s) => s.editingId);
 
   const [descOpen, setDescOpen] = useState(false);
   const [validOpen, setValidOpen] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  // Active sessions that will pick up the edited manifest — shown in a
+  // confirm before an EDIT save commits (propagation lands on next turn).
+  const [confirmActive, setConfirmActive] = useState<EnvironmentSessionSummary[] | null>(null);
+  const [checkingSessions, setCheckingSessions] = useState(false);
   const descRef = useRef<HTMLDivElement | null>(null);
   const validRef = useRef<HTMLDivElement | null>(null);
 
@@ -104,11 +112,16 @@ export default function CompactMetaBar({
   const errorCount = validationErrors.filter((e) => e.severity === 'error').length;
   const warningCount = validationErrors.filter((e) => e.severity !== 'error').length;
   const blockedByValidation = errorCount > 0;
+  const busy = saving || checkingSessions;
   const saveDisabled =
-    !showEnvFields || !nameValid || blockedByValidation || saving;
+    !showEnvFields || !nameValid || blockedByValidation || busy;
 
-  const handleSave = async () => {
+  // The actual commit — saveDraft (which PUTs the manifest; the backend
+  // flags live sessions to reload on their next turn) then hands control
+  // back to the page for post-save navigation.
+  const doSave = async () => {
     if (!draft) return;
+    setConfirmActive(null);
     try {
       const res = await saveDraft({
         name: draft.metadata.name,
@@ -119,6 +132,28 @@ export default function CompactMetaBar({
     } catch {
       /* error surfaces via store.error */
     }
+  };
+
+  const handleSave = async () => {
+    if (!draft) return;
+    // Editing an existing env → warn which active sessions use it before
+    // committing (they re-apply the manifest on their next turn).
+    if (editingId) {
+      setCheckingSessions(true);
+      try {
+        const res = await environmentApi.linkedSessions(editingId);
+        const active = res.sessions.filter((s) => !s.is_deleted);
+        if (active.length > 0) {
+          setConfirmActive(active);
+          return; // hold for the confirm
+        }
+      } catch {
+        /* session check failed — fall through and save anyway */
+      } finally {
+        setCheckingSessions(false);
+      }
+    }
+    await doSave();
   };
 
   const handleDiscard = () => {
@@ -146,6 +181,7 @@ export default function CompactMetaBar({
   };
 
   return (
+    <>
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
       {/* ── Back to home ── */}
       <Link
@@ -200,7 +236,7 @@ export default function CompactMetaBar({
             warningCount={warningCount}
             nameValid={nameValid}
             saveDisabled={saveDisabled}
-            saving={saving}
+            saving={busy}
             patchMetadata={patchMetadata}
             addTag={addTag}
             removeTag={removeTag}
@@ -212,6 +248,47 @@ export default function CompactMetaBar({
         </>
       )}
     </div>
+
+    {confirmActive && (
+      <ConfirmModal
+        title={t('envManagement.applyToSessionsTitle')}
+        message={
+          <div>
+            <p>{t('envManagement.applyToSessionsBody', { n: String(confirmActive.length) })}</p>
+            <ul className="mt-2 max-h-44 overflow-y-auto flex flex-col gap-0.5 text-[0.8125rem]">
+              {confirmActive.slice(0, 12).map((s) => (
+                <li key={s.session_id} className="flex items-center gap-1.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      s.status === 'running' || s.status === 'idle'
+                        ? 'bg-[var(--success-color)]'
+                        : s.status === 'error'
+                        ? 'bg-[var(--danger-color)]'
+                        : 'bg-[hsl(var(--muted-foreground))]'
+                    }`}
+                  />
+                  <span className="truncate text-[hsl(var(--foreground))]">
+                    {s.session_name || s.session_id.slice(0, 8)}
+                  </span>
+                  {s.role && (
+                    <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">· {s.role}</span>
+                  )}
+                </li>
+              ))}
+              {confirmActive.length > 12 && (
+                <li className="text-[hsl(var(--muted-foreground))]">
+                  +{confirmActive.length - 12} more
+                </li>
+              )}
+            </ul>
+          </div>
+        }
+        note={t('envManagement.applyToSessionsNote')}
+        onConfirm={doSave}
+        onClose={() => setConfirmActive(null)}
+      />
+    )}
+    </>
   );
 }
 
