@@ -25,6 +25,24 @@ const TRAY_ICON_B64 =
 
 const isDev = !app.isPackaged
 
+// ── Windows screen-capture fix ───────────────────────────────────────────────
+// The legacy desktop capturer (DXGI/GDI) renders hardware-accelerated app
+// windows — Chrome, Edge, VS Code, Teams, video players, … — as BLACK,
+// especially on hybrid-GPU laptops where DXGI duplication runs on a different
+// adapter than the desktop and silently falls back to GDI. The agent then
+// "sees" only the wallpaper + taskbar (reported: 바탕화면만 캡처됨). Forcing the
+// Windows Graphics Capture (WGC) backend captures the fully-composited desktop
+// — including GPU windows — on Windows 10 2004+ (build 19041) and Windows 11.
+// Command-line switches must be set at module load, before app `ready`.
+// (Zero-Hz WGC is intentionally NOT enabled: it suppresses frames when the
+// screen is static, which would starve our on-demand single-frame grabs.)
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'AllowWgcScreenCapturer,AllowWgcWindowCapturer',
+  )
+}
+
 let overlay: BrowserWindow | null = null
 let control: BrowserWindow | null = null
 
