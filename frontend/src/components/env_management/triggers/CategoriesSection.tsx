@@ -119,6 +119,7 @@ export default function CategoriesSection({
           consec_max: null,
           requires_sub_worker_busy: false,
           requires_sub_worker_idle: false,
+          requires_screen_active: false,
           time_window: null,
           cooldown_seconds: 0,
           autonomous_signal: '',

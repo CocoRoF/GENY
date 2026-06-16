@@ -62,19 +62,6 @@ _TICK_SPEC_NAME = "thinking_trigger"
 # bundled default manifest's ``sub_worker_working`` category.
 _SUB_WORKER_WORKING_COOLDOWN_SECONDS = 90.0
 
-# Appended to an idle-reflection prompt when the user is sharing their screen,
-# so the reflection reacts to the attached live frame instead of generic
-# small-talk. The sensitive-content guard mirrors the screen-observation path.
-_SCREEN_REFLECTION_SUFFIX = (
-    "[지금 화면] 사용자가 화면을 공유 중이라 방금 화면을 첨부했어. 위 reflection "
-    "주제에 매이지 말고, 가능하면 *화면에서 실제로 보이는 것*에 반응해 — 지금 하는 "
-    "작업, 진행 상황, 막혀 보이는 부분, 눈에 띄는 변화 등을 구체적으로 짚어서 자연스럽게 "
-    "한마디 해. \"화면 공유해 주셨네요\" 같은 메타 발언은 금지 (너가 옆에서 보고 있는 "
-    "거다). 비밀번호 / API 키 / 개인 메시지 / 결제 정보 등 민감한 텍스트는 절대 입에 "
-    "올리지 마 — 그럴 땐 추상적으로 우회해. 화면에 정말 반응할 게 없으면(빈 바탕화면 등) "
-    "원래 reflection 그대로 해도 된다."
-)
-
 
 # ── Default manifest (singleton, lazy) ────────────────────────────
 
@@ -100,6 +87,7 @@ def _category_eligible(
     time_window: str,
     last_fire_at: float,
     now: float,
+    screen_active: bool = False,
 ) -> bool:
     """Mirror of the FE simulator — condition gate for one category."""
     if consec < category.consec_min:
@@ -111,6 +99,8 @@ def _category_eligible(
     if category.requires_sub_worker_idle:
         if not sub_worker_linked or sub_worker_busy:
             return False
+    if getattr(category, "requires_screen_active", False) and not screen_active:
+        return False
     if (
         category.time_window is not None
         and category.time_window != time_window
@@ -408,30 +398,34 @@ class ThinkingTriggerService:
                 await self._kick_inbox_drain(session_id)
                 return
 
-            prompt = self._build_trigger_prompt(session_id, is_executing)
-            if prompt is None:
+            picked = self._pick_category_and_prompt(session_id, is_executing)
+            if picked is None:
                 return
+            prompt, chosen_category = picked
 
-            # Screen-aware reflection: when the user has screen observation ON,
-            # ground this idle reflection in what's literally on screen *right
-            # now* — attach the live frame and bias the persona to react to the
-            # actual work instead of generic time-of-day small-talk. The frame
-            # goes straight to the persona's own (vision) model, so this works
-            # even when the caption-LLM path is unavailable. Best-effort: any
-            # failure just falls back to the normal text-only reflection.
+            # When the preset's screen-observation category fired (a category
+            # with requires_screen_active), attach the live screen frame so the
+            # persona reacts to what's literally on screen. The prompt text comes
+            # from the editable preset — no hardcoded copy here. If a frame can't
+            # be grabbed this instant, skip the fire: the category demands a real
+            # frame, and the next tick retries (or the category stops being
+            # eligible once the share ends).
             screen_attachment = None
-            try:
-                from service.vtuber.screen_observation import (
-                    is_screen_active,
-                    capture_current_screen_attachment,
-                )
-                if is_screen_active(session_id):
+            if getattr(chosen_category, "requires_screen_active", False):
+                try:
+                    from service.vtuber.screen_observation import (
+                        capture_current_screen_attachment,
+                    )
                     screen_attachment = await capture_current_screen_attachment(session_id)
-            except Exception:  # noqa: BLE001
-                logger.debug("thinking trigger: screen capture skipped", exc_info=True)
-                screen_attachment = None
-            if screen_attachment is not None:
-                prompt = prompt + "\n\n" + _SCREEN_REFLECTION_SUFFIX
+                except Exception:  # noqa: BLE001
+                    logger.debug("thinking trigger: screen capture failed", exc_info=True)
+                    screen_attachment = None
+                if screen_attachment is None:
+                    logger.debug(
+                        "thinking trigger: screen category chosen but no live frame — "
+                        "skipping fire for %s", session_id,
+                    )
+                    return
 
             import re
             _tag_match = re.search(r'\[(THINKING|ACTIVITY)_TRIGGER(?::\w+)?\]', prompt)
@@ -574,12 +568,39 @@ class ThinkingTriggerService:
     def _build_trigger_prompt(
         self, session_id: str, is_executing_fn
     ) -> Optional[str]:
+        """Back-compat wrapper: return only the rendered prompt string.
+
+        New code wanting to know which category fired (e.g. to attach a screen
+        frame for a ``requires_screen_active`` category) should call
+        :meth:`_pick_category_and_prompt` instead."""
+        picked = self._pick_category_and_prompt(session_id, is_executing_fn)
+        return picked[0] if picked else None
+
+    @staticmethod
+    def _screen_active_for(session_id: str) -> bool:
+        """True only when the user is actively sharing their screen AND the
+        session's model can actually see images — so a ``requires_screen_active``
+        category never fires a screen prompt the persona can't ground in a
+        real frame."""
+        try:
+            from service.vtuber.screen_observation import (
+                is_screen_active,
+                _session_vision_capable,
+            )
+            return bool(is_screen_active(session_id) and _session_vision_capable(session_id))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _pick_category_and_prompt(
+        self, session_id: str, is_executing_fn
+    ) -> Optional[Tuple[str, TriggerCategory]]:
         """Pick a category, then a prompt within it, then render.
 
         Resolution path:
 
         1. Pull the active manifest (preset or default fallback).
-        2. Snapshot session state (consec, sub-worker, time window).
+        2. Snapshot session state (consec, sub-worker, time window,
+           screen-active).
         3. Filter the manifest's categories — keep those whose
            conditions hold under the current snapshot and whose
            per-category cooldown has elapsed.
@@ -589,8 +610,8 @@ class ThinkingTriggerService:
         6. Render via :func:`schemas.render_prompt` to the canonical
            ``[KIND_TRIGGER:id] [autonomous_signal: …] {content}`` form.
 
-        Returns ``None`` when the manifest is disabled or no category
-        passes the filter (operator-visible misconfiguration).
+        Returns ``(rendered_prompt, chosen_category)``, or ``None`` when the
+        manifest is disabled or no category passes the filter.
         """
         manifest = self._resolve_manifest(session_id)
         if not manifest.enabled:
@@ -603,6 +624,7 @@ class ThinkingTriggerService:
             session_id, is_executing_fn
         )
         time_window = _resolve_time_window(manifest, self._current_hour())
+        screen_active = self._screen_active_for(session_id)
         now = time.time()
         last_fires = self._last_category_fire.setdefault(session_id, {})
 
@@ -621,6 +643,7 @@ class ThinkingTriggerService:
                 time_window=time_window,
                 last_fire_at=last_fires.get(cat.id, 0.0),
                 now=now,
+                screen_active=screen_active,
             ):
                 continue
             if cat.weight <= 0:
@@ -676,7 +699,7 @@ class ThinkingTriggerService:
         if chosen_category.cooldown_seconds and chosen_category.cooldown_seconds > 0:
             last_fires[chosen_category.id] = now
 
-        return render_prompt(chosen_category, content)
+        return render_prompt(chosen_category, content), chosen_category
 
     @staticmethod
     def _probe_sub_worker_state(

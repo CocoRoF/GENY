@@ -160,6 +160,27 @@ export default function ScenarioBar({
           </div>
         </div>
 
+        {/* Screen sharing */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))]">
+            화면 공유
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({ ...scenario, screenActive: !scenario.screenActive })
+            }
+            title="켜면 화면 관찰(requires_screen_active) 상황이 발사 가능해집니다"
+            className={`h-8 px-2.5 rounded-md text-[0.75rem] font-medium border transition-colors ${
+              scenario.screenActive
+                ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/40'
+                : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
+            }`}
+          >
+            {scenario.screenActive ? '공유 중' : '꺼짐'}
+          </button>
+        </div>
+
         {/* Time window */}
         <div className="flex flex-col gap-1">
           <label className="text-[0.7rem] font-medium text-[hsl(var(--muted-foreground))]">

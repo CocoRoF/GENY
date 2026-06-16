@@ -57,6 +57,9 @@ export interface TriggerCategory {
   consec_max: number | null;
   requires_sub_worker_busy: boolean;
   requires_sub_worker_idle: boolean;
+  /** Only fires while the user is sharing their screen; the runtime attaches
+   *  the live frame so the persona reacts to what's on screen. */
+  requires_screen_active: boolean;
   time_window: TimeWindow | null;
   cooldown_seconds: number;
 
