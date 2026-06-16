@@ -14,6 +14,14 @@ let _logIdCounter = 0;
 //    across reloads + connector restarts. ──
 const OVERLAY_SETTINGS_KEY = 'geny_vtuber_overlay_settings';
 export interface OverlaySettings {
+  // ON/OFF toggle states — remembered per-machine so the avatar comes back
+  // the way the user left it. STT/screen-observation auto-RESUME on reload
+  // (their consuming hooks start capture when their `enabled` is true at
+  // mount); in a plain browser, screen-share can't auto-start without a user
+  // gesture, so the hook self-corrects the flag back to false in that case.
+  ttsEnabled: boolean;
+  sttEnabled: boolean;
+  screenObservationEnabled: boolean;
   ttsVolume: number;          // 0..1 output volume
   sttSensitivity: number;     // VAD speech threshold (lower = more sensitive)
   sttSilenceMs: number;       // silence trail before an utterance ends (ms)
@@ -24,6 +32,9 @@ export interface OverlaySettings {
   screenSourceId: string | null; // chosen capture source id (null = first screen)
 }
 const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
+  ttsEnabled: true,           // audio output on by default
+  sttEnabled: false,          // mic opt-in
+  screenObservationEnabled: false, // screen-capture opt-in
   ttsVolume: 0.7,
   sttSensitivity: 0.04,
   sttSilenceMs: 1200,
@@ -237,11 +248,11 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   _subs: {},
   _modelsStreamSub: null,
   _assignmentStreamSub: null,
-  ttsEnabled: true,
   ttsSpeaking: {},
-  sttEnabled: false,  // default OFF — user must opt in per session
-  screenObservationEnabled: false,  // V3 — default OFF, mic-style opt-in
-  // Persisted tuning (TTS volume + STT/screen knobs) hydrated from localStorage.
+  // Persisted per-machine settings hydrated from localStorage: ON/OFF toggles
+  // (ttsEnabled default ON; sttEnabled / screenObservationEnabled default OFF)
+  // AND the tuning knobs (TTS volume, STT thresholds, screen interval/source).
+  // Hydrating an "on" toggle auto-resumes its capture on load (user opted in).
   ...loadOverlaySettings(),
 
   fetchModels: async () => {
@@ -406,6 +417,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   toggleTTS: () => {
     const newEnabled = !get().ttsEnabled;
     set({ ttsEnabled: newEnabled });
+    persistOverlaySettings({ ttsEnabled: newEnabled });
 
     // TTS 켤 때 AudioContext 초기화 — user gesture(onClick) 컨텍스트에서 실행되므로
     // iOS/iPadOS WebKit에서도 AudioContext.resume()이 성공한다.
@@ -424,21 +436,27 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   // ─── STT Actions ───
 
   toggleSTT: () => {
-    set({ sttEnabled: !get().sttEnabled });
+    const next = !get().sttEnabled;
+    set({ sttEnabled: next });
+    persistOverlaySettings({ sttEnabled: next });
   },
 
   setSTTEnabled: (enabled) => {
     set({ sttEnabled: enabled });
+    persistOverlaySettings({ sttEnabled: enabled });
   },
 
   // ─── Screen-observation Actions (V3) ───
 
   toggleScreenObservation: () => {
-    set({ screenObservationEnabled: !get().screenObservationEnabled });
+    const next = !get().screenObservationEnabled;
+    set({ screenObservationEnabled: next });
+    persistOverlaySettings({ screenObservationEnabled: next });
   },
 
   setScreenObservationEnabled: (enabled) => {
     set({ screenObservationEnabled: enabled });
+    persistOverlaySettings({ screenObservationEnabled: enabled });
   },
 
   // ─── Persisted overlay tuning ───
