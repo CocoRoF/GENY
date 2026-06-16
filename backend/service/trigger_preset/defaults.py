@@ -489,7 +489,10 @@ def default_manifest() -> TriggerPresetManifest:
 
     return TriggerPresetManifest(
         enabled=True,
-        timing=TriggerTiming(),
+        # base_idle 60s (vs the 120s schema default): the companion reacts within
+        # ~a minute of going quiet — matches the "수다" default and makes screen
+        # observation testable promptly. Adaptive backoff still slows repeats.
+        timing=TriggerTiming(base_idle_seconds=60.0),
         time_boundaries=TimeBoundaries(),
         prompts=prompts,
         categories=categories,
