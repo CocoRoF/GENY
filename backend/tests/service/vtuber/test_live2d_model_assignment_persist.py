@@ -65,3 +65,17 @@ def test_unknown_stored_model_is_ignored(tmp_path, monkeypatch):
     # Store points at a model that no longer exists in the registry.
     fake.records["s1"] = {"assigned_model": "deleted-model"}
     assert mgr.get_agent_model_name("s1") is None
+
+
+def test_assign_and_unassign_notify_subscribers(tmp_path, monkeypatch):
+    # The live sync stream depends on assign/unassign waking subscribers with
+    # the exact (session_id, model_name|None) change.
+    mgr, _fake = _manager(tmp_path, monkeypatch)
+    q = mgr.subscribe_assignment_changes()
+    try:
+        mgr.assign_model_to_agent("s1", "m1")
+        assert q.get_nowait() == ("s1", "m1")
+        mgr.unassign_model("s1")
+        assert q.get_nowait() == ("s1", None)
+    finally:
+        mgr.unsubscribe_assignment_changes(q)

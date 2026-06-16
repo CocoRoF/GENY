@@ -91,11 +91,20 @@ export default function ConnectorPage() {
   const models = useVTuberStore((s) => s.models);
   const modelsLoaded = useVTuberStore((s) => s.modelsLoaded);
   const fetchModels = useVTuberStore((s) => s.fetchModels);
+  const fetchAssignment = useVTuberStore((s) => s.fetchAssignment);
   const assignModel = useVTuberStore((s) => s.assignModel);
   const assignedModelName = useVTuberStore((s) => (selectedSessionId ? s.assignments[selectedSessionId] : undefined));
 
   const { setTheme } = useTheme();
   const [booted, setBooted] = useState(false);
+
+  // Pull the current assignment for the selected session so the model picker
+  // shows what's actually bound (it was empty before). After this, the live
+  // assignment stream (wired in fetchModels) keeps it in sync with the web +
+  // overlay without polling.
+  useEffect(() => {
+    if (selectedSessionId) fetchAssignment(selectedSessionId);
+  }, [selectedSessionId, fetchAssignment]);
 
   // Sync the connector's ?theme into the ThemeProvider store (module-load
   // already painted the class for no-flash; this keeps React state in sync).

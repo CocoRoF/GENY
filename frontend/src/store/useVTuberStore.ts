@@ -155,6 +155,7 @@ interface VTuberState {
   // app's lifetime — the dropdown reflects auto-publish renames /
   // installs / deletes in real time off this stream.
   _modelsStreamSub: { close: () => void } | null;
+  _assignmentStreamSub: { close: () => void } | null;
 
   // TTS state
   ttsEnabled: boolean;
@@ -235,6 +236,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   logs: {},
   _subs: {},
   _modelsStreamSub: null,
+  _assignmentStreamSub: null,
   ttsEnabled: true,
   ttsSpeaking: {},
   sttEnabled: false,  // default OFF — user must opt in per session
@@ -262,6 +264,19 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
         void get().fetchModels();
       });
       set({ _modelsStreamSub: sub });
+    }
+    // Live assignment stream — keeps web / connector / overlay in sync the
+    // instant a model is (re)assigned anywhere, NO polling. Singleton too.
+    if (!get()._assignmentStreamSub) {
+      const sub = vtuberApi.subscribeToAssignmentChanges((sessionId, modelName) => {
+        set((s) => {
+          const next = { ...s.assignments };
+          if (modelName) next[sessionId] = modelName;
+          else delete next[sessionId];
+          return { assignments: next };
+        });
+      });
+      set({ _assignmentStreamSub: sub });
     }
   },
 
