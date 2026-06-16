@@ -894,6 +894,34 @@ def test_uploaded_frame_cached_and_served_even_without_caption(
     assert base64.b64decode(att["data"]) == b"FRAMEBYTES"
 
 
+def test_vision_capable_optimistic_for_unknown_and_alias(monkeypatch) -> None:
+    """Screen obs is opt-in + default model is Claude → unknown/empty/alias
+    models are treated as vision-capable (so the feature isn't silently off);
+    a recognised non-vision model is still rejected; env override wins."""
+    from service.vtuber import screen_observation as so
+
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: None)  # no live agent
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("GENY_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("GENY_SCREEN_OBS_ASSUME_VISION", raising=False)
+
+    assert so._session_vision_capable("s") is True  # empty/unknown → optimistic
+
+    class _A:
+        model_name = "sonnet"  # bare alias is_vision_capable misses
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: _A())
+    assert so._session_vision_capable("s") is True
+
+    class _B:
+        model_name = "some-local-text-only"  # recognised non-vision → rejected
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: _B())
+    assert so._session_vision_capable("s") is False
+
+    monkeypatch.setenv("GENY_SCREEN_OBS_ASSUME_VISION", "0")  # override forces off
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: None)
+    assert so._session_vision_capable("s") is False
+
+
 def test_recent_frame_none_for_non_vision_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

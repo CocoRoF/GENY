@@ -398,13 +398,24 @@ def _ext_to_mime(path: Path) -> str:
 
 
 def _session_vision_capable(session_id: str) -> bool:
-    """Whether the session's model can take images. Falls back to the
-    configured default model when the session didn't pin one, so we don't
-    silently degrade when the real default IS vision-capable (Claude)."""
+    """Whether the session's model can take images.
+
+    Screen observation is explicitly user-opted-in and Geny's default persona
+    model is Claude (vision-capable), so this defaults OPTIMISTIC: an unknown /
+    empty / bare-alias ("sonnet"/"opus"/"haiku") model is treated as vision-
+    capable. The conservative ``is_vision_capable`` returns False for those,
+    which silently disabled the whole screen feature on manifests that don't pin
+    a full ``claude-*`` model id. Only a model that is recognised AND non-vision
+    is rejected. Override with ``GENY_SCREEN_OBS_ASSUME_VISION=0/1``."""
+    override = os.environ.get("GENY_SCREEN_OBS_ASSUME_VISION", "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return True
+    if override in ("0", "false", "no", "off"):
+        return False
     try:
         from service.whiteboard.vision_capability import is_vision_capable
     except Exception:  # noqa: BLE001
-        return False
+        return True  # can't check → assume capable (feature is opt-in)
     agent = _resolve_agent(session_id)
     model = getattr(agent, "model_name", None) if agent is not None else None
     if not model:
@@ -413,7 +424,15 @@ def _session_vision_capable(session_id: str) -> bool:
             or os.environ.get("GENY_DEFAULT_MODEL")
             or ""
         )
-    return is_vision_capable(model)
+    if not model:
+        return True  # unknown model → assume the default (Claude) can see
+    if is_vision_capable(model):
+        return True
+    # Bare provider aliases the pattern list misses — all map to vision-capable
+    # Claude models in Geny (see the pricing-alias layer).
+    if model.strip().lower() in ("sonnet", "opus", "haiku", "claude"):
+        return True
+    return False
 
 
 def _maybe_image_attachment(
