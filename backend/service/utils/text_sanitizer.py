@@ -197,6 +197,14 @@ _MD_BLOCKQUOTE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.MULTILINE)
 _MD_LIST_MARKER = re.compile(r"^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+", re.MULTILINE)
 _MD_HRULE = re.compile(r"^[ \t]{0,3}(?:[-*_][ \t]?){3,}[ \t]*$", re.MULTILINE)
 _MD_HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+# Inline separator runs that AREN'T a full-line horizontal rule — topic
+# dividers the persona drops between same-line text: ``a --- b``, ``a — b``,
+# ``~~~``, ``***``, ``•••``. The run (or a lone em/en/hyphen dash) must be
+# whitespace-delimited on BOTH sides, so word-internal hyphens (``e-mail``,
+# ``2-3``, ``test_file``) and arrows survive. Replacing with the captured
+# leading boundary keeps the surrounding spacing; the final whitespace
+# collapse tidies the rest.
+_MD_INLINE_SEP = re.compile(r"(^|\s)(?:[-–—~·•*_]{2,}|[—–-])(?=\s|$)")
 
 
 def _strip_markdown_for_tts(text: str) -> str:
@@ -230,6 +238,11 @@ def _strip_markdown_for_tts(text: str) -> str:
     text = _MD_HRULE.sub("", text)
     # 11. HTML tags
     text = _MD_HTML_TAG.sub("", text)
+    # 12. Inline separator runs — drop dividers used between same-line text
+    #     (``a --- b``, ``a — b``, ``~~~``), keeping word-internal hyphens.
+    #     Apply twice so back-to-back dividers (``a --- b --- c``) fully clear.
+    text = _MD_INLINE_SEP.sub(r"\1", text)
+    text = _MD_INLINE_SEP.sub(r"\1", text)
     return text
 
 
