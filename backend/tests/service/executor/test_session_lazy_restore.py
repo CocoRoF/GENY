@@ -259,3 +259,24 @@ async def test_ensure_live_does_not_reload_a_clean_session():
 
     mgr._reload_session_manifest = _boom
     assert await mgr.ensure_session_live("s1") is clean
+
+
+@pytest.mark.asyncio
+async def test_ensure_live_defers_reload_while_session_busy():
+    # A turn in-flight (_is_executing) must NOT trigger a manifest reload —
+    # tearing the pipeline down mid-turn would corrupt it. The flag stays set
+    # so the rebuild lands on the next idle access.
+    mgr = _skeleton({})
+    busy = _FakeAgent("s1")
+    busy.env_id = "env-A"
+    busy._needs_manifest_reload = True
+    busy._is_executing = True
+    mgr._local_agents = {"s1": busy}
+
+    async def _boom(sid):
+        raise AssertionError("must not reload a busy session")
+
+    mgr._reload_session_manifest = _boom
+    out = await mgr.ensure_session_live("s1")
+    assert out is busy                      # deferred — same agent returned
+    assert busy._needs_manifest_reload is True  # flag retained for next access

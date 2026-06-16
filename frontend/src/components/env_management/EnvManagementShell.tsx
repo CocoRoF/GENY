@@ -87,22 +87,30 @@ export default function EnvManagementShell({
 
   // Back button while editing → return to the env-management overview (drop the
   // draft) instead of leaving /environments. We arm a history sentinel when the
-  // editor opens; the Back press pops it and we reset to the overview, with a
+  // editor OPENS; the Back press pops it and we reset to the overview, with a
   // dirty-confirm so unsaved edits aren't lost silently.
+  //
+  // Depend ONLY on whether a draft exists (`editing`), NOT the draft object —
+  // otherwise every keystroke/stage edit re-runs this effect and pushes a new
+  // history entry, flooding the back stack. isDirty/resetDraft are read from
+  // the store at call time so they don't need to be deps.
+  const editing = draft !== null;
   useEffect(() => {
-    if (!draft) return;
+    if (!editing) return;
     window.history.pushState({ envEditor: true }, '');
     const onPopState = () => {
-      if (isDirty() && !confirm(t('envManagement.confirmDiscard'))) {
+      const st = useEnvironmentDraftStore.getState();
+      if (st.isDirty() && !confirm(t('envManagement.confirmDiscard'))) {
         // Cancelled — re-arm so the editor stays put.
         window.history.pushState({ envEditor: true }, '');
         return;
       }
-      resetDraft();
+      st.resetDraft();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [draft, isDirty, resetDraft, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
 
   useEffect(() => {
     if (!draft && view.mode === 'stage') {
