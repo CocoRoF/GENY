@@ -55,6 +55,14 @@ def _fresh_id() -> str:
     return uuid4().hex[:12]
 
 
+# Stable id for the bundled default preset Geny seeds on first boot. Sessions
+# with no explicitly-attached preset resolve to THIS record (see
+# thinking_trigger._resolve_manifest), so editing it in 트리거 관리 changes the
+# default behavior for everyone. Seeded once from default_manifest(); never
+# overwritten afterwards, so user edits survive restarts.
+DEFAULT_PRESET_ID = "default"
+
+
 def _default_storage_path() -> str:
     """Storage root, defaults to ``./data/trigger_presets``.
 
@@ -105,6 +113,51 @@ class TriggerPresetService:
                 logger.warning(
                     "TriggerPresetService: reconcile failed (continuing): %s", exc,
                 )
+            try:
+                self._seed_default_locked()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "TriggerPresetService: default-preset seed failed (continuing): %s", exc,
+                )
+
+    def _seed_default_locked(self) -> None:
+        """Ensure the bundled default preset (``DEFAULT_PRESET_ID``) exists.
+
+        Idempotent — only writes when the record is missing, so a user's edits
+        to the default preset survive restarts. Seeded from
+        :func:`default_manifest`, which already includes the screen-observation
+        category, so screen-aware proactive speech is on out of the box.
+        Must be called with ``self._lock`` held (RLock; ``set_database`` holds it).
+        """
+        if self._read_record(DEFAULT_PRESET_ID) is not None:
+            return
+        now = _iso_now()
+        record = TriggerPresetRecord(
+            id=DEFAULT_PRESET_ID,
+            name="기본 (화면 관찰 포함)",
+            description=(
+                "Geny 기본 트리거 프리셋 — idle 반영 + 화면 관찰 발화. "
+                "직접 수정하거나 '새 드래프트'로 복제해서 쓰세요."
+            ),
+            tags=["default"],
+            created_at=now,
+            updated_at=now,
+            manifest=default_manifest(),
+        )
+        self._write_record(record)
+        self._bump_version()
+        logger.info(
+            "TriggerPresetService: seeded bundled default preset (%s)", DEFAULT_PRESET_ID,
+        )
+
+    def get_default(self) -> Optional[TriggerPresetRecord]:
+        """Return the bundled default preset record (seeding it if missing)."""
+        rec = self.get(DEFAULT_PRESET_ID)
+        if rec is None:
+            with self._lock:
+                self._seed_default_locked()
+            rec = self.get(DEFAULT_PRESET_ID)
+        return rec
 
     @property
     def _db_available(self) -> bool:

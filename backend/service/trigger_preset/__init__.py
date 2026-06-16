@@ -20,12 +20,13 @@ from service.trigger_preset.exceptions import (
     TriggerPresetNotFoundError,
     TriggerPresetValidationError,
 )
-from service.trigger_preset.service import TriggerPresetService
+from service.trigger_preset.service import DEFAULT_PRESET_ID, TriggerPresetService
 
 __all__ = [
     "TriggerPresetService",
     "TriggerPresetNotFoundError",
     "TriggerPresetValidationError",
+    "DEFAULT_PRESET_ID",
     "get_trigger_preset_service",
     "set_trigger_preset_service",
 ]
