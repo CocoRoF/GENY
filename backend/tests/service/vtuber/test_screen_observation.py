@@ -1103,3 +1103,28 @@ def test_prune_removes_old_images_keeps_notes(
     assert not old_img.exists()   # old image pruned
     assert old_note.exists()      # note kept (recall value)
     assert fresh_img.exists()     # recent image kept
+
+
+def test_screen_comment_dedup_robust_to_avatar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """De-dup: an unchanged screen (incl. small avatar-overlay jitter) is NOT
+    re-commented; a substantial change is. Lenient threshold ignores the avatar."""
+    from service.vtuber import screen_observation as so
+
+    sid = "s-dedup"
+    # First comment ever → allowed (no prior comment hash).
+    so._last_hash[sid] = "0f0f0f0f0f0f0f0f"
+    assert so.screen_changed_since_last_comment(sid) is True
+    so.mark_screen_comment(sid)
+
+    # Same frame again → skip (0 bits differ).
+    assert so.screen_changed_since_last_comment(sid) is False
+
+    # Tiny jitter (avatar idle animation: flip ~2 bits, < threshold 10) → skip.
+    so._last_hash[sid] = "0f0f0f0f0f0f0f0d"  # low nibble f→d = 1 bit
+    assert so.screen_changed_since_last_comment(sid) is False
+
+    # Substantial change (many bits) → allowed again.
+    so._last_hash[sid] = "f0f0f0f0f0f0f0f0"  # ~32 bits differ
+    assert so.screen_changed_since_last_comment(sid) is True
+    so.cleanup_session_state(sid)
+    assert sid not in so._last_comment_hash
