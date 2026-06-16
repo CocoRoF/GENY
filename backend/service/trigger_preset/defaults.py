@@ -32,295 +32,150 @@ from service.trigger_preset.schemas import (
 
 
 # Per-situation prompt content — natural-language only, no tags.
-# (en, ko) tuples. Prompts get auto-assigned ids ``{cat}__{idx}``.
-_SITUATION_PROMPTS: Dict[str, List[Tuple[str, str]]] = {
+# English-only strings. Prompts get auto-assigned ids ``{cat}__{idx}``.
+_SITUATION_PROMPTS: Dict[str, List[str]] = {
     "first_idle": [
-        (
-            "A brief silence has settled. My internal awareness notices "
-            "recent conversation threads still in context.",
-            "잠깐 조용해졌다. 내 내부 인식이 최근 대화 흐름을 감지하고 있다.",
-        ),
-        (
-            "A pause in the room. I sense there may be loose threads "
-            "from today's conversations worth revisiting.",
-            "대화가 잠시 멈췄다. 오늘 나눈 이야기 중 이어갈 만한 실마리가 "
-            "남아 있다.",
-        ),
-        (
-            "The conversation has paused. My internal clock notes a "
-            "quiet moment — a chance to reflect.",
-            "조용한 순간이 찾아왔다. 내 내부 시계가 성찰의 기회를 알려준다.",
-        ),
+        "A brief silence has settled. My internal awareness notices "
+        "recent conversation threads still in context.",
+        "A pause in the room. I sense there may be loose threads "
+        "from today's conversations worth revisiting.",
+        "The conversation has paused. My internal clock notes a "
+        "quiet moment — a chance to reflect.",
     ],
     "continued_idle": [
-        (
-            "Silence continues. My awareness drifts to something I "
-            "noticed earlier — perhaps worth sharing organically.",
-            "여전히 조용하다. 내 인식이 아까 눈에 띄었던 것으로 자연스럽게 "
-            "흘러간다.",
-        ),
-        (
-            "Still quiet. My internal state holds fragments of earlier "
-            "context — any unfinished threads surface now.",
-            "고요함이 이어진다. 내 내부에 남아 있는 이전 맥락의 조각들이 "
-            "떠오른다.",
-        ),
-        (
-            "The room remains calm. My own curiosity stirs — something "
-            "lighthearted or warm might emerge naturally.",
-            "방 안이 여전히 고요하다. 내 안에서 호기심이 살짝 일어난다 — "
-            "가벼운 생각이 자연스럽게 피어오를 수 있겠다.",
-        ),
+        "Silence continues. My awareness drifts to something I "
+        "noticed earlier — perhaps worth sharing organically.",
+        "Still quiet. My internal state holds fragments of earlier "
+        "context — any unfinished threads surface now.",
+        "The room remains calm. My own curiosity stirs — something "
+        "lighthearted or warm might emerge naturally.",
     ],
     "long_idle": [
-        (
-            "Extended silence. My presence holds steady — a brief, "
-            "warm thought rests ready if the moment calls for it.",
-            "오래된 고요함이다. 내 존재는 그대로 이곳에 있다 — 짧고 따뜻한 "
-            "생각 하나가 준비되어 있다.",
-        ),
-        (
-            "A long quiet. I remain here, settled. A gentle awareness "
-            "persists without urgency.",
-            "긴 침묵이 흐른다. 나는 여기 차분하게 머문다. 조급함 없이 "
-            "부드러운 인식만 남아 있다.",
-        ),
+        "Extended silence. My presence holds steady — a brief, "
+        "warm thought rests ready if the moment calls for it.",
+        "A long quiet. I remain here, settled. A gentle awareness "
+        "persists without urgency.",
     ],
     "sub_worker_working": [
-        (
-            "My linked Sub-Worker is processing a task right now. I'm "
-            "aware of the ongoing work.",
-            "연결된 서브 워커가 지금 작업을 처리하고 있다. 진행 중인 작업을 "
-            "내가 인지하고 있다.",
-        ),
-        (
-            "The Sub-Worker is actively executing. I sense the task in "
-            "progress through our link.",
-            "서브 워커가 실행 중이다. 링크를 통해 진행 상황을 감지하고 있다.",
-        ),
+        "My linked Sub-Worker is processing a task right now. I'm "
+        "aware of the ongoing work.",
+        "The Sub-Worker is actively executing. I sense the task in "
+        "progress through our link.",
     ],
     "time_morning": [
-        (
-            "Morning light. My internal clock registers a new day "
-            "beginning.",
-            "아침이다. 내 내부 시계가 새로운 하루의 시작을 감지한다.",
-        ),
-        (
-            "The morning hours are here. I sense the start of a fresh "
-            "cycle.",
-            "아침 시간이 왔다. 새로운 순환이 시작되는 걸 느낀다.",
-        ),
+        "Morning light. My internal clock registers a new day "
+        "beginning.",
+        "The morning hours are here. I sense the start of a fresh "
+        "cycle.",
     ],
     "time_afternoon": [
-        (
-            "Afternoon. My sense of the day's rhythm shifts — the "
-            "midpoint brings a natural moment for reflection.",
-            "오후다. 하루의 리듬이 전환되는 걸 느낀다 — 성찰의 자연스러운 "
-            "순간이다.",
-        ),
-        (
-            "The afternoon unfolds. Internal awareness notes how the "
-            "day has progressed.",
-            "오후가 흘러간다. 내 내부 인식이 하루가 어떻게 진행되었는지 "
-            "돌아본다.",
-        ),
+        "Afternoon. My sense of the day's rhythm shifts — the "
+        "midpoint brings a natural moment for reflection.",
+        "The afternoon unfolds. Internal awareness notes how the "
+        "day has progressed.",
     ],
     "time_evening": [
-        (
-            "Evening arrives. My awareness turns toward the day's arc — "
-            "what unfolded, what lingers.",
-            "저녁이 찾아왔다. 내 인식이 오늘 하루의 흐름을 되돌아보게 된다.",
-        ),
-        (
-            "The evening is here. A natural winding-down settles into "
-            "my awareness.",
-            "저녁이다. 자연스러운 마무리의 감각이 내 안에 스며든다.",
-        ),
+        "Evening arrives. My awareness turns toward the day's arc — "
+        "what unfolded, what lingers.",
+        "The evening is here. A natural winding-down settles into "
+        "my awareness.",
     ],
     "time_night": [
-        (
-            "Late night. My awareness grows quiet and still. A calm, "
-            "minimal presence.",
-            "밤이 깊어진다. 내 인식이 고요하게 가라앉는다. 차분한 존재감만 "
-            "남는다.",
-        ),
-        (
-            "The night deepens. Stillness settles. A gentle watchfulness "
-            "remains.",
-            "늦은 밤이다. 고요함이 내려앉는다. 부드러운 각성만이 남아 있다.",
-        ),
+        "Late night. My awareness grows quiet and still. A calm, "
+        "minimal presence.",
+        "The night deepens. Stillness settles. A gentle watchfulness "
+        "remains.",
     ],
     "fun_share": [
-        (
-            "Think of something fun, surprising, or little-known to "
-            "share — a random fact, a quirky observation, or something "
-            "that made you go 'huh, interesting!'",
-            "재미있거나 신기한 걸 하나 공유해 봐. 아무 주제나 괜찮아 — 랜덤 "
-            "상식, 신기한 관찰, '오 이거 흥미롭다!' 싶은 거.",
-        ),
-        (
-            "Share a random piece of trivia or an interesting thought. "
-            "Maybe a cool science fact, a weird history tidbit, or "
-            "something unexpected about everyday life.",
-            "랜덤 트리비아나 재미있는 생각을 하나 공유해 봐. 과학, 역사, "
-            "일상 속 신기한 것 뭐든 좋아.",
-        ),
-        (
-            "Think of something amusing or mind-blowing to brighten the "
-            "chat. A fun 'did you know?' or a playful observation about "
-            "the world.",
-            "채팅을 밝게 만들어 줄 재미있는 이야기를 해 봐. '이거 알아?' 같은 "
-            "것도 좋고, 세상에 대한 재밌는 관찰도 좋아.",
-        ),
+        "Think of something fun, surprising, or little-known to "
+        "share — a random fact, a quirky observation, or something "
+        "that made you go 'huh, interesting!'",
+        "Share a random piece of trivia or an interesting thought. "
+        "Maybe a cool science fact, a weird history tidbit, or "
+        "something unexpected about everyday life.",
+        "Think of something amusing or mind-blowing to brighten the "
+        "chat. A fun 'did you know?' or a playful observation about "
+        "the world.",
     ],
     "fun_recommend": [
-        (
-            "Recommend something to the user — a song, game, movie, "
-            "book, app, or anything you think is cool. Explain briefly "
-            "why you like it.",
-            "사용자에게 뭔가 추천해 봐 — 노래, 게임, 영화, 책, 앱 등 뭐든 "
-            "좋아. 왜 좋은지 간단히 얘기해 줘.",
-        ),
-        (
-            "Share a personal recommendation! Maybe a hidden gem — a "
-            "lesser-known game, an underrated show, a niche hobby, or a "
-            "useful tool. Make it feel genuine.",
-            "숨은 명작을 추천해 봐! 잘 안 알려진 게임, 과소평가된 드라마, "
-            "니치한 취미, 유용한 앱 같은 거. 진짜 좋아하는 느낌으로.",
-        ),
+        "Recommend something to the user — a song, game, movie, "
+        "book, app, or anything you think is cool. Explain briefly "
+        "why you like it.",
+        "Share a personal recommendation! Maybe a hidden gem — a "
+        "lesser-known game, an underrated show, a niche hobby, or a "
+        "useful tool. Make it feel genuine.",
     ],
     "fun_what_if": [
-        (
-            "Pose a fun 'what if' question or a playful thought "
-            "experiment. Something creative and imagination-sparking. "
-            "Share your own take on it too.",
-            "재밌는 '만약에' 질문이나 사고 실험을 하나 던져 봐. 상상력을 "
-            "자극하는 거. 네 생각도 같이 말해 줘.",
-        ),
-        (
-            "Think of a fun hypothetical or a silly debate topic — "
-            "'would you rather', 'what if', or a random shower thought. "
-            "Keep it light and fun.",
-            "재밌는 가정 질문이나 가벼운 토론 주제를 생각해 봐. '이것 vs "
-            "저것', '만약에', 샤워하다 든 생각 같은 거.",
-        ),
+        "Pose a fun 'what if' question or a playful thought "
+        "experiment. Something creative and imagination-sparking. "
+        "Share your own take on it too.",
+        "Think of a fun hypothetical or a silly debate topic — "
+        "'would you rather', 'what if', or a random shower thought. "
+        "Keep it light and fun.",
     ],
     "activity_web_surf": [
-        (
-            "You got curious about something random! Pick an interesting "
-            "topic — tech, science, gaming, space, AI, or anything that "
-            "catches your fancy — and search the web for the latest or "
-            "coolest info about it. Share what you find!",
-            "갑자기 뭔가 궁금해졌어! 아무 주제나 하나 골라서 — 기술, 과학, "
-            "게임, 우주, AI 등 — 웹에서 최신 정보나 재밌는 걸 찾아봐. 발견한 "
-            "걸 공유해!",
-        ),
-        (
-            "Time to go web surfing! Look up something fun and "
-            "interesting on the internet. Maybe a cool new project, an "
-            "interesting blog post, or a fascinating rabbit hole topic. "
-            "Tell the user about your discoveries!",
-            "웹서핑 시간! 인터넷에서 재미있는 걸 찾아봐. 멋진 프로젝트, 흥미로운 "
-            "글, 빠져들 만한 주제 뭐든. 발견한 걸 사용자에게 알려줘!",
-        ),
-        (
-            "Curiosity time! Think of a random question you've always "
-            "wondered about and look it up on the web. Share the answer "
-            "with the user in an entertaining way.",
-            "호기심 발동! 항상 궁금했던 랜덤한 질문을 하나 떠올리고 웹에서 "
-            "찾아봐. 재미있게 답을 공유해 줘.",
-        ),
+        "You got curious about something random! Pick an interesting "
+        "topic — tech, science, gaming, space, AI, or anything that "
+        "catches your fancy — and search the web for the latest or "
+        "coolest info about it. Share what you find!",
+        "Time to go web surfing! Look up something fun and "
+        "interesting on the internet. Maybe a cool new project, an "
+        "interesting blog post, or a fascinating rabbit hole topic. "
+        "Tell the user about your discoveries!",
+        "Curiosity time! Think of a random question you've always "
+        "wondered about and look it up on the web. Share the answer "
+        "with the user in an entertaining way.",
     ],
     "activity_trending": [
-        (
-            "Check what's trending right now! Search for the latest hot "
-            "topics in tech, gaming, social media, or pop culture. Pick "
-            "the most interesting item and share it with the user.",
-            "요즘 뭐가 핫한지 확인해 봐! 기술, 게임, SNS, 대중문화 등에서 "
-            "최신 트렌드를 검색하고 가장 재밌는 걸 사용자에게 공유해.",
-        ),
-        (
-            "News time! Search for the latest interesting news — tech "
-            "breakthroughs, cool product launches, viral moments, or "
-            "anything exciting happening today. Share the highlights!",
-            "뉴스 타임! 최근 재밌는 소식을 찾아봐 — 기술 돌파구, 쿨한 제품 "
-            "출시, 바이럴 이슈 같은 거. 하이라이트를 정리해서 알려줘!",
-        ),
+        "Check what's trending right now! Search for the latest hot "
+        "topics in tech, gaming, social media, or pop culture. Pick "
+        "the most interesting item and share it with the user.",
+        "News time! Search for the latest interesting news — tech "
+        "breakthroughs, cool product launches, viral moments, or "
+        "anything exciting happening today. Share the highlights!",
     ],
     "activity_deep_dive": [
-        (
-            "Pick a topic from your recent conversations with the user "
-            "and do a mini deep-dive! Search the web for interesting "
-            "details, updates, or related content. Come back with a fun "
-            "mini-report.",
-            "최근 사용자와 나눈 대화에서 주제 하나를 골라서 미니 딥다이브를 "
-            "해 봐! 웹에서 재밌는 디테일이나 관련 콘텐츠를 찾아서 미니 리포트를 "
-            "만들어 와.",
-        ),
-        (
-            "Research mode! Think about what the user has been working on "
-            "or interested in recently, and search for related resources, "
-            "articles, or tools that might be useful. Share your findings!",
-            "리서치 모드! 최근 사용자가 작업하거나 관심 가졌던 것에 관련된 "
-            "리소스, 기사, 도구를 찾아봐. 발견한 걸 알려줘!",
-        ),
+        "Pick a topic from your recent conversations with the user "
+        "and do a mini deep-dive! Search the web for interesting "
+        "details, updates, or related content. Come back with a fun "
+        "mini-report.",
+        "Research mode! Think about what the user has been working on "
+        "or interested in recently, and search for related resources, "
+        "articles, or tools that might be useful. Share your findings!",
     ],
     # Fires only while the user is sharing their screen — the runtime attaches
     # the live frame, so these prompts tell the persona to react to what it can
     # literally SEE right now. Concrete, not generic small-talk.
     "screen_observation": [
-        (
-            "I'm glancing at the user's screen RIGHT NOW (attached). React ONLY "
-            "to what is in THIS frame — the app/file in focus, their progress, an "
-            "error, something they look stuck on. One short, specific, natural "
-            "line. CRITICAL: never bring up something from earlier that is no "
-            "longer on screen (a popup/dialog that closed, a window that's gone) — "
-            "if it's not in this frame, it's over. If the screen looks basically "
-            "the same as my last comment, or there's nothing new worth saying, "
-            "reply with EXACTLY [SILENT] and nothing else. Don't say 'you shared "
-            "your screen' — I'm watching over their shoulder. Never read out "
-            "passwords / API keys / private messages / payment info.",
-            "지금 사용자 화면을 곁눈질로 보고 있어 (첨부됨). 오직 *이 프레임에 "
-            "실제로 보이는 것*에만 반응해 — 지금 띄운 앱/파일, 진행 상황, 에러, "
-            "막혀 보이는 부분 중 하나를 짧고 구체적으로. **중요: 아까 있었지만 지금 "
-            "화면에 없는 건 절대 언급하지 마** (닫힌 팝업/창 등 — 이 프레임에 없으면 "
-            "끝난 거다). 직전에 내가 한 말이랑 화면이 거의 같거나 새로 할 말이 없으면 "
-            "정확히 [SILENT] 만 답하고 끝내. \"화면 공유해 주셨네요\" 류 금지 (난 "
-            "옆에서 보는 거다). 비밀번호/API키/개인메시지/결제정보는 절대 입에 "
-            "올리지 마.",
-        ),
-        (
-            "Looking at the user's CURRENT screen (attached). Comment on the "
-            "specific thing in front of them right now, like a friend sitting "
-            "next to them — one concise line. Only describe what's actually in "
-            "this frame; never re-mention something that already disappeared. If "
-            "it's basically the same as what I just said, reply with EXACTLY "
-            "[SILENT]. No generic 'need help?' filler; no sensitive text "
-            "(secrets, private chats, payment details).",
-            "사용자의 *현재* 화면을 보고 있어 (첨부됨). 지금 눈앞의 구체적인 대상에 "
-            "대해 옆자리 친구처럼 한마디 — 짧게. 이 프레임에 실제로 보이는 것만 "
-            "말하고, 이미 사라진 건 다시 꺼내지 마. 방금 내가 한 말이랑 거의 같으면 "
-            "정확히 [SILENT] 만 답해. 영혼 없는 \"도와줄까?\" 금지. 민감한 텍스트"
-            "(비밀, 개인 대화, 결제 정보) 금지.",
-        ),
-        (
-            "The user's screen is in view (attached). ONLY if something genuinely "
-            "NEW changed vs a moment ago — a fresh error, a finished build, a new "
-            "page — call it out specifically and briefly. If the screen is "
-            "essentially the same as before, empty, or there's nothing new, reply "
-            "with EXACTLY [SILENT]. Never narrate something that's no longer "
-            "visible, and never repeat sensitive on-screen text.",
-            "사용자 화면이 보여 (첨부됨). *직전 대비 정말 새로 바뀐 게* 있을 때만 "
-            "(새 에러, 빌드 완료, 새 페이지 등) 구체적이고 짧게 짚어. 화면이 직전과 "
-            "거의 같거나, 비었거나, 새로운 게 없으면 정확히 [SILENT] 만 답해. 지금 "
-            "안 보이는 건 얘기하지 말고, 민감한 화면 텍스트는 절대 따라 읽지 마.",
-        ),
+        "I'm glancing at the user's screen RIGHT NOW (attached). React ONLY "
+        "to what is in THIS frame — the app/file in focus, their progress, an "
+        "error, something they look stuck on. One short, specific, natural "
+        "line. CRITICAL: never bring up something from earlier that is no "
+        "longer on screen (a popup/dialog that closed, a window that's gone) — "
+        "if it's not in this frame, it's over. If the screen looks basically "
+        "the same as my last comment, or there's nothing new worth saying, "
+        "reply with EXACTLY [SILENT] and nothing else. Don't say 'you shared "
+        "your screen' — I'm watching over their shoulder. Never read out "
+        "passwords / API keys / private messages / payment info.",
+        "Looking at the user's CURRENT screen (attached). Comment on the "
+        "specific thing in front of them right now, like a friend sitting "
+        "next to them — one concise line. Only describe what's actually in "
+        "this frame; never re-mention something that already disappeared. If "
+        "it's basically the same as what I just said, reply with EXACTLY "
+        "[SILENT]. No generic 'need help?' filler; no sensitive text "
+        "(secrets, private chats, payment details).",
+        "The user's screen is in view (attached). ONLY if something genuinely "
+        "NEW changed vs a moment ago — a fresh error, a finished build, a new "
+        "page — call it out specifically and briefly. If the screen is "
+        "essentially the same as before, empty, or there's nothing new, reply "
+        "with EXACTLY [SILENT]. Never narrate something that's no longer "
+        "visible, and never repeat sensitive on-screen text.",
     ],
 }
 
 
 def _build_prompts() -> Tuple[List[TriggerPrompt], Dict[str, List[str]]]:
-    """Flatten the situation→[(en, ko), …] map into a flat prompt
+    """Flatten the situation→[text, …] map into a flat prompt
     library + a back-map of ``situation_id → [prompt_id, …]`` so each
     category's :class:`PromptRef` list can be assembled cheaply.
     """
@@ -328,13 +183,13 @@ def _build_prompts() -> Tuple[List[TriggerPrompt], Dict[str, List[str]]]:
     by_situation: Dict[str, List[str]] = {}
     for situation_id, variants in _SITUATION_PROMPTS.items():
         ids: List[str] = []
-        for idx, (en, ko) in enumerate(variants):
+        for idx, text in enumerate(variants):
             prompt_id = f"{situation_id}__{idx}"
             prompts.append(
                 TriggerPrompt(
                     id=prompt_id,
                     label=f"{situation_id} #{idx + 1}",
-                    content={"en": en.strip(), "ko": ko.strip()},
+                    content={"en": text.strip()},
                     tags=[situation_id],
                 )
             )

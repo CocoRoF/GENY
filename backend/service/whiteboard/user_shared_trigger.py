@@ -52,7 +52,7 @@ def _compose_trigger_prompt(
     The framing branches on the spotlight item's source metadata so
     the persona perceives ambient overhearing (V2 STT stream) and
     deliberate shares as different events. Without the branch every
-    capture reads as "사용자가 방금 위 자료를 공유했습니다" and the
+    capture reads as "The user just shared the material above" and the
     VTuber over-eagerly reacts to every cough / mouse click /
     half-finished filler.
     """
@@ -81,25 +81,28 @@ def _compose_trigger_prompt(
         # addressed to them (their name, a direct question, etc.) or
         # when there's a thread worth picking up.
         body = (
-            "위 내용은 사용자가 직접 너에게 보낸 메시지가 아니라, "
-            "STT 가 마이크에서 우연히 잡은 발화야 — *너는 옆에서 한 마디 듣게 된 것*뿐이다. "
-            "다음 규칙을 지켜:\n"
-            "  • 본인에게 한 명확한 말 (호명, 직접 질문) 이 아니면 *침묵해도 좋다*. "
-            "응답이 필요해 보이면 1~2문장 짧은 호응만 한다.\n"
-            "  • 절대 \"~를 공유해 주셨네요\" 류 표현 금지. "
-            "\"방금 [내용] 라고 하셨나봐\" / \"옆에서 들었는데 [내용]\" 같이 "
-            "엿들은 톤으로 풀어라.\n"
-            "  • 동일 burst 의 여러 spotlight 항목은 *전체를 보고 한 번에* 반응. "
-            "각 발화마다 답하지 말 것.\n"
-            "  • 한 사람이 혼잣말 / 다른 사람과 대화 / 비속어 일 수 있다는 가능성을 항상 염두에 두고, "
-            "확신 없는 추측은 하지 말고 자연스럽게 흘려보낸다."
+            "The text above is not a message the user sent directly to you; "
+            "it is speech that STT happened to pick up from the mic — "
+            "*you just overheard a remark from the side*. "
+            "Follow these rules:\n"
+            "  • If it is not something clearly directed at you "
+            "(being named, a direct question), *staying silent is fine*. "
+            "If a response seems warranted, give only a brief 1-2 sentence acknowledgement.\n"
+            "  • Never use phrasing like \"you shared ~ with me\". "
+            "Phrase it in an overheard tone, e.g. "
+            "\"sounds like you just said [content]\" / \"I caught from the side that [content]\".\n"
+            "  • For multiple spotlight items in the same burst, react *to all of them at once*. "
+            "Do not reply to each utterance separately.\n"
+            "  • Always keep in mind the possibility that this is someone talking to themselves, "
+            "talking to another person, or profanity, and instead of making "
+            "unfounded guesses, let it pass naturally."
         )
     else:
         body = (
-            "사용자가 방금 위 자료를 공유했습니다. "
-            "자연스럽게 화제로 꺼내거나 짧게 의견을 표현하세요. "
-            "이미 본 자료(seen_before=true)라면 처음 마주친 듯 다루지 말고 "
-            "이전 맥락에 이어서 말하세요."
+            "The user just shared the material above with you. "
+            "Bring it up naturally as a topic or briefly offer your opinion. "
+            "If this is material already seen (seen_before=true), do not treat it "
+            "as a first encounter; continue from the prior context."
         )
     return (
         f"[USER_SHARED] {json.dumps(payload, ensure_ascii=False)}\n"

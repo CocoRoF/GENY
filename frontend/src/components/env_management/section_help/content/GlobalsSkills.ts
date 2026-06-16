@@ -160,9 +160,9 @@ tools: [Read, Grep, Bash]
 model_override: claude-opus-4-7
 ---
 
-당신은 시니어 리뷰어입니다. <args.pr_url>의 PR에 대해:
-1. 보안 이슈 식별
-2. 스타일 일관성 확인
+You are a senior reviewer. For the PR at <args.pr_url>:
+1. Identify security issues
+2. Check style consistency
 ...
 \`\`\`
 
