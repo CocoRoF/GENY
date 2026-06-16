@@ -1,9 +1,14 @@
-"""Tests for the V3 screen-observation trigger.
+"""Tests for the V3 screen-observation upload path.
 
-Covers the public ``save_and_maybe_trigger`` path: image persistence,
-caption short-circuit when vision is unavailable, per-session
-cooldown gating, and the ``force_trigger`` override used by the
-"Show Now" button.
+Covers the public ``save_observation`` path: marking the session active,
+ensuring the session is live, caching the latest frame, recording the
+perceptual hash, and persisting the image + a recall-able memory note
+when the frame changed (or ``force=True``).
+
+This module no longer fires its own proactive trigger — screen commentary
+is owned by the single thinking-trigger ``screen_observation`` category,
+which reuses the cached frame + hash recorded here. So there are no
+cooldown / trigger / prompt-compose tests anymore.
 """
 
 from __future__ import annotations
@@ -59,36 +64,19 @@ def _install_caption(
     monkeypatch.setattr(so, "_caption_image", _stub)
 
 
-def _install_trigger_recorder(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[dict]:
-    """Capture ``_run_trigger`` invocations without actually hitting
-    ``execute_command``."""
-    from service.vtuber import screen_observation as so
-
-    fired: list[dict] = []
-
-    async def _stub(**kwargs):
-        fired.append(kwargs)
-
-    monkeypatch.setattr(so, "_run_trigger", _stub)
-    return fired
-
-
-# ── save_and_maybe_trigger ────────────────────────────────────────────
+# ── save_observation ──────────────────────────────────────────────────
 
 
 def test_save_writes_image_and_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch)
-    _install_trigger_recorder(monkeypatch)
 
     result = _run(
-        save_and_maybe_trigger(
+        save_observation(
             session_id="sess-1",
             image_bytes=b"\x89PNG\r\n\x1a\nfakebytes",
             mime_type="image/png",
@@ -114,14 +102,13 @@ def test_save_writes_image_and_note(
 def test_session_not_found_short_circuits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=None)
     _install_caption(monkeypatch)
-    fired = _install_trigger_recorder(monkeypatch)
 
     result = _run(
-        save_and_maybe_trigger(
+        save_observation(
             session_id="ghost",
             image_bytes=b"FAKE",
             mime_type="image/png",
@@ -130,20 +117,18 @@ def test_session_not_found_short_circuits(
 
     assert result.skipped_reason == "session_not_found"
     assert result.image_path is None
-    assert fired == []
 
 
 def test_empty_image_short_circuits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch)
-    fired = _install_trigger_recorder(monkeypatch)
 
     result = _run(
-        save_and_maybe_trigger(
+        save_observation(
             session_id="sess-1",
             image_bytes=b"",
             mime_type="image/png",
@@ -151,25 +136,22 @@ def test_empty_image_short_circuits(
     )
 
     assert result.skipped_reason == "empty_image"
-    assert fired == []
 
 
-def test_no_caption_skips_trigger_but_keeps_image(
+def test_empty_caption_still_persists_image_and_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Vision LLM returned no caption (no vision provider configured
-    or LLM rejected the image). The image still lands on disk so a
-    later "list observations" tool can show it — but the trigger
-    must not fire because we have no real content for the persona
-    to react to."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    """Vision LLM returned no caption (no vision provider configured or
+    LLM rejected the image). The image + note still land on disk so a
+    later "list observations" tool can show it — a caption that comes
+    back empty/placeholder is still WRITTEN now; it does not skip."""
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="", source="placeholder")
-    fired = _install_trigger_recorder(monkeypatch)
 
     result = _run(
-        save_and_maybe_trigger(
+        save_observation(
             session_id="sess-1",
             image_bytes=b"FAKE",
             mime_type="image/png",
@@ -178,194 +160,72 @@ def test_no_caption_skips_trigger_but_keeps_image(
 
     assert result.image_path is not None
     assert Path(result.image_path).exists()
+    assert result.note_path is not None
     assert result.trigger_fired is False
-    assert result.skipped_reason == "no_real_caption"
-    assert fired == []
+    assert result.skipped_reason is None
 
 
-def test_cooldown_blocks_consecutive_triggers(
+def test_unchanged_hash_skips_persist_force_overrides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    """The same ``frame_hash`` twice → the 2nd is 'unchanged' (no image
+    written). ``force=True`` on the 2nd persists anyway."""
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="working on code")
-    fired = _install_trigger_recorder(monkeypatch)
 
-    first = _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME1",
-            mime_type="image/png",
-        )
-    )
-    second = _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME2",
-            mime_type="image/png",
-        )
-    )
+    h = "0123456789abcdef"
+    first = _run(save_observation(
+        session_id="sess-1", image_bytes=b"F1", mime_type="image/png", frame_hash=h,
+    ))
+    second = _run(save_observation(
+        session_id="sess-1", image_bytes=b"F2", mime_type="image/png", frame_hash=h,
+    ))
 
-    assert first.trigger_fired is True
-    assert second.trigger_fired is False
-    assert second.skipped_reason == "cooldown"
-    # Second frame still landed on disk — only the trigger was
-    # skipped.
+    assert first.image_path is not None
+    assert second.skipped_reason == "unchanged"
+    assert second.image_path is None      # returned before writing
+
+    # force=True ignores the change-gate and persists.
+    forced = _run(save_observation(
+        session_id="sess-1", image_bytes=b"F3", mime_type="image/png",
+        frame_hash=h, force=True,
+    ))
+    assert forced.skipped_reason is None
+    assert forced.image_path is not None
+    assert Path(forced.image_path).exists()
+
+
+def test_changed_hash_passes_gate_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A far-apart hash is NOT 'unchanged' — it passes the change-gate and
+    the image is written."""
+    from service.vtuber.screen_observation import save_observation
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="working on code")
+
+    _run(save_observation(
+        session_id="sess-1", image_bytes=b"F1", mime_type="image/png",
+        frame_hash="0000000000000000",
+    ))
+    second = _run(save_observation(
+        session_id="sess-1", image_bytes=b"F2", mime_type="image/png",
+        frame_hash="ffffffffffffffff",   # 64-bit flip → very changed
+    ))
+    assert second.skipped_reason is None
     assert second.image_path is not None
     assert Path(second.image_path).exists()
-    assert len(fired) == 1
-
-
-def test_force_trigger_bypasses_cooldown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The frontend "Show Now" button uses ``force_trigger=True`` so
-    a deliberate user click is never swallowed by a cooldown that
-    happens to be active."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="working on code")
-    fired = _install_trigger_recorder(monkeypatch)
-
-    _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME1",
-            mime_type="image/png",
-        )
-    )
-    forced = _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME2",
-            mime_type="image/png",
-            force_trigger=True,
-        )
-    )
-
-    assert forced.trigger_fired is True
-    assert len(fired) == 2
-
-
-def test_different_sessions_have_independent_cooldowns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-
-    alice = tmp_path / "alice"
-    bob = tmp_path / "bob"
-    alice.mkdir()
-    bob.mkdir()
-
-    from service.vtuber import screen_observation as so
-
-    def _resolve(session_id: str) -> Optional[Path]:
-        return {"alice": alice, "bob": bob}.get(session_id)
-
-    monkeypatch.setattr(so, "_resolve_session_storage", _resolve)
-    _install_caption(monkeypatch, caption="working")
-    fired = _install_trigger_recorder(monkeypatch)
-
-    _run(save_and_maybe_trigger(
-        session_id="alice", image_bytes=b"a1", mime_type="image/png",
-    ))
-    _run(save_and_maybe_trigger(
-        session_id="bob", image_bytes=b"b1", mime_type="image/png",
-    ))
-
-    # Both fire — they're in different sessions.
-    assert len(fired) == 2
-
-
-def test_trigger_error_releases_slot_for_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If ``_run_trigger`` itself blows up (executor offline, etc.),
-    the cooldown slot must be released so the next 3-min capture
-    can try again — otherwise a single failure silences the persona
-    for the full 10-min window."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-    from service.vtuber import screen_observation as so
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="working")
-
-    call_count = {"n": 0}
-
-    async def _flaky(**kwargs):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            raise RuntimeError("executor offline")
-
-    monkeypatch.setattr(so, "_run_trigger", _flaky)
-
-    first = _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME1",
-            mime_type="image/png",
-        )
-    )
-    second = _run(
-        save_and_maybe_trigger(
-            session_id="sess-1",
-            image_bytes=b"FRAME2",
-            mime_type="image/png",
-        )
-    )
-
-    assert first.trigger_fired is False
-    assert first.skipped_reason == "trigger_error"
-    # Slot was released → second attempt is allowed to try.
-    assert second.trigger_fired is True
-
-
-# ── Compose prompt sanity ─────────────────────────────────────────────
-
-
-def test_prompt_includes_silent_token_instruction() -> None:
-    """The persona must be told it can return ``[SILENT]`` to skip
-    the chat insert. Without this guidance the model produces
-    awkward filler ("nothing to comment on") that still hits the
-    chat room."""
-    from datetime import datetime, timezone
-    from service.vtuber.screen_observation import _compose_prompt
-
-    prompt = _compose_prompt(
-        caption="vscode editing python",
-        observation_id="obs-1",
-        captured_at=datetime.now(timezone.utc),
-    )
-    assert "[USER_OBSERVATION]" in prompt
-    assert "[SILENT]" in prompt
-    # And the payload carries the share_source the skill / telemetry
-    # branches on.
-    assert "vtuber_screen_observation" in prompt
-
-
-def test_prompt_mentions_sensitive_content_guard() -> None:
-    from datetime import datetime, timezone
-    from service.vtuber.screen_observation import _compose_prompt
-
-    prompt = _compose_prompt(
-        caption="x", observation_id="o",
-        captured_at=datetime.now(timezone.utc),
-    )
-    # Korean prompt asks the persona to skip sensitive text (password
-    # / API key / private messages). Without this the persona could
-    # repeat secrets it saw on the screen.
-    assert "비밀번호" in prompt or "민감" in prompt
 
 
 # ── Sanitiser interaction ─────────────────────────────────────────────
 
 
 def test_silent_token_collapses_to_empty_via_sanitizer() -> None:
-    """Confirm the existing display sanitiser already strips
-    ``[SILENT]`` so the chat-insert guard short-circuits naturally —
-    we rely on this in ``_save_trigger_response_to_chat``."""
+    """Confirm the existing display sanitiser strips ``[SILENT]`` so the
+    chat-insert guard short-circuits naturally."""
     from service.utils.text_sanitizer import sanitize_for_display
 
     assert sanitize_for_display("[SILENT]") == ""
@@ -375,7 +235,7 @@ def test_silent_token_collapses_to_empty_via_sanitizer() -> None:
     assert sanitize_for_display("[SILENT] just kidding") == "just kidding"
 
 
-# ── P1: real-image attachment + vision gating ─────────────────────────
+# ── P1: vision gating ─────────────────────────────────────────────────
 
 
 class _FakeAgent:
@@ -388,135 +248,6 @@ class _FakeAgent:
 def _install_agent(monkeypatch, agent) -> None:
     from service.vtuber import screen_observation as so
     monkeypatch.setattr(so, "_resolve_agent", lambda _sid: agent)
-
-
-def test_attachment_built_for_vision_capable_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from service.vtuber import screen_observation as so
-
-    _install_agent(monkeypatch, _FakeAgent(model_name="claude-sonnet-4-20250514"))
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"FAKEJPEG")
-
-    att = so._maybe_image_attachment("sess-1", img)
-    assert att is not None and len(att) == 1
-    assert att[0]["kind"] == "image"
-    assert att[0]["mime_type"] == "image/jpeg"
-    assert att[0]["url"].startswith("file://")
-    assert att[0]["url"].endswith("frame.jpg")
-
-
-def test_attachment_omitted_for_non_vision_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from service.vtuber import screen_observation as so
-
-    _install_agent(monkeypatch, _FakeAgent(model_name="some-local-text-only"))
-    img = tmp_path / "frame.png"
-    img.write_bytes(b"FAKE")
-
-    assert so._maybe_image_attachment("sess-1", img) is None
-
-
-def test_attachment_omitted_when_send_image_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from service.vtuber import screen_observation as so
-
-    monkeypatch.setenv("GENY_SCREEN_OBS_SEND_IMAGE", "0")
-    _install_agent(monkeypatch, _FakeAgent(model_name="claude-sonnet-4-20250514"))
-    img = tmp_path / "frame.png"
-    img.write_bytes(b"FAKE")
-
-    assert so._maybe_image_attachment("sess-1", img) is None
-
-
-def test_run_trigger_passes_attachments_when_vision_capable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The synthetic ``[USER_OBSERVATION]`` execute_command call must
-    carry the real frame as a multimodal attachment for a vision model."""
-    import sys
-    import types
-    from datetime import datetime, timezone
-    from service.vtuber import screen_observation as so
-
-    captured: dict = {}
-
-    fake_mod = types.ModuleType("service.execution.agent_executor")
-
-    async def _fake_exec(session_id, prompt, **kwargs):  # noqa: ANN001
-        captured["session_id"] = session_id
-        captured["prompt"] = prompt
-        captured["kwargs"] = kwargs
-
-        class _R:
-            success = True
-            output = "[SILENT]"
-            duration_ms = 1
-            cost_usd = 0.0
-
-        return _R()
-
-    fake_mod.execute_command = _fake_exec  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "service.execution.agent_executor", fake_mod)
-    monkeypatch.setattr(so, "_save_trigger_response_to_chat", lambda **k: None)
-    _install_agent(monkeypatch, _FakeAgent(model_name="claude-opus-4"))
-
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"FAKEJPEG")
-
-    _run(so._run_trigger(
-        session_id="sess-1",
-        observation_id="obs-1",
-        caption="vscode editing python",
-        captured_at=datetime.now(timezone.utc),
-        image_path=img,
-    ))
-
-    assert "attachments" in captured["kwargs"]
-    att = captured["kwargs"]["attachments"]
-    assert att[0]["kind"] == "image" and att[0]["url"].startswith("file://")
-    assert captured["kwargs"]["is_trigger"] is True
-
-
-def test_run_trigger_caption_only_for_non_vision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sys
-    import types
-    from datetime import datetime, timezone
-    from service.vtuber import screen_observation as so
-
-    captured: dict = {}
-    fake_mod = types.ModuleType("service.execution.agent_executor")
-
-    async def _fake_exec(session_id, prompt, **kwargs):  # noqa: ANN001
-        captured["kwargs"] = kwargs
-
-        class _R:
-            success = True
-            output = ""
-            duration_ms = 1
-            cost_usd = 0.0
-
-        return _R()
-
-    fake_mod.execute_command = _fake_exec  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "service.execution.agent_executor", fake_mod)
-    monkeypatch.setattr(so, "_save_trigger_response_to_chat", lambda **k: None)
-    _install_agent(monkeypatch, _FakeAgent(model_name="local-llama-text"))
-
-    img = tmp_path / "frame.png"
-    img.write_bytes(b"FAKE")
-
-    _run(so._run_trigger(
-        session_id="sess-1", observation_id="o", caption="c",
-        captured_at=datetime.now(timezone.utc), image_path=img,
-    ))
-
-    assert "attachments" not in captured["kwargs"]
 
 
 # ── P2: recall-able vault recording + dedup ───────────────────────────
@@ -653,18 +384,16 @@ def test_e2e_save_records_to_vault(
 ) -> None:
     """Full upload path with a live (fake) memory manager records the
     observation into the recall-able vault under category=observations."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-    from service.vtuber import screen_observation as so
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="terminal showing a stack trace")
-    _install_trigger_recorder(monkeypatch)
     mm = _FakeMemoryManager()
     _install_agent(monkeypatch, _FakeAgent(
         model_name="claude-sonnet-4", memory_manager=mm,
     ))
 
-    result = _run(save_and_maybe_trigger(
+    result = _run(save_observation(
         session_id="sess-1", image_bytes=b"FRAME", mime_type="image/jpeg",
     ))
 
@@ -693,39 +422,36 @@ def test_redaction_applied_to_caption_in_save(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A secret transcribed by the captioner must be masked before the
-    caption is recorded or fed to the trigger."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    caption is recorded."""
+    from service.vtuber.screen_observation import save_observation
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(
         monkeypatch,
         caption="terminal shows password: hunter2theverylongsecret123",
     )
-    fired = _install_trigger_recorder(monkeypatch)
 
-    result = _run(save_and_maybe_trigger(
+    result = _run(save_observation(
         session_id="sess-1", image_bytes=b"FRAME", mime_type="image/jpeg",
     ))
 
     assert "[REDACTED]" in result.caption
     assert "hunter2theverylongsecret123" not in result.caption
-    # The trigger receives the redacted caption too.
-    assert "hunter2theverylongsecret123" not in fired[0]["caption"]
 
 
 def test_cleanup_session_state_drops_tables() -> None:
     from service.vtuber import screen_observation as so
 
-    so._last_fire_at["sess-x"] = 123.0
     so._last_caption["sess-x"] = "something"
     so._last_hash["sess-x"] = "deadbeefdeadbeef"
+    so._last_comment_hash["sess-x"] = "deadbeefdeadbeef"
     so.cleanup_session_state("sess-x")
-    assert "sess-x" not in so._last_fire_at
     assert "sess-x" not in so._last_caption
     assert "sess-x" not in so._last_hash
+    assert "sess-x" not in so._last_comment_hash
 
 
-# ── Change-gate (perceptual-hash) + talkativeness ─────────────────────
+# ── Change-gate (perceptual-hash) ─────────────────────────────────────
 
 
 def test_hamming_and_invalid_input() -> None:
@@ -737,119 +463,12 @@ def test_hamming_and_invalid_input() -> None:
     assert so._hamming("zz", "00") is None        # non-hex → None (treated changed)
 
 
-def test_level_params_clamps_min_gap_to_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    from service.vtuber import screen_observation as so
-
-    assert so._level_params("chatty")["min_gap"] == 45.0
-    assert so._level_params("calm")["min_gap"] == 180.0
-    assert so._level_params(None)["min_gap"] == 45.0      # default = chatty
-    assert so._level_params("bogus")["min_gap"] == 45.0   # unknown → chatty
-    # Server floor wins over a too-small requested level value.
-    monkeypatch.setenv("GENY_SCREEN_OBS_MIN_GAP_FLOOR_S", "120")
-    assert so._level_params("chatty")["min_gap"] == 120.0
-
-
-def test_unchanged_frame_skips_caption_and_trigger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Identical consecutive frame_hash → the vision call + trigger are
-    skipped entirely (no image written, no caption, no fire)."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="working on code")
-    fired = _install_trigger_recorder(monkeypatch)
-
-    h = "0123456789abcdef"
-    first = _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F1", mime_type="image/png", frame_hash=h,
-    ))
-    second = _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F2", mime_type="image/png", frame_hash=h,
-    ))
-
-    assert first.trigger_fired is True
-    assert second.skipped_reason == "unchanged"
-    assert second.image_path is None      # returned before writing
-    assert second.caption == ""           # never captioned
-    assert len(fired) == 1
-
-
-def test_changed_frame_passes_gate_then_hits_min_gap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A far-apart hash is NOT 'unchanged' — it reaches the min-gap check
-    (reason 'cooldown'), proving the change-gate let it through."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="working on code")
-    _install_trigger_recorder(monkeypatch)
-
-    _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F1", mime_type="image/png",
-        frame_hash="0000000000000000",
-    ))
-    second = _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F2", mime_type="image/png",
-        frame_hash="ffffffffffffffff",   # 64-bit flip → very changed
-    ))
-    assert second.skipped_reason == "cooldown"   # passed change-gate, blocked by min_gap
-    assert second.skipped_reason != "unchanged"
-
-
-def test_force_bypasses_change_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="working on code")
-    fired = _install_trigger_recorder(monkeypatch)
-
-    h = "0123456789abcdef"
-    _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F1", mime_type="image/png", frame_hash=h,
-    ))
-    forced = _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F2", mime_type="image/png",
-        frame_hash=h, force_trigger=True,   # identical hash, but forced
-    ))
-    assert forced.trigger_fired is True
-    assert len(fired) == 2
-
-
-def test_ambient_fires_despite_unchanged_after_max_silence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Even with an identical frame, an ambient comment surfaces once the
-    max_silence window has elapsed since the last fire."""
-    import time as _time
-    from service.vtuber.screen_observation import save_and_maybe_trigger
-    from service.vtuber import screen_observation as so
-
-    _install_session_storage(monkeypatch, storage_root=tmp_path)
-    _install_caption(monkeypatch, caption="still on the same screen")
-    fired = _install_trigger_recorder(monkeypatch)
-
-    # Pretend we last fired long ago, and already saw this exact hash.
-    h = "0123456789abcdef"
-    so._last_hash["sess-1"] = h
-    so._last_fire_at["sess-1"] = _time.monotonic() - 10_000  # > chatty max_silence (300)
-
-    res = _run(save_and_maybe_trigger(
-        session_id="sess-1", image_bytes=b"F", mime_type="image/png", frame_hash=h,
-    ))
-    assert res.trigger_fired is True
-    assert len(fired) == 1
-
-
 def test_upload_wakes_dormant_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every upload calls ensure_session_live so an observing connector
     keeps the persona alive across a backend restart (no manual re-open)."""
-    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber.screen_observation import save_observation
     from service.vtuber import screen_observation as so
 
     woken: list[str] = []
@@ -860,9 +479,8 @@ def test_upload_wakes_dormant_session(
     monkeypatch.setattr(so, "_ensure_session_live", _record)
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="working")
-    _install_trigger_recorder(monkeypatch)
 
-    _run(save_and_maybe_trigger(
+    _run(save_observation(
         session_id="sess-1", image_bytes=b"F", mime_type="image/png",
     ))
     assert woken == ["sess-1"]
@@ -871,21 +489,21 @@ def test_upload_wakes_dormant_session(
 def test_uploaded_frame_cached_and_served_even_without_caption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The HTTP-uploaded frame is cached + served as an attachment even when the
-    caption LLM fails (placeholder) — this is the path the thinking-trigger uses
-    to comment on the screen without depending on captions."""
+    """The HTTP-uploaded frame is cached + served as an attachment even when
+    the caption LLM fails (placeholder) — this is the path the thinking-trigger
+    uses to comment on the screen without depending on captions. Caption no
+    longer gates persistence."""
     from service.vtuber.screen_observation import (
-        save_and_maybe_trigger, get_recent_frame_attachment, list_active_sessions,
+        save_observation, get_recent_frame_attachment, list_active_sessions,
     )
     from service.vtuber import screen_observation as so
     import base64
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="", source="placeholder")  # caption fails (like prod)
-    _install_trigger_recorder(monkeypatch)
     monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: True)
 
-    _run(save_and_maybe_trigger(session_id="s1", image_bytes=b"FRAMEBYTES", mime_type="image/jpeg"))
+    _run(save_observation(session_id="s1", image_bytes=b"FRAMEBYTES", mime_type="image/jpeg"))
 
     assert "s1" in list_active_sessions()
     att = get_recent_frame_attachment("s1")
@@ -925,30 +543,15 @@ def test_vision_capable_optimistic_for_unknown_and_alias(monkeypatch) -> None:
 def test_recent_frame_none_for_non_vision_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger, get_recent_frame_attachment
+    from service.vtuber.screen_observation import save_observation, get_recent_frame_attachment
     from service.vtuber import screen_observation as so
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch, caption="x")
-    _install_trigger_recorder(monkeypatch)
     monkeypatch.setattr(so, "_session_vision_capable", lambda _sid: False)
 
-    _run(save_and_maybe_trigger(session_id="s2", image_bytes=b"F", mime_type="image/jpeg"))
+    _run(save_observation(session_id="s2", image_bytes=b"F", mime_type="image/jpeg"))
     assert get_recent_frame_attachment("s2") is None
-
-
-def test_prompt_bias_varies_by_talkativeness() -> None:
-    from datetime import datetime, timezone
-    from service.vtuber.screen_observation import _compose_prompt
-
-    now = datetime.now(timezone.utc)
-    chatty = _compose_prompt(caption="c", observation_id="o", captured_at=now, talkativeness="chatty")
-    calm = _compose_prompt(caption="c", observation_id="o", captured_at=now, talkativeness="calm")
-    assert "기본적으로 *반응해라*" in chatty       # chatty pushes to speak
-    assert "조용히 있어도 된다" in calm            # calm is reserved
-    # Both keep the [SILENT] escape + sensitive guard.
-    for p in (chatty, calm):
-        assert "[SILENT]" in p and "민감" in p
 
 
 # ── P3b: real-time per-turn capture via connector ─────────────────────
@@ -1064,14 +667,13 @@ def test_turn_capture_none_on_transport_error(
 def test_is_screen_active_tracks_uploads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from service.vtuber.screen_observation import save_and_maybe_trigger, is_screen_active
+    from service.vtuber.screen_observation import save_observation, is_screen_active
 
     _install_session_storage(monkeypatch, storage_root=tmp_path)
     _install_caption(monkeypatch)
-    _install_trigger_recorder(monkeypatch)
 
     assert is_screen_active("sess-1") is False
-    _run(save_and_maybe_trigger(
+    _run(save_observation(
         session_id="sess-1", image_bytes=b"F", mime_type="image/jpeg",
     ))
     assert is_screen_active("sess-1") is True

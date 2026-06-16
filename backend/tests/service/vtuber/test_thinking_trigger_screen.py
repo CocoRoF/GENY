@@ -212,3 +212,71 @@ async def test_fire_falls_back_to_cached_upload_when_ws_grab_none(monkeypatch) -
     await svc._fire_trigger("sid-fallback")
 
     assert captured["kwargs"].get("attachments") == [cached]
+
+
+# ── fire_screen_now: the "Show Now" forced screen comment (path B) ────
+
+
+@pytest.mark.asyncio
+async def test_fire_screen_now_forces_comment_with_frame(monkeypatch) -> None:
+    """The Show-Now button forces an immediate screen comment: renders the
+    default manifest's screen_observation category prompt, attaches the frame,
+    fires one turn, and marks the screen commented."""
+    from unittest.mock import AsyncMock
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.vtuber import screen_observation as so
+    from service.trigger_preset import set_trigger_preset_service
+    import service.execution.agent_executor as exec_mod
+
+    set_trigger_preset_service(None)  # use the in-code default manifest (has screen cat)
+    try:
+        svc = ThinkingTriggerService()
+        monkeypatch.setattr(svc, "_save_to_chat_room", lambda _sid, _r: None)
+
+        frame = {"kind": "image", "mime_type": "image/jpeg", "data": "QUJD", "source": "screen_observation"}
+        async def _grab(_sid):
+            return frame
+        monkeypatch.setattr(so, "capture_current_screen_attachment", _grab)
+        marked: list = []
+        monkeypatch.setattr(so, "mark_screen_comment", lambda sid: marked.append(sid))
+
+        captured: dict = {}
+        async def _exec(session_id, prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["kwargs"] = kwargs
+            class _R:
+                success = True
+                output = "사장님, 그 에러 보여요!"
+            return _R()
+        monkeypatch.setattr(exec_mod, "execute_command", _exec)
+
+        ok = await svc.fire_screen_now("sid-now")
+        assert ok is True
+        assert captured["kwargs"].get("attachments") == [frame]
+        assert captured["kwargs"]["is_trigger"] is True
+        assert "[THINKING_TRIGGER:screen_observation]" in captured["prompt"]
+        assert marked == ["sid-now"]
+    finally:
+        set_trigger_preset_service(None)
+
+
+@pytest.mark.asyncio
+async def test_fire_screen_now_no_frame_returns_false(monkeypatch) -> None:
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.vtuber import screen_observation as so
+    from service.trigger_preset import set_trigger_preset_service
+    import service.execution.agent_executor as exec_mod
+
+    set_trigger_preset_service(None)
+    try:
+        svc = ThinkingTriggerService()
+        async def _none(_sid):
+            return None
+        monkeypatch.setattr(so, "capture_current_screen_attachment", _none)
+        monkeypatch.setattr(so, "get_recent_frame_attachment", lambda _sid: None)
+        async def _exec(*a, **k):
+            raise AssertionError("must not fire without a frame")
+        monkeypatch.setattr(exec_mod, "execute_command", _exec)
+        assert await svc.fire_screen_now("sid-x") is False
+    finally:
+        set_trigger_preset_service(None)

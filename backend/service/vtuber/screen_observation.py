@@ -1,34 +1,25 @@
 """
-Screen observation — VTuber-initiated proactive screen-capture trigger.
+Screen observation — landing site for the user's screen-share frames.
 
 When the user toggles "screen observation" ON in the VTuber tab, the
 frontend periodically captures a frame of their screen and POSTs it to
-``/api/vtuber/screen-observation/upload``. This module is the backend
-landing site:
+``/api/vtuber/screen-observation/upload``. This module (``save_observation``)
+handles the upload:
 
-  1. **Persist** — image bytes drop into the *session's* storage path
-     (``<storage_path>/observations/<ts>.png``). A small markdown
-     sidecar (``<ts>.md``) carries the caption + frontmatter so the
-     VTuber's agent can retrieve past observations via the regular
-     memory tools.
+  1. **Mark active + cache** — refresh the per-session "observing" marker,
+     cache the latest frame (``get_recent_frame_attachment``), and record its
+     perceptual hash (``screen_changed_since_last_comment``).
 
-  2. **Caption** — re-uses the same vision-LLM helper the whiteboard
-     image hook relies on (``_try_vision_describe``). Caption-failure
-     short-circuits the trigger (we never bother the persona without
-     a real "what I saw" string).
+  2. **Persist (on change)** — when the frame meaningfully changed, the image
+     drops into the session's storage (``<storage>/memory/observations/…``) and
+     a recall-able memory note is written (caption via ``_try_vision_describe``,
+     best-effort). Unchanged frames are skipped to avoid duplicate notes.
 
-  3. **Trigger** — fires a synthetic ``[USER_OBSERVATION]`` prompt
-     through ``agent_executor.execute_command`` with ``is_trigger=True``.
-     The persona may respond with ``[SILENT]`` to decline the
-     conversation; the sanitiser strips that token and the existing
-     empty-response guard in the trigger result handler skips the
-     chat-insert (mirrors the ambient STT trigger path).
-
-A per-session **cooldown** (default 10 min, env override) prevents
-the persona from being asked to react to every 3-min capture. Every
-capture still lands on disk + is captioned, but only some of them
-fire a trigger; the rest silently accumulate as memory the persona
-can browse if it wants context.
+This module no longer fires its own proactive comment. Screen commentary is
+owned by the SINGLE thinking-trigger ``screen_observation`` category (path B),
+which consumes the cached frame + hash this module records. The "Show Now"
+button forces an immediate comment via
+``ThinkingTriggerService.fire_screen_now`` (called by the upload controller).
 """
 
 from __future__ import annotations
@@ -50,50 +41,6 @@ logger = getLogger(__name__)
 
 
 # ── Tunables ──────────────────────────────────────────────────────────
-
-
-# ── Talkativeness levels ──────────────────────────────────────────────
-# How proactively the persona reacts to the screen while observation is ON.
-# Each level maps to (min_gap, change_threshold, max_silence):
-#   * min_gap          — minimum seconds between two trigger fires (anti-burst).
-#   * change_threshold — dHash Hamming distance below which two consecutive
-#                        frames count as "unchanged" → vision + trigger skipped
-#                        (cheap). Lower = more sensitive to small changes.
-#   * max_silence      — even with no change, surface a comment if this long has
-#                        passed since the last fire (ambient presence).
-# The client sends its chosen level per upload; the server clamps min_gap to a
-# hard floor so a buggy/hostile client can't spam the persona.
-_LEVELS: Dict[str, Dict[str, float]] = {
-    "chatty":   {"min_gap": 45.0,  "change_threshold": 4.0,  "max_silence": 300.0},
-    "balanced": {"min_gap": 90.0,  "change_threshold": 8.0,  "max_silence": 600.0},
-    "calm":     {"min_gap": 180.0, "change_threshold": 12.0, "max_silence": 1200.0},
-}
-_DEFAULT_LEVEL = "chatty"
-
-
-def _min_gap_floor() -> float:
-    """Hard server-side lower bound on the inter-trigger gap, regardless of the
-    client-requested level. Anti-spam guard. Default 20s."""
-    try:
-        return float(os.environ.get("GENY_SCREEN_OBS_MIN_GAP_FLOOR_S", "20"))
-    except ValueError:
-        return 20.0
-
-
-def _level_params(level: Optional[str]) -> Dict[str, float]:
-    """Resolve a talkativeness level name → its behavior params, with the
-    min_gap clamped to the server floor. A legacy explicit
-    ``GENY_SCREEN_OBSERVATION_COOLDOWN_S`` still overrides min_gap when set
-    (back-compat escape hatch for anyone who pinned a fixed cooldown)."""
-    p = dict(_LEVELS.get((level or _DEFAULT_LEVEL).strip().lower(), _LEVELS[_DEFAULT_LEVEL]))
-    legacy = os.environ.get("GENY_SCREEN_OBSERVATION_COOLDOWN_S")
-    if legacy is not None:
-        try:
-            p["min_gap"] = float(legacy)
-        except ValueError:
-            pass
-    p["min_gap"] = max(p["min_gap"], _min_gap_floor())
-    return p
 
 
 def _hamming(a: str, b: str) -> Optional[int]:
@@ -182,10 +129,9 @@ _MIME_TO_EXT: Dict[str, str] = {
 }
 
 
-# ── Cooldown state ────────────────────────────────────────────────────
+# ── Per-session state ─────────────────────────────────────────────────
 
 
-_last_fire_at: Dict[str, float] = {}
 # Per-session last recorded caption — skips writing a near-identical
 # observation note when the screen hasn't meaningfully changed (the
 # vision LLM returns the same caption), so the vault doesn't fill with
@@ -211,7 +157,6 @@ _screen_active_until: Dict[str, float] = {}
 # commentary works even when the caption LLM is unavailable and the WS grab
 # isn't supported.
 _latest_frame: Dict[str, Tuple[bytes, str, float]] = {}
-_lock = asyncio.Lock()
 
 
 def _screen_active_window() -> float:
@@ -272,30 +217,8 @@ def get_recent_frame_attachment(session_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _claim_trigger_slot(session_id: str, min_gap: float) -> bool:
-    """Return True iff at least *min_gap* seconds have elapsed since the
-    last successful trigger fire for *session_id*. On True, the slot
-    is reserved immediately so a racing concurrent call doesn't
-    double-fire."""
-    async with _lock:
-        last = _last_fire_at.get(session_id, 0.0)
-        now = time.monotonic()
-        if now - last < min_gap:
-            return False
-        _last_fire_at[session_id] = now
-        return True
-
-
-async def _release_trigger_slot(session_id: str) -> None:
-    """Roll back a claimed slot if the trigger itself failed before
-    actually running (so the next capture can try)."""
-    async with _lock:
-        _last_fire_at.pop(session_id, None)
-
-
 def reset_cooldown_state_for_tests() -> None:
-    """Test hook — clear the per-session cooldown + dedup + hash + prune + active tables."""
-    _last_fire_at.clear()
+    """Test hook — clear the per-session dedup + hash + prune + active tables."""
     _last_caption.clear()
     _last_hash.clear()
     _last_comment_hash.clear()
@@ -305,10 +228,9 @@ def reset_cooldown_state_for_tests() -> None:
 
 
 def cleanup_session_state(session_id: str) -> None:
-    """Drop a session's per-session screen-observation state (cooldown +
-    dedup + last hash). Wire into session teardown so the in-memory tables
+    """Drop a session's per-session screen-observation state (dedup + last
+    hash + comment hash). Wire into session teardown so the in-memory tables
     don't grow unbounded across the process lifetime."""
-    _last_fire_at.pop(session_id, None)
     _last_caption.pop(session_id, None)
     _last_hash.pop(session_id, None)
     _last_comment_hash.pop(session_id, None)
@@ -479,35 +401,6 @@ def _session_vision_capable(session_id: str) -> bool:
     if model.strip().lower() in ("sonnet", "opus", "haiku", "claude"):
         return True
     return False
-
-
-def _maybe_image_attachment(
-    session_id: str, image_path: Path,
-) -> Optional[list]:
-    """Build the multimodal attachment that hands the persona the REAL
-    captured frame — but only when the session's model supports vision
-    and image-sending is enabled. Returns ``None`` (caption-only
-    fallback) otherwise, so a non-vision model never gets an image it
-    would choke on.
-
-    Shape mirrors the chat-broadcast attachment the executor's
-    ``MultimodalNormalizer`` already consumes: a ``file://`` URI that the
-    normalizer inlines as a base64 image block (keeping huge base64 out
-    of this module + out of the chat-history JSON)."""
-    if not _send_image_enabled():
-        return None
-    if not _session_vision_capable(session_id):
-        logger.info("[USER_OBSERVATION] model not vision-capable — caption-only")
-        return None
-    try:
-        return [{
-            "kind": "image",
-            "mime_type": _ext_to_mime(image_path),
-            "url": Path(image_path).as_uri(),
-        }]
-    except Exception:  # noqa: BLE001
-        logger.debug("[USER_OBSERVATION] attachment build failed", exc_info=True)
-        return None
 
 
 async def capture_current_screen_attachment(
@@ -762,8 +655,8 @@ def _prune_old_observations(storage_root: Path) -> None:
 
 # Screen-tailored caption prompt (distinct from the whiteboard default). Pulls
 # out the active app/window, the user's current activity, key on-screen text,
-# and a concrete hook the persona can react to — so the proactive comment is
-# specific ("막혔어 보이는 그 import 에러?") not generic ("도와줄까?").
+# and a concrete hook the persona can react to — so the recorded note is
+# specific (e.g. "the import error they look stuck on") not generic.
 _SCREEN_CAPTION_INSTRUCTION = (
     "This is a screenshot of the user's screen, glanced at by an avatar sitting "
     "beside them. In 1–2 concrete sentences: which app/window is in focus, what "
@@ -803,36 +696,35 @@ async def _caption_image(
 # ── Public entry point ───────────────────────────────────────────────
 
 
-async def save_and_maybe_trigger(
+async def save_observation(
     *,
     session_id: str,
     image_bytes: bytes,
     mime_type: str = "image/png",
-    force_trigger: bool = False,
+    force: bool = False,
     frame_hash: Optional[str] = None,
-    talkativeness: Optional[str] = None,
 ) -> ObservationResult:
-    """Persist the image + caption into the session's storage and,
-    when the change-gate + min-gap allow, fire the synthetic
-    ``[USER_OBSERVATION]`` trigger.
+    """Land one screen-share frame: mark the session "observing", cache the
+    latest frame, update the perceptual hash, and (when the screen changed)
+    persist the image + a recall-able memory note.
 
-    *frame_hash* is the client's perceptual hash (dHash hex) of this frame.
-    When it's within the level's threshold of the previous frame the screen
-    counts as unchanged → the expensive vision caption AND the trigger are
-    skipped (cheap path), unless the ambient ``max_silence`` window has
-    elapsed. Absent hash → treated as changed (back-compat with old clients).
+    This function NO LONGER fires its own proactive comment. Screen commentary
+    is owned by the single thinking-trigger ``screen_observation`` category
+    (path B), which reuses the cached frame this function stores
+    (``get_recent_frame_attachment``) and the hash it records
+    (``screen_changed_since_last_comment``). The deliberate "Show Now" button
+    forces an immediate comment via ``ThinkingTriggerService.fire_screen_now``,
+    invoked by the upload controller — not here.
 
-    *talkativeness* picks the cadence/sensitivity level ("chatty" | "balanced"
-    | "calm"); defaults to the chatty profile.
-
-    *force_trigger* bypasses BOTH the change-gate and the min-gap — wired to
-    the "Show Now" manual button so a deliberate user click is never swallowed.
+    *frame_hash* is the client's perceptual hash (dHash hex). When it is within
+    the same-screen threshold of the previous frame, the (expensive) vision
+    caption + memory note are skipped — nothing meaningful changed. *force*
+    bypasses that skip so a deliberate capture is always persisted.
     """
     observation_id = uuid.uuid4().hex[:12]
     captured_at = datetime.now(timezone.utc)
-    params = _level_params(talkativeness)
-    # Every upload refreshes the "observing" marker so conversation turns may
-    # grab a fresh frame from the connector (P3b) only while the toggle is ON.
+    # Every upload refreshes the "observing" marker so conversation turns + the
+    # thinking-trigger screen category know the toggle is ON.
     _mark_screen_active(session_id)
     # Wake a dormant session (e.g. after a backend restart) so observation keeps
     # working without a manual re-open. No-op when already live or deleted.
@@ -851,29 +743,23 @@ async def save_and_maybe_trigger(
         return result
 
     # Cache the latest frame for the thinking-trigger's screen category (which
-    # attaches it straight to the persona's vision model). Done before the
-    # change-gate so even an "unchanged" frame keeps the cache fresh.
+    # attaches it straight to the persona's vision model). Done first so even an
+    # "unchanged" frame keeps the cache + hash fresh for path B.
     _latest_frame[session_id] = (image_bytes, mime_type, time.monotonic())
 
-    # ── Change-gate ──────────────────────────────────────────────────
-    # Skip the vision call + trigger when the frame is ~identical to the last
-    # one (the dedup already drops duplicate memory notes, so we lose nothing).
-    # This is what makes a faster capture cadence affordable. A forced capture
-    # or a long ambient silence overrides the gate so the persona isn't mute
-    # while the user stares at a static screen.
+    # Change-gate (memory only): skip the vision caption + note when the frame
+    # is ~identical to the last one — captioning every static frame is wasteful
+    # and the note would just be a duplicate. Robust to the captured avatar
+    # overlay via the lenient same-screen threshold. ``force`` always persists.
     changed = True
     if frame_hash:
         prev = _last_hash.get(session_id)
         if prev is not None:
             dist = _hamming(prev, frame_hash)
             if dist is not None:
-                changed = dist >= params["change_threshold"]
+                changed = dist >= _same_screen_threshold()
         _last_hash[session_id] = frame_hash
-    if not changed and not force_trigger:
-        since_fire = time.monotonic() - _last_fire_at.get(session_id, 0.0)
-        if since_fire >= params["max_silence"]:
-            changed = True  # ambient: surface something despite no change
-    if not changed and not force_trigger:
+    if not changed and not force:
         result.skipped_reason = "unchanged"
         return result
 
@@ -893,7 +779,7 @@ async def save_and_maybe_trigger(
         image_bytes, mime_type=mime_type,
     )
     # Mask secrets the captioner may have transcribed verbatim BEFORE the
-    # caption is stored in a searchable note or sent to the persona.
+    # caption is stored in a searchable note.
     caption = _redact_sensitive(caption)
     result.caption = caption
     result.vision_source = vision_source
@@ -906,261 +792,8 @@ async def save_and_maybe_trigger(
         vision_source=vision_source,
         captured_at=captured_at,
         observation_id=observation_id,
-        force=force_trigger,
+        force=force,
     )
-    # Best-effort disk hygiene — old frames age out; notes (caption
-    # text) stay for recall.
+    # Best-effort disk hygiene — old frames age out; notes stay for recall.
     _prune_old_observations(storage_root)
-
-    # Trigger only when the vision LLM produced a real caption AND
-    # the cooldown allows (or the caller forces). No-caption captures
-    # still land on disk for future memory recall — they just don't
-    # bother the persona.
-    if vision_source != "vision" or not caption.strip():
-        result.skipped_reason = (
-            "no_real_caption" if vision_source != "vision" else "empty_caption"
-        )
-        # Diagnostic (only on a CHANGED frame — the gate already dropped static
-        # ones, so this isn't per-tick noise): a persistent "no_real_caption"
-        # means the vision captioner is unavailable/erroring, which would
-        # otherwise silently keep the persona from reacting to the screen.
-        logger.info(
-            "[USER_OBSERVATION] no trigger for %s — %s (vision_source=%s, caption_len=%d)",
-            session_id, result.skipped_reason, vision_source, len(caption or ""),
-        )
-        return result
-
-    if not force_trigger:
-        claimed = await _claim_trigger_slot(session_id, params["min_gap"])
-        if not claimed:
-            result.skipped_reason = "cooldown"
-            return result
-    else:
-        async with _lock:
-            _last_fire_at[session_id] = time.monotonic()
-
-    try:
-        await _run_trigger(
-            session_id=session_id,
-            observation_id=observation_id,
-            caption=caption,
-            captured_at=captured_at,
-            image_path=image_path,
-            talkativeness=(talkativeness or _DEFAULT_LEVEL),
-        )
-        result.trigger_fired = True
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "screen_observation: trigger fire failed", exc_info=True,
-        )
-        result.skipped_reason = "trigger_error"
-        # Release the slot so the next 3-min capture can try again
-        # instead of waiting out the full cooldown after a bug.
-        await _release_trigger_slot(session_id)
     return result
-
-
-# ── Synthetic [USER_OBSERVATION] trigger ────────────────────────────
-
-
-# Per-level reaction bias. Default (chatty) wants the persona to almost always
-# say something specific about the screen; calm keeps it reserved. [SILENT] is
-# always available for sensitive/empty screens — that guard never weakens.
-_LEVEL_BIAS: Dict[str, str] = {
-    "chatty": (
-        "  • 기본적으로 *반응해라*. 방금 본 화면에서 구체적인 것 하나를 짚어 "
-        "짧고 자연스럽게 한마디 해 — 진행 상황 칭찬, 눈에 띄는 변화, 막혀 보이는 "
-        "지점, 가벼운 코멘트 등 뭐든 좋다. 한두 문장이면 충분.\n"
-    ),
-    "balanced": (
-        "  • 화면에 반응할 거리가 있으면 (변화·에러·진행·흥미로운 것) 구체적으로 "
-        "한마디 해. 정말 아무 일도 없으면 가볍게 넘어가도 된다.\n"
-    ),
-    "calm": (
-        "  • 꼭 말할 가치가 있을 때만 (의미 있는 변화·에러·막힘) 짧게 반응해. "
-        "그 외에는 조용히 있어도 된다.\n"
-    ),
-}
-
-
-def _compose_prompt(
-    *, caption: str, observation_id: str, captured_at: datetime,
-    talkativeness: str = _DEFAULT_LEVEL,
-) -> str:
-    payload: Dict[str, Any] = {
-        "observation_id": observation_id,
-        "captured_at": captured_at.isoformat(),
-        "caption": caption[:600],
-        "share_source": "vtuber_screen_observation",
-    }
-    bias = _LEVEL_BIAS.get((talkativeness or _DEFAULT_LEVEL).strip().lower(), _LEVEL_BIAS[_DEFAULT_LEVEL])
-    body = (
-        "방금 사용자 화면을 옆에서 잠깐 살펴봤어 — 위 caption 이 너가 본 거야. "
-        "다음 규칙을 지켜:\n"
-        + bias
-        + "  • 구체적으로 말해. \"혹시 그 [구체적인 부분] 막혔어?\" 처럼. "
-        "영혼 없는 \"도와줄까?\" 류 일반론은 금지.\n"
-        "  • \"공유해 주셨네요\" 류 표현 금지 — 너가 *옆에서 본 것* "
-        "이지 사용자가 보낸 게 아니다.\n"
-        "  • 캡션에 비밀번호 / 개인 메시지 / API 키 / 결제 정보 등 "
-        "민감해 보이는 텍스트가 보이면 그 부분을 *입에 올리지 마라*. 그럴 땐 "
-        "추상적으로 우회하거나, 정말 할 말이 없으면 출력 첫 줄에 **[SILENT]** "
-        "토큰만 써라 (그러면 chat 에 아무것도 안 나간다). 빈 바탕화면 등 반응할 "
-        "게 전혀 없을 때도 [SILENT]."
-    )
-    return (
-        f"[USER_OBSERVATION] {json.dumps(payload, ensure_ascii=False)}\n"
-        f"{body}"
-    )
-
-
-async def _run_trigger(
-    *,
-    session_id: str,
-    observation_id: str,
-    caption: str,
-    captured_at: datetime,
-    image_path: Path,
-    talkativeness: str = _DEFAULT_LEVEL,
-) -> None:
-    """Hand the synthetic prompt to ``execute_command``, then mirror
-    the response to the chat room (skipping ``[SILENT]`` / empty
-    output — the sanitiser turns ``[SILENT]`` into empty string and
-    the empty-guard below short-circuits)."""
-    try:
-        from service.execution.agent_executor import execute_command  # type: ignore
-    except Exception:  # noqa: BLE001
-        logger.debug("agent_executor unavailable", exc_info=True)
-        return
-
-    prompt = _compose_prompt(
-        caption=caption,
-        observation_id=observation_id,
-        captured_at=captured_at,
-        talkativeness=talkativeness,
-    )
-
-    # P1 — hand the persona the REAL captured frame (multimodal), not
-    # just the text caption, when the session's model is vision-capable.
-    # The caption stays in the prompt as a cheap "what I saw" anchor +
-    # the sensitive-content guard; the image lets the persona reason over
-    # pixels the caption can't fully convey (small text, layout, colours).
-    attachments = _maybe_image_attachment(session_id, image_path)
-    exec_kwargs: Dict[str, Any] = {"is_trigger": True, "timeout": 180}
-    if attachments:
-        exec_kwargs["attachments"] = attachments
-
-    try:
-        result = await execute_command(session_id, prompt, **exec_kwargs)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "[USER_OBSERVATION] execute_command failed", exc_info=True,
-        )
-        return
-
-    logger.info(
-        "[USER_OBSERVATION] fired for session %s (observation=%s, "
-        "caption_len=%d)",
-        session_id, observation_id, len(caption),
-    )
-
-    _save_trigger_response_to_chat(
-        session_id=session_id,
-        observation_id=observation_id,
-        result=result,
-    )
-
-
-def _save_trigger_response_to_chat(
-    *,
-    session_id: str,
-    observation_id: str,
-    result: Any,
-) -> None:
-    """Mirror the persona's response into the chat room. Skip when:
-      * the executor reported failure,
-      * the sanitised text is empty (which is what ``[SILENT]``
-        collapses to, since the system-tag sanitiser already covers
-        the token).
-
-    Best-effort: any failure here just logs and the user still sees
-    the persona's reaction on the next normal turn (since the
-    session memory has the observation note in it)."""
-    try:
-        if not getattr(result, "success", False):
-            return
-        output = getattr(result, "output", "") or ""
-
-        try:
-            from service.utils.text_sanitizer import sanitize_for_display
-            cleaned = sanitize_for_display(output)
-        except Exception:  # noqa: BLE001
-            cleaned = output
-        if not cleaned or not cleaned.strip():
-            logger.info(
-                "[USER_OBSERVATION] silent response for session %s "
-                "(observation=%s) — not inserting into chat",
-                session_id, observation_id,
-            )
-            return
-
-        try:
-            from service.executor import get_agent_session_manager
-        except Exception:  # noqa: BLE001
-            return
-        agent = get_agent_session_manager().get_agent(session_id)
-        if agent is None:
-            return
-        chat_room_id = getattr(agent, "_chat_room_id", None)
-        if not chat_room_id:
-            return
-
-        try:
-            from service.chat.conversation_store import get_chat_store
-            store = get_chat_store()
-        except Exception:  # noqa: BLE001
-            return
-
-        session_name = (
-            getattr(agent, "_session_name", None) or session_id
-        )
-        role_val = getattr(agent, "_role", None)
-        role = (
-            role_val.value if hasattr(role_val, "value")
-            else str(role_val or "vtuber")
-        )
-
-        msg = store.add_message(
-            chat_room_id,
-            {
-                "type": "agent",
-                "content": cleaned,
-                "session_id": session_id,
-                "session_name": session_name,
-                "role": role,
-                "duration_ms": getattr(result, "duration_ms", None),
-                "cost_usd": getattr(result, "cost_usd", None),
-                "source": "screen_observation_trigger",
-                "metadata": {
-                    "observation_id": observation_id,
-                },
-            },
-        )
-        logger.info(
-            "[USER_OBSERVATION] response saved to chat room %s "
-            "(msg_id=%s, len=%d)",
-            chat_room_id, msg.get("id", "?"), len(cleaned),
-        )
-        try:
-            from controller.chat_controller import _notify_room
-            _notify_room(chat_room_id)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "[USER_OBSERVATION] notify_room failed for %s",
-                chat_room_id, exc_info=True,
-            )
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "[USER_OBSERVATION] save_trigger_response_to_chat failed",
-            exc_info=True,
-        )
