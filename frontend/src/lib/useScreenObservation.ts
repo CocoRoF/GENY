@@ -51,6 +51,10 @@ export interface UseScreenObservationOptions {
    *  Null/undefined → auto-pick the first screen. Connector (Electron) only;
    *  ignored by the browser ``getDisplayMedia`` picker fallback. */
   sourceId?: string | null;
+  /** Reaction cadence/sensitivity level sent to the backend with each frame
+   *  ('chatty' | 'balanced' | 'calm'). Drives how proactively the persona
+   *  comments on the screen. */
+  talkativeness?: string | null;
   /** Called when the hook flips itself off — e.g. the user clicked
    *  the browser's "Stop sharing" button — so the consumer can
    *  reconcile its toggle state. */
@@ -146,15 +150,59 @@ async function _grabCanvas(
   return canvas;
 }
 
-/** Single frame as a JPEG ``Blob`` (for the periodic upload). */
-async function _captureFrameAsBlob(
+/** (removed _captureFrameAsBlob — superseded by _captureFrameBlobAndHash,
+ *   which grabs the canvas once and returns blob + dHash together.) */
+
+/** 64-bit dHash (difference hash) of a canvas → 16-char hex string, or null.
+ *  Downscale to 9×8, compare each pixel's luminance to its right neighbour
+ *  (8 comparisons/row × 8 rows = 64 bits). The backend Hamming-distances
+ *  consecutive hashes to decide whether the screen meaningfully changed —
+ *  cheap, robust to tiny noise, and computed from the already-decoded canvas
+ *  so it costs nothing extra. */
+function _dHashFromCanvas(src: HTMLCanvasElement): string | null {
+  try {
+    const W = 9;
+    const H = 8;
+    const small = document.createElement('canvas');
+    small.width = W;
+    small.height = H;
+    const sctx = small.getContext('2d', { willReadFrequently: true });
+    if (!sctx) return null;
+    sctx.drawImage(src, 0, 0, W, H);
+    const { data } = sctx.getImageData(0, 0, W, H);
+    const lum = (px: number): number => {
+      const o = px * 4;
+      return 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+    };
+    let bits = '';
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        bits += lum(y * W + x) > lum(y * W + x + 1) ? '1' : '0';
+      }
+    }
+    let hex = '';
+    for (let i = 0; i < 64; i += 4) {
+      hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
+    }
+    return hex.padStart(16, '0');
+  } catch {
+    return null;
+  }
+}
+
+/** Single frame as JPEG ``Blob`` + its dHash (for the periodic upload). One
+ *  canvas grab serves both so we never decode the frame twice. */
+async function _captureFrameBlobAndHash(
   stream: MediaStream,
-): Promise<Blob | null> {
+): Promise<{ blob: Blob; hash: string | null } | null> {
   const canvas = await _grabCanvas(stream);
   if (!canvas) return null;
-  return new Promise<Blob | null>((resolve) =>
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', CAP_QUALITY),
+  const hash = _dHashFromCanvas(canvas);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', CAP_QUALITY),
   );
+  if (!blob) return null;
+  return { blob, hash };
 }
 
 /** Single frame as a JPEG data URL (for attaching to a conversation
@@ -229,6 +277,7 @@ export function useScreenObservation(
     sessionId,
     intervalMs = 180_000,  // 3 min
     sourceId = null,
+    talkativeness = null,
     onAutoDisable,
     onUploadResult,
   } = opts;
@@ -255,6 +304,10 @@ export function useScreenObservation(
   useEffect(() => {
     onUploadResultRef.current = onUploadResult;
   }, [onUploadResult]);
+  const talkativenessRef = useRef(talkativeness);
+  useEffect(() => {
+    talkativenessRef.current = talkativeness;
+  }, [talkativeness]);
 
   const doUpload = useCallback(
     async (force: boolean) => {
@@ -264,8 +317,8 @@ export function useScreenObservation(
       setPhase('capturing');
       setUploadsInFlight((n) => n + 1);
       try {
-        const blob = await _captureFrameAsBlob(stream);
-        if (!blob) {
+        const cap = await _captureFrameBlobAndHash(stream);
+        if (!cap) {
           setError('frame capture failed');
           setPhase('observing');
           return;
@@ -275,9 +328,11 @@ export function useScreenObservation(
           .replace(/[:.]/g, '-');
         const res = await vtuberApi.uploadScreenObservation({
           sessionId: sid,
-          blob,
+          blob: cap.blob,
           filename: `screen-${stamp}.jpg`,
           forceTrigger: force,
+          frameHash: cap.hash,
+          talkativeness: talkativenessRef.current,
         });
         setLastCapturedAt(Date.now());
         setLastTriggerFired(Boolean(res.trigger_fired));
