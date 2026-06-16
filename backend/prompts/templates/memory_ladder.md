@@ -1,36 +1,36 @@
 ## Recalling Your Memory
 
-도구로만 메모리에 접근하세요. 시스템 프롬프트엔 본문이 들어 있지 않습니다 — 이 ladder 는 모든 role 에 공통이며 지도와 도구 사용법만 안내합니다.
+Access your memory only through tools. The system prompt does not contain the actual content — this ladder is shared by every role and only points you to the map and explains how to use the tools.
 
-### 빠른 점검
-1. `memory_status(category?, tag?)` — vault 의 카테고리·태그·최근 갱신 요약. 어디부터 볼지 결정용.
+### Quick check
+1. `memory_status(category?, tag?)` — a summary of the vault's categories, tags, and recent updates. Use it to decide where to start looking.
 
-### 검색 → 읽기 (가장 자주 쓰는 path)
+### Search → read (the most frequently used path)
 2. `memory_search(query, category?, kind?, counterpart?, limit?)`
-   — 후보 filename·점수·1-line snippet 만 반환. **본문은 안 옴.**
-   카테고리 권장 (plan §1.5):
-   - `conversations` — 특정 turn 의 verbatim 본문 (가장 정확). 매 record_message 가 자동 작성.
-   - `dms` — 카운터파트별 일일 묶음 인덱스. wikilink 로 conversations/ 를 가리킴.
-   - `insights` — LLM 이 distill 한 정제 지식.
-   - `topics` / `MEMORY` / `projects` — 사람이 작성한 narrative.
-   - `compactions` — context compaction 이 발생했던 기록.
-3. `memory_read(filename)` — 본문 전체 읽기. step 2 결과의 filename 을 그대로 전달.
+   — returns only candidate filenames, scores, and a 1-line snippet. **The actual content is not included.**
+   Recommended categories (plan §1.5):
+   - `conversations` — the verbatim content of a specific turn (the most precise). Written automatically on every record_message.
+   - `dms` — a daily bundled index per counterpart. Points to conversations/ via wikilinks.
+   - `insights` — refined knowledge distilled by the LLM.
+   - `topics` / `MEMORY` / `projects` — human-written narrative.
+   - `compactions` — records of when context compaction occurred.
+3. `memory_read(filename)` — read the full content. Pass the filename from the step 2 result as-is.
 
-### 카운터파트 / Stream 탐색
-4. `memory_with(counterpart, kinds?, limit?, since?)` — 카운터파트별 InteractionEvent 리스트.
-5. `memory_event(event_id)` — 특정 이벤트의 raw payload + linked parent.
-6. `memory_artifact(event_id, path)` — 그 이벤트가 만든 파일의 raw 내용.
+### Counterpart / stream exploration
+4. `memory_with(counterpart, kinds?, limit?, since?)` — a list of InteractionEvents per counterpart.
+5. `memory_event(event_id)` — the raw payload of a specific event plus its linked parent.
+6. `memory_artifact(event_id, path)` — the raw content of a file produced by that event.
 
-### 쓰기 / 정리
-7. `memory_write(title, content, category?, tags?)` — 새 노트 작성. category 는 보통
-   `topics` / `projects` / `insights`. **`conversations` / `dms` / `compactions` / `daily-journal` 는 자동 카테고리이므로 직접 쓰지 마세요.**
-8. `memory_link(source, target)` — wikilink 추가.
-9. `memory_distill(counterpart, update_note?)` — 카운터파트의 conversations/ 를 LLM 으로
-   요약 → `insights/counterpart-<id>.md` 갱신 (옵션) 또는 `insights/<slug>.md` 작성.
+### Writing / organizing
+7. `memory_write(title, content, category?, tags?)` — create a new note. The category is usually
+   `topics` / `projects` / `insights`. **`conversations` / `dms` / `compactions` / `daily-journal` are automatic categories, so do not write to them directly.**
+8. `memory_link(source, target)` — add a wikilink.
+9. `memory_distill(counterpart, update_note?)` — summarize a counterpart's conversations/ with the LLM
+   → update `insights/counterpart-<id>.md` (optional) or write `insights/<slug>.md`.
 
-### 원칙
-- 본문이 필요하다 싶을 때만 `read` 하세요. 그 전엔 `status`/`search` 로 지도만.
-- `conversations/` 는 leaf source-of-truth 입니다 — 어떤 turn 의 정확한 글자가 필요하면 거기를 보세요.
-- `dms/`, `daily-journal/` 는 인덱스이고 본문은 conversations/ 에 있어요.
-- `insights/` 는 distill 된 결론입니다 — 정확한 사실은 conversations/ 가 정답.
-- 시스템 프롬프트의 `## Vault Map` 섹션이 카테고리·태그·최근 갱신을 요약합니다 — 매 턴 자동 갱신되니 거기서 시작하세요.
+### Principles
+- Only `read` when you actually need the content. Until then, use `status`/`search` for the map only.
+- `conversations/` is the leaf source-of-truth — when you need the exact wording of a turn, look there.
+- `dms/` and `daily-journal/` are indexes; the actual content lives in conversations/.
+- `insights/` holds distilled conclusions — for precise facts, conversations/ is the authority.
+- The `## Vault Map` section of the system prompt summarizes categories, tags, and recent updates — it refreshes automatically every turn, so start there.

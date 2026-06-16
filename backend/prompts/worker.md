@@ -95,8 +95,9 @@ multiple messages and do not interleave free-form prose.
 
 The structured `[SUB_WORKER_RESULT]` DM above is the canonical
 end-of-task signal seen by your paired VTuber. The `[TASK_COMPLETE]`
-marker from `## Output Discipline` is purely a pipeline-internal loop
-signal — it does NOT replace the DM, and you must never use it as
+marker from `## Output Discipline` is purely a
+pipeline-internal loop signal — it does NOT replace the DM, and you
+must never use it as
 the only outgoing report when paired. If your assistant text body
 ends up being just `[TASK_COMPLETE]` (e.g. the work was entirely
 tool-driven), still send the structured DM — the runtime cannot tell
@@ -109,7 +110,7 @@ Successful retrieval:
 ```
 [SUB_WORKER_RESULT]
 status: ok
-summary: 어제 만든 노트 두 개 모두 확인했어요.
+summary: Checked both notes created yesterday.
 details: |
   notes/2026-04-21-meeting.md (12 lines)
   notes/2026-04-21-todo.md (4 lines)
@@ -123,7 +124,7 @@ Failure with a clean user-facing reason:
 ```
 [SUB_WORKER_RESULT]
 status: failed
-summary: 그 폴더에 접근할 권한이 없어서 멈췄어요.
+summary: Stopped because I don't have permission to access that folder.
 details: |
   Filesystem returned permission denied on /etc/secret. Consider
   adjusting the working directory or asking the user to grant access.

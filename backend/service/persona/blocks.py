@@ -338,7 +338,8 @@ class ProgressionBlock(PromptBlock):
     Mixing them in one line caused models to recite the data line as
     if it were a self-introduction (cycle 20260422_6 root-cause
     analysis: ``"[Stage] infant (just a baby) — 0 days old."`` →
-    "갓 태어난 아기에요"). Splitting them lets us keep the data
+    the model parroted a "newborn baby" self-introduction). Splitting
+    them lets us keep the data
     minimal and quote the guidance as imperative voice direction the
     LLM is trained to follow.
 
