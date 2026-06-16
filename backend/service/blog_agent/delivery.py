@@ -73,25 +73,26 @@ def build_external_result_payload(state: BlogTaskState, *, kind: str) -> str:
 
 
 def _build_paraphrase_prompt(state: BlogTaskState, payload: str, kind: str) -> str:
-    """외부 결과를 호출자가 paraphrase 하도록 trigger prompt."""
+    """Trigger prompt that asks the caller to paraphrase an external result."""
     if kind == "done":
         directive = (
-            "외부 블로그 AI 가 위임 작업을 마쳤다. 사용자에게 작업이 끝났다는 "
-            "사실과 핵심 결과를 1~3 문장으로 알려라. 슬러그 / URL 이 있으면 "
-            "명확히 보여준다. 본문을 그대로 복사하지 말고 자연어로 paraphrase."
+            "The external blog AI has finished the delegated task. Tell the user "
+            "it's done and give the key result in 1-3 sentences. If there's a slug "
+            "or URL, show it clearly. Do not copy the body verbatim — paraphrase "
+            "it in natural language."
         )
     elif kind == "cancelled":
         directive = (
-            "위임 작업이 취소되었다. 사용자에게 한 문장으로 알려라."
+            "The delegated task was cancelled. Tell the user in one sentence."
         )
     else:
         directive = (
-            "위임 작업이 실패했다. 사용자에게 에러 원인을 1~2 문장으로 알리고 "
-            "재시도가 필요한지 판단해 알려준다."
+            "The delegated task failed. Tell the user the cause of the error in "
+            "1-2 sentences and judge whether a retry is needed."
         )
     return (
         f"[SYSTEM] {directive}\n\n"
-        f"원래 사용자 요청: {state.task_summary}\n\n"
+        f"Original user request: {state.task_summary}\n\n"
         f"{payload}"
     )
 
