@@ -1272,6 +1272,20 @@ class AgentSessionManager:
         """
         agent = self._local_agents.get(session_id)
         if agent is not None:
+            # Environment edited while live → rebuild from the fresh manifest
+            # on this next access (safe: between turns, not mid-turn). A
+            # dormant session below already loads the current manifest when
+            # _rehydrate runs, so only live sessions carry the flag.
+            if getattr(agent, "_needs_manifest_reload", False):
+                lock = self._rehydrate_locks.setdefault(session_id, asyncio.Lock())
+                async with lock:
+                    cur = self._local_agents.get(session_id)
+                    if cur is not None and getattr(cur, "_needs_manifest_reload", False):
+                        try:
+                            return await self._reload_session_manifest(session_id)
+                        finally:
+                            self._rehydrate_locks.pop(session_id, None)
+                    return cur
             return agent
 
         record = self._store.get(session_id)
@@ -1375,6 +1389,53 @@ class AgentSessionManager:
             cascade="main",
             linked_id=linked_id,
         )
+        return agent
+
+    # ========================================================================
+    # Environment propagation — apply an edited manifest to live sessions
+    # ========================================================================
+
+    async def propagate_env_update(self, env_id: str) -> List[str]:
+        """Flag every LIVE session bound to ``env_id`` so it rebuilds its
+        pipeline from the freshly-saved manifest on its next access.
+
+        Returns the affected session ids. The rebuild itself is deferred to
+        :meth:`ensure_session_live` (which the message / invoke / WS paths all
+        funnel through) so it lands BETWEEN turns, never mid-turn. Dormant
+        (post-restart) sessions need no flag — :meth:`_rehydrate` already loads
+        the current manifest when they next wake.
+        """
+        affected: List[str] = []
+        for sid, agent in list(self._local_agents.items()):
+            if getattr(agent, "env_id", None) == env_id:
+                agent._needs_manifest_reload = True
+                affected.append(sid)
+        if affected:
+            logger.info(
+                f"♻️ env '{env_id}' edited → {len(affected)} live session(s) "
+                f"flagged for manifest reload: {affected}"
+            )
+        return affected
+
+    async def _reload_session_manifest(self, session_id: str) -> Optional[AgentSession]:
+        """Tear down a live session and re-create it (same id) from the
+        current manifest — the in-place equivalent of a restart that reuses the
+        proven :meth:`_rehydrate` path (storage / memory / transcripts on disk
+        are preserved; the conversation continues). Used by the manifest-reload
+        branch of :meth:`ensure_session_live`.
+        """
+        old = self._local_agents.get(session_id)
+        if old is not None:
+            try:
+                await old.cleanup()
+            except Exception as e:  # noqa: BLE001 — best effort; rebuild anyway
+                logger.warning(f"[{session_id}] cleanup before manifest reload failed: {e}")
+            self._local_agents.pop(session_id, None)
+        # cascade=False: each affected session reloads independently; a linked
+        # peer on the same env is flagged + reloaded on its own next access.
+        agent = await self._rehydrate(session_id, cascade=False)
+        if agent is not None:
+            logger.info(f"♻️ Session {session_id} pipeline reloaded from edited manifest")
         return agent
 
     # ========================================================================

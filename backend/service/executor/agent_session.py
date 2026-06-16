@@ -524,6 +524,11 @@ class AgentSession:
         self._env_id: Optional[str] = env_id
         self._memory_config: Optional[Dict[str, Any]] = memory_config
         self._prebuilt_pipeline: Optional[Any] = prebuilt_pipeline
+        # Set when the bound environment's manifest is edited while this
+        # session is live; the manager rebuilds the pipeline from the fresh
+        # manifest on the next access (ensure_session_live) — see
+        # AgentSessionManager.propagate_env_update.
+        self._needs_manifest_reload: bool = False
 
         # Memory manager (initialized lazily once storage_path is available)
         self._memory_manager: Optional["SessionMemoryManager"] = None

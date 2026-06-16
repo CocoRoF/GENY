@@ -212,3 +212,50 @@ async def test_rehydrate_reuses_id_env_prompt_and_cascades():
     # SESSION_RESTORED emitted for both main and linked peer
     emitted = {sid for (_evt, sid, _kw) in mgr._lifecycle_bus.events}
     assert {"vt", "sub"} <= emitted
+
+
+@pytest.mark.asyncio
+async def test_propagate_env_update_flags_matching_live_sessions():
+    # Editing env-A flags only the live sessions bound to env-A.
+    mgr = _skeleton({})
+    a1 = _FakeAgent("s1"); a1.env_id = "env-A"; a1._needs_manifest_reload = False
+    a2 = _FakeAgent("s2"); a2.env_id = "env-A"; a2._needs_manifest_reload = False
+    a3 = _FakeAgent("s3"); a3.env_id = "env-B"; a3._needs_manifest_reload = False
+    mgr._local_agents = {"s1": a1, "s2": a2, "s3": a3}
+
+    affected = await mgr.propagate_env_update("env-A")
+    assert set(affected) == {"s1", "s2"}
+    assert a1._needs_manifest_reload and a2._needs_manifest_reload
+    assert not a3._needs_manifest_reload  # different env untouched
+
+
+@pytest.mark.asyncio
+async def test_ensure_live_reloads_a_manifest_dirty_session():
+    mgr = _skeleton({})
+    dirty = _FakeAgent("s1"); dirty.env_id = "env-A"; dirty._needs_manifest_reload = True
+    mgr._local_agents = {"s1": dirty}
+    reloaded = _FakeAgent("s1")
+    calls = []
+
+    async def _fake_reload(sid):
+        calls.append(sid)
+        mgr._local_agents[sid] = reloaded
+        return reloaded
+
+    mgr._reload_session_manifest = _fake_reload
+    out = await mgr.ensure_session_live("s1")
+    assert out is reloaded
+    assert calls == ["s1"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_live_does_not_reload_a_clean_session():
+    mgr = _skeleton({})
+    clean = _FakeAgent("s1"); clean.env_id = "env-A"; clean._needs_manifest_reload = False
+    mgr._local_agents = {"s1": clean}
+
+    async def _boom(sid):
+        raise AssertionError("should not reload a clean session")
+
+    mgr._reload_session_manifest = _boom
+    assert await mgr.ensure_session_live("s1") is clean

@@ -117,6 +117,19 @@ def _affected_sessions_summary(env_id: str):
     )
 
 
+async def _propagate_manifest_to_sessions(env_id: str) -> None:
+    """Flag every live session bound to ``env_id`` so it rebuilds from the
+    just-saved manifest on its next turn (applied between turns, never
+    mid-turn). Best-effort — a propagation hiccup must not fail the save.
+    """
+    try:
+        from service.executor import get_agent_session_manager
+
+        await get_agent_session_manager().propagate_env_update(env_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"env propagation skipped for {env_id}: {e}")
+
+
 def _resolve_session_mutator(session_id: str):
     """Return (agent_session, PipelineMutator) for a live Geny session.
 
@@ -358,6 +371,7 @@ async def replace_manifest(
         raise HTTPException(400, str(exc))
     detail = _detail_response(record)
     # D.3 — see update_environment.
+    await _propagate_manifest_to_sessions(env_id)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
 
@@ -384,6 +398,7 @@ async def patch_pipeline(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     detail = _detail_response(record)
+    await _propagate_manifest_to_sessions(env_id)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
 
@@ -404,6 +419,7 @@ async def patch_model(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     detail = _detail_response(record)
+    await _propagate_manifest_to_sessions(env_id)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
 
@@ -426,6 +442,7 @@ async def patch_stage(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     detail = _detail_response(record)
+    await _propagate_manifest_to_sessions(env_id)
     detail.affected_sessions = _affected_sessions_summary(env_id)
     return detail
 
