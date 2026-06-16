@@ -287,14 +287,17 @@ class ThinkingTriggerService:
     # ── Manifest resolution + cache ────────────────────────
 
     def _resolve_manifest(self, session_id: str) -> TriggerPresetManifest:
+        # In-code default — last-resort when the preset service is unavailable
+        # (early boot / tests / no DB). Still includes the screen category.
         fallback = self._instance_default_manifest or _get_default_manifest()
 
-        preset_id = self._session_preset_id.get(session_id)
-        if not preset_id:
-            return fallback
+        explicit_id = self._session_preset_id.get(session_id)
 
         try:
-            from service.trigger_preset import get_trigger_preset_service
+            from service.trigger_preset import (
+                DEFAULT_PRESET_ID,
+                get_trigger_preset_service,
+            )
 
             svc = get_trigger_preset_service()
         except Exception:  # noqa: BLE001
@@ -303,18 +306,25 @@ class ThinkingTriggerService:
         if svc is None:
             return fallback
 
+        # No explicit attach → resolve to the SEEDED default preset, so Geny's
+        # provided default ("기본 (화면 관찰 포함)") is what actually runs and
+        # editing it in 트리거 관리 affects every default session.
+        effective_id = explicit_id or DEFAULT_PRESET_ID
+
         current_version = svc.get_version()
-        cached = self._preset_cache.get(preset_id)
+        cached = self._preset_cache.get(effective_id)
         if cached is not None and cached[0] == current_version:
             return cached[1]
 
-        record = svc.get(preset_id)
+        record = svc.get(effective_id)
         if record is None:
-            self._session_preset_id.pop(session_id, None)
-            self._preset_cache.pop(preset_id, None)
+            # An explicitly-attached preset that vanished → stop chasing it.
+            if explicit_id:
+                self._session_preset_id.pop(session_id, None)
+            self._preset_cache.pop(effective_id, None)
             return fallback
 
-        self._preset_cache[preset_id] = (current_version, record.manifest)
+        self._preset_cache[effective_id] = (current_version, record.manifest)
         return record.manifest
 
     @staticmethod
