@@ -49,6 +49,8 @@ async def upload_screen_observation(
     session_id: str = Form(...),
     file: UploadFile = File(...),
     force_trigger: bool = Form(False),
+    frame_hash: Optional[str] = Form(None),
+    talkativeness: Optional[str] = Form(None),
     auth: dict = Depends(require_auth),
 ) -> Dict[str, Any]:
     """Persist one screen-share frame to the session's observations
@@ -100,6 +102,8 @@ async def upload_screen_observation(
         image_bytes=data,
         mime_type=mime,
         force_trigger=bool(force_trigger),
+        frame_hash=(frame_hash or None),
+        talkativeness=(talkativeness or None),
     )
 
     if result.skipped_reason == "session_not_found":
