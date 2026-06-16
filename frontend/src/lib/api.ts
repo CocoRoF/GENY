@@ -2594,6 +2594,11 @@ export const vtuberApi = {
     blob: Blob;
     filename?: string;
     forceTrigger?: boolean;
+    /** Perceptual hash (dHash hex) of this frame — lets the backend skip the
+     *  vision call + trigger when the screen hasn't meaningfully changed. */
+    frameHash?: string | null;
+    /** Reaction cadence/sensitivity level: 'chatty' | 'balanced' | 'calm'. */
+    talkativeness?: string | null;
   }): Promise<{
     observation_id: string;
     session_id: string;
@@ -2608,6 +2613,8 @@ export const vtuberApi = {
     form.append('session_id', params.sessionId);
     form.append('file', params.blob, params.filename ?? 'screen.png');
     if (params.forceTrigger) form.append('force_trigger', 'true');
+    if (params.frameHash) form.append('frame_hash', params.frameHash);
+    if (params.talkativeness) form.append('talkativeness', params.talkativeness);
     const token = getToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;

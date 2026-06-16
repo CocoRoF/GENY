@@ -30,7 +30,19 @@ export interface OverlaySettings {
   sttAutoGain: boolean;
   screenIntervalMs: number;   // auto-capture cadence (ms)
   screenSourceId: string | null; // chosen capture source id (null = first screen)
+  // How proactively the avatar comments on the screen while observation is ON.
+  // Sent to the backend, which maps it to (min_gap, change_threshold, max_silence)
+  // and a speak-bias. Also drives the default capture cadence below.
+  screenTalkativeness: ScreenTalkativeness;
 }
+export type ScreenTalkativeness = 'chatty' | 'balanced' | 'calm';
+// Default capture cadence per level (ms). The change-gate on the backend means
+// a fast cadence still only triggers speech when the screen actually changes.
+export const SCREEN_INTERVAL_BY_LEVEL: Record<ScreenTalkativeness, number> = {
+  chatty: 45_000,
+  balanced: 75_000,
+  calm: 120_000,
+};
 const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
   ttsEnabled: true,           // audio output on by default
   sttEnabled: false,          // mic opt-in
@@ -41,7 +53,8 @@ const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
   sttEchoCancellation: true,
   sttNoiseSuppression: true,
   sttAutoGain: true,
-  screenIntervalMs: 180_000,
+  screenTalkativeness: 'chatty',     // user-chosen default: 웬만하면 발화
+  screenIntervalMs: SCREEN_INTERVAL_BY_LEVEL.chatty,
   screenSourceId: null,
 };
 function loadOverlaySettings(): OverlaySettings {
@@ -197,6 +210,7 @@ interface VTuberState {
   sttAutoGain: boolean;
   screenIntervalMs: number;
   screenSourceId: string | null;
+  screenTalkativeness: ScreenTalkativeness;
 
   // Actions
   fetchModels: () => Promise<void>;
@@ -228,7 +242,10 @@ interface VTuberState {
   // Persisted overlay tuning setters (write-through to localStorage)
   setSttSettings: (patch: Partial<Pick<VTuberState,
     'sttSensitivity' | 'sttSilenceMs' | 'sttEchoCancellation' | 'sttNoiseSuppression' | 'sttAutoGain'>>) => void;
-  setScreenSettings: (patch: Partial<Pick<VTuberState, 'screenIntervalMs' | 'screenSourceId'>>) => void;
+  setScreenSettings: (patch: Partial<Pick<VTuberState, 'screenIntervalMs' | 'screenSourceId' | 'screenTalkativeness'>>) => void;
+  /** Pick a talkativeness level → also resets the capture cadence to that
+   *  level's default (the user can still fine-tune the interval after). */
+  setScreenTalkativeness: (level: ScreenTalkativeness) => void;
 
   // ── Live chat-stream pre-emit TTS ──
   /** 새 유저 메시지 시작 시 호출 — 턴 인덱스 증가 + 이전 턴 잔여 클립 폐기. */
@@ -467,6 +484,16 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   },
 
   setScreenSettings: (patch) => {
+    set(patch);
+    persistOverlaySettings(patch);
+  },
+
+  setScreenTalkativeness: (level) => {
+    // Switching level also snaps the capture cadence to that level's default.
+    const patch = {
+      screenTalkativeness: level,
+      screenIntervalMs: SCREEN_INTERVAL_BY_LEVEL[level],
+    };
     set(patch);
     persistOverlaySettings(patch);
   },

@@ -59,6 +59,7 @@ export default function ScreenObservationControls({
 
   const screenIntervalMs = useVTuberStore((s) => s.screenIntervalMs);
   const screenSourceId = useVTuberStore((s) => s.screenSourceId);
+  const screenTalkativeness = useVTuberStore((s) => s.screenTalkativeness);
 
   const {
     phase, error, lastCapturedAt, lastTriggerFired, uploadsInFlight,
@@ -68,6 +69,7 @@ export default function ScreenObservationControls({
     sessionId,
     intervalMs: screenIntervalMs,
     sourceId: screenSourceId,
+    talkativeness: screenTalkativeness,
     onAutoDisable,
     onUploadResult,
   });
