@@ -155,7 +155,7 @@ def _content_type_for(path: str) -> str:
 
 
 async def _try_vision_describe(
-    image_bytes: bytes, *, content_type: str
+    image_bytes: bytes, *, content_type: str, instruction: Optional[str] = None,
 ) -> Optional[str]:
     """Best-effort vision-LLM call. Returns ``None`` on any failure
     so callers can fall back to the placeholder.
@@ -164,6 +164,10 @@ async def _try_vision_describe(
     (``build_memory_llm``). Vision-capable models will accept the
     image content block; non-vision models will likely error out
     and we'll catch that and return ``None``.
+
+    *instruction* overrides the default whiteboard caption prompt — e.g. the
+    screen-observation path passes a screen-tailored prompt. Default unchanged
+    so existing whiteboard callers behave identically.
     """
     try:
         from service.memory.memory_llm import build_memory_llm
@@ -188,7 +192,7 @@ async def _try_vision_describe(
                 },
                 {
                     "type": "text",
-                    "text": (
+                    "text": instruction or (
                         "Describe this image in 1–3 sentences. Be concrete: "
                         "what is shown, what text is visible (verbatim), and "
                         "what action would the user reasonably take next?"

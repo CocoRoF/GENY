@@ -718,9 +718,144 @@ def test_cleanup_session_state_drops_tables() -> None:
 
     so._last_fire_at["sess-x"] = 123.0
     so._last_caption["sess-x"] = "something"
+    so._last_hash["sess-x"] = "deadbeefdeadbeef"
     so.cleanup_session_state("sess-x")
     assert "sess-x" not in so._last_fire_at
     assert "sess-x" not in so._last_caption
+    assert "sess-x" not in so._last_hash
+
+
+# ── Change-gate (perceptual-hash) + talkativeness ─────────────────────
+
+
+def test_hamming_and_invalid_input() -> None:
+    from service.vtuber import screen_observation as so
+
+    assert so._hamming("00", "00") == 0
+    assert so._hamming("0f", "00") == 4           # 0x0f = 1111
+    assert so._hamming("ff", "00") == 8
+    assert so._hamming("zz", "00") is None        # non-hex → None (treated changed)
+
+
+def test_level_params_clamps_min_gap_to_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    from service.vtuber import screen_observation as so
+
+    assert so._level_params("chatty")["min_gap"] == 45.0
+    assert so._level_params("calm")["min_gap"] == 180.0
+    assert so._level_params(None)["min_gap"] == 45.0      # default = chatty
+    assert so._level_params("bogus")["min_gap"] == 45.0   # unknown → chatty
+    # Server floor wins over a too-small requested level value.
+    monkeypatch.setenv("GENY_SCREEN_OBS_MIN_GAP_FLOOR_S", "120")
+    assert so._level_params("chatty")["min_gap"] == 120.0
+
+
+def test_unchanged_frame_skips_caption_and_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical consecutive frame_hash → the vision call + trigger are
+    skipped entirely (no image written, no caption, no fire)."""
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="working on code")
+    fired = _install_trigger_recorder(monkeypatch)
+
+    h = "0123456789abcdef"
+    first = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F1", mime_type="image/png", frame_hash=h,
+    ))
+    second = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F2", mime_type="image/png", frame_hash=h,
+    ))
+
+    assert first.trigger_fired is True
+    assert second.skipped_reason == "unchanged"
+    assert second.image_path is None      # returned before writing
+    assert second.caption == ""           # never captioned
+    assert len(fired) == 1
+
+
+def test_changed_frame_passes_gate_then_hits_min_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A far-apart hash is NOT 'unchanged' — it reaches the min-gap check
+    (reason 'cooldown'), proving the change-gate let it through."""
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="working on code")
+    _install_trigger_recorder(monkeypatch)
+
+    _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F1", mime_type="image/png",
+        frame_hash="0000000000000000",
+    ))
+    second = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F2", mime_type="image/png",
+        frame_hash="ffffffffffffffff",   # 64-bit flip → very changed
+    ))
+    assert second.skipped_reason == "cooldown"   # passed change-gate, blocked by min_gap
+    assert second.skipped_reason != "unchanged"
+
+
+def test_force_bypasses_change_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="working on code")
+    fired = _install_trigger_recorder(monkeypatch)
+
+    h = "0123456789abcdef"
+    _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F1", mime_type="image/png", frame_hash=h,
+    ))
+    forced = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F2", mime_type="image/png",
+        frame_hash=h, force_trigger=True,   # identical hash, but forced
+    ))
+    assert forced.trigger_fired is True
+    assert len(fired) == 2
+
+
+def test_ambient_fires_despite_unchanged_after_max_silence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even with an identical frame, an ambient comment surfaces once the
+    max_silence window has elapsed since the last fire."""
+    import time as _time
+    from service.vtuber.screen_observation import save_and_maybe_trigger
+    from service.vtuber import screen_observation as so
+
+    _install_session_storage(monkeypatch, storage_root=tmp_path)
+    _install_caption(monkeypatch, caption="still on the same screen")
+    fired = _install_trigger_recorder(monkeypatch)
+
+    # Pretend we last fired long ago, and already saw this exact hash.
+    h = "0123456789abcdef"
+    so._last_hash["sess-1"] = h
+    so._last_fire_at["sess-1"] = _time.monotonic() - 10_000  # > chatty max_silence (300)
+
+    res = _run(save_and_maybe_trigger(
+        session_id="sess-1", image_bytes=b"F", mime_type="image/png", frame_hash=h,
+    ))
+    assert res.trigger_fired is True
+    assert len(fired) == 1
+
+
+def test_prompt_bias_varies_by_talkativeness() -> None:
+    from datetime import datetime, timezone
+    from service.vtuber.screen_observation import _compose_prompt
+
+    now = datetime.now(timezone.utc)
+    chatty = _compose_prompt(caption="c", observation_id="o", captured_at=now, talkativeness="chatty")
+    calm = _compose_prompt(caption="c", observation_id="o", captured_at=now, talkativeness="calm")
+    assert "기본적으로 *반응해라*" in chatty       # chatty pushes to speak
+    assert "조용히 있어도 된다" in calm            # calm is reserved
+    # Both keep the [SILENT] escape + sensitive guard.
+    for p in (chatty, calm):
+        assert "[SILENT]" in p and "민감" in p
 
 
 # ── P3b: real-time per-turn capture via connector ─────────────────────
