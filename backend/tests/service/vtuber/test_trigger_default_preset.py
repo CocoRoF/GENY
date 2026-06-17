@@ -87,3 +87,83 @@ def test_explicit_preset_still_wins_over_default(
     manifest = trig._resolve_manifest("sid-custom")
 
     assert not any(c.id == "screen_observation" for c in manifest.categories)
+
+
+# ── Designatable default preset (active_default pointer) ──────────────
+
+
+def test_set_active_default_redirects_get_default(tmp_path) -> None:
+    from service.trigger_preset.service import TriggerPresetService, DEFAULT_PRESET_ID
+    from service.trigger_preset.exceptions import TriggerPresetNotFoundError
+
+    svc = TriggerPresetService(storage_path=str(tmp_path))
+    svc.get_default()  # seed bundled "default"
+    assert svc.get_active_default_id() == DEFAULT_PRESET_ID
+
+    custom = svc.create("내 기본")
+    svc.set_active_default(custom)
+    assert svc.get_active_default_id() == custom
+    assert svc.get_default().id == custom           # get_default follows the pointer
+
+    # invalid id rejected; pointer unchanged
+    import pytest as _pytest
+    with _pytest.raises(TriggerPresetNotFoundError):
+        svc.set_active_default("nope")
+    assert svc.get_active_default_id() == custom
+
+
+def test_active_default_falls_back_when_pointer_dangles(tmp_path) -> None:
+    from service.trigger_preset.service import TriggerPresetService, DEFAULT_PRESET_ID
+
+    svc = TriggerPresetService(storage_path=str(tmp_path))
+    svc.get_default()
+    custom = svc.create("temp")
+    svc.set_active_default(custom)
+    svc.delete(custom)                              # pointer now dangles
+    assert svc.get_active_default_id() == DEFAULT_PRESET_ID   # falls back to bundled
+
+
+def test_resolve_manifest_uses_designated_default(tmp_path, _clear_preset_singleton) -> None:
+    from service.vtuber.thinking_trigger import ThinkingTriggerService
+    from service.trigger_preset.service import TriggerPresetService
+    from service.trigger_preset import set_trigger_preset_service
+    from service.trigger_preset.schemas import TriggerCategory
+
+    svc = TriggerPresetService(storage_path=str(tmp_path))
+    svc.get_default()
+    # a custom preset with a unique marker category, designated default
+    custom = svc.create("커스텀 기본")
+    rec = svc.get(custom)
+    rec.manifest.categories.append(TriggerCategory(id="marker_cat", label="m", weight=1.0))
+    svc.replace_manifest(custom, rec.manifest)
+    svc.set_active_default(custom)
+    set_trigger_preset_service(svc)
+
+    trig = ThinkingTriggerService()
+    m = trig._resolve_manifest("sid-no-explicit-no-env")  # no attach → designated default
+    assert any(c.id == "marker_cat" for c in m.categories)
+
+
+def test_env_trigger_preset_id_reads_manifest_extras() -> None:
+    """The session manager resolves an env's mapped trigger from
+    host_selections.extras['trigger_preset_id'] (geny-executor 2.6.0)."""
+    from service.executor.agent_session_manager import AgentSessionManager
+    from geny_executor.core.environment import EnvironmentManifest
+
+    mgr = object.__new__(AgentSessionManager)
+
+    m = EnvironmentManifest.blank_manifest("env-with-trigger")
+    m.host_selections.extras["trigger_preset_id"] = "preset-abc"
+
+    class _EnvSvc:
+        def load_manifest(self, _eid):
+            return m
+
+    mgr._environment_service = _EnvSvc()
+    assert mgr._env_trigger_preset_id("env-with-trigger") == "preset-abc"
+    # No mapping → None
+    m.host_selections.extras.clear()
+    assert mgr._env_trigger_preset_id("env-with-trigger") is None
+    # No env service / no id → None
+    mgr._environment_service = None
+    assert mgr._env_trigger_preset_id("x") is None

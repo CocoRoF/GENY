@@ -20,6 +20,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { agentApi } from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
+import { triggerPresetApi } from '@/lib/triggerPresetApi';
+import type { TriggerPresetSummary } from '@/types/triggerPreset';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import HostEnvSelectionPicker, {
   type HostItem,
@@ -244,5 +246,87 @@ export function PermissionEnvPicker() {
       loading={loading}
       errorText={errorText}
     />
+  );
+}
+
+// ── Trigger preset ─────────────────────────────────────────────
+
+/**
+ * TriggerEnvPicker — maps this env to a host-shared VTuber trigger
+ * preset (geny-executor 2.6.0). Unlike the hook/skill/permission
+ * pickers — which select a *subset* of host registrations — a trigger
+ * mapping is a single optional id stored at
+ * `host_selections.extras.trigger_preset_id`.
+ *
+ * Leaving it unset ("기본값 사용") removes the key entirely so the env
+ * carries no mapping and the backend resolves the host-designated
+ * default preset at session boot.
+ */
+export function TriggerEnvPicker() {
+  const draft = useEnvironmentDraftStore((s) => s.draft);
+  const setTriggerPresetId = useEnvironmentDraftStore(
+    (s) => s.setTriggerPresetId,
+  );
+
+  const [presets, setPresets] = useState<TriggerPresetSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrorText(null);
+    triggerPresetApi
+      .list()
+      .then((res) => {
+        if (!cancelled) setPresets(res.presets);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorText(err instanceof Error ? err.message : String(err));
+          setPresets([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selected = useMemo(() => {
+    const raw = draft?.host_selections?.extras?.trigger_preset_id;
+    return typeof raw === 'string' ? raw : '';
+  }, [draft]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+        트리거 프리셋
+      </label>
+      <select
+        value={selected}
+        onChange={(e) => setTriggerPresetId(e.target.value || null)}
+        disabled={loading}
+        className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+      >
+        <option value="">기본값 사용 (매핑 안 함)</option>
+        {presets.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.enabled ? '⚡' : '⏸'} {p.name}
+          </option>
+        ))}
+      </select>
+      {errorText ? (
+        <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">
+          {errorText}
+        </p>
+      ) : (
+        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+          비워두면 기본 트리거 프리셋을 사용합니다.
+        </p>
+      )}
+    </div>
   );
 }

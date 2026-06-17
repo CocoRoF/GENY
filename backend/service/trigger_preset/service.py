@@ -150,9 +150,37 @@ class TriggerPresetService:
             "TriggerPresetService: seeded bundled default preset (%s)", DEFAULT_PRESET_ID,
         )
 
+    def _default_pointer_path(self) -> Path:
+        return self._storage / "_active_default.txt"
+
+    def get_active_default_id(self) -> str:
+        """The preset id currently DESIGNATED as the default — used by VTuber
+        sessions that neither pass an explicit preset nor have one mapped on
+        their environment. Operators set this via :meth:`set_active_default`
+        (the 트리거 관리 "기본값으로 설정" action). Falls back to the bundled
+        ``DEFAULT_PRESET_ID`` when unset or pointing at a deleted preset, so a
+        default always resolves."""
+        try:
+            raw = self._default_pointer_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            raw = ""
+        if raw and self._read_record(raw) is not None:
+            return raw
+        return DEFAULT_PRESET_ID
+
+    def set_active_default(self, preset_id: str) -> None:
+        """Designate *preset_id* as the active default preset. Validates it
+        exists. Bumps the version so live trigger resolution re-reads it."""
+        with self._lock:
+            if self._read_record(preset_id) is None:
+                raise TriggerPresetNotFoundError(preset_id)
+            self._default_pointer_path().write_text(preset_id, encoding="utf-8")
+            self._bump_version()
+
     def get_default(self) -> Optional[TriggerPresetRecord]:
-        """Return the bundled default preset record (seeding it if missing)."""
-        rec = self.get(DEFAULT_PRESET_ID)
+        """Return the currently-DESIGNATED default preset record (seeding the
+        bundled one if nothing exists yet)."""
+        rec = self.get(self.get_active_default_id())
         if rec is None:
             with self._lock:
                 self._seed_default_locked()

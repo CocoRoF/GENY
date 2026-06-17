@@ -342,6 +342,11 @@ export interface EnvironmentDraftState {
    *  registrations"), an empty array (= "use none"), or a literal
    *  list of names (intersected with the host registry at runtime). */
   patchHostSelections: (patch: Partial<HostSelections>) => void;
+  /** Set (or clear) the env's mapped trigger preset, stored at
+   *  ``host_selections.extras.trigger_preset_id``. Passing ``null`` /
+   *  empty deletes the key entirely so the env has no mapping and the
+   *  backend falls back to the host-designated default preset. */
+  setTriggerPresetId: (presetId: string | null) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -601,6 +606,36 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         permissions: ['*'],
       };
       next.host_selections = { ...current, ...patch };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setTriggerPresetId: (presetId) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      if (presetId) {
+        extras.trigger_preset_id = presetId;
+      } else {
+        // No mapping — drop the key so the backend uses the designated
+        // default rather than persisting an empty string.
+        delete extras.trigger_preset_id;
+      }
+      // Keep `extras` only when it still has entries, so a cleared
+      // mapping doesn't leave a dangling empty object in the manifest.
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
       set({
         draft: next,
         hostSelectionsDirty: true,
