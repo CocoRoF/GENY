@@ -661,6 +661,10 @@ html.light ::-webkit-scrollbar-thumb:hover {
 	--pipe-circle-shadow: 0 2px 8px rgba(0, 0, 0, 0.20);
 	--pipe-circle-shadow-hover: 0 4px 18px rgba(0, 0, 0, 0.28);
 	--pipe-inactive-opacity: 0.5;
+	/* Bold redesign — a fixed mid-violet gradient for the *active* stage
+	   fill that keeps a white number readable in BOTH themes (the
+	   theme-split --grad-primary goes too light in dark mode). */
+	--pipe-grad: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
 
 	background: var(--pipe-bg-primary);
 	color: var(--pipe-text-primary);
@@ -699,22 +703,24 @@ html.light .pipeline-scope {
 	font-family: var(--font-jetbrains-mono, 'JetBrains Mono'), monospace;
 }
 
-/* ── Stage Circle ───────────────────────────────────── */
+/* ── Stage Circle (Bold lavender redesign) ──────────── */
 .pipeline-scope .stage-circle {
-	width: 54px;
-	height: 54px;
+	width: 56px;
+	height: 56px;
 	border-radius: 50%;
 	border: 1.5px solid var(--pipe-border-hover);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 14px;
-	font-weight: 600;
+	font-size: 15px;
+	font-weight: 700;
 	font-family: var(--font-jetbrains-mono, 'JetBrains Mono'), monospace;
 	color: var(--pipe-text-secondary);
-	background: radial-gradient(ellipse at 35% 30%, var(--pipe-bg-tertiary), var(--pipe-bg-secondary));
+	background:
+		radial-gradient(ellipse at 32% 26%, var(--pipe-bg-tertiary), var(--pipe-bg-secondary));
 	cursor: pointer;
-	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+		box-shadow 0.28s ease, border-color 0.2s ease, background 0.2s ease;
 	position: relative;
 	z-index: 2;
 	box-shadow: var(--pipe-circle-shadow);
@@ -722,17 +728,26 @@ html.light .pipeline-scope {
 .pipeline-scope .stage-circle:hover {
 	border-color: var(--pipe-text-secondary);
 	color: var(--pipe-text-primary);
-	transform: scale(1.12);
+	transform: translateY(-2px) scale(1.1);
 	box-shadow: var(--pipe-circle-shadow-hover);
 }
+/* Active = a filled violet gradient tile with a white number + glow —
+   the equivalent of nesy.app's gradient icon tiles. */
 .pipeline-scope .stage-circle.active {
-	border-color: var(--pipe-accent);
-	color: var(--pipe-accent);
-	background: radial-gradient(ellipse at 35% 30%, var(--pipe-accent-tint), var(--pipe-bg-secondary));
+	border-color: transparent;
+	color: #ffffff;
+	background: var(--pipe-grad);
 	box-shadow:
-		0 0 24px var(--pipe-accent-glow),
+		0 6px 20px var(--pipe-accent-glow),
+		0 0 44px var(--pipe-accent-glow-soft),
+		inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.pipeline-scope .stage-circle.active:hover {
+	transform: translateY(-2px) scale(1.1);
+	box-shadow:
+		0 10px 28px var(--pipe-accent-glow),
 		0 0 60px var(--pipe-accent-glow-soft),
-		inset 0 0 12px var(--pipe-accent-glow-soft);
+		inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .pipeline-scope .stage-circle.inactive {
 	border-color: var(--pipe-border);
@@ -745,13 +760,21 @@ html.light .pipeline-scope {
 	opacity: calc(var(--pipe-inactive-opacity) + 0.3);
 	border-color: var(--pipe-text-muted);
 	color: var(--pipe-text-secondary);
-	transform: scale(1.06);
+	transform: translateY(-1px) scale(1.06);
 	box-shadow: var(--pipe-circle-shadow);
 }
+/* Selected = active tile + a soft accent halo ring drawn outside the
+   circle (works on active and inactive nodes). */
 .pipeline-scope .stage-circle.selected {
-	border-color: var(--pipe-accent);
+	box-shadow:
+		0 0 0 3px var(--pipe-bg-primary),
+		0 0 0 5px var(--pipe-accent),
+		0 8px 26px var(--pipe-accent-glow);
+}
+.pipeline-scope .stage-circle.selected.inactive {
+	opacity: 1;
 	color: var(--pipe-accent);
-	box-shadow: 0 0 18px var(--pipe-accent-glow);
+	border-color: transparent;
 }
 
 /* ── Dash flow animation (loop-back path) ──────────── */

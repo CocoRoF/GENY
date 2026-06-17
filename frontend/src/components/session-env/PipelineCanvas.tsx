@@ -144,7 +144,7 @@ function StageNode({
               height: 10,
               borderRadius: '50%',
               background: 'var(--pipe-accent)',
-              boxShadow: '0 0 0 2px var(--pipe-bg-primary), 0 0 10px var(--pipe-accent-glow, rgba(59,130,246,0.5))',
+              boxShadow: '0 0 0 2px var(--pipe-bg-primary), 0 0 10px var(--pipe-accent-glow, rgba(139,92,246,0.5))',
             }}
           />
         )}
@@ -454,6 +454,13 @@ export default function PipelineCanvas({
       onPointerUp={interactive ? onPointerUp : undefined}
       onPointerLeave={interactive ? onPointerUp : undefined}
     >
+      {/* Fixed lavender hero-wash — stays put while the content pans, so
+          the canvas reads as a designed surface rather than empty space. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none"
+        style={{ background: 'var(--hero-wash)' }}
+      />
       <div
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
