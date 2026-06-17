@@ -9,9 +9,14 @@ import {
 } from 'lucide-react';
 import type { ToolInfo } from '@/types';
 import MCPAdminPanel from '@/components/mcp/MCPAdminPanel';
+import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function SessionToolsTab() {
-  const { selectedSessionId, sessions } = useAppStore();
+  const sessions = useAppStore((s) => s.sessions);
+  // The VTuber/Sub-Agent toggle lives in the Environment root tab and drives
+  // every session-scoped sub-tab via context — so the effective session here
+  // is already the side the user picked (no separate toggle in this tab).
+  const selectedSessionId = useSessionEnvTargetId();
   const { presets, catalog, loadPresets, loadCatalog } = useToolPresetStore();
   const { t } = useI18n();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -19,28 +24,11 @@ export default function SessionToolsTab() {
     custom_root: true,
   });
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'vtuber' | 'sub'>('vtuber');
 
   useEffect(() => { loadPresets(); loadCatalog(); }, [loadPresets, loadCatalog]);
 
   const session = sessions.find(s => s.session_id === selectedSessionId);
-
-  // Find linked Sub-Worker session (if current is VTuber)
-  const linkedSubWorkerSession = useMemo(() => {
-    if (!session || session.session_type !== 'vtuber') return null;
-    return sessions.find(s => s.session_type === 'sub' && s.linked_session_id === session.session_id) ?? null;
-  }, [session, sessions]);
-
-  const hasDualView = !!linkedSubWorkerSession;
-
-  // Resolve which session to display
-  const targetSession = useMemo(() => {
-    if (!hasDualView || viewMode === 'vtuber') return session;
-    return linkedSubWorkerSession ?? session;
-  }, [hasDualView, viewMode, session, linkedSubWorkerSession]);
-
-  // Reset viewMode when session changes
-  useEffect(() => { setViewMode('vtuber'); }, [selectedSessionId]);
+  const targetSession = session;
 
   const filteredBuiltIn = useMemo(() => {
     if (!catalog) return [];
@@ -118,32 +106,6 @@ export default function SessionToolsTab() {
           <h3 className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">
             {t('sessionTools.title')}
           </h3>
-
-          {/* VTuber / Sub-Worker toggle */}
-          {hasDualView && (
-            <div className="flex items-center h-6 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] overflow-hidden shrink-0">
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors ${
-                  viewMode === 'vtuber'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                }`}
-                onClick={() => setViewMode('vtuber')}
-              >
-                VTuber
-              </button>
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors ${
-                  viewMode === 'sub'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                }`}
-                onClick={() => setViewMode('sub')}
-              >
-                Sub-Worker
-              </button>
-            </div>
-          )}
 
           {/* Preset name */}
           {boundPreset && (

@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   AlertTriangle,
   Boxes,
@@ -22,13 +23,16 @@ import {
   Link2Off,
   Maximize2,
   RefreshCw,
+  Repeat2,
   Settings2,
+  X,
 } from 'lucide-react';
 
 import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
+import { agentApi } from '@/lib/api';
 import type {
   EnvironmentDetail,
   StageManifestEntry,
@@ -36,9 +40,12 @@ import type {
 import PipelineCanvas from '@/components/session-env/PipelineCanvas';
 import StageDetailPanel from '@/components/session-env/StageDetailPanel';
 import CodeViewModal from '@/components/session-env/CodeViewModal';
+import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function SessionEnvironmentTab() {
-  const { selectedSessionId, sessions, setActiveTab } = useAppStore();
+  const { sessions, setActiveTab } = useAppStore();
+  const loadSessions = useAppStore((s) => s.loadSessions);
+  const selectedSessionId = useSessionEnvTargetId();
   const environments = useEnvironmentStore((s) => s.environments);
   const loadEnvironments = useEnvironmentStore((s) => s.loadEnvironments);
   const requestOpenEnvDrawer = useEnvironmentStore(
@@ -142,6 +149,40 @@ export default function SessionEnvironmentTab() {
     setActiveTab('environments');
   };
 
+  // ── Change bound environment (rebind this session) ──────────────
+  const [envPickerOpen, setEnvPickerOpen] = useState(false);
+  const [changingEnv, setChangingEnv] = useState(false);
+
+  const handleChangeEnv = useCallback(
+    async (newEnvId: string) => {
+      if (!selectedSessionId || !newEnvId || newEnvId === sessionEnvId) {
+        setEnvPickerOpen(false);
+        return;
+      }
+      setChangingEnv(true);
+      try {
+        const res = await agentApi.changeEnv(selectedSessionId, newEnvId);
+        // Refresh sessions so session.env_id updates → manifest re-fetches.
+        await loadSessions();
+        setEnvPickerOpen(false);
+        toast.success(
+          res.live
+            ? t('sessionEnvironmentTab.changeEnv.appliedLive')
+            : t('sessionEnvironmentTab.changeEnv.appliedDormant'),
+        );
+      } catch (e) {
+        toast.error(
+          e instanceof Error
+            ? e.message
+            : t('sessionEnvironmentTab.changeEnv.failed'),
+        );
+      } finally {
+        setChangingEnv(false);
+      }
+    },
+    [selectedSessionId, sessionEnvId, loadSessions, t],
+  );
+
   if (!session) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-[0.875rem]">
@@ -234,6 +275,24 @@ export default function SessionEnvironmentTab() {
           >
             {t('sessionEnvironmentTab.pipeline.hint')}
           </span>
+          {/* Env 변경 — rebind THIS session (VTuber or Sub-Agent, per the
+              toggle in the root tab) to a different environment. Shown even
+              when unbound so a legacy session can be bound. */}
+          <button
+            onClick={() => {
+              if (environments.length === 0) void loadEnvironments();
+              setEnvPickerOpen(true);
+            }}
+            className="flex items-center gap-1.5 py-1 px-3 rounded-md cursor-pointer text-[10px] font-semibold transition-colors hover:brightness-125"
+            style={{
+              background: 'var(--pipe-bg-tertiary)',
+              color: 'var(--pipe-text-secondary)',
+              border: '1px solid var(--pipe-border)',
+            }}
+          >
+            <Repeat2 size={11} />
+            {t('sessionEnvironmentTab.changeEnv.button')}
+          </button>
           {hasPipeline && (
             <>
               <button
@@ -343,6 +402,113 @@ export default function SessionEnvironmentTab() {
           onClose={() => setCodeOpen(false)}
         />
       )}
+
+      {/* ── Change-env picker ────────────────────────────── */}
+      {envPickerOpen && (
+        <EnvChangeModal
+          sessionName={sessionDisplayName}
+          currentEnvId={sessionEnvId}
+          environments={environments}
+          busy={changingEnv}
+          onConfirm={handleChangeEnv}
+          onClose={() => !changingEnv && setEnvPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ═══ Change-env picker modal ═══ */
+
+function EnvChangeModal({
+  sessionName,
+  currentEnvId,
+  environments,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  sessionName: string;
+  currentEnvId: string | null;
+  environments: { id: string; name: string }[];
+  busy: boolean;
+  onConfirm: (envId: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [picked, setPicked] = useState<string>(currentEnvId ?? '');
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[460px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
+          <div className="flex items-center gap-2">
+            <Repeat2 size={15} className="text-[var(--primary-color)]" />
+            <span className="text-[0.875rem] font-semibold text-[var(--text-primary)]">
+              {t('sessionEnvironmentTab.changeEnv.title')}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40"
+            aria-label="close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-4 flex flex-col gap-3">
+          <p className="text-[0.75rem] text-[var(--text-secondary)]">
+            {t('sessionEnvironmentTab.changeEnv.body', { session: sessionName })}
+          </p>
+          <select
+            value={picked}
+            onChange={(e) => setPicked(e.target.value)}
+            disabled={busy}
+            className="w-full py-2 px-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-md text-[0.8125rem] text-[var(--text-primary)] cursor-pointer focus:outline-none focus:border-[var(--primary-color)]"
+          >
+            <option value="">
+              {t('sessionEnvironmentTab.changeEnv.placeholder')}
+            </option>
+            {environments.map((env) => (
+              <option key={env.id} value={env.id}>
+                {env.name}
+                {env.id === currentEnvId ? ' (현재)' : ''}
+              </option>
+            ))}
+          </select>
+          <p className="text-[0.6875rem] text-[var(--text-muted)] leading-relaxed">
+            {t('sessionEnvironmentTab.changeEnv.note')}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--border-color)]">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-[0.75rem] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-[var(--bg-secondary)] disabled:opacity-40"
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            onClick={() => onConfirm(picked)}
+            disabled={busy || !picked || picked === currentEnvId}
+            className="px-3 py-1.5 rounded-md text-[0.75rem] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: 'var(--primary-color)' }}
+          >
+            {busy
+              ? t('sessionEnvironmentTab.changeEnv.applying')
+              : t('sessionEnvironmentTab.changeEnv.confirm')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

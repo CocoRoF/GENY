@@ -10,13 +10,14 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useAppStore } from '@/store/useAppStore';
 import { agentWorkspaceApi, AgentWorkspaceResponse } from '@/lib/api';
 import { Folder, Trash2, RefreshCw, Layers } from 'lucide-react';
 import { TabShell, EmptyState, ActionButton } from '@/components/layout';
+import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function WorkspaceTab() {
-  const sessionId = useAppStore((s) => s.selectedSessionId);
+  // Follows the Environment root tab's VTuber/Sub-Agent toggle via context.
+  const sessionId = useSessionEnvTargetId();
   const [snap, setSnap] = useState<AgentWorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

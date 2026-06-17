@@ -394,6 +394,14 @@ class SessionStore:
             "timeout": rec.get("timeout", 21600),
             "max_iterations": rec.get("max_iterations", rec.get("autonomous_max_iterations", 100)),
             "role": rec.get("role", "worker"),
+            # The environment the session is bound to. ``_rehydrate`` passes
+            # this straight to ``create_agent_session(env_id=...)``; omitting
+            # it (the historical bug) made every reload / restart fall back to
+            # ``resolve_env_id(role, None)`` — the role's DEFAULT env — so a
+            # session bound to a custom env silently lost its binding on the
+            # next wake. Restoring it here also lets the change-env feature
+            # (PUT /api/agents/{id}/env) survive the manifest reload.
+            "env_id": rec.get("env_id"),
             "graph_name": rec.get("graph_name"),
             "workflow_id": rec.get("workflow_id"),
             "tool_preset_id": rec.get("tool_preset_id"),

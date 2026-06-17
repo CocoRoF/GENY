@@ -532,6 +532,26 @@ export const agentApi = {
       body: JSON.stringify({ system_prompt: systemPrompt }),
     }),
 
+  /**
+   * PUT /api/agents/{id}/env — rebind a session to a different environment.
+   * The session keeps its id/storage/memory/conversation; the pipeline
+   * reloads from the new manifest between turns. For a VTuber pair, call
+   * once per session id (the VTuber's and the Sub-Worker's) to set each
+   * side independently.
+   */
+  changeEnv: (id: string, envId: string) =>
+    apiCall<{
+      success: boolean;
+      session_id: string;
+      env_id: string;
+      previous_env_id: string | null;
+      live: boolean;
+      applies: string;
+    }>(`/api/agents/${id}/env`, {
+      method: 'PUT',
+      body: JSON.stringify({ env_id: envId }),
+    }),
+
   /** GET /api/agents/{id}/thinking-trigger — get thinking trigger status */
   getThinkingTrigger: (id: string) =>
     apiCall<{

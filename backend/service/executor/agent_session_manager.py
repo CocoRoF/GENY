@@ -1563,6 +1563,88 @@ class AgentSessionManager:
             )
         return affected
 
+    async def change_session_env(
+        self, session_id: str, env_id: str
+    ) -> Dict[str, Any]:
+        """Rebind an existing session to a different environment.
+
+        The session keeps its id, storage, memory, transcripts and
+        conversation — only the bound manifest changes. The new binding is
+        persisted to the store (the top-level ``env_id`` field, which
+        :meth:`SessionStore.get_creation_params` now reads), and a live
+        session is flagged for a between-turn manifest reload via the same
+        proven path env-edit propagation uses (:meth:`propagate_env_update`
+        → :meth:`ensure_session_live` → :meth:`_reload_session_manifest`).
+        Dormant (post-restart) sessions pick up the new env on their next
+        wake through :meth:`_rehydrate`.
+
+        Each session is rebound independently — for a VTuber/Sub-Worker
+        pair the caller targets whichever session id it wants (the FE's
+        VTuber tab vs Sub-Agent tab), so there is no implicit cascade.
+
+        Raises:
+            ValueError — session unknown, env unknown, or the new env's
+                Stage 6 provider has no configured credentials (caught here
+                so the rebind fails loudly now instead of breaking the
+                session on its next turn).
+        """
+        if self._environment_service is None:
+            raise RuntimeError(
+                "EnvironmentService is not configured on AgentSessionManager."
+            )
+        rec = self._store.get(session_id)
+        if not rec:
+            raise ValueError(f"session not found: {session_id}")
+
+        manifest = self._environment_service.load_manifest(env_id)
+        if manifest is None:
+            raise ValueError(f"environment not found: {env_id}")
+
+        # Same guard create_agent_session applies — refuse to rebind onto an
+        # env whose primary provider can't authenticate, so the deferred
+        # reload won't silently break the session.
+        primary_provider = self._extract_primary_provider(env_id)
+        if primary_provider:
+            try:
+                from service.executor.credentials import CredentialBundleBuilder
+
+                creds = CredentialBundleBuilder().build()
+                if not creds.has(primary_provider):
+                    raise ValueError(
+                        f"환경 '{env_id}'의 Stage 6 provider '{primary_provider}'에 "
+                        f"사용할 자격증명이 없습니다. Settings → LLM Backends에서 먼저 "
+                        f"설정해 주세요."
+                    )
+            except ValueError:
+                raise
+            except Exception:  # noqa: BLE001 — never block on a creds-probe hiccup
+                logger.debug(
+                    "change_session_env: credential probe failed; skipping",
+                    exc_info=True,
+                )
+
+        previous_env_id = rec.get("env_id")
+        self._store.update(session_id, {"env_id": env_id})
+        agent = self._local_agents.get(session_id)
+        live = agent is not None
+        if live:
+            agent._env_id = env_id
+            agent._needs_manifest_reload = True
+
+        logger.info(
+            "🔀 session %s env rebind: %s → %s (live=%s, applies between turns)",
+            session_id, previous_env_id, env_id, live,
+        )
+        return {
+            "session_id": session_id,
+            "env_id": env_id,
+            "previous_env_id": previous_env_id,
+            "live": live,
+            # The pipeline rebuild lands on the next access between turns;
+            # the binding itself is already persisted + reflected in the store.
+            "applies": "next_turn",
+        }
+
     async def _reload_session_manifest(self, session_id: str) -> Optional[AgentSession]:
         """Tear down a live session and re-create it (same id) from the
         current manifest — the in-place equivalent of a restart that reuses the
