@@ -1263,6 +1263,7 @@ const en = {
       navHooks: 'Hooks',
       navPermissions: 'Permissions',
       navSkills: 'Skills',
+      navTriggers: 'Triggers',
       hostBadge: 'Host-level',
       hostBadgeNote: 'Edits here apply to every environment on this host — not just the one you\'re currently editing. The data lives outside the manifest in a shared file / settings store.',
       executorTools: {
@@ -1309,6 +1310,10 @@ const en = {
           'MCP prompts can be projected into the catalog via `mcp_prompts_to_skills`.',
         ],
         manageLink: 'Manage skills in Library',
+      },
+      triggers: {
+        title: 'Trigger preset',
+        description: 'Map this environment to a host-shared VTuber trigger preset (phases / categories / prompts for self-talk). Leave it unset to use the host-designated default preset.',
       },
     },
     genyTools: {

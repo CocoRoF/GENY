@@ -54,12 +54,37 @@ async function apiCall<T = unknown>(
   return JSON.parse(text) as T;
 }
 
+/** Result of `list()` / `setDefault()` — the preset summaries plus the
+ *  id of the preset currently designated as the active default. Mirrors
+ *  the backend's `{ presets, default_preset_id }` response. */
+export interface TriggerPresetListResult {
+  presets: TriggerPresetSummary[];
+  defaultPresetId: string;
+}
+
 export const triggerPresetApi = {
-  list: async (): Promise<TriggerPresetSummary[]> => {
-    const res = await apiCall<{ presets: TriggerPresetSummary[] }>(
-      '/api/trigger-presets',
-    );
-    return res.presets;
+  list: async (): Promise<TriggerPresetListResult> => {
+    const res = await apiCall<{
+      presets: TriggerPresetSummary[];
+      default_preset_id: string;
+    }>('/api/trigger-presets');
+    return {
+      presets: res.presets ?? [],
+      defaultPresetId: res.default_preset_id ?? '',
+    };
+  },
+
+  /** Designate `presetId` as the active default. Returns the refreshed
+   *  list + the (now updated) default id. */
+  setDefault: async (presetId: string): Promise<TriggerPresetListResult> => {
+    const res = await apiCall<{
+      presets: TriggerPresetSummary[];
+      default_preset_id: string;
+    }>(`/api/trigger-presets/${presetId}/set-default`, { method: 'POST' });
+    return {
+      presets: res.presets ?? [],
+      defaultPresetId: res.default_preset_id ?? '',
+    };
   },
 
   get: (presetId: string) =>

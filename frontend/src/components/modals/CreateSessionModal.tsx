@@ -139,7 +139,7 @@ export default function CreateSessionModal({ onClose }: Props) {
   useEffect(() => {
     triggerPresetApi
       .list()
-      .then(setTriggerPresets)
+      .then((res) => setTriggerPresets(res.presets))
       .catch(() => {
         // Non-fatal — the picker just stays empty.
       });

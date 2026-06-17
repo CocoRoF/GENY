@@ -283,6 +283,9 @@ class TriggerPresetSummaryResponse(BaseModel):
 
 class TriggerPresetListResponse(BaseModel):
     presets: List[TriggerPresetSummaryResponse]
+    #: The preset id currently DESIGNATED as the default (used by sessions with
+    #: no explicit/env-mapped preset). Lets the UI badge "기본값".
+    default_preset_id: str = "default"
 
 
 class TriggerPresetDetailResponse(BaseModel):

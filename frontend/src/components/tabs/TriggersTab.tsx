@@ -19,6 +19,7 @@ import {
   Copy,
   Edit3,
   RotateCcw,
+  Star,
   Trash2,
   Zap,
   ZapOff,
@@ -46,6 +47,7 @@ type EditorMode =
 
 export function TriggersTab() {
   const [presets, setPresets] = useState<TriggerPresetSummary[]>([]);
+  const [defaultPresetId, setDefaultPresetId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorMode>({ kind: 'idle' });
@@ -58,8 +60,10 @@ export function TriggersTab() {
     setLoading(true);
     setError(null);
     try {
-      const list = await triggerPresetApi.list();
+      const { presets: list, defaultPresetId: defId } =
+        await triggerPresetApi.list();
       setPresets(list);
+      setDefaultPresetId(defId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -114,6 +118,21 @@ export function TriggersTab() {
       }
     },
     [refresh],
+  );
+
+  const onSetDefault = useCallback(
+    async (summary: TriggerPresetSummary) => {
+      setError(null);
+      try {
+        const { presets: list, defaultPresetId: defId } =
+          await triggerPresetApi.setDefault(summary.id);
+        setPresets(list);
+        setDefaultPresetId(defId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [],
   );
 
   const onReset = useCallback(
@@ -252,8 +271,10 @@ export function TriggersTab() {
                 <PresetCard
                   key={p.id}
                   summary={p}
+                  isDefault={p.id === defaultPresetId}
                   onEdit={() => void openEdit(p.id)}
                   onDuplicate={() => void onDuplicate(p)}
+                  onSetDefault={() => void onSetDefault(p)}
                   onReset={() => void onReset(p)}
                   onDelete={() => void onDelete(p)}
                 />
@@ -269,8 +290,10 @@ export function TriggersTab() {
               <PresetCard
                 key={p.id}
                 summary={p}
+                isDefault={p.id === defaultPresetId}
                 onEdit={() => void openEdit(p.id)}
                 onDuplicate={() => void onDuplicate(p)}
+                onSetDefault={() => void onSetDefault(p)}
                 onReset={() => void onReset(p)}
                 onDelete={() => void onDelete(p)}
               />
@@ -284,16 +307,21 @@ export function TriggersTab() {
 
 interface PresetCardProps {
   summary: TriggerPresetSummary;
+  /** True when this preset is the host-wide designated default. */
+  isDefault: boolean;
   onEdit: () => void;
   onDuplicate: () => void;
+  onSetDefault: () => void;
   onReset: () => void;
   onDelete: () => void;
 }
 
 function PresetCard({
   summary,
+  isDefault,
   onEdit,
   onDuplicate,
+  onSetDefault,
   onReset,
   onDelete,
 }: PresetCardProps) {
@@ -305,14 +333,27 @@ function PresetCard({
       icon={summary.enabled ? Zap : ZapOff}
       title={summary.name}
       description={summary.description || ' '}
+      active={isDefault}
       badges={[
+        // The default-preset badge leads the row so it's the first
+        // thing the operator reads — "good" tone (green) makes it
+        // unmistakable which preset is the active host default.
+        ...(isDefault
+          ? [
+              {
+                label: '기본값',
+                tone: 'good' as const,
+                icon: Star,
+              },
+            ]
+          : []),
         {
           label: `${summary.category_count} 상황`,
-          tone: 'info',
+          tone: 'info' as const,
         },
         {
           label: `${summary.prompt_count} 프롬프트`,
-          tone: 'neutral',
+          tone: 'neutral' as const,
         },
         ...(summary.enabled
           ? []
@@ -326,6 +367,15 @@ function PresetCard({
       meta={updated}
       actions={
         <>
+          {/* The default preset already wears the "기본값" badge — only
+              non-default presets get the "set as default" affordance. */}
+          {!isDefault && (
+            <RegistryActionButton
+              icon={Star}
+              onClick={onSetDefault}
+              title="기본값으로 설정"
+            />
+          )}
           <RegistryActionButton
             icon={Edit3}
             onClick={onEdit}

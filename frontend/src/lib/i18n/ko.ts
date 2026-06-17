@@ -1306,6 +1306,7 @@ const ko: Translations = {
       navHooks: '훅',
       navPermissions: '권한',
       navSkills: '스킬',
+      navTriggers: '트리거',
       hostBadge: '호스트',
       hostBadgeNote: '여기서의 편집은 현재 편집 중인 환경 뿐 아니라 이 호스트의 모든 환경에 적용됩니다. 데이터는 매니페스트 외부의 공유 파일 / 설정 저장소에 저장됩니다.',
       executorTools: {
@@ -1352,6 +1353,10 @@ const ko: Translations = {
           '`mcp_prompts_to_skills`로 MCP 프롬프트를 카탈로그에 어댑팅 가능.',
         ],
         manageLink: '라이브러리에서 스킬 관리',
+      },
+      triggers: {
+        title: '트리거 프리셋',
+        description: 'VTuber 자가 발화(생각 트리거)의 페이즈 / 카테고리 / 프롬프트를 정의한 호스트 공용 프리셋을 이 환경에 매핑합니다. 비워두면 호스트에서 지정한 기본 프리셋이 사용됩니다.',
       },
     },
     genyTools: {

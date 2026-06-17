@@ -90,9 +90,29 @@ async def get_default_manifest(auth: dict = Depends(require_auth)):
 
 @router.get("", response_model=TriggerPresetListResponse)
 async def list_presets(request: Request, auth: dict = Depends(require_auth)):
-    summaries = _svc(request).list_all()
+    svc = _svc(request)
+    summaries = svc.list_all()
     return TriggerPresetListResponse(
-        presets=[TriggerPresetSummaryResponse(**s) for s in summaries]
+        presets=[TriggerPresetSummaryResponse(**s) for s in summaries],
+        default_preset_id=svc.get_active_default_id(),
+    )
+
+
+@router.post("/{preset_id}/set-default", response_model=TriggerPresetListResponse)
+async def set_default_preset(
+    preset_id: str, request: Request, auth: dict = Depends(require_auth),
+):
+    """Designate *preset_id* as the active default — the preset used by any
+    VTuber session that neither passes an explicit preset nor has one mapped on
+    its environment. Returns the refreshed list so the UI can re-badge."""
+    svc = _svc(request)
+    try:
+        svc.set_active_default(preset_id)
+    except TriggerPresetNotFoundError:
+        raise HTTPException(404, f"preset not found: {preset_id}")
+    return TriggerPresetListResponse(
+        presets=[TriggerPresetSummaryResponse(**s) for s in svc.list_all()],
+        default_preset_id=svc.get_active_default_id(),
     )
 
 

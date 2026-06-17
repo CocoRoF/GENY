@@ -33,6 +33,7 @@ import {
   Settings2,
   Shield,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -51,6 +52,7 @@ import {
   HookEnvPicker,
   PermissionEnvPicker,
   SkillEnvPicker,
+  TriggerEnvPicker,
 } from './HostSelectionPickers';
 
 const S06_API_ORDER = 6;
@@ -65,7 +67,8 @@ type Panel =
   | 'pipeline'
   | 'hooks'
   | 'permissions'
-  | 'skills';
+  | 'skills'
+  | 'triggers';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -73,6 +76,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   hooks: 'globals.hooks',
   permissions: 'globals.permissions',
   skills: 'globals.skills',
+  triggers: 'globals.triggers',
 };
 
 const HEADER_PALETTE = {
@@ -117,6 +121,12 @@ export default function GlobalSettingsView() {
   const hookSelection = draft.host_selections?.hooks ?? ['*'];
   const skillSelection = draft.host_selections?.skills ?? ['*'];
   const permSelection = draft.host_selections?.permissions ?? ['*'];
+  // Trigger mapping is a single optional id (not a list) — show ★ when
+  // the env maps a preset, otherwise leave the badge off so the nav row
+  // reads as "using the default" by absence.
+  const triggerMapped =
+    typeof draft.host_selections?.extras?.trigger_preset_id === 'string' &&
+    draft.host_selections.extras.trigger_preset_id.length > 0;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -209,6 +219,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('skills')}
               badge={selectionBadge(skillSelection)}
             />
+            <SubTabButton
+              icon={Zap}
+              label={t('envManagement.globals.navTriggers')}
+              active={panel === 'triggers'}
+              onClick={() => setPanel('triggers')}
+              badge={triggerMapped ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -269,6 +286,16 @@ export default function GlobalSettingsView() {
                 />
                 <SkillEnvPicker />
                 <RegistryEditorLink tab="skills" />
+              </div>
+            )}
+
+            {panel === 'triggers' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.triggers.title')}
+                  description={t('envManagement.globals.triggers.description')}
+                />
+                <TriggerEnvPicker />
               </div>
             )}
           </div>

@@ -294,10 +294,7 @@ class ThinkingTriggerService:
         explicit_id = self._session_preset_id.get(session_id)
 
         try:
-            from service.trigger_preset import (
-                DEFAULT_PRESET_ID,
-                get_trigger_preset_service,
-            )
+            from service.trigger_preset import get_trigger_preset_service
 
             svc = get_trigger_preset_service()
         except Exception:  # noqa: BLE001
@@ -306,10 +303,11 @@ class ThinkingTriggerService:
         if svc is None:
             return fallback
 
-        # No explicit attach → resolve to the SEEDED default preset, so Geny's
-        # provided default ("기본 (화면 관찰 포함)") is what actually runs and
-        # editing it in 트리거 관리 affects every default session.
-        effective_id = explicit_id or DEFAULT_PRESET_ID
+        # Resolution order: explicit per-session attach (set from the session's
+        # request OR its environment's mapping at create time) → the DESIGNATED
+        # default preset (operator-set in 트리거 관리; falls back to the bundled
+        # "default"). So an unmapped session runs the operator's chosen default.
+        effective_id = explicit_id or svc.get_active_default_id()
 
         current_version = svc.get_version()
         cached = self._preset_cache.get(effective_id)

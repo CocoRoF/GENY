@@ -91,6 +91,13 @@ export interface HostSelections {
   hooks?: string[];
   skills?: string[];
   permissions?: string[];
+  /**
+   * Free-form extension map (geny-executor 2.6.0). Carries non-list
+   * host selections that don't fit the wildcard-or-subset grammar —
+   * notably ``trigger_preset_id`` (the env's chosen trigger preset;
+   * absent = use the host-designated default).
+   */
+  extras?: Record<string, unknown>;
 }
 
 export interface EnvironmentManifest {
