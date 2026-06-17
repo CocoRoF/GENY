@@ -14,15 +14,16 @@
    Shared / non-theme CSS Variables
    ======================================== */
 :root {
-	--border-radius: 6px;
-	--border-radius-lg: 10px;
+	/* Bold (lavender) geometry — larger, softer radii (2026-06-17 redesign). */
+	--border-radius: 10px;
+	--border-radius-lg: 16px;
 	--transition-fast: 120ms ease;
 	--transition-normal: 200ms ease;
 
 	/* shadcn token bridge — HSL components only (no `hsl(...)`) so the
 	   shadcn ui/* components can compose alpha via `hsl(var(--name) / 0.5)`.
 	   Values resolve from the active light/dark theme block below. */
-	--radius: 0.5rem;
+	--radius: 0.75rem;
 }
 
 /* shadcn-style geometry tokens (Tailwind 4 doesn't auto-pick these up
@@ -33,136 +34,154 @@
    Dark Theme (default)
    ======================================== */
 html.dark {
-	--primary-color: #3b82f6;
-	--primary-hover: #2563eb;
-	--primary-subtle: rgba(59, 130, 246, 0.1);
-	--secondary-color: #64748b;
-	--success-color: #10b981;
-	--warning-color: #f59e0b;
-	--danger-color: #ef4444;
-	--error-color: #ef4444;
-	--bg-primary: #09090b;
-	--bg-secondary: #18181b;
-	--bg-tertiary: #27272a;
-	--bg-card: #18181b;
-	--bg-hover: #27272a;
-	--text-primary: #fafafa;
-	--text-secondary: #a1a1aa;
-	--text-muted: #71717a;
-	--border-color: #27272a;
-	--border-subtle: #3f3f46;
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+	/* Bold lavender on violet-black (2026-06-17 redesign, nesy.app-inspired). */
+	--primary-color: #8b5cf6;          /* violet-500 — same luminance class as the old blue-500, so white text on it keeps its contrast */
+	--primary-hover: #7c3aed;          /* violet-600 */
+	--primary-subtle: rgba(139, 92, 246, 0.14);
+	--secondary-color: #8b85a3;
+	--success-color: #34d399;
+	--warning-color: #fbbf24;
+	--danger-color: #f87171;
+	--error-color: #f87171;
+	--bg-primary: #0c0a14;             /* violet-black */
+	--bg-secondary: #16131f;
+	--bg-tertiary: #221c30;
+	--bg-card: #16131f;
+	--bg-hover: #241f33;
+	--text-primary: #f4f1fb;
+	--text-secondary: #b3aacb;
+	--text-muted: #7d7596;
+	--border-color: #2a2438;
+	--border-subtle: #3d3654;
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+	--shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+	/* Bold accents — gradients, hero wash, sparkle, glow */
+	--grad-primary: linear-gradient(135deg, #a78bfa 0%, #c084fc 100%);
+	--grad-primary-hover: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(167, 139, 250, 0.20) 0%, rgba(139, 92, 246, 0.07) 34%, transparent 64%);
+	--sparkle-color: rgba(196, 132, 252, 0.65);
+	--glow-primary: 0 0 24px rgba(139, 92, 246, 0.38);
+	--glow-primary-soft: 0 0 40px rgba(139, 92, 246, 0.16);
 
 	/* Code / Syntax */
-	--code-bg: #0d0d0f;
+	--code-bg: #100c1a;
 	--code-string: #c3e88d;
 	--code-keyword: #c084fc;
-	--code-function: #60a5fa;
+	--code-function: #a78bfa;
 	--code-number: #fbbf24;
-	--code-comment: #6b7280;
-	--code-property: #a5d6ff;
+	--code-comment: #6b6580;
+	--code-property: #d8b4fe;
 
 	/* Node Handle border (matches bg so handles look punched-out) */
-	--node-handle-border: #18181b;
+	--node-handle-border: #16131f;
 
 	/* MiniMap */
-	--minimap-bg: #1a1a1e;
-	--minimap-stroke: #555;
+	--minimap-bg: #16131f;
+	--minimap-stroke: #3d3654;
 
 	/* Overlay / backdrop */
-	--overlay-bg: rgba(0, 0, 0, 0.55);
-	--backdrop-blur: rgba(0, 0, 0, 0.5);
+	--overlay-bg: rgba(8, 6, 16, 0.62);
+	--backdrop-blur: rgba(8, 6, 16, 0.55);
 
 	/* shadcn/ui token bridge — HSL components for hsl(var(--name) / a) */
-	--background: 240 10% 4%;          /* #09090b */
-	--foreground: 0 0% 98%;            /* #fafafa */
-	--card: 240 6% 10%;                /* #18181b */
-	--card-foreground: 0 0% 98%;
-	--popover: 240 6% 10%;
-	--popover-foreground: 0 0% 98%;
-	--primary: 217 91% 60%;            /* #3b82f6 */
-	--primary-foreground: 0 0% 98%;
-	--secondary: 240 4% 16%;           /* #27272a */
-	--secondary-foreground: 0 0% 98%;
-	--muted: 240 4% 16%;
-	--muted-foreground: 240 5% 65%;    /* #a1a1aa */
-	--accent: 240 4% 16%;
-	--accent-foreground: 0 0% 98%;
-	--destructive: 0 84% 60%;          /* #ef4444 */
-	--destructive-foreground: 0 0% 98%;
-	--border: 240 6% 15%;              /* #27272a */
-	--input: 240 6% 15%;
-	--ring: 217 91% 60%;
+	--background: 258 33% 6%;          /* #0c0a14 */
+	--foreground: 258 60% 96%;         /* #f4f1fb */
+	--card: 258 24% 10%;               /* #16131f */
+	--card-foreground: 258 60% 96%;
+	--popover: 258 24% 10%;
+	--popover-foreground: 258 60% 96%;
+	--primary: 258 90% 66%;            /* #8b5cf6 */
+	--primary-foreground: 0 0% 100%;
+	--secondary: 258 20% 18%;          /* #221c30 */
+	--secondary-foreground: 258 60% 96%;
+	--muted: 258 20% 18%;
+	--muted-foreground: 258 15% 68%;   /* #b3aacb */
+	--accent: 258 24% 20%;
+	--accent-foreground: 258 60% 96%;
+	--destructive: 0 84% 70%;          /* #f87171 */
+	--destructive-foreground: 0 0% 100%;
+	--border: 258 22% 18%;             /* #2a2438 */
+	--input: 258 22% 18%;
+	--ring: 258 90% 66%;
 }
 
 /* ========================================
    Light Theme
    ======================================== */
 html.light {
-	--primary-color: #2563eb;
-	--primary-hover: #1d4ed8;
-	--primary-subtle: rgba(37, 99, 235, 0.08);
-	--secondary-color: #64748b;
+	/* Bold lavender on warm lavender-white (2026-06-17 redesign, nesy.app-inspired). */
+	--primary-color: #7c3aed;          /* violet-600 */
+	--primary-hover: #6d28d9;          /* violet-700 */
+	--primary-subtle: rgba(124, 58, 237, 0.08);
+	--secondary-color: #6b6480;
 	--success-color: #059669;
 	--warning-color: #d97706;
 	--danger-color: #dc2626;
 	--error-color: #dc2626;
-	--bg-primary: #ffffff;
-	--bg-secondary: #f8fafc;
-	--bg-tertiary: #f1f5f9;
+	--bg-primary: #faf8ff;             /* lavender-white page wash */
+	--bg-secondary: #ffffff;           /* white cards pop on the lavender page */
+	--bg-tertiary: #f1ecfb;            /* lavender inset / hover */
 	--bg-card: #ffffff;
-	--bg-hover: #f1f5f9;
-	--text-primary: #0f172a;
-	--text-secondary: #475569;
-	--text-muted: #94a3b8;
-	--border-color: #e2e8f0;
-	--border-subtle: #cbd5e1;
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+	--bg-hover: #f3eefc;
+	--text-primary: #1e1b2e;           /* deep violet-ink */
+	--text-secondary: #5b5470;
+	--text-muted: #9890ad;
+	--border-color: #ece7f8;           /* soft lavender border */
+	--border-subtle: #dcd4f0;
+	--shadow-sm: 0 1px 2px rgba(76, 29, 149, 0.05);
+	--shadow-md: 0 4px 16px rgba(76, 29, 149, 0.08);
+	--shadow-lg: 0 12px 32px rgba(76, 29, 149, 0.12);
+
+	/* Bold accents — gradients, hero wash, sparkle, glow */
+	--grad-primary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+	--grad-primary-hover: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(139, 92, 246, 0.16) 0%, rgba(168, 85, 247, 0.06) 36%, transparent 66%);
+	--sparkle-color: rgba(139, 92, 246, 0.45);
+	--glow-primary: 0 0 24px rgba(124, 58, 237, 0.18);
+	--glow-primary-soft: 0 0 40px rgba(124, 58, 237, 0.08);
 
 	/* Code / Syntax */
-	--code-bg: #f8fafc;
+	--code-bg: #faf8ff;
 	--code-string: #16a34a;
 	--code-keyword: #7c3aed;
 	--code-function: #2563eb;
 	--code-number: #b45309;
-	--code-comment: #94a3b8;
-	--code-property: #0369a1;
+	--code-comment: #9890ad;
+	--code-property: #7e22ce;
 
 	/* Node Handle border */
-	--node-handle-border: #f8fafc;
+	--node-handle-border: #ffffff;
 
 	/* MiniMap */
-	--minimap-bg: #f1f5f9;
-	--minimap-stroke: #cbd5e1;
+	--minimap-bg: #f1ecfb;
+	--minimap-stroke: #dcd4f0;
 
 	/* Overlay / backdrop */
-	--overlay-bg: rgba(255, 255, 255, 0.55);
-	--backdrop-blur: rgba(255, 255, 255, 0.5);
+	--overlay-bg: rgba(30, 27, 46, 0.35);
+	--backdrop-blur: rgba(250, 248, 255, 0.55);
 
 	/* shadcn/ui token bridge */
-	--background: 0 0% 100%;           /* #ffffff */
-	--foreground: 222 47% 11%;         /* #0f172a */
+	--background: 258 100% 99%;        /* #faf8ff */
+	--foreground: 252 24% 14%;         /* #1e1b2e */
 	--card: 0 0% 100%;
-	--card-foreground: 222 47% 11%;
+	--card-foreground: 252 24% 14%;
 	--popover: 0 0% 100%;
-	--popover-foreground: 222 47% 11%;
-	--primary: 221 83% 53%;            /* #2563eb */
+	--popover-foreground: 252 24% 14%;
+	--primary: 262 83% 58%;            /* #7c3aed */
 	--primary-foreground: 0 0% 100%;
-	--secondary: 210 40% 96%;          /* #f1f5f9 */
-	--secondary-foreground: 222 47% 11%;
-	--muted: 210 40% 96%;
-	--muted-foreground: 215 16% 47%;   /* #64748b */
-	--accent: 210 40% 96%;
-	--accent-foreground: 222 47% 11%;
+	--secondary: 264 60% 96%;          /* #f1ecfb */
+	--secondary-foreground: 252 24% 14%;
+	--muted: 264 60% 96%;
+	--muted-foreground: 255 12% 62%;   /* #9890ad-ish */
+	--accent: 264 60% 96%;
+	--accent-foreground: 252 24% 14%;
 	--destructive: 0 84% 50%;          /* #dc2626 */
 	--destructive-foreground: 0 0% 100%;
-	--border: 214 32% 91%;             /* #e2e8f0 */
-	--input: 214 32% 91%;
-	--ring: 221 83% 53%;
+	--border: 262 56% 94%;             /* #ece7f8 */
+	--input: 262 56% 94%;
+	--ring: 262 83% 58%;
 }
 
 /* ========================================
