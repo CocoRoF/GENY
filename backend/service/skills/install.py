@@ -141,8 +141,37 @@ def _skill_allowed_for_role(skill: Any, role: Optional[str]) -> bool:
     return str(role).lower() in allow
 
 
+def _skill_in_host_selection(
+    skill: Any, selection: Optional[List[str]]
+) -> bool:
+    """Apply the env manifest's ``host_selections.skills`` to *skill*.
+
+    Audit 2026-06-17 — the per-env skill picker was dead UI: skills were
+    only ever filtered by role, so the manifest's ``skills`` list was
+    written but never read. This restores the contract used everywhere
+    else (permissions / hooks):
+
+        ``None`` / ``["*"]`` → keep every skill (wildcard / legacy env).
+        ``[]``               → keep none (explicit opt-out).
+        literal list         → keep skills whose id is in the list.
+
+    Orthogonal to :func:`_skill_allowed_for_role`; both gates must pass
+    for a skill to register. Applies only at session-scoped installs —
+    the global ``/api/skills/list`` endpoint passes ``selection=None``.
+    """
+    if selection is None or selection == ["*"]:
+        return True
+    if not selection:
+        return False
+    skill_id = getattr(skill, "id", None) or getattr(
+        getattr(skill, "metadata", None), "id", None,
+    )
+    return str(skill_id) in set(selection)
+
+
 def install_skill_registry(
     role: Optional[str] = None,
+    host_selection: Optional[List[str]] = None,
 ) -> Tuple[Optional[Any], List[Any]]:
     """Build a populated :class:`SkillRegistry`.
 
@@ -152,6 +181,11 @@ def install_skill_registry(
             allow-list does not include this role are filtered out
             *before* registration. ``None`` (default) keeps the catalog
             untrimmed — used by the global `/api/skills/list` endpoint.
+        host_selection: The env manifest's ``host_selections.skills`` list
+            (audit 2026-06-17). When a non-wildcard list is supplied, only
+            skills whose id is in it survive — the per-env skill picker
+            now narrows the catalog the same way ``role`` does. ``None``
+            (default) / ``["*"]`` keeps every skill the role allows.
 
     Three skill sources, in priority order (first-wins on id collision):
 
@@ -190,6 +224,8 @@ def install_skill_registry(
         for skill in executor_report.loaded:
             if not _skill_allowed_for_role(skill, role):
                 continue
+            if not _skill_in_host_selection(skill, host_selection):
+                continue
             try:
                 registry.register(skill)
                 loaded.append(skill)
@@ -216,6 +252,8 @@ def install_skill_registry(
         for skill in report.loaded:
             if not _skill_allowed_for_role(skill, role):
                 continue
+            if not _skill_in_host_selection(skill, host_selection):
+                continue
             try:
                 registry.register(skill)
                 loaded.append(skill)
@@ -237,6 +275,8 @@ def install_skill_registry(
         report = load_skills_dir(SAMPLE_SKILLS_DIR, strict=False)
         for skill in report.loaded:
             if not _skill_allowed_for_role(skill, role):
+                continue
+            if not _skill_in_host_selection(skill, host_selection):
                 continue
             try:
                 registry.register(skill)
@@ -260,6 +300,8 @@ def install_skill_registry(
             report = load_skills_dir(user_dir, strict=False)
             for skill in report.loaded:
                 if not _skill_allowed_for_role(skill, role):
+                    continue
+                if not _skill_in_host_selection(skill, host_selection):
                     continue
                 try:
                     registry.register(skill)

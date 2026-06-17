@@ -55,6 +55,7 @@ const EMPTY: EnvDefaultsResponse = {
   skills: [],
   permissions: [],
   mcp_servers: [],
+  custom_tools: [],
 };
 
 export const useEnvDefaults = create<EnvDefaultsState>((set, get) => ({
@@ -75,6 +76,7 @@ export const useEnvDefaults = create<EnvDefaultsState>((set, get) => ({
           skills: res.skills ?? [],
           permissions: res.permissions ?? [],
           mcp_servers: res.mcp_servers ?? [],
+          custom_tools: res.custom_tools ?? [],
         },
         loaded: true,
         loading: false,
@@ -99,6 +101,7 @@ export const useEnvDefaults = create<EnvDefaultsState>((set, get) => ({
           skills: res.skills ?? [],
           permissions: res.permissions ?? [],
           mcp_servers: res.mcp_servers ?? [],
+          custom_tools: res.custom_tools ?? [],
         },
         loaded: true,
         loading: false,

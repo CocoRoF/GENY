@@ -122,6 +122,24 @@ def _parse_config(kind: str, raw: Dict[str, Any]):
 
 
 def _build_definition(payload: CustomToolPayload, *, id_: Optional[str] = None) -> CustomToolDefinition:
+    # Audit 2026-06-17 (C4) — the mcp_proxy backend has no runtime
+    # dispatcher (``service.mcp_loader.get_session_mcp_call_dispatcher``
+    # was never implemented; the adapter even discards ``session_id``),
+    # so any mcp_proxy tool errors on first call. Block creation/replace
+    # of the kind rather than letting operators build dead tools. The
+    # supported path for exposing an upstream MCP tool is the
+    # environment's MCP server mapping (Stage 10 ``tools.mcp_servers``),
+    # which advertises the upstream tool to the LLM directly.
+    if payload.backend_kind == "mcp_proxy":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "mcp_proxy 백엔드는 아직 지원되지 않습니다 (런타임 디스패처 미구현). "
+                "업스트림 MCP 도구는 환경 편집기의 MCP 서버 매핑(tools.mcp_servers)으로 "
+                "직접 노출하세요. — mcp_proxy is not supported yet; expose the "
+                "upstream MCP tool via the environment's MCP server mapping instead."
+            ),
+        )
     cfg = _parse_config(payload.backend_kind, payload.config)
     caps = ToolCapabilities.model_validate(payload.capabilities or {})
     kwargs: Dict[str, Any] = dict(

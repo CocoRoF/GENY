@@ -495,6 +495,15 @@ class AgentSession:
         self._persona_provider = persona_provider
         self._lifecycle_bus = lifecycle_bus
         self._env_vars = env_vars or {}
+        # NOTE (audit 2026-06-17, C7): ``mcp_config`` is stored but the
+        # SDK pipeline never reads ``self._mcp_config`` — for env-driven
+        # sessions the MCP servers come from the manifest's
+        # ``tools.mcp_servers`` (Stage 10), built by
+        # ``Pipeline.from_manifest_async``. The legacy
+        # ``build_session_mcp_config`` / tool-preset ``mcp_servers`` chain
+        # that feeds this kwarg is therefore inert for SDK sessions; the
+        # kwarg is kept for create() signature stability. Configure MCP
+        # per environment, not via the tool preset.
         self._mcp_config = mcp_config
         self._max_iterations = max_iterations
 
@@ -1681,7 +1690,9 @@ class AgentSession:
             try:
                 from service.hooks.install import install_hook_runner
 
-                runner = install_hook_runner()
+                runner = install_hook_runner(
+                    host_selection=self._load_host_selection("hooks"),
+                )
                 if runner is not None:
                     pipeline.refresh_runtime(hook_runner=runner)
                     logger.info(
@@ -1801,22 +1812,25 @@ class AgentSession:
                 self._session_id,
             )
 
-    def _load_permission_host_selection(self) -> Optional[List[str]]:
-        """Read the env manifest's ``host_selections.permissions`` list.
+    def _load_host_selection(self, category: str) -> Optional[List[str]]:
+        """Read the env manifest's ``host_selections.<category>`` list.
 
-        Phase 9.9.2 — used by ``_build_pipeline`` and the runtime
-        refresh path so per-env narrowing of the host's permission
-        rules takes effect. Returns:
+        Generic per-env host-selection lookup. Phase 9.9.2 first shipped
+        this for ``permissions``; the env-attachments audit (2026-06-17)
+        generalised it so ``hooks`` and ``skills`` pickers stop being
+        dead UI — each now narrows the host registry the same way
+        permissions always have. Returns:
 
-            ``None`` — no manifest available (legacy / pre-1.3.3 envs);
-                       the caller treats this as wildcard (keep all).
-            ``["*"]`` — explicit wildcard (forward-compat; keep all
-                        plus future host additions).
-            ``[]`` — opt out of every rule.
-            literal list — only rules whose id is in the list survive.
+            ``None`` — no manifest available (legacy envs) OR the manifest
+                       leaves the category unset; the caller treats this
+                       as wildcard (keep all).
+            ``["*"]`` — explicit wildcard (forward-compat; keep all plus
+                        future host additions).
+            ``[]`` — opt out of every item in this category.
+            literal list — only items whose id is in the list survive.
 
-        Failures degrade silently to ``None`` — the runtime should
-        never fail to boot because the manifest read hiccupped.
+        Failures degrade silently to ``None`` — the runtime should never
+        fail to boot because the manifest read hiccupped.
         """
         if not self._env_id:
             return None
@@ -1827,8 +1841,9 @@ class AgentSession:
             manifest = svc.load_manifest(self._env_id) if svc else None
         except Exception:
             logger.debug(
-                "_load_permission_host_selection: manifest read failed "
+                "_load_host_selection(%s): manifest read failed "
                 "for env_id=%s; treating as wildcard",
+                category,
                 self._env_id,
                 exc_info=True,
             )
@@ -1837,12 +1852,16 @@ class AgentSession:
             return None
         sel = getattr(
             getattr(manifest, "host_selections", None),
-            "permissions",
+            category,
             None,
         )
         if sel is None:
             return None
         return list(sel)
+
+    def _load_permission_host_selection(self) -> Optional[List[str]]:
+        """Back-compat shim — see :meth:`_load_host_selection`."""
+        return self._load_host_selection("permissions")
 
     def _apply_session_limits_to_pipeline(self) -> None:
         """B.1 (cycle 20260426_1) — bridge UI session limits into the
@@ -2394,7 +2413,11 @@ class AgentSession:
         # back to no-op hook handling.
         try:
             from service.hooks import attach_kwargs as _hook_attach_kwargs
-            attach_kwargs.update(_hook_attach_kwargs())
+            attach_kwargs.update(
+                _hook_attach_kwargs(
+                    host_selection=self._load_host_selection("hooks"),
+                )
+            )
         except Exception:
             logger.debug(
                 "_build_pipeline: hook install failed; continuing without runner",

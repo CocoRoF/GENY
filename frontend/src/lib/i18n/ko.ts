@@ -1145,7 +1145,7 @@ const ko: Translations = {
         subtitle: 'HTTP API · MCP 프록시 · 내장 별칭의 세 가지 백엔드로 도구 등록',
         addLabel: '새 커스텀 도구',
         entitySingular: '커스텀 도구',
-        bannerNote: '커스텀 도구는 ToolLoader 가 모든 세션에 자동 노출됩니다. 환경별 노출은 향후 환경 매니페스트 편집기에서 조정.',
+        bannerNote: '커스텀 도구는 환경별로 노출됩니다 — 환경 편집기 Stage 10 의 도구 목록(tools.external)에 추가한 환경에서만 동작합니다. ★ 로 표시하면 새 환경 생성 시 자동으로 포함됩니다.',
         emptyTitle: '아직 등록된 커스텀 도구가 없습니다.',
         countLabel: '{n}개 도구',
         // 섹션
@@ -1230,7 +1230,7 @@ const ko: Translations = {
         subtitle: '도구 호출 허용/거부/확인 정책 (preview)',
         addLabel: '권한 룰 추가',
         entitySingular: '권한 룰',
-        bannerNote: '권한 룰의 env 별 narrowing은 매니페스트에 저장되지만 실제 enforcement는 호스트의 settings.json이 그대로 적용 (preview).',
+        bannerNote: '권한 룰의 env 별 narrowing은 실제로 적용됩니다 — 각 환경은 매니페스트가 선택한 호스트 룰(host_selections.permissions)만 유지합니다. 환경이 좁히지 않으면 이 목록의 룰은 전역으로 적용됩니다.',
         emptyTitle: '등록된 권한 룰이 없습니다.',
         countLabel: '{n}개 룰',
         // ── 새 모달용 (Phase 9.5) ──

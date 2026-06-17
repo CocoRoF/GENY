@@ -475,6 +475,67 @@ class EnvironmentService:
 
     # ── v2 — template CRUD ─────────────────────────────────────
 
+    def _apply_env_defaults(self, manifest: "EnvironmentManifest") -> None:
+        """Seed a freshly-created manifest from the host env-defaults set.
+
+        Audit 2026-06-17 (C5) — env-defaults curation used to be applied
+        only by the frontend draft seeder, so environments created via
+        the API, a preset, or any non-draft path silently ignored the
+        host's ★ defaults. This applies the same curation server-side so
+        *every* creation path honours it.
+
+        Semantics mirror the FE seeder and the ``HostSelections`` contract:
+            empty / uncurated list → leave the manifest's wildcard
+                (``["*"]``) so the env still gets every host registration.
+            non-empty list         → narrow to exactly those ids.
+
+        Covered here:
+            host_selections.{hooks, skills, permissions} — id lists.
+            tools.external (custom_tools ★, C6)           — tool names.
+
+        NOT covered (left to the FE draft seeder, which has the host MCP
+        registry to materialise full configs): ``mcp_servers`` — that
+        category is declarative (``tools.mcp_servers`` stores configs,
+        not selection ids), so a server-side join would duplicate the
+        FE's per-server config fetch. API/preset envs add MCP servers
+        explicitly via the manifest instead.
+
+        Best-effort: any failure (no DB, helper import error) degrades to
+        a no-op so env creation never fails on the seeding step.
+        """
+        if self._app_db is None:
+            return
+        try:
+            from service.env_defaults.service import EnvDefaultsService
+
+            defaults = EnvDefaultsService(self._app_db).get_all()
+        except Exception:
+            logger.debug(
+                "create: env-defaults seeding skipped (unavailable)",
+                exc_info=True,
+            )
+            return
+
+        host_sel = getattr(manifest, "host_selections", None)
+        if host_sel is not None:
+            for category in ("hooks", "skills", "permissions"):
+                ids = defaults.get(category) or []
+                if ids:
+                    setattr(host_sel, category, list(ids))
+
+        # C6 — custom_tools ★ narrows the custom (DB) tools seeded into
+        # tools.external. Union with whatever the manifest already has so
+        # a preset's own external picks are preserved.
+        custom_default = defaults.get("custom_tools") or []
+        if custom_default and getattr(manifest, "tools", None) is not None:
+            existing = list(getattr(manifest.tools, "external", None) or [])
+            merged = existing + [n for n in custom_default if n not in existing]
+            manifest.tools.external = merged
+            logger.info(
+                "create: seeded %d custom_tools default(s) into tools.external",
+                len(custom_default),
+            )
+
     def create_blank(
         self,
         name: str,
@@ -508,10 +569,14 @@ class EnvironmentService:
             manifest = self._manifest_from_preset(
                 base_preset, name=name, description=description, tags=tags or []
             )
+            # Non-override paths bypass the FE draft seeder — apply the
+            # host env-defaults server-side so they still honour ★ (C5).
+            self._apply_env_defaults(manifest)
         else:
             manifest = EnvironmentManifest.blank_manifest(
                 name, description=description, tags=tags or []
             )
+            self._apply_env_defaults(manifest)
         env_id = manifest.metadata.id or _fresh_id()
         self._write_manifest(env_id, manifest)
         return env_id
@@ -526,6 +591,9 @@ class EnvironmentService:
         manifest = self._manifest_from_preset(
             preset_name, name=name, description=description, tags=tags or []
         )
+        # Honour host ★ defaults server-side (C5) — this path never goes
+        # through the FE draft seeder.
+        self._apply_env_defaults(manifest)
         env_id = manifest.metadata.id or _fresh_id()
         self._write_manifest(env_id, manifest)
         return env_id

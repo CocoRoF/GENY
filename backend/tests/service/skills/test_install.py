@@ -91,6 +91,12 @@ def test_install_returns_none_registry_when_empty(
         "bundled_skills_dir",
         lambda: isolated_user_dir / "no-such-executor-bundled",
     )
+    # Geny also ships an always-loaded *samples* tree (PR #5 / Phase D);
+    # point it at a non-existent path too, else its sample skills leak
+    # into the registry and this "everything empty" assertion breaks.
+    monkeypatch.setattr(
+        skill_install, "SAMPLE_SKILLS_DIR", isolated_user_dir / "no-such-samples"
+    )
     # Don't set the opt-in env — user skills also skipped.
     registry, skills = skill_install.install_skill_registry()
     assert registry is None
@@ -389,3 +395,78 @@ def test_install_skill_watcher_picks_up_user_skill_change(
     report = watcher.reload_now()
     assert report is not None
     assert "fresh_skill" in registry
+
+
+# ── Per-env host_selection narrowing (audit 2026-06-17) ────────────
+#
+# The env manifest's ``host_selections.skills`` is a list of skill ids.
+# Before the audit it was dead UI (skills filtered by role only). Now
+# ``install_skill_registry(host_selection=...)`` narrows the catalog the
+# same way ``role`` does — both gates must pass.
+
+
+class _FakeSkill:
+    def __init__(self, skill_id: str) -> None:
+        self.id = skill_id
+
+
+def test_skill_host_selection_none_keeps_all() -> None:
+    s = _FakeSkill("alpha")
+    assert skill_install._skill_in_host_selection(s, None) is True
+
+
+def test_skill_host_selection_wildcard_keeps_all() -> None:
+    s = _FakeSkill("alpha")
+    assert skill_install._skill_in_host_selection(s, ["*"]) is True
+
+
+def test_skill_host_selection_empty_keeps_none() -> None:
+    s = _FakeSkill("alpha")
+    assert skill_install._skill_in_host_selection(s, []) is False
+
+
+def test_skill_host_selection_literal_membership() -> None:
+    assert skill_install._skill_in_host_selection(_FakeSkill("alpha"), ["alpha"]) is True
+    assert skill_install._skill_in_host_selection(_FakeSkill("beta"), ["alpha"]) is False
+
+
+def test_install_skill_registry_narrows_by_host_selection(
+    isolated_user_dir: Path, monkeypatch
+) -> None:
+    """End-to-end: two user skills, host_selection picks exactly one."""
+    user_dir = skill_install.user_skills_dir()
+    _write_skill(user_dir, "hs_keep")
+    _write_skill(user_dir, "hs_drop")
+    monkeypatch.setenv(skill_install.SKILLS_OPT_IN_ENV, "1")
+
+    _, skills = skill_install.install_skill_registry(
+        host_selection=["hs_keep"]
+    )
+    ids = {getattr(s, "id", None) for s in skills}
+    assert "hs_keep" in ids
+    assert "hs_drop" not in ids
+
+
+def test_install_skill_registry_wildcard_loads_both(
+    isolated_user_dir: Path, monkeypatch
+) -> None:
+    user_dir = skill_install.user_skills_dir()
+    _write_skill(user_dir, "hs_a")
+    _write_skill(user_dir, "hs_b")
+    monkeypatch.setenv(skill_install.SKILLS_OPT_IN_ENV, "1")
+
+    _, skills = skill_install.install_skill_registry(host_selection=["*"])
+    ids = {getattr(s, "id", None) for s in skills}
+    assert {"hs_a", "hs_b"} <= ids
+
+
+def test_install_skill_registry_empty_selection_excludes_user_skills(
+    isolated_user_dir: Path, monkeypatch
+) -> None:
+    user_dir = skill_install.user_skills_dir()
+    _write_skill(user_dir, "hs_x")
+    monkeypatch.setenv(skill_install.SKILLS_OPT_IN_ENV, "1")
+
+    _, skills = skill_install.install_skill_registry(host_selection=[])
+    ids = {getattr(s, "id", None) for s in skills}
+    assert "hs_x" not in ids
