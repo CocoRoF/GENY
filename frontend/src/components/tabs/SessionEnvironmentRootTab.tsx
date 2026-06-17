@@ -19,6 +19,7 @@
  */
 
 import dynamic from 'next/dynamic';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import {
   SubTabNav,
@@ -26,7 +27,8 @@ import {
   EmptyState,
   NextSessionBanner,
 } from '@/components/layout';
-import { Folder, Layers, Wrench, FolderOpen } from 'lucide-react';
+import { Folder, Layers, Wrench, FolderOpen, Bot, Sparkles } from 'lucide-react';
+import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
 
 const SessionEnvironmentTab = dynamic(
   () => import('@/components/tabs/SessionEnvironmentTab'),
@@ -54,8 +56,36 @@ export default function SessionEnvironmentRootTab() {
   const setSubTab = useAppStore((s) => s.setSessionEnvSubTab);
 
   const session = sessions.find((s) => s.session_id === sessionId);
-  const sessionLabel = session?.session_name || sessionId?.slice(0, 12) || '';
-  const envId = session?.env_id ?? null;
+
+  // VTuber ↔ Sub-Worker: a VTuber's linked_session_id points at its paired
+  // Sub-Worker. When present, expose a [VTuber / Sub-Agent] toggle so the
+  // session-scoped tabs can show (and rebind) either side independently.
+  const subWorker = useMemo(() => {
+    if (!session || session.role !== 'vtuber' || !session.linked_session_id) {
+      return null;
+    }
+    return (
+      sessions.find((s) => s.session_id === session.linked_session_id) ?? null
+    );
+  }, [session, sessions]);
+  const hasSubAgent = !!subWorker;
+
+  // 'vtuber' = the selected session; 'sub' = its linked Sub-Worker.
+  const [agentTarget, setAgentTarget] = useState<'vtuber' | 'sub'>('vtuber');
+  // Reset to the VTuber side whenever the selected session changes.
+  useEffect(() => {
+    setAgentTarget('vtuber');
+  }, [sessionId]);
+
+  const effectiveSession =
+    agentTarget === 'sub' && subWorker ? subWorker : session;
+  const effectiveSessionId = effectiveSession?.session_id ?? sessionId ?? null;
+
+  const sessionLabel =
+    effectiveSession?.session_name ||
+    effectiveSessionId?.slice(0, 12) ||
+    '';
+  const envId = effectiveSession?.env_id ?? null;
 
   // Hard guard: never render session-scoped sub-tabs without a session.
   if (!sessionId || !session) {
@@ -111,10 +141,64 @@ export default function SessionEnvironmentRootTab() {
         )}
       </div>
       <NextSessionBanner variant="session" />
+      {hasSubAgent && (
+        <div className="shrink-0 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center gap-2 flex-wrap">
+          <span className="text-[0.6875rem] text-[var(--text-muted)] uppercase tracking-wide">
+            에이전트
+          </span>
+          <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden">
+            <AgentToggleButton
+              active={agentTarget === 'vtuber'}
+              icon={Sparkles}
+              label="VTuber"
+              onClick={() => setAgentTarget('vtuber')}
+            />
+            <AgentToggleButton
+              active={agentTarget === 'sub'}
+              icon={Bot}
+              label="Sub-Agent"
+              onClick={() => setAgentTarget('sub')}
+            />
+          </div>
+          <span className="text-[0.6875rem] text-[var(--text-muted)]">
+            {agentTarget === 'sub'
+              ? '연결된 Sub-Worker의 환경'
+              : 'VTuber 본체의 환경'}
+          </span>
+        </div>
+      )}
       <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
       <div className="flex-1 min-h-0 overflow-hidden">
-        <Active />
+        <SessionEnvTargetContext.Provider value={effectiveSessionId}>
+          <Active />
+        </SessionEnvTargetContext.Provider>
       </div>
     </div>
+  );
+}
+
+function AgentToggleButton({
+  active,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: typeof Bot;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors cursor-pointer"
+      style={{
+        background: active ? 'var(--primary-color)' : 'transparent',
+        color: active ? '#ffffff' : 'var(--text-secondary)',
+      }}
+    >
+      <Icon size={11} />
+      {label}
+    </button>
   );
 }

@@ -399,6 +399,17 @@ class AttachTriggerPresetRequest(BaseModel):
     )
 
 
+class ChangeEnvRequest(BaseModel):
+    """Request to rebind a session to a different environment.
+
+    Targets exactly one session id (the path param). For a VTuber/Sub-Worker
+    pair the caller issues two separate requests — one per session — so each
+    side can run a different environment.
+    """
+
+    env_id: str = Field(..., description="The environment id to bind to.")
+
+
 @router.put("/{session_id}/system-prompt")
 async def update_system_prompt(
     request: UpdateSystemPromptRequest,
@@ -513,6 +524,37 @@ async def attach_trigger_preset(
         "session_id": session_id,
         "trigger_preset_id": request.trigger_preset_id,
     }
+
+
+@router.put("/{session_id}/env")
+async def change_session_env(
+    request: ChangeEnvRequest,
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Rebind a session to a different environment.
+
+    Works for both live and dormant (post-restart) sessions — the new
+    binding is persisted to the store and a live session reloads its
+    pipeline from the new manifest on the next access *between turns*
+    (storage / memory / conversation are preserved). For a VTuber pair,
+    call this once per session id (the VTuber's and the Sub-Worker's) to
+    change each side independently.
+
+    Returns 404 when the session is unknown, 400 when the target env is
+    unknown or its provider has no credentials.
+    """
+    try:
+        result = await agent_manager.change_session_env(
+            session_id, request.env_id
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        status = 404 if "session not found" in msg else 400
+        raise HTTPException(status_code=status, detail=msg)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"success": True, **result}
 
 
 @router.delete("/{session_id}")
