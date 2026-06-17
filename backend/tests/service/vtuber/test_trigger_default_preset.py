@@ -167,3 +167,15 @@ def test_env_trigger_preset_id_reads_manifest_extras() -> None:
     # No env service / no id → None
     mgr._environment_service = None
     assert mgr._env_trigger_preset_id("x") is None
+
+
+def test_summary_marks_bundled_default(tmp_path) -> None:
+    """The bundled default is flagged is_bundled=True; user presets are
+    not — the UI groups them into a separate "기본 프리셋" section."""
+    svc = TriggerPresetService(storage_path=str(tmp_path))
+    svc.get_default()  # force-seed the bundled default
+    user_id = svc.create("내 프리셋")
+
+    summaries = {s["id"]: s for s in svc.list_all()}
+    assert summaries[DEFAULT_PRESET_ID]["is_bundled"] is True
+    assert summaries[user_id]["is_bundled"] is False

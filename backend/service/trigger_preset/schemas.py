@@ -279,6 +279,9 @@ class TriggerPresetSummaryResponse(BaseModel):
     enabled: bool
     category_count: int
     prompt_count: int
+    #: True for the in-code bundled default preset Geny seeds on boot. The
+    #: UI lists these under a separate "기본 프리셋" section.
+    is_bundled: bool = False
 
 
 class TriggerPresetListResponse(BaseModel):
