@@ -354,6 +354,10 @@ class TriggerPresetService:
             "enabled": record.manifest.enabled,
             "category_count": len(record.manifest.categories),
             "prompt_count": len(record.manifest.prompts),
+            # Bundled = the in-code default preset Geny seeds on boot. The
+            # UI groups these under a separate "기본 프리셋" section instead
+            # of mixing them into the operator's own presets.
+            "is_bundled": record.id == DEFAULT_PRESET_ID,
         }
 
     # ── Write API ─────────────────────────────────────────────

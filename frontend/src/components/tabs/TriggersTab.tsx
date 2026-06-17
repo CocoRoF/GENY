@@ -190,18 +190,24 @@ export function TriggersTab() {
   );
 
   // ── Sectioning ──────────────────────────────────────────────────
-  // Group by tag — "preset" tagged go to a featured section, the rest
-  // fall under "내 프리셋". Mirrors the env-preset tag-driven section
-  // pattern so operators can mark favorites or shippable presets.
+  // Three groups, mirroring the env-management view (built-in presets
+  // vs "start from an existing env"):
+  //   bundled  — the in-code default preset Geny ships ("기본 프리셋").
+  //   featured — `preset`-tagged shareable presets ("공유 프리셋").
+  //   mine     — everything the operator authored ("내 프리셋").
+  // The bundled default must NOT sit under "내 프리셋" — it isn't the
+  // operator's, it's Geny's built-in.
 
   const sections = useMemo(() => {
+    const bundled: TriggerPresetSummary[] = [];
     const featured: TriggerPresetSummary[] = [];
     const mine: TriggerPresetSummary[] = [];
     for (const p of presets) {
-      if (p.tags?.includes('preset')) featured.push(p);
+      if (p.is_bundled) bundled.push(p);
+      else if (p.tags?.includes('preset')) featured.push(p);
       else mine.push(p);
     }
-    return { featured, mine };
+    return { bundled, featured, mine };
   }, [presets]);
 
   // ── Editor branch ───────────────────────────────────────────────
@@ -261,6 +267,27 @@ export function TriggersTab() {
         />
       ) : (
         <>
+          {sections.bundled.length > 0 && (
+            <RegistrySection
+              label="기본 프리셋"
+              count={sections.bundled.length}
+              description="Geny 내장 프리셋 — 미부착 세션의 기본 동작. 직접 수정하거나 '새 드래프트'로 복제해 쓰세요."
+            >
+              {sections.bundled.map((p) => (
+                <PresetCard
+                  key={p.id}
+                  summary={p}
+                  isDefault={p.id === defaultPresetId}
+                  onEdit={() => void openEdit(p.id)}
+                  onDuplicate={() => void onDuplicate(p)}
+                  onSetDefault={() => void onSetDefault(p)}
+                  onReset={() => void onReset(p)}
+                  onDelete={() => void onDelete(p)}
+                />
+              ))}
+            </RegistrySection>
+          )}
+
           {sections.featured.length > 0 && (
             <RegistrySection
               label="공유 프리셋"
@@ -282,23 +309,25 @@ export function TriggersTab() {
             </RegistrySection>
           )}
 
-          <RegistrySection
-            label="내 프리셋"
-            count={sections.mine.length}
-          >
-            {sections.mine.map((p) => (
-              <PresetCard
-                key={p.id}
-                summary={p}
-                isDefault={p.id === defaultPresetId}
-                onEdit={() => void openEdit(p.id)}
-                onDuplicate={() => void onDuplicate(p)}
-                onSetDefault={() => void onSetDefault(p)}
-                onReset={() => void onReset(p)}
-                onDelete={() => void onDelete(p)}
-              />
-            ))}
-          </RegistrySection>
+          {sections.mine.length > 0 && (
+            <RegistrySection
+              label="내 프리셋"
+              count={sections.mine.length}
+            >
+              {sections.mine.map((p) => (
+                <PresetCard
+                  key={p.id}
+                  summary={p}
+                  isDefault={p.id === defaultPresetId}
+                  onEdit={() => void openEdit(p.id)}
+                  onDuplicate={() => void onDuplicate(p)}
+                  onSetDefault={() => void onSetDefault(p)}
+                  onReset={() => void onReset(p)}
+                  onDelete={() => void onDelete(p)}
+                />
+              ))}
+            </RegistrySection>
+          )}
         </>
       )}
     </RegistryPageShell>

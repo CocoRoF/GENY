@@ -87,6 +87,8 @@ export interface TriggerPresetSummary {
   enabled: boolean;
   category_count: number;
   prompt_count: number;
+  /** True for the in-code bundled default preset (grouped separately). */
+  is_bundled?: boolean;
 }
 
 export interface TriggerPresetDetail {
