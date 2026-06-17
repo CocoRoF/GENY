@@ -129,3 +129,108 @@ entries:
         assert isinstance(result, HookRunner)
     else:
         assert result is None
+
+
+# ── Per-env host_selection narrowing (audit 2026-06-17) ────────────
+#
+# The env manifest's ``host_selections.hooks`` is a list of stable hook
+# ids — ``"<event>::<command + args joined by space>"`` — matching the FE
+# picker / ``service.env_defaults`` scheme. ``install_hook_runner`` now
+# narrows the parsed config to exactly those entries.
+
+
+def _two_hook_yaml() -> str:
+    # Executor-native YAML shape consumed by ``load_hooks_config``:
+    # the ``hooks:`` key with ``command`` (str head) + ``args`` (tail).
+    # Yields ids "pre_tool_use::echo hello" and "pre_tool_use::true".
+    return """\
+enabled: true
+hooks:
+  pre_tool_use:
+    - command: "echo"
+      args: ["hello"]
+      timeout_ms: 100
+    - command: "true"
+      timeout_ms: 50
+"""
+
+
+def _entry_count(runner: HookRunner) -> int:
+    return sum(len(v) for v in (runner.config.entries or {}).values())
+
+
+def test_host_entry_id_matches_fe_scheme() -> None:
+    class _E:
+        command = "echo"
+        args = ["hi", "there"]
+
+    assert hook_install._hook_entry_id("pre_tool_use", _E()) == (
+        "pre_tool_use::echo hi there"
+    )
+
+
+def test_host_selection_none_keeps_all(isolated_env: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    runner = hook_install.install_hook_runner(host_selection=None)
+    assert isinstance(runner, HookRunner)
+    assert _entry_count(runner) == 2
+
+
+def test_host_selection_wildcard_keeps_all(isolated_env: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    runner = hook_install.install_hook_runner(host_selection=["*"])
+    assert isinstance(runner, HookRunner)
+    assert _entry_count(runner) == 2
+
+
+def test_host_selection_literal_keeps_only_selected(
+    isolated_env: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    runner = hook_install.install_hook_runner(
+        host_selection=["pre_tool_use::echo hello"]
+    )
+    assert isinstance(runner, HookRunner)
+    assert _entry_count(runner) == 1
+    # the surviving entry is the selected one
+    remaining_ids = {
+        hook_install._hook_entry_id(getattr(ev, "value", str(ev)), e)
+        for ev, lst in runner.config.entries.items()
+        for e in lst
+    }
+    assert remaining_ids == {"pre_tool_use::echo hello"}
+
+
+def test_host_selection_empty_opts_out(isolated_env: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    # explicit [] → no entries survive → no runner
+    assert hook_install.install_hook_runner(host_selection=[]) is None
+
+
+def test_host_selection_no_match_yields_no_runner(
+    isolated_env: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    runner = hook_install.install_hook_runner(
+        host_selection=["post_tool_use::nonexistent"]
+    )
+    assert runner is None
+
+
+def test_attach_kwargs_forwards_host_selection(
+    isolated_env: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GENY_ALLOW_HOOKS", "1")
+    _write_yaml(hook_install.hooks_yaml_path(), _two_hook_yaml())
+    kwargs = hook_install.attach_kwargs(
+        host_selection=["pre_tool_use::true"]
+    )
+    assert "hook_runner" in kwargs
+    assert _entry_count(kwargs["hook_runner"]) == 1
+    # opt-out → {}
+    assert hook_install.attach_kwargs(host_selection=[]) == {}

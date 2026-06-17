@@ -391,6 +391,29 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return None
 
+    def _env_host_selection(
+        self, env_id: Optional[str], category: str
+    ) -> Optional[List[str]]:
+        """The env manifest's ``host_selections.<category>`` list, or None.
+
+        Manager-side twin of :meth:`AgentSession._load_host_selection` —
+        used for selections resolved *before* the AgentSession exists
+        (e.g. the skill registry is built here, in the manager). Returns
+        ``None`` on no manifest / unset category / any failure, which the
+        caller treats as wildcard (keep all)."""
+        if not env_id or self._environment_service is None:
+            return None
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return None
+            sel = getattr(
+                getattr(manifest, "host_selections", None), category, None
+            )
+            return list(sel) if sel is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _extract_primary_provider(self, env_id: str) -> Optional[str]:
         """Return the active Stage 6 provider for ``env_id``.
 
@@ -628,7 +651,13 @@ class AgentSessionManager:
             )
             logger.info(f"  allowed_tools: all ({total})")
 
-        # Compute allowed MCP servers from preset
+        # Compute allowed MCP servers from preset.
+        # NOTE (audit 2026-06-17, C7): the resulting ``merged_mcp_config``
+        # is passed to AgentSession.create() but the SDK pipeline never
+        # reads it (see AgentSession.__init__ self._mcp_config) — env MCP
+        # is resolved from the manifest's tools.mcp_servers. This block is
+        # therefore inert for SDK sessions; kept for signature/parity.
+        # Configure MCP per environment, not via the tool preset.
         if preset and preset.mcp_servers:
             allowed_mcp_servers = preset.mcp_servers  # ["*"] = all, or list of names
         else:
@@ -791,7 +820,10 @@ class AgentSessionManager:
             _skill_role = (
                 request.role.value if request.role else "worker"
             )
-            skill_registry, _skill_list = install_skill_registry(role=_skill_role)
+            skill_registry, _skill_list = install_skill_registry(
+                role=_skill_role,
+                host_selection=self._env_host_selection(env_id, "skills"),
+            )
             skill_provider = attach_provider(skill_registry)
             if skill_provider is not None:
                 adhoc_providers.append(skill_provider)

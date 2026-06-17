@@ -72,6 +72,9 @@ class EnvDefaultsResponse(BaseModel):
     skills: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
     mcp_servers: List[str] = Field(default_factory=list)
+    # Audit 2026-06-17 (C6) — custom (DB) tools ★-marked as a default for
+    # new envs (id = tool name → manifest.tools.external).
+    custom_tools: List[str] = Field(default_factory=list)
 
 
 class CategorySetPayload(BaseModel):
@@ -127,7 +130,7 @@ async def get_env_defaults(
     request: Request,
     _auth: dict = Depends(require_auth),
 ) -> EnvDefaultsResponse:
-    """All four categories in a single response."""
+    """Every supported category in a single response."""
     svc = _service_or_503(request)
     data = svc.get_all()
     return EnvDefaultsResponse(
@@ -135,6 +138,7 @@ async def get_env_defaults(
         skills=data.get("skills", []),
         permissions=data.get("permissions", []),
         mcp_servers=data.get("mcp_servers", []),
+        custom_tools=data.get("custom_tools", []),
     )
 
 

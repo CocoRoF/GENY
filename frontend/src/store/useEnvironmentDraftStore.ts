@@ -118,7 +118,21 @@ async function seedDefaultToolLists(
     fresh.tools.built_in = framework.tools.map((t) => t.name);
   }
   if (external && external.tools.length > 0) {
+    // C6 (audit 2026-06-17) — custom (DB) tools honour the env-defaults
+    // ★ curation set when it is non-empty: only ★-marked custom_db tools
+    // seed. Built-in / file tools always seed (minus exclusions). An
+    // empty/uncurated ★ set keeps the legacy "seed every custom tool"
+    // behaviour. Mirrors EnvironmentService._apply_env_defaults so the
+    // draft path and the server-side create paths agree.
+    const starredCustom = envDefaults?.custom_tools ?? [];
+    const curated = starredCustom.length > 0;
     fresh.tools.external = external.tools
+      .filter((entry) => {
+        if (curated && entry.source_kind === 'custom_db') {
+          return starredCustom.includes(entry.name);
+        }
+        return true;
+      })
       .map((t) => t.name)
       .filter((name) => !isExcludedFromSeedDefault(name));
   }

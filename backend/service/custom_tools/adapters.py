@@ -318,8 +318,13 @@ class McpProxyAdapter(BaseTool):
         try:
             from service.mcp_loader import get_session_mcp_call_dispatcher  # type: ignore
         except ImportError:
+            # Audit 2026-06-17 (C4) — the dispatcher was never
+            # implemented; creation of new mcp_proxy tools is now blocked
+            # in the controller. This guards any legacy on-disk row.
             raise ToolError(
-                "MCP proxy unavailable: host MCP manager is not initialised",
+                "mcp_proxy backend is not supported (no runtime dispatcher). "
+                "Expose the upstream MCP tool via the environment's MCP "
+                "server mapping (tools.mcp_servers) instead.",
                 code="MCP_UNAVAILABLE",
             )
 

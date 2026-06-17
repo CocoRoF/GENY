@@ -727,13 +727,19 @@ export type EnvDefaultsCategory =
   | 'hooks'
   | 'skills'
   | 'permissions'
-  | 'mcp_servers';
+  | 'mcp_servers'
+  // Audit 2026-06-17 (C6) — custom (DB) tools ★-marked as a default for
+  // new envs. Id = tool name (what lands in manifest.tools.external).
+  | 'custom_tools';
 
 export interface EnvDefaultsResponse {
   hooks: string[];
   skills: string[];
   permissions: string[];
   mcp_servers: string[];
+  // Optional for backward-compat with backends that predate the C6
+  // category (the useEnvDefaults store coalesces missing keys to []).
+  custom_tools?: string[];
 }
 
 export interface EnvDefaultsCategoryResponse {

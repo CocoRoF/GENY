@@ -55,9 +55,16 @@ import {
 import CustomToolFormModal, {
   type CustomToolFormSubmit,
 } from '@/components/env_management/custom_tools/CustomToolFormModal';
+import EnvDefaultStarToggle from '@/components/env_management/EnvDefaultStarToggle';
+import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 
 export function CustomToolsTab() {
   const { t } = useI18n();
+  // C6 — ★ "기본값" toggle wiring (env-defaults custom_tools category).
+  const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
+  useEffect(() => {
+    loadEnvDefaultsOnce();
+  }, [loadEnvDefaultsOnce]);
   const [tools, setTools] = useState<CustomToolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -187,7 +194,7 @@ export function CustomToolsTab() {
       }
       bannerNote={
         t('envManagement.registry.customTools.bannerNote', {}) ||
-        '커스텀 도구는 ToolLoader 가 모든 세션에 자동 노출됩니다. 환경별 노출은 향후 환경 매니페스트 편집기에서 조정.'
+        '커스텀 도구는 환경별로 노출됩니다 — 환경 편집기 Stage 10 의 도구 목록(tools.external)에 추가한 환경에서만 동작합니다. ★ 로 표시하면 새 환경 생성 시 자동으로 포함됩니다.'
       }
       addLabel={addLabel}
       onAdd={openCreate}
@@ -321,6 +328,10 @@ function CustomToolCard({
       titleMono
       description={summary.description || '—'}
       badges={badges}
+      star={
+        // C6 — id is the tool *name* (what lands in tools.external).
+        <EnvDefaultStarToggle category="custom_tools" itemId={summary.name} />
+      }
       actions={
         <>
           <RegistryActionButton

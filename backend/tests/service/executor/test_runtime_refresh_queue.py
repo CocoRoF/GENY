@@ -130,7 +130,7 @@ def test_apply_with_scope_all_calls_both_setters(monkeypatch) -> None:
         lambda host_selection=None: ([], "advisory"),
     )
     monkeypatch.setattr(
-        hook_install, "install_hook_runner", lambda: object(),
+        hook_install, "install_hook_runner", lambda host_selection=None: object(),
     )
 
     s._apply_pending_runtime_refresh()
@@ -149,7 +149,7 @@ def test_apply_skips_hook_when_install_returns_none(monkeypatch) -> None:
 
     import service.hooks.install as hook_install
 
-    monkeypatch.setattr(hook_install, "install_hook_runner", lambda: None)
+    monkeypatch.setattr(hook_install, "install_hook_runner", lambda host_selection=None: None)
 
     s._apply_pending_runtime_refresh()
     s._pipeline.refresh_runtime.assert_not_called()
@@ -332,7 +332,7 @@ def test_all_scope_includes_new_branches(monkeypatch) -> None:
         "install_permission_rules",
         lambda host_selection=None: ([], "advisory"),
     )
-    monkeypatch.setattr(hook_install, "install_hook_runner", lambda: object())
+    monkeypatch.setattr(hook_install, "install_hook_runner", lambda host_selection=None: object())
 
     s.queue_runtime_refresh("all")
     s._apply_pending_runtime_refresh()

@@ -20,11 +20,93 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 HOOKS_YAML_NAME = "hooks.yaml"
+
+
+def _hook_entry_id(event_value: str, entry: Any) -> str:
+    """Stable id for one parsed hook entry.
+
+    Matches the FE picker / ``service/env_defaults`` scheme exactly:
+    ``"<event>::<command + args joined by space>"``. The executor
+    splits the on-disk ``command`` list into ``command`` (head, str) +
+    ``args`` (tail, list); we re-join them so a checkbox in the env
+    editor maps 1:1 to a hook entry here.
+    """
+    cmd = getattr(entry, "command", "") or ""
+    args = list(getattr(entry, "args", None) or [])
+    return f"{event_value}::{' '.join([cmd, *args]).strip()}"
+
+
+def _filter_config_by_host_selection(
+    config: Any, selection: Optional[List[str]]
+) -> Any:
+    """Narrow a parsed HookConfig's entries by ``host_selections.hooks``.
+
+    Mirrors :func:`service.permission.install._apply_host_selection`:
+        ``None`` / ``["*"]`` → keep every entry (wildcard / legacy env).
+        ``[]``               → keep none (explicit opt-out).
+        literal list         → keep entries whose id is in the list.
+
+    The runner reads ``config.entries`` (dict of event → list); we
+    rebuild that dict in place to the kept subset. Ids not present in
+    the config are ignored (a manifest may outlive a hook edit).
+    """
+    if selection is None or selection == ["*"]:
+        return config
+    entries = getattr(config, "entries", None) or {}
+    wanted = set(selection)
+    kept_map: Dict[Any, List[Any]] = {}
+    total = 0
+    kept = 0
+    for event_key, event_entries in entries.items():
+        event_value = getattr(event_key, "value", str(event_key))
+        keep_list: List[Any] = []
+        for entry in event_entries:
+            total += 1
+            if _hook_entry_id(event_value, entry) in wanted:
+                keep_list.append(entry)
+                kept += 1
+        if keep_list:
+            kept_map[event_key] = keep_list
+    # HookConfig is a *frozen* dataclass — build a new instance rather
+    # than mutating in place (fall back to pydantic copy / direct
+    # assignment for forward-compat across executor builds).
+    new_config = None
+    import dataclasses as _dc
+
+    if _dc.is_dataclass(config):
+        try:
+            new_config = _dc.replace(config, entries=kept_map)
+        except Exception:
+            new_config = None
+    if new_config is None and hasattr(config, "model_copy"):
+        try:
+            new_config = config.model_copy(update={"entries": kept_map})
+        except Exception:
+            new_config = None
+    if new_config is None:
+        try:
+            config.entries = kept_map
+            new_config = config
+        except Exception:
+            logger.debug(
+                "install_hook_runner: could not rewrite filtered "
+                "config.entries; leaving config unfiltered",
+                exc_info=True,
+            )
+            return config
+    config = new_config
+    if kept != total:
+        logger.info(
+            "install_hook_runner: host_selection filtered hooks "
+            "(kept %d of %d entr%s)",
+            kept, total, "y" if total == 1 else "ies",
+        )
+    return config
 
 
 def hooks_yaml_path() -> Path:
@@ -117,13 +199,24 @@ def _build_config_from_settings_section() -> Optional[Any]:
         return None
 
 
-def install_hook_runner() -> Optional[Any]:
+def install_hook_runner(
+    host_selection: Optional[List[str]] = None,
+) -> Optional[Any]:
     """Resolve the env opt-in + config source (settings.json wins) and
     build a HookRunner.
 
+    Args:
+        host_selection: The env manifest's ``host_selections.hooks`` list
+            (audit 2026-06-17). When a non-wildcard list is supplied, the
+            parsed config is narrowed to exactly those hook entries before
+            the runner is built — so the per-env hook picker actually
+            takes effect instead of being dead UI. ``None``/``["*"]``
+            keeps every enabled hook (legacy / wildcard behaviour).
+
     Returns:
         A :class:`HookRunner` instance when both gates open and the
-        config resolves to an enabled state; ``None`` otherwise.
+        config resolves to an enabled state with at least one surviving
+        entry; ``None`` otherwise.
 
     PR-D.2.2 — dual-read priority:
       1. settings.json:hooks section
@@ -183,6 +276,25 @@ def install_hook_runner() -> Optional[Any]:
         )
         return None
 
+    # Per-env narrowing (audit 2026-06-17). Applied after the enabled
+    # gate so the host-global opt-in still governs whether hooks run at
+    # all; the env manifest only narrows *which* enabled hooks fire.
+    config = _filter_config_by_host_selection(config, host_selection)
+    remaining = sum(
+        len(v) for v in (getattr(config, "entries", None) or {}).values()
+    )
+    if (
+        host_selection is not None
+        and host_selection != ["*"]
+        and remaining == 0
+    ):
+        logger.info(
+            "install_hook_runner: host_selection left 0 hooks for this env "
+            "(source=%s) — no runner",
+            config_source,
+        )
+        return None
+
     runner = HookRunner(config=config)
     logger.info(
         "install_hook_runner: HookRunner active (config=%s, %d event(s))",
@@ -192,14 +304,16 @@ def install_hook_runner() -> Optional[Any]:
     return runner
 
 
-def attach_kwargs() -> dict:
+def attach_kwargs(host_selection: Optional[List[str]] = None) -> dict:
     """Convenience for ``agent_session._build_pipeline``.
 
-    Returns ``{"hook_runner": runner}`` when a runner was built,
-    else ``{}`` so older executor builds without the kwarg keep
+    ``host_selection`` is forwarded so the env manifest's
+    ``host_selections.hooks`` narrows which hooks fire (audit
+    2026-06-17). Returns ``{"hook_runner": runner}`` when a runner was
+    built, else ``{}`` so older executor builds without the kwarg keep
     working.
     """
-    runner = install_hook_runner()
+    runner = install_hook_runner(host_selection=host_selection)
     if runner is None:
         return {}
     return {"hook_runner": runner}

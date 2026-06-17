@@ -1117,7 +1117,7 @@ const en = {
         subtitle: 'Register tools with three backends — HTTP, MCP proxy, builtin alias.',
         addLabel: 'New custom tool',
         entitySingular: 'custom tool',
-        bannerNote: 'Custom tools auto-expose to every session via ToolLoader. Per-environment exposure will land in a later cycle.',
+        bannerNote: 'Custom tools are exposed per-environment — they only run in envs whose Stage 10 tool list (tools.external) includes them. Star one to seed it into new environments automatically.',
         emptyTitle: 'No custom tools yet.',
         countLabel: '{n} tool(s)',
         samplesTitle: 'Bundled samples',
@@ -1192,7 +1192,7 @@ const en = {
         subtitle: 'Tool-call allow/deny/ask policy (preview)',
         addLabel: 'Add rule',
         entitySingular: 'permission rule',
-        bannerNote: 'Per-env permission narrowing is saved to the manifest but the executor does not yet enforce it — preview only.',
+        bannerNote: 'Per-env permission narrowing is enforced: each env keeps only the host rules its manifest selects (host_selections.permissions). Unstarred rules in this list still apply globally unless an env narrows them.',
         emptyTitle: 'No permission rules registered.',
         countLabel: '{n} rule(s)',
         form: {

@@ -291,3 +291,27 @@ so editing/deleting a host item shows its reach.
   `stages/Stage10ToolsEditor.tsx`, `components/tabs/{McpServers,Skills,CustomTools,Hooks,
   Permissions,Triggers}Tab.tsx`, `store/useEnvironmentDraftStore.ts`,
   `components/modals/CreateSessionModal.tsx`, `lib/triggerPresetApi.ts`.
+
+---
+
+## Remediation status — 2026-06-17 (follow-up batch)
+
+All remaining critical/major findings from this audit were implemented in
+one batch (the Trigger mapping + designatable default — C-trigger — shipped
+earlier in #946 with geny-executor 2.6.0's `HostSelections.extras`):
+
+| Item | Finding | Resolution |
+|------|---------|------------|
+| **C1** | Hook per-env picker (`host_selections.hooks`) never enforced — silent no-op | `install_hook_runner(host_selection=...)` now narrows the parsed `HookConfig` to exactly the selected hook ids (`"<event>::<command+args>"`, matching the FE / env_defaults scheme). Wired at `_build_pipeline` + the runtime-refresh path via the generalised `AgentSession._load_host_selection(category)`. Frozen-dataclass safe (`dataclasses.replace`). +7 tests. |
+| **C2** | Skill per-env picker (`host_selections.skills`) never enforced — bound by role only | `install_skill_registry(host_selection=...)` adds a second gate (`_skill_in_host_selection`) orthogonal to the role gate, applied at all four load sources. Manager passes `_env_host_selection(env_id, "skills")`. +7 tests. |
+| **C4** | `mcp_proxy` custom tool crashes at call time (`get_session_mcp_call_dispatcher` never implemented; adapter discards `session_id`) | Creation/replace of the kind is rejected server-side (`_build_definition` → 400) and hidden from the FE new-tool picker; runtime `ToolError` clarified to point at the env MCP server mapping. +3 tests. Implementing a real dispatcher is a redesign (needs session→MCPManager plumbing) tracked separately. |
+| **C5** | env_defaults applied only by the FE draft seeder — API/preset/blank-created envs ignored ★ | `EnvironmentService._apply_env_defaults(manifest)` seeds `host_selections.{hooks,skills,permissions}` server-side on every non-override create path. `mcp_servers` (declarative configs) stays FE-materialised. +6 tests. |
+| **C6** | Custom tools had no ★/default concept | New `custom_tools` env_defaults category (id = tool name). ★ toggle on each custom-tool card; server-side + FE-draft seeders both seed ★-marked custom (DB) tools into `tools.external` (empty set = legacy "seed all"). |
+| **C7** | `self._mcp_config` / tool-preset `allowed_mcp_servers` dead for SDK sessions | Verified dead (assigned, never read; MCP resolves from manifest `tools.mcp_servers`). Documented in-code at both sites rather than removed — the kwarg is part of the `create()` signature and removal would risk the live MCP path without executor-internal verification. |
+| **C9** | Misleading custom-tools banner ("auto-expose to every session; per-env is future") + stale permissions banner ("not enforced — preview only") | Both banner copies (ko + en) corrected: custom tools are per-env via `tools.external` (★ seeds new envs); per-env permission narrowing IS enforced. |
+
+Not changed (low severity / out of scope): C8 `python_inline` runs unsandboxed
+(by design — single-admin host; "hide this kind first" if ever opened up),
+C10 `subagents[]` manifest field. Pre-existing unrelated test drift noted but
+not chased: `blog-write` vs `blog_write` skill-id, several memory-routing /
+default-manifest tests (fail on clean HEAD, unrelated to attachments).

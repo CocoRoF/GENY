@@ -40,6 +40,11 @@ SUPPORTED_CATEGORIES: tuple[str, ...] = (
     "skills",
     "permissions",
     "mcp_servers",
+    # Audit 2026-06-17 (C6) — custom (DB) tools can now be ★-marked as
+    # a default for new environments. The id is the tool *name* (what
+    # lands in ``manifest.tools.external``). An empty/uncurated list
+    # keeps the legacy "seed the whole external catalog" behaviour.
+    "custom_tools",
 )
 
 

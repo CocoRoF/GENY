@@ -83,13 +83,17 @@ const KIND_HINTS: Record<CustomToolBackendKind, string> = {
     '(legacy) backend/tools/custom/*_tools.py 의 Python 도구에 메타데이터 오버레이만 적용 — 신규 도구는 python_inline 권장',
 };
 
-// Backend kinds the new-tool form lets you pick. ``builtin_alias`` is
-// kept in the type union for backward-compat (existing rows still load
-// correctly) but hidden from the picker — write the actual Python via
-// ``python_inline`` instead so the tool lives in the web, not the repo.
+// Backend kinds the new-tool form lets you pick. Two kinds are hidden
+// (kept in the type union for backward-compat so existing rows still
+// load correctly):
+//   - ``builtin_alias`` — write the actual Python via ``python_inline``
+//     instead so the tool lives in the web, not the repo.
+//   - ``mcp_proxy`` — audit 2026-06-17 (C4): no runtime dispatcher, so
+//     it always errors on call. Expose an upstream MCP tool via the
+//     environment's MCP server mapping (Stage 10 tools.mcp_servers).
+//     Creation is also rejected server-side.
 const NEW_TOOL_KINDS: CustomToolBackendKind[] = [
   'http',
-  'mcp_proxy',
   'python_inline',
 ];
 
