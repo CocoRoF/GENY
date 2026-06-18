@@ -10,6 +10,7 @@ import { configApi } from '@/lib/api';
 import { Menu, Sun, Moon, Code2, User, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
+import { Button } from '@/components/ui/button';
 
 export default function Header() {
   const { healthStatus, sessions, setMobileSidebarOpen, devMode, toggleDevMode, hydrateDevMode } = useAppStore();
@@ -181,14 +182,16 @@ export default function Header() {
               <span className="hidden md:inline">{displayName || t('header.logout')}</span>
             </button>
           ) : (
-            <button
+            <Button
+              variant="gradient"
+              size="sm"
               onClick={() => setShowLogin(true)}
-              className="geny-btn-primary hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] rounded-md cursor-pointer"
+              className="hidden sm:inline-flex px-2.5 text-[0.6875rem]"
               title={t('header.login')}
             >
               <LogIn size={13} />
               <span className="hidden md:inline">{t('header.login')}</span>
-            </button>
+            </Button>
           )
         )}
 
