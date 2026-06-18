@@ -183,7 +183,7 @@ export default function Header() {
           ) : (
             <button
               onClick={() => setShowLogin(true)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-md bg-[var(--primary-color)] border-none text-white hover:opacity-90 cursor-pointer transition-opacity"
+              className="geny-btn-primary hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] rounded-md cursor-pointer"
               title={t('header.login')}
             >
               <LogIn size={13} />

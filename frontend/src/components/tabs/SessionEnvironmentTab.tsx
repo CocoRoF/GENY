@@ -203,7 +203,11 @@ export default function SessionEnvironmentTab() {
         className="px-6 py-3 flex items-center justify-between shrink-0 gap-3 flex-wrap"
         style={{ borderBottom: '1px solid var(--pipe-border)' }}
       >
-        <div className="min-w-0">
+        <div className="min-w-0 flex items-start gap-3">
+          <span className="geny-icon-tile w-9 h-9 shrink-0 mt-0.5">
+            <Boxes size={17} />
+          </span>
+          <div className="min-w-0">
           <span
             className="text-[10px] font-semibold uppercase tracking-[0.2em]"
             style={{ color: 'var(--pipe-accent)' }}
@@ -212,8 +216,7 @@ export default function SessionEnvironmentTab() {
           </span>
           <div className="flex items-center gap-2 mt-0.5">
             <h2
-              className="pipe-serif text-lg font-bold leading-tight"
-              style={{ color: 'var(--pipe-text-primary)' }}
+              className="text-lg font-extrabold leading-tight tracking-tight geny-gradient-text"
             >
               {t('sessionEnvironmentTab.pipeline.title')}
             </h2>
@@ -265,6 +268,7 @@ export default function SessionEnvironmentTab() {
             >
               {sessionDisplayName}
             </span>
+          </div>
           </div>
         </div>
 

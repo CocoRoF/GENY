@@ -114,31 +114,32 @@ export default function SessionEnvironmentRootTab() {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Strong scope header — distinguishes this from global Library. */}
-      <div className="shrink-0 px-4 py-2 border-b border-[var(--border-color)] bg-[rgba(16,185,129,0.05)] flex items-center gap-2 flex-wrap">
-        <Folder size={14} className="text-[var(--success-color)]" />
-        <span className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">
-          Environment
+      <div className="geny-hero-wash shrink-0 px-4 py-3 border-b border-[var(--border-color)] flex items-center gap-3 flex-wrap">
+        <span className="geny-icon-tile w-8 h-8 shrink-0">
+          <Folder size={15} />
         </span>
-        <span className="text-[0.6875rem] text-[var(--text-muted)]">
-          · session{' '}
-        </span>
-        <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)]">
-          {sessionLabel}
-        </code>
-        {envId ? (
-          <>
-            <span className="text-[0.6875rem] text-[var(--text-muted)]">
-              · bound env{' '}
-            </span>
-            <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)]">
-              {envId}
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="geny-eyebrow leading-none">Environment</span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+              {sessionLabel}
             </code>
-          </>
-        ) : (
-          <span className="text-[0.6875rem] text-[var(--warning-color)]">
-            · no env bound (using default manifest)
-          </span>
-        )}
+            {envId ? (
+              <>
+                <span className="text-[0.6875rem] text-[var(--text-muted)]">
+                  bound env
+                </span>
+                <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--primary-subtle)] text-[var(--primary-color)] font-semibold">
+                  {envId}
+                </code>
+              </>
+            ) : (
+              <span className="text-[0.6875rem] text-[var(--warning-color)]">
+                no env bound (using default manifest)
+              </span>
+            )}
+          </div>
+        </div>
       </div>
       <NextSessionBanner variant="session" />
       {hasSubAgent && (

@@ -234,7 +234,7 @@ function MobileSessionTabDropdown({
                   // External tabs never highlight as "active" — they
                   // never become the in-app activeTab.
                   !tab.external && activeTab === tab.id
-                    ? 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.1)]'
+                    ? 'text-[var(--primary-color)] bg-[hsl(var(--primary)/0.1)]'
                     : 'text-[var(--text-secondary)] bg-transparent hover:bg-[var(--bg-hover)]',
                 )}
                 onClick={handleClick}
@@ -332,8 +332,8 @@ export default function TabNavigation() {
                 className={cn(
                   'flex items-center gap-1.5 py-[3px] px-2.5 mr-1 text-[0.6875rem] font-semibold rounded-[10px] whitespace-nowrap max-w-[140px] overflow-hidden text-ellipsis shrink-0 tracking-[0.01em] border cursor-pointer transition-all duration-150',
                   activeTab === 'info'
-                    ? 'text-white bg-[var(--primary-color)] border-[var(--primary-color)] shadow-[0_0_8px_rgba(59,130,246,0.25)]'
-                    : 'text-[var(--primary-color)] bg-[rgba(59,130,246,0.08)] border-[rgba(59,130,246,0.18)] hover:bg-[rgba(59,130,246,0.16)]',
+                    ? 'text-white bg-[var(--primary-color)] border-[var(--primary-color)] shadow-[0_0_10px_hsl(var(--primary)/0.3)]'
+                    : 'text-[var(--primary-color)] bg-[hsl(var(--primary)/0.08)] border-[hsl(var(--primary)/0.18)] hover:bg-[hsl(var(--primary)/0.16)]',
                 )}
                 title={selectedSession?.session_id}
                 onClick={() => setActiveTab('info')}

@@ -44,17 +44,17 @@ function SessionItem({ session, isSelected, onSelect, subWorkerSession }: {
       {/* Status dot */}
       <span className={`w-2 h-2 rounded-full mr-3 shrink-0 ${dotClass}`} style={dotShadow} />
 
-      {/* Role badge */}
+      {/* Role badge — gradient tile */}
       <span
-        className="inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-semibold mr-1.5 text-white shrink-0"
+        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[11px] font-bold mr-2.5 text-white shrink-0 shadow-sm"
         style={{
           background: {
-            developer: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+            developer: 'linear-gradient(135deg, #6366f1, #4f46e5)',
             worker: 'linear-gradient(135deg, #10b981, #059669)',
             researcher: 'linear-gradient(135deg, #f97316, #ea580c)',
             planner: 'linear-gradient(135deg, #14b8a6, #0d9488)',
             vtuber: 'linear-gradient(135deg, #ec4899, #db2777)',
-          }[session.role || ''] || 'linear-gradient(135deg, #10b981, #059669)',
+          }[session.role || ''] || 'linear-gradient(135deg, #8b5cf6, #a855f7)',
         }}
       >
         {session.role?.charAt(0).toUpperCase() || 'W'}
@@ -136,9 +136,10 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
         <div className="flex items-center gap-1.5">
           {canModify && (
             <button
-              className="py-1.5 px-3 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed"
+              className="geny-btn-primary inline-flex items-center gap-1.5 py-1.5 px-3 text-[0.75rem] rounded-[var(--border-radius)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => setShowCreateModal(true)}
             >
+              <Plus size={13} />
               {t('sidebar.newSession')}
             </button>
           )}
@@ -357,7 +358,7 @@ export default function Sidebar() {
             </button>
             {canModify && (
               <button
-                className="flex items-center justify-center w-9 h-9 rounded-[var(--border-radius)] bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white border-none cursor-pointer transition-colors duration-150"
+                className="geny-btn-primary flex items-center justify-center w-9 h-9 rounded-[var(--border-radius)] cursor-pointer"
                 onClick={() => setShowCreateModal(true)}
                 title={t('sidebar.newSession')}
               >
