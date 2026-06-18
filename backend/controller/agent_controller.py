@@ -526,6 +526,49 @@ async def attach_trigger_preset(
     }
 
 
+@router.get("/{session_id}/sub-agent")
+async def get_session_sub_agent(
+    request: Request,
+    session_id: str = Path(..., description="VTuber session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """View the executor persistent sub-agent owned by a VTuber session.
+
+    The cutover (GENY_VTUBER_SUBAGENT_MODE=executor) makes a VTuber own a
+    geny-executor persistent sub-agent rather than a bespoke paired session.
+    It is not a session, so it has no sidebar entry — this read-only endpoint
+    surfaces its status + recent conversation + pending notifications so the
+    UI can render the "확인만" view (decision 4).
+    """
+    manager = getattr(request.app.state, "subagent_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="subagent_manager not configured")
+    try:
+        rec = get_session_store().get(session_id) or {}
+    except Exception:
+        rec = {}
+    sa_id = rec.get("executor_sub_agent_id")
+    if not sa_id:
+        raise HTTPException(status_code=404, detail="session has no executor sub-agent")
+    inbox_count = manager.inbox.count(session_id)
+    agent = manager.get(sa_id)
+    if agent is None:
+        # Not live in-memory (e.g. before first access after restart).
+        return {
+            "sub_agent_id": sa_id,
+            "owner_session_id": session_id,
+            "status": "dormant",
+            "conversation": [],
+            "inbox_count": inbox_count,
+        }
+    summary = agent.summary()
+    messages = [
+        {"role": m.get("role"), "content": m.get("content")}
+        for m in (getattr(agent.state, "messages", []) or [])[-20:]
+    ]
+    return {**summary, "conversation": messages, "inbox_count": inbox_count}
+
+
 @router.put("/{session_id}/env")
 async def change_session_env(
     request: ChangeEnvRequest,

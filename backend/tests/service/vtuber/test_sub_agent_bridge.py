@@ -14,32 +14,32 @@ import pytest
 from service.vtuber import sub_agent_bridge as bridge
 
 
-def test_mode_defaults_bespoke(monkeypatch):
+def test_mode_defaults_executor(monkeypatch):
+    # Cutover: default is now executor.
     monkeypatch.delenv("GENY_VTUBER_SUBAGENT_MODE", raising=False)
-    assert bridge.vtuber_subagent_mode() == "bespoke"
-
-
-def test_mode_env_executor(monkeypatch):
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "executor")
     assert bridge.vtuber_subagent_mode() == "executor"
 
 
-def test_mode_env_invalid_falls_back(monkeypatch):
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "nonsense")
+def test_mode_env_bespoke_rollback(monkeypatch):
+    # The flag still allows rollback to bespoke.
+    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "bespoke")
     assert bridge.vtuber_subagent_mode() == "bespoke"
 
 
-def test_executor_mode_active_requires_flag_and_manager(monkeypatch):
-    monkeypatch.delenv("GENY_VTUBER_SUBAGENT_MODE", raising=False)
-    app_state = types.SimpleNamespace(subagent_manager=object())
-    # default bespoke → not active even with a manager
-    assert bridge.executor_mode_active(app_state) is False
+def test_mode_env_invalid_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "nonsense")
+    assert bridge.vtuber_subagent_mode() == "executor"
 
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "executor")
-    # executor flag but no manager → not active
+
+def test_executor_mode_active_requires_manager(monkeypatch):
+    monkeypatch.delenv("GENY_VTUBER_SUBAGENT_MODE", raising=False)
+    # default executor + manager → active
+    assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=object())) is True
+    # executor but no manager → not active
     assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=None)) is False
-    # executor flag + manager → active
-    assert bridge.executor_mode_active(app_state) is True
+    # explicit bespoke rollback → not active even with manager
+    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "bespoke")
+    assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=object())) is False
 
 
 @pytest.mark.asyncio

@@ -552,6 +552,22 @@ export const agentApi = {
       body: JSON.stringify({ env_id: envId }),
     }),
 
+  /**
+   * GET /api/agents/{id}/sub-agent — view the executor persistent sub-agent
+   * a VTuber owns (status + recent conversation + pending notifications).
+   * 404 when the session has no executor sub-agent (bespoke mode / non-VTuber).
+   */
+  getSubAgent: (id: string) =>
+    apiCall<{
+      sub_agent_id: string;
+      owner_session_id?: string;
+      agent_type?: string;
+      status: string;
+      messages?: number;
+      conversation: Array<{ role: string; content: string }>;
+      inbox_count: number;
+    }>(`/api/agents/${id}/sub-agent`),
+
   /** GET /api/agents/{id}/thinking-trigger — get thinking trigger status */
   getThinkingTrigger: (id: string) =>
     apiCall<{

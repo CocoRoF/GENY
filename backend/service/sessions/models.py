@@ -360,6 +360,14 @@ class SessionInfo(BaseModel):
         default=None,
         description="Chat room ID auto-created for VTuber sessions"
     )
+    executor_sub_agent_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Id of the geny-executor persistent sub-agent this VTuber owns "
+            "(executor mode cutover). None in bespoke mode / non-VTuber. The "
+            "FE uses it to render the view-only Sub-Agent panel."
+        ),
+    )
 
     # Environment / memory — surfaced read-only for operator visibility.
     # Populated by AgentSession.get_session_info from the values captured

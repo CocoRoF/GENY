@@ -38,8 +38,15 @@ _VALID_MODES = ("bespoke", "executor")
 DEFAULT_SUBAGENT_TYPE = "worker"
 
 
+#: Default mode. Flipped to ``executor`` at the cutover (2026-06-18): the
+#: VTuber now owns a geny-executor persistent sub-agent. ``bespoke`` remains
+#: selectable via the flag for emergency rollback until the bespoke code is
+#: fully removed.
+_DEFAULT_MODE = "executor"
+
+
 def vtuber_subagent_mode() -> str:
-    """Resolve the VTuber sub-agent mode. Default ``bespoke`` (no change)."""
+    """Resolve the VTuber sub-agent mode. Default ``executor`` (cutover)."""
     raw = (os.environ.get(_MODE_ENV) or "").strip().lower()
     if raw in _VALID_MODES:
         return raw
@@ -54,7 +61,7 @@ def vtuber_subagent_mode() -> str:
             return mode.strip().lower()
     except Exception:  # noqa: BLE001 — settings optional; fall back to default
         pass
-    return "bespoke"
+    return _DEFAULT_MODE
 
 
 def executor_mode_active(app_state: Any) -> bool:
