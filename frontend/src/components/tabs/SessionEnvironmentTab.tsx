@@ -18,8 +18,6 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   Boxes,
-  Code2,
-  ExternalLink,
   Link2Off,
   Maximize2,
   RefreshCw,
@@ -39,7 +37,6 @@ import type {
 } from '@/types/environment';
 import PipelineCanvas from '@/components/session-env/PipelineCanvas';
 import StageDetailPanel from '@/components/session-env/StageDetailPanel';
-import CodeViewModal from '@/components/session-env/CodeViewModal';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function SessionEnvironmentTab() {
@@ -131,7 +128,6 @@ export default function SessionEnvironmentTab() {
   }, [selectedSessionId, sessionEnvId]);
 
   // Code view
-  const [codeOpen, setCodeOpen] = useState(false);
 
   // Canvas reset
   const resetViewRef = useRef<(() => void) | null>(null);
@@ -193,88 +189,29 @@ export default function SessionEnvironmentTab() {
 
   const sessionDisplayName =
     session.session_name || session.session_id.slice(0, 8);
-  const sourceLabel = envSummary?.name ?? sessionEnvId?.slice(0, 8) ?? '—';
   const hasPipeline = !!sessionEnvId && !envMissing && stages.length > 0;
 
   return (
     <div className="pipeline-scope h-full flex flex-col overflow-hidden">
-      {/* ── Header ──────────────────────────────────────── */}
+      {/* ── Slim toolbar — actions only. Identity (session · env) lives
+            in the scope bar above; activeRatio is shown as a chip here. ── */}
       <div
-        className="px-6 py-3 flex items-center justify-between shrink-0 gap-3 flex-wrap"
+        className="px-4 py-2 flex items-center justify-between shrink-0 gap-2 flex-wrap"
         style={{ borderBottom: '1px solid var(--pipe-border)' }}
       >
-        <div className="min-w-0">
-          <span
-            className="text-[10px] font-semibold uppercase tracking-[0.2em]"
-            style={{ color: 'var(--pipe-accent)' }}
-          >
-            {t('sessionEnvironmentTab.pipeline.label')}
-          </span>
-          <div className="flex items-center gap-2 mt-0.5">
-            <h2
-              className="pipe-serif text-lg font-bold leading-tight"
-              style={{ color: 'var(--pipe-text-primary)' }}
-            >
-              {t('sessionEnvironmentTab.pipeline.title')}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2 mt-1 text-[10px] flex-wrap">
-            <span
-              className="uppercase tracking-[0.15em]"
-              style={{ color: 'var(--pipe-text-muted)' }}
-            >
-              {t('sessionEnvironmentTab.pipeline.sourceEnvironment')}
-            </span>
-            <span style={{ color: 'var(--pipe-border-hover)' }}>·</span>
-            {sessionEnvId && !envMissing ? (
-              <button
-                onClick={openEnvInDrawer}
-                title={sessionEnvId}
-                className="pipe-mono font-semibold cursor-pointer hover:underline flex items-center gap-1"
-                style={{ color: 'var(--pipe-accent)' }}
-              >
-                {sourceLabel}
-                <ExternalLink size={10} className="opacity-60" />
-              </button>
-            ) : (
-              <span
-                className="pipe-mono font-semibold"
-                style={{ color: 'var(--pipe-text-muted)' }}
-              >
-                {envMissing
-                  ? t('sessionEnvironmentTab.envMissing')
-                  : t('sessionEnvironmentTab.noEnvBound')}
-              </span>
-            )}
-            {hasPipeline && (
-              <>
-                <span style={{ color: 'var(--pipe-border-hover)' }}>·</span>
-                <span style={{ color: 'var(--pipe-text-muted)' }}>
-                  {t('sessionEnvironmentTab.pipeline.activeRatio', {
-                    active: String(activeCount),
-                    total: String(stages.length),
-                  })}
-                </span>
-              </>
-            )}
-            <span style={{ color: 'var(--pipe-border-hover)' }}>·</span>
-            <span
-              className="pipe-mono"
-              style={{ color: 'var(--pipe-text-muted)' }}
-              title={session.session_id}
-            >
-              {sessionDisplayName}
-            </span>
-          </div>
-        </div>
+        <span
+          className="text-[10px] font-medium pipe-mono"
+          style={{ color: 'var(--pipe-text-muted)' }}
+        >
+          {hasPipeline
+            ? t('sessionEnvironmentTab.pipeline.activeRatio', {
+                active: String(activeCount),
+                total: String(stages.length),
+              })
+            : ''}
+        </span>
 
-        <div className="flex items-center gap-3 shrink-0 flex-wrap">
-          <span
-            className="text-[9px] tracking-wide hidden md:inline"
-            style={{ color: 'var(--pipe-text-muted)' }}
-          >
-            {t('sessionEnvironmentTab.pipeline.hint')}
-          </span>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           {/* Env 변경 — rebind THIS session (VTuber or Sub-Agent, per the
               toggle in the root tab) to a different environment. Shown even
               when unbound so a legacy session can be bound. */}
@@ -294,32 +231,19 @@ export default function SessionEnvironmentTab() {
             {t('sessionEnvironmentTab.changeEnv.button')}
           </button>
           {hasPipeline && (
-            <>
-              <button
-                onClick={() => setCodeOpen(true)}
-                className="text-[10px] px-3 py-1 rounded-md cursor-pointer transition-colors hover:brightness-125 flex items-center gap-1.5"
-                style={{
-                  background: 'var(--pipe-bg-tertiary)',
-                  color: 'var(--pipe-accent)',
-                  border: '1px solid var(--pipe-border)',
-                }}
-              >
-                <Code2 size={11} />
-                {t('sessionEnvironmentTab.pipeline.code')}
-              </button>
-              <button
-                onClick={handleReset}
-                className="text-[10px] px-3 py-1 rounded-md cursor-pointer transition-colors hover:brightness-125 flex items-center gap-1.5"
-                style={{
-                  background: 'var(--pipe-bg-tertiary)',
-                  color: 'var(--pipe-text-secondary)',
-                  border: '1px solid var(--pipe-border)',
-                }}
-              >
-                <Maximize2 size={11} />
-                {t('sessionEnvironmentTab.pipeline.reset')}
-              </button>
-            </>
+            <button
+              onClick={handleReset}
+              title={t('sessionEnvironmentTab.pipeline.reset')}
+              aria-label={t('sessionEnvironmentTab.pipeline.reset')}
+              className="flex items-center justify-center w-7 h-7 rounded-md cursor-pointer transition-colors hover:brightness-125"
+              style={{
+                background: 'var(--pipe-bg-tertiary)',
+                color: 'var(--pipe-text-muted)',
+                border: '1px solid var(--pipe-border)',
+              }}
+            >
+              <Maximize2 size={11} />
+            </button>
           )}
           {sessionEnvId && !envMissing && (
             <>
@@ -357,51 +281,56 @@ export default function SessionEnvironmentTab() {
         </div>
       </div>
 
-      {/* ── Body ────────────────────────────────────────── */}
-      {!sessionEnvId ? (
-        <UnboundState
-          workflow={session.workflow_id || '—'}
-          onGoToEnvironments={openEnvironmentsTab}
-        />
-      ) : envMissing ? (
-        <EnvMissingState sessionEnvId={sessionEnvId} />
-      ) : manifestLoading && !manifestEnv ? (
-        <CenterMessage message={t('sessionEnvironmentTab.loading')} />
-      ) : manifestError ? (
-        <ErrorState
-          message={manifestError}
-          onRetry={() => sessionEnvId && void fetchManifest(sessionEnvId)}
-        />
-      ) : stages.length === 0 ? (
-        <CenterMessage message={t('sessionEnvironmentTab.manifestEmpty')} />
-      ) : (
-        <PipelineCanvas
-          stages={stages}
-          selectedOrder={selectedOrder}
-          onSelectStage={setSelectedOrder}
-          onResetView={(fn) => {
-            resetViewRef.current = fn;
-          }}
-        />
-      )}
+      {/* ── Body: graph (flex-1) | inline stage detail (right split) ── */}
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 flex flex-col relative">
+          {!sessionEnvId ? (
+            <UnboundState
+              workflow={session.workflow_id || '—'}
+              onGoToEnvironments={openEnvironmentsTab}
+            />
+          ) : envMissing ? (
+            <EnvMissingState sessionEnvId={sessionEnvId} />
+          ) : manifestLoading && !manifestEnv ? (
+            <CenterMessage message={t('sessionEnvironmentTab.loading')} />
+          ) : manifestError ? (
+            <ErrorState
+              message={manifestError}
+              onRetry={() => sessionEnvId && void fetchManifest(sessionEnvId)}
+            />
+          ) : stages.length === 0 ? (
+            <CenterMessage message={t('sessionEnvironmentTab.manifestEmpty')} />
+          ) : (
+            <PipelineCanvas
+              stages={stages}
+              selectedOrder={selectedOrder}
+              onSelectStage={setSelectedOrder}
+              onResetView={(fn) => {
+                resetViewRef.current = fn;
+              }}
+            />
+          )}
+        </div>
 
-      {/* ── Detail panel ─────────────────────────────────── */}
-      {selectedOrder !== null && hasPipeline && (
-        <StageDetailPanel
-          order={selectedOrder}
-          entry={stageByOrder.get(selectedOrder)}
-          onClose={() => setSelectedOrder(null)}
-        />
-      )}
-
-      {/* ── Code view ────────────────────────────────────── */}
-      {codeOpen && manifestEnv?.manifest && (
-        <CodeViewModal
-          manifest={manifestEnv.manifest}
-          envName={envSummary?.name}
-          onClose={() => setCodeOpen(false)}
-        />
-      )}
+        {/* Stage detail — in-flow split panel beside the graph (not a
+            full-screen drawer). Clicking another node swaps its content. */}
+        {selectedOrder !== null && hasPipeline && (
+          <div
+            className="w-[380px] max-w-[46%] shrink-0 overflow-y-auto"
+            style={{
+              borderLeft: '1px solid var(--pipe-border)',
+              background: 'var(--pipe-bg-secondary)',
+            }}
+          >
+            <StageDetailPanel
+              inline
+              order={selectedOrder}
+              entry={stageByOrder.get(selectedOrder)}
+              onClose={() => setSelectedOrder(null)}
+            />
+          </div>
+        )}
+      </div>
 
       {/* ── Change-env picker ────────────────────────────── */}
       {envPickerOpen && (

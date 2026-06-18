@@ -657,7 +657,7 @@ export default function CommandTab() {
               </button>
             )}
             <button
-              className="h-7 px-3 rounded-md bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.6875rem] font-semibold flex items-center justify-center gap-1.5 transition-all border-none disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+              className="geny-btn-primary h-7 px-3 rounded-md text-[0.6875rem] flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
               disabled={isExecuting || !sessionData?.input?.trim()}
               onClick={handleExecute}
               title={isExecuting ? t('commandTab.executingBtn') : t('commandTab.executeBtn')}

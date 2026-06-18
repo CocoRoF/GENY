@@ -14,15 +14,16 @@
    Shared / non-theme CSS Variables
    ======================================== */
 :root {
-	--border-radius: 6px;
-	--border-radius-lg: 10px;
+	/* Bold (lavender) geometry — larger, softer radii (2026-06-17 redesign). */
+	--border-radius: 10px;
+	--border-radius-lg: 16px;
 	--transition-fast: 120ms ease;
 	--transition-normal: 200ms ease;
 
 	/* shadcn token bridge — HSL components only (no `hsl(...)`) so the
 	   shadcn ui/* components can compose alpha via `hsl(var(--name) / 0.5)`.
 	   Values resolve from the active light/dark theme block below. */
-	--radius: 0.5rem;
+	--radius: 0.75rem;
 }
 
 /* shadcn-style geometry tokens (Tailwind 4 doesn't auto-pick these up
@@ -33,136 +34,158 @@
    Dark Theme (default)
    ======================================== */
 html.dark {
-	--primary-color: #3b82f6;
-	--primary-hover: #2563eb;
-	--primary-subtle: rgba(59, 130, 246, 0.1);
-	--secondary-color: #64748b;
-	--success-color: #10b981;
-	--warning-color: #f59e0b;
-	--danger-color: #ef4444;
-	--error-color: #ef4444;
-	--bg-primary: #09090b;
-	--bg-secondary: #18181b;
-	--bg-tertiary: #27272a;
-	--bg-card: #18181b;
-	--bg-hover: #27272a;
-	--text-primary: #fafafa;
-	--text-secondary: #a1a1aa;
-	--text-muted: #71717a;
-	--border-color: #27272a;
-	--border-subtle: #3f3f46;
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+	/* Unified dark family — muted lavender accent, NOT neon (2026-06-18
+	   retune). Background layers sit within a few % of each other so
+	   boundaries don't read as alternating colour bands. */
+	--primary-color: #8d79c9;          /* muted lavender-violet — calm on dark */
+	--primary-hover: #7c68b8;
+	--primary-subtle: rgba(141, 121, 201, 0.13);
+	--secondary-color: #8b85a3;
+	--success-color: #4ade80;
+	--warning-color: #fbbf24;
+	--danger-color: #f47171;
+	--error-color: #f47171;
+	--bg-primary: #1a1726;             /* dark lavender base (lifted off near-black) */
+	--bg-secondary: #1f1b2d;
+	--bg-tertiary: #28233a;
+	--bg-card: #1f1b2d;
+	--bg-hover: #28233a;
+	--text-primary: #efecf6;
+	--text-secondary: #aca6bf;
+	--text-muted: #797292;
+	--border-color: #2f2942;
+	--border-subtle: #3c3553;
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+	--shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+	/* Accents — muted gradients + soft wash + restrained glow (no eye-burn). */
+	--grad-primary: linear-gradient(135deg, #7a6ab0 0%, #937fc2 100%);
+	--grad-primary-hover: linear-gradient(135deg, #6c5ca0 0%, #8470b2 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(141, 121, 201, 0.10) 0%, rgba(141, 121, 201, 0.03) 36%, transparent 64%);
+	--sparkle-color: rgba(160, 144, 205, 0.40);
+	--glow-primary: 0 0 16px rgba(141, 121, 201, 0.16);
+	--glow-primary-soft: 0 0 28px rgba(141, 121, 201, 0.07);
 
 	/* Code / Syntax */
-	--code-bg: #0d0d0f;
-	--code-string: #c3e88d;
-	--code-keyword: #c084fc;
-	--code-function: #60a5fa;
-	--code-number: #fbbf24;
-	--code-comment: #6b7280;
-	--code-property: #a5d6ff;
+	--code-bg: #1f1b2d;
+	--code-string: #a8c98a;
+	--code-keyword: #b69ae0;
+	--code-function: #9d8ad0;
+	--code-number: #e0bd7a;
+	--code-comment: #746e8c;
+	--code-property: #c9b0e6;
 
 	/* Node Handle border (matches bg so handles look punched-out) */
-	--node-handle-border: #18181b;
+	--node-handle-border: #1f1b2d;
 
 	/* MiniMap */
-	--minimap-bg: #1a1a1e;
-	--minimap-stroke: #555;
+	--minimap-bg: #1f1b2d;
+	--minimap-stroke: #3c3553;
 
 	/* Overlay / backdrop */
-	--overlay-bg: rgba(0, 0, 0, 0.55);
-	--backdrop-blur: rgba(0, 0, 0, 0.5);
+	--overlay-bg: rgba(8, 6, 14, 0.62);
+	--backdrop-blur: rgba(8, 6, 14, 0.55);
 
 	/* shadcn/ui token bridge — HSL components for hsl(var(--name) / a) */
-	--background: 240 10% 4%;          /* #09090b */
-	--foreground: 0 0% 98%;            /* #fafafa */
-	--card: 240 6% 10%;                /* #18181b */
-	--card-foreground: 0 0% 98%;
-	--popover: 240 6% 10%;
-	--popover-foreground: 0 0% 98%;
-	--primary: 217 91% 60%;            /* #3b82f6 */
-	--primary-foreground: 0 0% 98%;
-	--secondary: 240 4% 16%;           /* #27272a */
-	--secondary-foreground: 0 0% 98%;
-	--muted: 240 4% 16%;
-	--muted-foreground: 240 5% 65%;    /* #a1a1aa */
-	--accent: 240 4% 16%;
-	--accent-foreground: 0 0% 98%;
-	--destructive: 0 84% 60%;          /* #ef4444 */
-	--destructive-foreground: 0 0% 98%;
-	--border: 240 6% 15%;              /* #27272a */
-	--input: 240 6% 15%;
-	--ring: 217 91% 60%;
+	--background: 252 25% 12%;          /* #1a1726 */
+	--foreground: 256 30% 95%;          /* #efecf6 */
+	--card: 253 25% 14%;                /* #1f1b2d */
+	--card-foreground: 256 30% 95%;
+	--popover: 253 25% 14%;
+	--popover-foreground: 256 30% 95%;
+	--primary: 255 37% 63%;             /* #8d79c9 */
+	--primary-foreground: 0 0% 100%;
+	--secondary: 253 25% 18%;           /* #28233a */
+	--secondary-foreground: 256 30% 95%;
+	--muted: 253 25% 18%;
+	--muted-foreground: 254 17% 70%;    /* #aca6bf */
+	--accent: 253 24% 20%;
+	--accent-foreground: 256 30% 95%;
+	--destructive: 0 80% 70%;           /* #f47171 */
+	--destructive-foreground: 0 0% 100%;
+	--border: 254 23% 21%;              /* #2f2942 */
+	--input: 254 23% 21%;
+	--ring: 255 37% 63%;
 }
 
 /* ========================================
    Light Theme
    ======================================== */
 html.light {
-	--primary-color: #2563eb;
-	--primary-hover: #1d4ed8;
-	--primary-subtle: rgba(37, 99, 235, 0.08);
-	--secondary-color: #64748b;
+	/* Unified soft-lavender family — no white surfaces; every layer is a
+	   lavender tint within a few % of the others so the UI reads as one
+	   cohesive wash, not white blocks on lavender (2026-06-18 retune). */
+	--primary-color: #7c3aed;          /* violet-600 accent */
+	--primary-hover: #6d28d9;
+	--primary-subtle: rgba(124, 58, 237, 0.07);
+	--secondary-color: #6b6480;
 	--success-color: #059669;
 	--warning-color: #d97706;
 	--danger-color: #dc2626;
 	--error-color: #dc2626;
-	--bg-primary: #ffffff;
-	--bg-secondary: #f8fafc;
-	--bg-tertiary: #f1f5f9;
-	--bg-card: #ffffff;
-	--bg-hover: #f1f5f9;
-	--text-primary: #0f172a;
-	--text-secondary: #475569;
-	--text-muted: #94a3b8;
-	--border-color: #e2e8f0;
-	--border-subtle: #cbd5e1;
-	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-	--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+	--bg-primary: #f1ecfa;             /* unified lavender base */
+	--bg-secondary: #f6f2fd;           /* surfaces — barely lighter lavender, NOT white */
+	--bg-tertiary: #e9e1f6;            /* inset */
+	--bg-card: #f6f2fd;
+	--bg-hover: #ece5f8;
+	--text-primary: #221d33;           /* deep violet-ink */
+	--text-secondary: #5c5573;
+	--text-muted: #948cac;
+	--border-color: #e4dcf2;           /* soft lavender border */
+	--border-subtle: #d6cbeb;
+	--shadow-sm: 0 1px 2px rgba(76, 29, 149, 0.04);
+	--shadow-md: 0 4px 14px rgba(76, 29, 149, 0.06);
+	--shadow-lg: 0 12px 30px rgba(76, 29, 149, 0.09);
+
+	/* Accents — gradient for tiles, faint wash + soft glow. */
+	--grad-primary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
+	--grad-primary-hover: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(139, 92, 246, 0.10) 0%, rgba(168, 85, 247, 0.035) 38%, transparent 66%);
+	--sparkle-color: rgba(139, 92, 246, 0.40);
+	--glow-primary: 0 0 20px rgba(124, 58, 237, 0.12);
+	--glow-primary-soft: 0 0 32px rgba(124, 58, 237, 0.06);
 
 	/* Code / Syntax */
-	--code-bg: #f8fafc;
+	--code-bg: #ece5f8;
 	--code-string: #16a34a;
 	--code-keyword: #7c3aed;
 	--code-function: #2563eb;
 	--code-number: #b45309;
-	--code-comment: #94a3b8;
-	--code-property: #0369a1;
+	--code-comment: #948cac;
+	--code-property: #7e22ce;
 
 	/* Node Handle border */
-	--node-handle-border: #f8fafc;
+	--node-handle-border: #f6f2fd;
 
 	/* MiniMap */
-	--minimap-bg: #f1f5f9;
-	--minimap-stroke: #cbd5e1;
+	--minimap-bg: #e9e1f6;
+	--minimap-stroke: #d6cbeb;
 
 	/* Overlay / backdrop */
-	--overlay-bg: rgba(255, 255, 255, 0.55);
-	--backdrop-blur: rgba(255, 255, 255, 0.5);
+	--overlay-bg: rgba(34, 29, 51, 0.32);
+	--backdrop-blur: rgba(241, 236, 250, 0.55);
 
 	/* shadcn/ui token bridge */
-	--background: 0 0% 100%;           /* #ffffff */
-	--foreground: 222 47% 11%;         /* #0f172a */
-	--card: 0 0% 100%;
-	--card-foreground: 222 47% 11%;
-	--popover: 0 0% 100%;
-	--popover-foreground: 222 47% 11%;
-	--primary: 221 83% 53%;            /* #2563eb */
+	--background: 262 56% 95%;         /* #f1ecfa */
+	--foreground: 252 28% 16%;         /* #221d33 */
+	--card: 264 60% 97%;               /* #f6f2fd */
+	--card-foreground: 252 28% 16%;
+	--popover: 264 60% 97%;
+	--popover-foreground: 252 28% 16%;
+	--primary: 262 83% 58%;            /* #7c3aed */
 	--primary-foreground: 0 0% 100%;
-	--secondary: 210 40% 96%;          /* #f1f5f9 */
-	--secondary-foreground: 222 47% 11%;
-	--muted: 210 40% 96%;
-	--muted-foreground: 215 16% 47%;   /* #64748b */
-	--accent: 210 40% 96%;
-	--accent-foreground: 222 47% 11%;
+	--secondary: 263 47% 93%;          /* #e9e1f6 */
+	--secondary-foreground: 252 28% 16%;
+	--muted: 263 47% 93%;
+	--muted-foreground: 255 15% 62%;   /* #948cac */
+	--accent: 263 47% 93%;
+	--accent-foreground: 252 28% 16%;
 	--destructive: 0 84% 50%;          /* #dc2626 */
 	--destructive-foreground: 0 0% 100%;
-	--border: 214 32% 91%;             /* #e2e8f0 */
-	--input: 214 32% 91%;
-	--ring: 221 83% 53%;
+	--border: 263 45% 91%;             /* #e4dcf2 */
+	--input: 263 45% 91%;
+	--ring: 262 83% 58%;
 }
 
 /* ========================================
@@ -311,6 +334,93 @@ html.theme-transition *,
 html.theme-transition *::before,
 html.theme-transition *::after {
 	transition: background-color 300ms ease, color 200ms ease, border-color 200ms ease, box-shadow 200ms ease !important;
+}
+
+/* ========================================
+   Bold design language (2026-06 redesign)
+   Reusable primitives so every main-page surface shares the
+   nesy.app-style card / gradient-tile / hero / sparkle look.
+   All colors resolve from the theme tokens → both modes.
+   ======================================== */
+
+/* Elevated surface card */
+.geny-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius-lg);
+	box-shadow: var(--shadow-sm);
+	transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.geny-card-interactive {
+	cursor: pointer;
+}
+.geny-card-interactive:hover {
+	transform: translateY(-3px);
+	box-shadow: var(--shadow-md);
+	border-color: var(--border-subtle);
+}
+
+/* Gradient icon tile — violet rounded square with a white glyph
+   (the nesy.app category-tile motif). Size via width/height utilities. */
+.geny-icon-tile {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 14px;
+	background: var(--grad-primary);
+	color: #ffffff;
+	box-shadow: var(--glow-primary-soft);
+}
+
+/* Uppercase tracked eyebrow label */
+.geny-eyebrow {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+.geny-eyebrow .accent {
+	color: var(--primary-color);
+}
+
+/* Headline gradient text */
+.geny-gradient-text {
+	background: linear-gradient(118deg, var(--primary-color) 0%, #a855f7 55%, #c084fc 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: transparent;
+}
+
+/* Hero lavender wash backdrop */
+.geny-hero-wash {
+	background: var(--hero-wash);
+}
+
+/* Gradient primary button */
+.geny-btn-primary {
+	background: var(--grad-primary);
+	color: #ffffff;
+	border: none;
+	font-weight: 600;
+	box-shadow: var(--glow-primary-soft);
+	transition: filter 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.geny-btn-primary:hover {
+	filter: brightness(1.07);
+	transform: translateY(-1px);
+	box-shadow: var(--glow-primary);
+}
+
+/* Sparkle decoration (the ✦ four-point star motif) */
+@keyframes geny-sparkle-twinkle {
+	0%, 100% { opacity: 0.4; transform: scale(0.85) rotate(0deg); }
+	50% { opacity: 1; transform: scale(1.12) rotate(8deg); }
+}
+.geny-sparkle {
+	color: var(--sparkle-color);
+	animation: geny-sparkle-twinkle 4.5s ease-in-out infinite;
 }
 
 /* ========================================
@@ -642,22 +752,28 @@ html.light ::-webkit-scrollbar-thumb:hover {
 	--pipe-circle-shadow: 0 2px 8px rgba(0, 0, 0, 0.20);
 	--pipe-circle-shadow-hover: 0 4px 18px rgba(0, 0, 0, 0.28);
 	--pipe-inactive-opacity: 0.5;
+	/* Bold redesign — a fixed mid-violet gradient for the *active* stage
+	   fill that keeps a white number readable in BOTH themes (the
+	   theme-split --grad-primary goes too light in dark mode). */
+	--pipe-grad: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
 
 	background: var(--pipe-bg-primary);
 	color: var(--pipe-text-primary);
 	font-family: var(--font-inter, 'Inter'), system-ui, sans-serif;
 }
 
-/* Dark-specific tweaks: richer glow, darker ambient shadow on the circles. */
+/* Dark-specific: MUTED accent + restrained glow (no eye-burn), and a
+   calmer node-fill gradient than the light vivid default. */
 html.dark .pipeline-scope {
-	--pipe-accent-tint: color-mix(in srgb, var(--primary-color) 14%, transparent);
-	--pipe-accent-glow: color-mix(in srgb, var(--primary-color) 32%, transparent);
-	--pipe-accent-glow-soft: color-mix(in srgb, var(--primary-color) 10%, transparent);
-	--pipe-purple: #a855f7;
-	--pipe-cyan: #22d3ee;
-	--pipe-circle-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
-	--pipe-circle-shadow-hover: 0 4px 24px rgba(0, 0, 0, 0.55);
-	--pipe-inactive-opacity: 0.42;
+	--pipe-grad: linear-gradient(135deg, #6d5da3 0%, #8470b5 100%);
+	--pipe-accent-tint: color-mix(in srgb, var(--primary-color) 12%, transparent);
+	--pipe-accent-glow: color-mix(in srgb, var(--primary-color) 18%, transparent);
+	--pipe-accent-glow-soft: color-mix(in srgb, var(--primary-color) 6%, transparent);
+	--pipe-purple: #9d86cf;
+	--pipe-cyan: #6fa9b8;
+	--pipe-circle-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+	--pipe-circle-shadow-hover: 0 4px 18px rgba(0, 0, 0, 0.5);
+	--pipe-inactive-opacity: 0.4;
 }
 
 /* Light-specific tweaks: paler tint, softer shadow so circles don't
@@ -680,22 +796,24 @@ html.light .pipeline-scope {
 	font-family: var(--font-jetbrains-mono, 'JetBrains Mono'), monospace;
 }
 
-/* ── Stage Circle ───────────────────────────────────── */
+/* ── Stage Circle (Bold lavender redesign) ──────────── */
 .pipeline-scope .stage-circle {
-	width: 54px;
-	height: 54px;
+	width: 56px;
+	height: 56px;
 	border-radius: 50%;
 	border: 1.5px solid var(--pipe-border-hover);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 14px;
-	font-weight: 600;
+	font-size: 15px;
+	font-weight: 700;
 	font-family: var(--font-jetbrains-mono, 'JetBrains Mono'), monospace;
 	color: var(--pipe-text-secondary);
-	background: radial-gradient(ellipse at 35% 30%, var(--pipe-bg-tertiary), var(--pipe-bg-secondary));
+	background:
+		radial-gradient(ellipse at 32% 26%, var(--pipe-bg-tertiary), var(--pipe-bg-secondary));
 	cursor: pointer;
-	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+		box-shadow 0.28s ease, border-color 0.2s ease, background 0.2s ease;
 	position: relative;
 	z-index: 2;
 	box-shadow: var(--pipe-circle-shadow);
@@ -703,17 +821,26 @@ html.light .pipeline-scope {
 .pipeline-scope .stage-circle:hover {
 	border-color: var(--pipe-text-secondary);
 	color: var(--pipe-text-primary);
-	transform: scale(1.12);
+	transform: translateY(-2px) scale(1.1);
 	box-shadow: var(--pipe-circle-shadow-hover);
 }
+/* Active = a filled violet gradient tile with a white number + glow —
+   the equivalent of nesy.app's gradient icon tiles. */
 .pipeline-scope .stage-circle.active {
-	border-color: var(--pipe-accent);
-	color: var(--pipe-accent);
-	background: radial-gradient(ellipse at 35% 30%, var(--pipe-accent-tint), var(--pipe-bg-secondary));
+	border-color: transparent;
+	color: #ffffff;
+	background: var(--pipe-grad);
 	box-shadow:
-		0 0 24px var(--pipe-accent-glow),
+		0 6px 20px var(--pipe-accent-glow),
+		0 0 44px var(--pipe-accent-glow-soft),
+		inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.pipeline-scope .stage-circle.active:hover {
+	transform: translateY(-2px) scale(1.1);
+	box-shadow:
+		0 10px 28px var(--pipe-accent-glow),
 		0 0 60px var(--pipe-accent-glow-soft),
-		inset 0 0 12px var(--pipe-accent-glow-soft);
+		inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .pipeline-scope .stage-circle.inactive {
 	border-color: var(--pipe-border);
@@ -726,13 +853,21 @@ html.light .pipeline-scope {
 	opacity: calc(var(--pipe-inactive-opacity) + 0.3);
 	border-color: var(--pipe-text-muted);
 	color: var(--pipe-text-secondary);
-	transform: scale(1.06);
+	transform: translateY(-1px) scale(1.06);
 	box-shadow: var(--pipe-circle-shadow);
 }
+/* Selected = active tile + a soft accent halo ring drawn outside the
+   circle (works on active and inactive nodes). */
 .pipeline-scope .stage-circle.selected {
-	border-color: var(--pipe-accent);
+	box-shadow:
+		0 0 0 3px var(--pipe-bg-primary),
+		0 0 0 5px var(--pipe-accent),
+		0 8px 26px var(--pipe-accent-glow);
+}
+.pipeline-scope .stage-circle.selected.inactive {
+	opacity: 1;
 	color: var(--pipe-accent);
-	box-shadow: 0 0 18px var(--pipe-accent-glow);
+	border-color: transparent;
 }
 
 /* ── Dash flow animation (loop-back path) ──────────── */
