@@ -25,7 +25,6 @@ import {
   SubTabNav,
   type SubTabDef,
   EmptyState,
-  NextSessionBanner,
 } from '@/components/layout';
 import { Folder, Layers, Wrench, FolderOpen, Bot, Sparkles } from 'lucide-react';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
@@ -113,41 +112,25 @@ export default function SessionEnvironmentRootTab() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Strong scope header — distinguishes this from global Library. */}
-      <div className="geny-hero-wash shrink-0 px-4 py-3 border-b border-[var(--border-color)] flex items-center gap-3 flex-wrap">
-        <span className="geny-icon-tile w-8 h-8 shrink-0">
-          <Folder size={15} />
-        </span>
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="geny-eyebrow leading-none">Environment</span>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
-              {sessionLabel}
-            </code>
-            {envId ? (
-              <>
-                <span className="text-[0.6875rem] text-[var(--text-muted)]">
-                  bound env
-                </span>
-                <code className="text-[0.6875rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--primary-subtle)] text-[var(--primary-color)] font-semibold">
-                  {envId}
-                </code>
-              </>
-            ) : (
-              <span className="text-[0.6875rem] text-[var(--warning-color)]">
-                no env bound (using default manifest)
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-      <NextSessionBanner variant="session" />
-      {hasSubAgent && (
-        <div className="shrink-0 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center gap-2 flex-wrap">
-          <span className="text-[0.6875rem] text-[var(--text-muted)] uppercase tracking-wide">
-            에이전트
+      {/* Compact one-line scope bar — session · env, with the agent
+          toggle (VTuber/Sub-Agent) right-aligned when paired. No icon,
+          no read-only banner (env changes now apply live). */}
+      <div className="shrink-0 flex items-center justify-between gap-3 px-4 h-10 border-b border-[var(--border-color)]">
+        <div className="flex items-center gap-1.5 min-w-0 text-[0.75rem]">
+          <span className="font-semibold text-[var(--text-primary)] truncate">
+            {sessionLabel}
           </span>
-          <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden">
+          <span className="text-[var(--text-muted)]">·</span>
+          {envId ? (
+            <code className="font-mono text-[var(--primary-color)] truncate">
+              {envId}
+            </code>
+          ) : (
+            <span className="text-[var(--warning-color)]">기본 매니페스트</span>
+          )}
+        </div>
+        {hasSubAgent && (
+          <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden shrink-0">
             <AgentToggleButton
               active={agentTarget === 'vtuber'}
               icon={Sparkles}
@@ -161,13 +144,8 @@ export default function SessionEnvironmentRootTab() {
               onClick={() => setAgentTarget('sub')}
             />
           </div>
-          <span className="text-[0.6875rem] text-[var(--text-muted)]">
-            {agentTarget === 'sub'
-              ? '연결된 Sub-Worker의 환경'
-              : 'VTuber 본체의 환경'}
-          </span>
-        </div>
-      )}
+        )}
+      </div>
       <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
       <div className="flex-1 min-h-0 overflow-hidden">
         <SessionEnvTargetContext.Provider value={effectiveSessionId}>

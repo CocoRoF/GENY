@@ -21,6 +21,10 @@ interface StageDetailPanelProps {
   order: number;
   entry: StageManifestEntry | undefined;
   onClose: () => void;
+  /** When true, render as an in-flow panel (no fixed overlay / backdrop)
+   * so it can sit beside the graph inside the canvas area as a left/right
+   * split. The parent supplies width, scroll and the divider border. */
+  inline?: boolean;
 }
 
 function Section({
@@ -69,6 +73,7 @@ export default function StageDetailPanel({
   order,
   entry,
   onClose,
+  inline = false,
 }: StageDetailPanelProps) {
   const { t, locale } = useI18n();
   const meta = getStageMetaByOrder(order, locale);
@@ -79,25 +84,8 @@ export default function StageDetailPanel({
   const isPresent = !!entry;
   const currentStrategies: Record<string, string> = entry?.strategies ?? {};
 
-  return (
+  const body = (
     <>
-      {/* Backdrop — always a dark scrim so the slide-in panel has
-          separation from the canvas even in light mode. */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.4)' }}
-        onClick={onClose}
-      />
-
-      {/* Panel */}
-      <div
-        className="fixed right-0 top-0 bottom-0 w-[420px] max-w-[100vw] overflow-y-auto z-50 pipe-slide-in"
-        style={{
-          background: 'var(--pipe-bg-secondary)',
-          borderLeft: '1px solid var(--pipe-border)',
-          boxShadow: 'var(--shadow-lg)',
-        }}
-      >
         {/* Header */}
         <div
           className="p-5"
@@ -482,6 +470,31 @@ export default function StageDetailPanel({
         )}
 
         <div className="h-8" />
+    </>
+  );
+
+  // In-flow split panel (lives beside the graph inside the canvas area).
+  if (inline) {
+    return <div className="h-full pipe-slide-in">{body}</div>;
+  }
+
+  // Overlay drawer (legacy / fallback).
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        style={{ background: 'rgba(0,0,0,0.4)' }}
+        onClick={onClose}
+      />
+      <div
+        className="fixed right-0 top-0 bottom-0 w-[420px] max-w-[100vw] overflow-y-auto z-50 pipe-slide-in"
+        style={{
+          background: 'var(--pipe-bg-secondary)',
+          borderLeft: '1px solid var(--pipe-border)',
+          boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        {body}
       </div>
     </>
   );
