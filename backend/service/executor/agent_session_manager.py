@@ -1059,14 +1059,82 @@ class AgentSessionManager:
 
         logger.info(f"[{session_id}] ✅ AgentSession created successfully")
 
-        # ── Auto-create Sub-Worker for VTuber agents ───────────────────
+        # ── VTuber executor sub-agent (flag-gated cutover, default off) ──
+        # When GENY_VTUBER_SUBAGENT_MODE=executor (and a SubAgentManager is
+        # wired), the VTuber OWNS a geny-executor persistent sub-agent
+        # instead of the bespoke paired Sub-Worker session. Default off →
+        # this branch never runs and the bespoke path below is byte-for-byte
+        # unchanged (zero regression). See service/vtuber/sub_agent_bridge.
+        from service.vtuber.sub_agent_bridge import executor_mode_active as _exec_mode
+        from service.execution.agent_executor import get_app_state as _get_app_state
+        _vt_app_state = _get_app_state()
+        if (
+            request.role == SessionRole.VTUBER
+            and request.session_type != "sub"
+            and not request.linked_session_id
+            and _exec_mode(_vt_app_state)
+        ):
+            try:
+                from service.vtuber.sub_agent_bridge import spawn_vtuber_subagent
+                sa_id = await spawn_vtuber_subagent(
+                    _vt_app_state, session_id,
+                    credentials=credentials, parent_provider=primary_provider,
+                )
+                agent._session_type = "vtuber"
+                agent._executor_sub_agent_id = sa_id
+                self._store.update(session_id, {
+                    "session_type": "vtuber",
+                    "executor_sub_agent_id": sa_id,
+                })
+                self._persona_provider.append_context(
+                    session_id, _vtuber_sub_worker_notice()
+                )
+                # Chat room (shared VTuber UX).
+                try:
+                    from service.chat.conversation_store import get_chat_store
+                    chat_store = get_chat_store()
+                    room = chat_store.create_room(
+                        f"{request.session_name or 'VTuber'} Chat", [session_id]
+                    )
+                    room_id = room.get("id") or room.get("room_id")
+                    if room_id:
+                        agent._chat_room_id = room_id
+                        self._store.update(session_id, {"chat_room_id": room_id})
+                except Exception as e:  # noqa: BLE001
+                    logger.error(
+                        f"[{session_id}] chat room (executor mode) failed: {e}",
+                        exc_info=True,
+                    )
+                # Trigger registration (shared VTuber UX).
+                try:
+                    from service.vtuber.thinking_trigger import get_thinking_trigger_service
+                    trigger_svc = get_thinking_trigger_service()
+                    trigger_svc.record_activity(session_id)
+                    effective_trigger = trigger_preset_id or self._env_trigger_preset_id(env_id)
+                    if effective_trigger:
+                        trigger_svc.attach_preset(session_id, effective_trigger)
+                        self._store.update(
+                            session_id, {"trigger_preset_id": effective_trigger}
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+                logger.info(
+                    f"[{session_id}] 🤖 VTuber in executor sub-agent mode: {sa_id}"
+                )
+            except Exception as e:  # noqa: BLE001 — never fail VTuber create
+                logger.error(
+                    f"[{session_id}] VTuber executor sub-agent setup failed: {e}",
+                    exc_info=True,
+                )
+
+        # ── Auto-create Sub-Worker for VTuber agents (bespoke, default) ──
         # Recursion guard: a VTuber request with session_type="sub"
         # is a caller bug (sub sessions are always workers). The
         # implicit guard was `not request.linked_session_id` — that
         # worked because spawned requests carry linked_session_id, but
         # the invariant we actually want is "don't double-spawn." Make
         # it explicit on session_type.
-        if (
+        elif (
             request.role == SessionRole.VTUBER
             and request.session_type != "sub"
             and not request.linked_session_id
