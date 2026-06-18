@@ -1,23 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, Code2, User, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
+import { Menu, Sun, Moon, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 import { Button } from '@/components/ui/button';
 
 export default function Header() {
-  const { healthStatus, sessions, setMobileSidebarOpen, devMode, toggleDevMode, hydrateDevMode } = useAppStore();
+  const { healthStatus, sessions, setMobileSidebarOpen } = useAppStore();
   const { isAuthenticated, hasUsers, displayName, logout } = useAuthStore();
   const [showLogin, setShowLogin] = useState(false);
-
-  useEffect(() => { hydrateDevMode(); }, [hydrateDevMode]);
 
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
@@ -38,9 +36,6 @@ export default function Header() {
 
   const themeIcon = theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />;
   const themeTitle = theme === 'dark' ? 'Switch to Light' : 'Switch to Dark';
-
-  const devModeIcon = devMode ? <User size={14} /> : <Code2 size={14} />;
-  const devModeTitle = devMode ? t('header.normalMode') : t('header.devMode');
 
   return (
     <header className="flex justify-between items-center px-3 md:px-6 h-12 md:h-14 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
@@ -76,17 +71,6 @@ export default function Header() {
           {themeIcon}
         </button>
 
-        {/* ── Dev / Normal Mode Toggle — hidden on mobile, requires auth ── */}
-        {isAuthenticated && (
-          <button
-            onClick={toggleDevMode}
-            className="hidden sm:flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
-            title={devModeTitle}
-          >
-            {devModeIcon}
-          </button>
-        )}
-
         {/* ── Wiki Button — hidden on mobile ── */}
         <Link
           href="/wiki"
@@ -119,16 +103,14 @@ export default function Header() {
           <Palette size={14} />
         </a>
 
-        {/* ── Environment Management Page — hidden on mobile, dev only ── */}
-        {devMode && (
-          <Link
-            href="/environments"
-            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
-            title={t('header.envManagement')}
-          >
-            <Layers size={14} />
-          </Link>
-        )}
+        {/* ── Environment Management Page — hidden on mobile ── */}
+        <Link
+          href="/environments"
+          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          title={t('header.envManagement')}
+        >
+          <Layers size={14} />
+        </Link>
 
         {/* ── Language Toggle ── */}
         <div className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
@@ -170,11 +152,7 @@ export default function Header() {
         {hasUsers && (
           isAuthenticated ? (
             <button
-              onClick={() => {
-                logout();
-                // Reset to normal mode so dev-only tabs disappear
-                if (devMode) toggleDevMode();
-              }}
+              onClick={() => logout()}
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
               title={t('header.logout')}
             >
