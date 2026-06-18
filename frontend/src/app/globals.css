@@ -117,9 +117,9 @@ html.light {
 	/* Unified soft-lavender family — no white surfaces; every layer is a
 	   lavender tint within a few % of the others so the UI reads as one
 	   cohesive wash, not white blocks on lavender (2026-06-18 retune). */
-	--primary-color: #7458c6;          /* soft lavender-violet accent — less "쨍" */
-	--primary-hover: #6446b2;
-	--primary-subtle: rgba(116, 88, 198, 0.08);
+	--primary-color: #8268cf;          /* pastel lavender accent */
+	--primary-hover: #6f54bd;
+	--primary-subtle: rgba(130, 104, 207, 0.07);
 	--secondary-color: #6b6480;
 	--success-color: #059669;
 	--warning-color: #d97706;
@@ -139,13 +139,13 @@ html.light {
 	--shadow-lg: 0 12px 30px rgba(76, 29, 149, 0.09);
 
 	/* Accents — gradient for tiles, faint wash + soft glow. */
-	--grad-primary: linear-gradient(135deg, #7d5fcb 0%, #a98fe0 100%);
-	--grad-primary-hover: linear-gradient(135deg, #6c4eb8 0%, #9a83d6 100%);
-	--grad-text: linear-gradient(118deg, #7458c6 0%, #9a72d6 55%, #b48fe2 100%);
-	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(125, 95, 203, 0.08) 0%, rgba(169, 143, 224, 0.028) 38%, transparent 66%);
-	--sparkle-color: rgba(125, 95, 203, 0.30);
-	--glow-primary: 0 0 20px rgba(116, 88, 198, 0.10);
-	--glow-primary-soft: 0 0 32px rgba(116, 88, 198, 0.05);
+	--grad-primary: linear-gradient(135deg, #8b72d6 0%, #b69fe8 100%);
+	--grad-primary-hover: linear-gradient(135deg, #7a61c9 0%, #a78ee0 100%);
+	--grad-text: linear-gradient(118deg, #8268cf 0%, #a888df 55%, #c4abee 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(139, 114, 214, 0.08) 0%, rgba(182, 159, 232, 0.028) 38%, transparent 66%);
+	--sparkle-color: rgba(139, 114, 214, 0.28);
+	--glow-primary: 0 0 20px rgba(130, 104, 207, 0.09);
+	--glow-primary-soft: 0 0 32px rgba(130, 104, 207, 0.045);
 
 	/* Code / Syntax */
 	--code-bg: #efebf5;
@@ -174,7 +174,7 @@ html.light {
 	--card-foreground: 252 22% 16%;
 	--popover: 260 44% 97%;
 	--popover-foreground: 252 22% 16%;
-	--primary: 256 47% 56%;            /* #7458c6 — soft lavender */
+	--primary: 255 49% 61%;            /* #7458c6 — soft lavender */
 	--primary-foreground: 0 0% 100%;
 	--secondary: 260 30% 93%;          /* #ece7f2 */
 	--secondary-foreground: 252 22% 16%;
@@ -186,7 +186,7 @@ html.light {
 	--destructive-foreground: 0 0% 100%;
 	--border: 258 28% 91%;             /* #e7e2ef */
 	--input: 258 28% 91%;
-	--ring: 256 47% 56%;
+	--ring: 255 49% 61%;
 }
 
 /* ========================================
