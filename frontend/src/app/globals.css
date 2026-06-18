@@ -37,8 +37,8 @@ html.dark {
 	/* Unified dark family — muted lavender accent, NOT neon (2026-06-18
 	   retune). Background layers sit within a few % of each other so
 	   boundaries don't read as alternating colour bands. */
-	--primary-color: #8d79c9;          /* muted lavender-violet — calm on dark */
-	--primary-hover: #7c68b8;
+	--primary-color: #8573b8;          /* deeper muted lavender — sits into the dark palette */
+	--primary-hover: #74639f;
 	--primary-subtle: rgba(141, 121, 201, 0.13);
 	--secondary-color: #8b85a3;
 	--success-color: #4ade80;
@@ -60,12 +60,13 @@ html.dark {
 	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
 
 	/* Accents — muted gradients + soft wash + restrained glow (no eye-burn). */
-	--grad-primary: linear-gradient(135deg, #7a6ab0 0%, #937fc2 100%);
-	--grad-primary-hover: linear-gradient(135deg, #6c5ca0 0%, #8470b2 100%);
-	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(141, 121, 201, 0.10) 0%, rgba(141, 121, 201, 0.03) 36%, transparent 64%);
-	--sparkle-color: rgba(160, 144, 205, 0.40);
-	--glow-primary: 0 0 16px rgba(141, 121, 201, 0.16);
-	--glow-primary-soft: 0 0 28px rgba(141, 121, 201, 0.07);
+	--grad-primary: linear-gradient(135deg, #6f64a6 0%, #897ab4 100%);
+	--grad-primary-hover: linear-gradient(135deg, #635892 0%, #7a6ca3 100%);
+	--grad-text: linear-gradient(118deg, #8b7cbe 0%, #9b8dc8 55%, #ab9ed2 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(133, 115, 184, 0.09) 0%, rgba(133, 115, 184, 0.028) 36%, transparent 64%);
+	--sparkle-color: rgba(150, 136, 190, 0.34);
+	--glow-primary: 0 0 16px rgba(133, 115, 184, 0.14);
+	--glow-primary-soft: 0 0 28px rgba(133, 115, 184, 0.06);
 
 	/* Code / Syntax */
 	--code-bg: #1f1b2d;
@@ -94,7 +95,7 @@ html.dark {
 	--card-foreground: 256 30% 95%;
 	--popover: 253 25% 14%;
 	--popover-foreground: 256 30% 95%;
-	--primary: 255 37% 63%;             /* #8d79c9 */
+	--primary: 256 33% 59%;             /* #8d79c9 */
 	--primary-foreground: 0 0% 100%;
 	--secondary: 253 25% 18%;           /* #28233a */
 	--secondary-foreground: 256 30% 95%;
@@ -106,7 +107,7 @@ html.dark {
 	--destructive-foreground: 0 0% 100%;
 	--border: 254 23% 21%;              /* #2f2942 */
 	--input: 254 23% 21%;
-	--ring: 255 37% 63%;
+	--ring: 256 33% 59%;
 }
 
 /* ========================================
@@ -140,6 +141,7 @@ html.light {
 	/* Accents — gradient for tiles, faint wash + soft glow. */
 	--grad-primary: linear-gradient(135deg, #7d5fcb 0%, #a98fe0 100%);
 	--grad-primary-hover: linear-gradient(135deg, #6c4eb8 0%, #9a83d6 100%);
+	--grad-text: linear-gradient(118deg, #7458c6 0%, #9a72d6 55%, #b48fe2 100%);
 	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(125, 95, 203, 0.08) 0%, rgba(169, 143, 224, 0.028) 38%, transparent 66%);
 	--sparkle-color: rgba(125, 95, 203, 0.30);
 	--glow-primary: 0 0 20px rgba(116, 88, 198, 0.10);
@@ -385,7 +387,7 @@ html.theme-transition *::after {
 
 /* Headline gradient text */
 .geny-gradient-text {
-	background: linear-gradient(118deg, var(--primary-color) 0%, #a855f7 55%, #c084fc 100%);
+	background: var(--grad-text);
 	-webkit-background-clip: text;
 	background-clip: text;
 	-webkit-text-fill-color: transparent;
@@ -764,7 +766,7 @@ html.light ::-webkit-scrollbar-thumb:hover {
 /* Dark-specific: MUTED accent + restrained glow (no eye-burn), and a
    calmer node-fill gradient than the light vivid default. */
 html.dark .pipeline-scope {
-	--pipe-grad: linear-gradient(135deg, #6d5da3 0%, #8470b5 100%);
+	--pipe-grad: linear-gradient(135deg, #6f64a6 0%, #897ab4 100%);
 	--pipe-accent-tint: color-mix(in srgb, var(--primary-color) 12%, transparent);
 	--pipe-accent-glow: color-mix(in srgb, var(--primary-color) 18%, transparent);
 	--pipe-accent-glow-soft: color-mix(in srgb, var(--primary-color) 6%, transparent);
