@@ -15,6 +15,7 @@ import CreateSessionModal from '@/components/modals/CreateSessionModal';
 import DeleteSessionModal from '@/components/modals/DeleteSessionModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 function SessionItem({ session, isSelected, onSelect, subWorkerSession }: {
   session: SessionInfo; isSelected: boolean; onSelect: () => void; subWorkerSession?: SessionInfo | null;
@@ -135,13 +136,15 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
         </h2>
         <div className="flex items-center gap-1.5">
           {canModify && (
-            <button
-              className="geny-btn-primary inline-flex items-center gap-1.5 py-1.5 px-3 text-[0.75rem] rounded-[var(--border-radius)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            <Button
+              variant="gradient"
+              size="sm"
+              className="px-3 text-[0.75rem]"
               onClick={() => setShowCreateModal(true)}
             >
               <Plus size={13} />
               {t('sidebar.newSession')}
-            </button>
+            </Button>
           )}
           {/* Desktop: collapse button, Mobile: close button */}
           <button
@@ -357,13 +360,15 @@ export default function Sidebar() {
               <PanelLeftOpen size={18} />
             </button>
             {canModify && (
-              <button
-                className="geny-btn-primary flex items-center justify-center w-9 h-9 rounded-[var(--border-radius)] cursor-pointer"
+              <Button
+                variant="gradient"
+                size="icon"
+                className="w-9 h-9"
                 onClick={() => setShowCreateModal(true)}
                 title={t('sidebar.newSession')}
               >
                 <Plus size={16} />
-              </button>
+              </Button>
             )}
             <span
               className="text-[0.6875rem] font-semibold text-[var(--text-muted)]"

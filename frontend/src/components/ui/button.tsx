@@ -17,10 +17,14 @@ const buttonVariants = cva(
       variant: {
         default:
           'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary)/0.9)]',
+        /** Bold primary CTA — the lavender gradient tile look (see
+         *  .geny-btn-primary in globals.css). Use for the single main
+         *  action of a surface; everything else is secondary/ghost. */
+        gradient: 'geny-btn-primary text-white',
         destructive:
           'bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] hover:bg-[hsl(var(--destructive)/0.9)]',
         outline:
-          'border border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))]',
+          'border border-[hsl(var(--border))] bg-transparent hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))]',
         secondary:
           'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] hover:bg-[hsl(var(--secondary)/0.8)]',
         ghost:
@@ -32,6 +36,7 @@ const buttonVariants = cva(
         sm: 'h-7 rounded px-2 text-xs',
         lg: 'h-10 rounded-md px-6',
         icon: 'h-8 w-8',
+        'icon-sm': 'h-7 w-7 rounded',
       },
     },
     defaultVariants: {
