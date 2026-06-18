@@ -117,7 +117,12 @@ export default function Selector<T extends string = string>({
           'inline-flex items-center gap-1.5 rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
           expand && 'w-full justify-between',
           isField
-            ? 'h-9 px-3 text-[0.875rem] bg-[var(--bg-primary)] text-[var(--text-primary)] border-[var(--border-color)] hover:border-[var(--border-subtle)]'
+            ? cn(
+                'bg-[var(--bg-primary)] text-[var(--text-primary)] border-[var(--border-color)] hover:border-[var(--border-subtle)]',
+                size === 'sm'
+                  ? 'h-8 px-2.5 text-[0.75rem]'
+                  : 'h-9 px-3 text-[0.875rem]',
+              )
             : cn(
                 'px-3 font-semibold border-[var(--border-subtle)] bg-[var(--primary-subtle)] text-[var(--primary-color)] hover:brightness-110',
                 size === 'sm' ? 'h-7 text-[0.75rem]' : 'h-8 text-[0.8125rem]',

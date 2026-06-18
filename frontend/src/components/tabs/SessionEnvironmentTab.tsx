@@ -37,6 +37,7 @@ import type {
 } from '@/types/environment';
 import PipelineCanvas from '@/components/session-env/PipelineCanvas';
 import StageDetailPanel from '@/components/session-env/StageDetailPanel';
+import Selector from '@/components/ui/Selector';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function SessionEnvironmentTab() {
@@ -397,22 +398,21 @@ function EnvChangeModal({
           <p className="text-[0.75rem] text-[var(--text-secondary)]">
             {t('sessionEnvironmentTab.changeEnv.body', { session: sessionName })}
           </p>
-          <select
+          <Selector
+            variant="field"
+            ariaLabel={t('sessionEnvironmentTab.changeEnv.title')}
             value={picked}
-            onChange={(e) => setPicked(e.target.value)}
+            onChange={setPicked}
             disabled={busy}
-            className="w-full py-2 px-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-md text-[0.8125rem] text-[var(--text-primary)] cursor-pointer focus:outline-none focus:border-[var(--primary-color)]"
-          >
-            <option value="">
-              {t('sessionEnvironmentTab.changeEnv.placeholder')}
-            </option>
-            {environments.map((env) => (
-              <option key={env.id} value={env.id}>
-                {env.name}
-                {env.id === currentEnvId ? ' (현재)' : ''}
-              </option>
-            ))}
-          </select>
+            placeholder={t('sessionEnvironmentTab.changeEnv.placeholder')}
+            items={[
+              { id: '', label: t('sessionEnvironmentTab.changeEnv.placeholder') },
+              ...environments.map((env) => ({
+                id: env.id,
+                label: `${env.name}${env.id === currentEnvId ? ' (현재)' : ''}`,
+              })),
+            ]}
+          />
           <p className="text-[0.6875rem] text-[var(--text-muted)] leading-relaxed">
             {t('sessionEnvironmentTab.changeEnv.note')}
           </p>

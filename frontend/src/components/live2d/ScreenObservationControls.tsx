@@ -28,6 +28,7 @@
 import { useCallback, useMemo } from 'react';
 import { useVTuberStore, type ScreenTalkativeness } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
+import Selector, { type SelectorItem } from '@/components/ui/Selector';
 import { useScreenObservation } from '@/lib/useScreenObservation';
 import { Loader2, Monitor, MonitorOff, Zap } from 'lucide-react';
 
@@ -152,16 +153,21 @@ export default function ScreenObservationControls({
           {uploadsInFlight > 0 && (
             <Loader2 size={11} className="spin text-[var(--primary-color)]" />
           )}
-          <select
+          <Selector
+            variant="field"
+            size="sm"
+            fullWidth={false}
+            minWidthPx={120}
+            className="ml-1"
+            ariaLabel="발화 적극성"
             value={screenTalkativeness}
-            onChange={(e) => setScreenTalkativeness(e.target.value as ScreenTalkativeness)}
-            title="발화 적극성 — 화면을 보고 얼마나 자주 말을 걸지 (캡처 간격도 함께 조절)"
-            className="ml-1 text-[0.6rem] bg-transparent border border-[var(--border-color)] rounded px-1 py-[1px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-color)]"
-          >
-            <option value="chatty">수다</option>
-            <option value="balanced">균형</option>
-            <option value="calm">차분</option>
-          </select>
+            onChange={(v) => setScreenTalkativeness(v as ScreenTalkativeness)}
+            items={[
+              { id: 'chatty', label: '수다' },
+              { id: 'balanced', label: '균형' },
+              { id: 'calm', label: '차분' },
+            ] as SelectorItem[]}
+          />
           <button
             type="button"
             onClick={captureNow}

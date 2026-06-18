@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
+import Selector, { type SelectorItem } from '@/components/ui/Selector';
 import {
   backgroundTaskApi,
   BackgroundTaskRecord,
@@ -219,18 +220,23 @@ export function TasksTab() {
               {capacity.in_flight ?? '?'} / {capacity.max ?? '∞'}
             </StatusBadge>
           )}
-          <select
+          <Selector
+            variant="field"
+            size="sm"
+            fullWidth={false}
+            minWidthPx={160}
+            ariaLabel="Status filter"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-xs border rounded px-2 py-1 bg-[var(--bg-primary)]"
-          >
-            <option value="">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="running">Running</option>
-            <option value="done">Done</option>
-            <option value="failed">Failed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+            onChange={setStatusFilter}
+            items={[
+              { id: '', label: 'All statuses' },
+              { id: 'pending', label: 'Pending' },
+              { id: 'running', label: 'Running' },
+              { id: 'done', label: 'Done' },
+              { id: 'failed', label: 'Failed' },
+              { id: 'cancelled', label: 'Cancelled' },
+            ] as SelectorItem[]}
+          />
           <ActionButton variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>
             New task
           </ActionButton>
