@@ -167,3 +167,8 @@ optional 필드/hook only → 일회성 회귀 0. **geny-executor 2.7.0** publis
 
 ### PR-3b가 남은 이유 (정직한 평가)
 VTuber Sub-Worker는 Geny에서 가장 깊게 결합된 서브시스템(inbox·execute_command 알림·chat room·아바타·트리거·재시작 cascade·UI). 이를 executor sub-agent로 **완전 교체**하는 것은 라이브 VTuber의 대화/메모리/재시작 parity를 **실환경에서 검증**해야 안전하다. 사용자 제약("모든 기능이 제대로 동작")상 **무검증 일괄 교체는 부적절** → flag(`GENY_VTUBER_SUBAGENT_MODE`, default=bespoke)로 신경로를 넣고 staging 검증 후 default 전환 + bespoke 제거하는 것이 정석. cutover에 필요한 executor 능력은 **이미 전부 구축/배포됨**.
+
+### PR-3b 업데이트 (#964, 배포됨 — flag default OFF)
+VTuber→executor sub-agent cutover의 **백엔드 경로**를 `GENY_VTUBER_SUBAGENT_MODE`(default `bespoke`)로 게이트하여 구현:
+- executor 모드: VTuber 생성 시 executor 영속 sub-agent **소유**(spawn) + 위임은 `SubAgentAssign`(자율) + 완료 시 `[SUB_AGENT_RESULT]`로 VTuber 깨움(알람). bespoke 블록은 `elif`로 그대로 유지(무회귀, prod 검증: default=bespoke).
+- **남은 것(완전 이식 마무리):** ① 비-세션 sub-agent의 **view-only UI**(결정4) ② executor 모드 **라이브 parity 검증**(대화/메모리/재시작/알람/트리거) ③ default 전환 + bespoke 제거.
