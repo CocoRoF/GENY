@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/store/useAppStore';
+import Selector from '@/components/ui/Selector';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
@@ -129,26 +130,26 @@ export default function VTuberTab() {
           <label className="text-[0.75rem] text-[var(--text-muted)] font-medium">
             {t('vtuber.model') ?? 'Model'}
           </label>
-          <select
-            className="px-2 py-1 text-[0.75rem] rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-primary)] outline-none cursor-pointer min-w-[140px]"
+          <Selector
+            variant="field"
+            size="sm"
+            fullWidth={false}
+            minWidthPx={180}
+            className="min-w-[160px]"
+            ariaLabel={t('vtuber.model') ?? 'Model'}
             value={assignedModelName || ''}
-            onChange={(e) => {
-              if (e.target.value) {
-                assignModel(sessionId, e.target.value);
-              } else {
-                unassignModel(sessionId);
-              }
+            onChange={(v) => {
+              if (v) assignModel(sessionId, v);
+              else unassignModel(sessionId);
             }}
-          >
-            <option value="">
-              {t('vtuber.selectModel') ?? 'Select model...'}
-            </option>
-            {models.map((m) => (
-              <option key={m.name} value={m.name}>
-                [{m.runtime ?? 'live2d'}] {m.display_name}
-              </option>
-            ))}
-          </select>
+            items={[
+              { id: '', label: t('vtuber.selectModel') ?? 'Select model...' },
+              ...models.map((m) => ({
+                id: m.name,
+                label: `[${m.runtime ?? 'live2d'}] ${m.display_name}`,
+              })),
+            ]}
+          />
 
           {/* Avatar import button — opens the baked-puppet inbox modal.
               Lives next to the model selector since "import" produces a

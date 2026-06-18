@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Inbox } from 'lucide-react';
+import Selector from '@/components/ui/Selector';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useI18n } from '@/lib/i18n';
 import BakedImportsModal from '@/components/avatar/BakedImportsModal';
@@ -87,20 +88,20 @@ export default function VTuberPanel({
           <label className="text-[0.75rem] text-[var(--text-muted)] font-medium shrink-0">
             {t('vtuber.model') ?? 'Model'}
           </label>
-          <select
-            className="flex-1 min-w-0 px-2 py-1 text-[0.75rem] rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-primary)] outline-none cursor-pointer"
+          <Selector
+            variant="field"
+            size="sm"
+            fullWidth={false}
+            className="flex-1 min-w-0"
+            ariaLabel={t('vtuber.model') ?? 'Model'}
+            placeholder={t('vtuber.selectModel') ?? 'Select model...'}
             value={assignedModelName || ''}
-            onChange={(e) => handleModelChange(e.target.value)}
-          >
-            <option value="" disabled>
-              {t('vtuber.selectModel') ?? 'Select model...'}
-            </option>
-            {models.map((m) => (
-              <option key={m.name} value={m.name}>
-                [{m.runtime ?? 'live2d'}] {m.display_name}
-              </option>
-            ))}
-          </select>
+            onChange={handleModelChange}
+            items={models.map((m) => ({
+              id: m.name,
+              label: `[${m.runtime ?? 'live2d'}] ${m.display_name}`,
+            }))}
+          />
 
           {/* Avatar import button — surfaces baked-zip inbox from
               the avatar-editor service. Hidden when no controls. */}

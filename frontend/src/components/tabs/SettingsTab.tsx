@@ -7,6 +7,7 @@ import { twMerge } from 'tailwind-merge';
 import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
+import Selector from '@/components/ui/Selector';
 import { TabShell, ActionButton } from '@/components/layout';
 import { Settings as SettingsIcon, Download, Upload, RefreshCw } from 'lucide-react';
 import { useI18n, type Locale } from '@/lib/i18n';
@@ -411,12 +412,17 @@ export function ConfigFieldInput({ field, value, onChange, allValues, allFields,
     return (
       <div>
         {labelEl}
-        <select id={id} name={field.name} value={value ?? ''} onChange={e => handleParentChange(e.target.value)} className={inputClasses}>
-          <option value="">{t('common.selectOption')}</option>
-          {filteredOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        <Selector
+          variant="field"
+          ariaLabel={field.name}
+          value={String(value ?? '')}
+          onChange={handleParentChange}
+          placeholder={t('common.selectOption')}
+          items={[
+            { id: '', label: t('common.selectOption') },
+            ...filteredOptions.map((opt) => ({ id: String(opt.value), label: opt.label })),
+          ]}
+        />
       </div>
     );
   }

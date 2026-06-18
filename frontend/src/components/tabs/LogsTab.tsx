@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { commandApi } from '@/lib/api';
+import Selector from '@/components/ui/Selector';
 import { useIsMobile } from '@/lib/useIsMobile';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
@@ -275,26 +276,23 @@ export default function LogsTab() {
           )}
 
           {/* Filter selector */}
-          <select
-            className="flex-1 sm:flex-initial py-1 pl-2 pr-6 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-md text-[var(--text-primary)] text-[0.6875rem] font-medium cursor-pointer appearance-none transition-all hover:border-[var(--text-muted)] focus:outline-none focus:border-[var(--primary-color)]"
-            style={{
-              backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")",
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'right 6px center',
-            }}
+          <Selector
+            variant="field"
+            size="sm"
+            fullWidth={false}
+            minWidthPx={260}
+            className="flex-1 sm:flex-initial sm:max-w-[280px]"
+            ariaLabel={t('logsTab.filterLabel') || 'Log filter'}
             value={filter}
-            onChange={e => { setFilter(e.target.value); setCurrentPage(1); }}
-          >
-            {LOG_GROUPS.map(g => (
-              <option key={g.id} value={`group:${g.id}`}>
-                {t(`logsTab.${g.labelKey}`)} — {t(`logsTab.${g.descKey}`)}
-              </option>
-            ))}
-            <option disabled>{'─'.repeat(20)}</option>
-            {ALL_LEVELS.map(l => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
+            onChange={(v) => { setFilter(v); setCurrentPage(1); }}
+            items={[
+              ...LOG_GROUPS.map((g) => ({
+                id: `group:${g.id}`,
+                label: `${t(`logsTab.${g.labelKey}`)} — ${t(`logsTab.${g.descKey}`)}`,
+              })),
+              ...ALL_LEVELS.map((l) => ({ id: l, label: l, group: t('logsTab.levelsGroup') || 'LEVELS' })),
+            ]}
+          />
 
           <button
             className={cn(
