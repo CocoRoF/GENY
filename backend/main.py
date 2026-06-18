@@ -552,6 +552,33 @@ async def lifespan(app: FastAPI):
         app.state.task_registry = None
         app.state.task_runner = None
 
+    # ── Sub-agent orchestrator ─────────────────────────────────────────
+    # GAP B fix (audit 2026-06-18): the local_agent task executor's
+    # factory resolves ``app.state.subagent_orchestrator`` at run time and
+    # the inline Agent tool reads it from ToolContext.extras — but it was
+    # never set, so background sub-agent tasks + the Agent tool failed.
+    # Build one global orchestrator from the shared agent-type registry.
+    # Per-session role scoping still applies via the pipeline's own
+    # subagent_registry; this global instance backs background local_agent
+    # tasks and the inline Agent-tool fallback.
+    try:
+        from service.agent_types import SubagentRegistryBuilder
+        from geny_executor.stages.s12_agent.subagent_type import (
+            SubagentTypeOrchestrator,
+        )
+        _sub_registry = SubagentRegistryBuilder().build()
+        app.state.subagent_orchestrator = (
+            SubagentTypeOrchestrator(_sub_registry)
+            if _sub_registry is not None else None
+        )
+        logger.info(
+            "   ✅ subagent_orchestrator wired (%d agent type(s))",
+            len(_sub_registry) if _sub_registry is not None else 0,
+        )
+    except Exception as e:
+        logger.warning(f"   ⚠️  subagent_orchestrator: skipped ({e})")
+        app.state.subagent_orchestrator = None
+
     # ── Notification + Messaging Channels ──────────────────────────────
     try:
         from service.notifications import (

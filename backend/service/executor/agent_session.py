@@ -2344,6 +2344,34 @@ class AgentSession:
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 
+        # Audit 2026-06-18 (GAP A/B) — wire the host's task / cron /
+        # sub-agent runtime (boot-set on app.state) into ToolContext.extras
+        # so the executor's built-in TaskCreate / Task* / Cron* / Agent
+        # tools actually function. Without these the tools raise
+        # "not configured" at call time. Read-only handles; tools that
+        # don't use them are unaffected.
+        try:
+            from service.execution.agent_executor import get_app_state
+
+            _app_state = get_app_state()
+        except Exception:  # noqa: BLE001 — never block session build on this
+            _app_state = None
+        if _app_state is not None:
+            for _rt_key in (
+                "task_registry",
+                "task_runner",
+                "cron_store",
+                "cron_runner",
+            ):
+                _rt_val = getattr(_app_state, _rt_key, None)
+                if _rt_val is not None:
+                    _tool_extras[_rt_key] = _rt_val
+            _orchestrator = getattr(_app_state, "subagent_orchestrator", None)
+            if _orchestrator is not None:
+                # Inline `Agent` tool reads this from extras (the
+                # `[DELEGATE]` path uses the pipeline's own registry slot).
+                _tool_extras["agent_orchestrator"] = _orchestrator
+
         attach_kwargs: Dict[str, Any] = {
             "system_builder": system_builder,
             "tool_context": ToolContext(

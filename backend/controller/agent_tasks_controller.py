@@ -80,6 +80,36 @@ def _runner(request: Request):
     return runner
 
 
+def _row_session_id(rec) -> Optional[str]:
+    """The session a task belongs to — stamped into payload at create."""
+    try:
+        return (rec.payload or {}).get("_session_id")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _session_scope(session_id: str, include_linked: bool) -> set:
+    """Session ids whose tasks this view may see (audit 2026-06-18, GAP E).
+
+    The task registry is global; per-session isolation is enforced here by
+    matching the ``_session_id`` stamped into each task's payload. For a
+    VTuber/Sub-Worker pair the linked peer is folded in so the VTuber's
+    작업 탭 also shows its sub-agent's tasks.
+    """
+    scope = {session_id}
+    if include_linked:
+        try:
+            from service.sessions import get_session_store
+
+            rec = get_session_store().get(session_id)
+            linked = (rec or {}).get("linked_session_id")
+            if linked:
+                scope.add(linked)
+        except Exception:  # noqa: BLE001 — best effort; fall back to self only
+            pass
+    return scope
+
+
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
@@ -114,6 +144,9 @@ async def list_tasks(
     status: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=200),
+    include_linked: bool = Query(
+        True, description="VTuber: also include the linked Sub-Worker's tasks."
+    ),
     _auth: dict = Depends(require_auth),
 ):
     registry = _registry(request)
@@ -126,11 +159,16 @@ async def list_tasks(
         except ValueError:
             raise HTTPException(400, f"unknown status: {status}")
 
+    # Session scoping (GAP E): the registry is global, so fetch a wide
+    # window then keep only this session's (and its linked peer's) tasks
+    # before applying the caller's limit.
+    scope = _session_scope(session_id, include_linked)
     rows = registry.list_filtered(
-        TaskFilter(status=parsed_status, kind=kind, limit=limit),
+        TaskFilter(status=parsed_status, kind=kind, limit=200),
     )
+    scoped = [r for r in rows if _row_session_id(r) in scope][:limit]
     return TaskListResponse(
-        tasks=[TaskRecordResponse(**_serialize(r)) for r in rows],
+        tasks=[TaskRecordResponse(**_serialize(r)) for r in scoped],
     )
 
 
@@ -143,7 +181,7 @@ async def get_task(
 ):
     registry = _registry(request)
     rec = registry.get(task_id)
-    if rec is None:
+    if rec is None or _row_session_id(rec) not in _session_scope(session_id, True):
         raise HTTPException(404, "task not found")
     return TaskRecordResponse(**_serialize(rec))
 
@@ -155,6 +193,10 @@ async def stop_task(
     task_id: str = FPath(..., min_length=1),
     _auth: dict = Depends(require_auth),
 ):
+    registry = _registry(request)
+    rec = registry.get(task_id)
+    if rec is None or _row_session_id(rec) not in _session_scope(session_id, True):
+        raise HTTPException(404, "task not found")
     runner = _runner(request)
     stopped = await runner.stop(task_id)
     if not stopped:
@@ -170,6 +212,9 @@ async def stream_task_output(
     _auth: dict = Depends(require_auth),
 ):
     registry = _registry(request)
+    rec = registry.get(task_id)
+    if rec is None or _row_session_id(rec) not in _session_scope(session_id, True):
+        raise HTTPException(404, "task not found")
 
     async def gen():
         async for chunk in registry.stream_output(task_id):
