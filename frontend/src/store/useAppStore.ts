@@ -87,7 +87,6 @@ interface AppState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
   deletedSectionOpen: boolean;
-  devMode: boolean;
   userName: string;
   userTitle: string;
 
@@ -107,8 +106,6 @@ interface AppState {
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   toggleDeletedSection: () => void;
-  toggleDevMode: () => void;
-  hydrateDevMode: () => void;
   checkHealth: () => Promise<void>;
   loadPrompts: () => Promise<void>;
   loadPromptContent: (name: string) => Promise<string | null>;
@@ -139,7 +136,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   mobileSidebarOpen: false,
   deletedSectionOpen: false,
-  devMode: true,
   userName: '',
   userTitle: '',
 
@@ -318,25 +314,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   toggleDeletedSection: () => set((s) => ({ deletedSectionOpen: !s.deletedSectionOpen })),
-  toggleDevMode: () => set((s) => {
-    const next = !s.devMode;
-    localStorage.setItem('geny-dev-mode', String(next));
-    // If switching to normal mode while on a dev-only tab, fall back to main
-    const devOnlyTabs = new Set(['toolSets', 'tools', 'settings', 'logs', 'environment', 'graph', 'sessionTools']);
-    const activeTab = !next && devOnlyTabs.has(s.activeTab) ? 'main' : s.activeTab;
-    return { devMode: next, activeTab };
-  }),
-  hydrateDevMode: () => {
-    // Force normal mode on mobile
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
-      set({ devMode: false });
-      return;
-    }
-    const stored = localStorage.getItem('geny-dev-mode');
-    if (stored === 'false') {
-      set({ devMode: false });
-    }
-  },
 
   checkHealth: async () => {
     try {

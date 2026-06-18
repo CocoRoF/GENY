@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
 import { useIsMobile } from '@/lib/useIsMobile';
@@ -34,7 +33,7 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 // moved to /environments?tab=... top-level tabs (#553). The Header
 // component owns the entry point to /environments via its dedicated
 // link button, so nothing in this strip points to it anymore.
-const GLOBAL_TAB_IDS = ['main', 'sharedFolder', 'admin', 'settings'] as const;
+const GLOBAL_TAB_IDS = ['main', 'sharedFolder', 'settings'] as const;
 // SESSION_TAB_DEFS:
 //   - ``id`` — pairs with ``activeTab`` so the strip highlights the
 //     right entry.
@@ -67,11 +66,6 @@ const SESSION_TAB_DEFS = [
 ] as const;
 
 type SessionTabDef = (typeof SESSION_TAB_DEFS)[number];
-
-// Tabs hidden in Normal mode
-const DEV_ONLY_GLOBAL = new Set(['admin', 'settings']);
-// 'logs' is intentionally NOT in this set — it must be visible in User mode too (e.g. mobile)
-const DEV_ONLY_SESSION = new Set(['sessionEnvironment']);
 
 const TAB_BASE =
   'relative py-1.5 px-3 text-[0.8125rem] font-medium bg-transparent border-none rounded-md cursor-pointer transition-colors duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]';
@@ -251,8 +245,7 @@ function MobileSessionTabDropdown({
 }
 
 export default function TabNavigation() {
-  const { activeTab, setActiveTab, selectedSessionId, sessions, devMode } = useAppStore();
-  const { isAuthenticated, hasUsers } = useAuthStore();
+  const { activeTab, setActiveTab, selectedSessionId, sessions } = useAppStore();
   const { t } = useI18n();
   const isMobile = useIsMobile();
 
@@ -263,10 +256,9 @@ export default function TabNavigation() {
     || selectedSessionId?.substring(0, 10)
     || '';
 
-  // Dev-only tabs require both devMode AND authentication (when auth is set up)
-  const canShowDevTabs = devMode && (!hasUsers || isAuthenticated);
-  const visibleGlobalTabs = GLOBAL_TAB_IDS.filter(id => canShowDevTabs || !DEV_ONLY_GLOBAL.has(id));
-  const visibleSessionTabs = SESSION_TAB_DEFS.filter(tab => canShowDevTabs || !DEV_ONLY_SESSION.has(tab.id));
+  // All tabs are always visible now (the dev/normal mode toggle was removed).
+  const visibleGlobalTabs = GLOBAL_TAB_IDS;
+  const visibleSessionTabs = SESSION_TAB_DEFS;
 
   // Click handler for session tabs. Tabs with an ``external`` marker
   // open the resolved URL in a new browser tab and *do not* toggle

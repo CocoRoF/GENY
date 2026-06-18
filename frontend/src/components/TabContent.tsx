@@ -17,7 +17,6 @@ const SettingsTab = dynamic(() => import('@/components/tabs/SettingsTab'));
 const SharedFolderTab = dynamic(() => import('@/components/tabs/SharedFolderTab'));
 const SessionToolsTab = dynamic(() => import('@/components/tabs/SessionToolsTab'));
 const DashboardTab = dynamic(() => import('@/components/tabs/DashboardTab'));
-const AdminPanel = dynamic(() => import('@/components/admin/AdminPanel'));
 // Cycle 20260503_3 — the in-Geny ``MemoryTab`` was retired in favour
 // of opening the canonical Opsidian app (``/opsidian``) in a new
 // browser tab. ``TabNavigation`` flags the ``memory`` entry with an
@@ -49,7 +48,6 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   settings: SettingsTab,
   sessionTools: SessionToolsTab,
   dashboard: DashboardTab,
-  admin: AdminPanel,
   vtuber: VTuberTab,
   playground2d: Playground2DTab,
   tasks: TasksTab,
