@@ -45,16 +45,16 @@ html.dark {
 	--warning-color: #fbbf24;
 	--danger-color: #f47171;
 	--error-color: #f47171;
-	--bg-primary: #100e16;             /* unified dark base */
-	--bg-secondary: #15131d;
-	--bg-tertiary: #1d1a26;
-	--bg-card: #15131d;
-	--bg-hover: #1d1a26;
-	--text-primary: #ece9f4;
-	--text-secondary: #a8a2bb;
-	--text-muted: #726c84;
-	--border-color: #232030;
-	--border-subtle: #302c3e;
+	--bg-primary: #1a1726;             /* dark lavender base (lifted off near-black) */
+	--bg-secondary: #1f1b2d;
+	--bg-tertiary: #28233a;
+	--bg-card: #1f1b2d;
+	--bg-hover: #28233a;
+	--text-primary: #efecf6;
+	--text-secondary: #aca6bf;
+	--text-muted: #797292;
+	--border-color: #2f2942;
+	--border-subtle: #3c3553;
 	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
 	--shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
 	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
@@ -68,44 +68,44 @@ html.dark {
 	--glow-primary-soft: 0 0 28px rgba(141, 121, 201, 0.07);
 
 	/* Code / Syntax */
-	--code-bg: #15131d;
+	--code-bg: #1f1b2d;
 	--code-string: #a8c98a;
 	--code-keyword: #b69ae0;
 	--code-function: #9d8ad0;
 	--code-number: #e0bd7a;
-	--code-comment: #6b6580;
+	--code-comment: #746e8c;
 	--code-property: #c9b0e6;
 
 	/* Node Handle border (matches bg so handles look punched-out) */
-	--node-handle-border: #15131d;
+	--node-handle-border: #1f1b2d;
 
 	/* MiniMap */
-	--minimap-bg: #15131d;
-	--minimap-stroke: #302c3e;
+	--minimap-bg: #1f1b2d;
+	--minimap-stroke: #3c3553;
 
 	/* Overlay / backdrop */
 	--overlay-bg: rgba(8, 6, 14, 0.62);
 	--backdrop-blur: rgba(8, 6, 14, 0.55);
 
 	/* shadcn/ui token bridge — HSL components for hsl(var(--name) / a) */
-	--background: 255 22% 7%;          /* #100e16 */
-	--foreground: 256 31% 94%;         /* #ece9f4 */
-	--card: 252 21% 9%;                /* #15131d */
-	--card-foreground: 256 31% 94%;
-	--popover: 252 21% 9%;
-	--popover-foreground: 256 31% 94%;
-	--primary: 255 37% 63%;            /* #8d79c9 */
+	--background: 252 25% 12%;          /* #1a1726 */
+	--foreground: 256 30% 95%;          /* #efecf6 */
+	--card: 253 25% 14%;                /* #1f1b2d */
+	--card-foreground: 256 30% 95%;
+	--popover: 253 25% 14%;
+	--popover-foreground: 256 30% 95%;
+	--primary: 255 37% 63%;             /* #8d79c9 */
 	--primary-foreground: 0 0% 100%;
-	--secondary: 255 19% 13%;          /* #1d1a26 */
-	--secondary-foreground: 256 31% 94%;
-	--muted: 255 19% 13%;
-	--muted-foreground: 254 17% 68%;   /* #a8a2bb */
-	--accent: 255 19% 15%;
-	--accent-foreground: 256 31% 94%;
-	--destructive: 0 80% 70%;          /* #f47171 */
+	--secondary: 253 25% 18%;           /* #28233a */
+	--secondary-foreground: 256 30% 95%;
+	--muted: 253 25% 18%;
+	--muted-foreground: 254 17% 70%;    /* #aca6bf */
+	--accent: 253 24% 20%;
+	--accent-foreground: 256 30% 95%;
+	--destructive: 0 80% 70%;           /* #f47171 */
 	--destructive-foreground: 0 0% 100%;
-	--border: 251 20% 16%;             /* #232030 */
-	--input: 251 20% 16%;
+	--border: 254 23% 21%;              /* #2f2942 */
+	--input: 254 23% 21%;
 	--ring: 255 37% 63%;
 }
 
