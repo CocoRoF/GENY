@@ -106,7 +106,7 @@ function TabButton({
       >
         {label}
         {active && (
-          <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
+          <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
         )}
       </button>
     );
@@ -128,7 +128,7 @@ function TabButton({
       {label}
       {external && <ExternalLink size={11} className="opacity-70" />}
       {!external && active && (
-        <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
+        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
       )}
     </button>
   );
@@ -287,7 +287,7 @@ export default function TabNavigation() {
   );
 
   return (
-    <div className="flex items-center gap-0.5 h-11 px-2 md:px-4 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] shrink-0 overflow-x-auto scrollbar-hide">
+    <div className="flex items-center gap-0.5 h-11 px-2 md:px-4 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] shrink-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
       {/* ── Global Tabs ── */}
       <div className="flex items-center gap-0.5 shrink-0">
         {visibleGlobalTabs.map(id => (
