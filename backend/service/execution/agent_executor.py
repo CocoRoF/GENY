@@ -108,6 +108,17 @@ def set_app_state(app_state) -> None:
     _app_state = app_state
 
 
+def get_app_state():
+    """Return the FastAPI app.state set at startup, or ``None``.
+
+    Lets lower-level builders (e.g. ``AgentSession._build_pipeline``) read
+    boot-wired runtime handles — ``task_registry`` / ``task_runner`` /
+    ``cron_store`` / ``cron_runner`` / ``subagent_orchestrator`` — to inject
+    into the pipeline's ``ToolContext.extras`` so the executor's built-in
+    Task/Cron/Agent tools function (audit 2026-06-18, GAP A/B)."""
+    return _app_state
+
+
 # ============================================================================
 # Avatar state emission (called after every execution)
 # ============================================================================
