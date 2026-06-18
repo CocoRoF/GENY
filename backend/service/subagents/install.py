@@ -91,8 +91,28 @@ def install_subagent_manager(app_state: Any, *, registry: Any) -> Optional[Any]:
         logger.debug("install_subagent_manager: executor lacks persistent_subagent (<2.7.0)")
         return None
 
-    manager = SubAgentManager(registry, on_event=_make_on_event(app_state))
-    logger.info("   ✅ subagent_manager wired (persistent sub-agents available)")
+    # Restart survival: persist each sub-agent's PipelineState under the same
+    # storage root sessions use ({root}/{sub_agent_id}/.pipeline_state.json),
+    # reusing the executor's own FileSessionPersistence (its load/save shape
+    # matches the SubAgentManager session_store contract).
+    session_store = None
+    try:
+        from geny_executor.session import FileSessionPersistence
+        from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+        session_store = FileSessionPersistence(str(DEFAULT_STORAGE_ROOT))
+    except Exception:  # noqa: BLE001 — fall back to in-process-only persistence
+        logger.debug("install_subagent_manager: session_store unavailable", exc_info=True)
+
+    manager = SubAgentManager(
+        registry,
+        session_store=session_store,
+        on_event=_make_on_event(app_state),
+    )
+    logger.info(
+        "   ✅ subagent_manager wired (persistent sub-agents%s)",
+        " + durable state" if session_store is not None else "",
+    )
     return manager
 
 
