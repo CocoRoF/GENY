@@ -172,3 +172,13 @@ VTuber Sub-Worker는 Geny에서 가장 깊게 결합된 서브시스템(inbox·e
 VTuber→executor sub-agent cutover의 **백엔드 경로**를 `GENY_VTUBER_SUBAGENT_MODE`(default `bespoke`)로 게이트하여 구현:
 - executor 모드: VTuber 생성 시 executor 영속 sub-agent **소유**(spawn) + 위임은 `SubAgentAssign`(자율) + 완료 시 `[SUB_AGENT_RESULT]`로 VTuber 깨움(알람). bespoke 블록은 `elif`로 그대로 유지(무회귀, prod 검증: default=bespoke).
 - **남은 것(완전 이식 마무리):** ① 비-세션 sub-agent의 **view-only UI**(결정4) ② executor 모드 **라이브 parity 검증**(대화/메모리/재시작/알람/트리거) ③ default 전환 + bespoke 제거.
+
+### 완전 이식 완료 (#965, #966 — 배포됨)
+VTuber → executor 영속 sub-agent **cutover 완료**, bespoke 제거:
+- `GENY_VTUBER_SUBAGENT_MODE` default = **executor**. VTuber는 executor 영속 sub-agent를 소유.
+- **busy-safe 알람**: 완료 시 execute_command로 VTuber 깨움 → busy면 Geny inbox로 큐(기존 `_drain_inbox`가 다음 idle에 전달). 일반 인프라 재사용.
+- **재시작 re-attach**: 자동 — rehydrate의 create 경로가 executor 분기 실행 + `SubAgentManager`가 session_store에서 상태 복원.
+- **view-only UI** (결정4): `GET /api/agents/{id}/sub-agent` + `SubAgentPanel`, 환경 탭의 VTuber↔Sub-Agent 토글에서 노출.
+- **bespoke 제거**: `create_agent_session`의 182줄 bespoke 페어 auto-spawn 삭제. 잔여 inert 코드(send_direct_message_internal bespoke 경로, _notify_linked_vtuber)는 sub-worker 세션이 더 안 만들어져 도달 불가 — harmless dead code, 추후 정리 가능.
+
+**최종 상태:** executor가 sub-worker(일회성) + sub-agent(영속) 둘 다 일급 제공(알림/inbox/메시징 포함), Geny는 소비자, VTuber는 executor sub-agent 소유(view-only), 위임은 작업 탭에 노출. 단일 시스템.
