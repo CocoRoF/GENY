@@ -101,16 +101,36 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
             f"{tag} Sub-agent task completed.\n\n{text}" if ok
             else f"{tag} Sub-agent task failed: {str(text)[:500]}"
         )
+        sender = payload.get("sub_agent_id") or "sub-agent"
 
         import asyncio
 
         async def _wake() -> None:
+            # Try to wake the VTuber immediately; if it's busy, queue to the
+            # general Geny inbox so the existing _drain_inbox delivers it on
+            # the VTuber's next idle — same busy-safe path the bespoke notify
+            # used (reused general infra, not bespoke-specific).
             try:
-                from service.execution.agent_executor import execute_command
+                from service.execution.agent_executor import (
+                    execute_command,
+                    AlreadyExecutingError,
+                )
 
-                await execute_command(session_id=owner, prompt=body)
+                try:
+                    await execute_command(session_id=owner, prompt=body)
+                except AlreadyExecutingError:
+                    from service.chat.inbox import get_inbox_manager
+
+                    get_inbox_manager().deliver(
+                        target_session_id=owner,
+                        content=body,
+                        sender_session_id=sender,
+                        sender_name="Sub-Agent",
+                        metadata={"tag": tag, "source": "subagent_alarm_busy"},
+                    )
+                    logger.info("VTuber %s busy — sub-agent result queued to inbox", owner)
             except Exception:  # noqa: BLE001 — best effort
-                logger.debug("VTuber sub-agent alarm execute failed", exc_info=True)
+                logger.debug("VTuber sub-agent alarm failed", exc_info=True)
 
         try:
             asyncio.get_running_loop().create_task(_wake())

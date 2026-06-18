@@ -28,6 +28,7 @@ import {
 } from '@/components/layout';
 import { Folder, Layers, Wrench, FolderOpen, Bot, Sparkles } from 'lucide-react';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
+import SubAgentPanel from '@/components/session-env/SubAgentPanel';
 
 const SessionEnvironmentTab = dynamic(
   () => import('@/components/tabs/SessionEnvironmentTab'),
@@ -68,6 +69,10 @@ export default function SessionEnvironmentRootTab() {
     );
   }, [session, sessions]);
   const hasSubAgent = !!subWorker;
+  // Executor-mode cutover: a VTuber owns a non-session executor sub-agent
+  // (no linked_session_id). Surface a Sub-Agent view (read-only panel) for it.
+  const isVtuberExecutor = !!session && session.role === 'vtuber' && !subWorker;
+  const showAgentToggle = hasSubAgent || isVtuberExecutor;
 
   // 'vtuber' = the selected session; 'sub' = its linked Sub-Worker.
   const [agentTarget, setAgentTarget] = useState<'vtuber' | 'sub'>('vtuber');
@@ -129,7 +134,7 @@ export default function SessionEnvironmentRootTab() {
             <span className="text-[var(--warning-color)]">기본 매니페스트</span>
           )}
         </div>
-        {hasSubAgent && (
+        {showAgentToggle && (
           <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden shrink-0">
             <AgentToggleButton
               active={agentTarget === 'vtuber'}
@@ -146,12 +151,22 @@ export default function SessionEnvironmentRootTab() {
           </div>
         )}
       </div>
-      <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <SessionEnvTargetContext.Provider value={effectiveSessionId}>
-          <Active />
-        </SessionEnvTargetContext.Provider>
-      </div>
+      {agentTarget === 'sub' && isVtuberExecutor ? (
+        // Executor sub-agent is not a session — show its read-only panel
+        // instead of the env/tools/workspace sub-tabs.
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <SubAgentPanel vtuberId={sessionId} />
+        </div>
+      ) : (
+        <>
+          <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <SessionEnvTargetContext.Provider value={effectiveSessionId}>
+              <Active />
+            </SessionEnvTargetContext.Provider>
+          </div>
+        </>
+      )}
     </div>
   );
 }
