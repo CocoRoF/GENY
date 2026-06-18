@@ -116,9 +116,9 @@ html.light {
 	/* Unified soft-lavender family — no white surfaces; every layer is a
 	   lavender tint within a few % of the others so the UI reads as one
 	   cohesive wash, not white blocks on lavender (2026-06-18 retune). */
-	--primary-color: #7c3aed;          /* violet-600 accent */
-	--primary-hover: #6d28d9;
-	--primary-subtle: rgba(124, 58, 237, 0.06);
+	--primary-color: #7458c6;          /* soft lavender-violet accent — less "쨍" */
+	--primary-hover: #6446b2;
+	--primary-subtle: rgba(116, 88, 198, 0.08);
 	--secondary-color: #6b6480;
 	--success-color: #059669;
 	--warning-color: #d97706;
@@ -138,12 +138,12 @@ html.light {
 	--shadow-lg: 0 12px 30px rgba(76, 29, 149, 0.09);
 
 	/* Accents — gradient for tiles, faint wash + soft glow. */
-	--grad-primary: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
-	--grad-primary-hover: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
-	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(139, 92, 246, 0.08) 0%, rgba(168, 85, 247, 0.028) 38%, transparent 66%);
-	--sparkle-color: rgba(139, 92, 246, 0.32);
-	--glow-primary: 0 0 20px rgba(124, 58, 237, 0.10);
-	--glow-primary-soft: 0 0 32px rgba(124, 58, 237, 0.05);
+	--grad-primary: linear-gradient(135deg, #7d5fcb 0%, #a98fe0 100%);
+	--grad-primary-hover: linear-gradient(135deg, #6c4eb8 0%, #9a83d6 100%);
+	--hero-wash: radial-gradient(120% 130% at 82% -10%, rgba(125, 95, 203, 0.08) 0%, rgba(169, 143, 224, 0.028) 38%, transparent 66%);
+	--sparkle-color: rgba(125, 95, 203, 0.30);
+	--glow-primary: 0 0 20px rgba(116, 88, 198, 0.10);
+	--glow-primary-soft: 0 0 32px rgba(116, 88, 198, 0.05);
 
 	/* Code / Syntax */
 	--code-bg: #efebf5;
@@ -172,7 +172,7 @@ html.light {
 	--card-foreground: 252 22% 16%;
 	--popover: 260 44% 97%;
 	--popover-foreground: 252 22% 16%;
-	--primary: 262 83% 58%;            /* #7c3aed */
+	--primary: 256 47% 56%;            /* #7458c6 — soft lavender */
 	--primary-foreground: 0 0% 100%;
 	--secondary: 260 30% 93%;          /* #ece7f2 */
 	--secondary-foreground: 252 22% 16%;
@@ -184,7 +184,7 @@ html.light {
 	--destructive-foreground: 0 0% 100%;
 	--border: 258 28% 91%;             /* #e7e2ef */
 	--input: 258 28% 91%;
-	--ring: 262 83% 58%;
+	--ring: 256 47% 56%;
 }
 
 /* ========================================
@@ -754,7 +754,7 @@ html.light ::-webkit-scrollbar-thumb:hover {
 	/* Bold redesign — a fixed mid-violet gradient for the *active* stage
 	   fill that keeps a white number readable in BOTH themes (the
 	   theme-split --grad-primary goes too light in dark mode). */
-	--pipe-grad: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+	--pipe-grad: linear-gradient(135deg, #7d5fcb 0%, #a98fe0 100%);
 
 	background: var(--pipe-bg-primary);
 	color: var(--pipe-text-primary);
