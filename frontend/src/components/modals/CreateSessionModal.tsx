@@ -11,17 +11,12 @@ import { triggerPresetApi } from '@/lib/triggerPresetApi';
 import type { TriggerPresetSummary } from '@/types/triggerPreset';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
+import Selector, { type SelectorItem } from '@/components/ui/Selector';
 import { X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import type { CreateAgentRequest, SessionInfo, ToolPresetDefinition } from '@/types';
 // WorkflowDefinition type removed — using preset strings instead
-
-const selectArrow: React.CSSProperties = {
-  backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")",
-  backgroundRepeat: 'no-repeat',
-  backgroundPosition: 'right 12px center',
-};
 
 interface Props { onClose: () => void; }
 
@@ -327,25 +322,35 @@ export default function CreateSessionModal({ onClose }: Props) {
               truth. To change the model, edit the env. */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">{t('createSession.role')}</label>
-            <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={formState.role} onChange={e => handleRoleChange(e.target.value)}>
-              <option value="developer">{t('createSession.roleDeveloper')}</option>
-              <option value="worker">{t('createSession.roleWorker')}</option>
-              <option value="researcher">{t('createSession.roleResearcher')}</option>
-              <option value="planner">{t('createSession.rolePlanner')}</option>
-              <option value="vtuber">{t('createSession.roleVTuber')}</option>
-            </select>
+            <Selector
+              variant="field"
+              ariaLabel={t('createSession.role')}
+              value={formState.role ?? 'developer'}
+              onChange={handleRoleChange}
+              items={[
+                { id: 'developer', label: t('createSession.roleDeveloper') },
+                { id: 'worker', label: t('createSession.roleWorker') },
+                { id: 'researcher', label: t('createSession.roleResearcher') },
+                { id: 'planner', label: t('createSession.rolePlanner') },
+                { id: 'vtuber', label: t('createSession.roleVTuber') },
+              ] as SelectorItem[]}
+            />
           </div>
 
           {/* Avatar (VTuber only) */}
           {formState.role === 'vtuber' && (
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.avatar')} <InfoTooltip text={t('createSession.avatarHelp')} /></label>
-              <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedAvatar} onChange={e => setSelectedAvatar(e.target.value)}>
-                <option value="">{avatarsLoaded ? t('createSession.avatarNone') : t('createSession.avatarLoading')}</option>
-                {avatarModels.map(m => (
-                  <option key={m.name} value={m.name}>{m.display_name || m.name}</option>
-                ))}
-              </select>
+              <Selector
+                variant="field"
+                ariaLabel={t('createSession.avatar')}
+                value={selectedAvatar}
+                onChange={setSelectedAvatar}
+                items={[
+                  { id: '', label: avatarsLoaded ? t('createSession.avatarNone') : t('createSession.avatarLoading') },
+                  ...avatarModels.map(m => ({ id: m.name, label: m.display_name || m.name })),
+                ]}
+              />
             </div>
           )}
 
@@ -358,12 +363,16 @@ export default function CreateSessionModal({ onClose }: Props) {
                   {t('createSession.ttsDisabled')}
                 </div>
               ) : (
-                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedTtsProfile} onChange={e => setSelectedTtsProfile(e.target.value)}>
-                  <option value="">{ttsProfilesLoaded ? t('createSession.ttsProfileNone') : t('createSession.ttsProfileLoading')}</option>
-                  {ttsProfiles.map(p => (
-                    <option key={p.name} value={p.name}>{p.display_name || p.name}</option>
-                  ))}
-                </select>
+                <Selector
+                  variant="field"
+                  ariaLabel={t('createSession.ttsProfile')}
+                  value={selectedTtsProfile}
+                  onChange={setSelectedTtsProfile}
+                  items={[
+                    { id: '', label: ttsProfilesLoaded ? t('createSession.ttsProfileNone') : t('createSession.ttsProfileLoading') },
+                    ...ttsProfiles.map(p => ({ id: p.name, label: p.display_name || p.name })),
+                  ]}
+                />
               )}
             </div>
           )}
@@ -378,23 +387,20 @@ export default function CreateSessionModal({ onClose }: Props) {
                 트리거 프리셋
                 <InfoTooltip text="VTuber 자가 발화의 페이즈/카테고리/프롬프트를 정의한 프리셋. 미선택 시 기본 동작으로 작동하며, '트리거 관리' 탭에서 새로 만들 수 있어요." />
               </label>
-              <select
-                className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8"
-                style={selectArrow}
+              <Selector
+                variant="field"
+                ariaLabel="트리거 프리셋"
                 value={selectedTriggerPresetId}
-                onChange={e => setSelectedTriggerPresetId(e.target.value)}
-              >
-                <option value="">기본 트리거 (내장)</option>
-                {triggerPresets.length > 0 && (
-                  <optgroup label="내 프리셋">
-                    {triggerPresets.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.enabled ? '⚡' : '⏸'} {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+                onChange={setSelectedTriggerPresetId}
+                items={[
+                  { id: '', label: '기본 트리거 (내장)' },
+                  ...triggerPresets.map(p => ({
+                    id: p.id,
+                    label: `${p.enabled ? '⚡' : '⏸'} ${p.name}`,
+                    group: '내 프리셋',
+                  })),
+                ]}
+              />
               {selectedTriggerPresetId ? (
                 <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
                   {triggerPresets.find(p => p.id === selectedTriggerPresetId)?.description || ''}
@@ -411,12 +417,16 @@ export default function CreateSessionModal({ onClose }: Props) {
           {formState.role !== 'vtuber' && (
             <div className="flex flex-col gap-1.5">
               <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.promptTemplate')} <InfoTooltip text={t('createSession.promptTemplateHelp')} /></label>
-              <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
-                <option value="">{t('createSession.templateNone')}</option>
-                {generalPrompts.map(p => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
+              <Selector
+                variant="field"
+                ariaLabel={t('createSession.promptTemplate')}
+                value={selectedPrompt}
+                onChange={handlePromptChange}
+                items={[
+                  { id: '', label: t('createSession.templateNone') },
+                  ...generalPrompts.map(p => ({ id: p.name, label: p.name })),
+                ]}
+              />
             </div>
           )}
 
@@ -443,23 +453,25 @@ export default function CreateSessionModal({ onClose }: Props) {
             <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">
               {t('createSession.toolPreset')} <InfoTooltip text={t('createSession.toolPresetHelp')} />
             </label>
-            <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPreset} onChange={e => setSelectedPreset(e.target.value)}>
-              <option value="">Default (based on role)</option>
-              {toolPresets.filter(p => p.is_template).length > 0 && (
-                <optgroup label="Templates">
-                  {toolPresets.filter(p => p.is_template).map(p => (
-                    <option key={p.id} value={p.id}>{p.icon || '🔧'} {p.name}</option>
-                  ))}
-                </optgroup>
-              )}
-              {toolPresets.filter(p => !p.is_template).length > 0 && (
-                <optgroup label="Custom">
-                  {toolPresets.filter(p => !p.is_template).map(p => (
-                    <option key={p.id} value={p.id}>{p.icon || '🔧'} {p.name}</option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
+            <Selector
+              variant="field"
+              ariaLabel={t('createSession.toolPreset')}
+              value={selectedPreset}
+              onChange={setSelectedPreset}
+              items={[
+                { id: '', label: 'Default (based on role)' },
+                ...toolPresets.filter(p => p.is_template).map(p => ({
+                  id: p.id,
+                  label: `${p.icon || '🔧'} ${p.name}`,
+                  group: 'Templates',
+                })),
+                ...toolPresets.filter(p => !p.is_template).map(p => ({
+                  id: p.id,
+                  label: `${p.icon || '🔧'} ${p.name}`,
+                  group: 'Custom',
+                })),
+              ]}
+            />
             <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
               {(() => {
                 if (!selectedPreset) return 'Automatically selects the best preset for the chosen role.';
@@ -477,23 +489,22 @@ export default function CreateSessionModal({ onClose }: Props) {
               {t('createSession.environment')}
               <InfoTooltip text={t('createSession.environmentHelp')} />
             </label>
-            <select
-              className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8"
-              style={selectArrow}
+            <Selector
+              variant="field"
+              ariaLabel={t('createSession.environment')}
               value={selectedEnvId}
-              onChange={e => setSelectedEnvId(e.target.value)}
-            >
-              <option value="">
-                {environmentsLoading && environments.length === 0
-                  ? t('createSession.environmentLoading')
-                  : t('createSession.environmentNone')}
-              </option>
-              {environments.map(env => (
-                <option key={env.id} value={env.id}>
-                  {env.name}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedEnvId}
+              items={[
+                {
+                  id: '',
+                  label:
+                    environmentsLoading && environments.length === 0
+                      ? t('createSession.environmentLoading')
+                      : t('createSession.environmentNone'),
+                },
+                ...environments.map(env => ({ id: env.id, label: env.name })),
+              ]}
+            />
             <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
               {(() => {
                 if (!selectedEnvId) return t('createSession.environmentLegacy');
@@ -524,18 +535,19 @@ export default function CreateSessionModal({ onClose }: Props) {
                   <label className="text-[0.75rem] font-medium text-[var(--text-secondary)]">
                     {t('createSession.memoryProvider')}
                   </label>
-                  <select
-                    className="w-full py-2 px-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.8125rem] text-[var(--text-primary)] appearance-none cursor-pointer focus:outline-none focus:border-[var(--primary-color)] pr-8"
-                    style={selectArrow}
+                  <Selector
+                    variant="field"
+                    ariaLabel={t('createSession.memoryProvider')}
                     value={memoryProvider}
-                    onChange={e => setMemoryProvider(e.target.value as typeof memoryProvider)}
-                  >
-                    <option value="">{t('createSession.memoryProviderDefault')}</option>
-                    <option value="disabled">{t('createSession.memoryProviderDisabled')}</option>
-                    <option value="ephemeral">{t('createSession.memoryProviderEphemeral')}</option>
-                    <option value="file">{t('createSession.memoryProviderFile')}</option>
-                    <option value="sql">{t('createSession.memoryProviderSql')}</option>
-                  </select>
+                    onChange={v => setMemoryProvider(v as typeof memoryProvider)}
+                    items={[
+                      { id: '', label: t('createSession.memoryProviderDefault') },
+                      { id: 'disabled', label: t('createSession.memoryProviderDisabled') },
+                      { id: 'ephemeral', label: t('createSession.memoryProviderEphemeral') },
+                      { id: 'file', label: t('createSession.memoryProviderFile') },
+                      { id: 'sql', label: t('createSession.memoryProviderSql') },
+                    ] as SelectorItem[]}
+                  />
                 </div>
 
                 {memoryProvider === 'file' && (
@@ -575,16 +587,17 @@ export default function CreateSessionModal({ onClose }: Props) {
                       <label className="text-[0.75rem] font-medium text-[var(--text-secondary)]">
                         {t('createSession.memoryDialect')}
                       </label>
-                      <select
-                        className="w-full py-2 px-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.8125rem] text-[var(--text-primary)] appearance-none cursor-pointer focus:outline-none focus:border-[var(--primary-color)] pr-8"
-                        style={selectArrow}
+                      <Selector
+                        variant="field"
+                        ariaLabel={t('createSession.memoryDialect')}
                         value={memoryDialect}
-                        onChange={e => setMemoryDialect(e.target.value as typeof memoryDialect)}
-                      >
-                        <option value="">{t('createSession.memoryDialectAuto')}</option>
-                        <option value="sqlite">sqlite</option>
-                        <option value="postgres">postgres</option>
-                      </select>
+                        onChange={v => setMemoryDialect(v as typeof memoryDialect)}
+                        items={[
+                          { id: '', label: t('createSession.memoryDialectAuto') },
+                          { id: 'sqlite', label: 'sqlite' },
+                          { id: 'postgres', label: 'postgres' },
+                        ] as SelectorItem[]}
+                      />
                     </div>
                   </>
                 )}
@@ -659,29 +672,33 @@ export default function CreateSessionModal({ onClose }: Props) {
                         <label className="text-[0.6875rem] font-medium text-[var(--text-secondary)]">
                           enable_vector_search
                         </label>
-                        <select
-                          className="w-full py-1.5 px-2.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[0.75rem] text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]"
+                        <Selector
+                          variant="field"
+                          ariaLabel="enable_vector_search"
                           value={memoryTuningEnableVector}
-                          onChange={e => setMemoryTuningEnableVector(e.target.value as typeof memoryTuningEnableVector)}
-                        >
-                          <option value="">(global)</option>
-                          <option value="true">true</option>
-                          <option value="false">false</option>
-                        </select>
+                          onChange={v => setMemoryTuningEnableVector(v as typeof memoryTuningEnableVector)}
+                          items={[
+                            { id: '', label: '(global)' },
+                            { id: 'true', label: 'true' },
+                            { id: 'false', label: 'false' },
+                          ] as SelectorItem[]}
+                        />
                       </div>
                       <div className="flex flex-col gap-1">
                         <label className="text-[0.6875rem] font-medium text-[var(--text-secondary)]">
                           enable_reflection
                         </label>
-                        <select
-                          className="w-full py-1.5 px-2.5 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded text-[0.75rem] text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]"
+                        <Selector
+                          variant="field"
+                          ariaLabel="enable_reflection"
                           value={memoryTuningEnableReflection}
-                          onChange={e => setMemoryTuningEnableReflection(e.target.value as typeof memoryTuningEnableReflection)}
-                        >
-                          <option value="">(global)</option>
-                          <option value="true">true</option>
-                          <option value="false">false</option>
-                        </select>
+                          onChange={v => setMemoryTuningEnableReflection(v as typeof memoryTuningEnableReflection)}
+                          items={[
+                            { id: '', label: '(global)' },
+                            { id: 'true', label: 'true' },
+                            { id: 'false', label: 'false' },
+                          ] as SelectorItem[]}
+                        />
                       </div>
                     </div>
                   )}
@@ -696,24 +713,32 @@ export default function CreateSessionModal({ onClose }: Props) {
               {/* VTuber Persona Prompt */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.vtuberPromptLabel')} <InfoTooltip text={t('createSession.vtuberPromptHelp')} /></label>
-                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedPrompt} onChange={e => handlePromptChange(e.target.value)}>
-                  <option value="">{t('createSession.templateNone')}</option>
-                  {vtuberPrompts.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
+                <Selector
+                  variant="field"
+                  ariaLabel={t('createSession.vtuberPromptLabel')}
+                  value={selectedPrompt}
+                  onChange={handlePromptChange}
+                  items={[
+                    { id: '', label: t('createSession.templateNone') },
+                    ...vtuberPrompts.map(p => ({ id: p.name, label: p.name })),
+                  ]}
+                />
                 <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={4} placeholder={t('createSession.systemPromptPlaceholder')}
                   value={formState.system_prompt || ''} onChange={e => setFormState(f => ({ ...f, system_prompt: e.target.value }))} />
               </div>
               {/* Sub-Worker Prompt */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.subWorkerPromptLabel')} <InfoTooltip text={t('createSession.subWorkerPromptHelp')} /></label>
-                <select className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8" style={selectArrow} value={selectedSubWorkerPrompt} onChange={e => handleSubWorkerPromptChange(e.target.value)}>
-                  <option value="">{t('createSession.templateNone')}</option>
-                  {subWorkerPrompts.map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
+                <Selector
+                  variant="field"
+                  ariaLabel={t('createSession.subWorkerPromptLabel')}
+                  value={selectedSubWorkerPrompt}
+                  onChange={handleSubWorkerPromptChange}
+                  items={[
+                    { id: '', label: t('createSession.templateNone') },
+                    ...subWorkerPrompts.map(p => ({ id: p.name, label: p.name })),
+                  ]}
+                />
                 <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={3} placeholder={t('createSession.subWorkerPromptPlaceholder')}
                   value={formState.sub_worker_system_prompt || ''} onChange={e => setFormState(f => ({ ...f, sub_worker_system_prompt: e.target.value }))} />
               </div>
@@ -728,23 +753,22 @@ export default function CreateSessionModal({ onClose }: Props) {
                   tool surface. */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.subWorkerEnv')} <InfoTooltip text={t('createSession.subWorkerEnvHelp')} /></label>
-                <select
-                  className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] appearance-none cursor-pointer transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] pr-8"
-                  style={selectArrow}
+                <Selector
+                  variant="field"
+                  ariaLabel={t('createSession.subWorkerEnv')}
                   value={selectedSubWorkerEnvId}
-                  onChange={e => setSelectedSubWorkerEnvId(e.target.value)}
-                >
-                  <option value="">
-                    {environmentsLoading && environments.length === 0
-                      ? t('createSession.environmentLoading')
-                      : t('createSession.subWorkerEnvDefault')}
-                  </option>
-                  {environments.map(env => (
-                    <option key={env.id} value={env.id}>
-                      {env.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedSubWorkerEnvId}
+                  items={[
+                    {
+                      id: '',
+                      label:
+                        environmentsLoading && environments.length === 0
+                          ? t('createSession.environmentLoading')
+                          : t('createSession.subWorkerEnvDefault'),
+                    },
+                    ...environments.map(env => ({ id: env.id, label: env.name })),
+                  ]}
+                />
                 <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
                   {(() => {
                     if (!selectedSubWorkerEnvId) return t('createSession.subWorkerEnvDefaultHelp');
