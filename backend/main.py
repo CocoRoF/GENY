@@ -575,9 +575,17 @@ async def lifespan(app: FastAPI):
             "   ✅ subagent_orchestrator wired (%d agent type(s))",
             len(_sub_registry) if _sub_registry is not None else 0,
         )
+        # Persistent sub-agents (executor 2.7.0): owned, autonomous,
+        # notify-on-completion. Shares the registry; on_event mirrors
+        # assignments into the task registry so they appear in 작업.
+        from service.subagents import install_subagent_manager
+        app.state.subagent_manager = install_subagent_manager(
+            app.state, registry=_sub_registry
+        )
     except Exception as e:
         logger.warning(f"   ⚠️  subagent_orchestrator: skipped ({e})")
         app.state.subagent_orchestrator = None
+        app.state.subagent_manager = None
 
     # ── Notification + Messaging Channels ──────────────────────────────
     try:
