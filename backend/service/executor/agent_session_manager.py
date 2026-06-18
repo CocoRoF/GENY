@@ -1059,20 +1059,18 @@ class AgentSessionManager:
 
         logger.info(f"[{session_id}] ✅ AgentSession created successfully")
 
-        # ── VTuber executor sub-agent (flag-gated cutover, default off) ──
-        # When GENY_VTUBER_SUBAGENT_MODE=executor (and a SubAgentManager is
-        # wired), the VTuber OWNS a geny-executor persistent sub-agent
-        # instead of the bespoke paired Sub-Worker session. Default off →
-        # this branch never runs and the bespoke path below is byte-for-byte
-        # unchanged (zero regression). See service/vtuber/sub_agent_bridge.
-        from service.vtuber.sub_agent_bridge import executor_mode_active as _exec_mode
+        # ── VTuber owns a geny-executor persistent sub-agent ──────────────
+        # Cutover complete (2026-06-18): the VTuber OWNS a geny-executor
+        # persistent sub-agent. The bespoke paired Sub-Worker session is
+        # removed. When no SubAgentManager is wired the VTuber simply has no
+        # companion (spawn no-ops) — it never falls back to a bespoke pair.
         from service.execution.agent_executor import get_app_state as _get_app_state
         _vt_app_state = _get_app_state()
         if (
             request.role == SessionRole.VTUBER
             and request.session_type != "sub"
             and not request.linked_session_id
-            and _exec_mode(_vt_app_state)
+            and getattr(_vt_app_state, "subagent_manager", None) is not None
         ):
             try:
                 from service.vtuber.sub_agent_bridge import spawn_vtuber_subagent
@@ -1126,188 +1124,6 @@ class AgentSessionManager:
                     f"[{session_id}] VTuber executor sub-agent setup failed: {e}",
                     exc_info=True,
                 )
-
-        # ── Auto-create Sub-Worker for VTuber agents (bespoke, default) ──
-        # Recursion guard: a VTuber request with session_type="sub"
-        # is a caller bug (sub sessions are always workers). The
-        # implicit guard was `not request.linked_session_id` — that
-        # worked because spawned requests carry linked_session_id, but
-        # the invariant we actually want is "don't double-spawn." Make
-        # it explicit on session_type.
-        elif (
-            request.role == SessionRole.VTUBER
-            and request.session_type != "sub"
-            and not request.linked_session_id
-        ):
-            worker_session_id: Optional[str] = None
-            try:
-                worker_name = f"{request.session_name or 'vtuber'}_worker"
-                # Share the VTuber's actual storage path so memory is shared
-                shared_dir = (
-                    request.working_dir
-                    or (agent.storage_path if hasattr(agent, 'storage_path') else None)
-                )
-                # M.1 (cycle 20260426_3) — sub-worker defaults can come
-                # from settings.json:vtuber.sub_worker. Per-request
-                # overrides still win; the settings layer is the
-                # fallback before resolve_env_id picks the system default.
-                _sub_worker_cfg = _load_vtuber_sub_worker_section()
-                _settings_default_env_id = _sub_worker_cfg.get("default_env_id")
-                _settings_default_model = _sub_worker_cfg.get("default_model")
-                # Resolve the sub-worker's env_id BEFORE we recurse —
-                # ``CreateSessionRequest`` has no ``env_id`` field
-                # (env_id is a sibling kwarg on ``create_agent_session``,
-                # not a field on the request schema). The pre-fix code
-                # passed ``env_id=...`` to the constructor where Pydantic
-                # silently dropped it, then called
-                # ``create_agent_session(worker_request)`` without the
-                # ``env_id=`` kwarg — so the recursive call's parameter
-                # defaulted to ``None`` and ``resolve_env_id(WORKER, None)``
-                # always picked ``template-worker-env``, ignoring the
-                # user's explicit selection (or the settings default).
-                sub_worker_env_id = (
-                    request.sub_worker_env_id
-                    or (_settings_default_env_id if isinstance(_settings_default_env_id, str) and _settings_default_env_id.strip() else None)
-                )
-                # Sub-worker model override is still threaded through
-                # ``request.model`` for session-info display tagging.
-                # The actual LLM model used by the sub-worker pipeline
-                # comes from its env manifest's Stage 6 (model_override
-                # or pipeline.model) — manifest-driven, just like the
-                # main path.
-                worker_request = CreateSessionRequest(
-                    session_name=worker_name,
-                    working_dir=shared_dir,
-                    model=(
-                        request.sub_worker_model
-                        or (_settings_default_model if isinstance(_settings_default_model, str) and _settings_default_model.strip() else None)
-                    ),
-                    max_turns=request.max_turns or 50,
-                    timeout=request.timeout or 1800.0,
-                    max_iterations=request.max_iterations or 50,
-                    role=SessionRole.WORKER,
-                    system_prompt=request.sub_worker_system_prompt,
-                    linked_session_id=session_id,
-                    session_type="sub",
-                    env_vars=request.env_vars,
-                )
-                worker_agent = await self.create_agent_session(
-                    worker_request, env_id=sub_worker_env_id,
-                )
-                worker_session_id = worker_agent.session_id
-
-                # Back-link: update VTuber session with Sub-Worker ID
-                self._store.update(session_id, {
-                    "linked_session_id": worker_session_id,
-                    "session_type": "vtuber",
-                })
-
-                agent._linked_session_id = worker_session_id
-                agent._session_type = "vtuber"
-
-                # Inject the Sub-Worker delegation block into the
-                # VTuber's system prompt. The runtime pairs this
-                # VTuber with the freshly-created Sub-Worker via
-                # _linked_session_id; the tool layer resolves the
-                # target itself, so we do not expose the Sub-Worker's
-                # session_id to the LLM (it doesn't need to copy a
-                # UUID and we don't want it to treat the header as a
-                # name to recreate). The notice text is the
-                # module-level ``_VTUBER_SUB_WORKER_NOTICE`` constant
-                # (single source of truth — cycle 20260422_6 PR4).
-                # Stage the sub-worker delegation block through the
-                # PersonaProvider instead of mutating ``agent._system_prompt``
-                # directly. ``append_context`` is idempotent on identical
-                # text, so re-registration of an already-paired VTuber is
-                # safe.
-                self._persona_provider.append_context(
-                    session_id, _vtuber_sub_worker_notice()
-                )
-
-                # SESSION_PAIRED — fires once per pair, after both sides'
-                # SESSION_CREATED events have already fired. session_id
-                # is the VTuber (the "owning" half).
-                await self._lifecycle_bus.emit(
-                    LifecycleEvent.SESSION_PAIRED,
-                    session_id,
-                    vtuber_id=session_id,
-                    worker_id=worker_session_id,
-                )
-
-                logger.info(
-                    f"[{session_id}] 🔗 Sub-Worker created: "
-                    f"{worker_session_id} ({worker_name})"
-                )
-
-                # ── Auto-create chat room for VTuber session ───────────
-                try:
-                    from service.chat.conversation_store import get_chat_store
-                    chat_store = get_chat_store()
-                    room_name = f"{request.session_name or 'VTuber'} Chat"
-                    room = chat_store.create_room(room_name, [session_id])
-                    room_id = room.get("id") or room.get("room_id")
-                    if room_id:
-                        agent._chat_room_id = room_id
-                        self._store.update(session_id, {"chat_room_id": room_id})
-                        logger.info(f"[{session_id}] 💬 Chat room created: {room_id}")
-                except Exception as e:
-                    logger.error(f"[{session_id}] Failed to create chat room: {e}", exc_info=True)
-
-                # Register VTuber session with ThinkingTriggerService immediately
-                try:
-                    from service.vtuber.thinking_trigger import get_thinking_trigger_service
-                    trigger_svc = get_thinking_trigger_service()
-                    trigger_svc.record_activity(session_id)
-                    # Resolve the trigger preset: an explicit request override
-                    # wins; otherwise the ENVIRONMENT's mapping (stored in the
-                    # manifest's host_selections.extras). If neither, leave it
-                    # unattached → the session resolves to the DESIGNATED default
-                    # preset at fire time ("매핑 안 되면 기본값" principle).
-                    effective_trigger = trigger_preset_id or self._env_trigger_preset_id(env_id)
-                    if effective_trigger:
-                        trigger_svc.attach_preset(session_id, effective_trigger)
-                        # Persist on the session record so reverse-lookups
-                        # (preset → sessions) and FE re-renders see the
-                        # binding without re-reading runtime state.
-                        try:
-                            self._store.update(
-                                session_id, {"trigger_preset_id": effective_trigger}
-                            )
-                        except Exception:
-                            logger.debug(
-                                "[%s] Failed to persist trigger_preset_id; "
-                                "runtime binding still active",
-                                session_id,
-                                exc_info=True,
-                            )
-                except Exception:
-                    pass  # best-effort
-
-            except Exception as e:
-                logger.error(
-                    f"[{session_id}] Failed to create Sub-Worker: {e} — "
-                    f"rolling back VTuber to avoid an orphaned half-pair",
-                    exc_info=True,
-                )
-                # Roll back any Sub-Worker that did register before the
-                # failure, then the VTuber itself. Each cleanup is
-                # independently guarded so a secondary failure can't
-                # swallow the primary one — we still re-raise.
-                if worker_session_id is not None:
-                    try:
-                        await self.delete_session(worker_session_id)
-                    except Exception:
-                        logger.exception(
-                            f"[{session_id}] Rollback of partial Sub-Worker "
-                            f"{worker_session_id} also failed"
-                        )
-                try:
-                    await self.delete_session(session_id)
-                except Exception:
-                    logger.exception(
-                        f"[{session_id}] Rollback of partial VTuber also failed"
-                    )
-                raise
 
         return agent
 
