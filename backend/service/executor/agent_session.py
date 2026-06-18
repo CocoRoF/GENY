@@ -2371,6 +2371,10 @@ class AgentSession:
                 # Inline `Agent` tool reads this from extras (the
                 # `[DELEGATE]` path uses the pipeline's own registry slot).
                 _tool_extras["agent_orchestrator"] = _orchestrator
+            _sa_manager = getattr(_app_state, "subagent_manager", None)
+            if _sa_manager is not None:
+                # SubAgent* tools — persistent sub-agents (executor 2.7.0).
+                _tool_extras["subagent_manager"] = _sa_manager
 
         attach_kwargs: Dict[str, Any] = {
             "system_builder": system_builder,

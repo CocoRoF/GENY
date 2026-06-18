@@ -48,7 +48,7 @@ dependencies = [
     # next-request measure + Stage 2/4 shared estimator) instead of
     # hard-failing; PersistingLLMSummaryCompactor auto-wired into the
     # guard recovery path. Keep in sync with requirements.txt.
-    "geny-executor>=2.6.0,<3.0.0",
+    "geny-executor>=2.7.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth
