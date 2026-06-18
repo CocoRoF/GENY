@@ -147,3 +147,23 @@ optional 필드/hook only → 일회성 회귀 0. **geny-executor 2.7.0** publis
 
 ## 8. 지금 착수
 **PR-1 (Geny 배선)** 부터 구현. executor 무변경, 무회귀, 즉시 sub-worker(일회성) 동작 + 작업 탭 세션 격리. 이어서 PR-2(executor 2.7.0 §4 — 사용자 API 검토 후) 진행.
+
+---
+
+## 진행 현황 (2026-06-18, 구현)
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| PR-1 (#961) | 작업/cron/sub-agent 런타임을 세션 extras에 배선 + 작업 탭 세션 격리 (GAP A·B·E) | ✅ 배포 |
+| PR-2 (executor #229, **2.7.0** PyPI) | 영속 **sub-agent**(SubAgentManager: spawn/assign/list/stop, keep-alive, 다중턴, 재시작) + **inbox** + 완료 **알림** + 이벤트 v4 + descriptor 설정(system_prompt/tool_preset) + SubAgent* 툴. 일회성 **sub-worker**는 기존 `Agent`/`run_subagent`로 명확화. (3175 tests green) | ✅ 배포 |
+| PR-3a/PR-4 (#962) | Geny가 executor SubAgentManager를 소비(부팅 생성+extras 주입), 위임 lifecycle → 작업(Task) 미러(작업 탭 노출, 세션 격리) | ✅ 배포 |
+| 영속 state (#963) | sub-agent PipelineState를 FileSessionPersistence로 영속 → 재시작 생존 | ✅ 배포 |
+| **PR-3b** | **VTuber bespoke Sub-Worker → executor sub-agent 완전 cutover** (flag + 라이브 parity). 기존 inbox.py/send_direct_message_internal/[SUB_WORKER_RESULT]/execute_command 알림을 executor 메커니즘으로 대체 후 제거. | ⏳ **남음 (검증 필요)** |
+
+### 달성된 목표
+- geny-executor가 **두 프리미티브를 모두 일급 제공**: sub-worker(일회성) + sub-agent(영속, 자율, 완료 알림). 알림/inbox/메시징 **메커니즘이 executor에 위치**. Geny는 소비자. ✅
+- Geny에서 **상당히 고도화된 executor 기능** 사용 가능(SubAgent* 툴, 작업 탭 노출, 재시작 생존). ✅
+- **무회귀**: 기존 Geny 기능 그대로(전부 additive). ✅
+
+### PR-3b가 남은 이유 (정직한 평가)
+VTuber Sub-Worker는 Geny에서 가장 깊게 결합된 서브시스템(inbox·execute_command 알림·chat room·아바타·트리거·재시작 cascade·UI). 이를 executor sub-agent로 **완전 교체**하는 것은 라이브 VTuber의 대화/메모리/재시작 parity를 **실환경에서 검증**해야 안전하다. 사용자 제약("모든 기능이 제대로 동작")상 **무검증 일괄 교체는 부적절** → flag(`GENY_VTUBER_SUBAGENT_MODE`, default=bespoke)로 신경로를 넣고 staging 검증 후 default 전환 + bespoke 제거하는 것이 정석. cutover에 필요한 executor 능력은 **이미 전부 구축/배포됨**.
