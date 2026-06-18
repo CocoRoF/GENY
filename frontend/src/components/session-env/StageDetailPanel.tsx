@@ -193,6 +193,11 @@ export default function StageDetailPanel({
           )}
         </div>
 
+        {/* ── This env's ACTUAL configuration (real input values) — shown
+            up top so opening a node immediately answers "what is actually
+            set here", before the static explanation below. ── */}
+        <ActualConfig entry={entry} isPresent={isPresent} />
+
         {/* Description */}
         {meta && (
           <Section title={t('sessionEnvironmentTab.pipeline.overview')}>
@@ -317,142 +322,6 @@ export default function StageDetailPanel({
           </Section>
         )}
 
-        {/* Live Configuration (from the manifest) */}
-        {isPresent && hasLiveConfig(entry) && (
-          <Section title={t('sessionEnvironmentTab.pipeline.currentConfig')}>
-            <div className="space-y-3">
-              {Object.keys(currentStrategies).length > 0 && (
-                <div
-                  className="rounded-lg p-3"
-                  style={{
-                    background: 'var(--pipe-bg-tertiary)',
-                    border: '1px solid var(--pipe-border)',
-                  }}
-                >
-                  <div
-                    className="text-[10px] uppercase tracking-widest mb-2"
-                    style={{ color: 'var(--pipe-text-muted)' }}
-                  >
-                    {t('sessionEnvironmentTab.strategies')}
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    {Object.entries(currentStrategies).map(([slot, impl]) => (
-                      <div
-                        key={slot}
-                        className="flex items-center justify-between gap-2"
-                      >
-                        <span
-                          className="pipe-mono text-[11px]"
-                          style={{ color: 'var(--pipe-text-secondary)' }}
-                        >
-                          {slot}
-                        </span>
-                        <span
-                          className="pipe-mono text-[11px] font-medium"
-                          style={{ color: catColor.accent }}
-                        >
-                          {impl}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {Object.keys(entry.config ?? {}).length > 0 && (
-                <JsonBlock
-                  label={t('sessionEnvironmentTab.config')}
-                  value={entry.config}
-                />
-              )}
-
-              {Object.keys(entry.strategy_configs ?? {}).length > 0 && (
-                <JsonBlock
-                  label={t('sessionEnvironmentTab.pipeline.strategyConfigs')}
-                  value={entry.strategy_configs}
-                />
-              )}
-
-              {(() => {
-                // Cycle 20260427_1 — StageToolBinding shape switched
-                // from {mode, patterns} (placeholder) to the executor's
-                // canonical {allowed, blocked, extra_context}. Render
-                // both the mode (derived from which list is non-empty)
-                // and the entries.
-                const tb = entry.tool_binding;
-                if (!tb) return null;
-                const allowed = tb.allowed ?? [];
-                const blocked = tb.blocked ?? [];
-                const items: Array<{ key: string; tone: 'allow' | 'deny' }> = [
-                  ...allowed.map((p) => ({ key: p, tone: 'allow' as const })),
-                  ...blocked.map((p) => ({ key: p, tone: 'deny' as const })),
-                ];
-                if (items.length === 0) return null;
-                const mode =
-                  allowed.length > 0 && blocked.length === 0
-                    ? 'allowlist'
-                    : allowed.length === 0 && blocked.length > 0
-                      ? 'blocklist'
-                      : 'mixed';
-                return (
-                  <div
-                    className="rounded-lg p-3"
-                    style={{
-                      background: 'var(--pipe-bg-tertiary)',
-                      border: '1px solid var(--pipe-border)',
-                    }}
-                  >
-                    <div
-                      className="text-[10px] uppercase tracking-widest mb-2"
-                      style={{ color: 'var(--pipe-text-muted)' }}
-                    >
-                      {t('sessionEnvironmentTab.toolBinding')}
-                      <span
-                        className="pipe-mono ml-2 normal-case"
-                        style={{ color: 'var(--pipe-text-secondary)' }}
-                      >
-                        ({mode})
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {items.map((it) => (
-                        <span
-                          key={`${it.tone}_${it.key}`}
-                          className="pipe-mono text-[10px] px-1.5 py-0.5 rounded border"
-                          style={{
-                            background:
-                              it.tone === 'deny'
-                                ? 'rgba(239, 68, 68, 0.08)'
-                                : 'var(--pipe-bg-primary)',
-                            color:
-                              it.tone === 'deny'
-                                ? 'rgb(220, 38, 38)'
-                                : 'var(--pipe-text-secondary)',
-                            borderColor:
-                              it.tone === 'deny'
-                                ? 'rgba(239, 68, 68, 0.3)'
-                                : 'var(--pipe-border)',
-                          }}
-                        >
-                          {it.tone === 'deny' ? '−' : '+'} {it.key}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {entry.model_override &&
-                Object.keys(entry.model_override).length > 0 && (
-                  <JsonBlock
-                    label={t('sessionEnvironmentTab.modelOverride')}
-                    value={entry.model_override}
-                  />
-                )}
-            </div>
-          </Section>
-        )}
-
         {/* Architecture */}
         {meta?.architectureNotes && (
           <Section title={t('sessionEnvironmentTab.pipeline.architecture')}>
@@ -531,17 +400,293 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function hasLiveConfig(entry: StageManifestEntry): boolean {
-  const strat = Object.keys(entry.strategies ?? {}).length;
-  const stratCfg = Object.keys(entry.strategy_configs ?? {}).length;
-  const cfg = Object.keys(entry.config ?? {}).length;
-  // Cycle 20260427_1 — tool_binding shape: {allowed, blocked} (canonical).
-  const tbBinding = entry.tool_binding;
-  const tb =
-    !!tbBinding &&
-    ((tbBinding.allowed?.length ?? 0) > 0 || (tbBinding.blocked?.length ?? 0) > 0);
-  const mo = entry.model_override && Object.keys(entry.model_override).length > 0;
-  return strat + stratCfg + cfg > 0 || !!tb || !!mo;
+/**
+ * ActualConfig — the "real input values" panel: exactly what THIS env's
+ * manifest sets for this stage (artifact, status, selected strategies +
+ * their per-slot config, stage config, tool binding, model override),
+ * plus a collapsible raw-JSON of the whole entry for complete logging.
+ * Always rendered (with an explicit empty state) so opening a node always
+ * answers "what is actually configured here".
+ */
+function ActualConfig({
+  entry,
+  isPresent,
+}: {
+  entry: StageManifestEntry | undefined;
+  isPresent: boolean;
+}) {
+  const { locale } = useI18n();
+  const L = (ko: string, en: string) => (locale === 'ko' ? ko : en);
+  const title = L('이 환경의 실제 구성', 'Actual configuration');
+
+  if (!isPresent || !entry) {
+    return (
+      <Section title={title}>
+        <p
+          className="text-[12px] leading-relaxed"
+          style={{ color: 'var(--pipe-text-muted)' }}
+        >
+          {L(
+            '이 스테이지는 이 환경의 매니페스트에 없습니다 — 실행 시 비활성/기본값으로 처리됩니다.',
+            'This stage is not in this environment’s manifest — it runs inactive / with defaults.',
+          )}
+        </p>
+      </Section>
+    );
+  }
+
+  const strategies = (entry.strategies ?? {}) as Record<string, string>;
+  const strategyConfigs = (entry.strategy_configs ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const config = (entry.config ?? {}) as Record<string, unknown>;
+  const modelOverride = (entry.model_override ?? {}) as Record<string, unknown>;
+  const allowed = entry.tool_binding?.allowed ?? [];
+  const blocked = entry.tool_binding?.blocked ?? [];
+  const hasAny =
+    Object.keys(strategies).length > 0 ||
+    Object.keys(config).length > 0 ||
+    Object.keys(modelOverride).length > 0 ||
+    allowed.length > 0 ||
+    blocked.length > 0;
+
+  const surface = {
+    background: 'var(--pipe-bg-tertiary)',
+    border: '1px solid var(--pipe-border)',
+  };
+
+  return (
+    <Section title={title}>
+      {/* Facts */}
+      <div className="flex flex-col gap-2 mb-3">
+        <ConfigRow label={L('아티팩트', 'Artifact')}>
+          <span
+            className="pipe-mono text-[11px]"
+            style={{ color: 'var(--pipe-text-secondary)' }}
+          >
+            {entry.artifact || 'default'}
+          </span>
+        </ConfigRow>
+        <ConfigRow label={L('상태', 'Status')}>
+          <span
+            className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+            style={
+              entry.active
+                ? {
+                    background:
+                      'color-mix(in srgb, var(--pipe-green) 14%, transparent)',
+                    color: 'var(--pipe-green)',
+                  }
+                : {
+                    background: 'var(--pipe-bg-tertiary)',
+                    color: 'var(--pipe-text-muted)',
+                  }
+            }
+          >
+            {entry.active ? L('활성', 'active') : L('비활성', 'inactive')}
+          </span>
+        </ConfigRow>
+      </div>
+
+      {/* Selected strategies + per-slot config */}
+      {Object.keys(strategies).length > 0 && (
+        <div className="mb-3">
+          <FieldLabel>{L('전략 (선택된 구현)', 'Strategies')}</FieldLabel>
+          <div className="flex flex-col gap-2">
+            {Object.entries(strategies).map(([slot, impl]) => {
+              const sc = strategyConfigs[slot];
+              return (
+                <div
+                  key={slot}
+                  className="rounded-lg px-3 py-2"
+                  style={surface}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className="pipe-mono text-[11px]"
+                      style={{ color: 'var(--pipe-text-muted)' }}
+                    >
+                      {slot}
+                    </span>
+                    <span
+                      className="pipe-mono text-[11px] font-semibold"
+                      style={{ color: 'var(--pipe-accent)' }}
+                    >
+                      {String(impl)}
+                    </span>
+                  </div>
+                  {sc && Object.keys(sc).length > 0 && <KeyValues obj={sc} />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Stage config */}
+      {Object.keys(config).length > 0 && (
+        <div className="mb-3">
+          <FieldLabel>{L('설정 (config)', 'Config')}</FieldLabel>
+          <div className="rounded-lg px-3 py-2" style={surface}>
+            <KeyValues obj={config} />
+          </div>
+        </div>
+      )}
+
+      {/* Tool binding */}
+      {(allowed.length > 0 || blocked.length > 0) && (
+        <div className="mb-3">
+          <FieldLabel>{L('도구 바인딩', 'Tool binding')}</FieldLabel>
+          <div className="flex flex-wrap gap-1">
+            {allowed.map((p) => (
+              <ToolChip key={`a_${p}`} tone="allow" label={p} />
+            ))}
+            {blocked.map((p) => (
+              <ToolChip key={`b_${p}`} tone="deny" label={p} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Model override */}
+      {Object.keys(modelOverride).length > 0 && (
+        <div className="mb-3">
+          <FieldLabel>{L('모델 오버라이드', 'Model override')}</FieldLabel>
+          <div className="rounded-lg px-3 py-2" style={surface}>
+            <KeyValues obj={modelOverride} />
+          </div>
+        </div>
+      )}
+
+      {!hasAny && (
+        <p
+          className="text-[12px] leading-relaxed"
+          style={{ color: 'var(--pipe-text-muted)' }}
+        >
+          {L(
+            '이 환경에서 별도 설정 없음 — 모든 값이 기본값입니다.',
+            'No explicit settings in this env — everything uses defaults.',
+          )}
+        </p>
+      )}
+
+      {/* Raw manifest entry — the definitive actual values for logging. */}
+      <details className="mt-3">
+        <summary
+          className="cursor-pointer text-[10px] uppercase tracking-widest select-none"
+          style={{ color: 'var(--pipe-text-muted)' }}
+        >
+          {L('원본 매니페스트 (raw)', 'Raw manifest entry')}
+        </summary>
+        <pre
+          className="pipe-mono mt-2 text-[11px] leading-[1.5] whitespace-pre overflow-auto max-h-[300px] rounded-lg p-3"
+          style={{
+            background: 'var(--pipe-bg-primary)',
+            border: '1px solid var(--pipe-border)',
+            color: 'var(--pipe-text-secondary)',
+          }}
+        >
+          {safeJson(entry)}
+        </pre>
+      </details>
+    </Section>
+  );
+}
+
+function ConfigRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[11px]" style={{ color: 'var(--pipe-text-muted)' }}>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="text-[10px] uppercase tracking-widest mb-1.5"
+      style={{ color: 'var(--pipe-text-muted)' }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function KeyValues({ obj }: { obj: Record<string, unknown> }) {
+  return (
+    <div className="flex flex-col gap-1 mt-1.5">
+      {Object.entries(obj).map(([k, v]) => (
+        <div key={k} className="flex items-start justify-between gap-3">
+          <span
+            className="pipe-mono text-[11px] shrink-0"
+            style={{ color: 'var(--pipe-text-muted)' }}
+          >
+            {k}
+          </span>
+          <span
+            className="pipe-mono text-[11px] text-right break-all"
+            style={{ color: 'var(--pipe-text-primary)' }}
+          >
+            {formatVal(v)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolChip({
+  tone,
+  label,
+}: {
+  tone: 'allow' | 'deny';
+  label: string;
+}) {
+  return (
+    <span
+      className="pipe-mono text-[10px] px-1.5 py-0.5 rounded border"
+      style={
+        tone === 'deny'
+          ? {
+              background: 'rgba(239,68,68,0.08)',
+              color: 'rgb(220,38,38)',
+              borderColor: 'rgba(239,68,68,0.3)',
+            }
+          : {
+              background: 'var(--pipe-bg-primary)',
+              color: 'var(--pipe-text-secondary)',
+              borderColor: 'var(--pipe-border)',
+            }
+      }
+    >
+      {tone === 'deny' ? '−' : '+'} {label}
+    </span>
+  );
+}
+
+function formatVal(v: unknown): string {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return safeJson(v);
+}
+
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
 }
 
 /**

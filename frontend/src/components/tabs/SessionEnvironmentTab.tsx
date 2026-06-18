@@ -18,7 +18,6 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   Boxes,
-  Code2,
   Link2Off,
   Maximize2,
   RefreshCw,
@@ -38,7 +37,6 @@ import type {
 } from '@/types/environment';
 import PipelineCanvas from '@/components/session-env/PipelineCanvas';
 import StageDetailPanel from '@/components/session-env/StageDetailPanel';
-import CodeViewModal from '@/components/session-env/CodeViewModal';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function SessionEnvironmentTab() {
@@ -130,7 +128,6 @@ export default function SessionEnvironmentTab() {
   }, [selectedSessionId, sessionEnvId]);
 
   // Code view
-  const [codeOpen, setCodeOpen] = useState(false);
 
   // Canvas reset
   const resetViewRef = useRef<(() => void) | null>(null);
@@ -234,32 +231,19 @@ export default function SessionEnvironmentTab() {
             {t('sessionEnvironmentTab.changeEnv.button')}
           </button>
           {hasPipeline && (
-            <>
-              <button
-                onClick={() => setCodeOpen(true)}
-                className="text-[10px] px-3 py-1 rounded-md cursor-pointer transition-colors hover:brightness-125 flex items-center gap-1.5"
-                style={{
-                  background: 'var(--pipe-bg-tertiary)',
-                  color: 'var(--pipe-accent)',
-                  border: '1px solid var(--pipe-border)',
-                }}
-              >
-                <Code2 size={11} />
-                {t('sessionEnvironmentTab.pipeline.code')}
-              </button>
-              <button
-                onClick={handleReset}
-                className="text-[10px] px-3 py-1 rounded-md cursor-pointer transition-colors hover:brightness-125 flex items-center gap-1.5"
-                style={{
-                  background: 'var(--pipe-bg-tertiary)',
-                  color: 'var(--pipe-text-secondary)',
-                  border: '1px solid var(--pipe-border)',
-                }}
-              >
-                <Maximize2 size={11} />
-                {t('sessionEnvironmentTab.pipeline.reset')}
-              </button>
-            </>
+            <button
+              onClick={handleReset}
+              title={t('sessionEnvironmentTab.pipeline.reset')}
+              aria-label={t('sessionEnvironmentTab.pipeline.reset')}
+              className="flex items-center justify-center w-7 h-7 rounded-md cursor-pointer transition-colors hover:brightness-125"
+              style={{
+                background: 'var(--pipe-bg-tertiary)',
+                color: 'var(--pipe-text-muted)',
+                border: '1px solid var(--pipe-border)',
+              }}
+            >
+              <Maximize2 size={11} />
+            </button>
           )}
           {sessionEnvId && !envMissing && (
             <>
@@ -347,15 +331,6 @@ export default function SessionEnvironmentTab() {
           </div>
         )}
       </div>
-
-      {/* ── Code view ────────────────────────────────────── */}
-      {codeOpen && manifestEnv?.manifest && (
-        <CodeViewModal
-          manifest={manifestEnv.manifest}
-          envName={envSummary?.name}
-          onClose={() => setCodeOpen(false)}
-        />
-      )}
 
       {/* ── Change-env picker ────────────────────────────── */}
       {envPickerOpen && (
