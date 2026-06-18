@@ -72,36 +72,44 @@ def executor_mode_active(app_state: Any) -> bool:
     )
 
 
-async def spawn_vtuber_subagent(
+def owned_subagent_id(owner_session_id: str) -> str:
+    """Deterministic id for the persistent sub-agent an owner owns."""
+    return f"{owner_session_id}-subagent"
+
+
+async def spawn_owned_subagent(
     app_state: Any,
-    vtuber_session_id: str,
+    owner_session_id: str,
     *,
     agent_type: str = DEFAULT_SUBAGENT_TYPE,
     credentials: Any = None,
     parent_provider: Optional[str] = None,
 ) -> Optional[str]:
-    """Spawn the VTuber's owned persistent sub-agent. Returns its id or None."""
+    """Spawn the persistent sub-agent an env-declaring agent owns.
+
+    Env-driven (not role-driven): called when the agent's env declares
+    ``host_selections.extras['owned_subagent']``. Returns the sub-agent id,
+    or None when no SubAgentManager is wired / spawn fails."""
     manager = getattr(app_state, "subagent_manager", None)
     if manager is None:
         return None
-    sub_agent_id = f"{vtuber_session_id}-subagent"
+    sub_agent_id = owned_subagent_id(owner_session_id)
     try:
         await manager.spawn(
             agent_type,
-            vtuber_session_id,
+            owner_session_id,
             sub_agent_id=sub_agent_id,
             credentials=credentials,
             parent_provider=parent_provider,
         )
         logger.info(
-            "[%s] 🤖 VTuber executor sub-agent spawned: %s",
-            vtuber_session_id, sub_agent_id,
+            "[%s] 🤖 owned sub-agent spawned: %s (type=%s)",
+            owner_session_id, sub_agent_id, agent_type,
         )
         return sub_agent_id
-    except Exception:  # noqa: BLE001 — never fail VTuber create on this
+    except Exception:  # noqa: BLE001 — never fail create on this
         logger.warning(
-            "[%s] VTuber executor sub-agent spawn failed", vtuber_session_id,
-            exc_info=True,
+            "[%s] owned sub-agent spawn failed", owner_session_id, exc_info=True,
         )
         return None
 
@@ -120,7 +128,8 @@ async def delegate_to_subagent(
 __all__ = [
     "vtuber_subagent_mode",
     "executor_mode_active",
-    "spawn_vtuber_subagent",
+    "spawn_owned_subagent",
+    "owned_subagent_id",
     "delegate_to_subagent",
     "DEFAULT_SUBAGENT_TYPE",
 ]

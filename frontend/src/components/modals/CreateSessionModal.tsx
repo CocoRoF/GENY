@@ -52,13 +52,11 @@ export default function CreateSessionModal({ onClose }: Props) {
     system_prompt: '',
   });
   const [selectedPrompt, setSelectedPrompt] = useState('geny-default');
-  const [selectedSubWorkerPrompt, setSelectedSubWorkerPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [toolPresets, setToolPresets] = useState<ToolPresetDefinition[]>([]);
   const [selectedPreset, setSelectedPreset] = useState('');
   const [selectedEnvId, setSelectedEnvId] = useState('');
-  const [selectedSubWorkerEnvId, setSelectedSubWorkerEnvId] = useState('');
   const [memoryProvider, setMemoryProvider] = useState<'' | 'disabled' | 'ephemeral' | 'file' | 'sql'>('');
   const [memoryRoot, setMemoryRoot] = useState('');
   const [memoryDsn, setMemoryDsn] = useState('');
@@ -151,32 +149,17 @@ export default function CreateSessionModal({ onClose }: Props) {
     }
   };
 
-  const handleSubWorkerPromptChange = async (name: string) => {
-    setSelectedSubWorkerPrompt(name);
-    if (name) {
-      const content = await loadPromptContent(name);
-      if (content) setFormState(f => ({ ...f, sub_worker_system_prompt: content }));
-    } else {
-      setFormState(f => ({ ...f, sub_worker_system_prompt: '' }));
-    }
-  };
-
   const handleRoleChange = (role: string) => {
     setFormState(f => ({ ...f, role }));
     if (role === 'vtuber') {
       handlePromptChange('vtuber-default');
-      handleSubWorkerPromptChange('sub-worker-default');
       if (!avatarsLoaded) fetchAvatarModels();
-      // Auto-select the seeded VTuber env and Sub-Worker env so
-      // the user sees — and can override — what the backend would
-      // pick via resolve_env_id(VTUBER) / resolve_env_id(WORKER).
+      // Auto-select the seeded VTuber env (the user can override). The
+      // VTuber's owned sub-agent is declared by that env, not chosen here.
       setSelectedEnvId(DEFAULT_VTUBER_ENV_ID);
-      setSelectedSubWorkerEnvId(DEFAULT_WORKER_ENV_ID);
     } else {
       setSelectedAvatar('');
       setSelectedTtsProfile('');
-      setSelectedSubWorkerPrompt('');
-      setSelectedSubWorkerEnvId('');
       // If the main env was the VTuber seed (set by a prior vtuber
       // selection), clear it — a non-VTuber role shouldn't inherit
       // the VTuber pipeline.
@@ -188,7 +171,6 @@ export default function CreateSessionModal({ onClose }: Props) {
 
   // Filtered prompt lists
   const vtuberPrompts = prompts.filter(p => p.name.startsWith('vtuber-'));
-  const subWorkerPrompts = prompts.filter(p => p.name.startsWith('sub-worker-'));
   const generalPrompts = prompts.filter(
     p => !p.name.startsWith('vtuber-') && !p.name.startsWith('sub-worker-'),
   );
@@ -252,14 +234,9 @@ export default function CreateSessionModal({ onClose }: Props) {
         if (hasTuning) memCfg.tuning = tuning;
         payload.memory_config = memCfg;
       }
-      // Sub-Worker env override — only meaningful for VTuber role,
-      // since that's the only path that spawns a Sub-Worker. The
-      // backend's auto-pair block feeds this into
-      // resolve_env_id(WORKER, explicit); leaving it blank keeps the
-      // resolver default (template-worker-env).
-      if (formState.role === 'vtuber' && selectedSubWorkerEnvId) {
-        payload.sub_worker_env_id = selectedSubWorkerEnvId;
-      }
+      // (Sub-Worker env/prompt overrides removed 2026-06-18: the VTuber's
+      // sub-agent is now an environment capability — the env declares
+      // host_selections.extras.owned_subagent. Nothing per-session here.)
       // Trigger preset attach — VTuber-only. Empty selection keeps the
       // bundled defaults (current hardcoded ladder).
       if (formState.role === 'vtuber' && selectedTriggerPresetId) {
@@ -726,57 +703,11 @@ export default function CreateSessionModal({ onClose }: Props) {
                 <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={4} placeholder={t('createSession.systemPromptPlaceholder')}
                   value={formState.system_prompt || ''} onChange={e => setFormState(f => ({ ...f, system_prompt: e.target.value }))} />
               </div>
-              {/* Sub-Worker Prompt */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.subWorkerPromptLabel')} <InfoTooltip text={t('createSession.subWorkerPromptHelp')} /></label>
-                <Selector
-                  variant="field"
-                  ariaLabel={t('createSession.subWorkerPromptLabel')}
-                  value={selectedSubWorkerPrompt}
-                  onChange={handleSubWorkerPromptChange}
-                  items={[
-                    { id: '', label: t('createSession.templateNone') },
-                    ...subWorkerPrompts.map(p => ({ id: p.name, label: p.name })),
-                  ]}
-                />
-                <textarea className="w-full py-2.5 px-3 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-[var(--border-radius)] text-[0.875rem] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-[border-color] focus:outline-none focus:border-[var(--primary-color)] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)] resize-y" rows={3} placeholder={t('createSession.subWorkerPromptPlaceholder')}
-                  value={formState.sub_worker_system_prompt || ''} onChange={e => setFormState(f => ({ ...f, sub_worker_system_prompt: e.target.value }))} />
-              </div>
-              {/* Sub-Worker model selector removed — env-driven. The
-                  Sub-Worker uses its env manifest's Stage 6 model_override
-                  (or pipeline.model). To change the Sub-Worker's model,
-                  edit the env picked in "서브 워커 환경" below. */}
-              {/* Sub-Worker Environment — feeds sub_worker_env_id
-                  on the backend. Default is the seeded WORKER env;
-                  the user can swap to any EnvironmentManifest (e.g.
-                  template-developer-env) for a Worker with a broader
-                  tool surface. */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[0.8125rem] font-medium text-[var(--text-secondary)] inline-flex items-center gap-1.5">{t('createSession.subWorkerEnv')} <InfoTooltip text={t('createSession.subWorkerEnvHelp')} /></label>
-                <Selector
-                  variant="field"
-                  ariaLabel={t('createSession.subWorkerEnv')}
-                  value={selectedSubWorkerEnvId}
-                  onChange={setSelectedSubWorkerEnvId}
-                  items={[
-                    {
-                      id: '',
-                      label:
-                        environmentsLoading && environments.length === 0
-                          ? t('createSession.environmentLoading')
-                          : t('createSession.subWorkerEnvDefault'),
-                    },
-                    ...environments.map(env => ({ id: env.id, label: env.name })),
-                  ]}
-                />
-                <small className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">
-                  {(() => {
-                    if (!selectedSubWorkerEnvId) return t('createSession.subWorkerEnvDefaultHelp');
-                    const env = environments.find(e => e.id === selectedSubWorkerEnvId);
-                    return env?.description || t('createSession.environmentSelected');
-                  })()}
-                </small>
-              </div>
+              {/* Sub-Worker prompt / env fields removed (2026-06-18 cutover):
+                  the VTuber's sub-agent is now an ENVIRONMENT capability —
+                  the env declares host_selections.extras.owned_subagent and
+                  the executor builds it. Configure the sub-agent via the
+                  environment, not per-session here. */}
             </>
           ) : (
             <div className="flex flex-col gap-1.5">

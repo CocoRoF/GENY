@@ -391,6 +391,26 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return None
 
+    def _env_owned_subagent(self, env_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """The persistent sub-agent an env declares its agent OWNS, or None.
+
+        Stored in the manifest's generic ``host_selections.extras`` map under
+        ``owned_subagent`` (e.g. ``{"type": "worker"}``) — the env-driven
+        replacement for the old ``role==VTUBER`` hardcode. The vtuber env
+        templates declare it; any env may. ``None`` → the agent owns no
+        persistent sub-agent (it can still use one-shot sub-workers)."""
+        if not env_id or self._environment_service is None:
+            return None
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return None
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            val = extras.get("owned_subagent")
+            return dict(val) if isinstance(val, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _env_host_selection(
         self, env_id: Optional[str], category: str
     ) -> Optional[List[str]]:
@@ -1059,71 +1079,80 @@ class AgentSessionManager:
 
         logger.info(f"[{session_id}] ✅ AgentSession created successfully")
 
-        # ── VTuber owns a geny-executor persistent sub-agent ──────────────
-        # Cutover complete (2026-06-18): the VTuber OWNS a geny-executor
-        # persistent sub-agent. The bespoke paired Sub-Worker session is
-        # removed. When no SubAgentManager is wired the VTuber simply has no
-        # companion (spawn no-ops) — it never falls back to a bespoke pair.
+        # ── Owned persistent sub-agent — ENV-DRIVEN (any role) ────────────
+        # Owning a geny-executor persistent sub-agent is now an ENVIRONMENT
+        # capability, not a VTuber hardcode: any env that declares
+        # ``host_selections.extras['owned_subagent']`` makes its agent own one
+        # (the vtuber env templates declare it). A VTuber is then just "an
+        # agent on a vtuber env + an avatar/persona". Spawn no-ops when no
+        # manager is wired.
         from service.execution.agent_executor import get_app_state as _get_app_state
         _vt_app_state = _get_app_state()
+        _owned = self._env_owned_subagent(env_id)
         if (
-            request.role == SessionRole.VTUBER
+            _owned is not None
             and request.session_type != "sub"
             and not request.linked_session_id
             and getattr(_vt_app_state, "subagent_manager", None) is not None
         ):
             try:
-                from service.vtuber.sub_agent_bridge import spawn_vtuber_subagent
-                sa_id = await spawn_vtuber_subagent(
+                from service.vtuber.sub_agent_bridge import spawn_owned_subagent
+                sa_id = await spawn_owned_subagent(
                     _vt_app_state, session_id,
+                    agent_type=str(_owned.get("type") or "worker"),
                     credentials=credentials, parent_provider=primary_provider,
                 )
-                agent._session_type = "vtuber"
                 agent._executor_sub_agent_id = sa_id
-                self._store.update(session_id, {
-                    "session_type": "vtuber",
-                    "executor_sub_agent_id": sa_id,
-                })
+                self._store.update(session_id, {"executor_sub_agent_id": sa_id})
+                # The persona "## Sub-Worker Agent" notice only makes sense
+                # for an agent that actually owns a delegate.
                 self._persona_provider.append_context(
                     session_id, _vtuber_sub_worker_notice()
                 )
-                # Chat room (shared VTuber UX).
-                try:
-                    from service.chat.conversation_store import get_chat_store
-                    chat_store = get_chat_store()
-                    room = chat_store.create_room(
-                        f"{request.session_name or 'VTuber'} Chat", [session_id]
-                    )
-                    room_id = room.get("id") or room.get("room_id")
-                    if room_id:
-                        agent._chat_room_id = room_id
-                        self._store.update(session_id, {"chat_room_id": room_id})
-                except Exception as e:  # noqa: BLE001
-                    logger.error(
-                        f"[{session_id}] chat room (executor mode) failed: {e}",
-                        exc_info=True,
-                    )
-                # Trigger registration (shared VTuber UX).
-                try:
-                    from service.vtuber.thinking_trigger import get_thinking_trigger_service
-                    trigger_svc = get_thinking_trigger_service()
-                    trigger_svc.record_activity(session_id)
-                    effective_trigger = trigger_preset_id or self._env_trigger_preset_id(env_id)
-                    if effective_trigger:
-                        trigger_svc.attach_preset(session_id, effective_trigger)
-                        self._store.update(
-                            session_id, {"trigger_preset_id": effective_trigger}
-                        )
-                except Exception:  # noqa: BLE001
-                    pass
-                logger.info(
-                    f"[{session_id}] 🤖 VTuber in executor sub-agent mode: {sa_id}"
-                )
-            except Exception as e:  # noqa: BLE001 — never fail VTuber create
+                logger.info(f"[{session_id}] 🤖 owns executor sub-agent: {sa_id}")
+            except Exception as e:  # noqa: BLE001 — never fail create
                 logger.error(
-                    f"[{session_id}] VTuber executor sub-agent setup failed: {e}",
+                    f"[{session_id}] owned sub-agent setup failed: {e}",
                     exc_info=True,
                 )
+
+        # ── VTuber conversational UX — ROLE-DRIVEN (avatar/chat/triggers) ──
+        # This is the genuinely VTuber-specific part (a conversational
+        # persona surface): mark the session type, create a chat room, and
+        # register thinking triggers. Orthogonal to sub-agent ownership above.
+        if (
+            request.role == SessionRole.VTUBER
+            and request.session_type != "sub"
+            and not request.linked_session_id
+        ):
+            agent._session_type = "vtuber"
+            self._store.update(session_id, {"session_type": "vtuber"})
+            try:
+                from service.chat.conversation_store import get_chat_store
+                chat_store = get_chat_store()
+                room = chat_store.create_room(
+                    f"{request.session_name or 'VTuber'} Chat", [session_id]
+                )
+                room_id = room.get("id") or room.get("room_id")
+                if room_id:
+                    agent._chat_room_id = room_id
+                    self._store.update(session_id, {"chat_room_id": room_id})
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    f"[{session_id}] VTuber chat room failed: {e}", exc_info=True
+                )
+            try:
+                from service.vtuber.thinking_trigger import get_thinking_trigger_service
+                trigger_svc = get_thinking_trigger_service()
+                trigger_svc.record_activity(session_id)
+                effective_trigger = trigger_preset_id or self._env_trigger_preset_id(env_id)
+                if effective_trigger:
+                    trigger_svc.attach_preset(session_id, effective_trigger)
+                    self._store.update(
+                        session_id, {"trigger_preset_id": effective_trigger}
+                    )
+            except Exception:  # noqa: BLE001
+                pass
 
         return agent
 
