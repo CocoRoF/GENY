@@ -61,7 +61,6 @@ const SESSION_TAB_DEFS = [
   { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
   { id: 'cron' },      // PR-D.3.1 — CronRunner viewer (runtime state, stays separate)
   { id: 'storage' },
-  { id: 'dashboard' },
   { id: 'logs' },
 ] as const;
 

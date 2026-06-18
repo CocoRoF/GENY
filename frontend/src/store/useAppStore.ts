@@ -18,7 +18,6 @@ const SESSION_TAB_IDS = new Set([
   'info',
   'sessionTools',       // legacy direct mount
   'tools',              // legacy
-  'dashboard',
   'memory',
   'tasks',
   'cron',
