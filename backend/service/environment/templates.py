@@ -385,7 +385,28 @@ def create_vtuber_env(
     manifest.metadata.description = (
         "Lightweight conversational environment for the VTuber persona."
     )
+    _declare_owned_subagent(manifest)
     return manifest
+
+
+def _declare_owned_subagent(
+    manifest: "EnvironmentManifest", *, agent_type: str = "worker"
+) -> None:
+    """Declare that an agent running this env OWNS a persistent sub-agent.
+
+    Cutover (2026-06-18): owning a geny-executor persistent sub-agent is no
+    longer hardcoded to ``role==VTUBER`` — it is an ENVIRONMENT capability.
+    The session manager reads ``host_selections.extras['owned_subagent']``
+    and spawns the declared sub-agent for ANY agent on this env. A VTuber is
+    then just "an agent on a vtuber env + an avatar". Stored in the generic
+    ``extras`` map (executor 2.6.0), same pattern as the trigger binding.
+    """
+    try:
+        extras = manifest.host_selections.extras
+        if extras.get("owned_subagent") is None:
+            extras["owned_subagent"] = {"type": agent_type}
+    except Exception:  # noqa: BLE001 — never fail template build on this
+        pass
 
 
 def create_claude_code_worker_env(
@@ -440,6 +461,7 @@ def create_claude_code_vtuber_env(
     manifest.metadata.description = (
         "Conversational VTuber environment backed by the Claude Code CLI."
     )
+    _declare_owned_subagent(manifest)
     return manifest
 
 

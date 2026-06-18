@@ -223,20 +223,11 @@ class CreateSessionRequest(BaseModel):
     def _normalize_session_type_request(cls, v: Optional[str]) -> Optional[str]:
         return _normalize_session_type(v)
 
-    # VTuber-specific: overrides for the Sub-Worker session
-    sub_worker_system_prompt: Optional[str] = Field(
-        default=None,
-        description="System prompt override for the Sub-Worker (VTuber role only)"
-    )
-    sub_worker_model: Optional[str] = Field(
-        default=None,
-        description="Model override for the Sub-Worker (VTuber role only)"
-    )
-    sub_worker_env_id: Optional[str] = Field(
-        default=None,
-        description="Explicit env_id for the Sub-Worker (VTuber role only). "
-                    "When None, resolve_env_id(role=WORKER) picks the default worker env."
-    )
+    # (Removed 2026-06-18) sub_worker_system_prompt / sub_worker_model /
+    # sub_worker_env_id — the bespoke paired Sub-Worker is gone. A VTuber's
+    # sub-agent is now an ENVIRONMENT capability: the env declares
+    # host_selections.extras.owned_subagent and the executor builds it.
+    # Configure the sub-agent via the environment, not per session.
 
     # Cycle 20260422_6 PR3 — name separation
     character_display_name: Optional[str] = Field(

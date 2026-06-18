@@ -43,7 +43,7 @@ def test_executor_mode_active_requires_manager(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_spawn_vtuber_subagent_calls_manager():
+async def test_spawn_owned_subagent_calls_manager():
     calls = {}
 
     class _Mgr:
@@ -55,7 +55,7 @@ async def test_spawn_vtuber_subagent_calls_manager():
             return types.SimpleNamespace(sub_agent_id=sub_agent_id)
 
     app_state = types.SimpleNamespace(subagent_manager=_Mgr())
-    sa_id = await bridge.spawn_vtuber_subagent(
+    sa_id = await bridge.spawn_owned_subagent(
         app_state, "vtuber9", credentials="creds", parent_provider="anthropic"
     )
     assert sa_id == "vtuber9-subagent"
@@ -68,7 +68,7 @@ async def test_spawn_vtuber_subagent_calls_manager():
 @pytest.mark.asyncio
 async def test_spawn_no_manager_returns_none():
     app_state = types.SimpleNamespace(subagent_manager=None)
-    assert await bridge.spawn_vtuber_subagent(app_state, "v1") is None
+    assert await bridge.spawn_owned_subagent(app_state, "v1") is None
 
 
 @pytest.mark.asyncio

@@ -76,23 +76,23 @@ def _make_on_event(app_state: Any):
 
 
 def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
-    """Proactively wake a VTuber owner with the sub-agent result (the alarm).
+    """Proactively wake the OWNER when its OWNED sub-agent finishes (the alarm).
 
-    Mirrors the bespoke ``[SUB_WORKER_RESULT]`` → VTuber path: when the owner
-    is a VTuber session, fire-and-forget an execute_command so the VTuber can
-    summarise the completed work for the user. Non-VTuber owners just keep the
-    inbox entry (read via SubAgentInboxRead). Best-effort; never raises.
+    Env-driven, not role-driven: the proactive wake fires only for the owner's
+    *owned* persistent companion (deterministic id ``{owner}-subagent``) — the
+    conversational delegate an env declares. Sub-agents a session spawned ad-hoc
+    via the SubAgent* tools are NOT proactively woken; that owner pulls results
+    via SubAgentInboxRead. Best-effort; never raises.
     """
     owner = payload.get("owner_session_id")
-    if not owner:
+    sender = payload.get("sub_agent_id")
+    if not owner or not sender:
         return
     try:
-        from service.sessions import get_session_store
+        from service.vtuber.sub_agent_bridge import owned_subagent_id
 
-        rec = get_session_store().get(owner) or {}
-        role = (rec.get("role") or "").lower()
-        is_vtuber = role == "vtuber" or rec.get("session_type") == "vtuber"
-        if not is_vtuber:
+        # Only the owned companion triggers a proactive wake.
+        if sender != owned_subagent_id(owner):
             return
 
         text = payload.get("text") if ok else payload.get("error")
@@ -101,7 +101,6 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
             f"{tag} Sub-agent task completed.\n\n{text}" if ok
             else f"{tag} Sub-agent task failed: {str(text)[:500]}"
         )
-        sender = payload.get("sub_agent_id") or "sub-agent"
 
         import asyncio
 
