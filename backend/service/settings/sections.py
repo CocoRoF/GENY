@@ -73,6 +73,14 @@ class VTuberSubWorkerSection(BaseModel):
             "is not set."
         ),
     )
+    mode: Optional[str] = Field(
+        None,
+        description=(
+            "VTuber sub-agent mode: 'bespoke' (default — the paired "
+            "Sub-Worker session) or 'executor' (own a geny-executor "
+            "persistent sub-agent). Env GENY_VTUBER_SUBAGENT_MODE wins."
+        ),
+    )
 
 
 class VTuberSection(BaseModel):

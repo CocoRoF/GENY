@@ -59,18 +59,65 @@ def _make_on_event(app_state: Any):
                     registry.update_status(
                         aid, TaskStatus.DONE, result=payload.get("text")
                     )
+                _maybe_alarm_vtuber(payload, ok=True)
             elif event_type == "subagent.failed":
                 aid = payload.get("assignment_id")
                 if aid:
                     registry.update_status(
                         aid, TaskStatus.FAILED, error=payload.get("error")
                     )
+                _maybe_alarm_vtuber(payload, ok=False)
         except Exception:  # noqa: BLE001 — surfacing must never break a run
             logger.debug(
                 "subagent on_event mirror failed (%s)", event_type, exc_info=True
             )
 
     return _on_event
+
+
+def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
+    """Proactively wake a VTuber owner with the sub-agent result (the alarm).
+
+    Mirrors the bespoke ``[SUB_WORKER_RESULT]`` → VTuber path: when the owner
+    is a VTuber session, fire-and-forget an execute_command so the VTuber can
+    summarise the completed work for the user. Non-VTuber owners just keep the
+    inbox entry (read via SubAgentInboxRead). Best-effort; never raises.
+    """
+    owner = payload.get("owner_session_id")
+    if not owner:
+        return
+    try:
+        from service.sessions import get_session_store
+
+        rec = get_session_store().get(owner) or {}
+        role = (rec.get("role") or "").lower()
+        is_vtuber = role == "vtuber" or rec.get("session_type") == "vtuber"
+        if not is_vtuber:
+            return
+
+        text = payload.get("text") if ok else payload.get("error")
+        tag = "[SUB_AGENT_RESULT]"
+        body = (
+            f"{tag} Sub-agent task completed.\n\n{text}" if ok
+            else f"{tag} Sub-agent task failed: {str(text)[:500]}"
+        )
+
+        import asyncio
+
+        async def _wake() -> None:
+            try:
+                from service.execution.agent_executor import execute_command
+
+                await execute_command(session_id=owner, prompt=body)
+            except Exception:  # noqa: BLE001 — best effort
+                logger.debug("VTuber sub-agent alarm execute failed", exc_info=True)
+
+        try:
+            asyncio.get_running_loop().create_task(_wake())
+        except RuntimeError:
+            logger.debug("no running loop for VTuber sub-agent alarm")
+    except Exception:  # noqa: BLE001
+        logger.debug("_maybe_alarm_vtuber failed", exc_info=True)
 
 
 def install_subagent_manager(app_state: Any, *, registry: Any) -> Optional[Any]:

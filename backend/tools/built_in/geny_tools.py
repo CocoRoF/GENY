@@ -1092,6 +1092,35 @@ class SendDirectMessageInternalTool(BaseTool):
                 {"error": f"caller session not found: {session_id}"}
             )
 
+        # Executor sub-agent mode (flag-gated cutover, default off): when the
+        # VTuber owns a geny-executor persistent sub-agent instead of a
+        # bespoke paired session, fully delegate this message to it. The
+        # sub-agent completes autonomously; completion is surfaced as the
+        # alarm via the executor inbox + on_event. Default off → no session
+        # has this attr → the bespoke counterpart path below runs unchanged.
+        executor_sa_id = getattr(self_agent, "_executor_sub_agent_id", None)
+        if executor_sa_id:
+            from service.execution.agent_executor import get_app_state as _gas
+            from service.vtuber.sub_agent_bridge import delegate_to_subagent
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    delegate_to_subagent(_gas(), executor_sa_id, content.strip())
+                )
+            except RuntimeError:
+                return json.dumps(
+                    {"error": "no running event loop for sub-agent delegation"}
+                )
+            return json.dumps(
+                {
+                    "success": True,
+                    "delegated_to_subagent": executor_sa_id,
+                    "mode": "executor",
+                },
+                ensure_ascii=False,
+            )
+
         counterpart_id = getattr(self_agent, "_linked_session_id", None)
         if not counterpart_id:
             return json.dumps(
