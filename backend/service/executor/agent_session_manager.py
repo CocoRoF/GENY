@@ -1128,6 +1128,7 @@ class AgentSessionManager:
                     env_service=self._environment_service,
                     system_prompt=(_owned.get("system_prompt") or None),
                     credentials=credentials, parent_provider=primary_provider,
+                    adhoc_providers=adhoc_providers,
                 )
                 agent._executor_sub_agent_id = sa_id
                 self._store.update(session_id, {"executor_sub_agent_id": sa_id})

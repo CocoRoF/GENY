@@ -31,15 +31,23 @@ _MEMORY_STAGE_ORDERS = (2, 18, 19, 20)  # context / memory / summarize / persist
 _AGENT_STAGE_ORDER = 12
 
 
-def _make_parent_env_companion_factory(env_service: Any, parent_env_id: str):
+def _make_parent_env_companion_factory(
+    env_service: Any,
+    parent_env_id: str,
+    adhoc_providers: Any = (),
+):
     """Build a PipelineFactory that clones the PARENT agent's environment.
 
     The companion inherits the parent env's tools / model / provider / stages
     (decision: "부모 env 기능 그대로") — NO separate env. We only (a) deactivate
     the memory-dependent stages (no session memory provider is wired for the
     companion), and (b) force Stage-12 to single_agent so the companion can't
-    recursively spawn further sub-agents. The companion's system prompt
-    (``ctx.descriptor.system_prompt``) is applied via attach_runtime.
+    recursively spawn further sub-agents. ``adhoc_providers`` (the parent
+    session's GenyToolProvider / Connector / Skill providers) MUST be passed
+    through — otherwise the env's external tools (file/memory/web/blog/…) have
+    no provider and the companion can do nothing with a delegated task. The
+    companion's system prompt (``ctx.descriptor.system_prompt``) is applied via
+    attach_runtime.
     """
 
     async def _factory(ctx: Any) -> Any:
@@ -62,7 +70,10 @@ def _make_parent_env_companion_factory(env_service: Any, parent_env_id: str):
             pass
 
         pipeline = await Pipeline.from_manifest_async(
-            manifest, credentials=ctx.credentials, strict=False,
+            manifest,
+            credentials=ctx.credentials,
+            adhoc_providers=tuple(adhoc_providers or ()),
+            strict=False,
         )
         # Role prompt: the env editor's override when set, otherwise the
         # library's strong default companion persona (executor >=2.8.0). Either
@@ -106,19 +117,24 @@ async def spawn_owned_subagent(
     system_prompt: Optional[str] = None,
     credentials: Any = None,
     parent_provider: Optional[str] = None,
+    adhoc_providers: Any = (),
 ) -> Optional[str]:
     """Spawn the persistent sub-agent an env-declaring agent owns.
 
     The companion is built from the PARENT agent's environment (it inherits the
     parent's tools / model / stages — no separate env), with an optional
-    ``system_prompt`` role override. Returns the sub-agent id, or None when no
-    SubAgentManager is wired / spawn fails."""
+    ``system_prompt`` role override. ``adhoc_providers`` are the parent
+    session's tool providers, passed through so the companion's external tools
+    actually resolve. Returns the sub-agent id, or None when no SubAgentManager
+    is wired / spawn fails."""
     manager = getattr(app_state, "subagent_manager", None)
     if manager is None or env_service is None:
         return None
     sub_agent_id = owned_subagent_id(owner_session_id)
     try:
-        factory = _make_parent_env_companion_factory(env_service, parent_env_id)
+        factory = _make_parent_env_companion_factory(
+            env_service, parent_env_id, adhoc_providers,
+        )
         await manager.spawn(
             "owned",
             owner_session_id,
