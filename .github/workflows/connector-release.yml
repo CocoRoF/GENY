@@ -4,9 +4,10 @@ name: Connector Installers
 # the installers to a GitHub Release. Public repo → macOS/Windows/Linux runners
 # are free. Triggered by pushing a `connector-v*` tag, or manually.
 #
-# Installers are UNSIGNED in Phase 0 (PLAN §4.3 / R15): macOS users right-click →
-# Open to bypass Gatekeeper; Windows users click "More info → Run anyway" past
-# SmartScreen. Signing/notarization land in Phase 7.
+# macOS is ad-hoc signed (desktop/build/afterPack.cjs) so Apple Silicon no longer
+# hard-blocks it as "damaged"; users still bypass the "unidentified developer"
+# prompt (right-click → Open, or `xattr -dr com.apple.quarantine`). Windows is
+# unsigned ("More info → Run anyway"). Developer ID + notarization land later.
 
 on:
   workflow_dispatch:
@@ -97,13 +98,16 @@ jobs:
           files: artifacts/**/*
           fail_on_unmatched_files: true
           body: |
-            **Geny VTuber 데스크탑 접속기** — installers (unsigned, Phase 0).
+            **Geny VTuber 데스크탑 접속기** — installers (macOS ad-hoc signed; Windows unsigned).
 
             | OS | 파일 | 설치 |
             |---|---|---|
             | Windows | `Geny-Setup-*.exe` | 실행 → SmartScreen 뜨면 **자세히 → 실행** |
-            | macOS | `Geny-*.dmg` | 열어서 드래그 → 첫 실행 시 **우클릭 → 열기** (Gatekeeper) |
+            | macOS | `Geny-*.dmg` | 열어서 `Geny.app`을 **응용 프로그램**으로 드래그 → 첫 실행 시 **우클릭 → 열기** (또는 설정 → 개인정보 보호 및 보안 → **그래도 열기**) |
             | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` 후 실행 / deb: `sudo dpkg -i` |
+
+            > **macOS에서 "손상되었습니다 / 휴지통으로 이동" 이 뜨면** (예전 빌드를 받았거나 우클릭→열기가 안 될 때):
+            > 터미널에서 `xattr -dr com.apple.quarantine "/Applications/Geny.app"` 실행 후 다시 열기. (서명과 무관하게 항상 동작합니다.)
 
             실행 후: **서버 주소** + **admin 아이디/비밀번호** 입력 → 바로 사용.
             기본 서버는 `https://geny-x.hrletsgo.me` 로 채워져 있습니다.
