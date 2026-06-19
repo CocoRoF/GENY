@@ -1375,6 +1375,11 @@ const ko: Translations = {
         title: '영속 Sub-Agent (소유)',
         description: '이 환경의 에이전트가 영속 sub-agent(companion)를 소유할지 선택합니다. companion은 이 환경(부모)의 도구·모델·단계를 그대로 사용하며, 작업을 완전 위임하면 자율 수행 후 완료 알림을 받습니다. 선택적으로 역할 시스템 프롬프트를 줄 수 있습니다. 끄면 일회성 sub-worker(Agent 도구)만 사용합니다.',
       },
+      navSubworker: 'Sub-Worker',
+      subworker: {
+        title: '일회성 Sub-Worker 타입',
+        description: '에이전트가 Agent 도구로 위임하는 일회성 sub-worker의 타입별 정밀 설정입니다. 시드 타입(worker/researcher/…)을 오버라이드하거나 새 타입을 추가하고, 타입마다 모델·프로바이더·시스템 프롬프트·허용 도구를 지정할 수 있습니다. 비활성으로 표시하면 이 환경의 로스터에서 제거됩니다. 행이 없으면 기본 시드 로스터를 그대로 사용합니다.',
+      },
     },
     genyTools: {
       loading: 'Geny 도구 카탈로그 로드 중…',

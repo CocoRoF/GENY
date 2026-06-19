@@ -294,6 +294,20 @@ function runValidation(draft: EnvironmentManifest): ValidationError[] {
 
 // ─── Store shape ──────────────────────────────────────────
 
+/** One precise entry in an env's one-shot Sub-Worker roster, stored at
+ *  `host_selections.extras.subworker_types`. Overlays the seed by
+ *  `agent_type`. `model` maps to the descriptor's `model_override`. */
+export interface SubworkerTypeConfig {
+  agent_type: string;
+  /** `false` removes this type from the env's roster. */
+  enabled?: boolean;
+  description?: string;
+  provider?: string;
+  model?: string;
+  system_prompt?: string;
+  allowed_tools?: string[];
+}
+
 export interface ValidationError {
   path: string;
   message: string;
@@ -370,6 +384,13 @@ export interface EnvironmentDraftState {
   setOwnedSubagent: (
     config: { enabled: boolean; system_prompt?: string } | null,
   ) => void;
+  /**
+   * Set the env's precise one-shot **Sub-Worker** roster, written to
+   * `host_selections.extras.subworker_types`. Each entry overlays the seed
+   * by `agent_type` (override config / add a new type / `enabled:false` to
+   * remove). An empty list clears the key (→ default seed roster).
+   */
+  setSubworkerTypes: (types: SubworkerTypeConfig[]) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -684,6 +705,34 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         extras.owned_subagent = owned;
       } else {
         delete extras.owned_subagent;
+      }
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setSubworkerTypes: (types) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      // Drop blank rows (no agent_type) before persisting.
+      const clean = (types ?? []).filter((t) => t.agent_type?.trim());
+      if (clean.length > 0) {
+        extras.subworker_types = clean;
+      } else {
+        delete extras.subworker_types;
       }
       next.host_selections =
         Object.keys(extras).length > 0

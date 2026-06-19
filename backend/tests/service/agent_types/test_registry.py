@@ -27,10 +27,10 @@ def test_descriptors_include_three_canonical():
 def test_install_registers_all_descriptors():
     reg = _FakeRegistry()
     count = install_subagent_types(reg)
-    assert count == 3
-    assert {d.agent_type for d in reg.registered} == {
-        "worker", "researcher", "vtuber-narrator",
-    }
+    assert count == len(DESCRIPTORS)
+    assert {
+        "worker", "researcher", "summarizer", "critic", "vtuber-narrator",
+    }.issubset({d.agent_type for d in reg.registered})
 
 
 def test_install_with_none_returns_zero():
@@ -42,9 +42,13 @@ def test_install_with_extras():
         SubagentTypeDescriptor,
     )
     reg = _FakeRegistry()
-    extra = [SubagentTypeDescriptor(agent_type="custom", description="x")]
+    extra = [
+        SubagentTypeDescriptor(
+            agent_type="custom", factory=lambda ctx: None, description="x"
+        )
+    ]
     count = install_subagent_types(reg, extra=extra)
-    assert count == 4
+    assert count == len(DESCRIPTORS) + 1
 
 
 def test_failed_registration_does_not_propagate():
@@ -54,4 +58,4 @@ def test_failed_registration_does_not_propagate():
 
     # Should not raise — failures logged + count returned anyway.
     count = install_subagent_types(_BadReg())
-    assert count == 3
+    assert count == len(DESCRIPTORS)
