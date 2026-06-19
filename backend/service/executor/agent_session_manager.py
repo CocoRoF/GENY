@@ -1100,6 +1100,8 @@ class AgentSessionManager:
                 sa_id = await spawn_owned_subagent(
                     _vt_app_state, session_id,
                     agent_type=str(_owned.get("type") or "worker"),
+                    model=(_owned.get("model") or None),
+                    system_prompt=(_owned.get("system_prompt") or None),
                     credentials=credentials, parent_provider=primary_provider,
                 )
                 agent._executor_sub_agent_id = sa_id

@@ -47,7 +47,7 @@ async def test_spawn_owned_subagent_calls_manager():
     calls = {}
 
     class _Mgr:
-        async def spawn(self, agent_type, owner, *, sub_agent_id=None, credentials=None, parent_provider=None):
+        async def spawn(self, agent_type, owner, *, sub_agent_id=None, credentials=None, parent_provider=None, model=None, system_prompt=None):
             calls.update(
                 agent_type=agent_type, owner=owner, sub_agent_id=sub_agent_id,
                 credentials=credentials, parent_provider=parent_provider,

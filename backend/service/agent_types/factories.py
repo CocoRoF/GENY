@@ -153,6 +153,30 @@ async def _default_subagent_factory(ctx: Any) -> Any:
             desc.agent_type, provider,
         )
         raise
+
+    # Per-companion system prompt (executor 2.7.1) — when the descriptor
+    # declares one (set via the env editor's Sub-Agent panel → owned_subagent
+    # .system_prompt → SubAgentManager.spawn override), override the
+    # sub-pipeline's Stage-3 system builder so the sub-agent runs with that
+    # persona. Best-effort: a failure here must not break the build.
+    system_prompt = getattr(desc, "system_prompt", None)
+    if system_prompt:
+        try:
+            from geny_executor.stages.s03_system.artifact.default.builders import (
+                ComposablePromptBuilder,
+                PersonaBlock,
+            )
+
+            sub_pipeline.attach_runtime(
+                system_builder=ComposablePromptBuilder(
+                    blocks=[PersonaBlock(system_prompt)]
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "subagent factory: system_prompt attach failed for %s",
+                desc.agent_type, exc_info=True,
+            )
     return sub_pipeline
 
 

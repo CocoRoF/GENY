@@ -82,14 +82,17 @@ async def spawn_owned_subagent(
     owner_session_id: str,
     *,
     agent_type: str = DEFAULT_SUBAGENT_TYPE,
+    model: Optional[str] = None,
+    system_prompt: Optional[str] = None,
     credentials: Any = None,
     parent_provider: Optional[str] = None,
 ) -> Optional[str]:
     """Spawn the persistent sub-agent an env-declaring agent owns.
 
     Env-driven (not role-driven): called when the agent's env declares
-    ``host_selections.extras['owned_subagent']``. Returns the sub-agent id,
-    or None when no SubAgentManager is wired / spawn fails."""
+    ``host_selections.extras['owned_subagent']``. ``model`` / ``system_prompt``
+    are the env editor's precise overrides for this companion. Returns the
+    sub-agent id, or None when no SubAgentManager is wired / spawn fails."""
     manager = getattr(app_state, "subagent_manager", None)
     if manager is None:
         return None
@@ -101,10 +104,13 @@ async def spawn_owned_subagent(
             sub_agent_id=sub_agent_id,
             credentials=credentials,
             parent_provider=parent_provider,
+            model=model or None,
+            system_prompt=system_prompt or None,
         )
         logger.info(
-            "[%s] 🤖 owned sub-agent spawned: %s (type=%s)",
+            "[%s] 🤖 owned sub-agent spawned: %s (type=%s, model=%s, prompt=%s)",
             owner_session_id, sub_agent_id, agent_type,
+            model or "inherit", "custom" if system_prompt else "default",
         )
         return sub_agent_id
     except Exception:  # noqa: BLE001 — never fail create on this
