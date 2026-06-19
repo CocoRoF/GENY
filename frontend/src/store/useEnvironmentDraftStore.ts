@@ -367,7 +367,9 @@ export interface EnvironmentDraftState {
    * `{ type }`. Passing `null` removes ownership (the agent then has no
    * persistent companion; it can still use one-shot sub-workers).
    */
-  setOwnedSubagent: (config: { type: string } | null) => void;
+  setOwnedSubagent: (
+    config: { type: string; model?: string; system_prompt?: string } | null,
+  ) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -675,7 +677,10 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       };
       const extras = { ...(current.extras ?? {}) };
       if (config && config.type) {
-        extras.owned_subagent = { type: config.type };
+        const owned: Record<string, string> = { type: config.type };
+        if (config.model) owned.model = config.model;
+        if (config.system_prompt) owned.system_prompt = config.system_prompt;
+        extras.owned_subagent = owned;
       } else {
         delete extras.owned_subagent;
       }

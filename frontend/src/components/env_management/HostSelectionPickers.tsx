@@ -371,48 +371,97 @@ export function OwnedSubagentPicker() {
     };
   }, []);
 
-  const selected = useMemo(() => {
+  const owned = useMemo(() => {
     const raw = draft?.host_selections?.extras?.owned_subagent as
-      | { type?: string }
+      | { type?: string; model?: string; system_prompt?: string }
       | undefined;
-    return typeof raw?.type === 'string' ? raw.type : '';
+    return {
+      type: typeof raw?.type === 'string' ? raw.type : '',
+      model: typeof raw?.model === 'string' ? raw.model : '',
+      system_prompt:
+        typeof raw?.system_prompt === 'string' ? raw.system_prompt : '',
+    };
   }, [draft]);
 
   const selectedDesc = useMemo(
-    () => types.find((t) => t.agent_type === selected)?.description ?? '',
-    [types, selected],
+    () => types.find((t) => t.agent_type === owned.type)?.description ?? '',
+    [types, owned.type],
   );
 
+  // Merge one field, preserving the rest. Clearing the type drops ownership.
+  const update = (patch: Partial<typeof owned>) => {
+    const next = { ...owned, ...patch };
+    if (!next.type) {
+      setOwnedSubagent(null);
+      return;
+    }
+    setOwnedSubagent({
+      type: next.type,
+      model: next.model || undefined,
+      system_prompt: next.system_prompt || undefined,
+    });
+  };
+
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
-        영속 Sub-Agent (소유)
-      </label>
-      <select
-        value={selected}
-        onChange={(e) =>
-          setOwnedSubagent(e.target.value ? { type: e.target.value } : null)
-        }
-        disabled={loading}
-        className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
-      >
-        <option value="">소유 안 함 (없음)</option>
-        {types.map((t) => (
-          <option key={t.agent_type} value={t.agent_type}>
-            {t.agent_type}
-          </option>
-        ))}
-      </select>
-      {errorText ? (
-        <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">
-          {errorText}
-        </p>
-      ) : (
-        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
-          {selected
-            ? `이 환경의 에이전트는 영속 '${selected}' sub-agent를 소유합니다 — 작업을 완전 위임하면 자율 수행 후 완료 알림을 받습니다.${selectedDesc ? ` (${selectedDesc})` : ''}`
-            : '소유하지 않으면 영속 companion 없이 일회성 sub-worker(Agent 도구)만 사용합니다.'}
-        </p>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+          영속 Sub-Agent (소유)
+        </label>
+        <select
+          value={owned.type}
+          onChange={(e) => update({ type: e.target.value })}
+          disabled={loading}
+          className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+        >
+          <option value="">소유 안 함 (없음)</option>
+          {types.map((t) => (
+            <option key={t.agent_type} value={t.agent_type}>
+              {t.agent_type}
+            </option>
+          ))}
+        </select>
+        {errorText ? (
+          <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">
+            {errorText}
+          </p>
+        ) : (
+          <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+            {owned.type
+              ? `이 환경의 에이전트는 영속 '${owned.type}' sub-agent를 소유합니다 — 작업을 완전 위임하면 자율 수행 후 완료 알림을 받습니다.${selectedDesc ? ` (${selectedDesc})` : ''}`
+              : '소유하지 않으면 영속 companion 없이 일회성 sub-worker(Agent 도구)만 사용합니다.'}
+          </p>
+        )}
+      </div>
+
+      {/* Precise overrides — only meaningful when a sub-agent is owned. */}
+      {owned.type && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))]">
+              모델 오버라이드 (선택)
+            </label>
+            <input
+              type="text"
+              value={owned.model}
+              onChange={(e) => update({ model: e.target.value })}
+              placeholder="비워두면 부모/환경 모델을 상속"
+              className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))]">
+              시스템 프롬프트 오버라이드 (선택)
+            </label>
+            <textarea
+              rows={4}
+              value={owned.system_prompt}
+              onChange={(e) => update({ system_prompt: e.target.value })}
+              placeholder="이 sub-agent의 역할/지시를 직접 지정. 비워두면 기본 페르소나."
+              className="w-full px-2.5 py-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+            />
+          </div>
+        </>
       )}
     </div>
   );
