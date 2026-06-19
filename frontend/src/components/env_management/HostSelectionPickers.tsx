@@ -342,6 +342,56 @@ export function TriggerEnvPicker() {
  * ownership on and an optional system prompt gives it a role. Off → the agent
  * owns no persistent companion (it can still use one-shot sub-workers).
  */
+/** Geny-provided sub-agent role presets — strong starter prompts the user can
+ *  apply then tweak. (LLM instructions are kept in English by policy.) Empty
+ *  system_prompt → the backend uses the executor's strong default companion
+ *  persona (DEFAULT_PERSISTENT_SUBAGENT_PROMPT, geny-executor >=2.8.0). */
+const SUBAGENT_PRESETS: { id: string; label: string; prompt: string }[] = [
+  {
+    id: 'general',
+    label: '범용 자율 어시스턴트',
+    prompt:
+      'You are a capable autonomous companion working alongside your owner. ' +
+      'Take on whole tasks, execute them end-to-end with the available tools, ' +
+      'verify your work, and report concise, actionable results. Be proactive, ' +
+      'make sound assumptions, and only ask when genuinely blocked.',
+  },
+  {
+    id: 'researcher',
+    label: '리서치 전문가',
+    prompt:
+      'You are a research specialist. Investigate questions deeply and ' +
+      'accurately, cross-checking sources and citing concrete evidence ' +
+      '(file:line, URLs). Separate verified facts from inference and deliver ' +
+      'well-structured findings. Do not mutate state.',
+  },
+  {
+    id: 'coder',
+    label: '코드 작업자',
+    prompt:
+      'You are a focused software engineer. Implement, fix, and refactor code ' +
+      'precisely. Read the surrounding code first, match its conventions, make ' +
+      'minimal correct changes, and verify (build/tests) before reporting ' +
+      'exactly what you changed.',
+  },
+  {
+    id: 'planner',
+    label: '기획·문서 작성',
+    prompt:
+      'You are a planning and documentation specialist. Turn goals into clear, ' +
+      'structured plans and write precise, well-organized documents. Be ' +
+      'concrete, complete, and easy to follow.',
+  },
+  {
+    id: 'critic',
+    label: '비평가·리뷰어',
+    prompt:
+      'You are a rigorous reviewer. Scrutinize work for real defects — ' +
+      'correctness, security, edge cases, unmet requirements — and report ' +
+      'substantiated, well-located findings ranked by severity. Read-only.',
+  },
+];
+
 export function OwnedSubagentPicker() {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const setOwnedSubagent = useEnvironmentDraftStore((s) => s.setOwnedSubagent);
@@ -383,12 +433,48 @@ export function OwnedSubagentPicker() {
       </p>
 
       {owned.enabled && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <label className="text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))]">
+            역할 프리셋 — 적용 후 자유롭게 수정
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {SUBAGENT_PRESETS.map((p) => {
+              const active = owned.system_prompt === p.prompt;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() =>
+                    setOwnedSubagent({ enabled: true, system_prompt: p.prompt })
+                  }
+                  className={
+                    'text-[0.7rem] px-2.5 h-7 rounded-full border transition-colors ' +
+                    (active
+                      ? 'border-violet-500 bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                      : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]')
+                  }
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+            {owned.system_prompt && (
+              <button
+                type="button"
+                onClick={() =>
+                  setOwnedSubagent({ enabled: true, system_prompt: undefined })
+                }
+                className="text-[0.7rem] px-2.5 h-7 rounded-full border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+              >
+                기본값으로 초기화
+              </button>
+            )}
+          </div>
+          <label className="text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] mt-1">
             시스템 프롬프트 (역할) — 선택
           </label>
           <textarea
-            rows={4}
+            rows={5}
             value={owned.system_prompt}
             onChange={(e) =>
               setOwnedSubagent({
@@ -396,7 +482,7 @@ export function OwnedSubagentPicker() {
                 system_prompt: e.target.value || undefined,
               })
             }
-            placeholder="이 companion의 역할/지시를 직접 지정. 비워두면 부모 env의 기본 페르소나."
+            placeholder="이 companion의 역할/지시를 직접 지정하거나 위 프리셋을 적용하세요. 비워두면 강력한 기본 companion 페르소나가 적용됩니다."
             className="w-full px-2.5 py-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40"
           />
         </div>

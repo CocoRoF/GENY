@@ -117,7 +117,20 @@ def _make_parent_env_companion_factory(env_service: Any, parent_env_id: str):
         pipeline = await Pipeline.from_manifest_async(
             manifest, credentials=ctx.credentials, strict=False,
         )
+        # Role prompt: the env editor's override when set, otherwise the
+        # library's strong default companion persona (executor >=2.8.0). Either
+        # way the companion runs with an explicit "autonomous delegate" role on
+        # top of the inherited parent env.
         system_prompt = getattr(ctx.descriptor, "system_prompt", None)
+        if not system_prompt:
+            try:
+                from geny_executor.stages.s12_agent.subagent_catalog import (
+                    DEFAULT_PERSISTENT_SUBAGENT_PROMPT,
+                )
+
+                system_prompt = DEFAULT_PERSISTENT_SUBAGENT_PROMPT
+            except Exception:  # noqa: BLE001 — executor < 2.8.0
+                system_prompt = None
         if system_prompt:
             try:
                 from geny_executor.stages.s03_system.artifact.default.builders import (

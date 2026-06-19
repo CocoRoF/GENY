@@ -29,52 +29,35 @@ except ImportError:  # pragma: no cover — only triggers on stale exec
     SubagentTypeDescriptor = None  # type: ignore[assignment]
     SubagentTypeRegistry = None  # type: ignore[assignment]
 
+# The GENERALIZED, app-neutral catalog now lives in geny-executor (>=2.8.0):
+# worker / researcher / summarizer / critic, each with a strong default
+# system prompt + tool shape. Geny consumes it and lets users override / extend
+# / subset per-env (see SubagentRegistryBuilder + the env editor's Sub-Worker
+# panel). App-specific types (e.g. a vtuber narrator) are NOT seeded here — add
+# them per-env when wanted.
+try:  # pragma: no cover — covered by e2e environment
+    from geny_executor.stages.s12_agent.subagent_catalog import (
+        default_subagent_specs as _exec_default_specs,
+        specs_to_descriptors as _exec_specs_to_descriptors,
+    )
+except ImportError:  # pragma: no cover — executor < 2.8.0
+    _exec_default_specs = None  # type: ignore[assignment]
+    _exec_specs_to_descriptors = None  # type: ignore[assignment]
 
-# Seed sub-agent descriptors. ``provider=None`` means "inherit parent's
-# Stage-6 provider" (resolved by ``_default_subagent_factory``); any
-# non-None value pins a specific backend because the agent's tool
-# requirements demand it (e.g. ``critic`` is fundamentally a
-# Claude-Code-CLI agent).
-#
-# The previous values (``researcher → "anthropic"``,
-# ``summarizer → "openai"``) were hardcoded preferences for "deep
-# reasoning" vs "cheap model". They broke users who never configured
-# those backends — a user logged into Claude Code with no Anthropic
-# key would still see the researcher try to call Anthropic and 401.
-# The choice of "which model is cheap / which is deep" belongs in
-# ``model_override`` (or a future routing layer), not in a hardcoded
-# vendor pin that ignores what the user actually has access to.
-_SEED = (
-    (
-        "worker",
-        "General-purpose worker. Full default toolset (Read / Write / "
-        "Edit / Bash / Grep / Glob / NotebookEdit / WebFetch).",
-        None,                           # inherit parent provider
-    ),
+
+# Fallback seed used ONLY when geny-executor (<2.8.0) doesn't expose the
+# generalized catalog. The real catalog lives in the library now (worker /
+# researcher / summarizer / critic with strong default prompts). ``None``
+# provider = inherit the parent's Stage-6 provider.
+_FALLBACK_SEED = (
+    ("worker", "General-purpose autonomous worker. Full default toolset.", None),
     (
         "researcher",
-        "Read-only investigation. Read / Grep / Glob / WebFetch / "
-        "WebSearch only — no write/edit/bash so research can't "
-        "accidentally mutate state.",
-        None,                           # inherit parent provider
-    ),
-    (
-        "summarizer",
-        "Cheap summarisation worker. Suited for stage 19 / context "
-        "compaction overflow.",
-        None,                           # inherit parent provider
-    ),
-    (
-        "critic",
-        "Code-aware review using the local Claude Code CLI.",
-        "claude_code_cli",              # genuinely CLI-specific
-    ),
-    (
-        "vtuber-narrator",
-        "VTuber persona for short stream narrations. Memory + "
-        "Knowledge tools only.",
+        "Read-only investigation (Read / Grep / Glob / WebFetch / WebSearch).",
         None,
     ),
+    ("summarizer", "Faithful, compact summarization of supplied material.", None),
+    ("critic", "Rigorous read-only review — surfaces substantiated defects.", None),
 )
 
 
@@ -107,52 +90,46 @@ def _resolve_default_factory():
 
 
 def _make_descriptors() -> List[Any]:
-    """Build the descriptor list lazily so test environments without
-    geny-executor installed still import this module.
+    """Build the seed descriptor list lazily.
 
-    Tolerates executor signature drift: each constructor is tried with
-    the canonical kwargs first, falls back to the legacy
-    no-factory shape, and swallows any remaining TypeError so a single
-    bad seed can't crash module import (which cascades into a 500 on
-    boot for every controller that imports this package)."""
+    Primary path (geny-executor >=2.8.0): wire the library's GENERALIZED
+    catalog (``default_subagent_specs``) with Geny's real default factory via
+    ``specs_to_descriptors`` — so the generalized types + their strong default
+    prompts live in one place (the library) and Geny just attaches its
+    factory. Falls back to a minimal local seed for older executors, and
+    returns ``[]`` when geny-executor isn't importable at all (test env)."""
     if SubagentTypeDescriptor is None:
         return []
 
     factory = _resolve_default_factory()
+
+    # Generalized catalog from the library (preferred).
+    if _exec_specs_to_descriptors is not None and _exec_default_specs is not None:
+        try:
+            descs = _exec_specs_to_descriptors(factory, _exec_default_specs())
+            if descs:
+                return list(descs)
+        except Exception as exc:  # noqa: BLE001 — fall back below
+            logger.warning("generalized catalog wiring failed: %s", exc)
+
+    # Fallback for executor < 2.8.0 (no catalog module).
     out: List[Any] = []
-    for agent_type, description, provider in _SEED:
-        # Phase E3 — descriptors now ship with the real default
-        # factory. The fallback branches stay so an older executor
-        # still loads.
+    for agent_type, description, provider in _FALLBACK_SEED:
         try:
             out.append(SubagentTypeDescriptor(
-                agent_type=agent_type,
-                factory=factory,
-                description=description,
-                provider=provider,
+                agent_type=agent_type, factory=factory,
+                description=description, provider=provider,
             ))
-            continue
         except TypeError:
-            pass
-        try:
-            out.append(SubagentTypeDescriptor(
-                agent_type=agent_type,
-                factory=factory,
-                description=description,
-            ))
-            continue
-        except TypeError:
-            pass
-        try:
-            out.append(SubagentTypeDescriptor(
-                agent_type=agent_type,
-                description=description,
-            ))
-        except TypeError as exc:
-            logger.warning(
-                "subagent_descriptor_build_failed agent_type=%s err=%s",
-                agent_type, exc,
-            )
+            try:
+                out.append(SubagentTypeDescriptor(
+                    agent_type=agent_type, factory=factory, description=description,
+                ))
+            except TypeError as exc:
+                logger.warning(
+                    "subagent_descriptor_build_failed agent_type=%s err=%s",
+                    agent_type, exc,
+                )
     return out
 
 
