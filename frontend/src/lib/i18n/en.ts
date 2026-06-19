@@ -1327,6 +1327,11 @@ const en = {
         title: 'Trigger preset',
         description: 'Map this environment to a host-shared VTuber trigger preset (phases / categories / prompts for self-talk). Leave it unset to use the host-designated default preset.',
       },
+      navSubagent: 'Sub-Agent',
+      subagent: {
+        title: 'Owned persistent sub-agent',
+        description: 'Choose the geny-executor persistent sub-agent an agent on this environment OWNS. When owned, you fully delegate a task → it runs autonomously → you get a completion notification (this is how the VTuber companion works). Without one, the agent only uses one-shot sub-workers (the Agent tool).',
+      },
     },
     genyTools: {
       loading: 'Loading Geny tool catalog…',

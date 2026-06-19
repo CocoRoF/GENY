@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { agentApi } from '@/lib/api';
+import { agentApi, subagentTypeApi, type SubagentTypeRow } from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
 import type { TriggerPresetSummary } from '@/types/triggerPreset';
@@ -325,6 +325,93 @@ export function TriggerEnvPicker() {
       ) : (
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           비워두면 기본 트리거 프리셋을 사용합니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * OwnedSubagentPicker — declare the persistent **sub-agent** an agent on this
+ * env OWNS (geny-executor 2.7.0). Stored at
+ * `host_selections.extras.owned_subagent = { type }`. The session manager
+ * spawns this sub-agent at creation for ANY agent on the env (a VTuber is then
+ * just "an agent on a vtuber env + an avatar"). Leaving it "소유 안 함" removes
+ * the key → the agent owns no persistent companion (it can still use one-shot
+ * sub-workers via the Agent tool / Stage 12).
+ */
+export function OwnedSubagentPicker() {
+  const draft = useEnvironmentDraftStore((s) => s.draft);
+  const setOwnedSubagent = useEnvironmentDraftStore((s) => s.setOwnedSubagent);
+
+  const [types, setTypes] = useState<SubagentTypeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrorText(null);
+    subagentTypeApi
+      .list()
+      .then((res) => {
+        if (!cancelled) setTypes(res.types);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorText(err instanceof Error ? err.message : String(err));
+          setTypes([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selected = useMemo(() => {
+    const raw = draft?.host_selections?.extras?.owned_subagent as
+      | { type?: string }
+      | undefined;
+    return typeof raw?.type === 'string' ? raw.type : '';
+  }, [draft]);
+
+  const selectedDesc = useMemo(
+    () => types.find((t) => t.agent_type === selected)?.description ?? '',
+    [types, selected],
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+        영속 Sub-Agent (소유)
+      </label>
+      <select
+        value={selected}
+        onChange={(e) =>
+          setOwnedSubagent(e.target.value ? { type: e.target.value } : null)
+        }
+        disabled={loading}
+        className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+      >
+        <option value="">소유 안 함 (없음)</option>
+        {types.map((t) => (
+          <option key={t.agent_type} value={t.agent_type}>
+            {t.agent_type}
+          </option>
+        ))}
+      </select>
+      {errorText ? (
+        <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">
+          {errorText}
+        </p>
+      ) : (
+        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+          {selected
+            ? `이 환경의 에이전트는 영속 '${selected}' sub-agent를 소유합니다 — 작업을 완전 위임하면 자율 수행 후 완료 알림을 받습니다.${selectedDesc ? ` (${selectedDesc})` : ''}`
+            : '소유하지 않으면 영속 companion 없이 일회성 sub-worker(Agent 도구)만 사용합니다.'}
         </p>
       )}
     </div>
