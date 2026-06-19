@@ -112,11 +112,18 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
             try:
                 from service.execution.agent_executor import (
                     execute_command,
+                    _save_drain_to_chat_room,
                     AlreadyExecutingError,
                 )
 
                 try:
-                    await execute_command(session_id=owner, prompt=body)
+                    # Run the owner's reaction turn AND surface its reply in the
+                    # chat room — execute_command alone only runs the turn (the
+                    # reply stayed in the log and the VTuber never "spoke"). The
+                    # busy path below already broadcasts via _drain_inbox →
+                    # _save_drain_to_chat_room; mirror it here for the direct path.
+                    result = await execute_command(session_id=owner, prompt=body)
+                    _save_drain_to_chat_room(owner, result)
                 except AlreadyExecutingError:
                     from service.chat.inbox import get_inbox_manager
 
