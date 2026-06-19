@@ -1,75 +1,22 @@
-"""VTuber → executor persistent sub-agent bridge (flag-gated cutover).
+"""Agent → executor persistent sub-agent bridge.
 
-Decision 3 of the consolidation plan: the VTuber should *own an executor
-sub-agent* instead of Geny's bespoke paired Sub-Worker session. This is the
-highest-risk migration (the bespoke path is deeply integrated), so it is
-gated behind a flag and ships **default OFF** — existing VTubers keep using
-the bespoke pairing with zero behaviour change until an operator opts in and
-validates.
+Owning a persistent companion sub-agent is an ENVIRONMENT capability
+(``host_selections.extras.owned_subagent``): the session manager spawns the
+companion at create-time for any agent whose env declares one, and
+``send_direct_message_internal`` fully delegates to it via the executor
+``SubAgentManager``. The companion completes autonomously; completion lands in
+the owner's inbox and Geny surfaces it as the alarm via the execute path.
 
-Mode resolution (first wins):
-  * env ``GENY_VTUBER_SUBAGENT_MODE`` = ``executor`` | ``bespoke``
-  * settings ``vtuber.sub_worker.mode``
-  * default ``bespoke``
-
-When ``executor``:
-  * VTuber-create spawns a persistent sub-agent it owns (via the executor
-    ``SubAgentManager``) instead of the bespoke paired session.
-  * ``send_direct_message_internal`` routes to ``SubAgentAssign`` (the
-    VTuber fully delegates; the sub-agent completes autonomously).
-  * completion lands in the VTuber's inbox; Geny surfaces it as the alarm
-    (``[SUB_AGENT_RESULT]``) via the existing execute path.
-
-Remaining for full cutover (tracked): view-only UI for the non-session
-sub-agent, live parity validation, then flip default + remove bespoke.
+The pre-cutover "bespoke paired Sub-Worker session" path has been removed —
+this is now the only delegation mechanism.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
-_MODE_ENV = "GENY_VTUBER_SUBAGENT_MODE"
-_VALID_MODES = ("bespoke", "executor")
-#: agent-type the VTuber's owned sub-agent is built from.
-DEFAULT_SUBAGENT_TYPE = "worker"
-
-
-#: Default mode. Flipped to ``executor`` at the cutover (2026-06-18): the
-#: VTuber now owns a geny-executor persistent sub-agent. ``bespoke`` remains
-#: selectable via the flag for emergency rollback until the bespoke code is
-#: fully removed.
-_DEFAULT_MODE = "executor"
-
-
-def vtuber_subagent_mode() -> str:
-    """Resolve the VTuber sub-agent mode. Default ``executor`` (cutover)."""
-    raw = (os.environ.get(_MODE_ENV) or "").strip().lower()
-    if raw in _VALID_MODES:
-        return raw
-    try:
-        from service.settings.sections import VTuberSubWorkerSection  # noqa: F401
-        from geny_executor.settings import get_default_loader
-
-        section = get_default_loader().get_section("vtuber")
-        sub = getattr(section, "sub_worker", None) if section is not None else None
-        mode = getattr(sub, "mode", None) if sub is not None else None
-        if isinstance(mode, str) and mode.strip().lower() in _VALID_MODES:
-            return mode.strip().lower()
-    except Exception:  # noqa: BLE001 — settings optional; fall back to default
-        pass
-    return _DEFAULT_MODE
-
-
-def executor_mode_active(app_state: Any) -> bool:
-    """True only when executor mode is selected AND a manager is wired."""
-    return (
-        vtuber_subagent_mode() == "executor"
-        and getattr(app_state, "subagent_manager", None) is not None
-    )
 
 
 def owned_subagent_id(owner_session_id: str) -> str:
@@ -206,10 +153,7 @@ async def delegate_to_subagent(
 
 
 __all__ = [
-    "vtuber_subagent_mode",
-    "executor_mode_active",
     "spawn_owned_subagent",
     "owned_subagent_id",
     "delegate_to_subagent",
-    "DEFAULT_SUBAGENT_TYPE",
 ]

@@ -839,14 +839,11 @@ class AgentSession:
     def _is_always_on(self) -> bool:
         """Whether this session should never go idle.
 
-        True for VTuber sessions and their Sub-Worker sessions — these
-        form a tightly-coupled unit that must stay warm together.
+        True for VTuber sessions — a conversational persona that must stay
+        warm. (Owned companion sub-agents are not sessions; the
+        SubAgentManager manages their lifecycle.)
         """
-        if self._role == SessionRole.VTUBER:
-            return True
-        if self._session_type == "sub" and self._linked_session_id:
-            return True
-        return False
+        return self._role == SessionRole.VTUBER
 
     def _get_logger(self) -> Optional[SessionLogger]:
         """Get session logger (lazy)."""
