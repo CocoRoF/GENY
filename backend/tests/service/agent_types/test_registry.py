@@ -19,9 +19,12 @@ class _FakeRegistry:
         self.registered.append(descriptor)
 
 
-def test_descriptors_include_three_canonical():
+def test_descriptors_are_generalized_catalog():
     types = {d.agent_type for d in DESCRIPTORS}
-    assert {"worker", "researcher", "vtuber-narrator"}.issubset(types)
+    # generalized, app-neutral catalog from geny-executor (>=2.8.0)
+    assert {"worker", "researcher", "summarizer", "critic"}.issubset(types)
+    # app-specific types are not seeded
+    assert "vtuber-narrator" not in types
 
 
 def test_install_registers_all_descriptors():
@@ -29,7 +32,7 @@ def test_install_registers_all_descriptors():
     count = install_subagent_types(reg)
     assert count == len(DESCRIPTORS)
     assert {
-        "worker", "researcher", "summarizer", "critic", "vtuber-narrator",
+        "worker", "researcher", "summarizer", "critic",
     }.issubset({d.agent_type for d in reg.registered})
 
 
