@@ -609,6 +609,9 @@ def _build_subworker_run_event_metadata(
         return None
 
 
+#: Active command executions, keyed by session id (the in-flight holder dict).
+_active_executions: Dict[str, dict] = {}
+
 #: Sessions currently draining their inbox — re-entry guard for ``_drain_inbox``.
 _draining_sessions: Set[str] = set()
 
