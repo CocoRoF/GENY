@@ -123,7 +123,7 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
                     # busy path below already broadcasts via _drain_inbox →
                     # _save_drain_to_chat_room; mirror it here for the direct path.
                     result = await execute_command(session_id=owner, prompt=body)
-                    _save_drain_to_chat_room(owner, result)
+                    _save_drain_to_chat_room(owner, result, source="subagent_result")
                 except AlreadyExecutingError:
                     from service.chat.inbox import get_inbox_manager
 

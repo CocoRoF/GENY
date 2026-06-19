@@ -299,6 +299,10 @@ export default function VTuberChatPanel({
                 // the user reported. The message still appears in the
                 // chat panel; the per-message Speak button is the
                 // explicit-opt-in path.
+                // NOTE: 'subagent_result' is intentionally NOT suppressed —
+                // an owned sub-agent's completion arrives when the VTuber is
+                // idle / post-turn (never concurrent with a user turn), so the
+                // VTuber should speak it. Do not add it to this list.
                 const isAutoTriggered =
                   msg.source === 'thinking_trigger' ||
                   msg.source === 'sub_worker_reply' ||
