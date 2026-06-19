@@ -11,6 +11,10 @@ publish:
 directories:
   output: dist
   buildResources: build
+# Ad-hoc sign the macOS .app (build/afterPack.cjs) so Apple Silicon doesn't
+# hard-block the un-notarized build as "손상됨 — 휴지통으로 이동". No-op once a
+# Developer ID (CSC_LINK / CSC_IDENTITY) is configured.
+afterPack: build/afterPack.cjs
 files:
   - out/**/*
   - package.json
@@ -20,8 +24,10 @@ asarUnpack:
   - '**/*.node'
   - '**/node_modules/@nut-tree-fork/**'
   - '**/node_modules/keytar/**'
-# Phase 0: unsigned dev builds. Signing/notarization land in Phase 7
-# (PLAN §4.3) — macOS Developer ID + @electron/notarize, Win EV/OV cert.
+# macOS is ad-hoc signed (afterPack above) — runs on Apple Silicon without the
+# "damaged" hard block, but still shows the bypassable "unidentified developer"
+# prompt until Developer ID + @electron/notarize land. Windows is still unsigned
+# (SmartScreen "More info → Run anyway") pending an EV/OV cert.
 linux:
   target:
     - AppImage

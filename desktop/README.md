@@ -35,8 +35,25 @@ GENY_SERVER_URL=https://gapt.example.com npm run dev
 ```bash
 npm run dist:linux     # AppImage + deb
 npm run dist:win       # NSIS
-npm run dist:mac       # dmg   (unsigned in Phase 0)
+npm run dist:mac       # dmg   (ad-hoc signed — see build/afterPack.cjs)
 ```
+
+### macOS Gatekeeper
+
+The mac build is **ad-hoc signed** (`build/afterPack.cjs`), not notarized — so it
+runs on Apple Silicon (no "손상됨 / damaged" hard block) but the first launch shows
+the "확인되지 않은 개발자" prompt: **right-click → Open**, or System Settings →
+Privacy & Security → **Open Anyway**. If a download is still blocked as *damaged*
+(e.g. an older unsigned build), strip the quarantine flag (always works):
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Geny.app"
+```
+
+To ship with **no** prompt, set an Apple Developer ID (`CSC_LINK` +
+`CSC_KEY_PASSWORD`) and notarization secrets (`APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) in CI — the afterPack ad-hoc pass
+then no-ops and electron-builder signs + notarizes for real.
 
 ## Architecture
 
