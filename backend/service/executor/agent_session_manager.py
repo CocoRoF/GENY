@@ -1099,8 +1099,8 @@ class AgentSessionManager:
                 from service.vtuber.sub_agent_bridge import spawn_owned_subagent
                 sa_id = await spawn_owned_subagent(
                     _vt_app_state, session_id,
-                    agent_type=str(_owned.get("type") or "worker"),
-                    model=(_owned.get("model") or None),
+                    parent_env_id=env_id,
+                    env_service=self._environment_service,
                     system_prompt=(_owned.get("system_prompt") or None),
                     credentials=credentials, parent_provider=primary_provider,
                 )

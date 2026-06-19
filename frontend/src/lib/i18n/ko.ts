@@ -1373,7 +1373,7 @@ const ko: Translations = {
       navSubagent: 'Sub-Agent',
       subagent: {
         title: '영속 Sub-Agent (소유)',
-        description: '이 환경의 에이전트가 소유할 geny-executor 영속 sub-agent를 선택합니다. 소유하면 작업을 완전 위임 → 자율 수행 → 완료 알림을 받습니다(VTuber의 동반 에이전트가 이 방식). 소유 안 하면 일회성 sub-worker(Agent 도구)만 사용합니다.',
+        description: '이 환경의 에이전트가 영속 sub-agent(companion)를 소유할지 선택합니다. companion은 이 환경(부모)의 도구·모델·단계를 그대로 사용하며, 작업을 완전 위임하면 자율 수행 후 완료 알림을 받습니다. 선택적으로 역할 시스템 프롬프트를 줄 수 있습니다. 끄면 일회성 sub-worker(Agent 도구)만 사용합니다.',
       },
     },
     genyTools: {
