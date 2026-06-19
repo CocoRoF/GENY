@@ -34,6 +34,7 @@ import {
   Shield,
   Sparkles,
   Zap,
+  Bot,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -53,6 +54,7 @@ import {
   PermissionEnvPicker,
   SkillEnvPicker,
   TriggerEnvPicker,
+  OwnedSubagentPicker,
 } from './HostSelectionPickers';
 
 const S06_API_ORDER = 6;
@@ -68,7 +70,8 @@ type Panel =
   | 'hooks'
   | 'permissions'
   | 'skills'
-  | 'triggers';
+  | 'triggers'
+  | 'subagent';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -77,6 +80,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   permissions: 'globals.permissions',
   skills: 'globals.skills',
   triggers: 'globals.triggers',
+  subagent: 'globals.subagent',
 };
 
 const HEADER_PALETTE = {
@@ -127,6 +131,14 @@ export default function GlobalSettingsView() {
   const triggerMapped =
     typeof draft.host_selections?.extras?.trigger_preset_id === 'string' &&
     draft.host_selections.extras.trigger_preset_id.length > 0;
+
+  // ★ on the Sub-Agent nav row when the env declares an owned sub-agent.
+  const ownedSubagentType = (() => {
+    const raw = draft.host_selections?.extras?.owned_subagent as
+      | { type?: string }
+      | undefined;
+    return typeof raw?.type === 'string' ? raw.type : null;
+  })();
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -226,6 +238,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('triggers')}
               badge={triggerMapped ? '★' : undefined}
             />
+            <SubTabButton
+              icon={Bot}
+              label={t('envManagement.globals.navSubagent')}
+              active={panel === 'subagent'}
+              onClick={() => setPanel('subagent')}
+              badge={ownedSubagentType ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -296,6 +315,16 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.triggers.description')}
                 />
                 <TriggerEnvPicker />
+              </div>
+            )}
+
+            {panel === 'subagent' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.subagent.title')}
+                  description={t('envManagement.globals.subagent.description')}
+                />
+                <OwnedSubagentPicker />
               </div>
             )}
           </div>

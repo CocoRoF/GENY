@@ -1370,6 +1370,11 @@ const ko: Translations = {
         title: '트리거 프리셋',
         description: 'VTuber 자가 발화(생각 트리거)의 페이즈 / 카테고리 / 프롬프트를 정의한 호스트 공용 프리셋을 이 환경에 매핑합니다. 비워두면 호스트에서 지정한 기본 프리셋이 사용됩니다.',
       },
+      navSubagent: 'Sub-Agent',
+      subagent: {
+        title: '영속 Sub-Agent (소유)',
+        description: '이 환경의 에이전트가 소유할 geny-executor 영속 sub-agent를 선택합니다. 소유하면 작업을 완전 위임 → 자율 수행 → 완료 알림을 받습니다(VTuber의 동반 에이전트가 이 방식). 소유 안 하면 일회성 sub-worker(Agent 도구)만 사용합니다.',
+      },
     },
     genyTools: {
       loading: 'Geny 도구 카탈로그 로드 중…',

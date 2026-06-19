@@ -361,6 +361,13 @@ export interface EnvironmentDraftState {
    *  empty deletes the key entirely so the env has no mapping and the
    *  backend falls back to the host-designated default preset. */
   setTriggerPresetId: (presetId: string | null) => void;
+  /**
+   * Declare (or clear) the persistent **sub-agent** an agent on this env
+   * OWNS — written to `host_selections.extras.owned_subagent` as
+   * `{ type }`. Passing `null` removes ownership (the agent then has no
+   * persistent companion; it can still use one-shot sub-workers).
+   */
+  setOwnedSubagent: (config: { type: string } | null) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -646,6 +653,32 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       }
       // Keep `extras` only when it still has entries, so a cleared
       // mapping doesn't leave a dangling empty object in the manifest.
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setOwnedSubagent: (config) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      if (config && config.type) {
+        extras.owned_subagent = { type: config.type };
+      } else {
+        delete extras.owned_subagent;
+      }
       next.host_selections =
         Object.keys(extras).length > 0
           ? { ...current, extras }
