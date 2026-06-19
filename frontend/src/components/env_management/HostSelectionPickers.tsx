@@ -18,11 +18,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { agentApi } from '@/lib/api';
+import { agentApi, subagentTypeApi, type SubagentTypeRow } from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
 import type { TriggerPresetSummary } from '@/types/triggerPreset';
-import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
+import {
+  useEnvironmentDraftStore,
+  type SubworkerTypeConfig,
+} from '@/store/useEnvironmentDraftStore';
 import HostEnvSelectionPicker, {
   type HostItem,
 } from './HostEnvSelectionPicker';
@@ -398,6 +401,175 @@ export function OwnedSubagentPicker() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Sub-Worker types (one-shot delegation roster) ─────────────
+
+const _INPUT_CLS =
+  'w-full h-8 px-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40';
+
+/**
+ * SubworkerTypesPicker — precise per-env roster for the ONE-SHOT sub-workers
+ * an agent spawns via the Agent tool (Stage 12). Each row overlays the seed
+ * catalog by `agent_type`: edit a seed type's model / provider / system prompt
+ * / tools, add a brand-new type, or disable one. Stored at
+ * `host_selections.extras.subworker_types`; the backend
+ * (`SubagentRegistryBuilder`) applies it when building the session registry.
+ * No rows → the env uses the default seed roster unchanged.
+ */
+export function SubworkerTypesPicker() {
+  const draft = useEnvironmentDraftStore((s) => s.draft);
+  const setSubworkerTypes = useEnvironmentDraftStore((s) => s.setSubworkerTypes);
+
+  const [seed, setSeed] = useState<SubagentTypeRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    subagentTypeApi
+      .list()
+      .then((res) => {
+        if (!cancelled) setSeed(res.types);
+      })
+      .catch(() => {
+        /* seed hint is optional */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const rows = useMemo<SubworkerTypeConfig[]>(() => {
+    const raw = draft?.host_selections?.extras?.subworker_types;
+    return Array.isArray(raw) ? (raw as SubworkerTypeConfig[]) : [];
+  }, [draft]);
+
+  const commit = (next: SubworkerTypeConfig[]) => setSubworkerTypes(next);
+  const updateRow = (i: number, patch: Partial<SubworkerTypeConfig>) =>
+    commit(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const removeRow = (i: number) => commit(rows.filter((_, idx) => idx !== i));
+  const addRow = (agent_type = '') =>
+    commit([...rows, { agent_type, enabled: true }]);
+
+  // Seed types not yet overridden — offered as quick "override" starters.
+  const overridable = seed.filter(
+    (s) => !rows.some((r) => r.agent_type === s.agent_type),
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+        일회성 sub-worker(에이전트가 Agent 도구로 위임)의 타입별 정밀 설정입니다.
+        시드 타입을 오버라이드하거나 새 타입을 추가하고, 모델·프로바이더·시스템
+        프롬프트·허용 도구를 지정할 수 있습니다. 행이 없으면 기본 시드 로스터를
+        그대로 사용합니다.
+      </p>
+
+      {rows.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {rows.map((r, i) => (
+            <div
+              key={i}
+              className="rounded-lg border border-[hsl(var(--border))] p-3 flex flex-col gap-2 bg-[hsl(var(--muted))]/30"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={r.enabled !== false}
+                  onChange={(e) => updateRow(i, { enabled: e.target.checked })}
+                  title={r.enabled === false ? '비활성 (로스터에서 제거)' : '활성'}
+                  className="h-4 w-4 accent-violet-500"
+                />
+                <input
+                  type="text"
+                  value={r.agent_type}
+                  onChange={(e) => updateRow(i, { agent_type: e.target.value })}
+                  placeholder="agent_type (예: worker, translator)"
+                  className={_INPUT_CLS + ' font-medium flex-1'}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRow(i)}
+                  className="text-[0.7rem] px-2 h-8 rounded-md border border-[hsl(var(--border))] text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                >
+                  삭제
+                </button>
+              </div>
+              {r.enabled !== false && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={r.model ?? ''}
+                    onChange={(e) => updateRow(i, { model: e.target.value })}
+                    placeholder="모델 (비우면 상속)"
+                    className={_INPUT_CLS}
+                  />
+                  <input
+                    type="text"
+                    value={r.provider ?? ''}
+                    onChange={(e) => updateRow(i, { provider: e.target.value })}
+                    placeholder="프로바이더 (비우면 부모)"
+                    className={_INPUT_CLS}
+                  />
+                  <input
+                    type="text"
+                    value={r.description ?? ''}
+                    onChange={(e) =>
+                      updateRow(i, { description: e.target.value })
+                    }
+                    placeholder="설명 (위임 시 LLM에 노출)"
+                    className={_INPUT_CLS + ' col-span-2'}
+                  />
+                  <input
+                    type="text"
+                    value={(r.allowed_tools ?? []).join(', ')}
+                    onChange={(e) =>
+                      updateRow(i, {
+                        allowed_tools: e.target.value
+                          .split(',')
+                          .map((t) => t.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="허용 도구 (쉼표, 비우면 전체). 예: Read, Grep, WebFetch"
+                    className={_INPUT_CLS + ' col-span-2'}
+                  />
+                  <textarea
+                    rows={3}
+                    value={r.system_prompt ?? ''}
+                    onChange={(e) =>
+                      updateRow(i, { system_prompt: e.target.value })
+                    }
+                    placeholder="시스템 프롬프트 (역할/지시). 비우면 기본."
+                    className="col-span-2 w-full px-2 py-1.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => addRow('')}
+          className="text-[0.7rem] px-2.5 h-8 rounded-md border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+        >
+          + 커스텀 타입
+        </button>
+        {overridable.map((s) => (
+          <button
+            key={s.agent_type}
+            type="button"
+            onClick={() => addRow(s.agent_type)}
+            title={s.description}
+            className="text-[0.7rem] px-2.5 h-8 rounded-md border border-dashed border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+          >
+            + {s.agent_type} 오버라이드
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -159,6 +159,66 @@ def _make_descriptors() -> List[Any]:
 DESCRIPTORS = _make_descriptors()
 
 
+#: Keys the env editor's per-env Sub-Worker roster may carry. ``model`` maps to
+#: the descriptor's ``model_override``; the rest are 1:1.
+SUBWORKER_CONFIG_KEYS = (
+    "agent_type",
+    "enabled",
+    "description",
+    "provider",
+    "model",
+    "system_prompt",
+    "allowed_tools",
+)
+
+
+def build_descriptor_from_config(cfg: Any) -> Optional[Any]:
+    """Build one :class:`SubagentTypeDescriptor` from a plain config dict.
+
+    Used for the per-env precise Sub-Worker roster
+    (``host_selections.extras.subworker_types``). Carries the editable fields
+    (description / provider / model / system_prompt / allowed_tools) onto the
+    descriptor; the default factory honours them when it builds the one-shot
+    sub-worker pipeline. Returns None for an empty / unbuildable entry.
+    """
+    if SubagentTypeDescriptor is None or not isinstance(cfg, dict):
+        return None
+    agent_type = str(cfg.get("agent_type") or "").strip()
+    if not agent_type:
+        return None
+
+    kwargs: dict[str, Any] = {
+        "agent_type": agent_type,
+        "factory": _resolve_default_factory(),
+    }
+    if cfg.get("description"):
+        kwargs["description"] = str(cfg["description"])
+    if cfg.get("provider"):
+        kwargs["provider"] = str(cfg["provider"])
+    if cfg.get("model"):
+        kwargs["model_override"] = str(cfg["model"])
+    if cfg.get("system_prompt"):
+        kwargs["system_prompt"] = str(cfg["system_prompt"])
+    tools = cfg.get("allowed_tools")
+    if isinstance(tools, (list, tuple)) and tools:
+        kwargs["allowed_tools"] = tuple(str(t) for t in tools)
+
+    try:
+        return SubagentTypeDescriptor(**kwargs)
+    except TypeError:
+        # Older executor: drop fields it doesn't accept, keep the essentials.
+        for k in ("system_prompt",):
+            kwargs.pop(k, None)
+        try:
+            return SubagentTypeDescriptor(**kwargs)
+        except TypeError as exc:
+            logger.warning(
+                "build_descriptor_from_config failed agent_type=%s err=%s",
+                agent_type, exc,
+            )
+            return None
+
+
 def install_subagent_types(
     registry: Optional[Any] = None,
     *,

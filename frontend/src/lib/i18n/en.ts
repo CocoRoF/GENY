@@ -1332,6 +1332,11 @@ const en = {
         title: 'Owned persistent sub-agent',
         description: 'Choose whether an agent on this environment owns a persistent sub-agent (companion). The companion inherits THIS (the parent) environment — its tools, model and stages; you fully delegate a task and get a completion notification. Optionally give it a role system prompt. Off → only one-shot sub-workers (the Agent tool).',
       },
+      navSubworker: 'Sub-Worker',
+      subworker: {
+        title: 'One-shot Sub-Worker types',
+        description: 'Per-type precise config for the one-shot sub-workers an agent delegates to via the Agent tool. Override a seed type (worker/researcher/…) or add a new one, and set each type model / provider / system prompt / allowed tools. Mark a type disabled to drop it from this env roster. No rows → the default seed roster is used unchanged.',
+      },
     },
     genyTools: {
       loading: 'Loading Geny tool catalog…',

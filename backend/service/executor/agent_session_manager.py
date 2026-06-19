@@ -411,6 +411,27 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return None
 
+    def _env_subworker_types(self, env_id: Optional[str]) -> List[Dict[str, Any]]:
+        """The env's precise one-shot Sub-Worker roster, or ``[]``.
+
+        Stored in ``host_selections.extras.subworker_types`` — a list of
+        per-type config dicts (``{agent_type, enabled?, description?, provider?,
+        model?, system_prompt?, allowed_tools?}``) the env editor's Sub-Worker
+        panel writes. :class:`SubagentRegistryBuilder` overlays these on the
+        seed so the Agent tool's sub-workers run with exactly this config. An
+        empty list → the agent uses the default seed roster unchanged."""
+        if not env_id or self._environment_service is None:
+            return []
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return []
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            val = extras.get("subworker_types")
+            return [c for c in val if isinstance(c, dict)] if isinstance(val, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
     def _env_host_selection(
         self, env_id: Optional[str], category: str
     ) -> Optional[List[str]]:
@@ -799,10 +820,14 @@ class AgentSessionManager:
 
         # Build the per-session SubagentTypeRegistry once. The Stage 12
         # orchestrator slot is auto-rewired by
-        # ``Pipeline.from_manifest_async(subagent_registry=...)``.
+        # ``Pipeline.from_manifest_async(subagent_registry=...)``. The env's
+        # precise Sub-Worker roster (host_selections.extras.subworker_types) is
+        # overlaid on the seed so one-shot sub-workers run with that config.
         from service.agent_types import SubagentRegistryBuilder
 
-        subagent_registry = SubagentRegistryBuilder().build()
+        subagent_registry = SubagentRegistryBuilder(
+            env_overrides=self._env_subworker_types(env_id),
+        ).build()
         adhoc_providers: list = []
         if self._tool_loader is not None:
             from service.executor.geny_tool_provider import GenyToolProvider

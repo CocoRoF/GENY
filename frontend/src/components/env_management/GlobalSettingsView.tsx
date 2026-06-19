@@ -35,6 +35,7 @@ import {
   Sparkles,
   Zap,
   Bot,
+  Workflow,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -55,6 +56,7 @@ import {
   SkillEnvPicker,
   TriggerEnvPicker,
   OwnedSubagentPicker,
+  SubworkerTypesPicker,
 } from './HostSelectionPickers';
 
 const S06_API_ORDER = 6;
@@ -71,7 +73,8 @@ type Panel =
   | 'permissions'
   | 'skills'
   | 'triggers'
-  | 'subagent';
+  | 'subagent'
+  | 'subworker';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -81,6 +84,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   skills: 'globals.skills',
   triggers: 'globals.triggers',
   subagent: 'globals.subagent',
+  subworker: 'globals.subworker',
 };
 
 const HEADER_PALETTE = {
@@ -134,6 +138,9 @@ export default function GlobalSettingsView() {
 
   // ★ on the Sub-Agent nav row when the env declares an owned sub-agent.
   const ownedSubagentEnabled = !!draft.host_selections?.extras?.owned_subagent;
+  const subworkerCustomized =
+    Array.isArray(draft.host_selections?.extras?.subworker_types) &&
+    (draft.host_selections?.extras?.subworker_types as unknown[]).length > 0;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -240,6 +247,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('subagent')}
               badge={ownedSubagentEnabled ? '★' : undefined}
             />
+            <SubTabButton
+              icon={Workflow}
+              label={t('envManagement.globals.navSubworker')}
+              active={panel === 'subworker'}
+              onClick={() => setPanel('subworker')}
+              badge={subworkerCustomized ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -320,6 +334,16 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.subagent.description')}
                 />
                 <OwnedSubagentPicker />
+              </div>
+            )}
+
+            {panel === 'subworker' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.subworker.title')}
+                  description={t('envManagement.globals.subworker.description')}
+                />
+                <SubworkerTypesPicker />
               </div>
             )}
           </div>
