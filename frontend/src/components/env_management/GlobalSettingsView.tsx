@@ -133,12 +133,7 @@ export default function GlobalSettingsView() {
     draft.host_selections.extras.trigger_preset_id.length > 0;
 
   // ★ on the Sub-Agent nav row when the env declares an owned sub-agent.
-  const ownedSubagentType = (() => {
-    const raw = draft.host_selections?.extras?.owned_subagent as
-      | { type?: string }
-      | undefined;
-    return typeof raw?.type === 'string' ? raw.type : null;
-  })();
+  const ownedSubagentEnabled = !!draft.host_selections?.extras?.owned_subagent;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -243,7 +238,7 @@ export default function GlobalSettingsView() {
               label={t('envManagement.globals.navSubagent')}
               active={panel === 'subagent'}
               onClick={() => setPanel('subagent')}
-              badge={ownedSubagentType ? '★' : undefined}
+              badge={ownedSubagentEnabled ? '★' : undefined}
             />
           </nav>
 

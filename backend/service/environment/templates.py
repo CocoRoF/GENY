@@ -389,22 +389,21 @@ def create_vtuber_env(
     return manifest
 
 
-def _declare_owned_subagent(
-    manifest: "EnvironmentManifest", *, agent_type: str = "worker"
-) -> None:
+def _declare_owned_subagent(manifest: "EnvironmentManifest") -> None:
     """Declare that an agent running this env OWNS a persistent sub-agent.
 
-    Cutover (2026-06-18): owning a geny-executor persistent sub-agent is no
-    longer hardcoded to ``role==VTUBER`` — it is an ENVIRONMENT capability.
-    The session manager reads ``host_selections.extras['owned_subagent']``
-    and spawns the declared sub-agent for ANY agent on this env. A VTuber is
-    then just "an agent on a vtuber env + an avatar". Stored in the generic
-    ``extras`` map (executor 2.6.0), same pattern as the trigger binding.
+    Owning a geny-executor persistent sub-agent is an ENVIRONMENT capability,
+    not a role hardcode: the session manager reads
+    ``host_selections.extras['owned_subagent']`` and spawns the companion for
+    ANY agent on this env. The companion is built from THIS (the parent's)
+    env — it inherits its tools / model / stages — so no separate sub-agent
+    env is configured here; ``{"enabled": True}`` just turns ownership on. An
+    optional ``system_prompt`` (set via the env editor) gives it a role.
     """
     try:
         extras = manifest.host_selections.extras
         if extras.get("owned_subagent") is None:
-            extras["owned_subagent"] = {"type": agent_type}
+            extras["owned_subagent"] = {"enabled": True}
     except Exception:  # noqa: BLE001 — never fail template build on this
         pass
 

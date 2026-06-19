@@ -43,32 +43,39 @@ def test_executor_mode_active_requires_manager(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_spawn_owned_subagent_calls_manager():
+async def test_spawn_owned_subagent_calls_manager_with_factory():
     calls = {}
 
     class _Mgr:
-        async def spawn(self, agent_type, owner, *, sub_agent_id=None, credentials=None, parent_provider=None, model=None, system_prompt=None):
+        async def spawn(self, agent_type, owner, *, factory=None, sub_agent_id=None,
+                        credentials=None, parent_provider=None, system_prompt=None):
             calls.update(
                 agent_type=agent_type, owner=owner, sub_agent_id=sub_agent_id,
                 credentials=credentials, parent_provider=parent_provider,
+                system_prompt=system_prompt, has_factory=factory is not None,
             )
             return types.SimpleNamespace(sub_agent_id=sub_agent_id)
 
     app_state = types.SimpleNamespace(subagent_manager=_Mgr())
+    env_service = types.SimpleNamespace(load_manifest=lambda eid: object())
     sa_id = await bridge.spawn_owned_subagent(
-        app_state, "vtuber9", credentials="creds", parent_provider="anthropic"
+        app_state, "vtuber9",
+        parent_env_id="template-vtuber-env", env_service=env_service,
+        system_prompt="role", credentials="creds", parent_provider="anthropic",
     )
     assert sa_id == "vtuber9-subagent"
     assert calls["owner"] == "vtuber9"
-    assert calls["agent_type"] == bridge.DEFAULT_SUBAGENT_TYPE
+    assert calls["has_factory"] is True  # builds from the parent env
+    assert calls["system_prompt"] == "role"
     assert calls["credentials"] == "creds"
-    assert calls["parent_provider"] == "anthropic"
 
 
 @pytest.mark.asyncio
 async def test_spawn_no_manager_returns_none():
     app_state = types.SimpleNamespace(subagent_manager=None)
-    assert await bridge.spawn_owned_subagent(app_state, "v1") is None
+    assert await bridge.spawn_owned_subagent(
+        app_state, "v1", parent_env_id="e", env_service=object()
+    ) is None
 
 
 @pytest.mark.asyncio

@@ -1330,7 +1330,7 @@ const en = {
       navSubagent: 'Sub-Agent',
       subagent: {
         title: 'Owned persistent sub-agent',
-        description: 'Choose the geny-executor persistent sub-agent an agent on this environment OWNS. When owned, you fully delegate a task → it runs autonomously → you get a completion notification (this is how the VTuber companion works). Without one, the agent only uses one-shot sub-workers (the Agent tool).',
+        description: 'Choose whether an agent on this environment owns a persistent sub-agent (companion). The companion inherits THIS (the parent) environment — its tools, model and stages; you fully delegate a task and get a completion notification. Optionally give it a role system prompt. Off → only one-shot sub-workers (the Agent tool).',
       },
     },
     genyTools: {

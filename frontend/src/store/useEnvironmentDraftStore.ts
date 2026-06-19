@@ -368,7 +368,7 @@ export interface EnvironmentDraftState {
    * persistent companion; it can still use one-shot sub-workers).
    */
   setOwnedSubagent: (
-    config: { type: string; model?: string; system_prompt?: string } | null,
+    config: { enabled: boolean; system_prompt?: string } | null,
   ) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
@@ -676,9 +676,10 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         permissions: ['*'],
       };
       const extras = { ...(current.extras ?? {}) };
-      if (config && config.type) {
-        const owned: Record<string, string> = { type: config.type };
-        if (config.model) owned.model = config.model;
+      if (config && config.enabled) {
+        // Companion inherits the parent env — only the optional role prompt
+        // is stored alongside the enable flag.
+        const owned: Record<string, unknown> = { enabled: true };
         if (config.system_prompt) owned.system_prompt = config.system_prompt;
         extras.owned_subagent = owned;
       } else {

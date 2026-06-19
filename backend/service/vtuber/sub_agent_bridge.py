@@ -77,40 +77,101 @@ def owned_subagent_id(owner_session_id: str) -> str:
     return f"{owner_session_id}-subagent"
 
 
+#: Memory-dependent stages deactivated in the companion (it has no
+#: session-level memory provider; conversation continuity comes from the
+#: SubAgentManager's persisted state instead).
+_MEMORY_STAGE_ORDERS = (2, 18, 19, 20)  # context / memory / summarize / persist
+_AGENT_STAGE_ORDER = 12
+
+
+def _make_parent_env_companion_factory(env_service: Any, parent_env_id: str):
+    """Build a PipelineFactory that clones the PARENT agent's environment.
+
+    The companion inherits the parent env's tools / model / provider / stages
+    (decision: "부모 env 기능 그대로") — NO separate env. We only (a) deactivate
+    the memory-dependent stages (no session memory provider is wired for the
+    companion), and (b) force Stage-12 to single_agent so the companion can't
+    recursively spawn further sub-agents. The companion's system prompt
+    (``ctx.descriptor.system_prompt``) is applied via attach_runtime.
+    """
+
+    async def _factory(ctx: Any) -> Any:
+        from geny_executor import EnvironmentManifest, Pipeline
+
+        base = env_service.load_manifest(parent_env_id)
+        if base is None:
+            raise RuntimeError(f"parent env not found for companion: {parent_env_id}")
+        # Clone so we never mutate the cached parent manifest.
+        manifest = EnvironmentManifest.from_dict(base.to_dict())
+        entries = manifest.stage_entries()
+        for e in entries:
+            if e.order in _MEMORY_STAGE_ORDERS:
+                e.active = False
+            if e.order == _AGENT_STAGE_ORDER:
+                e.strategies = {**(e.strategies or {}), "orchestrator": "single_agent"}
+        try:
+            manifest.set_stage_entries(entries)
+        except Exception:  # noqa: BLE001 — in-place mutation already applied
+            pass
+
+        pipeline = await Pipeline.from_manifest_async(
+            manifest, credentials=ctx.credentials, strict=False,
+        )
+        system_prompt = getattr(ctx.descriptor, "system_prompt", None)
+        if system_prompt:
+            try:
+                from geny_executor.stages.s03_system.artifact.default.builders import (
+                    ComposablePromptBuilder,
+                    PersonaBlock,
+                )
+
+                pipeline.attach_runtime(
+                    system_builder=ComposablePromptBuilder(
+                        blocks=[PersonaBlock(system_prompt)]
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("companion: system_prompt attach failed", exc_info=True)
+        return pipeline
+
+    return _factory
+
+
 async def spawn_owned_subagent(
     app_state: Any,
     owner_session_id: str,
     *,
-    agent_type: str = DEFAULT_SUBAGENT_TYPE,
-    model: Optional[str] = None,
+    parent_env_id: str,
+    env_service: Any,
     system_prompt: Optional[str] = None,
     credentials: Any = None,
     parent_provider: Optional[str] = None,
 ) -> Optional[str]:
     """Spawn the persistent sub-agent an env-declaring agent owns.
 
-    Env-driven (not role-driven): called when the agent's env declares
-    ``host_selections.extras['owned_subagent']``. ``model`` / ``system_prompt``
-    are the env editor's precise overrides for this companion. Returns the
-    sub-agent id, or None when no SubAgentManager is wired / spawn fails."""
+    The companion is built from the PARENT agent's environment (it inherits the
+    parent's tools / model / stages — no separate env), with an optional
+    ``system_prompt`` role override. Returns the sub-agent id, or None when no
+    SubAgentManager is wired / spawn fails."""
     manager = getattr(app_state, "subagent_manager", None)
-    if manager is None:
+    if manager is None or env_service is None:
         return None
     sub_agent_id = owned_subagent_id(owner_session_id)
     try:
+        factory = _make_parent_env_companion_factory(env_service, parent_env_id)
         await manager.spawn(
-            agent_type,
+            "owned",
             owner_session_id,
+            factory=factory,
             sub_agent_id=sub_agent_id,
             credentials=credentials,
             parent_provider=parent_provider,
-            model=model or None,
             system_prompt=system_prompt or None,
         )
         logger.info(
-            "[%s] 🤖 owned sub-agent spawned: %s (type=%s, model=%s, prompt=%s)",
-            owner_session_id, sub_agent_id, agent_type,
-            model or "inherit", "custom" if system_prompt else "default",
+            "[%s] 🤖 owned sub-agent spawned: %s (parent env=%s, prompt=%s)",
+            owner_session_id, sub_agent_id, parent_env_id,
+            "custom" if system_prompt else "default",
         )
         return sub_agent_id
     except Exception:  # noqa: BLE001 — never fail create on this

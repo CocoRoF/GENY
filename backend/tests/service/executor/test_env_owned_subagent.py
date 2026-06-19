@@ -25,9 +25,9 @@ def _mgr_with_env(manifest):
 
 def test_env_owned_subagent_reads_extras():
     m = EnvironmentManifest.blank_manifest("e")
-    m.host_selections.extras["owned_subagent"] = {"type": "worker"}
+    m.host_selections.extras["owned_subagent"] = {"enabled": True}
     mgr = _mgr_with_env(m)
-    assert mgr._env_owned_subagent("e") == {"type": "worker"}
+    assert mgr._env_owned_subagent("e") == {"enabled": True}
 
 
 def test_env_owned_subagent_none_when_absent():
@@ -45,6 +45,6 @@ def test_vtuber_template_declares_owned_subagent_worker_does_not():
     from service.environment.templates import create_vtuber_env, create_worker_env
 
     assert create_vtuber_env().host_selections.extras.get("owned_subagent") == {
-        "type": "worker"
+        "enabled": True
     }
     assert create_worker_env().host_selections.extras.get("owned_subagent") is None
