@@ -135,9 +135,12 @@ export function ControlApp() {
   const checkStatus = async () => {
     setBusy(true)
     stat('서버에 연결하는 중…', 'working')
-    await window.connector?.serverConfig.set({ serverUrl })
+    // Strip trailing slash(es): the server (Caddy) doesn't collapse `//`, so a
+    // serverUrl like "https://host/" would build "//api/auth/..." → HTTP 404.
+    const base = serverUrl.trim().replace(/\/+$/, '')
+    await window.connector?.serverConfig.set({ serverUrl: base })
     try {
-      const r = await fetch(`${serverUrl}/api/auth/status`)
+      const r = await fetch(`${base}/api/auth/status`)
       const j = await r.json()
       stat(j.is_authenticated ? '연결됨 · 로그인 상태' : j.has_users ? '연결됨 · 로그인 필요' : '연결됨 · 초기 설정 필요', 'ok')
     } catch (e) {
@@ -150,8 +153,10 @@ export function ControlApp() {
   const login = async () => {
     setBusy(true)
     stat('로그인하는 중…', 'working')
+    // Normalize the same way as checkStatus — a trailing slash → "//api/..." 404.
+    const base = serverUrl.trim().replace(/\/+$/, '')
     try {
-      const r = await fetch(`${serverUrl}/api/auth/login`, {
+      const r = await fetch(`${base}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
