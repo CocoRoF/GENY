@@ -19,7 +19,6 @@ from service.execution.agent_executor import (
     AlreadyExecutingError,
     ExecutionResult,
     _drain_inbox,
-    _notify_linked_vtuber,
     _resolve_agent,
 )
 from service.logging.session_logger import LogLevel
@@ -112,80 +111,6 @@ async def test_auto_revival_emits_session_log_entry(monkeypatch) -> None:
 # ─────────────────────────────────────────────────────────────────
 # Inbox delivery on busy recipient
 # ─────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_inbox_delivery_on_busy_logs_sender_side_entry(monkeypatch) -> None:
-    vtuber = _FakeAgent(
-        "vtuber-1",
-        session_type="vtuber",
-        linked_id="sub-1",
-        chat_room_id="room-1",
-    )
-    sub = _FakeAgent(
-        "sub-1",
-        session_type="sub",
-        linked_id="vtuber-1",
-        chat_room_id="room-1",
-        role="worker",
-    )
-    manager = _FakeAgentManager({"vtuber-1": vtuber, "sub-1": sub})
-
-    sender_sl = _FakeSessionLogger()
-
-    delivered_calls: List[Dict[str, Any]] = []
-
-    class _FakeInbox:
-        def deliver(self, **kwargs):
-            delivered_calls.append(kwargs)
-
-        def send_to_dlq(self, **kwargs):  # pragma: no cover — must not fire
-            raise AssertionError("DLQ path should not be reached")
-
-    async def _busy_execute(*_a, **_kw):
-        raise AlreadyExecutingError("busy")
-
-    monkeypatch.setattr(agent_executor, "_get_agent_manager", lambda: manager)
-    monkeypatch.setattr(agent_executor, "execute_command", _busy_execute)
-    monkeypatch.setattr(
-        agent_executor,
-        "_get_session_logger",
-        lambda sid, create_if_missing=True: sender_sl if sid == "sub-1" else None,
-    )
-    monkeypatch.setattr(
-        "service.chat.inbox.get_inbox_manager",
-        lambda: _FakeInbox(),
-        raising=False,
-    )
-
-    # Capture the fire-and-forget inbox trigger task so the assertion
-    # runs after the AlreadyExecutingError handler finishes.
-    import asyncio
-
-    created_tasks: List[asyncio.Task] = []
-    original_create_task = asyncio.create_task
-
-    def _capturing_create_task(coro, *args, **kwargs):
-        task = original_create_task(coro, *args, **kwargs)
-        created_tasks.append(task)
-        return task
-
-    monkeypatch.setattr(asyncio, "create_task", _capturing_create_task)
-
-    sub_result = ExecutionResult(
-        success=True, session_id="sub-1", output="done", duration_ms=1,
-    )
-    await _notify_linked_vtuber("sub-1", sub_result)
-    for task in created_tasks:
-        await task
-
-    assert len(delivered_calls) == 1
-    inbox_entries = [
-        e for e in sender_sl.entries if e["metadata"].get("event") == "inbox.delivered"
-    ]
-    assert len(inbox_entries) == 1
-    assert inbox_entries[0]["level"] == LogLevel.INFO
-    assert inbox_entries[0]["metadata"]["to_session_id"] == "vtuber-1"
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
-"""VTuber → executor sub-agent bridge (PR-3b, flag-gated cutover).
+"""Agent → executor sub-agent bridge.
 
-Pins the flag resolution + the executor-mode spawn/delegate routing. Default
-mode is bespoke (zero regression); executor mode only activates with the env
-flag AND a wired SubAgentManager.
+Pins the owned-companion spawn/delegate routing. The pre-cutover bespoke
+paired-session mode has been removed; the executor SubAgentManager is the only
+delegation mechanism.
 """
 
 from __future__ import annotations
@@ -12,34 +12,6 @@ import types
 import pytest
 
 from service.vtuber import sub_agent_bridge as bridge
-
-
-def test_mode_defaults_executor(monkeypatch):
-    # Cutover: default is now executor.
-    monkeypatch.delenv("GENY_VTUBER_SUBAGENT_MODE", raising=False)
-    assert bridge.vtuber_subagent_mode() == "executor"
-
-
-def test_mode_env_bespoke_rollback(monkeypatch):
-    # The flag still allows rollback to bespoke.
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "bespoke")
-    assert bridge.vtuber_subagent_mode() == "bespoke"
-
-
-def test_mode_env_invalid_falls_back_to_default(monkeypatch):
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "nonsense")
-    assert bridge.vtuber_subagent_mode() == "executor"
-
-
-def test_executor_mode_active_requires_manager(monkeypatch):
-    monkeypatch.delenv("GENY_VTUBER_SUBAGENT_MODE", raising=False)
-    # default executor + manager → active
-    assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=object())) is True
-    # executor but no manager → not active
-    assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=None)) is False
-    # explicit bespoke rollback → not active even with manager
-    monkeypatch.setenv("GENY_VTUBER_SUBAGENT_MODE", "bespoke")
-    assert bridge.executor_mode_active(types.SimpleNamespace(subagent_manager=object())) is False
 
 
 @pytest.mark.asyncio

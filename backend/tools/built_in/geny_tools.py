@@ -235,67 +235,6 @@ def _record_dm_on_sender_stm(
         )
 
 
-def _maybe_save_paired_dm_reply(
-    *,
-    sender_session_id: str,
-    target_session_id: str,
-    result,
-) -> None:
-    """Cycle 20260430_1 P1-1 — broadcast a Sub-Worker → VTuber DM
-    reply to the user-visible chat room.
-
-    The DM trigger path (see :func:`_trigger_dm_response`) wakes the
-    target session via ``execute_command`` but historically did
-    nothing with the resulting reply — it died inside the
-    fire-and-forget task. That was fine in the dual-dispatch era
-    because ``_notify_linked_vtuber`` always fired its own
-    notification immediately afterward and that notification's reply
-    *was* persisted via ``_save_subworker_reply_to_chat_room``.
-
-    Cycle 20260430_1 P0-1 broke that implicit duplication: when the
-    Sub-Worker explicitly delivers a ``[SUB_WORKER_RESULT]`` payload
-    via ``send_direct_message_internal``, the auto fallback is now
-    suppressed. So this DM path becomes the *only* surface for the
-    VTuber's paraphrased reply.
-
-    Scope: only fires when sender is a paired Sub-Worker and target
-    is its bound VTuber. Other DM topologies (general session→session
-    via ``send_direct_message_external``, peer Worker chatter, etc.)
-    keep the previous behaviour — no chat-room broadcast.
-
-    Best-effort: any failure (missing agents, missing chat_room,
-    broken broadcast helper) is swallowed.
-    """
-    try:
-        manager = _get_agent_manager()
-        sender = manager.get_agent(sender_session_id)
-        target = manager.get_agent(target_session_id)
-        if sender is None or target is None:
-            return
-        if getattr(sender, "_session_type", None) != "sub":
-            return
-        if getattr(target, "_session_type", None) != "vtuber":
-            return
-        # Confirm the pair is the bound counterpart relationship —
-        # otherwise an external DM from one sub-worker to a different
-        # VTuber should not leak into that VTuber's room.
-        if getattr(sender, "_linked_session_id", None) != target_session_id:
-            return
-
-        from service.execution.agent_executor import (
-            _save_subworker_reply_to_chat_room,
-        )
-
-        _save_subworker_reply_to_chat_room(target_session_id, result)
-    except Exception:
-        logger.debug(
-            "P1-1 paired DM reply broadcast failed (sender=%s target=%s)",
-            sender_session_id,
-            target_session_id,
-            exc_info=True,
-        )
-
-
 def _build_recipient_dm_metadata(
     *,
     target_session_id: str,
@@ -408,21 +347,6 @@ def _trigger_dm_response(
                     target_session_id,
                     result.duration_ms or 0,
                     result.output[:100],
-                )
-                # Cycle 20260430_1 P1-1 — surface the VTuber's reply to
-                # the user's chat room when the incoming DM came from
-                # the paired Sub-Worker. Before this, a sub-worker that
-                # delivered an explicit `[SUB_WORKER_RESULT]` payload
-                # made the VTuber generate a perfectly good summary
-                # that died in the fire-and-forget task — never seen
-                # by the user. P0-1 already prevents `_notify_linked_vtuber`
-                # from emitting a duplicate notification, so this
-                # broadcast is the *only* surface for the paraphrased
-                # reply.
-                _maybe_save_paired_dm_reply(
-                    sender_session_id=sender_session_id,
-                    target_session_id=target_session_id,
-                    result=result,
                 )
             else:
                 logger.warning(
@@ -1092,119 +1016,41 @@ class SendDirectMessageInternalTool(BaseTool):
                 {"error": f"caller session not found: {session_id}"}
             )
 
-        # Executor sub-agent mode (flag-gated cutover, default off): when the
-        # VTuber owns a geny-executor persistent sub-agent instead of a
-        # bespoke paired session, fully delegate this message to it. The
-        # sub-agent completes autonomously; completion is surfaced as the
-        # alarm via the executor inbox + on_event. Default off → no session
-        # has this attr → the bespoke counterpart path below runs unchanged.
+        # Full delegation to the agent's owned companion sub-agent (env-driven
+        # via host_selections.extras.owned_subagent). The companion completes
+        # autonomously; completion is surfaced as the alarm via the executor
+        # inbox + on_event. An agent that owns no companion has nothing to
+        # delegate to.
         executor_sa_id = getattr(self_agent, "_executor_sub_agent_id", None)
-        if executor_sa_id:
-            from service.execution.agent_executor import get_app_state as _gas
-            from service.vtuber.sub_agent_bridge import delegate_to_subagent
-
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(
-                    delegate_to_subagent(_gas(), executor_sa_id, content.strip())
-                )
-            except RuntimeError:
-                return json.dumps(
-                    {"error": "no running event loop for sub-agent delegation"}
-                )
-            return json.dumps(
-                {
-                    "success": True,
-                    "delegated_to_subagent": executor_sa_id,
-                    "mode": "executor",
-                },
-                ensure_ascii=False,
-            )
-
-        counterpart_id = getattr(self_agent, "_linked_session_id", None)
-        if not counterpart_id:
+        if not executor_sa_id:
             return json.dumps(
                 {
                     "error": (
-                        "no linked counterpart — this session has no "
-                        "bound pair"
+                        "this agent owns no sub-agent to delegate to — "
+                        "declare one in the environment "
+                        "(host_selections.extras.owned_subagent)"
                     )
                 }
             )
 
-        target, resolved_id = _resolve_session(counterpart_id)
-        if target is None:
-            return json.dumps(
-                {
-                    "error": (
-                        f"linked counterpart {counterpart_id} no longer "
-                        f"exists"
-                    )
-                }
+        from service.execution.agent_executor import get_app_state as _gas
+        from service.vtuber.sub_agent_bridge import delegate_to_subagent
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                delegate_to_subagent(_gas(), executor_sa_id, content.strip())
             )
-
-        sender_name = getattr(self_agent, "session_name", None) or session_id[:8]
-
-        body = content.strip()
-
-        # Cycle 20260430_1 P0-1 — when a paired Sub-Worker uses this tool to
-        # explicitly deliver a `[SUB_WORKER_RESULT]` payload to its VTuber,
-        # mark the caller's session so `_notify_linked_vtuber` skips the
-        # auto-fallback notification at invoke end (otherwise it overwrites
-        # the structured payload with "Task finished with no output."). The
-        # flag is turn-scoped — `AgentSession.invoke`/`astream` reset it at
-        # the next turn boundary.
-        if (
-            getattr(self_agent, "_session_type", None) == "sub"
-            and body.startswith("[SUB_WORKER_RESULT]")
-        ):
-            try:
-                self_agent._explicit_subworker_report_sent = True
-            except Exception:
-                logger.debug(
-                    "could not set explicit_subworker_report_sent on %s",
-                    session_id,
-                    exc_info=True,
-                )
-
-        inbox = _get_inbox_manager()
-        msg = inbox.deliver(
-            target_session_id=resolved_id,
-            content=body,
-            sender_session_id=session_id,
-            sender_name=sender_name,
-        )
-
-        _trigger_dm_response(
-            target_session_id=resolved_id,
-            sender_session_id=session_id,
-            sender_name=sender_name,
-            content=body,
-            message_id=msg["id"],
-        )
-
-        # Pin the outgoing DM on the sender's STM — see helper docstring
-        # for why this is needed on top of the recipient-side record.
-        _record_dm_on_sender_stm(
-            session_id=session_id,
-            content=body,
-            target_label=target.session_name or resolved_id,
-            channel="internal",
-            target_session_id=resolved_id,
-        )
-
+        except RuntimeError:
+            return json.dumps(
+                {"error": "no running event loop for sub-agent delegation"}
+            )
         return json.dumps(
             {
                 "success": True,
-                "message_id": msg["id"],
-                "delivered_to": resolved_id,
-                "delivered_to_name": target.session_name,
-                "timestamp": msg["timestamp"],
-                "auto_triggered": True,
+                "delegated_to_subagent": executor_sa_id,
             },
-            indent=2,
             ensure_ascii=False,
-            default=str,
         )
 
 
