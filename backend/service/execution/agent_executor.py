@@ -1309,7 +1309,14 @@ async def _drain_inbox(session_id: str) -> None:
                 )
 
             if result.success and result.output and result.output.strip():
-                _save_drain_to_chat_room(session_id, result)
+                # An owned sub-agent's completion reaction is TTS-eligible;
+                # other background drains stay suppressed.
+                _drain_source = (
+                    "subagent_result"
+                    if tag == "[SUB_AGENT_RESULT]"
+                    else "inbox_drain"
+                )
+                _save_drain_to_chat_room(session_id, result, source=_drain_source)
     finally:
         _draining_sessions.discard(session_id)
         if started and sl is not None:
@@ -1402,11 +1409,19 @@ def _save_subworker_reply_to_chat_room(
         )
 
 
-def _save_drain_to_chat_room(session_id: str, result: 'ExecutionResult') -> None:
+def _save_drain_to_chat_room(
+    session_id: str, result: 'ExecutionResult', *, source: str = "inbox_drain",
+) -> None:
     """
     Save an inbox-drain execution result to the session's chat room.
     Similar to ThinkingTriggerService._save_to_chat_room but usable
     from agent_executor without circular dependency.
+
+    ``source`` tags the message for the frontend's auto-TTS policy. Most
+    background drains use ``"inbox_drain"`` (TTS-suppressed). An owned
+    sub-agent's completion reaction passes ``"subagent_result"`` — it arrives
+    when the owner is idle / post-turn (never concurrent with a user turn), so
+    it is TTS-eligible and the VTuber actually speaks it.
     """
     try:
         from service.utils.text_sanitizer import sanitize_for_display
@@ -1439,10 +1454,9 @@ def _save_drain_to_chat_room(session_id: str, result: 'ExecutionResult') -> None
             "duration_ms": result.duration_ms,
             "cost_usd": result.cost_usd,
             # TTS-fix (2026-04-26): tag the source so the frontend can
-            # suppress auto-TTS for inbox-drain outputs (the user
-            # didn't initiate this turn). Mirrors the
-            # ``thinking_trigger`` / ``sub_worker_reply`` markers.
-            "source": "inbox_drain",
+            # decide auto-TTS. Background drains stay suppressed; an owned
+            # sub-agent completion (source="subagent_result") is TTS-eligible.
+            "source": source,
         })
 
         # Notify SSE listeners
