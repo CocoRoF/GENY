@@ -255,9 +255,13 @@ export default function TabNavigation() {
     || selectedSessionId?.substring(0, 10)
     || '';
 
-  // All tabs are always visible now (the dev/normal mode toggle was removed).
+  // The VTuber tab is the avatar/persona/chat surface — meaningful ONLY for a
+  // vtuber-role session. Hide it for every other role so non-vtuber sessions
+  // don't show an empty tab. All other session tabs are always visible.
   const visibleGlobalTabs = GLOBAL_TAB_IDS;
-  const visibleSessionTabs = SESSION_TAB_DEFS;
+  const visibleSessionTabs = SESSION_TAB_DEFS.filter(
+    (tab) => tab.id !== 'vtuber' || selectedSession?.role === 'vtuber',
+  );
 
   // Click handler for session tabs. Tabs with an ``external`` marker
   // open the resolved URL in a new browser tab and *do not* toggle

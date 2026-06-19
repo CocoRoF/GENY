@@ -9,6 +9,10 @@ export interface SessionInfo {
   linked_session_id?: string | null;
   session_type?: string | null;
   chat_room_id?: string | null;
+  /** Id of the persistent companion sub-agent this agent owns, when its env
+   *  declares one (host_selections.extras.owned_subagent). Env-driven, not
+   *  role-driven. Absent/null → the agent owns no companion. */
+  executor_sub_agent_id?: string | null;
   max_turns: number | null;
   timeout: number | null;
   max_iterations: number | null;

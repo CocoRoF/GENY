@@ -684,6 +684,7 @@ const ko: Translations = {
   // ─── Session Environment Tab ───
   sessionEnvironmentTab: {
     title: '환경',
+    agentToggle: { agent: 'Agent', subAgent: 'Sub-Agent' },
     selectSession: '세션을 선택하면 해당 환경이 표시됩니다.',
     sessionLine: '세션: {name} · 모델: {model}',
     environmentLabel: '환경',

@@ -690,6 +690,7 @@ const en = {
   // the EnvironmentManifest the session is bound to.
   sessionEnvironmentTab: {
     title: 'Environment',
+    agentToggle: { agent: 'Agent', subAgent: 'Sub-Agent' },
     selectSession: 'Select a session to see its environment.',
     sessionLine: 'Session: {name} · Model: {model}',
     environmentLabel: 'Environment',

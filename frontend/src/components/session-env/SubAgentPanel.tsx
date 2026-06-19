@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * SubAgentPanel — read-only view of the executor persistent sub-agent a
- * VTuber owns (cutover, decision 4: "확인만"). The sub-agent is not a
- * session, so it has no sidebar entry; this panel surfaces its status,
- * recent conversation, and pending completion notifications via
- * GET /api/agents/{vtuberId}/sub-agent.
+ * SubAgentPanel — read-only view of the persistent companion sub-agent an
+ * agent owns (env-driven via host_selections.extras.owned_subagent). The
+ * sub-agent is not a session, so it has no sidebar entry; this panel surfaces
+ * its status, recent conversation, and pending completion notifications via
+ * GET /api/agents/{ownerId}/sub-agent.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -20,7 +20,7 @@ interface SubAgentView {
   inbox_count: number;
 }
 
-export default function SubAgentPanel({ vtuberId }: { vtuberId: string }) {
+export default function SubAgentPanel({ ownerId }: { ownerId: string }) {
   const [data, setData] = useState<SubAgentView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export default function SubAgentPanel({ vtuberId }: { vtuberId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await agentApi.getSubAgent(vtuberId);
+      const res = await agentApi.getSubAgent(ownerId);
       setData(res as SubAgentView);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no sub-agent');
@@ -37,7 +37,7 @@ export default function SubAgentPanel({ vtuberId }: { vtuberId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [vtuberId]);
+  }, [ownerId]);
 
   useEffect(() => {
     void load();
@@ -49,7 +49,7 @@ export default function SubAgentPanel({ vtuberId }: { vtuberId: string }) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-[var(--text-muted)]">
         <Bot size={28} className="opacity-50" />
-        <p className="text-[0.8125rem]">이 VTuber에 연결된 sub-agent가 없습니다.</p>
+        <p className="text-[0.8125rem]">이 에이전트가 소유한 sub-agent가 없습니다.</p>
         <p className="text-[0.6875rem] opacity-70">{error}</p>
       </div>
     );
@@ -103,7 +103,7 @@ export default function SubAgentPanel({ vtuberId }: { vtuberId: string }) {
       <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-2">
         {!data || data.conversation.length === 0 ? (
           <p className="text-[0.75rem] text-[var(--text-muted)] text-center mt-8">
-            아직 대화 내역이 없습니다. VTuber가 작업을 위임하면 여기에 표시됩니다.
+            아직 대화 내역이 없습니다. 에이전트가 작업을 위임하면 여기에 표시됩니다.
           </p>
         ) : (
           data.conversation.map((m, i) => (
