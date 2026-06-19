@@ -32,20 +32,14 @@ export default function InfoTab() {
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [promptMsg, setPromptMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [showPermanentDeleteModal, setShowPermanentDeleteModal] = useState(false);
-  const [subWorkerData, setSubWorkerData] = useState<any>(null);
-  const [subWorkerLoading, setSubWorkerLoading] = useState(false);
-  const [editingSubWorkerPrompt, setEditingSubWorkerPrompt] = useState(false);
-  const [subWorkerPromptDraft, setSubWorkerPromptDraft] = useState('');
-  const [savingSubWorkerPrompt, setSavingSubWorkerPrompt] = useState(false);
-  const [subWorkerPromptMsg, setSubWorkerPromptMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [thinkingTriggerEnabled, setThinkingTriggerEnabled] = useState<boolean | null>(null);
   const [thinkingTriggerInfo, setThinkingTriggerInfo] = useState<{ consecutive_triggers: number; current_threshold_seconds: number } | null>(null);
   const [thinkingTriggerLoading, setThinkingTriggerLoading] = useState(false);
   const [thinkingTriggerMsg, setThinkingTriggerMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [envDrawerId, setEnvDrawerId] = useState<string | null>(null);
 
-  // Sub-tab navigation: VTuber / Status / Worker
-  type SubTab = 'vtuber' | 'status' | 'worker';
+  // Sub-tab navigation: VTuber / Status
+  type SubTab = 'vtuber' | 'status';
   const [subTab, setSubTab] = useState<SubTab>('vtuber');
 
   // Reset sub-tab when switching session
@@ -100,32 +94,6 @@ export default function InfoTab() {
   }, [selectedSessionId, setCreatureSnapshot]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
-
-  // Fetch linked Sub-Worker session data when main session is VTuber type
-  useEffect(() => {
-    if (!data?.linked_session_id || data?.session_type !== 'vtuber') {
-      setSubWorkerData(null);
-      return;
-    }
-    let cancelled = false;
-    setSubWorkerLoading(true);
-    (async () => {
-      try {
-        let result: any;
-        try {
-          result = await agentApi.get(data.linked_session_id);
-        } catch {
-          result = await agentApi.getStore(data.linked_session_id);
-        }
-        if (!cancelled) setSubWorkerData(result);
-      } catch {
-        if (!cancelled) setSubWorkerData(null);
-      } finally {
-        if (!cancelled) setSubWorkerLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [data?.linked_session_id, data?.session_type]);
 
   // Fetch thinking trigger status for VTuber sessions
   useEffect(() => {
@@ -242,12 +210,11 @@ export default function InfoTab() {
       }
     >
     <div className="p-3 md:p-5 overflow-y-auto h-full">
-      {/* Sub-tab navigation: VTuber / Status / Worker */}
+      {/* Sub-tab navigation: VTuber / Status */}
       <div className="flex items-center gap-1 mb-4 border-b border-[var(--border-color)]">
         {([
           { id: 'vtuber' as const, label: t('info.subTabs.vtuber') },
           { id: 'status' as const, label: t('info.subTabs.status') },
-          { id: 'worker' as const, label: t('info.subTabs.worker') },
         ]).map((tab) => {
           const active = subTab === tab.id;
           return (
@@ -443,144 +410,6 @@ export default function InfoTab() {
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Linked Sub-Worker Section (VTuber sessions only) ── */}
-      {subTab === 'worker' && !isDeleted && data.session_type === 'vtuber' && data.linked_session_id && (
-        <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
-          <div className="flex items-center gap-1.5 mb-3">
-            <Link2 size={14} className="text-[var(--text-muted)]" />
-            <span className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">{t('info.subWorker.title')}</span>
-            {subWorkerData && (
-              <span
-                className="text-[10px] font-semibold py-[2px] px-2 rounded-[10px] uppercase ml-1"
-                style={
-                  subWorkerData.status === 'running'
-                    ? { background: 'rgba(16, 185, 129, 0.15)', color: 'var(--success-color)' }
-                    : { background: 'rgba(107, 114, 128, 0.15)', color: 'var(--text-muted)' }
-                }
-              >
-                {subWorkerData.status || 'unknown'}
-              </span>
-            )}
-          </div>
-
-          {subWorkerLoading ? (
-            <div className="text-[12px] text-[var(--text-muted)] py-3">{t('common.loading')}</div>
-          ) : subWorkerData ? (
-            <>
-              {/* Sub-Worker Session Info Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-3">
-                {[
-                  { label: t('info.subWorker.sessionId'), value: subWorkerData.session_id },
-                  { label: t('info.subWorker.name'), value: subWorkerData.session_name || t('info.unnamed') },
-                  { label: t('info.subWorker.model'), value: subWorkerData.model || t('info.default') },
-                  { label: t('info.subWorker.role'), value: subWorkerData.role || 'worker' },
-                  { label: t('info.subWorker.graphName'), value: subWorkerData.graph_name || '—' },
-                  { label: t('info.subWorker.workflowId'), value: subWorkerData.workflow_id || '—' },
-                  { label: t('info.subWorker.toolPreset'), value: subWorkerData.tool_preset_id || t('info.default') },
-                  { label: t('info.subWorker.totalCost'), value: subWorkerData.total_cost != null && subWorkerData.total_cost > 0 ? `$${subWorkerData.total_cost.toFixed(6)}` : '$0.000000' },
-                ].map(f => (
-                  <div key={f.label} className="flex flex-col gap-0.5 py-2 px-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">{f.label}</span>
-                    <span className="text-[13px] text-[var(--text-primary)] break-all" style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}>{String(f.value)}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Sub-Worker System Prompt Section */}
-              <div className="mt-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <Terminal size={14} className="text-[var(--text-muted)]" />
-                    <span className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">{t('info.subWorker.systemPrompt')}</span>
-                    {subWorkerData.system_prompt && !editingSubWorkerPrompt && (
-                      <span className="text-[10px] text-[var(--text-muted)] ml-1">({t('info.systemPrompt.chars', { count: String(subWorkerData.system_prompt.length) })})</span>
-                    )}
-                  </div>
-                  {!editingSubWorkerPrompt ? (
-                    <button
-                      className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
-                      onClick={() => { setSubWorkerPromptDraft(subWorkerData.system_prompt || ''); setEditingSubWorkerPrompt(true); setSubWorkerPromptMsg(null); }}
-                    >
-                      <Pencil size={11} /> {t('info.systemPrompt.edit')}
-                    </button>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <button
-                        className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
-                        onClick={() => { setSubWorkerPromptDraft(''); }}
-                      >
-                        <Eraser size={11} /> {t('info.systemPrompt.clear')}
-                      </button>
-                      <button
-                        disabled={savingSubWorkerPrompt}
-                        className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--primary-color)] text-white hover:bg-[var(--primary-hover)] border-none transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={async () => {
-                          setSavingSubWorkerPrompt(true);
-                          setSubWorkerPromptMsg(null);
-                          try {
-                            const val = subWorkerPromptDraft.trim() || null;
-                            await agentApi.updateSystemPrompt(subWorkerData.session_id, val);
-                            setSubWorkerData((prev: any) => ({ ...prev, system_prompt: val }));
-                            setEditingSubWorkerPrompt(false);
-                            setSubWorkerPromptMsg({ type: 'ok', text: t('info.systemPrompt.saveSuccess') });
-                          } catch {
-                            setSubWorkerPromptMsg({ type: 'err', text: t('info.systemPrompt.saveError') });
-                          } finally {
-                            setSavingSubWorkerPrompt(false);
-                          }
-                        }}
-                      >
-                        <Save size={11} /> {t('info.systemPrompt.save')}
-                      </button>
-                      <button
-                        className="inline-flex items-center gap-1 py-1 px-2.5 text-[11px] font-medium rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-all duration-150 cursor-pointer"
-                        onClick={() => { setEditingSubWorkerPrompt(false); setSubWorkerPromptMsg(null); }}
-                      >
-                        <X size={11} /> {t('info.systemPrompt.cancel')}
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {subWorkerPromptMsg && (
-                  <div className={`text-[11px] mb-2 ${subWorkerPromptMsg.type === 'ok' ? 'text-[var(--success-color)]' : 'text-[var(--danger-color)]'}`}>
-                    {subWorkerPromptMsg.text}
-                  </div>
-                )}
-
-                {editingSubWorkerPrompt ? (
-                  <textarea
-                    className="w-full min-h-[120px] p-3 text-[12px] leading-relaxed rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] resize-y focus:outline-none focus:border-[var(--primary-color)] transition-colors"
-                    style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}
-                    value={subWorkerPromptDraft}
-                    onChange={e => setSubWorkerPromptDraft(e.target.value)}
-                    placeholder={t('info.subWorker.promptPlaceholder')}
-                    autoFocus
-                  />
-                ) : (
-                  <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] min-h-[40px]">
-                    {subWorkerData.system_prompt ? (
-                      <pre className="text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap break-words m-0" style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}>
-                        {subWorkerData.system_prompt}
-                      </pre>
-                    ) : (
-                      <span className="text-[12px] text-[var(--text-muted)] italic">{t('info.subWorker.noPrompt')}</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="text-[12px] text-[var(--text-muted)] italic py-3">{t('info.subWorker.notFound')}</div>
-          )}
-        </div>
-      )}
-      {subTab === 'worker' && !isDeleted && !(data.session_type === 'vtuber' && data.linked_session_id) && (
-        <div className="text-[12px] text-[var(--text-muted)] italic py-3">
-          {t('info.subWorker.notFound')}
         </div>
       )}
 

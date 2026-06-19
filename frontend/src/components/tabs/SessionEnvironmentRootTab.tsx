@@ -19,14 +19,15 @@
  */
 
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import {
   SubTabNav,
   type SubTabDef,
   EmptyState,
 } from '@/components/layout';
-import { Folder, Layers, Wrench, FolderOpen, Bot, Sparkles } from 'lucide-react';
+import { Folder, Layers, Wrench, FolderOpen, Bot, User } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
 import SubAgentPanel from '@/components/session-env/SubAgentPanel';
 
@@ -50,6 +51,7 @@ const SUB_TAB_COMPONENT: Record<string, React.ComponentType> = {
 };
 
 export default function SessionEnvironmentRootTab() {
+  const { t } = useI18n();
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const sessions = useAppStore((s) => s.sessions);
   const subTab = useAppStore((s) => s.sessionEnvSubTab);
@@ -57,39 +59,25 @@ export default function SessionEnvironmentRootTab() {
 
   const session = sessions.find((s) => s.session_id === sessionId);
 
-  // VTuber ↔ Sub-Worker: a VTuber's linked_session_id points at its paired
-  // Sub-Worker. When present, expose a [VTuber / Sub-Agent] toggle so the
-  // session-scoped tabs can show (and rebind) either side independently.
-  const subWorker = useMemo(() => {
-    if (!session || session.role !== 'vtuber' || !session.linked_session_id) {
-      return null;
-    }
-    return (
-      sessions.find((s) => s.session_id === session.linked_session_id) ?? null
-    );
-  }, [session, sessions]);
-  const hasSubAgent = !!subWorker;
-  // Executor-mode cutover: a VTuber owns a non-session executor sub-agent
-  // (no linked_session_id). Surface a Sub-Agent view (read-only panel) for it.
-  const isVtuberExecutor = !!session && session.role === 'vtuber' && !subWorker;
-  const showAgentToggle = hasSubAgent || isVtuberExecutor;
+  // Agent / Sub-Agent: an agent OWNS a persistent companion sub-agent when its
+  // env declares one (host_selections.extras.owned_subagent) — surfaced here as
+  // ``executor_sub_agent_id``. This is env-driven, NOT role-driven: any agent
+  // may own one. When present, expose an [Agent / Sub-Agent] toggle — "Agent" =
+  // this session's env (manifest/tools/workspace), "Sub-Agent" = the read-only
+  // companion panel (the companion inherits this env, so it has nothing
+  // separate to configure).
+  const ownsSubAgent = !!session?.executor_sub_agent_id;
 
-  // 'vtuber' = the selected session; 'sub' = its linked Sub-Worker.
-  const [agentTarget, setAgentTarget] = useState<'vtuber' | 'sub'>('vtuber');
-  // Reset to the VTuber side whenever the selected session changes.
+  const [agentTarget, setAgentTarget] = useState<'agent' | 'sub'>('agent');
+  // Reset to the Agent side whenever the selected session changes.
   useEffect(() => {
-    setAgentTarget('vtuber');
+    setAgentTarget('agent');
   }, [sessionId]);
 
-  const effectiveSession =
-    agentTarget === 'sub' && subWorker ? subWorker : session;
-  const effectiveSessionId = effectiveSession?.session_id ?? sessionId ?? null;
-
+  const effectiveSessionId = sessionId ?? null;
   const sessionLabel =
-    effectiveSession?.session_name ||
-    effectiveSessionId?.slice(0, 12) ||
-    '';
-  const envId = effectiveSession?.env_id ?? null;
+    session?.session_name || effectiveSessionId?.slice(0, 12) || '';
+  const envId = session?.env_id ?? null;
 
   // Hard guard: never render session-scoped sub-tabs without a session.
   if (!sessionId || !session) {
@@ -134,28 +122,28 @@ export default function SessionEnvironmentRootTab() {
             <span className="text-[var(--warning-color)]">기본 매니페스트</span>
           )}
         </div>
-        {showAgentToggle && (
+        {ownsSubAgent && (
           <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden shrink-0">
             <AgentToggleButton
-              active={agentTarget === 'vtuber'}
-              icon={Sparkles}
-              label="VTuber"
-              onClick={() => setAgentTarget('vtuber')}
+              active={agentTarget === 'agent'}
+              icon={User}
+              label={t('sessionEnvironmentTab.agentToggle.agent')}
+              onClick={() => setAgentTarget('agent')}
             />
             <AgentToggleButton
               active={agentTarget === 'sub'}
               icon={Bot}
-              label="Sub-Agent"
+              label={t('sessionEnvironmentTab.agentToggle.subAgent')}
               onClick={() => setAgentTarget('sub')}
             />
           </div>
         )}
       </div>
-      {agentTarget === 'sub' && isVtuberExecutor ? (
-        // Executor sub-agent is not a session — show its read-only panel
+      {agentTarget === 'sub' && ownsSubAgent ? (
+        // The owned companion is not a session — show its read-only panel
         // instead of the env/tools/workspace sub-tabs.
         <div className="flex-1 min-h-0 overflow-hidden">
-          <SubAgentPanel vtuberId={sessionId} />
+          <SubAgentPanel ownerId={sessionId} />
         </div>
       ) : (
         <>

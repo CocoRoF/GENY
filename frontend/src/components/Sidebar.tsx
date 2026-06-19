@@ -17,8 +17,8 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
-function SessionItem({ session, isSelected, onSelect, subWorkerSession }: {
-  session: SessionInfo; isSelected: boolean; onSelect: () => void; subWorkerSession?: SessionInfo | null;
+function SessionItem({ session, isSelected, onSelect }: {
+  session: SessionInfo; isSelected: boolean; onSelect: () => void;
 }) {
   const { t } = useI18n();
   const dotClass = session.status === 'running' ? 'bg-[var(--success-color)]'
@@ -68,15 +68,18 @@ function SessionItem({ session, isSelected, onSelect, subWorkerSession }: {
         </div>
         <div className="text-[0.75rem] text-[var(--text-muted)] font-mono mt-0.5 flex items-center gap-1.5">
           {session.session_id.substring(0, 12)}...
-          {subWorkerSession && (
+          {/* SA = this agent owns a persistent companion sub-agent
+              (env-driven via host_selections.extras.owned_subagent). */}
+          {session.executor_sub_agent_id && (
             <span
               className="inline-flex items-center px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wide"
               style={{
-                background: subWorkerSession.status === 'running' ? 'rgba(34,197,94,0.15)' : 'rgba(107,114,128,0.15)',
-                color: subWorkerSession.status === 'running' ? 'var(--success-color)' : 'var(--text-muted)',
+                background: 'rgba(139,92,246,0.15)',
+                color: 'var(--primary-color)',
               }}
+              title="이 에이전트는 영속 sub-agent를 소유합니다"
             >
-              SUB {subWorkerSession.status === 'running' ? '●' : '○'}
+              SA
             </span>
           )}
         </div>
@@ -104,18 +107,11 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<SessionInfo | null>(null);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
 
-  // Hide Sub-Worker sessions that are paired with a VTuber
-  const visibleSessions = sessions.filter(s => !(s.session_type === 'sub' && s.linked_session_id));
+  // Defensive: hide any orphaned legacy "sub" paired-session records (the
+  // bespoke pairing was removed — nothing produces these any more).
+  const visibleSessions = sessions.filter(s => s.session_type !== 'sub');
   const running = visibleSessions.filter(s => s.status === 'running' || s.status === 'idle').length;
   const errors = visibleSessions.filter(s => s.status === 'error').length;
-
-  // Build a lookup for VTuber → paired Sub-Worker session
-  const subWorkerByVtuber = new Map<string, SessionInfo>();
-  for (const s of sessions) {
-    if (s.session_type === 'sub' && s.linked_session_id) {
-      subWorkerByVtuber.set(s.linked_session_id, s);
-    }
-  }
 
   const handleDeleteClick = useCallback((e: React.MouseEvent, session: SessionInfo) => {
     e.stopPropagation();
@@ -204,7 +200,6 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
                 session={session}
                 isSelected={selectedSessionId === session.session_id}
                 onSelect={() => handleSessionSelect(session.session_id)}
-                subWorkerSession={subWorkerByVtuber.get(session.session_id)}
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover:opacity-100 md:group-hover:opacity-100 max-md:opacity-100 transition-opacity duration-150">
                 {canModify && (
@@ -225,7 +220,7 @@ function SidebarContent({ onSessionSelect }: { onSessionSelect?: () => void }) {
       {/* Deleted Sessions — only visible when authenticated */}
       {canModify && deletedSessions.length > 0 && (() => {
         // Hide Sub-Worker sessions paired with VTuber (same filter as active sessions)
-        const visibleDeleted = deletedSessions.filter(s => !(s.session_type === 'sub' && s.linked_session_id));
+        const visibleDeleted = deletedSessions.filter(s => s.session_type !== 'sub');
         if (visibleDeleted.length === 0) return null;
         return (
         <div className="border-t border-[var(--border-color)]">
@@ -329,7 +324,7 @@ export default function Sidebar() {
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Filter out Sub-Worker sessions paired with VTuber for collapsed counter
-  const visibleCount = sessions.filter(s => !(s.session_type === 'sub' && s.linked_session_id)).length;
+  const visibleCount = sessions.filter(s => s.session_type !== 'sub').length;
 
   // Close mobile sidebar on route/tab change or escape
   useEffect(() => {

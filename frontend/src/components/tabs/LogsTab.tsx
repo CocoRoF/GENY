@@ -84,26 +84,10 @@ export default function LogsTab() {
   const [filter, setFilter] = useState('group:default');
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'vtuber' | 'sub'>('vtuber');
 
-  // VTuber/Sub-Worker dual-view support
-  const session = useMemo(
-    () => sessions.find(s => s.session_id === selectedSessionId),
-    [sessions, selectedSessionId],
-  );
-
-  const linkedSubWorkerSession = useMemo(() => {
-    if (!session || session.session_type !== 'vtuber') return null;
-    return sessions.find(s => s.session_type === 'sub' && s.linked_session_id === session.session_id) ?? null;
-  }, [session, sessions]);
-
-  const hasDualView = !!linkedSubWorkerSession;
-
-  // Resolve which session ID to fetch logs for
-  const targetSessionId = useMemo(() => {
-    if (!hasDualView || viewMode === 'vtuber') return selectedSessionId;
-    return linkedSubWorkerSession?.session_id ?? selectedSessionId;
-  }, [hasDualView, viewMode, selectedSessionId, linkedSubWorkerSession]);
+  // Logs are always for the selected session (the owned companion sub-agent
+  // has its own read-only view in the Environment tab, not a log stream here).
+  const targetSessionId = selectedSessionId;
 
   // Context for the sticky header — which session's env/role/type we're looking at.
   const contextSession = useMemo(() => {
@@ -111,8 +95,6 @@ export default function LogsTab() {
     return sessions.find(s => s.session_id === targetSessionId) ?? null;
   }, [sessions, targetSessionId]);
 
-  // Reset viewMode when session changes
-  useEffect(() => { setViewMode('vtuber'); }, [selectedSessionId]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Split pane state
@@ -221,60 +203,8 @@ export default function LogsTab() {
             <ScrollText size={13} className="text-white" />
           </div>
           <h3 className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">{t('logsTab.title')}</h3>
-
-          {/* VTuber / Sub-Worker toggle */}
-          {hasDualView && (
-            <div className="flex items-center h-6 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] overflow-hidden shrink-0">
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors border-none cursor-pointer ${
-                  viewMode === 'vtuber'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] bg-transparent'
-                }`}
-                onClick={() => setViewMode('vtuber')}
-              >
-                VTuber
-              </button>
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors border-none cursor-pointer ${
-                  viewMode === 'sub'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] bg-transparent'
-                }`}
-                onClick={() => setViewMode('sub')}
-              >
-                Sub-Worker
-              </button>
-            </div>
-          )}
         </div>
         <div className="flex items-center gap-2">
-          {/* VTuber / Sub-Worker toggle — mobile */}
-          {hasDualView && (
-            <div className="flex md:hidden items-center h-6 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] overflow-hidden shrink-0">
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors border-none cursor-pointer ${
-                  viewMode === 'vtuber'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] bg-transparent'
-                }`}
-                onClick={() => setViewMode('vtuber')}
-              >
-                VTuber
-              </button>
-              <button
-                className={`px-2 h-full text-[10px] font-semibold transition-colors border-none cursor-pointer ${
-                  viewMode === 'sub'
-                    ? 'bg-[var(--primary-color)] text-white'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] bg-transparent'
-                }`}
-                onClick={() => setViewMode('sub')}
-              >
-                Sub-Worker
-              </button>
-            </div>
-          )}
-
           {/* Filter selector */}
           <Selector
             variant="field"
