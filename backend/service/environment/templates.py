@@ -477,7 +477,24 @@ def _resolve_active_provider() -> str:
     try:
         from service.executor.credentials import CredentialBundleBuilder
 
-        provider = CredentialBundleBuilder().build().preferred_provider()
+        # Explicit order: cloud/CLI backends keep priority (an existing
+        # Claude/OpenAI setup is unchanged), but the branded local
+        # providers (executor 2.9.0) are appended so a *local-only*
+        # install — Ollama running, no cloud keys — resolves to ``ollama``
+        # instead of falling through to the keyless ``anthropic``
+        # last-resort and failing every session.
+        provider = CredentialBundleBuilder().build().preferred_provider(
+            order=(
+                "claude_code_cli",
+                "anthropic",
+                "openai",
+                "google",
+                "vllm",
+                "ollama",
+                "lmstudio",
+                "custom",
+            )
+        )
     except Exception:  # noqa: BLE001 — defensive, very early-boot callers
         provider = None
     return provider or "anthropic"

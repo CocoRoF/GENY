@@ -19,8 +19,10 @@ import { llmBackendsApi, type ProviderHealth, type ClaudeCodeVersionStatus } fro
 import { useI18n } from '@/lib/i18n';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import ApiBackendModal from './ApiBackendModal';
+import LocalBackendModal, { type LocalProviderId } from './LocalBackendModal';
 
 const API_PROVIDERS = new Set(['anthropic', 'openai', 'google', 'vllm']);
+const LOCAL_PROVIDERS = new Set<string>(['ollama', 'lmstudio', 'custom']);
 
 
 type BadgeTone = 'good' | 'warn' | 'bad' | 'info';
@@ -436,6 +438,15 @@ function LLMBackendsPanelInner() {
       {openProvider && API_PROVIDERS.has(openProvider) && (
         <ApiBackendModal
           providerId={openProvider as 'anthropic' | 'openai' | 'google' | 'vllm'}
+          providerLabel={providerLabelById[openProvider] || openProvider}
+          onClose={() => setOpenProvider(null)}
+          onChange={() => fetchHealth()}
+        />
+      )}
+
+      {openProvider && LOCAL_PROVIDERS.has(openProvider) && (
+        <LocalBackendModal
+          providerId={openProvider as LocalProviderId}
           providerLabel={providerLabelById[openProvider] || openProvider}
           onClose={() => setOpenProvider(null)}
           onChange={() => fetchHealth()}

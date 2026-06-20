@@ -2,7 +2,7 @@
  * Provider + model catalog for the global model config editor.
  *
  * Provider taxonomy mirrors geny-executor's
- * `geny_executor.llm_client.registry.ClientRegistry` — five providers:
+ * `geny_executor.llm_client.registry.ClientRegistry`:
  *
  *   - anthropic         Claude family (default; hard dependency)
  *   - openai            GPT-4.1 + reasoning models (o3 / o4-mini)
@@ -10,6 +10,9 @@
  *   - vllm              any model on a local vLLM endpoint; free-form
  *   - claude_code_cli   subprocess driving the local `claude` CLI
  *                       (Anthropic-subscription or API-key auth)
+ *   - ollama            Ollama's OpenAI endpoint (executor 2.9.0); local
+ *   - lmstudio          LM Studio local server (executor 2.9.0); local
+ *   - custom            any other OpenAI-compatible endpoint; local
  *
  * The legacy ``copilot_cli`` provider was removed in cycle 20260520 —
  * ``gh copilot`` does not support streaming, tools, or MCP, so it
@@ -27,7 +30,11 @@ export type ProviderId =
   | 'openai'
   | 'google'
   | 'vllm'
-  | 'claude_code_cli';
+  | 'claude_code_cli'
+  // Branded local (OpenAI-compatible) backends — executor 2.9.0.
+  | 'ollama'
+  | 'lmstudio'
+  | 'custom';
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -64,6 +71,34 @@ export const PROVIDERS: ProviderInfo[] = [
     kind: 'cli',
     installHelp:
       'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM Backends.',
+  },
+  // Local OpenAI-compatible backends. ``freeForm`` because the served
+  // model id is endpoint-specific; the LLM Backends panel's local card
+  // discovers the actual ids (Ollama /api/tags, others /v1/models) so the
+  // user can copy one in. Configure the endpoint in Settings → LLM Backends.
+  {
+    id: 'ollama',
+    label: 'Ollama (local)',
+    freeForm: true,
+    kind: 'api',
+    installHelp:
+      'Install Ollama (ollama.com), run a model (e.g. `ollama run qwen2.5-coder`), then set the endpoint in Settings → LLM Backends → Ollama.',
+  },
+  {
+    id: 'lmstudio',
+    label: 'LM Studio (local)',
+    freeForm: true,
+    kind: 'api',
+    installHelp:
+      'Start LM Studio\'s local server, then set the endpoint in Settings → LLM Backends → LM Studio.',
+  },
+  {
+    id: 'custom',
+    label: 'Custom (OpenAI-compatible)',
+    freeForm: true,
+    kind: 'api',
+    installHelp:
+      'Any OpenAI-compatible server (llama.cpp, LiteLLM, …). Set the base URL in Settings → LLM Backends → Custom.',
   },
 ];
 
@@ -111,6 +146,10 @@ export const MODEL_CATALOG: Record<ProviderId, ModelOption[]> = {
     { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (pinned)' },
     { id: 'claude-opus-4-7', label: 'Opus 4.7 (pinned)' },
   ],
+  // Local backends are free-form — models are discovered per endpoint.
+  ollama: [],
+  lmstudio: [],
+  custom: [],
 };
 
 export const DEFAULT_PROVIDER: ProviderId = 'anthropic';
@@ -125,6 +164,10 @@ export const PROVIDER_DEFAULT_MODEL: Record<ProviderId, string> = {
   google: 'gemini-3.1-pro',
   vllm: '',
   claude_code_cli: 'sonnet',
+  // Local: user enters / copies a discovered model id.
+  ollama: '',
+  lmstudio: '',
+  custom: '',
 };
 
 /** Look up provider metadata by id. Returns the canonical Anthropic
@@ -142,6 +185,11 @@ export const PROVIDER_CAPABILITY_HINTS: Record<ProviderId, string[]> = {
   google: ['tools', 'streaming', 'top_k', 'json_schema'],
   vllm: ['streaming'],
   claude_code_cli: ['thinking', 'tools', 'streaming', 'mcp', 'session_resume', 'budget'],
+  // Local OpenAI-compatible: tools depend on the served model, but the
+  // executor's branded providers default to tool-capable.
+  ollama: ['tools', 'streaming', 'local'],
+  lmstudio: ['tools', 'streaming', 'local'],
+  custom: ['tools', 'streaming', 'local'],
 };
 
 /** Mirrors executor's `_infer_api_artifact` so the UI can fall back to
