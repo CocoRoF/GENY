@@ -83,6 +83,11 @@ services:
       # root .env to let users DM the VTuber from Telegram; empty = off.
       - GATEWAY_TELEGRAM_BOT_TOKEN=${GATEWAY_TELEGRAM_BOT_TOKEN:-}
       - GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS=${GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS:-}
+      - GATEWAY_DISCORD_BOT_TOKEN=${GATEWAY_DISCORD_BOT_TOKEN:-}
+      - GATEWAY_DISCORD_ALLOWED_CHANNEL_IDS=${GATEWAY_DISCORD_ALLOWED_CHANNEL_IDS:-}
+      - GATEWAY_SLACK_APP_TOKEN=${GATEWAY_SLACK_APP_TOKEN:-}
+      - GATEWAY_SLACK_BOT_TOKEN=${GATEWAY_SLACK_BOT_TOKEN:-}
+      - GATEWAY_SLACK_ALLOWED_CHANNEL_IDS=${GATEWAY_SLACK_ALLOWED_CHANNEL_IDS:-}
       # ── Persistent-storage paths (Phase 1, 2026-05-19) ─────────────
       # Every path below is backed by a named volume so its data
       # survives ``docker compose up --build``. Without these env
