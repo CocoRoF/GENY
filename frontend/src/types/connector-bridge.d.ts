@@ -52,6 +52,13 @@ declare global {
         setPushToTalk(accelerator: string): Promise<boolean>
         /** Subscribe to global push-to-talk presses; returns a disposer. */
         onPushToTalk(cb: () => void): () => void
+        getQuickChat?(): Promise<string | null>
+        setQuickChat?(accelerator: string): Promise<boolean>
+      }
+      /** Quick-chat relay: the floating bar's message arrives here so the
+       *  /connector chat can reuse its own send path. */
+      messaging?: {
+        onQuickSend(cb: (text: string) => void): () => void
       }
       capture: {
         listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>

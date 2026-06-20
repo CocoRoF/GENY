@@ -29,8 +29,9 @@ export interface ConnectorConfig {
 }
 
 export interface ConnectorBridge {
-  /** Which window this renderer is: 'overlay' (avatar) or 'settings'/'control'. */
-  windowKind: 'overlay' | 'control' | 'settings'
+  /** Which window this renderer is: 'overlay' (avatar), 'settings'/'control', or
+   *  'quickchat' (the floating Spotlight-style input bar). */
+  windowKind: 'overlay' | 'control' | 'settings' | 'quickchat'
 
   /** Connector app version (package.json), for the settings window. */
   appVersion(): Promise<string>
@@ -73,12 +74,32 @@ export interface ConnectorBridge {
     reloadPanel(): void
   }
 
-  /** Global push-to-talk hotkey. */
+  /** Global hotkeys (push-to-talk + quick-chat). */
   hotkeys: {
     getPushToTalk(): Promise<string | null>
     setPushToTalk(accelerator: string): Promise<boolean>
     /** Subscribe to global push-to-talk presses; returns a disposer. */
     onPushToTalk(cb: () => void): () => void
+    /** Global quick-chat accelerator (summons the floating input bar). */
+    getQuickChat(): Promise<string | null>
+    setQuickChat(accelerator: string): Promise<boolean>
+  }
+
+  /** Quick-chat input bar (the 'quickchat' window) → relay to the VTuber chat. */
+  quickChat: {
+    /** Send the typed text to the current VTuber; main closes the bar on ok. */
+    submit(text: string): Promise<{ ok: boolean; error?: string }>
+    /** Dismiss the bar (Esc / blur). */
+    close(): void
+    /** Fired each time the bar is summoned (reset + focus the input). */
+    onOpened(cb: () => void): () => void
+  }
+
+  /** Inbound messaging from the connector → the /connector chat page reuses its
+   *  own send path when a quick-chat message arrives. */
+  messaging: {
+    /** Subscribe to quick-chat relays; returns a disposer. */
+    onQuickSend(cb: (text: string) => void): () => void
   }
 
   /** GitHub Releases auto-update controls. */
@@ -117,7 +138,11 @@ export interface ActuationResult {
 const _wk = new URLSearchParams(location.search).get('window')
 
 const api: ConnectorBridge = {
-  windowKind: _wk === 'settings' ? 'settings' : _wk === 'control' ? 'control' : 'overlay',
+  windowKind:
+    _wk === 'settings' ? 'settings'
+    : _wk === 'control' ? 'control'
+    : _wk === 'quickchat' ? 'quickchat'
+    : 'overlay',
   appVersion: () => ipcRenderer.invoke('app:version'),
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
@@ -167,6 +192,24 @@ const api: ConnectorBridge = {
       const h = () => cb()
       ipcRenderer.on('connector:ptt-toggle', h)
       return () => ipcRenderer.removeListener('connector:ptt-toggle', h)
+    },
+    getQuickChat: () => ipcRenderer.invoke('hotkey:get-quickchat'),
+    setQuickChat: (acc) => ipcRenderer.invoke('hotkey:set-quickchat', acc),
+  },
+  quickChat: {
+    submit: (text) => ipcRenderer.invoke('quickchat:submit', text),
+    close: () => ipcRenderer.send('quickchat:close'),
+    onOpened: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('quickchat:opened', h)
+      return () => ipcRenderer.removeListener('quickchat:opened', h)
+    },
+  },
+  messaging: {
+    onQuickSend: (cb) => {
+      const h = (_e: unknown, text: string) => cb(text)
+      ipcRenderer.on('connector:quick-send', h)
+      return () => ipcRenderer.removeListener('connector:quick-send', h)
     },
   },
 }

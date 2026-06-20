@@ -45,6 +45,7 @@ if (process.platform === 'win32') {
 
 let overlay: BrowserWindow | null = null
 let control: BrowserWindow | null = null
+let quickchat: BrowserWindow | null = null
 
 // ── tiny JSON config (server URL, last geometry) in userData ────────────────
 interface ConnectorConfig {
@@ -55,6 +56,9 @@ interface ConnectorConfig {
   autoUpdate?: boolean
   /** Global push-to-talk accelerator (Electron format). */
   pttHotkey?: string
+  /** Global quick-chat accelerator (Electron format) — pops the floating input
+   *  bar that sends a message to the current VTuber (Spotlight-style). */
+  quickChatHotkey?: string
   /** Allow the agent to capture the screen (Phase 4). Default true. */
   captureArmed?: boolean
   /** Allow the agent to actuate the desktop — type/click/open (Phase 6). Default false. */
@@ -232,6 +236,104 @@ function showSettings(): void {
   settings?.focus()
 }
 
+// ── quick-chat window: Spotlight-style floating input ───────────────────────
+// A small, frameless, transparent, always-on-top input bar summoned by a global
+// hotkey from anywhere. Typing + Enter sends the message to the CURRENT VTuber
+// (the overlaySession) by relaying it to the already-loaded /connector chat —
+// reusing its proven send/auth/TTS pipeline (no duplicate transport).
+const QUICKCHAT_W = 640
+const QUICKCHAT_H = 188
+function createQuickChat(): void {
+  quickchat = new BrowserWindow({
+    width: QUICKCHAT_W,
+    height: QUICKCHAT_H,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    // Don't appear in the dock-cycle / app-switcher; it's an ephemeral palette.
+    fullscreenable: false,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  // Float above full-screen apps too (so the hotkey works over a game/video).
+  quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  quickchat.setAlwaysOnTop(true, 'screen-saver')
+  loadRoute(quickchat, 'quickchat')
+  // Dismiss on focus loss (click elsewhere) — Spotlight behaviour.
+  quickchat.on('blur', () => quickchat?.hide())
+  quickchat.on('close', (e) => {
+    if (!appQuitting) {
+      e.preventDefault()
+      quickchat?.hide()
+    }
+  })
+}
+
+// Center the bar horizontally on the display under the cursor, anchored ~22%
+// from the top (classic launcher placement).
+function positionQuickChat(): void {
+  if (!quickchat) return
+  const pt = screen.getCursorScreenPoint()
+  const disp = screen.getDisplayNearestPoint(pt)
+  const wa = disp.workArea
+  const x = Math.round(wa.x + (wa.width - QUICKCHAT_W) / 2)
+  const y = Math.round(wa.y + wa.height * 0.22)
+  quickchat.setBounds({ x, y, width: QUICKCHAT_W, height: QUICKCHAT_H })
+}
+
+async function toggleQuickChat(): Promise<void> {
+  if (!quickchat) createQuickChat()
+  if (quickchat?.isVisible()) {
+    quickchat.hide()
+    return
+  }
+  // Logged-out → there's no VTuber to message; route the user to login instead.
+  const token = await getStoredToken()
+  if (!token || !loadConfig().serverUrl) {
+    showSettings()
+    return
+  }
+  positionQuickChat()
+  quickchat?.show()
+  quickchat?.focus()
+  // Tell the renderer to reset + focus its input each time it's summoned.
+  quickchat?.webContents.send('quickchat:opened')
+}
+
+// Relay a quick-chat message to the current VTuber via the /connector page's
+// existing chat send. Returns whether it was delivered (false → not logged in /
+// panel not ready, so the bar can surface a hint).
+async function deliverQuickChat(text: string): Promise<{ ok: boolean; error?: string }> {
+  const body = (text ?? '').trim()
+  if (!body) return { ok: false, error: '빈 메시지' }
+  const token = await getStoredToken()
+  if (!token || !loadConfig().serverUrl) return { ok: false, error: '로그인이 필요합니다' }
+  if (!control) createControl()
+  // Make sure the /connector chat page is loaded (it mounts the listener that
+  // relays the message into the chat). Normally it's already up from startup.
+  let justLoaded = false
+  if (!control!.webContents.getURL().includes('/connector')) {
+    await applyControlContent()
+    justLoaded = true
+  }
+  // If we had to (re)load, give React a beat to mount its onQuickSend listener
+  // before the event arrives (an early send would be dropped).
+  if (justLoaded) await new Promise((r) => setTimeout(r, 450))
+  control!.webContents.send('connector:quick-send', body)
+  return { ok: true }
+}
+
 // Re-evaluate everything after login/logout/url-change: window content + which
 // window is visible.
 async function refreshAll(): Promise<void> {
@@ -247,7 +349,7 @@ async function refreshAll(): Promise<void> {
   }
 }
 
-function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings'): void {
+function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings' | 'quickchat'): void {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/index.html?window=${route}`)
   } else {
@@ -309,6 +411,7 @@ function createTray(): void {
   const rebuildMenu = () => {
     const menu = Menu.buildFromTemplate([
       { label: '제어판 / 채팅 열기', click: () => showControl() },
+      { label: '빠른 채팅 (VTuber에게 보내기)', click: () => void toggleQuickChat() },
       { label: '설정 열기', click: () => showSettings() },
       {
         label: overlay?.isVisible() ? '아바타 숨기기' : '아바타 보이기',
@@ -385,19 +488,42 @@ async function logout(): Promise<void> {
   await refreshAll() // logged out → hides panel, shows settings/login
 }
 
-// ── global push-to-talk hotkey ──────────────────────────────────────────────
+// ── global hotkeys (push-to-talk + quick-chat) ──────────────────────────────
 const DEFAULT_PTT = 'CommandOrControl+Shift+Space'
-function registerPtt(acc?: string | null): boolean {
+// A deliberately uncommon default (rarely claimed system-wide) yet mnemonic —
+// Enter = "send". Reconfigurable in the settings window.
+const DEFAULT_QUICKCHAT = 'CommandOrControl+Shift+Enter'
+
+// Both global accelerators are (re)registered together: globalShortcut has no
+// race-free per-accelerator rebind, so we unregister all and re-add each from
+// the current config. Returns which ones actually bound (false → conflict).
+function registerHotkeys(): { ptt: boolean; quickChat: boolean } {
   globalShortcut.unregisterAll()
-  const hk = acc ?? loadConfig().pttHotkey ?? DEFAULT_PTT
-  if (!hk) return true
-  try {
-    // press-only (globalShortcut has no key-up) → the overlay treats it as a
-    // tap-to-toggle for the mic. Target the overlay: it owns the WS + audio.
-    return globalShortcut.register(hk, () => overlay?.webContents.send('connector:ptt-toggle'))
-  } catch {
-    return false
+  const cfg = loadConfig()
+  const result = { ptt: true, quickChat: true }
+
+  const ptt = cfg.pttHotkey ?? DEFAULT_PTT
+  if (ptt) {
+    try {
+      // press-only (globalShortcut has no key-up) → the overlay treats it as a
+      // tap-to-toggle for the mic. Target the overlay: it owns the WS + audio.
+      result.ptt = globalShortcut.register(ptt, () =>
+        overlay?.webContents.send('connector:ptt-toggle'),
+      )
+    } catch {
+      result.ptt = false
+    }
   }
+
+  const qc = cfg.quickChatHotkey ?? DEFAULT_QUICKCHAT
+  if (qc) {
+    try {
+      result.quickChat = globalShortcut.register(qc, () => void toggleQuickChat())
+    } catch {
+      result.quickChat = false
+    }
+  }
+  return result
 }
 
 // ── Phase 6 actuation gate: master switch (default OFF) + native confirm ─────
@@ -511,13 +637,42 @@ function registerIpc(): void {
     app.quit()
   })
 
-  // Global push-to-talk hotkey config.
+  // Global push-to-talk hotkey config. Persist the candidate, re-bind both
+  // hotkeys, and roll back if it failed to register (conflict with another app).
   ipcMain.handle('hotkey:get-ptt', () => loadConfig().pttHotkey ?? DEFAULT_PTT)
   ipcMain.handle('hotkey:set-ptt', (_e, acc: string) => {
-    const ok = registerPtt(acc)
-    if (ok) saveConfig({ pttHotkey: acc })
+    const prev = loadConfig().pttHotkey
+    saveConfig({ pttHotkey: acc })
+    const ok = registerHotkeys().ptt
+    if (!ok) {
+      saveConfig({ pttHotkey: prev ?? DEFAULT_PTT })
+      registerHotkeys()
+    }
     return ok
   })
+
+  // Global quick-chat hotkey config (same rollback contract as PTT).
+  ipcMain.handle('hotkey:get-quickchat', () => loadConfig().quickChatHotkey ?? DEFAULT_QUICKCHAT)
+  ipcMain.handle('hotkey:set-quickchat', (_e, acc: string) => {
+    const prev = loadConfig().quickChatHotkey
+    saveConfig({ quickChatHotkey: acc })
+    const ok = registerHotkeys().quickChat
+    if (!ok) {
+      saveConfig({ quickChatHotkey: prev ?? DEFAULT_QUICKCHAT })
+      registerHotkeys()
+    }
+    return ok
+  })
+
+  // Quick-chat bar → send to the current VTuber, then close. Returns {ok,error}
+  // so the bar can show a brief result (전송됨 / 로그인 필요).
+  ipcMain.handle('quickchat:submit', async (_e, text: string) => {
+    const r = await deliverQuickChat(text)
+    if (r.ok) quickchat?.hide()
+    return r
+  })
+  // Esc / cancel from the bar.
+  ipcMain.on('quickchat:close', () => quickchat?.hide())
 
   // ── Phase 4: desktop awareness (read-only capture) ──
   ipcMain.handle('capture:list-sources', async () => {
@@ -682,6 +837,7 @@ app.whenReady().then(() => {
   createOverlay()
   createControl()
   createSettings()
+  createQuickChat()
   createTray()
 
   // Show the right window for the current state: logged in → the /connector
@@ -692,8 +848,8 @@ app.whenReady().then(() => {
   // check, so changes take effect immediately.
   initAutoUpdate(() => loadConfig().autoUpdate !== false)
 
-  // Register the global push-to-talk hotkey.
-  registerPtt(loadConfig().pttHotkey ?? DEFAULT_PTT)
+  // Register the global hotkeys (push-to-talk + quick-chat).
+  registerHotkeys()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()

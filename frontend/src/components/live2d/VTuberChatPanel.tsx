@@ -407,8 +407,11 @@ export default function VTuberChatPanel({
     lastMsgIdRef.current = null;
   }, [sessionId, roomId]);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  // Core send — takes the message text explicitly (not from the input state) so
+  // it can be driven both by the in-app composer and by an external trigger
+  // (the desktop connector's global quick-chat hotkey).
+  const sendText = useCallback(async (rawText: string) => {
+    const text = rawText.trim();
     const hasAttachments = pendingAttachments.length > 0;
     if ((!text && !hasAttachments) || sending || !roomId) return;
     if (uploadingCount > 0) return;  // wait for in-flight uploads
@@ -423,7 +426,6 @@ export default function VTuberChatPanel({
       useVTuberStore.getState().beginTTSTurn(sessionId);
     }
 
-    setInput('');
     const attachmentsToSend = [...pendingAttachments];
     setPendingAttachments([]);
     setAttachmentError(null);
@@ -464,7 +466,27 @@ export default function VTuberChatPanel({
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [input, sending, roomId, toDisplayMessage, pendingAttachments, uploadingCount, sessionId, t]);
+  }, [sending, roomId, toDisplayMessage, pendingAttachments, uploadingCount, sessionId, t]);
+
+  const handleSend = useCallback(() => {
+    const hasAttachments = pendingAttachments.length > 0;
+    if ((!input.trim() && !hasAttachments) || sending || !roomId || uploadingCount > 0) return;
+    const text = input;
+    setInput('');
+    void sendText(text);
+  }, [input, sending, roomId, uploadingCount, pendingAttachments, sendText]);
+
+  // Desktop connector: the global-hotkey quick-chat bar relays its text here, so
+  // a message typed in the floating bar travels the SAME path as the in-app
+  // composer — the VTuber answers (avatar TTS + reply) exactly as usual.
+  useEffect(() => {
+    const onQuickSend = window.connector?.messaging?.onQuickSend;
+    if (!onQuickSend) return;
+    const dispose = onQuickSend((text: string) => {
+      void sendText(text);
+    });
+    return () => dispose?.();
+  }, [sendText]);
 
   // ── Attachment helpers ────────────────────────────────────────────
   const MAX_ATTACHMENTS = 8;
