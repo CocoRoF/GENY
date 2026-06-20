@@ -21,15 +21,44 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _csv(name: str) -> List[str]:
+    raw = (os.environ.get(name) or "").strip()
+    return [c.strip() for c in raw.split(",") if c.strip()] if raw else []
+
+
 def _specs_from_env() -> List[Dict[str, Any]]:
-    token = (os.environ.get("GATEWAY_TELEGRAM_BOT_TOKEN") or "").strip()
-    if not token:
-        return []
-    config: Dict[str, Any] = {"token": token}
-    allowed = (os.environ.get("GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS") or "").strip()
-    if allowed:
-        config["allowed_chat_ids"] = [c.strip() for c in allowed.split(",") if c.strip()]
-    return [{"platform": "telegram", "config": config}]
+    """Gateway specs from env — one block per platform, each gated on its token."""
+    specs: List[Dict[str, Any]] = []
+
+    # Telegram (HTTP long-poll)
+    tg = (os.environ.get("GATEWAY_TELEGRAM_BOT_TOKEN") or "").strip()
+    if tg:
+        cfg: Dict[str, Any] = {"token": tg}
+        allowed = _csv("GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS")
+        if allowed:
+            cfg["allowed_chat_ids"] = allowed
+        specs.append({"platform": "telegram", "config": cfg})
+
+    # Discord (Gateway WebSocket)
+    dc = (os.environ.get("GATEWAY_DISCORD_BOT_TOKEN") or "").strip()
+    if dc:
+        cfg = {"token": dc}
+        allowed = _csv("GATEWAY_DISCORD_ALLOWED_CHANNEL_IDS")
+        if allowed:
+            cfg["allowed_channel_ids"] = allowed
+        specs.append({"platform": "discord", "config": cfg})
+
+    # Slack (Socket Mode — needs both an app token and a bot token)
+    slack_app = (os.environ.get("GATEWAY_SLACK_APP_TOKEN") or "").strip()
+    slack_bot = (os.environ.get("GATEWAY_SLACK_BOT_TOKEN") or "").strip()
+    if slack_app and slack_bot:
+        cfg = {"app_token": slack_app, "bot_token": slack_bot}
+        allowed = _csv("GATEWAY_SLACK_ALLOWED_CHANNEL_IDS")
+        if allowed:
+            cfg["allowed_channel_ids"] = allowed
+        specs.append({"platform": "slack", "config": cfg})
+
+    return specs
 
 
 def _specs_from_settings() -> List[Dict[str, Any]]:

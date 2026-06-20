@@ -26,6 +26,45 @@ def test_env_token_builds_telegram_spec():
     assert specs == [{"platform": "telegram", "config": {"token": "123:abc"}}]
 
 
+def test_env_discord_spec():
+    with patch.dict(
+        "os.environ",
+        {"GATEWAY_TELEGRAM_BOT_TOKEN": "", "GATEWAY_DISCORD_BOT_TOKEN": "botT"},
+        clear=False,
+    ):
+        specs = _specs_from_env()
+    assert specs == [{"platform": "discord", "config": {"token": "botT"}}]
+
+
+def test_env_slack_needs_both_tokens():
+    # only the app token → no spec
+    with patch.dict(
+        "os.environ",
+        {
+            "GATEWAY_TELEGRAM_BOT_TOKEN": "",
+            "GATEWAY_DISCORD_BOT_TOKEN": "",
+            "GATEWAY_SLACK_APP_TOKEN": "xapp",
+            "GATEWAY_SLACK_BOT_TOKEN": "",
+        },
+        clear=False,
+    ):
+        assert _specs_from_env() == []
+    with patch.dict(
+        "os.environ",
+        {
+            "GATEWAY_TELEGRAM_BOT_TOKEN": "",
+            "GATEWAY_DISCORD_BOT_TOKEN": "",
+            "GATEWAY_SLACK_APP_TOKEN": "xapp",
+            "GATEWAY_SLACK_BOT_TOKEN": "xoxb",
+        },
+        clear=False,
+    ):
+        specs = _specs_from_env()
+    assert specs == [
+        {"platform": "slack", "config": {"app_token": "xapp", "bot_token": "xoxb"}}
+    ]
+
+
 def test_env_allowed_chat_ids_parsed():
     with patch.dict(
         "os.environ",
