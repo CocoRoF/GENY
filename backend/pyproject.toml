@@ -51,8 +51,12 @@ dependencies = [
     # 2.9.0 — first-class local LLM providers (ollama / lmstudio /
     # custom) via declarative ProviderProfile + /api/show context-window
     # probe + tolerant local tool-call JSON repair. Geny surfaces these
-    # in the LLM Backends panel. Keep in sync with requirements.txt.
-    "geny-executor>=2.9.0,<3.0.0",
+    # in the LLM Backends panel.
+    # 2.10.0 — built-in output-channel transports (webhook / telegram /
+    # discord / slack / ntfy) so Geny declares channels in config and the
+    # executor builds them (no host transport code). Keep in sync with
+    # requirements.txt.
+    "geny-executor>=2.10.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

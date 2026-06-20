@@ -177,12 +177,13 @@ class NotificationsConfigSection(BaseModel):
 class SendMessageChannelEntry(BaseModel):
     """One row in ``settings.json:channels.send_message`` (L.1 / cycle 20260426_3).
 
-    The actual channel implementation must be registered in code via
-    ``service.notifications.channel_factory.register_channel_factory(kind, ...)``
-    before the install layer runs — settings drives *which entries
-    activate*, not the implementation. The shipped factory handles
-    ``stdout`` only; hosts add Discord / Slack / etc by registering
-    their own.
+    Settings drives *which entries activate*, not the implementation.
+    geny-executor ≥2.10.0 ships the common transports built-in, so
+    ``kind`` can be ``webhook`` / ``telegram`` / ``discord`` / ``slack`` /
+    ``ntfy`` / ``stdout`` with no host code — ``config`` carries that
+    kind's params (token, webhook_url, …). Hosts can still register extra
+    transports via
+    ``service.notifications.channel_factory.register_channel_factory(kind, ...)``.
     """
 
     name: str = Field(..., min_length=1, description="Registry key")
