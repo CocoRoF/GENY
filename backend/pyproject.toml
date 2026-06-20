@@ -47,8 +47,12 @@ dependencies = [
     # 2.5.0 — token-budget guard compacts-and-rechecks (projected
     # next-request measure + Stage 2/4 shared estimator) instead of
     # hard-failing; PersistingLLMSummaryCompactor auto-wired into the
-    # guard recovery path. Keep in sync with requirements.txt.
-    "geny-executor>=2.8.0,<3.0.0",
+    # guard recovery path.
+    # 2.9.0 — first-class local LLM providers (ollama / lmstudio /
+    # custom) via declarative ProviderProfile + /api/show context-window
+    # probe + tolerant local tool-call JSON repair. Geny surfaces these
+    # in the LLM Backends panel. Keep in sync with requirements.txt.
+    "geny-executor>=2.9.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

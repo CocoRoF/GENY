@@ -1767,6 +1767,21 @@ export interface BackendsHealthResponse {
   providers: ProviderHealth[];
 }
 
+export interface LocalModelsResponse {
+  provider: string;
+  base_url: string;
+  reachable: boolean;
+  models: string[];
+  detail_code?: string | null;
+}
+
+export interface LocalContextWindowResponse {
+  provider: string;
+  base_url: string;
+  model: string;
+  context_window?: number | null;
+}
+
 export interface SubagentInfo {
   agent_type: string;
   description: string;
@@ -1836,6 +1851,29 @@ export const llmBackendsApi = {
 
   /** GET /api/llm-backends/subagents */
   subagents: () => apiCall<SubagentsResponse>('/api/llm-backends/subagents'),
+
+  // ── Local (OpenAI-compatible) backends — discovery + context probe ──
+
+  /** GET /api/llm-backends/local-models — discover models served by a
+   *  local backend (Ollama / LM Studio / custom). ``baseUrl`` overrides
+   *  the stored/default endpoint so "Test" works before save. */
+  localModels: (provider: string, baseUrl?: string) => {
+    const params = new URLSearchParams({ provider });
+    if (baseUrl) params.set('base_url', baseUrl);
+    return apiCall<LocalModelsResponse>(
+      `/api/llm-backends/local-models?${params.toString()}`,
+    );
+  },
+
+  /** GET /api/llm-backends/local-context-window — probe a local model's
+   *  real context window (Ollama /api/show) to auto-fill num_ctx. */
+  localContextWindow: (provider: string, model: string, baseUrl?: string) => {
+    const params = new URLSearchParams({ provider, model });
+    if (baseUrl) params.set('base_url', baseUrl);
+    return apiCall<LocalContextWindowResponse>(
+      `/api/llm-backends/local-context-window?${params.toString()}`,
+    );
+  },
 
   // ── Claude Code CLI version management (keep-latest + rollback) ──
 

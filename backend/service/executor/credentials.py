@@ -51,6 +51,14 @@ def _split_csv(raw: str) -> Tuple[str, ...]:
     return tuple(s.strip() for s in raw.split(",") if s.strip())
 
 
+def _env_int(name: str) -> int:
+    """Best-effort int from an env var; 0 when unset or non-numeric."""
+    try:
+        return int(os.environ.get(name, "0") or "0")
+    except (TypeError, ValueError):
+        return 0
+
+
 class McpBridgeContext:
     """Per-session MCP bridge wiring info.
 
@@ -169,6 +177,30 @@ class CredentialBundleBuilder:
                 base_url=(creds.base_url or None),
             ),
         }
+
+        # Branded local (OpenAI-compatible) backends — executor 2.9.0
+        # ProviderProfile providers. Registered only when a base_url is
+        # configured (config field or env fallback) so
+        # ``bundle.has(provider)`` / ``preferred_provider`` reflect real
+        # availability and an unconfigured local card never shadows a
+        # configured cloud backend. ``ollama_num_ctx`` rides in extras →
+        # the client emits ``extra_body.options.num_ctx`` so Ollama loads
+        # the model with the requested window.
+        ollama_url = creds.ollama_base_url or os.environ.get("OLLAMA_BASE_URL", "")
+        if ollama_url:
+            ollama_extras: Dict[str, Any] = {}
+            num_ctx = creds.ollama_num_ctx or _env_int("OLLAMA_NUM_CTX")
+            if num_ctx and num_ctx > 0:
+                ollama_extras["ollama_num_ctx"] = int(num_ctx)
+            by_provider["ollama"] = ProviderCredentials(
+                base_url=ollama_url, extras=ollama_extras
+            )
+        lmstudio_url = creds.lmstudio_base_url or os.environ.get("LMSTUDIO_BASE_URL", "")
+        if lmstudio_url:
+            by_provider["lmstudio"] = ProviderCredentials(base_url=lmstudio_url)
+        custom_url = creds.custom_base_url or os.environ.get("CUSTOM_LLM_BASE_URL", "")
+        if custom_url:
+            by_provider["custom"] = ProviderCredentials(base_url=custom_url)
 
         # Include ``claude_code_cli`` whenever the operator has the
         # backend enabled (via the LLM Backends card or by completing

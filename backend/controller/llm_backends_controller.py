@@ -101,6 +101,19 @@ PROVIDER_LABELS: Dict[str, str] = {
     "google": "Google Gemini",
     "vllm": "vLLM (self-host)",
     "claude_code_cli": "Claude Code (CLI)",
+    # Branded local (OpenAI-compatible) backends — executor 2.9.0.
+    "ollama": "Ollama (local)",
+    "lmstudio": "LM Studio (local)",
+    "custom": "Custom (OpenAI-compatible)",
+}
+
+# Default endpoints for the branded local providers — used when the user
+# hasn't pinned a base_url yet (matches the executor ProviderProfile
+# defaults). ``custom`` has no default (the user must supply one).
+LOCAL_PROVIDER_DEFAULT_URLS: Dict[str, str] = {
+    "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://127.0.0.1:1234/v1",
+    "custom": "",
 }
 
 
@@ -186,6 +199,134 @@ async def _check_vllm(bundle) -> ProviderHealth:
         detail_params={"url": creds.base_url or ""},
         auth_method=None,
         auth_ok=have_url or None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Local (OpenAI-compatible) backends — reachability + model discovery
+# ---------------------------------------------------------------------------
+
+
+async def _http_get_json(url: str, timeout: float = 5.0) -> Optional[Any]:
+    """GET *url* and parse JSON. Best-effort: any failure → ``None``."""
+    try:
+        import httpx  # transitive via geny-executor / anthropic
+    except ImportError:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+    except Exception:  # noqa: BLE001 — unreachable server / DNS / TLS
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        return None
+
+
+def _ollama_native_root(base_url: str) -> str:
+    """``http://host:11434/v1`` → ``http://host:11434`` (native API root)."""
+    root = (base_url or "").rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")].rstrip("/")
+    return root
+
+
+async def _discover_local_models(provider: str, base_url: str) -> Optional[List[str]]:
+    """List model ids served at *base_url*, or ``None`` if unreachable.
+
+    Ollama exposes its catalogue at the native ``/api/tags``; every other
+    OpenAI-compatible server (LM Studio / llama.cpp / vLLM / custom) uses
+    ``/v1/models``. An empty list means "reachable but no models loaded".
+    """
+    if not base_url:
+        return None
+    if provider == "ollama":
+        body = await _http_get_json(f"{_ollama_native_root(base_url)}/api/tags")
+        if not isinstance(body, dict):
+            return None
+        models = body.get("models")
+        if not isinstance(models, list):
+            return []
+        names = [m.get("name") for m in models if isinstance(m, dict) and m.get("name")]
+        return sorted(str(n) for n in names)
+    # OpenAI-compatible /models
+    body = await _http_get_json(f"{base_url.rstrip('/')}/models")
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if not isinstance(data, list):
+        return []
+    ids = [d.get("id") for d in data if isinstance(d, dict) and d.get("id")]
+    return sorted(str(i) for i in ids)
+
+
+def _resolve_local_base_url(provider: str, creds, override: Optional[str]) -> str:
+    """Effective base_url for a local provider: explicit override → stored
+    credential → the provider's default endpoint."""
+    if override:
+        return override
+    stored = getattr(creds, "base_url", "") or ""
+    if stored:
+        return stored
+    return LOCAL_PROVIDER_DEFAULT_URLS.get(provider, "")
+
+
+async def _check_local(provider: str, bundle) -> ProviderHealth:
+    """Health for a branded local provider: configured? reachable? how
+    many models are served? A live probe makes the card actionable —
+    "준비됨 (3 models)" vs "엔드포인트에 연결할 수 없어요"."""
+    creds = bundle.get(provider)
+    configured_url = getattr(creds, "base_url", "") or ""
+    base_url = _resolve_local_base_url(provider, creds, None)
+    label = PROVIDER_LABELS[provider]
+
+    # ``custom`` with no endpoint is simply not set up yet.
+    if not base_url:
+        return ProviderHealth(
+            provider=provider,
+            label=label,
+            kind="api",
+            available=False,
+            detail="Endpoint not set. Open this card and paste the OpenAI-compatible base URL.",
+            detail_code="local.base_url_missing",
+            detail_params={"provider": provider},
+            auth_ok=None,
+        )
+
+    models = await _discover_local_models(provider, base_url)
+    reachable = models is not None
+    configured = bool(configured_url)
+    if not reachable:
+        return ProviderHealth(
+            provider=provider,
+            label=label,
+            kind="api",
+            available=False,
+            detail=f"Could not reach {base_url}. Is the local server running?",
+            detail_code="local.unreachable",
+            detail_params={"url": base_url},
+            auth_ok=False,
+        )
+    count = len(models or [])
+    return ProviderHealth(
+        provider=provider,
+        # ``available`` means usable now: reachable AND the operator
+        # actually opted in (a configured base_url). A reachable default
+        # endpoint the user never saved is surfaced but not auto-active.
+        label=label,
+        kind="api",
+        available=configured and count > 0,
+        detail=(
+            f"Reachable at {base_url} — {count} model(s)."
+            if configured
+            else f"Reachable at {base_url} — {count} model(s). Save this endpoint to enable it."
+        ),
+        detail_code="local.reachable" if configured else "local.reachable_unsaved",
+        detail_params={"url": base_url, "count": str(count)},
+        auth_ok=True if configured else None,
     )
 
 
@@ -407,6 +548,9 @@ async def get_backends_health() -> BackendsHealthResponse:
         _check_google(bundle),
         _check_vllm(bundle),
         _check_claude_code(bundle, claude_cfg),
+        _check_local("ollama", bundle),
+        _check_local("lmstudio", bundle),
+        _check_local("custom", bundle),
     )
     return BackendsHealthResponse(providers=list(results))
 
@@ -424,6 +568,92 @@ async def recheck_claude_code() -> ProviderHealth:
     bundle = CredentialBundleBuilder(cm).build()
     cfg = cm.load_config(CLIBackendClaudeCodeConfig)
     return await _check_claude_code(bundle, cfg)
+
+
+class LocalModelsResponse(BaseModel):
+    provider: str
+    base_url: str
+    reachable: bool
+    models: List[str] = []
+    detail_code: Optional[str] = None
+
+
+@router.get(
+    "/local-models",
+    response_model=LocalModelsResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def list_local_models(
+    provider: str,
+    base_url: Optional[str] = None,
+) -> LocalModelsResponse:
+    """Discover the model ids served by a local backend so the LLM
+    Backends card can render a dropdown instead of a free-form box.
+
+    *base_url* (optional) overrides the stored / default endpoint — the
+    card passes the value the user is typing so "Test" works before save.
+    """
+    if provider not in ("ollama", "lmstudio", "custom"):
+        raise HTTPException(status_code=400, detail=f"not a local provider: {provider!r}")
+    cm = get_config_manager()
+    bundle = CredentialBundleBuilder(cm).build()
+    creds = bundle.get(provider)
+    resolved = _resolve_local_base_url(provider, creds, base_url)
+    if not resolved:
+        return LocalModelsResponse(
+            provider=provider, base_url="", reachable=False,
+            detail_code="local.base_url_missing",
+        )
+    models = await _discover_local_models(provider, resolved)
+    if models is None:
+        return LocalModelsResponse(
+            provider=provider, base_url=resolved, reachable=False,
+            detail_code="local.unreachable",
+        )
+    return LocalModelsResponse(
+        provider=provider, base_url=resolved, reachable=True, models=models,
+        detail_code="local.reachable",
+    )
+
+
+class LocalContextWindowResponse(BaseModel):
+    provider: str
+    base_url: str
+    model: str
+    context_window: Optional[int] = None
+
+
+@router.get(
+    "/local-context-window",
+    response_model=LocalContextWindowResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def get_local_context_window(
+    provider: str,
+    model: str,
+    base_url: Optional[str] = None,
+) -> LocalContextWindowResponse:
+    """Probe a local model's real context window (Ollama ``/api/show``)
+    via the executor's :func:`resolve_local_context_window`, so the card
+    can auto-fill the Ollama context-window field instead of guessing.
+    ``context_window`` is ``None`` when the probe can't determine it."""
+    if provider not in ("ollama", "lmstudio", "custom"):
+        raise HTTPException(status_code=400, detail=f"not a local provider: {provider!r}")
+    cm = get_config_manager()
+    bundle = CredentialBundleBuilder(cm).build()
+    creds = bundle.get(provider)
+    resolved = _resolve_local_base_url(provider, creds, base_url)
+    num_ctx: Optional[int] = None
+    if resolved and model:
+        try:
+            from geny_executor.llm_client import resolve_local_context_window
+
+            num_ctx = await resolve_local_context_window(provider, resolved, model)
+        except Exception:  # noqa: BLE001 — probe is best-effort
+            num_ctx = None
+    return LocalContextWindowResponse(
+        provider=provider, base_url=resolved, model=model, context_window=num_ctx,
+    )
 
 
 @router.get(
