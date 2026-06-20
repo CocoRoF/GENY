@@ -1,8 +1,8 @@
-"""
-Slack Bot Configuration.
+"""Slack bot channel — drives the geny-executor inbound gateway.
 
-Enables Geny Agent integration with Slack workspaces.
-Allows users to interact with Claude sessions via Slack messages.
+Uses Slack **Socket Mode** (no public endpoint): enable + paste an app-level
+token (``xapp-…``) and a bot token (``xoxb-…``) and the backend opens a socket,
+turns ``message`` events into VTuber turns, and replies via ``chat.postMessage``.
 """
 
 from dataclasses import dataclass, field
@@ -14,45 +14,12 @@ from service.config.base import BaseConfig, ConfigField, FieldType, register_con
 @register_config
 @dataclass
 class SlackConfig(BaseConfig):
-    """
-    Slack Bot Configuration.
+    """Slack bot integration (inbound gateway, Socket Mode)."""
 
-    Enables Geny Agent integration with Slack workspaces.
-    Allows users to interact with Claude sessions via Slack messages.
-    """
-
-    # Connection settings
     enabled: bool = False
-    bot_token: str = ""  # xoxb-...
-    app_token: str = ""  # xapp-... for Socket Mode
-    signing_secret: str = ""
-
-    # Workspace settings
-    workspace_id: str = ""
-
-    # Channel settings
+    app_token: str = ""  # xapp-… (Socket Mode)
+    bot_token: str = ""  # xoxb-… (Web API)
     allowed_channel_ids: List[str] = field(default_factory=list)
-    default_channel_id: str = ""
-
-    # Permissions
-    admin_user_ids: List[str] = field(default_factory=list)
-    allowed_user_ids: List[str] = field(default_factory=list)
-
-    # Behavior settings
-    respond_to_mentions: bool = True
-    respond_to_dms: bool = True
-    respond_in_thread: bool = True  # Reply in threads
-    use_blocks: bool = True  # Use Slack Block Kit for rich formatting
-    max_message_length: int = 4000
-
-    # Session settings
-    session_timeout_minutes: int = 30
-    max_sessions_per_user: int = 3
-    default_prompt: str = ""
-
-    # Slash commands
-    enable_slash_commands: bool = True
-    slash_command_name: str = "/claude"
 
     @classmethod
     def get_config_name(cls) -> str:
@@ -64,7 +31,12 @@ class SlackConfig(BaseConfig):
 
     @classmethod
     def get_description(cls) -> str:
-        return "Configure Slack bot integration for Geny Agent. Allows users to interact with Claude sessions through Slack messages and slash commands."
+        return (
+            "Let users talk to your VTuber from Slack via Socket Mode (no public "
+            "server needed). Create a Slack app, enable Socket Mode, add an "
+            "app-level token (xapp-) and a bot token (xoxb-) with chat:write, and "
+            "subscribe to message events."
+        )
 
     @classmethod
     def get_category(cls) -> str:
@@ -78,92 +50,35 @@ class SlackConfig(BaseConfig):
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
         return {
             "ko": {
-                "display_name": "Slack",
-                "description": "Slack bot integration settings. Users can interact with Claude sessions through Slack messages and slash commands.",
-                "groups": {
-                    "connection": "Connection Settings",
-                    "workspace": "Workspace",
-                    "permissions": "Permissions",
-                    "behavior": "Behavior Settings",
-                    "session": "Session Settings",
-                    "commands": "Slash Commands",
-                },
+                "display_name": "슬랙",
+                "description": (
+                    "슬랙에서 VTuber와 대화하게 합니다(Socket Mode, 공개 서버 불필요). "
+                    "Slack 앱을 만들어 Socket Mode를 켜고, app-level 토큰(xapp-)과 "
+                    "chat:write 권한의 봇 토큰(xoxb-)을 발급한 뒤, message 이벤트를 "
+                    "구독하세요."
+                ),
                 "fields": {
                     "enabled": {
-                        "label": "Enable Slack Integration",
-                        "description": "Enable or disable Slack bot integration",
-                    },
-                    "bot_token": {
-                        "label": "Bot Token (xoxb-)",
-                        "description": "Slack bot token starting with xoxb-",
+                        "label": "슬랙 연동 사용",
+                        "description": "켜면 봇이 메시지를 받기 시작합니다.",
                     },
                     "app_token": {
-                        "label": "App Token (xapp-)",
-                        "description": "Slack app-level token for Socket Mode (starts with xapp-)",
+                        "label": "App-Level 토큰 (xapp-)",
+                        "description": (
+                            "Slack 앱 → Basic Information → App-Level Tokens에서 "
+                            "connections:write 스코프로 발급. Socket Mode 연결에 사용돼요."
+                        ),
                     },
-                    "signing_secret": {
-                        "label": "Signing Secret",
-                        "description": "Slack app signing secret for request verification",
-                    },
-                    "workspace_id": {
-                        "label": "Workspace ID",
-                        "description": "Slack workspace ID (optional)",
+                    "bot_token": {
+                        "label": "봇 토큰 (xoxb-)",
+                        "description": (
+                            "OAuth & Permissions → Bot User OAuth Token. chat:write "
+                            "스코프가 필요하고 답장 전송에 사용돼요."
+                        ),
                     },
                     "allowed_channel_ids": {
-                        "label": "Allowed Channel IDs",
-                        "description": "Comma-separated list of channel IDs. Leave empty to allow all channels.",
-                    },
-                    "default_channel_id": {
-                        "label": "Default Channel ID",
-                        "description": "Default channel for bot responses",
-                    },
-                    "admin_user_ids": {
-                        "label": "Admin User IDs",
-                        "description": "Comma-separated list of user IDs with admin privileges",
-                    },
-                    "allowed_user_ids": {
-                        "label": "Allowed User IDs",
-                        "description": "Comma-separated list of user IDs allowed to use the bot. Leave empty to allow all users.",
-                    },
-                    "respond_to_mentions": {
-                        "label": "Respond to Mentions",
-                        "description": "Respond when the bot is mentioned",
-                    },
-                    "respond_to_dms": {
-                        "label": "Respond to DMs",
-                        "description": "Allow users to interact via direct messages",
-                    },
-                    "respond_in_thread": {
-                        "label": "Reply in Threads",
-                        "description": "Reply to messages in threads",
-                    },
-                    "use_blocks": {
-                        "label": "Use Block Kit",
-                        "description": "Use Slack Block Kit for rich message formatting",
-                    },
-                    "max_message_length": {
-                        "label": "Max Message Length",
-                        "description": "Maximum number of characters per message (Slack limit: 4000)",
-                    },
-                    "session_timeout_minutes": {
-                        "label": "Session Timeout (minutes)",
-                        "description": "Auto-close inactive sessions after the specified time",
-                    },
-                    "max_sessions_per_user": {
-                        "label": "Max Sessions Per User",
-                        "description": "Maximum number of concurrent sessions per user",
-                    },
-                    "default_prompt": {
-                        "label": "Default System Prompt",
-                        "description": "Default system prompt for sessions initiated from Slack",
-                    },
-                    "enable_slash_commands": {
-                        "label": "Enable Slash Commands",
-                        "description": "Enable slash command support",
-                    },
-                    "slash_command_name": {
-                        "label": "Slash Command Name",
-                        "description": "Name of the slash command (e.g., /claude)",
+                        "label": "허용 채널 ID (선택)",
+                        "description": "쉼표로 구분한 채널 ID 목록. 비우면 모든 채널에 응답.",
                     },
                 },
             }
@@ -172,178 +87,45 @@ class SlackConfig(BaseConfig):
     @classmethod
     def get_fields_metadata(cls) -> List[ConfigField]:
         return [
-            # Connection group
             ConfigField(
                 name="enabled",
                 field_type=FieldType.BOOLEAN,
-                label="Enable Slack Integration",
-                description="Enable or disable Slack bot integration",
+                label="Enable Slack",
+                description="Start receiving messages when on.",
                 default=False,
-                group="connection"
+                group="connection",
+            ),
+            ConfigField(
+                name="app_token",
+                field_type=FieldType.PASSWORD,
+                label="App-Level Token (xapp-)",
+                description="Basic Information → App-Level Tokens (connections:write). For Socket Mode.",
+                required=True,
+                placeholder="xapp-...",
+                group="connection",
+                secure=True,
             ),
             ConfigField(
                 name="bot_token",
                 field_type=FieldType.PASSWORD,
                 label="Bot Token (xoxb-)",
-                description="Slack bot token starting with xoxb-",
+                description="OAuth & Permissions → Bot User OAuth Token (chat:write). For replies.",
                 required=True,
                 placeholder="xoxb-...",
                 group="connection",
-                secure=True
-            ),
-            ConfigField(
-                name="app_token",
-                field_type=FieldType.PASSWORD,
-                label="App Token (xapp-)",
-                description="Slack app-level token for Socket Mode (starts with xapp-)",
-                placeholder="xapp-...",
-                group="connection",
-                secure=True
-            ),
-            ConfigField(
-                name="signing_secret",
-                field_type=FieldType.PASSWORD,
-                label="Signing Secret",
-                description="Slack app signing secret for request verification",
-                placeholder="Enter signing secret",
-                group="connection",
-                secure=True
-            ),
-
-            # Workspace group
-            ConfigField(
-                name="workspace_id",
-                field_type=FieldType.STRING,
-                label="Workspace ID",
-                description="Slack workspace ID (optional)",
-                placeholder="T01234567",
-                group="workspace"
+                secure=True,
             ),
             ConfigField(
                 name="allowed_channel_ids",
                 field_type=FieldType.TEXTAREA,
-                label="Allowed Channel IDs",
-                description="Comma-separated list of channel IDs. Leave empty for all channels.",
-                placeholder="C01234567, C98765432",
-                group="workspace"
-            ),
-            ConfigField(
-                name="default_channel_id",
-                field_type=FieldType.STRING,
-                label="Default Channel ID",
-                description="Default channel for bot responses",
-                placeholder="C01234567",
-                group="workspace"
-            ),
-
-            # Permissions group
-            ConfigField(
-                name="admin_user_ids",
-                field_type=FieldType.TEXTAREA,
-                label="Admin User IDs",
-                description="Comma-separated list of user IDs with admin privileges",
-                placeholder="U01234567",
-                group="permissions"
-            ),
-            ConfigField(
-                name="allowed_user_ids",
-                field_type=FieldType.TEXTAREA,
-                label="Allowed User IDs",
-                description="Comma-separated list of user IDs allowed to use the bot. Leave empty for all users.",
-                placeholder="U01234567, U98765432",
-                group="permissions"
-            ),
-
-            # Behavior group
-            ConfigField(
-                name="respond_to_mentions",
-                field_type=FieldType.BOOLEAN,
-                label="Respond to Mentions",
-                description="Respond when the bot is mentioned",
-                default=True,
-                group="behavior"
-            ),
-            ConfigField(
-                name="respond_to_dms",
-                field_type=FieldType.BOOLEAN,
-                label="Respond to Direct Messages",
-                description="Allow users to interact via DMs",
-                default=True,
-                group="behavior"
-            ),
-            ConfigField(
-                name="respond_in_thread",
-                field_type=FieldType.BOOLEAN,
-                label="Reply in Threads",
-                description="Reply to messages in threads",
-                default=True,
-                group="behavior"
-            ),
-            ConfigField(
-                name="use_blocks",
-                field_type=FieldType.BOOLEAN,
-                label="Use Block Kit",
-                description="Use Slack Block Kit for rich message formatting",
-                default=True,
-                group="behavior"
-            ),
-            ConfigField(
-                name="max_message_length",
-                field_type=FieldType.NUMBER,
-                label="Max Message Length",
-                description="Maximum characters per message (Slack limit: 4000)",
-                default=4000,
-                min_value=100,
-                max_value=4000,
-                group="behavior"
-            ),
-
-            # Session group
-            ConfigField(
-                name="session_timeout_minutes",
-                field_type=FieldType.NUMBER,
-                label="Session Timeout (minutes)",
-                description="Auto-close inactive sessions after this many minutes",
-                default=30,
-                min_value=5,
-                max_value=1440,
-                group="session"
-            ),
-            ConfigField(
-                name="max_sessions_per_user",
-                field_type=FieldType.NUMBER,
-                label="Max Sessions Per User",
-                description="Maximum concurrent sessions per user",
-                default=3,
-                min_value=1,
-                max_value=10,
-                group="session"
-            ),
-            ConfigField(
-                name="default_prompt",
-                field_type=FieldType.TEXTAREA,
-                label="Default System Prompt",
-                description="Default system prompt for Slack-initiated sessions",
-                placeholder="You are a helpful assistant...",
-                group="session"
-            ),
-
-            # Slash commands group
-            ConfigField(
-                name="enable_slash_commands",
-                field_type=FieldType.BOOLEAN,
-                label="Enable Slash Commands",
-                description="Enable slash command support",
-                default=True,
-                group="commands"
-            ),
-            ConfigField(
-                name="slash_command_name",
-                field_type=FieldType.STRING,
-                label="Slash Command Name",
-                description="Name of the slash command (e.g., /claude)",
-                default="/claude",
-                placeholder="/claude",
-                group="commands"
+                label="Allowed Channel IDs (optional)",
+                description="Comma-separated channel ids. Empty = all channels.",
+                placeholder="C0123456789",
+                group="connection",
             ),
         ]
+
+    def validate(self) -> List[str]:
+        if not self.enabled:
+            return []
+        return super().validate()
