@@ -391,6 +391,18 @@ export interface EnvironmentDraftState {
    * remove). An empty list clears the key (→ default seed roster).
    */
   setSubworkerTypes: (types: SubworkerTypeConfig[]) => void;
+  /**
+   * Set (or clear) one per-environment tool's settings, written to
+   * `host_selections.extras.tool_settings[<key>]` (e.g. `web_search`). This
+   * mirrors `setOwnedSubagent` / `setSubworkerTypes`: passing a non-empty
+   * values object stores it; passing `null` / `{}` drops that tool's entry,
+   * and the empty containers (`tool_settings`, then `extras`) are pruned so
+   * cleared settings never leave dangling objects in the manifest.
+   */
+  setToolSetting: (
+    key: string,
+    values: Record<string, unknown> | null,
+  ) => void;
   /** Replace one stage entry. Caller passes the full new entry; the
    *  store merges it in by `order`. */
   patchStage: (
@@ -733,6 +745,46 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         extras.subworker_types = clean;
       } else {
         delete extras.subworker_types;
+      }
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setToolSetting: (key, values) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      const tool_settings = {
+        ...((extras.tool_settings as Record<string, unknown> | undefined) ?? {}),
+      };
+      // Store the values only when at least one is set; otherwise drop the
+      // tool's entry so cleared settings don't persist an empty object.
+      const hasValues =
+        values != null && Object.keys(values).length > 0;
+      if (hasValues) {
+        tool_settings[key] = values;
+      } else {
+        delete tool_settings[key];
+      }
+      // Prune empty containers bottom-up (tool_settings → extras), mirroring
+      // the sibling setters so the manifest stays free of dangling objects.
+      if (Object.keys(tool_settings).length > 0) {
+        extras.tool_settings = tool_settings;
+      } else {
+        delete extras.tool_settings;
       }
       next.host_selections =
         Object.keys(extras).length > 0

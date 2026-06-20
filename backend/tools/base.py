@@ -36,7 +36,7 @@ from typing import Any, Callable, ClassVar, Dict, FrozenSet, List, Optional, Uni
 #
 # Adding a name here is the *only* place a new injected parameter needs to
 # be registered; both BaseTool and ToolWrapper read it.
-INJECTED_PARAM_NAMES: FrozenSet[str] = frozenset({"session_id"})
+INJECTED_PARAM_NAMES: FrozenSet[str] = frozenset({"session_id", "web_search_config"})
 
 
 class ToolError(Exception):

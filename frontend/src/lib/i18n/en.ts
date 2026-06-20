@@ -1373,6 +1373,11 @@ const en = {
         title: 'One-shot Sub-Worker types',
         description: 'Per-type precise config for the one-shot sub-workers an agent delegates to via the Agent tool. Override a seed type (worker/researcher/…) or add a new one, and set each type model / provider / system prompt / allowed tools. Mark a type disabled to drop it from this env roster. No rows → the default seed roster is used unchanged.',
       },
+      navToolSettings: 'Tool Settings',
+      toolSettings: {
+        title: 'Tool Settings',
+        description: 'Per-environment options for built-in tools (e.g. the web-search backend and its API keys). Settings save with this environment manifest. Leave a tool unconfigured to use its defaults.',
+      },
     },
     genyTools: {
       loading: 'Loading Geny tool catalog…',

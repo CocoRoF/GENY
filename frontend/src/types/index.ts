@@ -516,6 +516,30 @@ export interface ConfigListResponse {
   categories: ConfigCategory[];
 }
 
+// ==================== Tool Settings (per-environment) ====================
+
+/**
+ * Schema describing one configurable per-environment tool (e.g. `web_search`).
+ * Fields share the exact shape of {@link ConfigField} used by global settings,
+ * so the existing `ConfigFieldInput` / localization helpers render them as-is.
+ * Values are stored on the manifest draft at
+ * `host_selections.extras.tool_settings[<key>]` and ride the normal save.
+ */
+export interface ToolSettingSchema {
+  key: string;
+  display_name: string;
+  description: string;
+  icon?: string;
+  fields: ConfigField[];
+  i18n?: Record<string, ConfigI18nLocale>;
+  /** Optional per-locale Markdown setup guide (rendered in a modal). */
+  setup_guide?: Record<string, string>;
+}
+
+export interface ToolSettingSchemasResponse {
+  schemas: ToolSettingSchema[];
+}
+
 // ==================== Graph Types ====================
 
 export interface GraphNode {

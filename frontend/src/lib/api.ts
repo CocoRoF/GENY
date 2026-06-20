@@ -1712,7 +1712,11 @@ export const healthApi = {
 
 // ==================== Config API ====================
 
-import type { ConfigListResponse, ConfigSchema } from '@/types';
+import type {
+  ConfigListResponse,
+  ConfigSchema,
+  ToolSettingSchemasResponse,
+} from '@/types';
 
 export const configApi = {
   /** GET /api/config — list all configs */
@@ -1743,6 +1747,22 @@ export const configApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+};
+
+// ==================== Tool Settings API (per-environment) ====================
+
+/**
+ * Schema-driven per-environment tool configuration (e.g. `web_search`).
+ * Only the schemas are fetched from the backend; values live on the
+ * environment manifest draft (`host_selections.extras.tool_settings`) and
+ * persist via the normal manifest save — there is no per-value endpoint.
+ */
+export const toolSettingsApi = {
+  /** GET /api/tool-settings/schemas — list configurable tool schemas */
+  getSchemas: () =>
+    apiCall<ToolSettingSchemasResponse>('/api/tool-settings/schemas').then(
+      (res) => res.schemas ?? [],
+    ),
 };
 
 // ==================== LLM Backends API (Phase E4 / F2) ====================
