@@ -14,7 +14,7 @@ Provides REST API endpoints for managing configurations:
 from logging import getLogger
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from pydantic import BaseModel
 
 from service.auth.auth_middleware import require_auth
@@ -159,8 +159,16 @@ async def get_config(config_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_GATEWAY_CHANNEL_CONFIGS = {"telegram", "discord", "slack", "kakao", "teams"}
+
+
 @router.put("/{config_name}")
-async def update_config(config_name: str, request: ConfigUpdateRequest, auth: dict = Depends(require_auth)):
+async def update_config(
+    config_name: str,
+    request: ConfigUpdateRequest,
+    http_request: Request,
+    auth: dict = Depends(require_auth),
+):
     """
     Update a configuration.
 
@@ -182,6 +190,17 @@ async def update_config(config_name: str, request: ConfigUpdateRequest, auth: di
 
         if updated_config is None:
             raise HTTPException(status_code=500, detail="Failed to update config")
+
+        # Hot-reload the inbound gateway when a channel integration changes, so
+        # enabling Telegram/Discord/Slack in the UI takes effect immediately
+        # (no backend restart). Best-effort — a reload failure never fails the
+        # save.
+        if config_name in _GATEWAY_CHANNEL_CONFIGS:
+            try:
+                from service.gateway import reload_gateway
+                await reload_gateway(http_request.app.state)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"gateway reload after {config_name} save failed: {e}")
 
         return {
             "success": True,

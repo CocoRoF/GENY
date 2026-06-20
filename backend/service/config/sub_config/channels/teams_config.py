@@ -79,7 +79,7 @@ class TeamsConfig(BaseConfig):
         return {
             "ko": {
                 "display_name": "Microsoft Teams",
-                "description": "Microsoft Teams bot integration settings. Users can interact with Claude sessions through Teams messages.",
+                "description": "⚠️ 준비 중 — Teams는 공개 HTTPS 엔드포인트(Bot Framework)가 필요해 아직 게이트웨이에 연결되지 않았습니다. 현재 바로 쓸 수 있는 채널은 텔레그램·디스코드·슬랙이에요. 아래 필드는 향후 연동 시 사용할 값입니다.",
                 "groups": {
                     "connection": "Connection Settings",
                     "teams": "Team Settings",
@@ -346,3 +346,10 @@ class TeamsConfig(BaseConfig):
                 secure=True
             ),
         ]
+
+    def validate(self) -> List[str]:
+        # A disabled integration reports no problems (no spurious "required"
+        # flags on the card). Teams is not yet wired to the gateway.
+        if not self.enabled:
+            return []
+        return super().validate()

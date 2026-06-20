@@ -95,10 +95,12 @@ class KakaoConfig(BaseConfig):
     def get_i18n(cls) -> Dict[str, Dict[str, Any]]:
         return {
             "ko": {
-                "display_name": "KakaoTalk",
+                "display_name": "카카오톡",
                 "description": (
-                    "KakaoTalk chatbot integration settings via Kakao i OpenBuilder. "
-                    "Users can interact with Claude sessions through KakaoTalk channel messages."
+                    "⚠️ 준비 중 — 카카오톡은 공개 스킬 서버 엔드포인트(Kakao i "
+                    "OpenBuilder)가 필요해 아직 게이트웨이에 연결되지 않았습니다. "
+                    "현재 바로 쓸 수 있는 채널은 텔레그램·디스코드·슬랙이에요. 아래 "
+                    "필드는 향후 연동 시 사용할 값입니다."
                 ),
                 "groups": {
                     "connection": "Connection Settings",
@@ -467,3 +469,10 @@ class KakaoConfig(BaseConfig):
                 group="session"
             ),
         ]
+
+    def validate(self) -> List[str]:
+        # A disabled integration reports no problems. KakaoTalk is not yet
+        # wired to the gateway (webhook skill-server model).
+        if not self.enabled:
+            return []
+        return super().validate()

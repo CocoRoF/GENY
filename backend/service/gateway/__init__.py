@@ -9,6 +9,6 @@ See :func:`install.install_gateway` (called from the app lifespan).
 """
 
 from service.gateway.handler import handle_inbound
-from service.gateway.install import install_gateway, load_gateway_specs
+from service.gateway.install import install_gateway, load_gateway_specs, reload_gateway
 
-__all__ = ["handle_inbound", "install_gateway", "load_gateway_specs"]
+__all__ = ["handle_inbound", "install_gateway", "reload_gateway", "load_gateway_specs"]

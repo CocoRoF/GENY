@@ -61,6 +61,52 @@ def _specs_from_env() -> List[Dict[str, Any]]:
     return specs
 
 
+def _specs_from_geny_config() -> List[Dict[str, Any]]:
+    """Gateway specs from the Geny config UI (Settings → Channels).
+
+    Each channel config (telegram / discord / slack) is the user-facing editor;
+    when ``enabled`` + the required token(s) are set, it produces a gateway spec.
+    This is the primary, UI-driven source.
+    """
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.channels.discord_config import DiscordConfig
+        from service.config.sub_config.channels.slack_config import SlackConfig
+        from service.config.sub_config.channels.telegram_config import TelegramConfig
+    except Exception:  # noqa: BLE001 — config layer unavailable very early
+        return []
+
+    cm = get_config_manager()
+    specs: List[Dict[str, Any]] = []
+
+    tg = cm.load_config(TelegramConfig)
+    if getattr(tg, "enabled", False) and (tg.bot_token or "").strip():
+        cfg: Dict[str, Any] = {"token": tg.bot_token.strip()}
+        if tg.allowed_chat_ids:
+            cfg["allowed_chat_ids"] = list(tg.allowed_chat_ids)
+        specs.append({"platform": "telegram", "config": cfg})
+
+    dc = cm.load_config(DiscordConfig)
+    if getattr(dc, "enabled", False) and (dc.bot_token or "").strip():
+        cfg = {"token": dc.bot_token.strip()}
+        if dc.allowed_channel_ids:
+            cfg["allowed_channel_ids"] = list(dc.allowed_channel_ids)
+        specs.append({"platform": "discord", "config": cfg})
+
+    sl = cm.load_config(SlackConfig)
+    if (
+        getattr(sl, "enabled", False)
+        and (sl.app_token or "").strip()
+        and (sl.bot_token or "").strip()
+    ):
+        cfg = {"app_token": sl.app_token.strip(), "bot_token": sl.bot_token.strip()}
+        if sl.allowed_channel_ids:
+            cfg["allowed_channel_ids"] = list(sl.allowed_channel_ids)
+        specs.append({"platform": "slack", "config": cfg})
+
+    return specs
+
+
 def _specs_from_settings() -> List[Dict[str, Any]]:
     try:
         from geny_executor.settings import get_default_loader
@@ -78,10 +124,22 @@ def _specs_from_settings() -> List[Dict[str, Any]]:
 
 
 def load_gateway_specs() -> List[Dict[str, Any]]:
-    """Gateway platform specs from settings + env (env appended)."""
-    specs = _specs_from_settings()
-    specs.extend(_specs_from_env())
-    return specs
+    """Gateway specs from all sources, de-duplicated by platform.
+
+    Priority (first wins per platform): Geny config UI (Settings → Channels) →
+    settings.json ``gateway.platforms`` → env vars. So a channel configured in
+    the UI takes over from an env fallback.
+    """
+    seen: set[str] = set()
+    merged: List[Dict[str, Any]] = []
+    for source in (_specs_from_geny_config(), _specs_from_settings(), _specs_from_env()):
+        for spec in source:
+            platform = spec.get("platform")
+            if not platform or platform in seen:
+                continue
+            seen.add(platform)
+            merged.append(spec)
+    return merged
 
 
 async def install_gateway() -> Optional[Any]:
@@ -111,4 +169,29 @@ async def install_gateway() -> Optional[Any]:
     return runner
 
 
-__all__ = ["install_gateway", "load_gateway_specs"]
+async def reload_gateway(app_state: Any) -> Optional[Any]:
+    """Stop the running gateway and start a fresh one from current config.
+
+    Called after a Channels config is saved so enabling/disabling a platform in
+    the UI takes effect without a backend restart. Stores the new runner on
+    ``app_state.gateway_runner`` (or ``None`` when nothing is configured).
+    """
+    old = getattr(app_state, "gateway_runner", None)
+    if old is not None:
+        try:
+            await old.shutdown(timeout=5)
+        except Exception:  # noqa: BLE001 — best-effort
+            logger.warning("gateway reload: old runner shutdown failed", exc_info=True)
+    runner = await install_gateway()
+    try:
+        app_state.gateway_runner = runner
+    except Exception:  # noqa: BLE001
+        pass
+    logger.info(
+        "gateway reloaded platforms=%s",
+        [a.name for a in runner.adapters] if runner else [],
+    )
+    return runner
+
+
+__all__ = ["install_gateway", "reload_gateway", "load_gateway_specs"]
