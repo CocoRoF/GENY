@@ -50,6 +50,7 @@ const I = {
   sun: <Svg><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
   moon: <Svg><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></Svg>,
   monitor: <Svg><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></Svg>,
+  chat: <Svg><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></Svg>,
 }
 
 type ThemeMode = 'system' | 'dark' | 'light'
@@ -65,6 +66,8 @@ export function ControlApp() {
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [pttHotkey, setPttHotkey] = useState('CommandOrControl+Shift+Space')
   const [pttMsg, setPttMsg] = useState('')
+  const [quickChatHotkey, setQuickChatHotkey] = useState('CommandOrControl+Shift+Enter')
+  const [quickChatMsg, setQuickChatMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState('')
   const [theme, setThemeState] = useState<ThemeMode>('system')
@@ -83,6 +86,7 @@ export function ControlApp() {
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
     window.connector?.hotkeys.getPushToTalk().then((h) => h && setPttHotkey(h))
+    window.connector?.hotkeys.getQuickChat?.().then((h) => h && setQuickChatHotkey(h))
     window.connector?.appVersion?.().then(setVersion).catch(() => undefined)
     window.connector?.capture?.listSources?.().then(setSources).catch(() => undefined)
   }, [])
@@ -130,6 +134,11 @@ export function ControlApp() {
   const savePtt = async () => {
     const ok = await window.connector?.hotkeys.setPushToTalk(pttHotkey)
     setPttMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
+  }
+
+  const saveQuickChat = async () => {
+    const ok = await window.connector?.hotkeys.setQuickChat?.(quickChatHotkey)
+    setQuickChatMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
   }
 
   const checkStatus = async () => {
@@ -346,6 +355,26 @@ export function ControlApp() {
         {/* ─────────────── 앱 ─────────────── */}
         {tab === 'app' && (
           <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.chat} 빠른 채팅 단축키</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>
+                어디서든 이 단축키를 누르면 입력창이 떠오르고, 메시지를 입력해 현재 VTuber에게 바로 보냅니다.
+                자주 안 쓰는 조합을 권장합니다(기본: {`Cmd/Ctrl+Shift+Enter`}).
+              </p>
+              <input
+                className="gy-input mono"
+                value={quickChatHotkey}
+                onChange={(e) => setQuickChatHotkey(e.target.value)}
+                placeholder="CommandOrControl+Shift+Enter"
+                spellCheck={false}
+              />
+              <div className="gy-spacer" />
+              <div className="gy-row">
+                <button className="gy-btn gy-btn--primary gy-btn--sm" onClick={saveQuickChat}>단축키 저장</button>
+                {quickChatMsg && <span className="gy-hint" style={{ margin: 0 }}>{quickChatMsg}</span>}
+              </div>
+            </section>
+
             <section className="gy-card">
               <div className="gy-card-h">{I.monitor} 화면 캡처 관찰</div>
               <label className="gy-field-label" htmlFor="gy-cap-int">캡처 주기</label>
