@@ -204,6 +204,26 @@ class ChannelsConfigSection(BaseModel):
     send_message: List[SendMessageChannelEntry] = Field(default_factory=list)
 
 
+class GatewayPlatformEntry(BaseModel):
+    """One inbound gateway platform (``settings.json:gateway.platforms``).
+
+    geny-executor ≥2.11.0 owns the transports; this declares which to start.
+    ``config`` carries the platform's params (e.g. telegram ``token`` +
+    optional ``allowed_chat_ids``).
+    """
+
+    platform: str = Field(..., min_length=1, description="e.g. 'telegram'")
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GatewayConfigSection(BaseModel):
+    """``settings.gateway`` — inbound chat gateway. The executor receives a
+    message from each platform, runs a VTuber turn, and replies. Also
+    configurable via env (``GATEWAY_TELEGRAM_BOT_TOKEN``)."""
+
+    platforms: List[GatewayPlatformEntry] = Field(default_factory=list)
+
+
 class CuratedKnowledgeSection(BaseModel):
     """``settings.curated_knowledge`` (N.1 / cycle 20260426_3) — knobs
     for ``service.memory.curated_knowledge.CuratedKnowledgeManager``.
@@ -370,6 +390,8 @@ __all__ = [
     "AffectConfigSection",
     "ChannelsConfigSection",
     "SendMessageChannelEntry",
+    "GatewayConfigSection",
+    "GatewayPlatformEntry",
     "VTuberSubWorkerSection",
     "PersonaConfigSection",
     "CuratedKnowledgeSection",

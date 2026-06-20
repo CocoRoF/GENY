@@ -21,6 +21,7 @@ from service.settings.sections import (
     AffectConfigSection,
     ChannelsConfigSection,
     CuratedKnowledgeSection,
+    GatewayConfigSection,
     HooksConfigSection,
     MemoryConfigSection,
     ModelConfigSection,
@@ -84,6 +85,7 @@ def install_geny_settings() -> Optional[Any]:
     register_section("affect", AffectConfigSection)
     # L.1 (cycle 20260426_3) — send-message channel registry config.
     register_section("channels", ChannelsConfigSection)
+    register_section("gateway", GatewayConfigSection)
     # J.1 (cycle 20260426_3) — persona tail-block composition.
     register_section("persona", PersonaConfigSection)
     # N.1 (cycle 20260426_3) — curated knowledge vault root.

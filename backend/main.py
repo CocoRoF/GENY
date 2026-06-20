@@ -631,6 +631,22 @@ async def lifespan(app: FastAPI):
         app.state.cron_store = None
         app.state.cron_runner = None
 
+    # ── Inbound Gateway (geny-executor ≥2.11.0) ───────────────────────
+    # Telegram (etc) DM → run one VTuber turn → reply. Starts only when a
+    # platform is configured (GATEWAY_TELEGRAM_BOT_TOKEN env, or the
+    # settings.json ``gateway.platforms`` section). The transport + loop live
+    # in the executor; Geny supplies the per-chat session handler.
+    try:
+        from service.gateway import install_gateway
+        app.state.gateway_runner = await install_gateway()
+        if app.state.gateway_runner is not None:
+            logger.info("   ✅ gateway: inbound chat gateway started")
+        else:
+            logger.info("   ⏭️  gateway: no platform configured (skipped)")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"   ⚠️  gateway: skipped ({e})")
+        app.state.gateway_runner = None
+
     # ── Tool Runtime Health Check ──────────────────────────────────────
     # Verify tools actually execute (not just registered) by invoking a
     # read-only tool directly and checking the response.
@@ -689,6 +705,14 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception) as e:
             if not isinstance(e, asyncio.CancelledError):
                 logger.warning(f"audio_backfill shutdown failed: {e}")
+
+    # Stop the inbound gateway (geny-executor ≥2.11.0) — cancels poll loops
+    # and in-flight turns, closes adapters.
+    if getattr(app.state, "gateway_runner", None) is not None:
+        try:
+            await app.state.gateway_runner.shutdown(timeout=5)
+        except Exception as e:
+            logger.warning(f"gateway shutdown failed: {e}")
 
     # Stop cron runner before task runner (cron submits to task runner)
     if getattr(app.state, "cron_runner", None) is not None:
