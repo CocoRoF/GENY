@@ -6,7 +6,8 @@ import LLMBackendsPanel from './LLMBackendsPanel';
 import { PROVIDERS } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 import { twMerge } from 'tailwind-merge';
-import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
+import { Eye, EyeOff, AlertTriangle, X, BookOpen } from 'lucide-react';
+import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 import Selector from '@/components/ui/Selector';
@@ -66,6 +67,7 @@ export default function SettingsTab() {
   const [categories, setCategories] = useState<ConfigCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(() => readInitialCategory());
   const [editing, setEditing] = useState<{ name: string; schema: ConfigSchema; values: Record<string, any> } | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importData, setImportData] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -107,6 +109,7 @@ export default function SettingsTab() {
   const openEdit = async (name: string) => {
     try {
       const res = await configApi.get(name);
+      setGuideOpen(false);
       setEditing({ name, schema: res.schema, values: { ...res.values } });
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
@@ -300,7 +303,18 @@ export default function SettingsTab() {
           <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[600px] mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center py-4 px-6 border-b border-[var(--border-color)]">
               <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">{t('settings.editPrefix')}{getLocalizedSchema(editing.schema, locale).display_name}</h3>
-              <button className="flex items-center justify-center w-8 h-8 rounded-[var(--border-radius)] bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer" onClick={() => setEditing(null)}><X size={16} /></button>
+              <div className="flex items-center gap-2">
+                {editing.schema.setup_guide && (
+                  <button
+                    type="button"
+                    onClick={() => setGuideOpen(true)}
+                    className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-[var(--border-radius)] bg-transparent border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] text-[0.75rem] font-medium cursor-pointer transition-all duration-150"
+                  >
+                    <BookOpen size={14} /> {locale === 'ko' ? '설정 방법' : 'Setup guide'}
+                  </button>
+                )}
+                <button className="flex items-center justify-center w-8 h-8 rounded-[var(--border-radius)] bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer" onClick={() => setEditing(null)}><X size={16} /></button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <form id="config-form" className="flex flex-col gap-6">
@@ -335,6 +349,23 @@ export default function SettingsTab() {
                 <button className={cn("py-2 px-4 bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border border-[var(--border-color)]", "!py-1.5 !px-3 text-[0.75rem]")} onClick={() => setEditing(null)}>{t('common.cancel')}</button>
                 <button className={cn("py-2 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem]")} onClick={saveConfig}>{t('common.save')}</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Setup guide modal (Markdown) — overlays the edit modal */}
+      {editing && guideOpen && editing.schema.setup_guide && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setGuideOpen(false)}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[760px] mx-4 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center py-4 px-6 border-b border-[var(--border-color)]">
+              <h3 className="flex items-center gap-2 text-[1rem] font-semibold text-[var(--text-primary)]">
+                <BookOpen size={16} /> {getLocalizedSchema(editing.schema, locale).display_name} · {locale === 'ko' ? '설정 방법' : 'Setup guide'}
+              </h3>
+              <button className="flex items-center justify-center w-8 h-8 rounded-[var(--border-radius)] bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer" onClick={() => setGuideOpen(false)}><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <MarkdownRenderer content={editing.schema.setup_guide[locale] || editing.schema.setup_guide.ko || editing.schema.setup_guide.en || Object.values(editing.schema.setup_guide)[0] || ''} />
             </div>
           </div>
         </div>
