@@ -72,6 +72,10 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geny123}
       - AUTO_MIGRATION=true
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
+      # Inbound chat gateway (geny-executor >=2.11.0). Set the token in .env
+      # to let users DM the VTuber from Telegram; empty = off.
+      - GATEWAY_TELEGRAM_BOT_TOKEN=${GATEWAY_TELEGRAM_BOT_TOKEN:-}
+      - GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS=${GATEWAY_TELEGRAM_ALLOWED_CHAT_IDS:-}
       # ── Persistent-storage paths (Phase 1, 2026-05-19) ─────────────
       # Mirrors docker-compose.prod.yml — each path is backed by a
       # named volume so its data survives ``docker compose up --build``.
