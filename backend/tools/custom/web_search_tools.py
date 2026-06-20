@@ -28,6 +28,34 @@ def _safe_ddgs_import():
         ) from exc
 
 
+def _search_via_backend(backend_name: str, cfg: dict, query: str, max_results: int, region: str) -> list:
+    """Delegate to geny-executor's pluggable web-search backend (Brave / Tavily /
+    SearXNG), reusing the executor capability rather than duplicating it.
+
+    ``cfg`` is the per-environment ``web_search`` Tool-Setting (backend + keys),
+    injected from ``ctx.extras["web_search"]``. Returns normalized hit dicts
+    (rank/title/url/snippet). Raises :class:`ToolError` on config/runtime error.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from geny_executor.tools.built_in._web_search_backends import (
+        WebSearchBackendError,
+        build_backend,
+    )
+
+    from tools.base import ToolError
+
+    ctx = SimpleNamespace(extras={"web_search": cfg})
+    try:
+        backend = build_backend(backend_name, ctx)
+        return asyncio.run(backend.search(query, max_results, region, "moderate"))
+    except WebSearchBackendError as exc:
+        raise ToolError(str(exc)) from exc
+    except Exception as exc:
+        raise ToolError(f"web search via {backend_name} failed: {exc}") from exc
+
+
 class WebSearchTool(BaseTool):
     """Search the web using multiple search engines.
 
@@ -55,6 +83,7 @@ class WebSearchTool(BaseTool):
         max_results: int = 5,
         region: str = "us-en",
         timelimit: Optional[str] = None,
+        web_search_config: Optional[dict] = None,
     ) -> str:
         """Search the web.
 
@@ -64,9 +93,36 @@ class WebSearchTool(BaseTool):
             region: Region code (e.g. "us-en", "ko-kr", "ja-jp"). Defaults to "us-en".
             timelimit: Time filter — "d" (day), "w" (week), "m" (month), "y" (year). None for all time.
         """
-        DDGS = _safe_ddgs_import()
-
         max_results = min(max(1, max_results), 20)
+
+        # Per-environment Tool Setting (host-injected, not LLM-visible). When a
+        # non-default backend is configured, delegate to geny-executor's
+        # pluggable backend (Brave / Tavily / SearXNG).
+        cfg = web_search_config or {}
+        backend_name = str(cfg.get("backend") or "ddg").strip().lower()
+        if backend_name and backend_name != "ddg":
+            hits = _search_via_backend(backend_name, cfg, query, max_results, region)
+            formatted = [
+                {
+                    "rank": h.get("rank", i),
+                    "title": h.get("title", ""),
+                    "url": h.get("url", ""),
+                    "snippet": h.get("snippet", ""),
+                }
+                for i, h in enumerate(hits, 1)
+            ]
+            return json.dumps(
+                {
+                    "query": query,
+                    "backend": backend_name,
+                    "result_count": len(formatted),
+                    "results": formatted,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        DDGS = _safe_ddgs_import()
 
         try:
             results = DDGS().text(

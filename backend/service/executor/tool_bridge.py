@@ -43,6 +43,31 @@ class _GenyToolAdapter:
             "properties": {},
         }
         self._accepts_session_id = self._probe_session_id_support(geny_tool)
+        # Host-injected per-environment web-search config (Tool Settings).
+        # Explicit-param only — never sprayed into a `**kwargs` tool.
+        self._accepts_web_search_config = self._probe_explicit_param(
+            geny_tool, "web_search_config"
+        )
+
+    @staticmethod
+    def _probe_explicit_param(tool: Any, param_name: str) -> bool:
+        """True iff the tool's authoritative signature EXPLICITLY declares
+        ``param_name`` (unlike :meth:`_probe_session_id_support`, a bare
+        ``**kwargs`` does NOT count — host-injected tool config should only
+        reach tools that opt in by naming the parameter)."""
+        for fn in (
+            getattr(tool, "func", None),
+            getattr(tool, "run", None),
+            getattr(tool, "arun", None),
+        ):
+            if fn is None:
+                continue
+            try:
+                sig = inspect.signature(fn)
+            except (TypeError, ValueError):
+                continue
+            return param_name in sig.parameters
+        return False
 
     @staticmethod
     def _probe_session_id_support(tool: Any) -> bool:
@@ -168,6 +193,11 @@ class _GenyToolAdapter:
         ):
             # Overwrite, not setdefault — see docstring above.
             call_input["session_id"] = context.session_id
+
+        if self._accepts_web_search_config and context:
+            _ws_cfg = (getattr(context, "extras", None) or {}).get("web_search")
+            if _ws_cfg:
+                call_input["web_search_config"] = _ws_cfg
 
         try:
             # Try async first (arun), fall back to sync (run)

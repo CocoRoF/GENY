@@ -1416,6 +1416,11 @@ const ko: Translations = {
         title: '일회성 Sub-Worker 타입',
         description: '에이전트가 Agent 도구로 위임하는 일회성 sub-worker의 타입별 정밀 설정입니다. 시드 타입(worker/researcher/…)을 오버라이드하거나 새 타입을 추가하고, 타입마다 모델·프로바이더·시스템 프롬프트·허용 도구를 지정할 수 있습니다. 비활성으로 표시하면 이 환경의 로스터에서 제거됩니다. 행이 없으면 기본 시드 로스터를 그대로 사용합니다.',
       },
+      navToolSettings: '도구 설정',
+      toolSettings: {
+        title: '도구 설정',
+        description: '내장 도구의 환경별 옵션입니다(예: 웹 검색 백엔드와 API 키). 설정은 이 환경 매니페스트와 함께 저장됩니다. 구성하지 않으면 기본값이 사용됩니다.',
+      },
     },
     genyTools: {
       loading: 'Geny 도구 카탈로그 로드 중…',

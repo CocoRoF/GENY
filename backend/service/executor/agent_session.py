@@ -1860,6 +1860,35 @@ class AgentSession:
         """Back-compat shim — see :meth:`_load_host_selection`."""
         return self._load_host_selection("permissions")
 
+    def _load_tool_settings(self) -> Dict[str, Dict[str, Any]]:
+        """Read per-environment tool settings from the manifest.
+
+        Stored under ``host_selections.extras["tool_settings"]`` (e.g.
+        ``{"web_search": {"backend": "brave", "brave_api_key": "..."}}``).
+        Sanitized (unknown keys / empty fields dropped) so a stray value can
+        never reach a tool or shadow a reserved ToolContext.extras key. Returns
+        ``{}`` for legacy envs or on any read failure (never blocks boot).
+        """
+        if not self._env_id:
+            return {}
+        try:
+            from service.environment.service import get_environment_service
+            from service.tool_settings import sanitize_tool_settings
+
+            svc = get_environment_service()
+            manifest = svc.load_manifest(self._env_id) if svc else None
+            if manifest is None:
+                return {}
+            extras = getattr(getattr(manifest, "host_selections", None), "extras", None) or {}
+            return sanitize_tool_settings(extras.get("tool_settings"))
+        except Exception:
+            logger.debug(
+                "_load_tool_settings: manifest read failed for env_id=%s",
+                self._env_id,
+                exc_info=True,
+            )
+            return {}
+
     def _apply_session_limits_to_pipeline(self) -> None:
         """B.1 (cycle 20260426_1) — bridge UI session limits into the
         bound Pipeline's ``PipelineConfig``.
@@ -2338,6 +2367,14 @@ class AgentSession:
             pass
 
         _tool_extras: Dict[str, Any] = {}
+
+        # Per-environment tool settings (Settings → Tool Settings): each
+        # schema's key IS the ctx.extras key its tool reads (e.g. web_search).
+        # Set first so the reserved runtime handles below always win on the
+        # (sanitize-prevented) chance of a collision.
+        for _ts_key, _ts_val in self._load_tool_settings().items():
+            _tool_extras[_ts_key] = _ts_val
+
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 

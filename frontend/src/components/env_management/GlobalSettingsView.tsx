@@ -36,6 +36,7 @@ import {
   Zap,
   Bot,
   Workflow,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -58,6 +59,7 @@ import {
   OwnedSubagentPicker,
   SubworkerTypesPicker,
 } from './HostSelectionPickers';
+import ToolSettingsPicker from './ToolSettingsPicker';
 
 const S06_API_ORDER = 6;
 
@@ -74,7 +76,8 @@ type Panel =
   | 'skills'
   | 'triggers'
   | 'subagent'
-  | 'subworker';
+  | 'subworker'
+  | 'tool_settings';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -85,6 +88,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   triggers: 'globals.triggers',
   subagent: 'globals.subagent',
   subworker: 'globals.subworker',
+  tool_settings: 'globals.toolSettings',
 };
 
 const HEADER_PALETTE = {
@@ -141,6 +145,14 @@ export default function GlobalSettingsView() {
   const subworkerCustomized =
     Array.isArray(draft.host_selections?.extras?.subworker_types) &&
     (draft.host_selections?.extras?.subworker_types as unknown[]).length > 0;
+
+  // ★ on the Tool Settings nav row when any per-env tool has stored values.
+  const toolSettingsConfigured =
+    Object.keys(
+      (draft.host_selections?.extras?.tool_settings as
+        | Record<string, unknown>
+        | undefined) ?? {},
+    ).length > 0;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -254,6 +266,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('subworker')}
               badge={subworkerCustomized ? '★' : undefined}
             />
+            <SubTabButton
+              icon={SlidersHorizontal}
+              label={t('envManagement.globals.navToolSettings')}
+              active={panel === 'tool_settings'}
+              onClick={() => setPanel('tool_settings')}
+              badge={toolSettingsConfigured ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -344,6 +363,18 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.subworker.description')}
                 />
                 <SubworkerTypesPicker />
+              </div>
+            )}
+
+            {panel === 'tool_settings' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.toolSettings.title')}
+                  description={t(
+                    'envManagement.globals.toolSettings.description',
+                  )}
+                />
+                <ToolSettingsPicker />
               </div>
             )}
           </div>
