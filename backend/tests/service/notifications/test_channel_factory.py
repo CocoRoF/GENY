@@ -35,9 +35,9 @@ def test_stdout_factory_registered_by_default() -> None:
     assert "stdout" in channel_factory.known_kinds()
     channel = channel_factory.channel_from_entry({"kind": "stdout"})
     assert channel is not None
-    # geny_executor.channels.StdoutSendMessageChannel implements
-    # SendMessageChannel; we just check it has a send_message attr.
-    assert callable(getattr(channel, "send_message", None))
+    # geny_executor.channels.StdoutSendMessageChannel implements the
+    # SendMessageChannel ABC — whose method is ``send`` (async).
+    assert callable(getattr(channel, "send", None))
 
 
 def test_register_custom_factory_then_retrieve() -> None:
@@ -77,6 +77,52 @@ def test_factory_exception_is_swallowed(caplog) -> None:
         ), caplog.records
     finally:
         channel_factory._FACTORIES.pop("boom-kind", None)
+
+
+def test_builtin_kinds_exposed_via_known_kinds() -> None:
+    """executor ≥2.10.0 built-in transports surface in known_kinds() so the
+    settings UI / docs can list them — no host registration needed."""
+    kinds = set(channel_factory.known_kinds())
+    assert {"telegram", "discord", "slack", "webhook", "ntfy"} <= kinds
+
+
+def test_builtin_telegram_resolved_via_executor() -> None:
+    """A telegram entry with no host factory delegates to the executor
+    built-in and constructs a real channel."""
+    ch = channel_factory.channel_from_entry(
+        {"name": "owner", "kind": "telegram", "config": {"token": "1:a", "chat_id": "5"}},
+    )
+    assert ch is not None
+    assert type(ch).__name__ == "TelegramSendMessageChannel"
+
+
+def test_builtin_discord_resolved_via_executor() -> None:
+    ch = channel_factory.channel_from_entry(
+        {"name": "ops", "kind": "discord", "config": {"webhook_url": "https://d/wh"}},
+    )
+    assert ch is not None
+    assert type(ch).__name__ == "DiscordSendMessageChannel"
+
+
+def test_builtin_bad_config_returns_none() -> None:
+    """A known built-in kind with invalid config (missing token) → None,
+    not a crash — the install layer skips it."""
+    assert (
+        channel_factory.channel_from_entry({"name": "x", "kind": "telegram", "config": {}})
+        is None
+    )
+
+
+def test_host_factory_overrides_builtin() -> None:
+    """A host-registered factory for a built-in kind wins over the executor's."""
+    sentinel = object()
+    channel_factory.register_channel_factory("slack", lambda _c: sentinel)
+    try:
+        assert (
+            channel_factory.channel_from_entry({"kind": "slack", "config": {}}) is sentinel
+        )
+    finally:
+        channel_factory._FACTORIES.pop("slack", None)
 
 
 def test_invalid_config_type_falls_through_to_empty() -> None:
