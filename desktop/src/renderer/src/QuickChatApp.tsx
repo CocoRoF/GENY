@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import genyIcon from './assets/geny_character.png'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quick-chat bar — the floating, Spotlight-style input summoned by the global
@@ -107,7 +106,6 @@ export function QuickChatApp() {
     <div className={`qc-root gy ${dark ? '' : 'gy--light'}`}>
       <div className="qc-card">
         <div className="qc-bar">
-          <img className="qc-logo" src={genyIcon} alt="" draggable={false} />
           <textarea
             ref={inputRef}
             className="qc-input"
