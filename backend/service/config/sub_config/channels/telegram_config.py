@@ -116,3 +116,48 @@ class TelegramConfig(BaseConfig):
         if not self.enabled:
             return []
         return super().validate()
+
+    @classmethod
+    def get_setup_guide(cls) -> Dict[str, str]:
+        return {"ko": _GUIDE_KO, "en": _GUIDE_EN}
+
+
+_GUIDE_KO = """\
+# 텔레그램 봇 연결 방법
+
+가장 간단해요. **봇 만들기 → 토큰 입력**, 끝.
+
+## 1. 봇 만들기
+1. 텔레그램에서 **@BotFather** 를 검색해 대화를 시작해요.
+2. `/newbot` 입력 → 봇 표시 이름 → 사용자명(끝이 `bot` 으로 끝나야 함) 입력.
+3. BotFather가 **토큰**(`123456:ABC-DEF...` 형태)을 줍니다 → **복사**.
+
+## 2. Geny에 연결
+1. 이 카드에서 **텔레그램 연동 사용**을 켜요.
+2. **봇 토큰**을 붙여넣어요.
+3. *(선택)* **허용 채팅 ID** — 나만 쓰려면 내 chat id 입력, 비우면 누구나 사용 가능.
+4. **저장** → 자동 연결돼요. 봇에게 아무 메시지나 보내면 VTuber가 답합니다.
+
+## 내 chat id 확인하는 법
+봇에게 메시지를 한 번 보낸 뒤, 텔레그램에서 **@userinfobot** 에게 말을 걸면 내 숫자 ID를 알려줘요.
+
+> 전제: **설정 → LLM 백엔드**에 모델이 하나라도 설정돼 있어야 답합니다.
+"""
+
+_GUIDE_EN = """\
+# Connect a Telegram bot
+
+The simplest channel: **create a bot → paste the token.**
+
+## 1. Create the bot
+1. In Telegram, open **@BotFather**.
+2. Send `/newbot` → display name → username (must end in `bot`).
+3. BotFather gives you a **token** (`123456:ABC-DEF...`) → copy it.
+
+## 2. Connect to Geny
+Enable Telegram here, paste the **Bot Token**, optionally restrict **Allowed
+Chat IDs**, and **Save** — it connects automatically. DM the bot and the VTuber
+replies. (Find your chat id by messaging **@userinfobot**.)
+
+> Requires an LLM backend configured under Settings → LLM Backends.
+"""

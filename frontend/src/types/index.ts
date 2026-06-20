@@ -495,6 +495,8 @@ export interface ConfigSchema {
   icon?: string;
   fields: ConfigField[];
   i18n?: Record<string, ConfigI18nLocale>;
+  /** Optional per-locale Markdown setup guide (rendered in a modal). */
+  setup_guide?: Record<string, string>;
 }
 
 export interface ConfigItem {

@@ -129,3 +129,66 @@ class SlackConfig(BaseConfig):
         if not self.enabled:
             return []
         return super().validate()
+
+    @classmethod
+    def get_setup_guide(cls) -> Dict[str, str]:
+        return {"ko": _GUIDE_KO, "en": _GUIDE_EN}
+
+
+_GUIDE_KO = """\
+# 슬랙 봇 연결 방법 (Socket Mode)
+
+공개 서버 없이 동작해요. 토큰이 **두 개** 필요합니다 — 앱 토큰(`xapp-`)과 봇 토큰(`xoxb-`).
+
+## 1. 앱 만들기
+<https://api.slack.com/apps> → **Create New App** → *From scratch* → 워크스페이스 선택.
+
+## 2. Socket Mode 켜기 + 앱 토큰(xapp-)
+1. 좌측 **Socket Mode** → **Enable Socket Mode** 를 켜요.
+2. 그 과정에서 **App-Level Token** 을 만들어요(스코프 `connections:write`) → 토큰(`xapp-...`) **복사**.
+
+## 3. 봇 토큰(xoxb-) + 권한
+1. **OAuth & Permissions** → **Scopes → Bot Token Scopes** 에 **`chat:write`** 추가.
+2. 페이지 위쪽 **Install to Workspace** → 설치 → **Bot User OAuth Token**(`xoxb-...`) **복사**.
+
+## 4. 메시지 이벤트 구독
+1. **Event Subscriptions** → **Enable Events** 켜기.
+2. **Subscribe to bot events** 에 **`message.channels`** 추가(DM도 받으려면 `message.im`) → 저장.
+3. 권한/이벤트 변경 후 *재설치* 안내가 뜨면 다시 **Install** 해요.
+
+## 5. Geny에 연결
+1. 이 카드에서 **슬랙 연동 사용** 켜기.
+2. **App-Level 토큰(xapp-)** 과 **봇 토큰(xoxb-)** 을 붙여넣어요.
+3. *(선택)* 허용 채널 ID.
+4. **저장** → 자동 연결. 채널에서 **`/invite @봇이름`** 으로 봇을 초대한 뒤 말을 걸어보세요.
+
+> 전제: **설정 → LLM 백엔드**에 모델이 설정돼 있어야 답합니다.
+"""
+
+_GUIDE_EN = """\
+# Connect a Slack bot (Socket Mode)
+
+No public endpoint needed. You need **two** tokens — an app-level token
+(`xapp-`) and a bot token (`xoxb-`).
+
+## 1. Create an app
+<https://api.slack.com/apps> → **Create New App** → *From scratch*.
+
+## 2. Socket Mode + app token
+Left menu **Socket Mode** → enable it → create an **App-Level Token**
+(`connections:write`) → copy `xapp-…`.
+
+## 3. Bot token + scope
+**OAuth & Permissions** → add the **`chat:write`** Bot Token Scope → **Install to
+Workspace** → copy the **Bot User OAuth Token** `xoxb-…`.
+
+## 4. Subscribe to message events
+**Event Subscriptions** → enable → add bot events **`message.channels`** (and
+`message.im` for DMs) → save → reinstall if prompted.
+
+## 5. Connect to Geny
+Enable Slack here, paste both tokens, optionally restrict channels, **Save**.
+Invite the bot to a channel (`/invite @bot`) and message it.
+
+> Requires an LLM backend configured under Settings → LLM Backends.
+"""

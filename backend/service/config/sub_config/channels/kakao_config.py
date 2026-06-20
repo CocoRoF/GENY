@@ -476,3 +476,22 @@ class KakaoConfig(BaseConfig):
         if not self.enabled:
             return []
         return super().validate()
+
+    @classmethod
+    def get_setup_guide(cls) -> Dict[str, str]:
+        return {
+            "ko": (
+                "# 카카오톡 — 준비 중\n\n"
+                "⚠️ 카카오톡은 **Kakao i OpenBuilder 스킬 서버**(공개 HTTPS 엔드포인트로 "
+                "Kakao가 요청을 보내는 방식)가 필요해서, 현재 인바운드 게이트웨이에 "
+                "**아직 연결되지 않았습니다.**\n\n"
+                "지금 바로 쓸 수 있는 채널은 **텔레그램·디스코드·슬랙**이에요. "
+                "아래 필드는 향후 연동될 때 사용할 값입니다.\n"
+            ),
+            "en": (
+                "# KakaoTalk — coming soon\n\n"
+                "⚠️ KakaoTalk needs a public **Kakao i OpenBuilder skill server** "
+                "endpoint, so it is **not wired to the gateway yet**. Use "
+                "**Telegram / Discord / Slack** for now.\n"
+            ),
+        }

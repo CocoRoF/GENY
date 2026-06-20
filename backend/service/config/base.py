@@ -326,6 +326,17 @@ class BaseConfig(ABC):
                     )
 
     @classmethod
+    def get_setup_guide(cls) -> Dict[str, str]:
+        """Optional per-locale Markdown setup guide.
+
+        Return ``{}`` for no guide, or ``{"ko": "...", "en": "..."}`` with
+        Markdown bodies. The frontend renders it in a "설정 방법" modal so a
+        channel's external-bot setup (Discord intents, OAuth2 invite, Slack
+        Socket Mode, …) lives next to the fields instead of in docs.
+        """
+        return {}
+
+    @classmethod
     def get_schema(cls) -> Dict[str, Any]:
         """
         Get the full schema for this config.
@@ -360,4 +371,7 @@ class BaseConfig(ABC):
         i18n = cls.get_i18n()
         if i18n:
             schema["i18n"] = i18n
+        guide = cls.get_setup_guide()
+        if guide:
+            schema["setup_guide"] = guide
         return schema
