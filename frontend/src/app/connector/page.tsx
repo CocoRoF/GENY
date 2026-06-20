@@ -10,7 +10,7 @@
  * Query: ?token (→localStorage), ?session (preselect).
  */
 
-import { useEffect, useState, type SVGProps } from 'react';
+import { useEffect, useRef, useState, type SVGProps } from 'react';
 import { setToken } from '@/lib/authApi';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
@@ -97,6 +97,11 @@ export default function ConnectorPage() {
 
   const { setTheme } = useTheme();
   const [booted, setBooted] = useState(false);
+  // The session the connector is bound to (?session = overlaySession). The
+  // restore logic must always prefer THIS over "first VTuber" — otherwise a
+  // restart can land on a different VTuber and overwrite overlaySession with it,
+  // poisoning every future restart (and losing the bound model in the picker).
+  const wantSessionRef = useRef<string | null>(null);
 
   // Pull the current assignment for the selected session so the model picker
   // shows what's actually bound (it was empty before). After this, the live
@@ -119,6 +124,7 @@ export default function ConnectorPage() {
     const token = qs.get('token');
     if (token) setToken(token);
     const wantSession = qs.get('session');
+    wantSessionRef.current = wantSession;
 
     (async () => {
       await loadSessions();
@@ -134,13 +140,18 @@ export default function ConnectorPage() {
   }, []);
 
   // Auto-select a VTuber session AND correct a stale/invalid selection so the
-  // panel + overlay self-heal onto a real VTuber.
+  // panel + overlay self-heal onto a real VTuber. Crucially, prefer the BOUND
+  // session (?session = overlaySession) over "first VTuber" — landing on a
+  // different VTuber would overwrite overlaySession (pickSession syncs it) and
+  // lose the user's session+model across restarts.
   useEffect(() => {
     if (!booted) return;
     const cur = sessions.find((s) => s.session_id === selectedSessionId);
     if (cur?.role === 'vtuber') return; // already on a valid VTuber
-    const v = sessions.find((s) => s.role === 'vtuber');
-    if (v) pickSession(v.session_id);
+    const want = wantSessionRef.current;
+    const bound = want ? sessions.find((s) => s.session_id === want && s.role === 'vtuber') : undefined;
+    const target = bound ?? sessions.find((s) => s.role === 'vtuber');
+    if (target) pickSession(target.session_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, sessions, selectedSessionId]);
 

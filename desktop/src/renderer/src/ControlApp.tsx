@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import genyIcon from './assets/geny_character.png'
 import type { OverlayTuning } from '../../preload/index'
 
@@ -54,6 +54,85 @@ const I = {
 }
 
 type ThemeMode = 'system' | 'dark' | 'light'
+
+// ── hotkey recorder: click → press a combo → Electron accelerator string ──────
+function keyName(e: KeyboardEvent): string | null {
+  const code = e.code
+  if (code.startsWith('Key')) return code.slice(3)        // KeyA → A
+  if (code.startsWith('Digit')) return code.slice(5)      // Digit1 → 1
+  if (/^F\d{1,2}$/.test(code)) return code                // F1..F24
+  if (code.startsWith('Numpad')) {
+    const n = code.slice(6)
+    if (/^\d$/.test(n)) return 'num' + n
+    const m: Record<string, string> = { Enter: 'Enter', Add: 'numadd', Subtract: 'numsub', Multiply: 'nummult', Divide: 'numdiv', Decimal: 'numdec' }
+    return m[n] ?? null
+  }
+  const named: Record<string, string> = {
+    Enter: 'Enter', Space: 'Space', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+    Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+  }
+  if (code in named) return named[code]
+  if (e.key && e.key.length === 1) return e.key.toUpperCase()
+  return null
+}
+function keyEventToAccelerator(e: KeyboardEvent): string | null {
+  const mods: string[] = []
+  if (e.ctrlKey || e.metaKey) mods.push('CommandOrControl')
+  if (e.altKey) mods.push('Alt')
+  if (e.shiftKey) mods.push('Shift')
+  const key = keyName(e)
+  if (!key) return null               // modifier-only so far → keep waiting
+  if (mods.length === 0) return null  // a global hotkey needs at least one modifier
+  return [...mods, key].join('+')
+}
+function prettyAccel(acc: string): string {
+  if (!acc) return ''
+  const mac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
+  return acc
+    .replace(/CommandOrControl/g, mac ? '⌘' : 'Ctrl')
+    .replace(/Command/g, '⌘')
+    .replace(/Control/g, 'Ctrl')
+    .replace(/Alt/g, mac ? '⌥' : 'Alt')
+    .replace(/Shift/g, mac ? '⇧' : 'Shift')
+    .split('+').join(' + ')
+}
+function HotkeyCapture({ value, onCapture }: { value: string; onCapture: (acc: string) => void }) {
+  const [recording, setRecording] = useState(false)
+  const start = () => {
+    if (recording) return
+    setRecording(true)
+    window.connector?.hotkeys.pause?.()  // free up registered combos for re-capture
+  }
+  const stop = () => {
+    setRecording(false)
+    window.connector?.hotkeys.resume?.()
+  }
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!recording) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); start() }
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.key === 'Escape') { stop(); return }
+    const acc = keyEventToAccelerator(e.nativeEvent)
+    if (acc) { onCapture(acc); stop() }
+  }
+  return (
+    <button
+      type="button"
+      className={`gy-hotkey ${recording ? 'is-recording' : ''}`}
+      onClick={start}
+      onKeyDown={onKeyDown}
+      onBlur={stop}
+    >
+      {recording ? '키 조합을 누르세요…  (Esc 취소)' : (prettyAccel(value) || '클릭한 뒤 키 조합을 누르세요')}
+    </button>
+  )
+}
 
 export function ControlApp() {
   const [tab, setTab] = useState<Tab>('account')
@@ -131,13 +210,15 @@ export function ControlApp() {
     await window.connector?.updater.setEnabled(next)
   }
 
-  const savePtt = async () => {
-    const ok = await window.connector?.hotkeys.setPushToTalk(pttHotkey)
+  const savePtt = async (acc: string) => {
+    setPttHotkey(acc)
+    const ok = await window.connector?.hotkeys.setPushToTalk(acc)
     setPttMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
   }
 
-  const saveQuickChat = async () => {
-    const ok = await window.connector?.hotkeys.setQuickChat?.(quickChatHotkey)
+  const saveQuickChat = async (acc: string) => {
+    setQuickChatHotkey(acc)
+    const ok = await window.connector?.hotkeys.setQuickChat?.(acc)
     setQuickChatMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
   }
 
@@ -307,19 +388,10 @@ export function ControlApp() {
               <div className="gy-card-h">{I.mic} 푸시투토크 단축키</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
                 탭하면 마이크가 켜지고, 다시 탭하면 꺼지거나 아바타의 말을 끊습니다.
+                아래를 클릭한 뒤 원하는 키 조합을 누르세요.
               </p>
-              <input
-                className="gy-input mono"
-                value={pttHotkey}
-                onChange={(e) => setPttHotkey(e.target.value)}
-                placeholder="CommandOrControl+Shift+Space"
-                spellCheck={false}
-              />
-              <div className="gy-spacer" />
-              <div className="gy-row">
-                <button className="gy-btn gy-btn--primary gy-btn--sm" onClick={savePtt}>단축키 저장</button>
-                {pttMsg && <span className="gy-hint" style={{ margin: 0 }}>{pttMsg}</span>}
-              </div>
+              <HotkeyCapture value={pttHotkey} onCapture={savePtt} />
+              {pttMsg && <span className="gy-hint" style={{ margin: '8px 0 0', display: 'block' }}>{pttMsg}</span>}
             </section>
 
             <section className="gy-card">
@@ -359,20 +431,10 @@ export function ControlApp() {
               <div className="gy-card-h">{I.chat} 빠른 채팅 단축키</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
                 어디서든 이 단축키를 누르면 입력창이 떠오르고, 메시지를 입력해 현재 VTuber에게 바로 보냅니다.
-                자주 안 쓰는 조합을 권장합니다(기본: {`Cmd/Ctrl+Shift+Enter`}).
+                아래를 클릭한 뒤 원하는 키 조합을 누르세요. 자주 안 쓰는 조합을 권장합니다(기본: Cmd/Ctrl+Shift+Enter).
               </p>
-              <input
-                className="gy-input mono"
-                value={quickChatHotkey}
-                onChange={(e) => setQuickChatHotkey(e.target.value)}
-                placeholder="CommandOrControl+Shift+Enter"
-                spellCheck={false}
-              />
-              <div className="gy-spacer" />
-              <div className="gy-row">
-                <button className="gy-btn gy-btn--primary gy-btn--sm" onClick={saveQuickChat}>단축키 저장</button>
-                {quickChatMsg && <span className="gy-hint" style={{ margin: 0 }}>{quickChatMsg}</span>}
-              </div>
+              <HotkeyCapture value={quickChatHotkey} onCapture={saveQuickChat} />
+              {quickChatMsg && <span className="gy-hint" style={{ margin: '8px 0 0', display: 'block' }}>{quickChatMsg}</span>}
             </section>
 
             <section className="gy-card">

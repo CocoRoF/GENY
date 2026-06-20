@@ -236,6 +236,34 @@ body,
   letter-spacing: 0.2px;
 }
 
+/* Hotkey recorder field (click → press a combo) */
+.gy-hotkey {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border-radius: 9px;
+  border: 1px dashed var(--gy-field-border);
+  background: var(--gy-field);
+  color: var(--gy-text);
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  text-align: center;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.gy-hotkey:hover {
+  border-color: var(--gy-accent);
+}
+.gy-hotkey.is-recording {
+  border-style: solid;
+  border-color: var(--gy-accent);
+  color: var(--gy-accent);
+  box-shadow: 0 0 0 3px rgba(79, 124, 255, 0.18);
+  animation: gy-pulse 1.2s ease-in-out infinite;
+}
+
 /* Buttons */
 .gy-btn {
   display: inline-flex;
