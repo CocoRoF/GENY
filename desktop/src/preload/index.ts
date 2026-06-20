@@ -83,6 +83,10 @@ export interface ConnectorBridge {
     /** Global quick-chat accelerator (summons the floating input bar). */
     getQuickChat(): Promise<string | null>
     setQuickChat(accelerator: string): Promise<boolean>
+    /** Suspend / restore all global shortcuts while a settings field records a
+     *  new combo (so a registered key isn't intercepted during capture). */
+    pause(): void
+    resume(): void
   }
 
   /** Quick-chat input bar (the 'quickchat' window) → relay to the VTuber chat. */
@@ -195,6 +199,8 @@ const api: ConnectorBridge = {
     },
     getQuickChat: () => ipcRenderer.invoke('hotkey:get-quickchat'),
     setQuickChat: (acc) => ipcRenderer.invoke('hotkey:set-quickchat', acc),
+    pause: () => ipcRenderer.send('hotkey:pause'),
+    resume: () => ipcRenderer.send('hotkey:resume'),
   },
   quickChat: {
     submit: (text) => ipcRenderer.invoke('quickchat:submit', text),

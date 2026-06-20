@@ -698,6 +698,12 @@ function registerIpc(): void {
     return ok
   })
 
+  // While a settings field is RECORDING a new hotkey, suspend the global
+  // shortcuts so an already-registered combo (e.g. the current PTT key) isn't
+  // swallowed system-wide and can be re-captured by the renderer's keydown.
+  ipcMain.on('hotkey:pause', () => globalShortcut.unregisterAll())
+  ipcMain.on('hotkey:resume', () => registerHotkeys())
+
   // Quick-chat bar → send to the current VTuber, then close. Returns {ok,error}
   // so the bar can show a brief result (전송됨 / 로그인 필요).
   ipcMain.handle('quickchat:submit', async (_e, text: string) => {
