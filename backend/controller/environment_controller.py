@@ -170,6 +170,36 @@ async def get_preset_catalog(auth: dict = Depends(require_auth)):
     return {"presets": catalog}
 
 
+@router.post("/reseed-templates")
+async def reseed_templates(request: Request, auth: dict = Depends(require_auth)):
+    """Rewrite the built-in template seed environments from the canonical
+    manifest, re-resolving the Stage-6 provider from the *current* credential
+    bundle.
+
+    Boot already does this once (``install_environment_templates``), but the
+    resolved provider is frozen at that moment — a fresh install with no keys
+    seeds ``anthropic`` (the last-resort fallback). When the user configures a
+    backend *after* boot (e.g. points Geny at a local Ollama in the first-run
+    wizard), the seed envs still pin the old provider. This endpoint re-runs
+    the seed so they adopt the now-active backend, with no restart.
+
+    Only the four template seeds are rewritten; user-created environments are
+    never touched (same guarantee as the boot path).
+    """
+    svc = _env_svc(request)
+    tool_loader = getattr(request.app.state, "tool_loader", None)
+    from service.environment.templates import (
+        _resolve_active_provider,
+        install_environment_templates,
+    )
+
+    names = tool_loader.get_all_names() if tool_loader is not None else None
+    count = install_environment_templates(
+        svc, external_tool_names=names, tool_loader=tool_loader
+    )
+    return {"reseeded": count, "active_provider": _resolve_active_provider()}
+
+
 @router.get("/session-counts", response_model=EnvironmentSessionCountsResponse)
 async def list_environment_session_counts(
     request: Request,
