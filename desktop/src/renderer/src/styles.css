@@ -512,6 +512,13 @@ body,
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   padding: 12px 14px 9px;
   animation: qc-rise 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  /* The card is the drag handle — grab anywhere except the input/send button to
+     move the bar; the spot is remembered between summons. */
+  -webkit-app-region: drag;
+  cursor: grab;
+}
+.qc-card:active {
+  cursor: grabbing;
 }
 .gy--light .qc-card {
   background: rgba(255, 255, 255, 0.92);
@@ -558,6 +565,9 @@ body,
   /* Editing must work even though the window disables selection globally. */
   -webkit-user-select: text;
   user-select: text;
+  /* Not a drag region — typing/selection here must not move the window. */
+  -webkit-app-region: no-drag;
+  cursor: text;
 }
 .qc-input::placeholder {
   color: var(--gy-text-3);
@@ -577,6 +587,8 @@ body,
   justify-content: center;
   box-shadow: 0 4px 14px rgba(79, 124, 255, 0.34);
   transition: filter 0.15s ease, transform 0.08s ease, opacity 0.15s ease;
+  /* Clickable, not a drag region. */
+  -webkit-app-region: no-drag;
 }
 .qc-send svg {
   width: 17px;

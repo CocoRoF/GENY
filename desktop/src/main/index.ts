@@ -59,6 +59,9 @@ interface ConnectorConfig {
   /** Global quick-chat accelerator (Electron format) — pops the floating input
    *  bar that sends a message to the current VTuber (Spotlight-style). */
   quickChatHotkey?: string
+  /** Last position of the draggable quick-chat bar (remembered between summons).
+   *  Absent → it opens centered near the top of the active display. */
+  quickChatBar?: { x: number; y: number }
   /** Allow the agent to capture the screen (Phase 4). Default true. */
   captureArmed?: boolean
   /** Allow the agent to actuate the desktop — type/click/open (Phase 6). Default false. */
@@ -272,6 +275,11 @@ function createQuickChat(): void {
   loadRoute(quickchat, 'quickchat')
   // Dismiss on focus loss (click elsewhere) — Spotlight behaviour.
   quickchat.on('blur', () => quickchat?.hide())
+  // Remember where the user drags the bar. 'move' streams during the drag
+  // (Win/Linux) and 'moved' lands once it settles (macOS); debounce both so we
+  // persist the final spot without hammering the config file mid-drag.
+  quickchat.on('move', persistQuickChatPos)
+  quickchat.on('moved', persistQuickChatPos)
   quickchat.on('close', (e) => {
     if (!appQuitting) {
       e.preventDefault()
@@ -280,16 +288,42 @@ function createQuickChat(): void {
   })
 }
 
-// Center the bar horizontally on the display under the cursor, anchored ~22%
-// from the top (classic launcher placement).
+let quickChatPosTimer: ReturnType<typeof setTimeout> | null = null
+let suppressQuickChatPosSave = false
+function persistQuickChatPos(): void {
+  // Ignore the programmatic setBounds in positionQuickChat — only user drags.
+  if (suppressQuickChatPosSave) return
+  if (quickChatPosTimer) clearTimeout(quickChatPosTimer)
+  quickChatPosTimer = setTimeout(() => {
+    if (!quickchat || !quickchat.isVisible()) return
+    const b = quickchat.getBounds()
+    saveConfig({ quickChatBar: { x: b.x, y: b.y } })
+  }, 350)
+}
+
+// Place the bar: restore the user's remembered spot (clamped onto a visible
+// display in case monitors changed), else center it near the top of the display
+// under the cursor (classic launcher placement).
 function positionQuickChat(): void {
   if (!quickchat) return
-  const pt = screen.getCursorScreenPoint()
-  const disp = screen.getDisplayNearestPoint(pt)
-  const wa = disp.workArea
-  const x = Math.round(wa.x + (wa.width - QUICKCHAT_W) / 2)
-  const y = Math.round(wa.y + wa.height * 0.22)
-  quickchat.setBounds({ x, y, width: QUICKCHAT_W, height: QUICKCHAT_H })
+  suppressQuickChatPosSave = true
+  const saved = loadConfig().quickChatBar
+  if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+    const disp = screen.getDisplayNearestPoint({ x: saved.x, y: saved.y })
+    const wa = disp.workArea
+    // Keep the whole bar on-screen (guard against a closed/moved monitor).
+    const x = Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - QUICKCHAT_W)
+    const y = Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - QUICKCHAT_H)
+    quickchat.setBounds({ x: Math.round(x), y: Math.round(y), width: QUICKCHAT_W, height: QUICKCHAT_H })
+  } else {
+    const pt = screen.getCursorScreenPoint()
+    const wa = screen.getDisplayNearestPoint(pt).workArea
+    const x = Math.round(wa.x + (wa.width - QUICKCHAT_W) / 2)
+    const y = Math.round(wa.y + wa.height * 0.22)
+    quickchat.setBounds({ x, y, width: QUICKCHAT_W, height: QUICKCHAT_H })
+  }
+  // Re-arm persistence after the programmatic move settles.
+  setTimeout(() => { suppressQuickChatPosSave = false }, 120)
 }
 
 async function toggleQuickChat(): Promise<void> {
