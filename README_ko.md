@@ -166,7 +166,34 @@ geny/
 
 ## 설치
 
-### 🐳 Docker (추천)
+### ⚡ 한 줄 설치 (추천) — `./geny up`
+
+GPU·API 키·submodule 없이 가장 빠르게 띄우는 경량(lite) 경로입니다.
+
+```bash
+git clone https://github.com/CocoRoF/Geny.git
+cd Geny
+./geny up            # postgres + backend + frontend (GPU-free, 키 0개)
+```
+
+`./geny up`이 알아서: docker/compose 확인 → `.env` 시드(없으면 sample 복사) → 빌드·기동 → 백엔드 healthy 대기 → 접속 URL 안내. **http://localhost:3000** 접속 → 관리자 계정 생성 → **Settings → LLM 백엔드**에서:
+
+- **로컬·키 0개**: Ollama를 켠 뒤 Ollama 카드에서 *모델 검색* → 바로 사용.
+- **클라우드**: Anthropic / OpenAI / Google 키를 해당 카드에 붙여넣기.
+
+기타 명령:
+
+```bash
+./geny up --full     # + 아바타 에디터(submodule) + 로컬 GPU TTS/STT (NVIDIA 필요)
+./geny doctor        # 호스트 설정 진단 ( --fix 로 .env 시드·submodule 초기화 )
+./geny logs backend  # 로그 추적
+./geny update        # git pull + 재빌드 + 재시작
+./geny down          # 정지
+```
+
+> lite 스택은 음성(TTS)이 클라우드 edge-tts로 동작합니다. 자체호스팅 고품질 음성(OmniVoice)·STT(Whisper)는 NVIDIA GPU가 있을 때 `./geny up --full`로 켜집니다.
+
+### 🐳 Docker (수동)
 
 ```bash
 # 1. submodule 포함 clone (geny-avatar + geny-licensed-assets)
