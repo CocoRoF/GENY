@@ -20,6 +20,7 @@ import { useI18n } from '@/lib/i18n';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import ApiBackendModal from './ApiBackendModal';
 import LocalBackendModal, { type LocalProviderId } from './LocalBackendModal';
+import { PROVIDERS } from '@/lib/modelCatalog';
 
 const API_PROVIDERS = new Set(['anthropic', 'openai', 'google', 'vllm']);
 const LOCAL_PROVIDERS = new Set<string>(['ollama', 'lmstudio', 'custom']);
@@ -381,7 +382,9 @@ function LLMBackendsPanelInner() {
         <div className="flex-1 min-w-0">
           <h3 className="text-[1.0625rem] font-semibold">{t('settings.llmBackends.title')}</h3>
           <p className="text-[0.8125rem] text-[var(--text-secondary)] mt-1 leading-relaxed">
-            {t('settings.llmBackends.description')}
+            {t('settings.llmBackends.description', {
+              count: providers.length || PROVIDERS.length,
+            })}
           </p>
         </div>
         <button

@@ -374,7 +374,7 @@ const ko: Translations = {
     llmBackends: {
       navLabel: 'LLM 백엔드',
       title: 'LLM 백엔드',
-      description: '5개 프로바이더가 executor의 ClientRegistry에 매핑됩니다. 각 카드가 해당 프로바이더의 유일한 편집창이에요 — API 키를 붙여넣거나(Anthropic / OpenAI / Google / vLLM) 모달 내 로그인 흐름을 실행하면(Claude Code) 됩니다. 카드가 초록색이 되면 해당 프로바이더를 Stage 6에서 선택한 Environment가 실제 VTuber / Worker 세션을 그 백엔드로 라우팅합니다.',
+      description: '{count}개 프로바이더가 executor의 ClientRegistry에 매핑됩니다. 각 카드가 해당 프로바이더의 유일한 편집창이에요 — 클라우드는 API 키를 붙여넣고(Anthropic / OpenAI / Google), 로컬은 OpenAI 호환 엔드포인트를 입력하고(vLLM / Ollama / LM Studio / Custom), Claude Code는 모달 내 로그인 흐름을 실행하면 됩니다. 카드가 초록색이 되면 해당 프로바이더를 Stage 6에서 선택한 Environment가 실제 VTuber / Worker 세션을 그 백엔드로 라우팅합니다.',
       refreshAll: '전체 새로고침',
       reCheck: '다시 확인',
       docs: '문서',
