@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+#
+# geny — one-command runner for the Geny stack.
+#
+# The "easy install" entry point (hermes_docs P0-B). Wraps docker compose so a
+# new self-hoster doesn't have to learn the 5-file compose matrix, hand-copy
+# two .env files, or remember the git-submodule + GPU footguns.
+#
+#   ./geny up            bring up the LITE stack (default): postgres + backend +
+#                        frontend. GPU-free, no git submodule, no LLM key
+#                        required — open the UI and add a key (or point it at a
+#                        local Ollama). TTS falls back to cloud edge-tts.
+#   ./geny up --full     full stack: + avatar-editor (inits the git submodule)
+#                        + omnivoice/whisper local GPU TTS/STT (needs NVIDIA).
+#   ./geny down          stop the stack
+#   ./geny restart [svc] recreate everything (or one service)
+#   ./geny logs [svc]    follow logs
+#   ./geny ps            stack status
+#   ./geny doctor [--fix] diagnose the host setup (and optionally auto-fix)
+#   ./geny update        git pull + rebuild + restart
+#   ./geny help
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+# ── output helpers ───────────────────────────────────────────────────
+if [ -t 1 ]; then
+  C_RESET='\033[0m'; C_BOLD='\033[1m'; C_GREEN='\033[32m'; C_YELLOW='\033[33m'
+  C_RED='\033[31m'; C_BLUE='\033[36m'; C_DIM='\033[2m'
+else
+  C_RESET=''; C_BOLD=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BLUE=''; C_DIM=''
+fi
+info()  { printf "${C_BLUE}»${C_RESET} %s\n" "$*"; }
+ok()    { printf "${C_GREEN}✓${C_RESET} %s\n" "$*"; }
+warn()  { printf "${C_YELLOW}!${C_RESET} %s\n" "$*"; }
+err()   { printf "${C_RED}✗${C_RESET} %s\n" "$*" >&2; }
+die()   { err "$*"; exit 1; }
+
+# ── docker / compose detection (auto-sudo when the daemon needs it) ───
+# If the daemon isn't reachable as the current user and sudo exists, use
+# 'sudo docker'. We do NOT probe with 'sudo docker info' (that would block
+# on a password prompt) — real commands prompt the human interactively when
+# no cached credential exists, which is correct for a hand-run CLI.
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    DOCKER="sudo docker"
+    warn "docker is not reachable as $(id -un); using 'sudo docker' (you may be prompted for your password)."
+  fi
+fi
+
+detect_compose() {
+  if $DOCKER compose version >/dev/null 2>&1; then
+    echo "$DOCKER compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    # honour the same sudo decision for the legacy v1 binary
+    case "$DOCKER" in "sudo "*) echo "sudo docker-compose" ;; *) echo "docker-compose" ;; esac
+  else
+    echo ""
+  fi
+}
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 \
+    || die "Docker is not installed. See https://docs.docker.com/engine/install/"
+  $DOCKER info >/dev/null 2>&1 \
+    || die "Docker daemon is not reachable. Start Docker (or check your permissions / sudo)."
+  COMPOSE="$(detect_compose)"
+  [ -n "$COMPOSE" ] \
+    || die "docker compose is not available. Install the Compose plugin: https://docs.docker.com/compose/install/"
+}
+
+# Read a KEY=value from .env (host-side), falling back to a default.
+env_get() {
+  local key="$1" def="${2:-}"
+  if [ -f .env ]; then
+    local v; v="$(grep -E "^${key}=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]')" || true
+    [ -n "$v" ] && { echo "$v"; return; }
+  fi
+  echo "$def"
+}
+
+LITE_SERVICES="postgres backend frontend"
+
+# ── env seeding ──────────────────────────────────────────────────────
+seed_env() {
+  # Both files are optional (compose uses ${VAR:-default} and the backend
+  # env_file is required:false), but seeding them gives the user an obvious,
+  # documented place to add an LLM key / change a port.
+  if [ ! -f .env ] && [ -f .env.sample ]; then
+    cp .env.sample .env && ok "Created .env from .env.sample"
+  fi
+  if [ ! -f backend/.env ] && [ -f backend/.env.example ]; then
+    cp backend/.env.example backend/.env && ok "Created backend/.env from backend/.env.example"
+  fi
+}
+
+ensure_submodules() {
+  [ -f .gitmodules ] || return 0
+  if [ -z "$(ls -A vendor/geny-avatar 2>/dev/null)" ]; then
+    info "Initializing git submodules (avatar-editor assets)…"
+    git submodule update --init --recursive || die "git submodule init failed."
+    ok "Submodules ready."
+  fi
+}
+
+wait_backend_healthy() {
+  local port; port="$(env_get BACKEND_PORT 8000)"
+  info "Waiting for the backend to become healthy…"
+  for _ in $(seq 1 60); do
+    if curl -fsS -o /dev/null "http://localhost:${port}/health" 2>/dev/null; then
+      ok "Backend healthy."
+      return 0
+    fi
+    sleep 2
+  done
+  warn "Backend didn't report healthy within ~2 min. Check: ./geny logs backend"
+  return 0
+}
+
+# ── subcommands ──────────────────────────────────────────────────────
+cmd_up() {
+  local full=0
+  for a in "$@"; do case "$a" in --full) full=1 ;; esac; done
+  require_docker
+  seed_env
+
+  if [ "$full" = 1 ]; then
+    ensure_submodules
+    info "Building + starting the FULL stack (avatar-editor + GPU TTS/STT)…"
+    $COMPOSE --profile audio-local up -d --build
+  else
+    info "Building + starting the LITE stack (postgres + backend + frontend, GPU-free)…"
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --build $LITE_SERVICES
+  fi
+
+  wait_backend_healthy
+  local fport; fport="$(env_get FRONTEND_PORT 3000)"
+  echo
+  ok "Geny is up."
+  printf "${C_BOLD}  Open:${C_RESET} http://localhost:%s\n" "$fport"
+  printf "${C_DIM}  First run → create the admin account, then Settings → LLM 백엔드:\n"
+  printf "    • Local & keyless: start Ollama, open the Ollama card, Discover models.\n"
+  printf "    • Cloud: paste an Anthropic / OpenAI / Google key into its card.${C_RESET}\n"
+  printf "${C_DIM}  Diagnose anytime: ./geny doctor   ·   Logs: ./geny logs backend${C_RESET}\n"
+}
+
+cmd_down()    { require_docker; $COMPOSE --profile audio-local down; ok "Stopped."; }
+cmd_restart() { require_docker; $COMPOSE restart "$@"; ok "Restarted ${*:-all}."; }
+cmd_logs()    { require_docker; $COMPOSE logs -f --tail=120 "$@"; }
+cmd_ps()      { require_docker; $COMPOSE ps; }
+
+cmd_update() {
+  require_docker
+  info "Pulling latest main…"
+  git pull --ff-only origin main || die "git pull failed (uncommitted changes or diverged history?)."
+  info "Rebuilding + restarting the lite stack…"
+  # shellcheck disable=SC2086
+  $COMPOSE up -d --build $LITE_SERVICES
+  wait_backend_healthy
+  ok "Updated."
+}
+
+# ── doctor ───────────────────────────────────────────────────────────
+port_busy() {  # 0 = busy
+  local p="$1"
+  if command -v ss >/dev/null 2>&1; then ss -ltn 2>/dev/null | grep -qE "[:.]${p}\b"
+  elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
+  else return 1; fi
+}
+
+cmd_doctor() {
+  local fix=0; for a in "$@"; do case "$a" in --fix) fix=1 ;; esac; done
+  local problems=0
+  local fixlabel=""; [ "$fix" = 1 ] && fixlabel=" (--fix)"
+  echo "Geny doctor${fixlabel}"
+  echo "──────────────────────────────────────────"
+
+  # docker / compose
+  if command -v docker >/dev/null 2>&1 && $DOCKER info >/dev/null 2>&1; then
+    ok "docker daemon reachable${DOCKER:+ ($DOCKER)}"
+  else
+    err "docker not installed or daemon unreachable"; problems=$((problems+1))
+  fi
+  COMPOSE="$(detect_compose)"
+  if [ -n "$COMPOSE" ]; then ok "docker compose: $COMPOSE"; else err "docker compose missing"; problems=$((problems+1)); fi
+
+  # env files
+  for f in .env backend/.env; do
+    local sample; case "$f" in .env) sample=".env.sample" ;; *) sample="backend/.env.example" ;; esac
+    if [ -f "$f" ]; then ok "$f present"
+    elif [ "$fix" = 1 ] && [ -f "$sample" ]; then cp "$sample" "$f"; ok "$f created from $sample"
+    else warn "$f missing (optional — defaults apply; run --fix to seed from $sample)"; fi
+  done
+
+  # submodules (only needed for --full / avatar-editor)
+  if [ -f .gitmodules ]; then
+    if [ -n "$(ls -A vendor/geny-avatar 2>/dev/null)" ]; then ok "git submodules initialized"
+    elif [ "$fix" = 1 ]; then ensure_submodules
+    else warn "git submodules not initialized (only needed for 'up --full'; run --fix or 'up --full')"; fi
+  fi
+
+  # ports
+  for pair in "FRONTEND_PORT:3000" "BACKEND_PORT:8000" "POSTGRES_PORT:5432"; do
+    local name="${pair%%:*}" def="${pair##*:}" p; p="$(env_get "$name" "$def")"
+    if port_busy "$p"; then
+      # busy by our own stack is fine; flag only if no geny container owns it
+      if $DOCKER ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -q ":${p}->"; then
+        ok "port $p ($name) — used by a running container (likely this stack)"
+      else
+        warn "port $p ($name) is in use by another process — set $name in .env to a free port"
+      fi
+    else
+      ok "port $p ($name) free"
+    fi
+  done
+
+  # running stack + backend health
+  local bport; bport="$(env_get BACKEND_PORT 8000)"
+  if curl -fsS -o /dev/null "http://localhost:${bport}/health" 2>/dev/null; then
+    ok "backend /health responding on :$bport"
+  else
+    warn "backend not responding on :$bport (not started yet? run ./geny up)"
+  fi
+
+  # local LLM hint — Ollama (keyless path)
+  if curl -fsS -o /dev/null "http://localhost:11434/api/tags" 2>/dev/null; then
+    ok "Ollama reachable at http://localhost:11434 — keyless local LLM available"
+  else
+    info "Ollama not detected at :11434 (optional — install from ollama.com for a keyless local model)"
+  fi
+
+  # GPU (only relevant for --full)
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+    ok "NVIDIA GPU available (enables 'up --full' local TTS/STT)"
+  else
+    info "no NVIDIA GPU detected — use the default lite stack (cloud TTS)"
+  fi
+
+  echo "──────────────────────────────────────────"
+  if [ "$problems" = 0 ]; then ok "No blocking problems."; else err "$problems blocking problem(s) above."; fi
+  return 0
+}
+
+usage() {
+  cat <<'EOF'
+geny — one-command runner for the Geny stack
+
+  ./geny up [--full]    start the stack (default: lite, GPU-free, no submodule,
+                        no LLM key required). --full adds the avatar-editor and
+                        local GPU TTS/STT (NVIDIA).
+  ./geny down           stop the stack
+  ./geny restart [svc]  restart everything (or one service)
+  ./geny logs [svc]     follow logs
+  ./geny ps             stack status
+  ./geny doctor [--fix] diagnose the host setup (and optionally auto-fix)
+  ./geny update         git pull + rebuild + restart (lite)
+  ./geny help
+
+First run: ./geny up → open http://localhost:3000 → create admin → Settings →
+LLM 백엔드 → add a key, or Discover models on the Ollama card for a keyless
+local model.
+EOF
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  up)        cmd_up "$@" ;;
+  down)      cmd_down "$@" ;;
+  restart)   cmd_restart "$@" ;;
+  logs)      cmd_logs "$@" ;;
+  ps|status) cmd_ps "$@" ;;
+  doctor)    cmd_doctor "$@" ;;
+  update)    cmd_update "$@" ;;
+  help|-h|--help) usage ;;
+  *) err "unknown command: $cmd"; echo; usage; exit 2 ;;
+esac

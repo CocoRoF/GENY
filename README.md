@@ -206,7 +206,39 @@ For the developer-facing internal architecture maps see [`backend/docs/`](backen
 
 ## Installation
 
-### 🐳 Docker (recommended)
+### ⚡ One-command (recommended) — `./geny up`
+
+The lite path: up and running with no GPU, no API key, no git submodule.
+
+```bash
+git clone https://github.com/CocoRoF/Geny.git
+cd Geny
+./geny up            # postgres + backend + frontend (GPU-free, keyless)
+```
+
+`./geny up` handles it: checks docker/compose → seeds `.env` (from sample if
+missing) → builds + starts → waits for backend health → prints the URL. Open
+**http://localhost:3000** → create the admin account → **Settings → LLM
+Backends**:
+
+- **Local & keyless**: start Ollama, then *Discover models* on the Ollama card.
+- **Cloud**: paste an Anthropic / OpenAI / Google key into its card.
+
+Other commands:
+
+```bash
+./geny up --full     # + avatar-editor (git submodule) + local GPU TTS/STT (NVIDIA)
+./geny doctor        # diagnose the host setup ( --fix to seed .env / init submodules )
+./geny logs backend  # follow logs
+./geny update        # git pull + rebuild + restart
+./geny down          # stop
+```
+
+> The lite stack uses cloud edge-tts for voice. Self-hosted high-quality voice
+> (OmniVoice) + STT (Whisper) turn on with `./geny up --full` when an NVIDIA GPU
+> is present.
+
+### 🐳 Docker (manual)
 
 ```bash
 # 1. Clone with submodules (geny-avatar + geny-licensed-assets)
