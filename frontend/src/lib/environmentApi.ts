@@ -139,6 +139,15 @@ export const environmentApi = {
       body: JSON.stringify(body),
     }),
 
+  /** Rewrite the built-in template seed envs, re-resolving the Stage-6
+   *  provider from the current credentials. Used by the first-run wizard so a
+   *  just-configured backend (e.g. local Ollama) is adopted without a restart. */
+  reseedTemplates: () =>
+    apiCall<{ reseeded: number; active_provider: string }>(
+      `/api/environments/reseed-templates`,
+      { method: 'POST' },
+    ),
+
   markPreset: (envId: string) =>
     apiCall<void>(`/api/environments/${envId}/preset`, { method: 'POST' }),
 
