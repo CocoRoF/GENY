@@ -374,7 +374,7 @@ const en = {
     llmBackends: {
       navLabel: 'LLM Backends',
       title: 'LLM Backends',
-      description: 'Five providers map to the executor\'s ClientRegistry. Each card is the single editor for that provider — click to paste an API key (Anthropic / OpenAI / Google / vLLM) or run the in-modal login flow (Claude Code). Once a card turns green any Environment whose Stage 6 picks that provider routes actual VTuber / Worker sessions through it.',
+      description: '{count} providers map to the executor\'s ClientRegistry. Each card is the single editor for that provider — paste an API key for cloud (Anthropic / OpenAI / Google), enter an OpenAI-compatible endpoint for local (vLLM / Ollama / LM Studio / Custom), or run the in-modal login flow (Claude Code). Once a card turns green any Environment whose Stage 6 picks that provider routes actual VTuber / Worker sessions through it.',
       refreshAll: 'Refresh all',
       reCheck: 'Re-check',
       docs: 'Docs',

@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { configApi } from '@/lib/api';
 import LLMBackendsPanel from './LLMBackendsPanel';
+import { PROVIDERS } from '@/lib/modelCatalog';
+import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 import { twMerge } from 'tailwind-merge';
 import { Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import NumberStepper from '@/components/ui/NumberStepper';
@@ -67,6 +69,23 @@ export default function SettingsTab() {
   const [importOpen, setImportOpen] = useState(false);
   const [importData, setImportData] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // LLM-backends count for the sidebar badge — derived, never hardcoded.
+  // Source of truth = the live health snapshot (exactly what LLMBackendsPanel
+  // renders as cards). Before that loads, fall back to the canonical provider
+  // taxonomy (`modelCatalog.PROVIDERS`, which mirrors the executor
+  // ClientRegistry) so the badge is correct on first paint and auto-updates
+  // when a provider is added/removed — no manual sync.
+  const llmHealthProviders = useLLMBackendsHealthStore((s) => s.providers);
+  const llmHealthLoaded = useLLMBackendsHealthStore((s) => s.loaded);
+  const fetchLlmHealth = useLLMBackendsHealthStore((s) => s.fetch);
+  useEffect(() => {
+    fetchLlmHealth();
+  }, [fetchLlmHealth]);
+  const llmBackendCount =
+    llmHealthLoaded && Object.keys(llmHealthProviders).length > 0
+      ? Object.keys(llmHealthProviders).length
+      : PROVIDERS.length;
 
   const loadConfigs = useCallback(async () => {
     try {
@@ -194,17 +213,17 @@ export default function SettingsTab() {
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{configs.length}</span>
             </button>
             {/* Phase F2 — virtual 'LLM Backends' category. Swaps the
-                 main pane to the health/login panel.
-                 Count mirrors the provider list in ``LLMBackendsPanel``:
-                 anthropic / openai / google / vllm / claude_code_cli
-                 = 5. Cycle 20260520 dropped ``copilot_cli`` so this
-                 used to be ``6``. */}
+                 main pane to the health/login panel. The count is derived
+                 (``llmBackendCount``) from the live health snapshot with the
+                 provider taxonomy as fallback — NOT hardcoded, so adding a
+                 provider (e.g. the 2.9.0 ollama / lmstudio / custom backends)
+                 updates it automatically. */}
             <button
               className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'llm_backends' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               onClick={() => setSelectedCategory('llm_backends')}
             >
               <span className="flex-1">{t('settings.llmBackends.navLabel')}</span>
-              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">5</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{llmBackendCount}</span>
             </button>
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
