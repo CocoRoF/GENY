@@ -250,6 +250,14 @@ const QUICKCHAT_H = 188
 // focused full-screen game fires immediately after we show (so the bar doesn't
 // vanish before the user can type).
 let quickChatShownAt = 0
+// The bar is a PERMANENTLY-shown top-most window (like the avatar overlay) — we
+// only toggle its visibility via opacity + click-through, never hide()/show().
+// This is the load-bearing fix for surfacing over a borderless full-screen game:
+// re-showing a hidden window won't place it above a game that's already full-
+// screen, but a window that claimed the top band BEFORE the game did stays above
+// it. `quickChatOpen` tracks the summoned/dismissed state (isVisible() is always
+// true now).
+let quickChatOpen = false
 function createQuickChat(): void {
   quickchat = new BrowserWindow({
     width: QUICKCHAT_W,
@@ -290,8 +298,9 @@ function createQuickChat(): void {
   // not win focus on the first frame); real click-away dismissal still works
   // once the short grace window elapses.
   quickchat.on('blur', () => {
+    if (!quickChatOpen) return
     if (Date.now() - quickChatShownAt < 450) return
-    quickchat?.hide()
+    dismissQuickChat()
   })
   // Remember where the user drags the bar. 'move' streams during the drag
   // (Win/Linux) and 'moved' lands once it settles (macOS); debounce both so we
@@ -301,9 +310,40 @@ function createQuickChat(): void {
   quickchat.on('close', (e) => {
     if (!appQuitting) {
       e.preventDefault()
-      quickchat?.hide()
+      dismissQuickChat()
     }
   })
+  // Claim the top band NOW, while nothing is full-screen yet, then sit parked
+  // off-screen + click-through until summoned. showInactive() so we don't steal
+  // focus from whatever the user is doing at launch.
+  quickchat.setOpacity(0)
+  quickchat.setIgnoreMouseEvents(true, { forward: true })
+  const off = offscreenPoint()
+  quickchat.setPosition(off.x, off.y)
+  quickchat.showInactive()
+}
+
+// A point well below every display — where the bar is parked while dismissed.
+// Moving it off-screen reliably hides it WITHOUT hide() (which would forfeit its
+// top-most z-order over a full-screen game). Opacity alone isn't trustworthy here:
+// on Windows a `transparent` window already uses per-pixel alpha, so setOpacity
+// can be a no-op — hence the off-screen park as the load-bearing hide.
+function offscreenPoint(): { x: number; y: number } {
+  const displays = screen.getAllDisplays()
+  const maxBottom = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height))
+  return { x: 0, y: maxBottom + 2000 }
+}
+
+// Hide the bar WITHOUT destroying its top-most window: park it off-screen +
+// click-through, but still shown so it keeps its z-order above any full-screen
+// game (so the next summon can place it back on top instantly).
+function dismissQuickChat(): void {
+  if (!quickchat) return
+  quickChatOpen = false
+  quickchat.setIgnoreMouseEvents(true, { forward: true })
+  quickchat.setOpacity(0)
+  const off = offscreenPoint()
+  quickchat.setPosition(off.x, off.y)
 }
 
 let quickChatPosTimer: ReturnType<typeof setTimeout> | null = null
@@ -313,7 +353,7 @@ function persistQuickChatPos(): void {
   if (suppressQuickChatPosSave) return
   if (quickChatPosTimer) clearTimeout(quickChatPosTimer)
   quickChatPosTimer = setTimeout(() => {
-    if (!quickchat || !quickchat.isVisible()) return
+    if (!quickchat || !quickChatOpen) return
     const b = quickchat.getBounds()
     saveConfig({ quickChatBar: { x: b.x, y: b.y } })
   }, 350)
@@ -344,31 +384,33 @@ function positionQuickChat(): void {
   setTimeout(() => { suppressQuickChatPosSave = false }, 120)
 }
 
-// Surface the bar over whatever's on screen — INCLUDING a borderless /
-// windowed-fullscreen game — exactly the way the avatar overlay does (which
-// demonstrably renders over Skyrim): re-assert the 'screen-saver' top band, then
-// plain show + focus. NO app.focus({steal}) and NO Windows setVisibleOnAllWork-
-// spaces — both were fighting the game's foreground and kept the bar from
-// appearing. We're summoned from a global hotkey (user input), so Windows grants
-// the foreground transfer on a normal show()+focus(); no steal is needed. (True
-// EXCLUSIVE-fullscreen DirectX bypasses the compositor and needs injection to
-// overlay; borderless / windowed-fullscreen — like the screenshot — works.)
+// Summon the bar: it's ALREADY a shown top-most window, so we only flip it
+// visible + interactive (opacity + mouse events) and re-assert the top band —
+// no hide()/show(), which is what lets it sit above a borderless full-screen
+// game (the window claimed the top band at launch, before the game went full-
+// screen, exactly like the avatar overlay). Then focus it for typing; because
+// we're triggered by a global hotkey (user input) Windows allows the foreground
+// transfer. (True EXCLUSIVE-fullscreen DirectX bypasses the compositor and needs
+// injection to overlay; borderless / windowed-fullscreen works.)
 function showQuickChatOnTop(): void {
   if (!quickchat) return
+  quickChatOpen = true
   quickChatShownAt = Date.now()
   quickchat.setAlwaysOnTop(true, 'screen-saver')
   if (process.platform === 'darwin') {
     quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
-  quickchat.show()
+  quickchat.setIgnoreMouseEvents(false)
+  quickchat.setOpacity(1)
+  quickchat.moveTop()
   quickchat.focus()
   quickchat.webContents.send('quickchat:opened')
 }
 
 async function toggleQuickChat(): Promise<void> {
   if (!quickchat) createQuickChat()
-  if (quickchat?.isVisible()) {
-    quickchat.hide()
+  if (quickChatOpen) {
+    dismissQuickChat()
     return
   }
   // Logged-out → there's no VTuber to message; route the user to login instead.
@@ -744,11 +786,11 @@ function registerIpc(): void {
   // so the bar can show a brief result (전송됨 / 로그인 필요).
   ipcMain.handle('quickchat:submit', async (_e, text: string) => {
     const r = await deliverQuickChat(text)
-    if (r.ok) quickchat?.hide()
+    if (r.ok) dismissQuickChat()
     return r
   })
   // Esc / cancel from the bar.
-  ipcMain.on('quickchat:close', () => quickchat?.hide())
+  ipcMain.on('quickchat:close', () => dismissQuickChat())
 
   // ── Phase 4: desktop awareness (read-only capture) ──
   ipcMain.handle('capture:list-sources', async () => {
