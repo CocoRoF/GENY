@@ -215,15 +215,29 @@ export default function CompactMetaBar({
   return (
     <>
     <div className="flex items-center gap-3 h-[52px] px-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
-      {/* ── Back to home ── */}
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 h-7 px-2 rounded text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors hover:bg-[hsl(var(--accent))] shrink-0"
-        title="메인으로"
-      >
-        <ArrowLeft size={13} />
-        {t('envManagement.backToHome')}
-      </Link>
+      {/* ── Back: 뒤로가기 while editing an env (graceful save-or-discard exit
+              to the overview), 홈으로 otherwise. ── */}
+      {showEnvFields ? (
+        <button
+          type="button"
+          onClick={handleBack}
+          disabled={saving}
+          className="inline-flex items-center gap-1 h-7 px-2 rounded text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--accent))] shrink-0 disabled:opacity-50"
+          title={t('envManagement.backButton')}
+        >
+          <ArrowLeft size={13} />
+          {t('envManagement.backButton')}
+        </button>
+      ) : (
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1 h-7 px-2 rounded text-[0.75rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] no-underline transition-colors hover:bg-[hsl(var(--accent))] shrink-0"
+          title="메인으로"
+        >
+          <ArrowLeft size={13} />
+          {t('envManagement.backToHome')}
+        </Link>
+      )}
       <div className="w-px h-4 bg-[hsl(var(--border))] shrink-0" />
 
       {/* ── Tab switcher dropdown (always) ── */}
@@ -273,7 +287,6 @@ export default function CompactMetaBar({
             addTag={addTag}
             removeTag={removeTag}
             handleSave={handleSave}
-            handleBack={handleBack}
             onOpenGlobals={onOpenGlobals}
             t={t}
           />
@@ -422,7 +435,6 @@ interface EnvEditFieldsProps {
   addTag: () => void;
   removeTag: (tag: string) => void;
   handleSave: () => Promise<void>;
-  handleBack: () => void;
   onOpenGlobals: () => void;
   t: (k: string, vars?: Record<string, string>) => string;
 }
@@ -448,7 +460,6 @@ function EnvEditFields({
   addTag,
   removeTag,
   handleSave,
-  handleBack,
   onOpenGlobals,
   t,
 }: EnvEditFieldsProps) {
@@ -614,9 +625,6 @@ function EnvEditFields({
           <Settings2 className="w-3.5 h-3.5" />
           {t('envManagement.compactBar.globalsLabel')}
         </button>
-        <ActionButton icon={ArrowLeft} onClick={handleBack} disabled={saving}>
-          {t('envManagement.backButton')}
-        </ActionButton>
         <ActionButton
           variant="primary"
           icon={Save}
