@@ -255,20 +255,52 @@ export default function SettingsTab() {
               {filtered.map(config => {
                 const schema = config.schema || {} as ConfigSchema;
                 const values = config.values || {};
-                const hasEnabledField = schema.fields?.some((f: ConfigField) => f.name === 'enabled');
-                const configured = schema.fields?.filter((f: ConfigField) => {
+                const fields = schema.fields || [];
+                const hasEnabledField = fields.some((f: ConfigField) => f.name === 'enabled');
+                const total = fields.length;
+                // A field's value can be: explicit (set to a non-default value),
+                // default (no value but a default applies, or value == default), or
+                // unset (no value and no default). A default is a *valid* state —
+                // it must read as "기본값", never "미설정".
+                const hasVal = (f: ConfigField) => {
                   const v = values[f.name];
-                  return v !== undefined && v !== '' && v !== f.default;
-                }).length || 0;
-                const total = schema.fields?.length || 0;
+                  return v !== undefined && v !== null && v !== '';
+                };
+                const hasDefault = (f: ConfigField) =>
+                  f.default !== undefined && f.default !== null && f.default !== '';
+                const isExplicit = (f: ConfigField) => hasVal(f) && values[f.name] !== f.default;
+                const isEffective = (f: ConfigField) => hasVal(f) || hasDefault(f);
+                const explicitCount = fields.filter(isExplicit).length;
+                // Count fields that have an effective value (explicit OR default) —
+                // so a default-valued field reads as set, not "0/1".
+                const configured = fields.filter(isEffective).length;
                 const ls = getLocalizedSchema(schema, locale);
 
-                // Configs with explicit enabled toggle vs configs that are "configured" by having fields set
-                const isActive = hasEnabledField ? values.enabled === true : configured > 0;
+                // Three card states for plain configs: configured (any explicit
+                // value) / default (only defaults apply) / unset (nothing).
+                const plainStatus = explicitCount > 0
+                  ? 'configured'
+                  : (configured > 0 ? 'default' : 'unset');
+                const isActive = hasEnabledField
+                  ? values.enabled === true
+                  : plainStatus !== 'unset'; // default counts as "set" (full opacity)
                 const badgeLabel = hasEnabledField
                   ? (values.enabled === true ? t('common.enabled') : t('common.disabled'))
-                  : (configured > 0 ? t('common.configured') : t('common.notConfigured'));
-                const activeColor = hasEnabledField ? 'var(--success-color)' : 'var(--info-color, #3b82f6)';
+                  : plainStatus === 'configured'
+                    ? t('common.configured')
+                    : plainStatus === 'default'
+                      ? t('common.usingDefaults')
+                      : t('common.notConfigured');
+                const activeColor = hasEnabledField
+                  ? 'var(--success-color)'
+                  : plainStatus === 'default'
+                    ? 'var(--text-secondary)' // calm "set to default" tone
+                    : 'var(--info-color, #3b82f6)';
+                const badgeBg = hasEnabledField
+                  ? 'rgba(16, 185, 129, 0.15)'
+                  : plainStatus === 'default'
+                    ? 'var(--bg-tertiary)'
+                    : 'rgba(59, 130, 246, 0.15)';
 
                 return (
                   <div key={schema.name}
@@ -281,7 +313,7 @@ export default function SettingsTab() {
                         <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-[1.4] line-clamp-2">{ls.description}</p>
                       </div>
                       <span className={`shrink-0 inline-block py-1 px-2.5 rounded-[12px] text-[0.75rem] font-medium ${isActive ? '' : 'text-[var(--text-muted)] bg-[var(--bg-tertiary)]'}`}
-                            style={isActive ? { color: activeColor, background: hasEnabledField ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)' } : {}}>
+                            style={isActive ? { color: activeColor, background: badgeBg } : {}}>
                         {badgeLabel}
                       </span>
                     </div>
