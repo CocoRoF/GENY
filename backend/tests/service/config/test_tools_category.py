@@ -85,6 +85,29 @@ def test_per_env_config_overrides_global():
     assert captured["backend"] == "brave"  # per-env overrides global
 
 
+def test_save_config_propagates_to_env_live():
+    """Saving Web Search (the update_config path) updates os.environ live — so
+    an already-running session reads the new backend on its next call, with no
+    restart and no session rebuild (single-process backend; env read at call
+    time). This is the behaviour users rely on when flipping the backend."""
+    import tempfile
+
+    from service.config.manager import ConfigManager
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GENY_WEBSEARCH_BACKEND", None)
+        os.environ.pop("TAVILY_API_KEY", None)
+        mgr = ConfigManager(config_dir=tempfile.mkdtemp())
+
+        mgr.update_config("web_search", {"backend": "tavily", "tavily_api_key": "tvly-x"})
+        assert os.environ["GENY_WEBSEARCH_BACKEND"] == "tavily"
+        assert os.environ["TAVILY_API_KEY"] == "tvly-x"
+
+        # flipping the backend updates the env again (live)
+        mgr.update_config("web_search", {"backend": "ddg"})
+        assert os.environ["GENY_WEBSEARCH_BACKEND"] == "ddg"
+
+
 def test_controller_exposes_tools_category():
     import controller.config_controller as cc
     import inspect
