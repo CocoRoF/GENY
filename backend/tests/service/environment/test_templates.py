@@ -94,14 +94,12 @@ def test_worker_env_external_mirrors_caller_input() -> None:
     assert list(manifest.tools.external) == names
 
 
-def test_vtuber_env_has_internal_dm_and_inbox_only() -> None:
-    """Cycle 20260420_8 / plan/01: VTuber must receive the
-    ``send_direct_message_internal`` + ``read_inbox`` pair (plus
-    ``memory_*`` / ``knowledge_*``) and **must not** see
-    ``send_direct_message_external``, ``session_list``,
-    ``session_info``, or ``session_create``. Exposing those caused
-    the trial-and-error DM sequence observed in the 01:15:28 →
-    01:15:37 log (analysis/01)."""
+def test_vtuber_env_includes_all_address_primitives() -> None:
+    """All-tools principle: the VTuber env no longer filters anything.
+    Every name passed in — including ``send_direct_message_external``,
+    ``session_*``, and the internal DM + inbox pair — lands in the
+    external roster. The old address-primitive deny list is gone by
+    design (the persona narrows per-env in the editor if desired)."""
     from service.environment.templates import create_vtuber_env
 
     all_names = [
@@ -126,8 +124,6 @@ def test_vtuber_env_has_internal_dm_and_inbox_only() -> None:
         "session_list",
         "session_info",
         "session_create",
-        # memory_* / knowledge_* are platform-sourced too (matches prod's
-        # real ToolLoader — see the vtuber env served in production).
         "memory_read",
         "memory_write",
         "knowledge_search",
@@ -136,26 +132,25 @@ def test_vtuber_env_has_internal_dm_and_inbox_only() -> None:
     manifest = create_vtuber_env(all_tool_names=all_names, tool_loader=loader)
     external = list(manifest.tools.external)
 
-    # Must be present
+    # Internal DM + inbox + memory remain present...
     assert "send_direct_message_internal" in external
     assert "read_inbox" in external
     assert "memory_read" in external
     assert "knowledge_search" in external
 
-    # Must be absent — deny list
-    assert "send_direct_message_external" not in external, (
-        "VTuber must not see send_direct_message_external; "
-        "it should rely on internal DM for its counterpart"
-    )
-    assert "session_list" not in external, sorted(external)
-    assert "session_info" not in external, sorted(external)
-    assert "session_create" not in external, sorted(external)
+    # ...and the previously-denied address primitives are now present too.
+    assert "send_direct_message_external" in external
+    assert "session_list" in external
+    assert "session_info" in external
+    assert "session_create" in external
+
+    # No filtering at all — the roster is a pass-through of all_tool_names.
+    assert external == all_names
 
 
-def test_vtuber_env_excludes_browser_tools() -> None:
-    """Browser automation is heavy and inappropriate for the VTuber
-    conversational persona. The filter must drop every ``browser_*``
-    name even when the loader reports them."""
+def test_vtuber_env_includes_browser_tools() -> None:
+    """All-tools principle: ``browser_*`` names are no longer filtered.
+    Every browser tool passed in lands in the VTuber roster."""
     from service.environment.templates import create_vtuber_env
 
     all_names = [
@@ -165,9 +160,10 @@ def test_vtuber_env_excludes_browser_tools() -> None:
         "browser_screenshot",
     ]
     manifest = create_vtuber_env(all_tool_names=all_names)
-    for name in manifest.tools.external:
-        assert not name.startswith("browser_"), (
-            f"VTuber roster should not contain browser tool: {name}"
+    external = list(manifest.tools.external)
+    for name in ("browser_navigate", "browser_click", "browser_screenshot"):
+        assert name in external, (
+            f"VTuber roster should now contain browser tool: {name}"
         )
 
 
@@ -190,15 +186,16 @@ def test_vtuber_env_keeps_conversational_web_tools() -> None:
     assert "web_fetch" in external
 
 
-def test_vtuber_env_legacy_call_site_still_works() -> None:
-    """Calling :func:`create_vtuber_env` without *all_tool_names*
-    falls back to the three-web-tool roster. This keeps any caller
-    that hasn't yet adopted the new signature from breaking."""
+def test_vtuber_env_empty_roster_yields_no_externals() -> None:
+    """All-tools principle: the VTuber factory is now a pure pass-through
+    of *all_tool_names*. The legacy three-web-tool fallback is gone —
+    calling it without a roster yields an empty external list (the seed
+    is maximal only because boot passes the full ToolLoader roster)."""
     from service.environment.templates import create_vtuber_env
 
     manifest = create_vtuber_env()
     external = list(manifest.tools.external)
-    assert external == ["web_search", "news_search", "web_fetch"]
+    assert external == []
 
 
 def test_vtuber_env_includes_memory_inspect_tools() -> None:
@@ -274,15 +271,14 @@ def test_install_templates_propagates_to_vtuber(tmp_path) -> None:
     assert "read_inbox" in vtuber.tools.external
     assert "memory_read" in vtuber.tools.external
     assert "web_search" in vtuber.tools.external
-    # browser_navigate filtered out even though passed in
-    assert "browser_navigate" not in vtuber.tools.external
+    # All-tools: browser_navigate is now included too (no filtering).
+    assert "browser_navigate" in vtuber.tools.external
 
 
-def test_vtuber_env_denies_full_address_primitives_set() -> None:
-    """Cycle 20260420_8 / plan/01: the VTuber deny set now covers
-    every address-discovery / external-DM primitive, not just
-    ``session_create``. Regression guard against a future change
-    that re-narrows the deny list."""
+def test_vtuber_env_includes_full_address_primitives_set() -> None:
+    """All-tools principle: the address-primitive deny set is gone. Every
+    address-discovery / external-DM primitive passed in now reaches the
+    VTuber roster, alongside the internal DM counterpart."""
     from service.environment.templates import create_vtuber_env
 
     all_names = [
@@ -305,19 +301,18 @@ def test_vtuber_env_denies_full_address_primitives_set() -> None:
     manifest = create_vtuber_env(all_tool_names=all_names, tool_loader=loader)
     external = list(manifest.tools.external)
 
-    for denied in (
+    for name in (
         "session_create",
         "session_list",
         "session_info",
         "send_direct_message_external",
+        "send_direct_message_internal",
+        "memory_read",
     ):
-        assert denied not in external, (
-            f"VTuber must not see {denied}; deny list regressed "
+        assert name in external, (
+            f"VTuber must now see {name}; all-tools contract regressed "
             f"(external={sorted(external)})"
         )
-    # Counterpart DM remains
-    assert "send_direct_message_internal" in external
-    assert "memory_read" in external
 
 
 def test_worker_env_retains_full_messaging_set() -> None:
@@ -365,38 +360,29 @@ def test_worker_env_declares_all_executor_built_ins() -> None:
     )
 
 
-def test_vtuber_env_declares_read_plan_built_ins_only() -> None:
-    """PR #654 (env-vtuber: read/plan/ask built-in opt-ins): the VTuber
-    seed declares the read-only / planning built-ins
-    (:data:`_VTUBER_BUILT_IN_TOOL_NAMES` — Read / Glob / Grep / TodoWrite /
-    EnterPlanMode / ExitPlanMode / AskUserQuestion / PushNotification) but
-    **no mutating file tools** (Write / Edit / Bash). Mutating file work is
-    still delegated to the bound Sub-Worker."""
-    from service.environment.templates import (
-        create_vtuber_env,
-        _VTUBER_BUILT_IN_TOOL_NAMES,
-    )
+def test_vtuber_env_declares_all_built_ins() -> None:
+    """All-tools principle: the VTuber seed now opts into every framework
+    built-in via ``built_in == ["*"]`` — same as the worker seed. The old
+    curated read/plan-only subset (which excluded Write / Edit / Bash) is
+    gone by design."""
+    from service.environment.templates import create_vtuber_env
 
     manifest = create_vtuber_env(all_tool_names=["web_search"])
-    built_in = list(manifest.tools.built_in)
-    assert built_in == list(_VTUBER_BUILT_IN_TOOL_NAMES)
-    for mutating in ("Write", "Edit", "Bash"):
-        assert mutating not in built_in, (
-            f"VTuber must not declare the mutating built-in {mutating}"
-        )
+    assert list(manifest.tools.built_in) == ["*"], (
+        "VTuber env must opt into every executor built-in via '*'"
+    )
 
 
 def test_install_templates_persists_role_built_in_choices(tmp_path) -> None:
-    """Cycle 20260420_7 / PR-3: the ``.built_in`` field is serialized
-    to disk by ``install_environment_templates``. Worker seed keeps
-    ``["*"]``, VTuber seed keeps ``[]`` — verifies the roundtrip, so
-    a boot-time edit of the seed env and a read-back don't silently
-    drop the selection."""
+    """The ``.built_in`` field is serialized to disk by
+    ``install_environment_templates``. All-tools principle: BOTH the
+    worker and the VTuber seed persist ``["*"]`` — verifies the
+    roundtrip, so a boot-time edit of the seed env and a read-back
+    don't silently drop the selection."""
     from service.environment.service import EnvironmentService
     from service.environment.templates import (
         VTUBER_ENV_ID,
         WORKER_ENV_ID,
-        _VTUBER_BUILT_IN_TOOL_NAMES,
         install_environment_templates,
     )
 
@@ -410,8 +396,8 @@ def test_install_templates_persists_role_built_in_choices(tmp_path) -> None:
     vtuber = service.load_manifest(VTUBER_ENV_ID)
     assert worker is not None and vtuber is not None
     assert list(worker.tools.built_in) == ["*"]
-    # PR #654: vtuber keeps the read/plan/ask built-ins (no mutating tools).
-    assert list(vtuber.tools.built_in) == list(_VTUBER_BUILT_IN_TOOL_NAMES)
+    # All-tools: vtuber now opts into every built-in too.
+    assert list(vtuber.tools.built_in) == ["*"]
 
 
 def test_install_environment_templates_passes_all_names(tmp_path) -> None:
