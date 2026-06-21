@@ -489,6 +489,39 @@ class AgentSessionManager:
             return None
         return None
 
+    #: Provider-agnostic short aliases that resolve to "latest" at the backend —
+    #: live discovery returns canonical ids, so don't warn on these.
+    _MODEL_ALIASES = frozenset({"sonnet", "opus", "haiku", "default", "latest"})
+
+    async def _warn_if_model_unavailable(
+        self, provider: Optional[str], model: Optional[str], credentials, env_id: str
+    ) -> None:
+        """Best-effort, non-blocking: warn when the configured model isn't in the
+        provider's live-discovered list. Silent when discovery is unavailable
+        (can't validate) or the model is a short alias. Never raises."""
+        if not provider or not model:
+            return
+        if str(model).strip().lower() in self._MODEL_ALIASES:
+            return
+        try:
+            from geny_executor.llm_client import discover_models
+
+            creds = credentials.get(provider) if hasattr(credentials, "get") else None
+            api_key = getattr(creds, "api_key", "") or None
+            base_url = getattr(creds, "base_url", "") or None
+            disc = await discover_models(provider, api_key=api_key, base_url=base_url)
+            if disc.source != "live":
+                return  # can't enumerate → no warning; runtime fallback covers it
+            ids = {m.id for m in disc.models}
+            if model not in ids:
+                logger.warning(
+                    "[%s] configured model %r is not in %s's %d discovered models — "
+                    "it may fail at runtime (model_fallback will retry alternates)",
+                    env_id, model, provider, len(ids),
+                )
+        except Exception:  # noqa: BLE001 — diagnostics only
+            logger.debug("model availability warn-check failed", exc_info=True)
+
     # ========================================================================
     # Prompt Builder
     # ========================================================================
@@ -817,6 +850,22 @@ class AgentSessionManager:
                 f"자격증명이 설정되지 않았습니다. Settings → LLM Backends에서 해당 provider 카드를 "
                 f"열어 API key를 입력하거나, CLI 백엔드라면 binary 설치 + 인증을 완료해 주세요."
             )
+
+        # Warn-only model availability check (non-blocking, best-effort): if the
+        # provider supports live discovery and the configured model isn't in the
+        # real list, log a warning — never block creation (runtime model_fallback
+        # covers genuine failures). Skips aliases and providers that can't be
+        # enumerated (e.g. claude_code_cli).
+        try:
+            import asyncio as _asyncio
+
+            _asyncio.get_running_loop().create_task(
+                self._warn_if_model_unavailable(
+                    primary_provider, resolved_model, credentials, env_id
+                )
+            )
+        except RuntimeError:
+            pass
 
         # Build the per-session SubagentTypeRegistry once. The Stage 12
         # orchestrator slot is auto-rewired by

@@ -1795,6 +1795,19 @@ export interface LocalModelsResponse {
   detail_code?: string | null;
 }
 
+export interface ProviderModel {
+  id: string;
+  display_name?: string | null;
+}
+
+export interface ProviderModelsResponse {
+  provider: string;
+  /** "live" = real backend list; "unavailable" = fall back to static catalog. */
+  source: string;
+  models: ProviderModel[];
+  error?: string | null;
+}
+
 export interface LocalContextWindowResponse {
   provider: string;
   base_url: string;
@@ -1882,6 +1895,17 @@ export const llmBackendsApi = {
     if (baseUrl) params.set('base_url', baseUrl);
     return apiCall<LocalModelsResponse>(
       `/api/llm-backends/local-models?${params.toString()}`,
+    );
+  },
+
+  /** GET /api/llm-backends/models — live-list the models a provider serves
+   *  (cloud + local). source="live" → real list; "unavailable" → caller
+   *  falls back to the static catalog. */
+  providerModels: (provider: string, baseUrl?: string) => {
+    const params = new URLSearchParams({ provider });
+    if (baseUrl) params.set('base_url', baseUrl);
+    return apiCall<ProviderModelsResponse>(
+      `/api/llm-backends/models?${params.toString()}`,
     );
   },
 
