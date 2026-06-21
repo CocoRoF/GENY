@@ -825,7 +825,22 @@ class ThinkingTriggerService:
         if chosen_category.cooldown_seconds and chosen_category.cooldown_seconds > 0:
             last_fires[chosen_category.id] = now
 
-        return render_prompt(chosen_category, content), chosen_category
+        # Explicit current-time anchor (configured tz) so idle/lonely prompts —
+        # which carry no time of their own — never make the persona guess the
+        # time of day (e.g. calling a 09:51 morning "evening").
+        return (
+            render_prompt(
+                chosen_category, content, time_context=self._time_context(locale)
+            ),
+            chosen_category,
+        )
+
+    @staticmethod
+    def _time_context(locale: str) -> str:
+        """One-line current-time phrase in the configured timezone."""
+        from service.utils.utils import time_context_phrase
+
+        return time_context_phrase(locale=locale)
 
     @staticmethod
     def _probe_sub_worker_state(
