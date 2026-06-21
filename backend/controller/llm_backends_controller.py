@@ -627,7 +627,6 @@ async def list_local_models(
 
 _LOCAL_DISCOVERY_PROVIDERS = {"ollama", "lmstudio", "vllm", "custom", "local"}
 
-
 class ProviderModel(BaseModel):
     id: str
     display_name: Optional[str] = None
@@ -638,6 +637,31 @@ class ProviderModelsResponse(BaseModel):
     source: str = "unavailable"  # "live" | "unavailable"
     models: List[ProviderModel] = []
     error: Optional[str] = None
+
+
+# OpenAI's /v1/models returns the whole account catalogue (embeddings, whisper,
+# tts, dall-e, …) — a model picker only wants chat/completions models. Keep the
+# chat families and drop known non-chat ones. Other providers already return
+# chat-only (anthropic = all claude; google filtered to generateContent; local
+# = user-controlled), so the filter is a no-op for them.
+_OPENAI_CHAT_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt")
+_NON_CHAT_SUBSTR = (
+    "embedding", "whisper", "tts", "dall-e", "davinci", "babbage", "ada",
+    "moderation", "audio", "transcribe", "realtime", "image", "-search",
+)
+
+
+def _filter_chat_models(
+    provider: str, models: List[ProviderModel]
+) -> List[ProviderModel]:
+    if provider != "openai":
+        return models
+    kept = [
+        m for m in models
+        if m.id.lower().startswith(_OPENAI_CHAT_PREFIXES)
+        and not any(s in m.id.lower() for s in _NON_CHAT_SUBSTR)
+    ]
+    return kept or models  # never return empty — fall back to the full list
 
 
 @router.get(
@@ -674,13 +698,12 @@ async def list_provider_models(
     disc = await discover_models(
         provider, api_key=api_key, base_url=resolved_base
     )
+    models = _filter_chat_models(
+        provider,
+        [ProviderModel(id=m.id, display_name=m.display_name) for m in disc.models],
+    )
     return ProviderModelsResponse(
-        provider=provider,
-        source=disc.source,
-        models=[
-            ProviderModel(id=m.id, display_name=m.display_name) for m in disc.models
-        ],
-        error=disc.error,
+        provider=provider, source=disc.source, models=models, error=disc.error
     )
 
 
