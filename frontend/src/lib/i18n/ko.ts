@@ -151,6 +151,7 @@ const ko: Translations = {
     disabled: '비활성화',
     configured: '설정됨',
     notConfigured: '미설정',
+    usingDefaults: '기본값',
     export: '내보내기',
     import: '가져오기',
     view: '보기',

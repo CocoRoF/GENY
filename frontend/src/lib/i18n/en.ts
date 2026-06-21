@@ -151,6 +151,7 @@ const en = {
     disabled: 'Disabled',
     configured: 'Configured',
     notConfigured: 'Not Configured',
+    usingDefaults: 'Default',
     export: 'Export',
     import: 'Import',
     view: 'View',
