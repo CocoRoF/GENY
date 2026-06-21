@@ -99,6 +99,7 @@ async def list_configs():
     # Category metadata
     category_info = {
         "general": {"name": "general", "label": "General", "icon": "settings"},
+        "tools": {"name": "tools", "label": "Tool", "icon": "wrench"},
         "channels": {"name": "channels", "label": "Channels", "icon": "chat"},
         "tts": {"name": "tts", "label": "TTS", "icon": "volume"},
         "security": {"name": "security", "label": "Security", "icon": "shield"},
