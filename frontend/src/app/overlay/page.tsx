@@ -235,7 +235,7 @@ export default function OverlayPage() {
           Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
         <div style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
-          <button type="button" onClick={() => setLocked(false)} title="잠금 해제 — 이동·설정" style={ICON_BTN}>
+          <button type="button" onClick={() => setLocked(false)} style={ICON_BTN}>
             <LockIcon open={false} />
           </button>
         </div>
