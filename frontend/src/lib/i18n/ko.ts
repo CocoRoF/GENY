@@ -923,6 +923,7 @@ const ko: Translations = {
       empty: '아직 시작점으로 쓸 환경이 없습니다 — "새 드래프트"로 만드세요.',
       noDescription: '설명 없음',
       useThis: '이걸로 시작',
+      viewGuide: '설명보기',
       edit: '편집',
       clone: '복제',
       delete: '삭제',

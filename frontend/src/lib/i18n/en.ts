@@ -929,6 +929,7 @@ const en = {
       empty: 'No environments to start from yet — create one with "New draft".',
       noDescription: 'No description',
       useThis: 'Use this',
+      viewGuide: 'How it works',
       edit: 'Edit',
       clone: 'Clone',
       delete: 'Delete',

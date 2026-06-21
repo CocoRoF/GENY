@@ -14,12 +14,14 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Copy, Pencil, Plus, Sparkles, Star, Trash2 } from 'lucide-react';
+import { BookOpen, Boxes, Copy, Pencil, Plus, Sparkles, Star, Trash2, X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type { EnvironmentSummary } from '@/types/environment';
 import { ActionButton } from '@/components/layout';
+import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
+import { presetGuide } from '@/lib/presetGuides';
 
 export interface StartFromPickerProps {
   /** When true, skip the leading "빈 환경으로 시작" row — the
@@ -29,7 +31,8 @@ export interface StartFromPickerProps {
 }
 
 export default function StartFromPicker({ omitBlankRow = false }: StartFromPickerProps = {}) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [guideEnv, setGuideEnv] = useState<EnvironmentSummary | null>(null);
   const newDraft = useEnvironmentDraftStore((s) => s.newDraft);
   const newDraftFromExisting = useEnvironmentDraftStore(
     (s) => s.newDraftFromExisting,
@@ -156,6 +159,7 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
                 key={env.id}
                 env={env}
                 onPick={() => handleFromExisting(env.id)}
+                onShowGuide={() => setGuideEnv(env)}
                 disabled={seeding}
                 accent="violet"
               />
@@ -209,6 +213,60 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
           {t('envManagement.startFrom.empty')}
         </p>
       )}
+
+      {/* ── Preset "설명보기" modal ── */}
+      {guideEnv && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setGuideEnv(null)}
+        >
+          <div
+            className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg w-full max-w-[640px] max-h-[85vh] flex flex-col shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between py-3 px-5 border-b border-[hsl(var(--border))]">
+              <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold text-[hsl(var(--foreground))]">
+                <BookOpen className="w-4 h-4 text-violet-500" />
+                {guideEnv.name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setGuideEnv(null)}
+                aria-label={t('common.close')}
+                className="inline-flex items-center justify-center w-7 h-7 rounded text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <MarkdownRenderer
+                content={presetGuide(guideEnv, locale === 'en' ? 'en' : 'ko')}
+              />
+            </div>
+            <div className="flex justify-end gap-2 py-3 px-5 border-t border-[hsl(var(--border))]">
+              <button
+                type="button"
+                onClick={() => setGuideEnv(null)}
+                className="inline-flex items-center h-8 px-3 rounded-md border border-[hsl(var(--border))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+              >
+                {t('common.close')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = guideEnv.id;
+                  setGuideEnv(null);
+                  handleFromExisting(id);
+                }}
+                disabled={seeding}
+                className="inline-flex items-center h-8 px-3 rounded-md bg-[hsl(var(--primary))] text-[0.75rem] font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {t('envManagement.startFrom.useThis')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -216,11 +274,13 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
 function PresetCard({
   env,
   onPick,
+  onShowGuide,
   disabled,
   accent,
 }: {
   env: EnvironmentSummary;
   onPick: () => void;
+  onShowGuide: () => void;
   disabled: boolean;
   accent: 'violet' | 'blue';
 }) {
@@ -229,17 +289,26 @@ function PresetCard({
     accent === 'violet'
       ? 'border-violet-500/30 hover:border-violet-500'
       : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]';
-  // ``h-full`` lets the grid (default ``align-items: stretch``) make
-  // every card in a row the same height regardless of description
-  // length. Inside, ``flex-col`` + the description's reserved 2-line
-  // ``min-h`` + ``mt-auto`` on the footer keep the visual rhythm
-  // consistent for cards with 1-line vs 2-line descriptions.
+  // A ``div role=button`` (not a ``<button>``) so the footer's "설명보기"
+  // button can nest without invalid button-in-button markup. Body
+  // click/Enter/Space ≙ pick this preset; the guide button stops
+  // propagation. ``h-full`` keeps every card in a row the same height.
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={disabled}
-      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed ${accentClass}`}
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => { if (!disabled) onPick(); }}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPick();
+        }
+      }}
+      aria-disabled={disabled}
+      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
+        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      } ${accentClass}`}
     >
       <div className="flex items-center gap-1.5">
         <Sparkles
@@ -254,22 +323,20 @@ function PresetCard({
       <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed min-h-[2.3rem]">
         {env.description || t('envManagement.startFrom.noDescription')}
       </p>
-      {env.tags && env.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {env.tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--muted-foreground))]"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="text-[0.625rem] text-[hsl(var(--primary))] mt-auto pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {t('envManagement.startFrom.useThis')} →
+      <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-[hsl(var(--border))]">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onShowGuide(); }}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+        >
+          <BookOpen className="w-3 h-3" />
+          {t('envManagement.startFrom.viewGuide')}
+        </button>
+        <span className="ml-auto text-[0.625rem] text-[hsl(var(--primary))] opacity-0 group-hover:opacity-100 transition-opacity">
+          {t('envManagement.startFrom.useThis')} →
+        </span>
       </div>
-    </button>
+    </div>
   );
 }
 
