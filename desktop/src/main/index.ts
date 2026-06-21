@@ -388,12 +388,19 @@ function showQuickChatOnTop(): void {
   }
   quickchat.setIgnoreMouseEvents(false)
   quickchat.moveTop()
-  // NOTE: deliberately NO quickchat.focus() / app.focus — the avatar overlay
-  // never grabs OS focus and it surfaces over Skyrim; grabbing focus makes a
-  // borderless game reclaim the foreground and paint back over us. The renderer
-  // focuses the INPUT element intra-window (works if the window holds keyboard
-  // focus); otherwise a single click on the now-visible bar focuses it to type.
+  // Paint the bar FIRST so it's visible immediately (grabbing OS focus up-front
+  // makes a borderless game reclaim the foreground and repaint over us — that's
+  // what kept the bar from showing in earlier builds).
   quickchat.webContents.send('quickchat:opened')
+  // THEN, a tick later, take keyboard focus so the user can type without clicking,
+  // and re-raise right after in case the focus transfer let the game repaint for a
+  // frame. The bar is already established/visible by now, so this no longer hides
+  // it. The renderer re-focuses its input on the window 'focus' event.
+  setTimeout(() => {
+    if (!quickchat || !quickChatOpen) return
+    quickchat.focus()
+    quickchat.moveTop()
+  }, 110)
 }
 
 async function toggleQuickChat(): Promise<void> {
