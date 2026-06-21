@@ -35,9 +35,10 @@ import {
 import { useI18n } from '@/lib/i18n';
 import {
   MODEL_CATALOG,
-  getProviderInfo,
+  type ModelOption,
   type ProviderId,
 } from '@/lib/modelCatalog';
+import { llmBackendsApi } from '@/lib/api';
 
 interface Props {
   provider: ProviderId;
@@ -58,25 +59,54 @@ export function ModelPicker({ provider, value, onChange, id, disabled }: Props) 
   const reactId = useId();
   const inputId = id ?? reactId;
 
-  const info = getProviderInfo(provider);
-  const options = MODEL_CATALOG[provider];
+  const staticOptions = MODEL_CATALOG[provider];
+
+  // Live model discovery (geny-executor 2.9.0 via GET /api/llm-backends/models):
+  // when the backend reports a real list (cloud key present, local server
+  // reachable, …) we offer THOSE — so a backend version bump / new pull shows
+  // up automatically. ``null`` ⇒ discovery unavailable ⇒ fall back to the
+  // static catalog (and free-text for backends that have neither).
+  const [liveOptions, setLiveOptions] = useState<ModelOption[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLiveOptions(null);
+    llmBackendsApi
+      .providerModels(provider)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.source === 'live' && res.models.length > 0) {
+          setLiveOptions(
+            res.models.map((m) => ({ id: m.id, label: m.display_name || m.id })),
+          );
+        }
+      })
+      .catch(() => {
+        /* best-effort — keep static fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  const options = liveOptions ?? staticOptions;
+  const hasOptions = options.length > 0;
   const currentInCatalog = options.some((o) => o.id === value);
 
   // ``customMode`` is sticky once entered, so the user can type their
   // arbitrary id without the picker yanking them back to the Select on
   // the next render. We exit custom mode when the user picks a real
   // catalog entry (handled via the Select's onChange below).
-  const [customMode, setCustomMode] = useState<boolean>(() =>
-    info.freeForm || (value !== '' && !currentInCatalog),
+  const [customMode, setCustomMode] = useState<boolean>(
+    () => !hasOptions || (value !== '' && !currentInCatalog),
   );
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // When the provider switches, recompute whether we should land in
-  // custom mode. vLLM (freeForm) is always custom; catalog-backed
-  // providers only enter custom mode when the current value is
-  // off-catalog OR the user explicitly opted in.
+  // Recompute custom mode when the provider, value, or the (async) option set
+  // changes. No options at all ⇒ free-text. Otherwise custom only when the
+  // current value is off-list (or the user explicitly opted in, which keeps
+  // it off-list so this stays true).
   useEffect(() => {
-    if (info.freeForm) {
+    if (!hasOptions) {
       setCustomMode(true);
       return;
     }
@@ -85,13 +115,11 @@ export function ModelPicker({ provider, value, onChange, id, disabled }: Props) 
     } else {
       setCustomMode(true);
     }
-    // ``options`` reference changes per render but its contents are
-    // stable per provider, so depending on ``provider`` is enough.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, value]);
+  }, [provider, value, hasOptions, currentInCatalog]);
 
-  // ── vLLM-style pure free-form (no catalog) ─────────────────────────
-  if (info.freeForm) {
+  // ── No options at all (e.g. vLLM with no endpoint, unreachable local) ──
+  if (!hasOptions) {
     return (
       <Input
         id={inputId}
@@ -158,7 +186,7 @@ export function ModelPicker({ provider, value, onChange, id, disabled }: Props) 
         <span className="flex-1 min-w-0 text-left truncate">
           {value ? (
             currentInCatalog ? (
-              <CatalogLabel id={value} provider={provider} />
+              <CatalogLabel id={value} options={options} />
             ) : (
               <span className="inline-flex items-center gap-2 min-w-0">
                 <span className="truncate font-mono text-[0.75rem]">{value}</span>
@@ -202,8 +230,8 @@ export function ModelPicker({ provider, value, onChange, id, disabled }: Props) 
 }
 
 
-function CatalogLabel({ id, provider }: { id: string; provider: ProviderId }) {
-  const opt = MODEL_CATALOG[provider].find((o) => o.id === id);
+function CatalogLabel({ id, options }: { id: string; options: ModelOption[] }) {
+  const opt = options.find((o) => o.id === id);
   if (!opt) return <span className="truncate">{id}</span>;
   return (
     <span className="inline-flex items-baseline gap-2 min-w-0">

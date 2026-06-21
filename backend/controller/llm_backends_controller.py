@@ -616,6 +616,74 @@ async def list_local_models(
     )
 
 
+# ── Unified per-provider model discovery (cloud + local) ─────────────────────
+# Live-lists the models a backend actually serves via the executor's
+# discover_models (geny-executor >=2.9.0): cloud providers authenticate with
+# their configured key; local providers probe their endpoint. source="live"
+# means the list is real; "unavailable" means the caller should fall back to
+# its static catalogue (the FE keeps MODEL_CATALOG for that). claude_code_cli
+# is always "unavailable" — the CLI has no model-list command; its
+# version-robust aliases (sonnet/opus/haiku) are the correct fallback.
+
+_LOCAL_DISCOVERY_PROVIDERS = {"ollama", "lmstudio", "vllm", "custom", "local"}
+
+
+class ProviderModel(BaseModel):
+    id: str
+    display_name: Optional[str] = None
+
+
+class ProviderModelsResponse(BaseModel):
+    provider: str
+    source: str = "unavailable"  # "live" | "unavailable"
+    models: List[ProviderModel] = []
+    error: Optional[str] = None
+
+
+@router.get(
+    "/models",
+    response_model=ProviderModelsResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def list_provider_models(
+    provider: str,
+    base_url: Optional[str] = None,
+) -> ProviderModelsResponse:
+    """Discover the models *provider* currently serves (best-effort, live).
+
+    The model picker calls this on provider change. On ``source="unavailable"``
+    the caller falls back to its static catalogue — so a backend version bump
+    (e.g. a new Ollama pull, a new cloud model) shows up automatically while a
+    backend that can't be enumerated (Claude Code CLI) still works via aliases.
+    """
+    try:
+        from geny_executor.llm_client import discover_models
+    except Exception:  # noqa: BLE001 — executor < 2.9.0
+        return ProviderModelsResponse(
+            provider=provider, source="unavailable", error="discovery unsupported"
+        )
+
+    cm = get_config_manager()
+    bundle = CredentialBundleBuilder(cm).build()
+    creds = bundle.get(provider)
+    api_key = getattr(creds, "api_key", "") or None
+    resolved_base = base_url
+    if provider in _LOCAL_DISCOVERY_PROVIDERS:
+        resolved_base = _resolve_local_base_url(provider, creds, base_url) or None
+
+    disc = await discover_models(
+        provider, api_key=api_key, base_url=resolved_base
+    )
+    return ProviderModelsResponse(
+        provider=provider,
+        source=disc.source,
+        models=[
+            ProviderModel(id=m.id, display_name=m.display_name) for m in disc.models
+        ],
+        error=disc.error,
+    )
+
+
 class LocalContextWindowResponse(BaseModel):
     provider: str
     base_url: str
