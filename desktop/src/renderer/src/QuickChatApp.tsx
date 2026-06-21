@@ -69,6 +69,14 @@ export function QuickChatApp() {
     return () => { offOpen?.(); offDismiss?.() }
   }, [resolveTheme, focusInput])
 
+  // When the window gains OS keyboard focus (main grabs it a tick after summon),
+  // re-focus the input so the user can type immediately — no click needed.
+  useEffect(() => {
+    const onWinFocus = () => { if (visible) focusInput() }
+    window.addEventListener('focus', onWinFocus)
+    return () => window.removeEventListener('focus', onWinFocus)
+  }, [visible, focusInput])
+
   // Auto-grow the textarea up to a few lines.
   useEffect(() => {
     const el = inputRef.current
