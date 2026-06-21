@@ -273,9 +273,14 @@ function createQuickChat(): void {
       nodeIntegration: false,
     },
   })
-  // Float above full-screen apps too (so the hotkey works over a game/video).
-  quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Float above full-screen apps — mirror the avatar overlay's proven recipe
+  // (it surfaces over borderless / windowed-fullscreen games): the 'screen-saver'
+  // top band, and visibleOnFullScreen ONLY on macOS. On Windows that call is a
+  // macOS-only feature that misbehaves, so it's guarded like the overlay.
   quickchat.setAlwaysOnTop(true, 'screen-saver')
+  if (process.platform === 'darwin') {
+    quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   // Never let the window itself go full-screen; keep it a floating palette that
   // rides above other apps rather than joining the full-screen space.
   quickchat.setFullScreenable(false)
@@ -339,31 +344,25 @@ function positionQuickChat(): void {
   setTimeout(() => { suppressQuickChatPosSave = false }, 120)
 }
 
-// Bring the bar to the absolute front and grab keyboard focus — robustly enough
-// to surface over a full-screen-WINDOWED / borderless game. Windows can demote
-// always-on-top and hold the foreground, so we re-assert the top band, pull the
-// app forward with a focus steal, raise the window, and re-assert once more on
-// the next tick to win the focus race against a game that reclaims the
-// foreground a frame later. (True EXCLUSIVE-fullscreen DirectX bypasses the
-// compositor and can't be overlaid without injection — borderless works.)
+// Surface the bar over whatever's on screen — INCLUDING a borderless /
+// windowed-fullscreen game — exactly the way the avatar overlay does (which
+// demonstrably renders over Skyrim): re-assert the 'screen-saver' top band, then
+// plain show + focus. NO app.focus({steal}) and NO Windows setVisibleOnAllWork-
+// spaces — both were fighting the game's foreground and kept the bar from
+// appearing. We're summoned from a global hotkey (user input), so Windows grants
+// the foreground transfer on a normal show()+focus(); no steal is needed. (True
+// EXCLUSIVE-fullscreen DirectX bypasses the compositor and needs injection to
+// overlay; borderless / windowed-fullscreen — like the screenshot — works.)
 function showQuickChatOnTop(): void {
   if (!quickchat) return
   quickChatShownAt = Date.now()
   quickchat.setAlwaysOnTop(true, 'screen-saver')
-  quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  app.focus({ steal: true })
+  if (process.platform === 'darwin') {
+    quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   quickchat.show()
-  quickchat.moveTop()
   quickchat.focus()
   quickchat.webContents.send('quickchat:opened')
-  setTimeout(() => {
-    if (!quickchat || !quickchat.isVisible()) return
-    quickChatShownAt = Date.now() // extend the grace window across the re-assert
-    quickchat.setAlwaysOnTop(true, 'screen-saver')
-    quickchat.moveTop()
-    quickchat.focus()
-    quickchat.webContents.send('quickchat:opened')
-  }, 60)
 }
 
 async function toggleQuickChat(): Promise<void> {
