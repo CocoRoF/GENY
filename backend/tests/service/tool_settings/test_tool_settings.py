@@ -109,8 +109,11 @@ def test_custom_web_search_delegates_to_executor_backend():
 
 
 def test_custom_web_search_default_stays_ddg(monkeypatch):
-    """No config → existing DuckDuckGo path (executor backend never built)."""
+    """No per-env config AND no global backend → existing DuckDuckGo path."""
     from tools.custom import web_search_tools
+
+    # No global Web Search config set either.
+    monkeypatch.delenv("GENY_WEBSEARCH_BACKEND", raising=False)
 
     class _FakeDDGS:
         def text(self, *a, **k):

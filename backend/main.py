@@ -147,13 +147,22 @@ async def lifespan(app: FastAPI):
     try:
         from service.config import get_config_manager
         from service.config.sub_config.general.timezone_config import TimezoneConfig
+        from service.config.sub_config.tools.web_search_config import WebSearchConfig
 
-        get_config_manager().load_config(TimezoneConfig)  # _sync_env_on_load sets GENY_TIMEZONE
+        _cm = get_config_manager()
+        # _sync_env_on_load fires each config's env_sync apply_change callbacks,
+        # so the persisted values reach os.environ before anything reads them.
+        _cm.load_config(TimezoneConfig)  # → GENY_TIMEZONE
+        _cm.load_config(WebSearchConfig)  # → GENY_WEBSEARCH_BACKEND / *_API_KEY / SEARXNG_URL
         import os as _os
 
-        logger.info("Timezone applied: GENY_TIMEZONE=%s", _os.environ.get("GENY_TIMEZONE"))
+        logger.info(
+            "Boot config sync: GENY_TIMEZONE=%s GENY_WEBSEARCH_BACKEND=%s",
+            _os.environ.get("GENY_TIMEZONE"),
+            _os.environ.get("GENY_WEBSEARCH_BACKEND"),
+        )
     except Exception:  # noqa: BLE001 — never block startup on this
-        logger.warning("Timezone config boot-sync failed; defaulting to Asia/Seoul", exc_info=True)
+        logger.warning("Boot config env-sync failed; using defaults", exc_info=True)
 
     # ── Step 1: Initialize PostgreSQL Database ─────────────────────────
     app_db = None

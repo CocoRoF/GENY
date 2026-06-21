@@ -93,13 +93,18 @@ class WebSearchTool(BaseTool):
             region: Region code (e.g. "us-en", "ko-kr", "ja-jp"). Defaults to "us-en".
             timelimit: Time filter — "d" (day), "w" (week), "m" (month), "y" (year). None for all time.
         """
+        import os
+
         max_results = min(max(1, max_results), 20)
 
-        # Per-environment Tool Setting (host-injected, not LLM-visible). When a
-        # non-default backend is configured, delegate to geny-executor's
-        # pluggable backend (Brave / Tavily / SearXNG).
+        # Backend precedence: per-environment Tool Setting (host-injected, not
+        # LLM-visible) → global Web Search config (GENY_WEBSEARCH_BACKEND env) →
+        # DuckDuckGo. Non-ddg backends delegate to geny-executor's pluggable
+        # backend, which reads keys from cfg or the BRAVE/TAVILY/SEARXNG env vars.
         cfg = web_search_config or {}
-        backend_name = str(cfg.get("backend") or "ddg").strip().lower()
+        backend_name = str(
+            cfg.get("backend") or os.environ.get("GENY_WEBSEARCH_BACKEND") or "ddg"
+        ).strip().lower()
         if backend_name and backend_name != "ddg":
             hits = _search_via_backend(backend_name, cfg, query, max_results, region)
             formatted = [

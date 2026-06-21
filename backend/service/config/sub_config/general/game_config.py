@@ -68,7 +68,7 @@ class GameConfig(BaseConfig):
 
     @classmethod
     def get_category(cls) -> str:
-        return "general"
+        return "tools"
 
     @classmethod
     def get_icon(cls) -> str:
