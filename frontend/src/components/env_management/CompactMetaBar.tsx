@@ -35,7 +35,6 @@ import {
   Plus,
   Save,
   Settings2,
-  Trash2,
   X,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
@@ -84,6 +83,10 @@ export default function CompactMetaBar({
   // confirm before an EDIT save commits (propagation lands on next turn).
   const [confirmActive, setConfirmActive] = useState<EnvironmentSessionSummary[] | null>(null);
   const [checkingSessions, setCheckingSessions] = useState(false);
+  // "Save before leaving?" prompt — opened by the Back button when the
+  // draft is dirty. For preset-seeded drafts the env may have no name yet,
+  // so the modal hosts a required name input before Save & leave unlocks.
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const descRef = useRef<HTMLDivElement | null>(null);
   const validRef = useRef<HTMLDivElement | null>(null);
 
@@ -101,6 +104,17 @@ export default function CompactMetaBar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [descOpen, validOpen]);
+
+  // Escape closes the "save before leaving?" prompt = cancel (stay),
+  // matching ConfirmModal's Escape-to-close behaviour.
+  useEffect(() => {
+    if (!leaveOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLeaveOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [leaveOpen]);
 
   // env-edit fields render only when both apply: we're on the
   // environments tab AND a draft is loaded. Other states (registry
@@ -156,8 +170,26 @@ export default function CompactMetaBar({
     await doSave();
   };
 
-  const handleDiscard = () => {
-    if (isDirty() && !confirm(t('envManagement.confirmDiscard'))) return;
+  // Back — graceful exit. Clean draft drops straight to the overview
+  // (resetDraft is state-driven). A dirty draft opens the "save before
+  // leaving?" prompt instead of discarding silently.
+  const handleBack = () => {
+    if (!isDirty()) {
+      resetDraft();
+      return;
+    }
+    setLeaveOpen(true);
+  };
+
+  const handleSaveAndLeave = async () => {
+    setLeaveOpen(false);
+    // handleSave handles the existing-env active-session check + saves;
+    // saveDraft clears the draft on success → overview.
+    await handleSave();
+  };
+
+  const handleDontSave = () => {
+    setLeaveOpen(false);
     resetDraft();
   };
 
@@ -241,7 +273,7 @@ export default function CompactMetaBar({
             addTag={addTag}
             removeTag={removeTag}
             handleSave={handleSave}
-            handleDiscard={handleDiscard}
+            handleBack={handleBack}
             onOpenGlobals={onOpenGlobals}
             t={t}
           />
@@ -288,6 +320,83 @@ export default function CompactMetaBar({
         onClose={() => setConfirmActive(null)}
       />
     )}
+
+    {leaveOpen && (
+      // "Save before leaving?" — custom 3-button prompt (Save & leave /
+      // Don't save / Cancel) hosting an optional required name input for
+      // preset-seeded drafts. Mirrors ConfirmModal's overlay/panel
+      // classes; overlay click / Escape = cancel (stay).
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setLeaveOpen(false)}
+      >
+        <div
+          className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[400px] max-h-[85vh] flex flex-col shadow-[var(--shadow-lg)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex justify-between items-center py-4 px-6 border-b border-[var(--border-color)]">
+            <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">
+              {t('envManagement.saveBeforeLeaveTitle')}
+            </h3>
+            <button
+              className="flex items-center justify-center w-8 h-8 rounded-[var(--border-radius)] bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+              onClick={() => setLeaveOpen(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
+            {!draft || draft.metadata.name.trim() === '' ? (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  {t('envManagement.envNameLabel')}
+                </label>
+                <Input
+                  value={draft?.metadata.name ?? ''}
+                  onChange={(e) => patchMetadata({ name: e.target.value })}
+                  placeholder={t('envManagement.namePlaceholder')}
+                  className="h-8 text-[0.8125rem]"
+                  autoFocus
+                />
+                <p className="text-[0.75rem] text-[var(--text-muted)]">
+                  {t('envManagement.presetNamePrompt')}
+                </p>
+              </div>
+            ) : (
+              <div className="text-[0.8125rem] text-[var(--text-secondary)]">
+                {t('envManagement.saveBeforeLeaveDirty')}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex justify-end items-center gap-3 py-4 px-6 border-t border-[var(--border-color)]">
+            <button
+              className="py-2 px-4 bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border border-[var(--border-color)]"
+              onClick={() => setLeaveOpen(false)}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              className="py-2 px-4 bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border border-[var(--border-color)]"
+              onClick={handleDontSave}
+            >
+              {t('envManagement.dontSave')}
+            </button>
+            <button
+              className="py-2 px-4 bg-[var(--primary-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSaveAndLeave}
+              disabled={!draft || draft.metadata.name.trim() === ''}
+            >
+              {t('envManagement.saveAndLeave')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }
@@ -313,7 +422,7 @@ interface EnvEditFieldsProps {
   addTag: () => void;
   removeTag: (tag: string) => void;
   handleSave: () => Promise<void>;
-  handleDiscard: () => void;
+  handleBack: () => void;
   onOpenGlobals: () => void;
   t: (k: string, vars?: Record<string, string>) => string;
 }
@@ -339,7 +448,7 @@ function EnvEditFields({
   addTag,
   removeTag,
   handleSave,
-  handleDiscard,
+  handleBack,
   onOpenGlobals,
   t,
 }: EnvEditFieldsProps) {
@@ -505,8 +614,8 @@ function EnvEditFields({
           <Settings2 className="w-3.5 h-3.5" />
           {t('envManagement.compactBar.globalsLabel')}
         </button>
-        <ActionButton icon={Trash2} onClick={handleDiscard} disabled={saving}>
-          {t('envManagement.discard')}
+        <ActionButton icon={ArrowLeft} onClick={handleBack} disabled={saving}>
+          {t('envManagement.backButton')}
         </ActionButton>
         <ActionButton
           variant="primary"

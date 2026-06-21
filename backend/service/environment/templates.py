@@ -64,6 +64,15 @@ VTUBER_ENV_ID = "template-vtuber-env"
 # worker side by side.
 CLAUDE_CODE_WORKER_ENV_ID = "template-claude-code-worker-env"
 CLAUDE_CODE_VTUBER_ENV_ID = "template-claude-code-vtuber-env"
+# Explicit per-backend presets (provider locked). Each backend × {general,
+# vtuber}. The two seeds above (worker/vtuber) follow the user's *active* login;
+# these let a user force a specific backend regardless of the default.
+CLAUDE_WORKER_ENV_ID = "template-claude-worker-env"
+CLAUDE_VTUBER_ENV_ID = "template-claude-vtuber-env"
+OPENAI_WORKER_ENV_ID = "template-openai-worker-env"
+OPENAI_VTUBER_ENV_ID = "template-openai-vtuber-env"
+LOCAL_WORKER_ENV_ID = "template-local-worker-env"
+LOCAL_VTUBER_ENV_ID = "template-local-vtuber-env"
 
 
 # Custom tools the VTuber persona should keep access to. Distinct
@@ -315,22 +324,19 @@ def create_worker_env(
     ``BlogAgentConfig.enabled_for_subworkers``. See
     BLOG_AGENT_DELEGATION_PLAN.md § Phase 4.
     """
-    deny = _resolve_worker_custom_deny()
-    filtered = [n for n in (external_tool_names or []) if n not in deny]
+    # All-tools principle: every tool by default (built_in ``["*"]`` + the full
+    # external roster). Users narrow per-environment in the editor; the seed is
+    # maximal. The ``model`` block is filled at session creation.
     manifest = build_manifest(
         "worker_adaptive",
-        # build_manifest requires an explicit provider; keep Geny's
-        # historical "anthropic" last-resort default for callers that
-        # pass None (the install path resolves the real one).
         provider=provider or "anthropic",
-        external_tools=filtered,
-        built_in_tools=list(_WORKER_BUILT_IN_TOOL_NAMES),
+        external_tools=list(external_tool_names or []),
+        built_in_tools=["*"],
     )
     manifest.metadata.id = WORKER_ENV_ID
-    manifest.metadata.name = "Worker Environment"
+    manifest.metadata.name = "일반 환경"
     manifest.metadata.description = (
-        "Default environment for worker / developer / researcher / "
-        "planner roles. Adaptive loop with binary_classify evaluator."
+        "범용 작업 환경 — 적응형 루프 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
     return manifest
 
@@ -369,21 +375,20 @@ def create_vtuber_env(
     knowledge — every piece of functionality the VTuber↔Sub-Worker
     delegation relies on.
     """
-    if all_tool_names:
-        external = _vtuber_tool_roster(all_tool_names, tool_loader=tool_loader)
-    else:
-        external = ["web_search", "news_search", "web_fetch"]
-
+    # All-tools principle: the VTuber persona also gets every tool by default.
+    # The persona is the ``vtuber`` loop + owned sub-agent + Geny's session-layer
+    # affect/voice/avatar — NOT a tool restriction. Users narrow per-env if they
+    # want a quieter persona.
     manifest = build_manifest(
         "vtuber",
         provider=provider or "anthropic",
-        external_tools=external,
-        built_in_tools=list(_VTUBER_BUILT_IN_TOOL_NAMES),
+        external_tools=list(all_tool_names or []),
+        built_in_tools=["*"],
     )
     manifest.metadata.id = VTUBER_ENV_ID
-    manifest.metadata.name = "VTuber Environment"
+    manifest.metadata.name = "VTuber 환경"
     manifest.metadata.description = (
-        "Lightweight conversational environment for the VTuber persona."
+        "VTuber 페르소나 환경 — 감정/음성/아바타 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
     _declare_owned_subagent(manifest)
     return manifest
@@ -419,19 +424,15 @@ def create_claude_code_worker_env(
     (``claude_code_worker`` preset). Lets a user run a Claude-Code-backed
     worker regardless of which provider is the global default.
     """
-    deny = _resolve_worker_custom_deny()
-    filtered = [n for n in (external_tool_names or []) if n not in deny]
     manifest = build_manifest_for(
         "claude_code_worker",
-        external_tools=filtered,
-        built_in_tools=list(_WORKER_BUILT_IN_TOOL_NAMES),
+        external_tools=list(external_tool_names or []),
+        built_in_tools=["*"],
     )
     manifest.metadata.id = CLAUDE_CODE_WORKER_ENV_ID
-    manifest.metadata.name = "Claude Code · Worker"
+    manifest.metadata.name = "Claude Code · 일반"
     manifest.metadata.description = (
-        "Worker environment backed by the Claude Code CLI (subscription "
-        "auth). Same adaptive loop + tools as the default worker, on the "
-        "claude_code_cli provider."
+        "Claude Code CLI(구독 인증) 백엔드 · 일반 환경 — 적응형 루프 + 모든 도구."
     )
     return manifest
 
@@ -446,21 +447,46 @@ def create_claude_code_vtuber_env(
     :func:`create_vtuber_env`, locked to ``claude_code_cli`` via the
     catalog (``claude_code_vtuber`` preset).
     """
-    if all_tool_names:
-        external = _vtuber_tool_roster(all_tool_names, tool_loader=tool_loader)
-    else:
-        external = ["web_search", "news_search", "web_fetch"]
     manifest = build_manifest_for(
         "claude_code_vtuber",
-        external_tools=external,
-        built_in_tools=list(_VTUBER_BUILT_IN_TOOL_NAMES),
+        external_tools=list(all_tool_names or []),
+        built_in_tools=["*"],
     )
     manifest.metadata.id = CLAUDE_CODE_VTUBER_ENV_ID
     manifest.metadata.name = "Claude Code · VTuber"
     manifest.metadata.description = (
-        "Conversational VTuber environment backed by the Claude Code CLI."
+        "Claude Code CLI 백엔드 · VTuber 페르소나 환경 — 모든 도구."
     )
     _declare_owned_subagent(manifest)
+    return manifest
+
+
+def _backend_env(
+    chain: str,
+    provider: str,
+    env_id: str,
+    name: str,
+    description: str,
+    all_names: List[str],
+    *,
+    vtuber: bool,
+) -> EnvironmentManifest:
+    """Build a provider-locked preset (every tool enabled).
+
+    ``chain`` is the stage blueprint (``worker_adaptive`` / ``vtuber``);
+    ``provider`` locks Stage 6. VTuber presets additionally own a sub-agent.
+    """
+    manifest = build_manifest(
+        chain,
+        provider=provider,
+        external_tools=list(all_names or []),
+        built_in_tools=["*"],
+    )
+    manifest.metadata.id = env_id
+    manifest.metadata.name = name
+    manifest.metadata.description = description
+    if vtuber:
+        _declare_owned_subagent(manifest)
     return manifest
 
 
@@ -540,15 +566,50 @@ def install_environment_templates(
     # historical anthropic last-resort so the boot reseed never fails.
     active_provider = _resolve_active_provider()
     seeds: List[EnvironmentManifest] = [
+        # Defaults — follow the user's active login (role-default targets).
         create_worker_env(external_tool_names=all_names, provider=active_provider),
         create_vtuber_env(
             all_tool_names=all_names,
             tool_loader=tool_loader,
             provider=active_provider,
         ),
-        # Dedicated Claude Code engine presets (always claude_code_cli).
+        # ── Explicit per-backend presets (4 backends × {general, vtuber}) ──
+        # Claude Code (CLI subscription auth).
         create_claude_code_worker_env(external_tool_names=all_names),
         create_claude_code_vtuber_env(all_tool_names=all_names, tool_loader=tool_loader),
+        # Claude (Anthropic API key).
+        _backend_env(
+            "worker_adaptive", "anthropic", CLAUDE_WORKER_ENV_ID,
+            "Claude · 일반", "Anthropic API 백엔드 · 일반 환경 — 모든 도구.",
+            all_names, vtuber=False,
+        ),
+        _backend_env(
+            "vtuber", "anthropic", CLAUDE_VTUBER_ENV_ID,
+            "Claude · VTuber", "Anthropic API 백엔드 · VTuber 페르소나 환경 — 모든 도구.",
+            all_names, vtuber=True,
+        ),
+        # OpenAI.
+        _backend_env(
+            "worker_adaptive", "openai", OPENAI_WORKER_ENV_ID,
+            "OpenAI · 일반", "OpenAI 백엔드 · 일반 환경 — 모든 도구.",
+            all_names, vtuber=False,
+        ),
+        _backend_env(
+            "vtuber", "openai", OPENAI_VTUBER_ENV_ID,
+            "OpenAI · VTuber", "OpenAI 백엔드 · VTuber 페르소나 환경 — 모든 도구.",
+            all_names, vtuber=True,
+        ),
+        # Local LLM (Ollama — model/base_url come from LLM Backends settings).
+        _backend_env(
+            "worker_adaptive", "ollama", LOCAL_WORKER_ENV_ID,
+            "Local LLM · 일반", "로컬 LLM(Ollama) 백엔드 · 일반 환경 — 모든 도구.",
+            all_names, vtuber=False,
+        ),
+        _backend_env(
+            "vtuber", "ollama", LOCAL_VTUBER_ENV_ID,
+            "Local LLM · VTuber", "로컬 LLM(Ollama) 백엔드 · VTuber 페르소나 환경 — 모든 도구.",
+            all_names, vtuber=True,
+        ),
     ]
     for manifest in seeds:
         env_id = manifest.metadata.id
