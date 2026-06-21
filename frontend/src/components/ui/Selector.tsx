@@ -18,7 +18,16 @@
  *     value={v} onChange={setV} />
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -70,6 +79,10 @@ export default function Selector<T extends string = string>({
 }: SelectorProps<T>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // Fixed-viewport coords for the portaled popover (escapes any `overflow`
+  // clipping from ancestor scroll containers / modals).
+  const [coords, setCoords] = useState<CSSProperties>({});
 
   const isField = variant === 'field';
   const expand = fullWidth ?? isField; // field defaults full-width
@@ -77,21 +90,59 @@ export default function Selector<T extends string = string>({
   const active = items.find((i) => i.id === value);
   const ActiveIcon = active?.icon;
 
+  const recompute = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const gap = 6;
+    const vh = window.innerHeight;
+    // Open upward when there's little room below and more room above.
+    const openUp = r.bottom + 320 > vh && r.top > vh - r.bottom;
+    const next: CSSProperties = { position: 'fixed', zIndex: 1000 };
+    if (expand) {
+      next.left = r.left;
+      next.width = r.width;
+    } else if (align === 'end') {
+      next.right = window.innerWidth - r.right;
+      next.minWidth = minWidthPx ?? 200;
+    } else {
+      next.left = r.left;
+      next.minWidth = minWidthPx ?? 200;
+    }
+    if (openUp) next.bottom = vh - r.top + gap;
+    else next.top = r.bottom + gap;
+    setCoords(next);
+  }, [expand, align, minWidthPx]);
+
+  useLayoutEffect(() => {
+    if (open) recompute();
+  }, [open, recompute]);
+
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      const inTrigger = ref.current?.contains(t);
+      const inMenu = menuRef.current?.contains(t);
+      if (!inTrigger && !inMenu) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
+    // Capture scroll anywhere (modal bodies, page) so the popover tracks its
+    // trigger; reposition on resize too.
+    const onReflow = () => recompute();
     document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onReflow, true);
+    window.addEventListener('resize', onReflow);
     return () => {
       document.removeEventListener('mousedown', onClick);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onReflow, true);
+      window.removeEventListener('resize', onReflow);
     };
-  }, [open]);
+  }, [open, recompute]);
 
   const pick = (id: T) => {
     setOpen(false);
@@ -151,14 +202,13 @@ export default function Selector<T extends string = string>({
         />
       </button>
 
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <div
+          ref={menuRef}
           role="menu"
-          style={minWidthPx ? { minWidth: minWidthPx } : undefined}
+          style={coords}
           className={cn(
-            'animate-dropdown-pop absolute top-full mt-1.5 z-40 py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-[var(--shadow-lg)] max-h-[320px] overflow-y-auto',
-            expand ? 'left-0 right-0' : align === 'end' ? 'right-0' : 'left-0',
-            !expand && !minWidthPx && 'min-w-[200px]',
+            'animate-dropdown-pop py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-[var(--shadow-lg)] max-h-[320px] overflow-y-auto',
           )}
         >
           {items.map((item) => {
@@ -234,7 +284,8 @@ export default function Selector<T extends string = string>({
               </div>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

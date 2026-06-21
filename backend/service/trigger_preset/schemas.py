@@ -308,17 +308,23 @@ class CreateTriggerPresetResponse(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────
 
 
-def render_prompt(category: TriggerCategory, content: str) -> str:
+def render_prompt(
+    category: TriggerCategory,
+    content: str,
+    *,
+    time_context: Optional[str] = None,
+) -> str:
     """Render a fully-formed prompt string from a category + content.
 
     The runtime calls this *exactly once* per fire. Operators don't
     have to think about the tag format — only the natural language —
     because every prompt that goes out is constructed here::
 
-        [{KIND}_TRIGGER:{cat.id}] [autonomous_signal: {signal}] {content}
+        [{KIND}_TRIGGER:{id}] [autonomous_signal: {signal}] [time_context: {tc}] {content}
 
     The ``autonomous_signal`` chunk is omitted when the category leaves
-    that field empty.
+    that field empty. ``time_context`` (e.g. ``일요일 아침, 09:51 KST``) is an
+    explicit current-time anchor so the persona never guesses the time of day.
     """
     kind_token = (
         "ACTIVITY_TRIGGER" if category.kind == "activity" else "THINKING_TRIGGER"
@@ -328,6 +334,8 @@ def render_prompt(category: TriggerCategory, content: str) -> str:
     signal = (category.autonomous_signal or "").strip()
     if signal:
         parts.append(f"[autonomous_signal: {signal}]")
+    if time_context and time_context.strip():
+        parts.append(f"[time_context: {time_context.strip()}]")
     parts.append(content.strip())
     return " ".join(parts)
 

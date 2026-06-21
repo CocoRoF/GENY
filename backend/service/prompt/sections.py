@@ -291,13 +291,22 @@ class SectionLibrary:
     @staticmethod
     def datetime_info() -> PromptSection:
         """Current time (1-line). Captures the time at prompt build."""
+        from service.utils.utils import time_of_day_label
+
         tz = _get_tz()
         now_local = datetime.now(timezone.utc).astimezone(tz)
         abbr = now_local.strftime("%Z")
+        # Weekday + part-of-day so the persona has an explicit anchor and never
+        # mistakes e.g. a 09:51 morning for "evening".
+        weekday = now_local.strftime("%A")
+        part = time_of_day_label(now_local, "en")
 
         return PromptSection(
             name="datetime",
-            content=f"Current time: {now_local.strftime('%Y-%m-%d %H:%M:%S')} {abbr}",
+            content=(
+                f"Current time: {now_local.strftime('%Y-%m-%d %H:%M:%S')} {abbr} "
+                f"({weekday}, {part})"
+            ),
             priority=45,
             modes={PromptMode.FULL},
         )

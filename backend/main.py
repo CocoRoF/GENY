@@ -141,6 +141,20 @@ async def lifespan(app: FastAPI):
     # error envelopes are first-class ``api.*`` pipeline events now,
     # bridged in ``service.executor.agent_session``.)
 
+    # Apply the persisted Timezone config to the environment at boot, so every
+    # time helper (now_kst / prompt datetime / think-trigger time-of-day) agrees
+    # with the user's configured timezone even before the config is first read.
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.general.timezone_config import TimezoneConfig
+
+        get_config_manager().load_config(TimezoneConfig)  # _sync_env_on_load sets GENY_TIMEZONE
+        import os as _os
+
+        logger.info("Timezone applied: GENY_TIMEZONE=%s", _os.environ.get("GENY_TIMEZONE"))
+    except Exception:  # noqa: BLE001 — never block startup on this
+        logger.warning("Timezone config boot-sync failed; defaulting to Asia/Seoul", exc_info=True)
+
     # ── Step 1: Initialize PostgreSQL Database ─────────────────────────
     app_db = None
     try:
