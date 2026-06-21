@@ -313,37 +313,27 @@ function createQuickChat(): void {
       dismissQuickChat()
     }
   })
-  // Claim the top band NOW, while nothing is full-screen yet, then sit parked
-  // off-screen + click-through until summoned. showInactive() so we don't steal
-  // focus from whatever the user is doing at launch.
-  quickchat.setOpacity(0)
+  // Establish the window ON-SCREEN, shown, top-most and click-through at launch —
+  // exactly like the avatar overlay (which surfaces over borderless full-screen
+  // games). It claims the 'screen-saver' top band BEFORE any game goes full-screen
+  // and then stays put; the renderer paints nothing until summoned. showInactive()
+  // so we don't steal focus from whatever the user is doing at launch.
+  positionQuickChat()
   quickchat.setIgnoreMouseEvents(true, { forward: true })
-  const off = offscreenPoint()
-  quickchat.setPosition(off.x, off.y)
   quickchat.showInactive()
 }
 
-// A point well below every display — where the bar is parked while dismissed.
-// Moving it off-screen reliably hides it WITHOUT hide() (which would forfeit its
-// top-most z-order over a full-screen game). Opacity alone isn't trustworthy here:
-// on Windows a `transparent` window already uses per-pixel alpha, so setOpacity
-// can be a no-op — hence the off-screen park as the load-bearing hide.
-function offscreenPoint(): { x: number; y: number } {
-  const displays = screen.getAllDisplays()
-  const maxBottom = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height))
-  return { x: 0, y: maxBottom + 2000 }
-}
-
-// Hide the bar WITHOUT destroying its top-most window: park it off-screen +
-// click-through, but still shown so it keeps its z-order above any full-screen
-// game (so the next summon can place it back on top instantly).
+// Hide the bar WITHOUT touching the window: the window stays shown, on-screen and
+// top-most (so it keeps its z-order above a full-screen game); the RENDERER just
+// stops painting the card, and we make the window click-through. This mirrors the
+// avatar overlay exactly — a persistent transparent top-most window whose content
+// is what appears/disappears, never the window itself. (Hiding / moving off-screen
+// / opacity all failed to layer above a game that went full-screen after launch.)
 function dismissQuickChat(): void {
   if (!quickchat) return
   quickChatOpen = false
   quickchat.setIgnoreMouseEvents(true, { forward: true })
-  quickchat.setOpacity(0)
-  const off = offscreenPoint()
-  quickchat.setPosition(off.x, off.y)
+  quickchat.webContents.send('quickchat:dismissed')
 }
 
 let quickChatPosTimer: ReturnType<typeof setTimeout> | null = null
@@ -384,14 +374,14 @@ function positionQuickChat(): void {
   setTimeout(() => { suppressQuickChatPosSave = false }, 120)
 }
 
-// Summon the bar: it's ALREADY a shown top-most window, so we only flip it
-// visible + interactive (opacity + mouse events) and re-assert the top band —
-// no hide()/show(), which is what lets it sit above a borderless full-screen
-// game (the window claimed the top band at launch, before the game went full-
-// screen, exactly like the avatar overlay). Then focus it for typing; because
-// we're triggered by a global hotkey (user input) Windows allows the foreground
-// transfer. (True EXCLUSIVE-fullscreen DirectX bypasses the compositor and needs
-// injection to overlay; borderless / windowed-fullscreen works.)
+// Summon the bar: the window is ALREADY shown + top-most on-screen, so we only
+// re-assert the top band, make it interactive, raise + focus it, and tell the
+// renderer to paint the card. No hide()/show(), no move, no opacity — the window
+// claimed the top band at launch (before any game went full-screen) and never
+// left, exactly like the avatar overlay, so it stays above the game. Focus works
+// because we're triggered by a global hotkey (user input). (True EXCLUSIVE-
+// fullscreen DirectX bypasses the compositor and needs injection; borderless /
+// windowed-fullscreen works.)
 function showQuickChatOnTop(): void {
   if (!quickchat) return
   quickChatOpen = true
@@ -401,9 +391,9 @@ function showQuickChatOnTop(): void {
     quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
   quickchat.setIgnoreMouseEvents(false)
-  quickchat.setOpacity(1)
   quickchat.moveTop()
   quickchat.focus()
+  // Renderer paints the card + focuses the input.
   quickchat.webContents.send('quickchat:opened')
 }
 

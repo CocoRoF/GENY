@@ -95,8 +95,10 @@ export interface ConnectorBridge {
     submit(text: string): Promise<{ ok: boolean; error?: string }>
     /** Dismiss the bar (Esc / blur). */
     close(): void
-    /** Fired each time the bar is summoned (reset + focus the input). */
+    /** Fired each time the bar is summoned (paint the card, reset + focus). */
     onOpened(cb: () => void): () => void
+    /** Fired when main dismisses the bar (blur/submit/Esc) — stop painting. */
+    onDismissed(cb: () => void): () => void
   }
 
   /** Inbound messaging from the connector → the /connector chat page reuses its
@@ -209,6 +211,11 @@ const api: ConnectorBridge = {
       const h = () => cb()
       ipcRenderer.on('quickchat:opened', h)
       return () => ipcRenderer.removeListener('quickchat:opened', h)
+    },
+    onDismissed: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('quickchat:dismissed', h)
+      return () => ipcRenderer.removeListener('quickchat:dismissed', h)
     },
   },
   messaging: {
