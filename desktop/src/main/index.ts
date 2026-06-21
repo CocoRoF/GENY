@@ -246,6 +246,10 @@ function showSettings(): void {
 // reusing its proven send/auth/TTS pipeline (no duplicate transport).
 const QUICKCHAT_W = 640
 const QUICKCHAT_H = 188
+// When the bar was last summoned — used to swallow the spurious `blur` that a
+// focused full-screen game fires immediately after we show (so the bar doesn't
+// vanish before the user can type).
+let quickChatShownAt = 0
 function createQuickChat(): void {
   quickchat = new BrowserWindow({
     width: QUICKCHAT_W,
@@ -272,9 +276,18 @@ function createQuickChat(): void {
   // Float above full-screen apps too (so the hotkey works over a game/video).
   quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   quickchat.setAlwaysOnTop(true, 'screen-saver')
+  // Never let the window itself go full-screen; keep it a floating palette that
+  // rides above other apps rather than joining the full-screen space.
+  quickchat.setFullScreenable(false)
   loadRoute(quickchat, 'quickchat')
-  // Dismiss on focus loss (click elsewhere) — Spotlight behaviour.
-  quickchat.on('blur', () => quickchat?.hide())
+  // Dismiss on focus loss (click elsewhere) — Spotlight behaviour. But ignore the
+  // spurious blur a focused full-screen game fires right after we show (we may
+  // not win focus on the first frame); real click-away dismissal still works
+  // once the short grace window elapses.
+  quickchat.on('blur', () => {
+    if (Date.now() - quickChatShownAt < 450) return
+    quickchat?.hide()
+  })
   // Remember where the user drags the bar. 'move' streams during the drag
   // (Win/Linux) and 'moved' lands once it settles (macOS); debounce both so we
   // persist the final spot without hammering the config file mid-drag.
@@ -326,6 +339,33 @@ function positionQuickChat(): void {
   setTimeout(() => { suppressQuickChatPosSave = false }, 120)
 }
 
+// Bring the bar to the absolute front and grab keyboard focus — robustly enough
+// to surface over a full-screen-WINDOWED / borderless game. Windows can demote
+// always-on-top and hold the foreground, so we re-assert the top band, pull the
+// app forward with a focus steal, raise the window, and re-assert once more on
+// the next tick to win the focus race against a game that reclaims the
+// foreground a frame later. (True EXCLUSIVE-fullscreen DirectX bypasses the
+// compositor and can't be overlaid without injection — borderless works.)
+function showQuickChatOnTop(): void {
+  if (!quickchat) return
+  quickChatShownAt = Date.now()
+  quickchat.setAlwaysOnTop(true, 'screen-saver')
+  quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  app.focus({ steal: true })
+  quickchat.show()
+  quickchat.moveTop()
+  quickchat.focus()
+  quickchat.webContents.send('quickchat:opened')
+  setTimeout(() => {
+    if (!quickchat || !quickchat.isVisible()) return
+    quickChatShownAt = Date.now() // extend the grace window across the re-assert
+    quickchat.setAlwaysOnTop(true, 'screen-saver')
+    quickchat.moveTop()
+    quickchat.focus()
+    quickchat.webContents.send('quickchat:opened')
+  }, 60)
+}
+
 async function toggleQuickChat(): Promise<void> {
   if (!quickchat) createQuickChat()
   if (quickchat?.isVisible()) {
@@ -339,10 +379,7 @@ async function toggleQuickChat(): Promise<void> {
     return
   }
   positionQuickChat()
-  quickchat?.show()
-  quickchat?.focus()
-  // Tell the renderer to reset + focus its input each time it's summoned.
-  quickchat?.webContents.send('quickchat:opened')
+  showQuickChatOnTop()
 }
 
 // Relay a quick-chat message to the current VTuber via the /connector page's
