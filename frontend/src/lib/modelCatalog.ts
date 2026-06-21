@@ -139,12 +139,16 @@ export const MODEL_CATALOG: Record<ProviderId, ModelOption[]> = {
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
   ],
   vllm: [],
+  // Claude Code CLI exposes no model-list command (the list is baked into the
+  // compiled binary), so we can't enumerate per version. Aliases are the
+  // correct choice: the CLI resolves `opus`/`sonnet`/`haiku` to the LATEST it
+  // supports (e.g. `opus` → claude-opus-4-8 today, verified at runtime). Avoid
+  // date-pinned ids here — they go stale across CLI upgrades; pin a specific id
+  // via "Custom value…" if you really need to.
   claude_code_cli: [
-    { id: 'sonnet', label: 'Claude Sonnet (alias)' },
-    { id: 'opus', label: 'Claude Opus (alias)' },
-    { id: 'haiku', label: 'Claude Haiku (alias)' },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (pinned)' },
-    { id: 'claude-opus-4-7', label: 'Opus 4.7 (pinned)' },
+    { id: 'opus', label: 'Opus — 최신 (CLI가 자동 해석)' },
+    { id: 'sonnet', label: 'Sonnet — 최신 (CLI가 자동 해석)' },
+    { id: 'haiku', label: 'Haiku — 최신 (CLI가 자동 해석)' },
   ],
   // Local backends are free-form — models are discovered per endpoint.
   ollama: [],
