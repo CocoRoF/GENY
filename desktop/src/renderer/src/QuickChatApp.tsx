@@ -6,9 +6,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // relayed to the CURRENT VTuber's chat (the overlaySession) through the
 // /connector page's own send path — so the avatar answers via the usual TTS.
 //
-// This window is frameless + transparent; the card paints itself. Dismiss on
-// Esc or focus-loss (main hides on blur). It re-themes with the connector's
-// dark/light choice via the shared `.gy` tokens.
+// The window itself is PERMANENT: main keeps a transparent, top-most, on-screen
+// window alive at all times (like the avatar overlay, so it layers above a
+// full-screen game). What appears/disappears is the CARD — this component only
+// paints it while `visible`, toggled by main's opened/dismissed events. Dismiss
+// on Esc or focus-loss (main detects blur). Re-themes via the shared `.gy` tokens.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Phase = 'idle' | 'sending' | 'sent' | 'error'
@@ -21,6 +23,7 @@ const sendIcon = (
 )
 
 export function QuickChatApp() {
+  const [visible, setVisible] = useState(false)
   const [text, setText] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState('')
@@ -47,19 +50,23 @@ export function QuickChatApp() {
     el.select()
   }, [])
 
-  // Summoned: reset + refocus each time the hotkey fires (the window is reused).
+  // Paint the card on summon (reset + focus), erase it on dismiss. The window
+  // stays alive either way — only the card mounts/unmounts.
   useEffect(() => {
     resolveTheme()
-    focusInput()
-    const off = window.connector?.quickChat?.onOpened?.(() => {
+    const offOpen = window.connector?.quickChat?.onOpened?.(() => {
       if (sentTimer.current) clearTimeout(sentTimer.current)
       setText('')
       setPhase('idle')
       setError('')
+      setVisible(true)
       resolveTheme()
       setTimeout(focusInput, 20)
     })
-    return () => off?.()
+    const offDismiss = window.connector?.quickChat?.onDismissed?.(() => {
+      setVisible(false)
+    })
+    return () => { offOpen?.(); offDismiss?.() }
   }, [resolveTheme, focusInput])
 
   // Auto-grow the textarea up to a few lines.
@@ -92,6 +99,7 @@ export function QuickChatApp() {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault()
+      setVisible(false)
       window.connector?.quickChat?.close()
     } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       // isComposing guard: don't send while an IME candidate is being confirmed.
@@ -101,6 +109,10 @@ export function QuickChatApp() {
   }
 
   const canSend = !!text.trim() && phase !== 'sending'
+
+  // Window stays alive always; paint the card only while summoned so the rest of
+  // the time the window is fully transparent (and click-through, set by main).
+  if (!visible) return <div className="qc-root" />
 
   return (
     <div className={`qc-root gy ${dark ? '' : 'gy--light'}`}>
