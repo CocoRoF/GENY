@@ -271,14 +271,13 @@ function createQuickChat(): void {
     skipTaskbar: true,
     hasShadow: false,
     backgroundColor: '#00000000',
-    // Don't appear in the dock-cycle / app-switcher; it's an ephemeral palette.
-    fullscreenable: false,
-    minimizable: false,
-    maximizable: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Match the avatar overlay exactly (it surfaces over Skyrim): keep the
+      // renderer ticking even while unfocused/occluded.
+      backgroundThrottling: false,
     },
   })
   // Float above full-screen apps — mirror the avatar overlay's proven recipe
@@ -289,9 +288,6 @@ function createQuickChat(): void {
   if (process.platform === 'darwin') {
     quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
-  // Never let the window itself go full-screen; keep it a floating palette that
-  // rides above other apps rather than joining the full-screen space.
-  quickchat.setFullScreenable(false)
   loadRoute(quickchat, 'quickchat')
   // Dismiss on focus loss (click elsewhere) — Spotlight behaviour. But ignore the
   // spurious blur a focused full-screen game fires right after we show (we may
@@ -392,8 +388,11 @@ function showQuickChatOnTop(): void {
   }
   quickchat.setIgnoreMouseEvents(false)
   quickchat.moveTop()
-  quickchat.focus()
-  // Renderer paints the card + focuses the input.
+  // NOTE: deliberately NO quickchat.focus() / app.focus — the avatar overlay
+  // never grabs OS focus and it surfaces over Skyrim; grabbing focus makes a
+  // borderless game reclaim the foreground and paint back over us. The renderer
+  // focuses the INPUT element intra-window (works if the window holds keyboard
+  // focus); otherwise a single click on the now-visible bar focuses it to type.
   quickchat.webContents.send('quickchat:opened')
 }
 
