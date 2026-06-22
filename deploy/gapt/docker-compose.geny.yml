@@ -1,0 +1,49 @@
+# Geny-integration override for GAPT's vendored tunnel compose.
+#
+# Layers on top of gapt/compose/docker-compose.tunnel.yml to:
+#   - give the containers stable names (gapt-server / gapt-postgres /
+#     gapt-caddy) so Geny + nginx can target them deterministically,
+#   - put the control-plane server on `gapt-net` with the alias
+#     `gapt-server` so geny-backend (also on gapt-net) can call the API
+#     at http://gapt-server:8088/_gapt/api directly,
+#   - set the single-admin credentials Geny's GaptClient logs in with,
+#   - pin the workspace runtime to sysbox-runc (installed on the host).
+#
+# GAPT's own cloudflared lives behind the `tunnel` profile in the base
+# file, so by NOT passing `--profile tunnel` it stays OFF — Geny's
+# existing nginx fronts caddy (published on 127.0.0.1:38080) instead.
+#
+# Deploy (from the Geny repo root on the host):
+#   docker compose \
+#     -f gapt/compose/docker-compose.tunnel.yml \
+#     -f deploy/gapt/docker-compose.geny.yml \
+#     --env-file deploy/gapt/.env up -d --build
+#
+# See docs/operations/gapt-deploy.md.
+
+name: gapt-tunnel
+
+services:
+  postgres:
+    container_name: gapt-postgres
+
+  server:
+    container_name: gapt-server
+    environment:
+      GAPT_ADMIN_ID: ${GAPT_ADMIN_ID:-admin}
+      GAPT_ADMIN_PASSWORD: ${GAPT_ADMIN_PASSWORD:?GAPT_ADMIN_PASSWORD required}
+      # The host has sysbox-runc registered (zero-downtime SIGHUP enable).
+      GAPT_SANDBOX_RUNTIME: ${GAPT_SANDBOX_RUNTIME:-sysbox-runc}
+    networks:
+      default: {}
+      gapt-net:
+        aliases:
+          - gapt-server
+
+  caddy:
+    container_name: gapt-caddy
+
+networks:
+  # Defined (created) by the base tunnel compose as name: gapt-net.
+  gapt-net:
+    name: gapt-net
