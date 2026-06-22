@@ -221,6 +221,39 @@ class GaptClient:
             f"/_gapt/api/workspaces/{workspace_id}/tests/run", json=body
         )
 
+    async def workspace_stats(self) -> Any:
+        return await self.get("/_gapt/api/workspaces/stats")
+
+    # ----------------------------------------------------------- deploy
+    async def list_environments(self, project_id: str) -> Any:
+        return await self.get(f"/_gapt/api/projects/{project_id}/environments")
+
+    async def deploy_environment(
+        self, environment_id: str, *, version: Optional[str] = None
+    ) -> Any:
+        body: dict[str, Any] = {}
+        if version:
+            body["version"] = version
+        return await self.post(
+            f"/_gapt/api/environments/{environment_id}/deploy/async", json=body
+        )
+
+    async def get_deploy_run(self, environment_id: str, run_id: str) -> Any:
+        return await self.get(
+            f"/_gapt/api/environments/{environment_id}/runs/{run_id}"
+        )
+
+    # ------------------------------------------------------------- probe
+    async def health(self) -> bool:
+        """True if the GAPT control plane answers /health with 2xx."""
+        if not self._base:
+            return False
+        try:
+            resp = await self._client.get("/health")
+            return resp.status_code < 400
+        except Exception:
+            return False
+
     async def wait_workspace_running(
         self, workspace_id: str, *, timeout_s: float = 300.0, interval_s: float = 2.0
     ) -> dict:

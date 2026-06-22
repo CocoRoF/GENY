@@ -24,6 +24,7 @@ const ko: Translations = {
     wiki: '위키',
     voiceStudio: 'Voice Studio',
     envManagement: '환경 관리',
+    gapt: 'GAPT — 샌드박스 / 프로젝트 / 배포 플랫폼',
     login: '로그인',
     logout: '로그아웃',
     memory: '메모리',

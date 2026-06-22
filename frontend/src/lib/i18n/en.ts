@@ -24,6 +24,7 @@ const en = {
     wiki: 'Wiki',
     voiceStudio: 'Voice Studio',
     envManagement: 'Environments',
+    gapt: 'GAPT — sandbox / project / deploy platform',
     login: 'Login',
     logout: 'Logout',
     memory: 'Memory',
