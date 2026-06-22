@@ -132,7 +132,24 @@ class GaptWorkspaceProvider:
             raise GaptApiError(500, "workspace.no_id", str(ws)[:200])
 
         if wait_running and (not isinstance(ws, dict) or ws.get("status") != "running"):
-            await self._client.wait_workspace_running(wid, timeout_s=wait_timeout_s)
+            # Best-effort: GAPT marks the workspace 'running' after it preboots
+            # the container + finishes the (here empty) clone. That status field
+            # can occasionally lag/stick at 'creating' even though the container
+            # is up — and the executor execs the container DIRECTLY (docker exec
+            # bypasses GAPT's status gate), so a status lag must not block the
+            # session. Wait briefly for the happy path, then proceed; the
+            # container is already prebooted at create time.
+            try:
+                await self._client.wait_workspace_running(
+                    wid, timeout_s=min(wait_timeout_s, 45.0)
+                )
+            except GaptApiError as exc:
+                logger.warning(
+                    "gapt_workspace.status_lag workspace=%s (%s) — proceeding; "
+                    "container is prebooted and exec'd directly",
+                    wid,
+                    exc.code,
+                )
 
         logger.info(
             "gapt_workspace.ready project=%s workspace=%s id=%s",
