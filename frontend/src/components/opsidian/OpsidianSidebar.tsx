@@ -354,27 +354,27 @@ export default function OpsidianSidebar() {
           className={`obs-sb-view-btn ${viewMode === 'editor' ? 'active' : ''}`}
           onClick={() => setViewMode('editor')}
         >
-          <FileText size={13} /> {t('opsidian.editor')}
+          <FileText size={16} /> {t('opsidian.editor')}
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'graph' ? 'active' : ''}`}
           onClick={() => setViewMode('graph')}
         >
-          <GitGraph size={13} /> {t('opsidian.graph')}
+          <GitGraph size={16} /> {t('opsidian.graph')}
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'conversation' ? 'active' : ''}`}
           onClick={() => setViewMode('conversation')}
           title={t('opsidian.conversationHint')}
         >
-          <MessageSquare size={13} /> {t('opsidian.conversation')}
+          <MessageSquare size={16} /> {t('opsidian.conversation')}
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'digest' ? 'active' : ''}`}
           onClick={() => setViewMode('digest')}
           title={t('opsidian.digestHint')}
         >
-          <Sparkles size={13} /> {t('opsidian.digest')}
+          <Sparkles size={16} /> {t('opsidian.digest')}
         </button>
       </div>
 
