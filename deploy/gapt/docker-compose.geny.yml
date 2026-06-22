@@ -45,8 +45,20 @@ services:
 
   caddy:
     container_name: gapt-caddy
+    # Also join Geny's network so geny-nginx can reverse-proxy /_gapt and
+    # /preview to gapt-caddy by container name. Declared here (not a manual
+    # `docker network connect`) so it survives every caddy recreate.
+    networks:
+      default: {}
+      gapt-net: {}
+      geny-prod: {}
 
 networks:
   # Defined (created) by the base tunnel compose as name: gapt-net.
   gapt-net:
     name: gapt-net
+  # Geny's prod network (created by docker-compose.prod.yml as the
+  # "geny" project's geny-net-prod). External here so gapt-caddy can join it.
+  geny-prod:
+    name: geny_geny-net-prod
+    external: true
