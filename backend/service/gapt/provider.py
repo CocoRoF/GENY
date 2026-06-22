@@ -39,10 +39,14 @@ class GaptSandboxHandle:
         self.container_name = f"gapt-ws-{workspace_id.lower()}"
 
     async def ensure(self) -> None:
-        # Idempotent on GAPT's side; non-fatal if it races (the docker exec
-        # that follows surfaces the real error if the container truly isn't up).
+        # Bring the workspace container live before the executor's docker exec.
+        # ``/start`` is a no-op when the workspace is already "running" (and the
+        # container may have been prebooted-then-released), so run a trivial
+        # command — that path triggers GAPT's WorkspaceSandbox.ensure()
+        # (docker run) and the container stays up. Idempotent; non-fatal if it
+        # races (the docker exec surfaces the real error if it's truly down).
         try:
-            await self._client.start_workspace(self.workspace_id)
+            await self._client.run_command(self.workspace_id, "true")
         except GaptApiError as exc:
             logger.warning(
                 "gapt_sandbox.ensure_failed workspace=%s: %s", self.workspace_id, exc
