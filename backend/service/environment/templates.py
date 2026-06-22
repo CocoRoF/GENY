@@ -338,6 +338,7 @@ def create_worker_env(
     manifest.metadata.description = (
         "범용 작업 환경 — 적응형 루프 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
+    _use_llm_compactor(manifest)
     return manifest
 
 
@@ -391,7 +392,23 @@ def create_vtuber_env(
         "VTuber 페르소나 환경 — 감정/음성/아바타 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
     _declare_owned_subagent(manifest)
+    _use_llm_compactor(manifest)
     return manifest
+
+
+def _use_llm_compactor(manifest: "EnvironmentManifest") -> None:
+    """Switch Stage-2 context-pressure compaction from the dumb ``truncate``
+    default to ``llm_summary`` — a proper, preservation-focused LLM recap when
+    the context outgrows the model window (geny-executor >=2.19.0 self-wires the
+    compactor's model from the live session). Never fails template build."""
+    try:
+        entries = manifest.stage_entries()
+        for e in entries:
+            if e.order == 2:
+                e.strategies = {**(e.strategies or {}), "compactor": "llm_summary"}
+        manifest.set_stage_entries(entries)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _declare_owned_subagent(manifest: "EnvironmentManifest") -> None:
@@ -434,6 +451,7 @@ def create_claude_code_worker_env(
     manifest.metadata.description = (
         "Claude Code CLI(구독 인증) 백엔드 · 일반 환경 — 적응형 루프 + 모든 도구."
     )
+    _use_llm_compactor(manifest)
     return manifest
 
 
@@ -458,6 +476,7 @@ def create_claude_code_vtuber_env(
         "Claude Code CLI 백엔드 · VTuber 페르소나 환경 — 모든 도구."
     )
     _declare_owned_subagent(manifest)
+    _use_llm_compactor(manifest)
     return manifest
 
 
@@ -487,6 +506,7 @@ def _backend_env(
     manifest.metadata.description = description
     if vtuber:
         _declare_owned_subagent(manifest)
+    _use_llm_compactor(manifest)
     return manifest
 
 
