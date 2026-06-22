@@ -222,7 +222,7 @@ class GaptClient:
         )
 
     async def wait_workspace_running(
-        self, workspace_id: str, *, timeout_s: float = 180.0, interval_s: float = 2.0
+        self, workspace_id: str, *, timeout_s: float = 300.0, interval_s: float = 2.0
     ) -> dict:
         """Poll ``get_workspace`` until status is ``running`` (or raise).
 
