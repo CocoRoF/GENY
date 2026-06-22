@@ -101,7 +101,7 @@ class GaptWorkspaceProvider:
         workspace_name: str,
         git_remote_url: str = "",
         wait_running: bool = True,
-        wait_timeout_s: float = 180.0,
+        wait_timeout_s: float = 300.0,
     ) -> GaptSandboxHandle:
         """Idempotently ensure ``project_slug``/``workspace_name`` exists and is
         running; return a :class:`GaptSandboxHandle` for it."""
