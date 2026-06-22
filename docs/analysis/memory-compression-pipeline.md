@@ -245,10 +245,24 @@ Per the standing principle ([[feedback_extend_executor_not_adapter_layer]]):
   identity (엘렌), nickname (사장님), a durable Skyrim fact, recent game context. ✅
   Both compressed-first tiers (L1 recent + L3 durable) now maintained + always injected.
 
+- **2026-06-22 — context-pressure compactor + L2 daily DONE + deployed:**
+  geny-executor **2.19.0**: `LLMSummaryCompactor` self-wires its model from
+  `state.model` (selecting `llm_summary` now does real preservation-focused
+  context-pressure compaction, not the static placeholder); `MemoryRollup.rollup_daily`
+  L2 per-day digest note. Geny: env templates set Stage-2 compactor = `llm_summary`
+  (worker/vtuber/cc/generic); `compact_now` writes the L2 daily digest each rollup.
+  Verified in prod. Tiers L1+L2+L3 + context-pressure now all live.
+- **2026-06-22 — Opsidian view (Phase 4 partial):** GET `/memory/summary` + a
+  "다이제스트" view (rolling digest + evergreen); daily/observations/executions/dms
+  grouped by date in the sidebar; stacked icon-over-label view buttons.
+
 ### Remaining
-- **Phase 1b leftover (executor/Geny):** L2 daily/topic rollups + L4 compressed
-  `render_vault_map` + swap the in-context (Stage 2/4) placeholder compactor for the
-  strong LLM compactor (context-pressure path).
+- **L4 compressed `render_vault_map`** (executor IndexHandle) — upgrade the always-
+  injected map from a flat note list to a compressed, drillable hierarchy. (Polish;
+  the map is already injected.)
+- **Phase 3 raw retention/rotation** — reflection/conversation rotation (archive old,
+  keep raw) + observation TTL/GC (the 201MB / 951-obs growth). DELETION-sensitive →
+  confirm the policy (TTL, archive-vs-delete, categories) before implementing.
 - **Phase 2 (Geny):** wire the host LLM `summarize` callable + trigger `MemoryRollup.run()`
   from the idle/thinking-trigger detector; replace `manager.py` mechanical "Session End
   Summary"; configure `MemoryHooks` compressed-first budget. ← first visible prod effect.
