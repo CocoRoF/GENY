@@ -165,9 +165,13 @@ class ThinkingTriggerService:
         self._consecutive_triggers: Dict[str, int] = {}
         # session_id → last memory-compaction epoch (idle-compaction throttle).
         self._last_compaction: Dict[str, float] = {}
-        # Min seconds between idle compactions per session (folding is one LLM call;
-        # bound the rate so a long idle doesn't re-fold repeatedly).
+        # session_id → last EVERGREEN merge epoch (slower cadence than the segment).
+        self._last_evergreen: Dict[str, float] = {}
+        # Min seconds between idle segment compactions per session (folding is one
+        # LLM call; bound the rate so a long idle doesn't re-fold repeatedly).
         self._compact_min_interval_s: float = 600.0
+        # Min seconds between idle EVERGREEN merges (durable tier — slower).
+        self._evergreen_min_interval_s: float = 1800.0
         # session_id → category_id → last fire epoch (cooldown gate).
         self._last_category_fire: Dict[str, Dict[str, float]] = {}
         # session_id → preset_id (None = use bundled defaults)
@@ -403,10 +407,18 @@ class ThinkingTriggerService:
             trigger_tasks.append((sid, self._fire_trigger(sid)))
             self._activity[sid] = now
             # Idle = spare time → fold recent raw turns into the semantic rolling
-            # digest (compressed-first memory). Throttled per session.
+            # digest (compressed-first memory). Throttled per session. The durable
+            # evergreen tier merges on a slower cadence.
             if (now - self._last_compaction.get(sid, 0.0)) >= self._compact_min_interval_s:
                 self._last_compaction[sid] = now
-                trigger_tasks.append((sid, self._kick_memory_compaction(sid)))
+                want_evergreen = (
+                    now - self._last_evergreen.get(sid, 0.0)
+                ) >= self._evergreen_min_interval_s
+                if want_evergreen:
+                    self._last_evergreen[sid] = now
+                trigger_tasks.append(
+                    (sid, self._kick_memory_compaction(sid, evergreen=want_evergreen))
+                )
         if trigger_tasks:
             results = await asyncio.gather(
                 *[coro for _, coro in trigger_tasks],
@@ -416,8 +428,11 @@ class ThinkingTriggerService:
                 if isinstance(result, Exception):
                     logger.debug("Trigger failed for %s: %s", sid, result)
 
-    async def _kick_memory_compaction(self, session_id: str) -> None:
-        """On idle, fold recent raw turns into the semantic rolling digest.
+    async def _kick_memory_compaction(
+        self, session_id: str, *, evergreen: bool = False
+    ) -> None:
+        """On idle, fold recent raw turns into the semantic rolling digest (and,
+        on the slower cadence, the durable evergreen tier).
 
         Reaches the session's memory manager and runs ``compact_now()`` (the
         geny-executor ``MemoryRollup``). Best-effort — never breaks the tick loop."""
@@ -428,7 +443,7 @@ class ThinkingTriggerService:
             mm = getattr(agent, "_memory_manager", None) if agent else None
             if mm is None or not hasattr(mm, "compact_now"):
                 return
-            await mm.compact_now()
+            await mm.compact_now(evergreen=evergreen)
         except Exception:  # noqa: BLE001 — diagnostics only
             logger.debug(
                 "memory compaction kick failed for %s", session_id, exc_info=True

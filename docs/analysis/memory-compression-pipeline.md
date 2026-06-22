@@ -224,6 +224,19 @@ Per the standing principle ([[feedback_extend_executor_not_adapter_layer]]):
   PRESERVE clause. Best-effort, host-driven (idle/pressure/lazy). +5 tests green.
   *Not yet wired into Geny — no prod effect until Phase 2.*
 
+- **2026-06-22 — Phase 2 DONE + VERIFIED (prod):** `SessionMemoryManager.compact_now()`
+  wires `MemoryRollup` + `build_memory_llm`; idle trigger in `thinking_trigger.scan_all`
+  (throttled ≥600s); `auto_flush` (session-close) now writes the semantic digest to the
+  L1 slot (mechanical text still archived to executions LTM). Required geny-executor
+  **2.17.0** (fixed: non-streaming claude_code `create_message` delivered NO prompt →
+  only streaming sessions worked; now appends the flattened prompt as the positional
+  arg). Live test on session 18da9654: 65M raw chars → 2,886-char sectioned digest
+  (## Summary / ## Facts & Decisions / ## Entities) preserving user title, names,
+  decisions. ✅
+  - **Env wart:** `/root/.claude.json` intermittently disappears on the host (the CLI
+    rotates it); a flapped compaction is skipped (best-effort) and retried next idle.
+    Consider stabilizing the CLI config / rolling the CLI forward to 2.1.185.
+
 ### Remaining
 - **Phase 1b (executor):** L3 evergreen (rewritable pinned `critical` note, always
   injected + preserved) + L2 daily/topic rollups + L4 compressed `render_vault_map` +
