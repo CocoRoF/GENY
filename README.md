@@ -80,7 +80,8 @@ The backend is built on [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-
 │  Backend (FastAPI)                                               │
 │   ├── controller/  ← FastAPI routes (sessions, env, vtuber, …)   │
 │   ├── service/                                                   │
-│   │   ├── executor/    ← geny-executor 2.1.0 hookup              │
+│   │   ├── executor/    ← geny-executor hookup                    │
+│   │   ├── gapt/        ← GAPT client + workspace provider        │
 │   │   ├── environment/ ← manifest store + templates              │
 │   │   ├── llm_patches/ ← Korean error envelopes + CLI tool tap   │
 │   │   ├── memory/      ← session memory v2 + vector retrieval    │
@@ -92,14 +93,21 @@ The backend is built on [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-
 │   ├── scripts/geny_mcp_bridge.py ← per-session MCP wrap for CLI  │
 │   └── prompts/  ← role markdown (vtuber.md, worker.md, …)        │
 │                                                                  │
-│  geny-executor 2.1.0  (PyPI dep)                                 │
+│  geny-executor ≥2.21  (PyPI dep)                                 │
 │   ├── 21-stage agent pipeline                                    │
 │   ├── 5 LLM client implementations                               │
+│   ├── ContainerCLIRunner + SandboxHandle (run CLI in a sandbox) │
 │   └── ExecutorErrorCode taxonomy                                 │
+│                                                                  │
+│  gapt/  ← vendored GAPT sub-repo (sandbox/devops platform)       │
+│   ├── server/  FastAPI control plane (projects/workspaces/…)     │
+│   ├── per-workspace containers (git · fs · terminal · preview)  │
+│   └── deploy pipeline (compose / ssh / webhook targets)          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 Full architecture writeup → [`docs/architecture.md`](docs/architecture.md).
+Geny ⇄ GAPT integration → [`docs/analysis/gapt-integration-plan.md`](docs/analysis/gapt-integration-plan.md).
 
 ---
 
@@ -135,6 +143,9 @@ Session memory routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Me
 ### 🤖 Multi-pod ready
 Redis-backed session metadata sharding lets multiple backend pods serve one user — useful for cloud deployments.
 
+### 📦 Sandboxed projects & deploy (GAPT)
+Project / workspace / sandbox / deploy is delegated to **[GAPT](gapt/UPSTREAM.md)** (`geny-adapted-project-toolkit`), vendored under [`gapt/`](gapt/). GAPT runs each workspace in its own isolated container (git · file ops · terminal · dev-server preview · compose/ssh deploy targets), Postgres-backed and Caddy-routed. Geny keeps its own agent runtime (persona · voice · emotion · memory) and points sessions at a GAPT workspace via the executor's `ContainerCLIRunner` — so the agent edits code inside the sandbox while Geny's moat stays host-side. Agents can also drive GAPT directly through its 41-tool MCP. Design: [`docs/analysis/gapt-integration-plan.md`](docs/analysis/gapt-integration-plan.md).
+
 ---
 
 ## Project structure
@@ -146,7 +157,7 @@ geny/
 ├── docs/                             # topic-page docs (architecture, sessions, …)
 ├── backend/                          # FastAPI + geny-executor host
 │   ├── main.py                       # app entry + executor wiring
-│   ├── pyproject.toml                # pins geny-executor >= 2.1.0
+│   ├── pyproject.toml                # pins geny-executor >= 2.21.0
 │   ├── controller/                   # FastAPI routes
 │   │   ├── agent_controller.py       # session + stream + invoke
 │   │   ├── llm_backends_controller.py# 5-provider health + auth
@@ -180,6 +191,11 @@ geny/
 │       ├── store/                    # Zustand stores
 │       └── types/                    # shared TypeScript types
 ├── vendor/geny-avatar/               # puppet-editor submodule
+├── gapt/                             # vendored GAPT sub-repo (see gapt/UPSTREAM.md)
+│   ├── server/                       # FastAPI control plane (projects/workspaces/…)
+│   ├── compose/                      # GAPT compose stacks (postgres/redis/caddy/…)
+│   ├── docker/workspace/             # per-workspace sandbox image
+│   └── mcp/                          # 41-tool agent MCP for GAPT
 └── docker-compose.{yml,dev,prod}.yml # compose stacks
 ```
 

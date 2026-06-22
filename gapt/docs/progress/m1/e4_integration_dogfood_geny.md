@@ -1,0 +1,818 @@
+# M1-E4 Progress — 통합 / Dogfood / Geny 어댑트
+
+[Plan card](../../plan/m1/e4_integration_dogfood_geny.md) · 12 cycle · 10 작업일 estimate.
+
+## 진입 조건 검증
+
+- [x] M1-E1 backend foundation 완료 (b9... 라인업)
+- [x] M1-E2 agent + git + sessions 완료 (8ece16f)
+- [x] M1-E3 web IDE shell 완료 (5e1fe93)
+- [ ] 사용자 prod 서버 정의 (VPS SSH 키) — Cycle 4.10 진입 시 필요
+- [ ] 사용자 Geny repo GitHub OAuth — Cycle 4.11 진입 시 필요
+
+## 시작 시점 인벤토리
+
+**서버 (M1-E3 종료):**
+- D1 Project / D2 Auth / D4 Sandbox / D7 Secret Vault / D8 Audit / Workspace lifecycle
+- ProjectAwareSessionManager + HookRunner (policy + audit + cost)
+- PolicyEngine 골격 (단일 계층 default bundle)
+- GithubProvider (gh CLI driver) — list_workflow_runs / get_workflow_run_logs 등 surface 있음
+- `/api/projects/:pid/audit` (Cycle 3.13)
+- 255 server tests · 104 runtime tests
+
+**클라이언트:**
+- React Router + Auth + I18n + Theme + Palette + dockview shell + Monaco + FileTree + ChatPanel + DiffCard + ToolCallCard + CostModal + GuardRejectedAlert + AuditPanel + PreviewPanel
+- 76 web tests · PWA + 번들 분할
+
+**M1-E4 진입 전 deferred 항목** (M1-E3 마무리에서 누적):
+1. xterm.js 터미널 (Cycle 3.7) — backend PTY/WS endpoint 필요
+2. CI / Logs 패널 (Cycle 3.13 일부) — backend GitHub Actions + log streaming
+3. GitHub Device Flow modal wizard (Cycle 3.2) — `/api/integrations/github/*`
+4. backend layout 영속 — server endpoint
+5. git status dot / 컨텍스트 메뉴 — git status endpoint
+6. Approve/Deny pre-apply — PolicyEngine REQUIRE_USER_APPROVAL UI flow
+7. `@file` / `@tool` 자동완성 — file tree query mode
+8. recharts 일별 그래프
+9. shadcn/ui + Tailwind 디자인 리뉴얼
+
+→ M1-E4 가 이 중 (3) (4) (6) (7) 을 자연스럽게 흡수.
+
+## Cycle 진행 로그
+
+### Cycle 4.1 — DeployTarget 어댑터 3종 (✅ 완료 — *this commit*)
+
+[plan §4.1](../../plan/m1/e4_integration_dogfood_geny.md#cycle-41-——-deploytarget-어댑터-3종-2-pr).
+
+**의존성 추가:** `asyncssh>=2.18` (서버 deploy SSH 채널).
+
+**구성 (5 module + 3 test, 12 case):**
+- `server/src/gapt_server/domains/deploy/protocol.py` — `DeployTarget` Protocol (`deploy / status / rollback`) + 값 타입 `DeployRequest`, `DeployContext`, `DeployResult`, `DeployStatus`, `RollbackResult`, `DeployStatusKind` (PENDING/RUNNING/SUCCESS/FAILED/ROLLED_BACK), `DeployTargetError` (stable code suffix).
+- `domains/deploy/local.py` — `LocalComposeTarget`:
+  - injectable `ComposeRunner` (default = `asyncio.create_subprocess_exec`)
+  - per-run state (`_runs`) 가 prior image digests snapshot 보관 → rollback 시 digest 복원
+  - 시퀀스: `docker compose ps --format json` (snapshot) → `compose pull` → `compose up -d --remove-orphans`
+  - exec_code: `deploy.compose_pull_failed`, `deploy.compose_up_failed`, `deploy.rollback_failed`
+  - `finally: env.zeroize` — 시크릿 dict 평문 폐기
+- `domains/deploy/ssh.py` — `RemoteSshTarget`:
+  - `SshConnectionSpec` (host / user / port / private_key_pem / known_hosts)
+  - 기본 runner 가 `asyncssh.connect` (lazy import) + in-memory key load — host disk 미터치
+  - 시크릿 env: `KEY=quoted_val command` prefix 패턴 (`SendEnv` 의존 안 함)
+  - exec_code: `deploy.ssh.{no_key, bad_key, spec_missing, transport, compose_pull_failed, compose_up_failed, rollback_failed}`
+- `domains/deploy/webhook.py` — `WebhookTarget`:
+  - `httpx.AsyncClient` POST 에 `X-GAPT-Signature: hex(HMAC-SHA256(secret, body))` 헤더
+  - body 에 `env_keys` 만 (시크릿 *값* 절대 POST 안 됨 — 외부 webhook 신뢰 경계 명확)
+  - 응답 `{"status": "success" | "failed", ...}` 파싱 → DeployStatusKind 매핑
+  - exec_code: `deploy.webhook.{transport, http_{status}, reported_failure, spec_missing}`
+
+**테스트 (12 case):**
+- `test_local.py` (4): pull→up 시퀀스, pull 실패 → exec_code, status PENDING (unknown run), env zeroize after deploy
+- `test_ssh.py` (3): pull+up runner 호출 + DB_URL env 통과, spec missing → DeployTargetError, runner transport raise → status=FAILED with exec_code
+- `test_webhook.py` (5): HMAC signature 검증 + env values 절대 POST 안 됨, HTTP 502 → exec_code, reported failed → exec_code, spec missing → raise, rollback action POST
+
+**Gate:** ruff/mypy clean (5 src), 267 server tests pass (+12), openapi 영향 없음 (라우터 추가는 Cycle 4.2).
+
+**🧪 사용자가 직접 테스트할 수 있는 부분**: 아직 없음. 라우터 미존재 — Cycle 4.2 가 `POST /api/environments/{env_id}/deploy` 추가하면 curl 으로 테스트 가능.
+
+#### Plan 카드 대비 변경
+
+- **단명 ssh-agent → in-memory key load**: plan 의 "단명 ssh-agent" 명시. asyncssh 가 `import_private_key` 로 PEM 을 메모리에 직접 로드 — agent 프로세스 spawn 불필요. 동일한 보안 속성 (host disk 평문 미저장) 더 단순한 구현.
+- **secrets via prefix vs SendEnv**: plan 명시 없음. `SendEnv` 는 sshd 의 `AcceptEnv` whitelist 필요 → 호스트 admin 권한 가정 못함. 명령 prefix (`KEY=val cmd`) 가 모든 sshd 에서 동작 + shlex.quote 로 injection 방지.
+- **WebhookTarget body 가 env values 미포함**: 의도적. webhook URL 은 외부 신뢰 경계 — secret 평문 POST 시 webhook owner 가 그것을 로깅하거나 leak 할 수 있음. `env_keys` 만 hint 로 보내고 webhook 이 *자기 secret store* 에서 fetch 한다는 명확한 책임 분리.
+- **rollback snapshot 기반**: plan 의 "rollback(to: Version)" 시그너처. LocalComposeTarget 은 deploy 시점에 image digest snapshot 을 캡처 → rollback 시 그걸 복원 (registry version log 의존 안 함). 단순하고 self-contained.
+- **2 PR → 1 PR**: plan 이 2 PR 명시. 3개 어댑터가 같은 Protocol 위에 빌드되어 분할 가치 작음. 함께 ship.
+
+### Cycle 4.2 — Build/Deploy Orchestrator + Deploy API (✅ 완료 — *this commit*)
+
+[plan §4.2](../../plan/m1/e4_integration_dogfood_geny.md#cycle-42-——-builddeploy-orchestrator-d6--deploy-api-1-pr).
+
+**구성 (3 module + 2 test, 11 case):**
+- `domains/deploy/two_factor.py` — `TwoFactorVerifier` Protocol + `AcceptAnyCodeVerifier` (dev stub) + `AlwaysDenyVerifier` (test) + `TwoFactorError`. 실 TOTP backend 는 `users.totp_secret_encrypted` migration 후 wrap.
+- `domains/deploy/orchestrator.py` — `DeployOrchestrator` 가 5단계 시퀀스 실행:
+  1. `PolicyEngine.evaluate("deploy.{env_name}", actor=USER, scope)` → DENY 면 OrchestratorError + audit("deploy.denied", DENIED)
+  2. `REQUIRE_2FA` → `TwoFactorVerifier.verify(user_id, code)` 실패면 TwoFactorError + audit
+  3. `REQUIRE_USER_APPROVAL` → audit("deploy.user_approved") (UI 가 이미 click 후 호출)
+  4. `secret_resolver(refs)` → plaintext dict (default = empty; 라우터가 SecretVault 와 wire)
+  5. `audit("deploy.start")` → `target.deploy(ctx)` → `audit("deploy.{status}")` (try/finally zeroize env_secrets)
+  - `rollback(...)`: 동일 policy + 2FA gate → `target.rollback(ctx, to_version)` → audit("deploy.rollback")
+  - `stream_status(...)`: poll `target.status()` until terminal, yield JSON 프레임 — SSE wire 는 다음 cycle.
+- `routers/deploy.py` — `POST /api/environments/{env_id}/deploy` + `/rollback`:
+  - `_resolve_env` (404), `fetch_project_for` (403 if non-member)
+  - `_build_target` (kind → target instance), per-env asyncio.Lock 으로 동시 deploy 직렬화
+  - Exception 매핑: TwoFactorError → 412, OrchestratorError(policy_denied) → 403, 그 외 → 500
+- `domains/deploy/__init__.py` 가 orchestrator/2FA 타입 모두 re-export. `app.py` 가 `deploy.router` include.
+
+**테스트:**
+- `test_orchestrator.py` (6 case): success → start+terminal audit, DENY → OrchestratorError + denied audit + target 미실행, REQUIRE_2FA 코드 없으면 TwoFactorError, REQUIRE_2FA 코드 있으면 통과, secret_resolver 호출 + 시크릿 target 까지 전달, rollback → target.rollback 호출 (to_version 전달)
+- `test_routes.py` (5 case, Postgres): happy path (webhook target), webhook 502 → exec_code, 환경 미존재 → 404, 비멤버 → 403, rollback round-trip
+- 라우터 fixture 가 `_build_target` 을 monkey-patch 해서 모든 kind → WebhookTarget (`poster` injected) — 실 docker/SSH 미터치
+
+**Gate:** ruff/mypy clean (70 src), 278 server tests (+11), openapi check 통과.
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. 서버 띄우기 (Postgres + dev DSN 필요)
+cd server && uv run uvicorn gapt_server.app:app --host 0.0.0.0 --port 8001
+
+# 2. 매직 링크 로그인 (dev 모드는 서버 콘솔에 callback URL 출력)
+curl -X POST http://localhost:8001/api/auth/magic-link \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com"}'
+# 서버 로그에서 token 찾아 paste:
+
+curl -c /tmp/cookies.txt \
+  "http://localhost:8001/api/auth/magic-link/callback?token=PASTE_TOKEN"
+
+# 3. 프로젝트 생성 (이미 가능)
+# 4. 환경 생성 (UI 미존재 — DB 직접 insert 필요. UI wizard 는 추후 cycle)
+
+# 5. deploy 호출
+curl -b /tmp/cookies.txt -X POST \
+  http://localhost:8001/api/environments/{env_id}/deploy \
+  -H "Content-Type: application/json" \
+  -d '{"version": "v1"}'
+# → 200 {"run_id": "...", "status": "success" | "failed", "exec_code": ..., "log": "..."}
+```
+
+웹 UI 트리거 (`DeployModal`) 는 추후 cycle 에서. 본 cycle 은 backend HTTP API + 테스트 수준까지.
+
+#### Plan 카드 대비 변경
+
+- **SSE deploy progress stream 미연결**: plan 명시 "진행 로그 SSE". orchestrator 에 `stream_status` 가 yield JSON 프레임 가능하지만 라우터 SSE endpoint 는 다음 cycle. 현재는 `deploy()` 가 동기 호출.
+- **5분 내 진행 중 deploy queue 미구현**: plan 의 "queue + 사용자 확인". 본 cycle 은 per-env asyncio.Lock 으로 동시성만 차단 — 두 번째 요청은 첫 번째 완료까지 *block*. "queue + UI confirm" 은 Cycle 4.8 (알림) 와 함께.
+- **TOTP backend stub**: `AcceptAnyCodeVerifier` 가 dev/test default. 실 TOTP 는 `users.totp_secret_encrypted` 컬럼 + `pyotp` 추가 + verifier 구현 (별도 cycle). 412 흐름은 이미 wire-up.
+- **Environment CRUD UI 부재**: 백엔드 `/api/projects/{pid}/environments` 존재하지만 웹 UI 없음 — M1-E3 deferred 카탈로그에 추가.
+- **stream_status JSON shape**: 한 줄 JSON `{"run_id","status","exec_code"}` — Cycle 2.10 의 chat SSE 와 같은 패턴.
+### Cycle 4.3 — CI 결과 polling + UI 통합 (✅ 완료 — *this commit*, 스코프 축소)
+
+[plan §4.3](../../plan/m1/e4_integration_dogfood_geny.md#cycle-43-——-ci-결과-polling--ui-통합-1-pr).
+
+**스코프 축소 사유**: plan 의 "ARQ 백그라운드 polling 10s" + "WS `/api/projects/{pid}/ci/stream` 라이브 stream" + "CI 그린 → 채팅에 자동 메시지" 는 ARQ + Redis 가 필요하지만 M1-E1 에서 Redis 의존성을 도입하지 않았음 (M2 로 deferred — 본 progress card 의 누적 drift 참조). 따라서 본 cycle 은 **on-demand GET endpoint + UI panel + manual refresh** 로 축소. SSE 실시간 stream + 채팅 자동 메시지 + GitHub Webhook ingress 는 M2 의 Redis 도입 후 wrap.
+
+**서버 신규 (1 module + 1 setting + 1 test, 4 case):**
+- `settings.py` — `ci_github_token: str | None`. M1 의 서버-wide dev 토큰. M2 가 project 별 SecretVault 룩업으로 교체.
+- `routers/ci.py` — `GET /api/projects/{pid}/ci/runs?branch=&limit=`:
+  - `fetch_project_for` (viewer 이상)
+  - `settings.ci_github_token` 미설정 → 412 `ci.no_token` + 운영자 친화 메시지
+  - `parse_github_repo(project.git_remote_url)` (HTTPS / SSH / bare 형태 지원) — 파싱 실패 → 412 `ci.repo_unparseable`
+  - `GithubProvider(token, repo).list_workflow_runs(branch, limit)`
+  - `GitOperationError` → 502
+- `tests/ci/test_routes.py` (4 case): parser 4 variant, happy path (stub runner), 토큰 미설정 → 412, 비멤버 → 403
+- 서버 282 pass (+4), openapi 갱신 (`/api/projects/{pid}/ci/runs` 추가).
+
+**웹 신규 (2 module + 1 test, 3 case):**
+- `src/api/ci.ts` — `CiRun`, `WorkflowRunStatus`, `listCiRuns(pid, {branch?, limit?})`
+- `src/ci/CiPanel.tsx` — 5 컬럼 테이블 (workflow / branch / status / SHA[:7] / link), 브랜치 필터 input + Refresh 버튼, `ci.no_token` 에러는 `data-error-code` 속성으로 surface (UI 가 추후 친화 메시지로 분기 가능).
+- `src/ide/panels.tsx` 에 `<CiPanelDock>`, `DockviewShell.tsx` components 에 `ci: CiPanelDock` 등록.
+- i18n 19 키 추가 (en/ko): ci.title / loading / empty / refresh / branch / col.* (5) / status.* (7).
+
+**테스트 (`tests/CiPanel.test.tsx`, 3 case):**
+- 정상 응답 → 테이블 + 7자 SHA 표시
+- 빈 응답 → empty-state
+- 412 ci.no_token → role="alert" + data-error-code
+
+**Gate:** server ruff/mypy clean, 282 server pass (+4), openapi up to date. Web lint/typecheck/format clean, 79 web test pass (+3), build 성공 (PWA precache 773 KiB).
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. GitHub 토큰 설정 (dev/test 한정)
+export GAPT_CI_GITHUB_TOKEN="ghp_yourtoken"
+
+# 2. 서버 띄우기
+cd server && uv run uvicorn gapt_server.app:app --port 8001
+
+# 3. 매직 링크 로그인 → 프로젝트 생성 (Cycle 4.2 와 동일 흐름)
+#    git_remote_url 은 `https://github.com/owner/repo.git` 형식 필요.
+
+# 4. CI 호출
+curl -b /tmp/cookies.txt \
+  "http://localhost:8001/api/projects/{pid}/ci/runs?branch=main&limit=10"
+# → 200 [{"id": 123, "name": "CI", "head_branch": "main", "status": "completed_success", ...}, ...]
+
+# 5. 웹 UI 에서: 프로젝트 워크스페이스 진입 → 우측 패널 영역에 CI 패널 드래그 (custom 레이아웃)
+# (현재 review/debug preset 의 default panel slot 에 CI 미배치 — Cycle 4.6/4.8 의 dashboard 합류 시 재배치 예정)
+```
+
+#### Plan 카드 대비 변경 (스코프 축소 명시)
+
+- **ARQ background poller 미구현**: plan 의 "활성 워크스페이스의 PR 브랜치에 대해 10s polling". M1-E1 에서 Redis 의존성 도입 안 했음 → ARQ 사용 불가. M2 의 Redis 도입 cycle 에서 wrap.
+- **`WS .../ci/stream` 미구현**: plan 의 "진행 + 결과 WebSocket stream". 동일하게 ARQ/Redis 의존. 본 cycle 은 manual `Refresh` 버튼.
+- **CI 그린 → 채팅 자동 메시지 미구현**: poller 가 없어 자동화 불가. M2 에서.
+- **GitHub Webhook ingress (`POST /api/integrations/github/webhook`) 미구현**: HMAC 검증 자체는 Cycle 4.1 의 `WebhookTarget` 에 패턴 있지만 ingress 라우터는 별도. 사용자 호스트가 외부 도달 가능한 경우만 의미 — M1 dogfood 단계는 manual polling 으로 충분.
+- **per-project SecretVault token lookup 미구현**: `settings.ci_github_token` 서버-wide dev 토큰만. 멀티 프로젝트 / 멀티 owner 시나리오는 `projects.git_auth_secret_ref` 룩업 추가 (별도 cycle).
+- **review/debug preset 에 CI 패널 자동 배치 안 함**: Cycle 3.13 에서 review preset 의 "ci" slot 을 audit panel 로 교체했음. CI 패널은 dockview component 로 등록되어 있어 사용자가 *custom layout* 으로 드래그 가능. 자동 배치는 dashboard cycle (4.6/4.7) 와 함께 재구성 예정.
+### Cycle 4.4 — Caddy subdomain 동적 등록 (✅ 완료 — *this commit*)
+
+[plan §4.4](../../plan/m1/e4_integration_dogfood_geny.md#cycle-44-——-caddy-subdomain-동적-등록-1-pr).
+
+**구성 (4 module + 1 router + 3 test, 18 case):**
+- `domains/caddy/admin_api.py` — `CaddyAdminClient` (`get/put/post/delete`) + `CaddyHttpTransport` (httpx 기반, 5s 타임아웃) + `CaddyAdminError` (stable code suffix `caddy.admin.{get,put,post,delete}_failed` / `server_error`). Transport 가 protocol — 테스트는 hand-rolled async callable 주입.
+- `domains/caddy/subdomain.py` — `SubdomainManager.register(binding) / unregister(slug) / list_routes()`:
+  - 라우트 페이로드: `@id`=`gapt-workspace-{slug}` (DELETE 시 `/id/{route_id}` 패턴으로 정확 1개 노드 타겟), `match.host`=`{slug}.{preview_domain}`, `handle.reverse_proxy.upstreams.dial`=`{host}:{port}`
+  - POST `/config/apps/http/servers/preview/routes/...` (Caddy 의 append-array 시맨틱), DELETE `/id/{route_id}`
+  - 404 on DELETE = 멱등 no-op (이미 없어진 라우트 재요청 안전)
+- `domains/caddy/share.py` — `issue_share_link / parse_share_link`:
+  - 형식: `{workspace_id}.{expiry_unix}.{hex_signature}`
+  - 서명: `HMAC-SHA256(secret, "{workspace_id}.{expiry}")`
+  - `hmac.compare_digest` 로 constant-time 비교 (timing side channel 방지)
+  - 에러 코드: `share.{invalid_ttl, malformed, bad_signature, expired}`
+- `routers/preview.py` — 3 endpoint:
+  - `POST /api/workspaces/{wid}/preview {upstream_host, upstream_port}` → 201 + `{host, workspace_id}` (Caddy 미설정 시 412 `preview.disabled`)
+  - `DELETE /api/workspaces/{wid}/preview` → 204 (Caddy 없어도 멱등 200)
+  - `POST /api/workspaces/{wid}/share?ttl_s=` → `{token, url, expires_in_s}` (`ttl_s > share_link_max_ttl_s` 면 400 `share.ttl_too_long`)
+  - 모든 endpoint `fetch_project_for` 멤버십 게이트 (403 if non-member)
+- `settings.py` — `caddy_admin_url`, `caddy_preview_domain`, `share_link_secret`, `share_link_max_ttl_s` (24h default).
+- `app.py` 가 `preview.router` include.
+
+**테스트 (18 case):**
+- `test_admin_and_subdomain.py` (7): GET 200/404, PUT 500 → CaddyAdminError, DELETE 404 swallow, register POST 페이로드 검증 (@id / host / dial), unregister /id/{slug} 타겟, unregister 404 멱등
+- `test_share.py` (5): round-trip, malformed token, bad signature (1 hex flip), expired, ttl ≤ 0
+- `test_routes.py` (6): register → Caddy POST, unregister → Caddy DELETE, Caddy 미설정 → 412 preview.disabled, share round-trip + URL 형식, ttl cap → 400, 비멤버 → 403
+
+**Gate:** ruff/mypy clean (76 src), 300 server tests (+18), openapi up to date.
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *Caddy 설정 시 가능*:**
+
+```bash
+# 1. Caddy 설정 (compose 또는 별도)
+# docker compose up caddy  # admin :2019, on-demand TLS, server "preview" 정의 필요
+# (compose/Caddyfile 의 정비는 Cycle 4.10 dogfood 와 함께)
+
+export GAPT_CADDY_ADMIN_URL="http://localhost:2019"
+export GAPT_CADDY_PREVIEW_DOMAIN="preview.localhost.dev"
+export GAPT_SHARE_LINK_SECRET="$(openssl rand -hex 32)"
+
+# 2. 서버 부팅 + 로그인 + 워크스페이스 생성 (이전 cycle 흐름)
+
+# 3. 프리뷰 등록
+curl -b /tmp/cookies.txt -X POST \
+  http://localhost:8001/api/workspaces/{wid}/preview \
+  -H "Content-Type: application/json" \
+  -d '{"upstream_host": "10.0.0.5", "upstream_port": 3000}'
+# → {"host": "01k....preview.localhost.dev", "workspace_id": "01K..."}
+
+# 4. 브라우저: https://01k....preview.localhost.dev/
+#    (Caddy on-demand TLS 가 자체서명 또는 Let's Encrypt 발급)
+
+# 5. 외부 공유 링크 발급
+curl -b /tmp/cookies.txt -X POST \
+  "http://localhost:8001/api/workspaces/{wid}/share?ttl_s=3600"
+# → {"token": "01K...12345.abcdef...", "url": "https://01k.../?share=...", "expires_in_s": 3600}
+```
+
+#### Plan 카드 대비 변경
+
+- **on-demand TLS 설정 미포함**: plan 의 "on-demand TLS" — Caddy 자체 설정. 본 cycle 은 admin API 만 wire (라우트 등록/해제). on-demand TLS 의 `ask` endpoint (등록된 워크스페이스만 cert 발급 허용) 는 Caddy 설정 + 별도 endpoint 필요 — Cycle 4.10 dogfood 의 compose 정비 단계에서 추가.
+- **사용자 SSO 인증 게이트 미연결**: plan 의 "M1-E1 세션 cookie 검증 — 기본". Caddy forward_auth 또는 reverse_proxy 의 인증 middleware 가 필요. 본 cycle 은 워크스페이스 멤버만 *프리뷰를 register* 할 수 있음 — *접근* 시 게이트는 Caddy 측 설정.
+- **공유 토글 UI 미연결**: backend `share` endpoint 만. PreviewPanel (Cycle 3.12) 에 share 버튼 추가는 추후 cycle / dogfood 단계.
+- **Caddy 설정 자체는 별도**: 서버는 admin API 호출만 함. Caddyfile / Caddy JSON config 의 `apps.http.servers.preview` server 정의는 운영자가 미리 부팅해야 함 — `docs/operations/install.md` (Cycle 4.12) 에 가이드 예정.
+- **routes_path 의 `...`**: Caddy 의 array append 시맨틱 — `/routes/...` 가 array 끝에 push. 직접 index 지정 (`/routes/0`) 보다 안전.
+
+### Cycle 4.5 — PolicyEngine 4계층 config (✅ L1 + L2 완료 — *this commit*, L3/L4 deferred)
+
+[plan §4.5](../../plan/m1/e4_integration_dogfood_geny.md#cycle-45-——-policyengine-config-시스템-——-4계층-2-pr).
+
+**스코프 축소 사유**: plan 의 4계층 (L1 built-in / L2 server YAML / L3 org DB / L4 project DB + `.gapt/policy.yaml`) 중 L3/L4 는 Alembic migration (`org_policies` / `project_policies`) + PUT API 가 필요. 본 cycle 은 **L1 + L2 + 불변식 강제 + 효과 정책 조회 API** 까지. L3/L4 + PUT 편집은 별도 cycle.
+
+**의존성 추가:** `pyyaml>=6.0`, `types-pyyaml` (dev).
+
+**구성 (3 module + 1 router + 3 test, 13 case):**
+- `policy/config_loader.py`:
+  - `INVARIANT_FLOORS` — 5 액션의 최대 허용 완화 수준: `deploy.prod` (REQUIRE_2FA), `secret.create/update/delete` (REQUIRE_USER_APPROVAL), `git.push.force` (DENY)
+  - 순서: ALLOW < REQUIRE_USER_APPROVAL < REQUIRE_2FA < DENY
+  - `check_invariant(action, decision)` — floor 보다 *느슨* 시 `PolicyConfigError("policy.config.invariant_violated")`. 더 엄격은 허용.
+  - `load_yaml(path)` / `parse_dict(raw)` — short form `action: decision_str` + long form `action: {decision, reason}` 모두 지원. 파싱 시점에 invariant 체크.
+- `policy/engine.py`:
+  - `PolicyEngine.__init__(audit_sink, overrides, override_reasons)` — `overrides: dict[str, PolicyDecision]` 가 L2 결과
+  - `evaluate()` 가 overrides 먼저 lookup, 없으면 `_DEFAULTS`
+  - `effective_table()` — `[{action, decision, source: "server"|"builtin", reason}]` 반환
+- `settings.py` — `policy_config_path: str | None` (`GAPT_POLICY_CONFIG_PATH`)
+- `container.py` — `_engine_from_settings(settings, audit)` 가 startup 시 YAML 로드 + invariant 검증 + PolicyEngine 생성. 잘못된 config 는 startup 시점에 raise.
+- `routers/policies.py` — `GET /api/policies` (인증 필수): `{rows, invariants}`
+
+**테스트 (13 case):**
+- `test_config_loader.py` (7): 누락 파일 → 빈 set, short/long form, invariant raise (ALLOW for deploy.prod / git.push.force), 미지 decision, INVARIANT_FLOORS 커버
+- `test_layered_engine.py` (4): override 우선, override 없으면 builtin, agent forbidden 이 override 보다 우선, effective_table source 라벨링
+- `test_routes.py` (2): YAML 적용된 효과 테이블, 비인증 → 401
+
+**Gate:** ruff/mypy clean (78 src), 313 server tests (+13), openapi 갱신.
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. 정책 YAML 작성
+cat > /tmp/gapt-policies.yaml <<'EOF'
+actions:
+  git.push.protected:
+    decision: allow
+    reason: "local CI is the gate"
+EOF
+
+# 2. 서버 부팅 + 정책 조회
+export GAPT_POLICY_CONFIG_PATH=/tmp/gapt-policies.yaml
+cd server && uv run uvicorn gapt_server.app:app --port 8001
+
+curl -b /tmp/cookies.txt http://localhost:8001/api/policies | jq
+# rows[git.push.protected] = {source: "server", decision: "allow", reason: "..."}
+# rows[secret.create]      = {source: "builtin", decision: "deny"}
+# invariants               = {"deploy.prod": "require_2fa", ...}
+
+# 3. 잘못된 YAML (invariant 위반):
+echo 'actions: {deploy.prod: allow}' > /tmp/bad.yaml
+GAPT_POLICY_CONFIG_PATH=/tmp/bad.yaml uv run uvicorn gapt_server.app:app
+# → PolicyConfigError on startup (서버 부팅 실패)
+```
+
+#### Plan 카드 대비 변경
+
+- **L3 (org DB) + L4 (project DB + `.gapt/policy.yaml`) deferred**: Alembic migration + scope 별 PUT API + diff UI 가 별도 cycle. 본 cycle 의 `PolicyEngine.overrides` dict + `effective_table` source 라벨이 L3/L4 wrap 시 그대로 사용됨.
+- **PUT API 미구현**: L3/L4 없으면 PUT 대상 없음.
+- **5 invariant floor**: plan 의 "5개 코드 강제 불변식" → `INVARIANT_FLOORS`. 단순 deny 강제가 아니라 *floor* 모델 (operator 가 *더 엄격하게* 만드는 건 항상 가능).
+- **YAML 핫 리로드 미구현**: startup-only. SIGHUP handler / file watcher 는 M2.
+- **변경 diff UI 미구현**: PUT 없으니 diff UI 도 없음.
+### Cycle 4.6 — Audit Dashboard (✅ 완료 — *this commit*)
+
+[plan §4.6](../../plan/m1/e4_integration_dogfood_geny.md#cycle-46-——-audit-dashboard-1-pr).
+
+**구성 (서버 1 router 확장 + 4 test, 웹 2 module 확장 + 2 test, i18n 12 키):**
+
+서버:
+- `routers/audit.py` — `GET /api/projects/{pid}/audit/export?format=csv|jsonl[&action_prefix&outcome&since&until]`:
+  - `_EXPORT_MAX = 5000` (서버 캡 — 큰 export 도 bounded)
+  - `_CSV_FIELDS` 11 컬럼 (id/ts/actor_type/actor_id/action/outcome/duration_ms/exec_code/scope/subject/payload). scope/subject/payload 는 `json.dumps` 직렬화 → CSV 필드 안에서도 안전.
+  - JSONL 은 `models.AuditEvent` 한 줄 = 한 row.
+  - `fetch_project_for` 멤버 게이트 (403 if non-member)
+  - 응답: `StreamingResponse(content_type="text/csv" | "application/x-ndjson", Content-Disposition: attachment; filename=...)` — 브라우저가 곧장 다운로드.
+  - 동일 endpoint 가 `list_project_audit` 와 같은 필터 (action_prefix / outcome / since / until) 를 공유.
+- `tests/audit/test_routes.py` (+4 case): CSV round-trip (header + 3 rows), JSONL round-trip (2 rows, each JSON parseable), action_prefix=test.event.1 → 1줄, 비멤버 → 403.
+
+웹:
+- `src/api/audit.ts` — `exportProjectAuditUrl(projectId, format, query)` 가 export URL 빌더. UI 가 fetch 가 아니라 `<a href download>` 로 브라우저 다운로드 트리거.
+- `src/audit/AuditPanel.tsx` 전면 개편:
+  - 시간 범위 preset (오늘 / 최근 7일 / 최근 30일 / 전체 / custom datetime-local 2개)
+  - `resolveRange(preset, custom)` 유틸이 ISO since/until 계산
+  - `PAGE_SIZE = 100`, offset paginate. 마지막 페이지가 100 미만 → Load more 버튼 자동 숨김 (`hasMore` state)
+  - CSV / JSONL 다운로드 앵커 (`<a download>`) — 현재 필터 그대로 적용한 URL
+  - `baseQuery` 메모이즈 (action_prefix / outcome / since / until) → refresh / loadMore / export 가 동일 쿼리 공유
+- i18n 12 키 추가 (en + ko): audit.filter.since/until, audit.export.csv/jsonl, audit.load_more, audit.range.{label,today,7d,30d,all,custom}.
+- `tests/AuditPanel.test.tsx` (+2 case): export anchor href 가 action_prefix 반영, 100-row 응답 → Load more 클릭 → offset=100 호출 + 2번째 페이지 단행 → 버튼 사라짐.
+
+**Gate:** server ruff/mypy clean, 317 server tests pass (+4), openapi 갱신. Web typecheck / lint / format clean, 81 web tests pass (+2), build 성공 (PWA precache 776 KiB).
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. 서버 부팅 + 매직 링크 로그인 (이전 cycle 흐름)
+# 2. 프로젝트 생성 + 약간의 audit 이벤트 발생 (chat/edit/git push 등)
+
+# 3. CSV 다운로드
+curl -b /tmp/cookies.txt \
+  "http://localhost:8001/api/projects/{pid}/audit/export?format=csv&action_prefix=agent." \
+  -o audit.csv
+head -3 audit.csv
+# id,ts,actor_type,actor_id,action,outcome,duration_ms,exec_code,scope,subject,payload
+# ...
+
+# 4. JSONL 다운로드
+curl -b /tmp/cookies.txt \
+  "http://localhost:8001/api/projects/{pid}/audit/export?format=jsonl&outcome=error&since=2026-05-01T00:00:00Z" \
+  -o audit.jsonl
+
+# 5. 웹 UI: 프로젝트 워크스페이스 → audit 패널
+#    - 시간 범위 select 에서 "최근 30일" / "custom" 선택
+#    - "Export CSV" / "Export JSONL" 버튼 클릭 → 브라우저 다운로드
+#    - 100개 이상 결과면 "Load more" 버튼 출현 → 클릭하면 추가 100개 append
+```
+
+#### Plan 카드 대비 변경
+
+- **Subject diff viewer 부재**: plan 의 "subject before/after diff (JSON viewer)". 현재는 단순 텍스트 컬럼만. JSON diff 컴포넌트는 다음 cycle 또는 dogfood 단계에서 패널 확장.
+- **per-actor pivot 미구현**: plan 의 "특정 사용자/세션 행위 시간순". 현재는 actor_type/actor_id 컬럼만. 별도 actor view 는 추후.
+- **별도 dashboard 페이지 없음**: 기존 dockview audit panel 을 확장 — 별도 route 추가하지 않음. M1 의 IDE-centric IA 와 일관.
+- **export 5000 cap**: plan 명시 없음. JSONB 페치 + 직렬화 비용 vs 사용자 기대값 균형 — 큰 export 는 추후 streaming chunked 으로 무제한화.
+
+### Cycle 4.7 — 비용 대시보드 + Prometheus exporter (✅ 완료 — *this commit*, OTel push 부분 deferred)
+
+[plan §4.7](../../plan/m1/e4_integration_dogfood_geny.md#cycle-47-——-비용-대시보드--otel-prometheus-2-pr).
+
+**스코프 축소 사유**: plan 의 OTel SDK init + Grafana dashboard JSON + compose Prometheus/Grafana profile 은 별도 dogfood (4.10) 와 함께. 본 cycle 은 **pull-based /metrics + cost dashboard endpoint + UI** 까지. opentelemetry-sdk 는 이미 deps 에 있어 운영자가 자체 OTLP collector 와 wire 가능 — push 측 wiring 은 deferred.
+
+**서버 (4 module + 1 router + 2 test, 13 case):**
+- `domains/cost/service.py` — `aggregate_summary(db, project_ids, since?, until?)` + `aggregate_daily_for_project(db, project_id, since?, until?)`. 둘 다 `agent_sessions` 테이블 직접 집계 (`cost_usd / input_tokens / output_tokens`). 일별 집계는 `created_at` 의 UTC date cast.
+- `routers/cost.py` — 2 endpoint:
+  - `GET /api/cost/summary?since&until` → 액터의 멤버십 프로젝트만 집계. `rows` + `total_*` 필드.
+  - `GET /api/projects/{pid}/cost/daily?since&until` → 일별 row (sparse — 0인 날 미생성).
+- `observability/metrics.py` — 자체 Counter / Gauge (no `prometheus_client` 의존, 모듈 메타클래스 회피). `MetricsRegistry` 가 dict 컨테이너. Gauge 는 `set_collector(async fn)` 로 scrape 시점 live refresh 지원.
+- `observability/render.py` — Prometheus text exposition format 직접 렌더 (HELP/TYPE/value 라인 + label escape).
+- `observability/instruments.py` — GAPT 메트릭 정의:
+  - 카운터: `gapt_agent_cost_usd_total{project_id}`, `gapt_agent_input_tokens_total{project_id}`, `gapt_agent_output_tokens_total{project_id}`
+  - 게이지: `gapt_sessions_active` (DB collector), `gapt_sandbox_count{state}` (DB collector)
+  - `register_default_metrics(container)` 가 startup 시 collector wire — 컨테이너별 fresh registry (테스트 cross-pollution 방지).
+- `routers/metrics.py` — `GET /metrics` (Prometheus pull). `refresh_collectors()` 호출 후 render.
+- `container.py` — `AppContainer.registry: MetricsRegistry` 필드 추가. `app.py` 가 lifespan 아닌 `create_app` 시점에 `register_default_metrics` 호출 (테스트 lifespan 부재 케이스 커버).
+- `routers/sessions.py` — `create_session` 의 cost callback 이 SSE publish 뿐 아니라 (a) 델타 기반 Prometheus counter 증분 (b) `agent_sessions` row 의 cost_usd / input_tokens / output_tokens 누적 update. fresh session 사용 — 외부 요청 트랜잭션과 deadlock 방지.
+
+**테스트 (13 case):**
+- `tests/observability/test_metrics.py` (7): counter 음수 거부, label 별 누적, gauge set, gauge collector refresh on render, label quote escape, empty registry → 빈 출력, reset idempotent
+- `tests/cost/test_routes.py` (6, Postgres): summary 프로젝트별 집계, 비멤버 프로젝트 제외, since/until 윈도우, daily 일별 버킷 + 같은 날 합산, daily 403 (비멤버), /metrics 텍스트 형식 + `gapt_sessions_active`
+
+**Gate:** server ruff/mypy clean (86 src), 330 server tests (+13). Web typecheck/lint/format clean, 86 web tests (+5), build 성공 (PWA precache 782 KiB).
+
+**웹 (4 file + 1 route + 1 panel + 1 test, 5 case, i18n 19 키):**
+- `src/api/cost.ts` — `getCostSummary({since,until})` + `getProjectCostDaily(pid, {since,until})` + 타입.
+- `src/cost/CostPanel.tsx` — 비용 대시보드 패널:
+  - 범위 preset (7일/30일/90일/전체)
+  - 총합 dl (cost / tokens in / tokens out)
+  - 프로젝트별 테이블 (display_name + slug + cost + tokens + sessions)
+  - 프로젝트 row 클릭 → 일별 breakdown section + CSS 바 (max-day 대비 width %, no recharts)
+- `src/routes/Cost.tsx` + `/cost` route (RequireAuth + AppShell)
+- `src/ide/panels.tsx` 에 `CostPanelDock`, `DockviewShell.tsx` components 에 `cost: CostPanelDock` 등록 (워크스페이스 안에서도 패널 드래그 가능)
+- i18n 19 키 (en+ko): cost.dashboard.title / loading / empty / refresh / range.{label,7d,30d,90d,all} / totals.* (3) / col.* (5) / daily.{title,empty,error}
+- `tests/CostPanel.test.tsx` (5 case): 총합 + 테이블 렌더, 범위 변경 시 재페치, 프로젝트 클릭 → daily fetch, empty-state, API 에러 surface
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. 서버 부팅 + 매직 링크 로그인 + 프로젝트 생성 (이전 cycle 흐름)
+# 2. 채팅 세션 한 두번 돌려서 cost 누적 (agent 호출이 input/output tokens 채움)
+
+# 3. 비용 대시보드 endpoint 직접
+curl -b /tmp/cookies.txt "http://localhost:8001/api/cost/summary?since=2026-05-01T00:00:00Z" | jq
+# {"rows":[...], "total_cost_usd":0.123, ...}
+
+curl -b /tmp/cookies.txt "http://localhost:8001/api/projects/{pid}/cost/daily" | jq
+# [{"date":"2026-05-20","cost_usd":0.05,...}, ...]
+
+# 4. Prometheus scrape
+curl http://localhost:8001/metrics
+# # TYPE gapt_sessions_active gauge
+# gapt_sessions_active 0
+# # TYPE gapt_agent_cost_usd_total counter
+# gapt_agent_cost_usd_total{project_id="01K..."} 0.123
+# ...
+
+# 5. 웹 UI: /cost 라우트 → 범위 select 변경 → 프로젝트 row 클릭하면 일별 CSS 바 펼침
+```
+
+#### Plan 카드 대비 변경
+
+- **OTel SDK init + OTLP push 미구현**: plan 의 `gen_ai.*` semantic convention export. 이미 `opentelemetry-api/sdk/instrumentation-fastapi` 가 deps 에 있어 운영자가 자체 collector wire 가능. 자동 init 은 4.10 dogfood 단계.
+- **Grafana dashboard JSON 미동봉**: plan 의 `compose/grafana/dashboards/gapt-overview.json`. compose Prometheus/Grafana profile 정비와 함께 4.10 dogfood 에서.
+- **compose Prometheus/Grafana 미추가**: 4.10 dogfood 가 compose 전반 정비할 때 같이.
+- **CAP 게이지 + UI 미구현**: plan 의 "cap 설정 + 게이지". cap 설정 자체가 SettingsService UI 가 필요 — 4.8 알림 cycle 의 cost-cap-80%-도달 트리거와 함께.
+- **recharts 미사용**: plan 명시. 기존 메모리 (no decorative chrome / bundle size 우려) + Plan 3.10 deferred 카탈로그 → CSS 바로 대체.
+- **prometheus_client 의존성 추가 안 함**: 자체 14줄짜리 exposition format 렌더가 충분. global registry / process collector 가 가져오는 부작용 회피.
+### Cycle 4.8 — 알림 (✅ 완료 — *this commit*, per-user subscription UI deferred)
+
+[plan §4.8](../../plan/m1/e4_integration_dogfood_geny.md#cycle-48-——-알림-1-pr).
+
+**스코프 축소 사유**: plan 의 "사용자별 알림 설정 페이지 + 이메일 채널 + cost cap 80% 트리거" 는 cost-cap 설정 UI + SMTP 통합 + per-user webhook URL 저장 (SecretVault wire) 가 필요. 본 cycle 은 **3 채널 (메모리/Slack/Discord) + bell UI + deploy 후 자동 emit + test endpoint** 까지. 운영자가 GAPT_SLACK_WEBHOOK_URL / GAPT_DISCORD_WEBHOOK_URL 환경변수로 wire — per-user 는 4.10 dogfood 와 함께.
+
+**서버 (3 module + 1 router + 2 test, 9+3 case):**
+- `domains/notifications/channel.py` — `Channel` Protocol + 3 impl:
+  - `InMemoryChannel` (no-op marker — 서비스 ring buffer 가 실제 저장소)
+  - `SlackWebhookChannel` (Slack incoming webhook POST, severity 별 emoji + color)
+  - `DiscordWebhookChannel` (Discord webhook POST, embed 사용)
+  - 둘 다 `WebhookPoster` callable injectable → 테스트는 hand-rolled poster, 기본은 httpx
+  - `NotificationError("notification.{slack,discord}.http_status")` for 4xx/5xx
+- `domains/notifications/service.py` — `NotificationService`:
+  - Per-actor ring buffer (`deque(maxlen=50)`), broadcast bucket (`actor_id=None`)
+  - `emit(...)` → ring 추가 + 모든 channel 에 deliver (channel 에러는 swallow + log, 호출자 crash 없음)
+  - `list_for(actor_id, limit)` → 자기 ring + broadcast ring merge, ts desc sort
+  - asyncio.Lock 으로 ring mutation 직렬화
+- `routers/notifications.py` — 2 endpoint:
+  - `GET /api/notifications?limit` → 현재 actor 의 ring 반환
+  - `POST /api/notifications/test {kind?, title?, body?, severity?}` → 등록된 모든 채널로 테스트 emit (운영자가 Slack/Discord wire 확인)
+- `settings.py` — `slack_webhook_url`, `discord_webhook_url` (모두 optional). 미설정 시 InMemoryChannel 만.
+- `container.py` — `AppContainer.notifications: NotificationService` 필드 + `_build_notifications(settings)` 가 channel 조합.
+- `routers/deploy.py` — `trigger_deploy` 결과에 따라 `notifications.emit(kind=DEPLOY_SUCCESS/FAILED, severity=info/error, project_id, details)` 자동 호출. Slack/Discord 설정 시 외부로도 push.
+
+**테스트 (12 case):**
+- `tests/notifications/test_service.py` (6, unit, no DB): emit → ring append, broadcast → 모든 actor 가 봄, Slack body 검증 (color + project field), Discord embed, channel 실패 swallow, ring 50 cap
+- `tests/notifications/test_routes.py` (3, Postgres): test endpoint → feed 반영, per-user 격리 (alice's note 가 mallory 에게 안 보임), 비인증 → 401
+
+**Gate:** server ruff/mypy clean (90 src), 339 server tests (+9, unit 6 + integration 3). Web typecheck/lint/format clean, 89 web tests (+3).
+
+**웹 (3 file + 1 test, 3 case, i18n 3 키):**
+- `src/api/notifications.ts` — `listNotifications(limit)` + `emitTestNotification(payload)` + 타입
+- `src/notifications/NotificationBell.tsx`:
+  - 헤더 chip (🔔 + unread 배지)
+  - 30s polling + dropdown 열 때 refresh
+  - lastSeenRef 로 "이전 열기 이후 새 알림" unread 카운트
+  - dropdown: title/body/relative time/kind code, severity별 className
+  - 배열 아닌 응답 방어 (Array.isArray)
+- `src/app/layouts/AppShellLayout.tsx` 헤더에 `<NotificationBell />` (로그인 시만)
+- i18n 3 키 (en+ko): notifications.title / empty / refresh
+- `tests/NotificationBell.test.tsx` (3 case): 응답 → 배지 + 리스트 / empty state / 500 → alert
+- `tests/App.test.tsx` mockFetchOnce 가 /api/notifications 를 빈 배열로 라우팅 (헤더 폴링이 메인 mock 가로채는 것 방지)
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. (옵션) Slack/Discord webhook 설정
+export GAPT_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+export GAPT_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+
+cd server && uv run uvicorn gapt_server.app:app --port 8001
+
+# 2. 로그인 후 테스트 알림 발사
+curl -b /tmp/cookies.txt -X POST http://localhost:8001/api/notifications/test \
+  -H "Content-Type: application/json" \
+  -d '{"title": "hello", "body": "wired!", "severity": "warn"}'
+# → 메모리 ring + Slack + Discord 모두에 도착
+
+# 3. 알림 피드 확인
+curl -b /tmp/cookies.txt http://localhost:8001/api/notifications | jq
+
+# 4. 웹 UI: 헤더 우측 🔔 아이콘 → unread 배지 → 드롭다운 펼침
+#    Slack/Discord 가 설정돼 있으면 그곳에서도 즉시 메시지 수신
+#    Deploy 트리거 (POST /api/environments/:eid/deploy) 후 자동 알림 발사
+```
+
+#### Plan 카드 대비 변경
+
+- **per-user 알림 설정 페이지 미구현**: plan 의 사용자별 webhook/이메일 등록 UI. SecretVault 에 per-user `notify.slack_url` 등을 저장하는 wire 필요 — 4.10 dogfood 단계에서 통합.
+- **이메일 채널 미구현**: SMTP 통합 + 이메일 템플릿 디자인. 4.10 또는 M2.
+- **cost cap 80% 도달 트리거 미구현**: cost cap 설정 자체가 SettingsService UI 부재 (4.7 도 deferred). 4.10 에서 cap settings + 트리거.
+- **CI 그린/실패 트리거 미구현**: 4.3 의 CI 가 polling-only (no Redis/ARQ). 자동 trigger 는 webhook ingress 가 들어와야 함 (M2).
+- **정책 거부 자동 알림 미구현**: 현재는 audit 만. policy hook 에 `notifications.emit` 추가는 PolicyHookConfig 가 NotificationService 의존성 받아야 — separate cycle.
+- **per-channel retry/backoff 미구현**: 4xx/5xx 한번 시도 후 fail. 신뢰성 강화는 M2.
+### Cycle 4.9 — 헤드리스 oneshot API (✅ 완료 — *this commit*, project-scoped API token deferred)
+
+[plan §4.9](../../plan/m1/e4_integration_dogfood_geny.md#cycle-49-——-헤드리스-api--단일-액션-트리거-1-pr).
+
+**스코프 축소 사유**: plan 의 "project-scoped API token (`agent.run` 권한)" 는 별도 token 모델 + auth depends 가 필요. 본 cycle 은 **기존 쿠키 인증 재사용 + endpoint 인터페이스 형태**. project-scoped API token 은 M5 의 cron 스케줄러 UI 와 함께 wrap — 본 endpoint 의 형태는 그대로 유지.
+
+**서버 (1 router + 1 test, 7 case):**
+- `routers/oneshot.py` — `POST /api/sessions/oneshot`:
+  - 입력: `{workspace_id, env_id?, message, timeout_s?}` (timeout 1–600s, default 120s)
+  - 흐름: session create → hook runner 부착 → bus subscribe → invoke → drain until DONE/ERROR/timeout → archive
+  - 출력: `{session_id, status: "ok"|"error"|"timeout", exec_code?, error_reason?, text, tool_calls[], tool_results[], cost, events[]}`
+  - DONE 이벤트가 도착할 때까지 TEXT/TOOL_CALL/TOOL_RESULT 를 모아 단일 JSON 으로 통합
+  - timeout 발생 시 `runtime.interrupt()` 호출 + status=timeout
+  - 마지막에 항상 archive (성공/실패/timeout 무관) → registry/runtime/DB 모두 정리
+  - 기존 interactive endpoint 와 동일한 hook chain (policy + audit + cost) → 정책/감사 일관성 유지
+- 동일한 cost delta wiring (Prometheus counter + DB writeback) — `sessions.py` 와 똑같은 패턴
+- `app.py` 에 `oneshot.router` include
+
+**테스트 (`tests/sessions/test_oneshot.py`, 7 case):**
+- `_ScriptedPipeline` 가 `_StubEvent(type, data)` 리스트를 `run_stream` 으로 yield — 실 Claude binary 불필요
+- text chunks → text 필드로 합산, tool.invoke/tool.result → 각각 배열, pipeline.error → status=error + exec_code 그대로, archive 후 session row.status=archived, workspace 미존재 → 404, 비인증 → 401, hang pipeline + timeout_s=1 → status=timeout
+
+**Gate:** server ruff/mypy clean (91 src), 346 server tests (+7). 웹 변경 없음.
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *이제 가능*:**
+
+```bash
+# 1. 서버 부팅 + 매직 링크 로그인 + 프로젝트 + 워크스페이스 생성 (이전 cycle 흐름)
+# 2. 단일 호출
+curl -b /tmp/cookies.txt -X POST http://localhost:8001/api/sessions/oneshot \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "{wid}", "message": "list files in src/", "timeout_s": 60}'
+# → 200 {
+#     "session_id": "...",
+#     "status": "ok",
+#     "text": "src/foo.py\nsrc/bar.py\n...",
+#     "tool_calls": [{"name":"gapt_list","input":{"path":"src/"}}, ...],
+#     "tool_results": [{"name":"gapt_list","output":"..."}],
+#     "cost": {"cost_usd":0.012, "input_tokens":150, "output_tokens":40, ...},
+#     "events": [모든 SSE 프레임을 JSON 으로 stack],
+#     "session_id": "01K..." (이미 archived)
+#   }
+
+# 3. timeout 트리거
+curl -b /tmp/cookies.txt -X POST http://localhost:8001/api/sessions/oneshot \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "{wid}", "message": "do something slow", "timeout_s": 5}'
+# → 200 {status: "timeout", exec_code: "exec.session.timeout", ...}
+```
+
+M5 의 cron 스케줄러 / webhook ingress 가 이 endpoint 호출하면 자동화 가능. 현재는 사용자 (또는 외부 스크립트) 가 직접 curl.
+
+#### Plan 카드 대비 변경
+
+- **project-scoped API token + `agent.run` 권한 미구현**: plan 명시. 별도 `api_tokens` 모델 + `Depends(get_api_token_actor)` + permission 체크 필요. token 발급/철회 UI 도 같이. M5 cron 스케줄러 cycle 에서 wrap — endpoint 인터페이스는 동일하게 재사용.
+- **cron 스케줄러 UI 부재**: plan 명시 "M5". 본 cycle 은 endpoint 만.
+- **webhook ingress 미구현**: M5 의 webhook trigger (이 endpoint 를 호출하는 GAPT 외부 트리거). HMAC 검증 패턴은 Cycle 4.1 의 WebhookTarget + 4.4 의 share_link 에 이미 있어 재활용 가능.
+### Cycle 4.10 — Dogfood compose 정비 + 운영 가이드 (✅ 작성자 측 완료 — *this commit*, 실제 dogfood 실행은 사용자 운영 환경에서)
+
+[plan §4.10](../../plan/m1/e4_integration_dogfood_geny.md#cycle-410-——-dogfood-gapt에-gapt-등록-1-pr).
+
+**스코프 분리**: plan 의 "GAPT 의 다음 PR을 GAPT 워크스페이스에서 작성 → CI 그린 → 머지 → prod 재배포" 는 사용자가 실제 VPS 에서 실행해야 검증 가능 (assistant 가 진행할 수 없음). 본 cycle 은 **사용자가 dogfood 를 즉시 시작할 수 있도록 인프라 + 문서 + 자동화 준비** 까지. 실제 dogfood 실행 + 사이클 로그 기록은 사용자 별도 PR.
+
+**구성 (compose 7 file + 운영 가이드 + 서버 ask endpoint 추가):**
+
+compose 작업:
+- `compose/docker-compose.prod.yml` — 신규. operator-friendly template:
+  - 모든 시크릿 환경변수화 (`${...:?ERR}` 패턴으로 미설정 시 즉시 실패)
+  - 호스트 포트 미노출 (Postgres / Redis / SeaweedFS / Prometheus / Grafana 모두 gapt-prod 네트워크 내부만)
+  - Caddy 만 :80/:443 public
+  - `vault-data` 명명 볼륨 (SecretVault 암호문 보존)
+  - `metrics` profile (Prometheus + Grafana) — `--profile metrics` 시만 부팅
+- `compose/caddy/Caddyfile.prod` — 신규. apex domain → server, `*.preview.{domain}` → on-demand TLS + `ask http://server:8088/api/preview/ask` 가드 (모르는 서브도메인은 cert 미발급)
+- `compose/prometheus/prometheus.yml` — 신규. server:8088/metrics scrape (30s)
+- `compose/grafana/provisioning/datasources/prometheus.yml` — 신규. provisioned datasource
+- `compose/grafana/provisioning/dashboards/gapt.yml` — provider 정의
+- `compose/grafana/provisioning/dashboards/gapt-overview.json` — 4개 패널: 활성 세션 / 샌드박스 running / 비용 rate / 토큰 throughput
+- `compose/docker-compose.dev.yml` 에도 `metrics` profile 추가 (개발자가 dashboard 사전 검증 가능)
+
+서버 보강 (`routers/preview.py`):
+- `ask_router` + `GET /api/preview/ask?domain=...` 추가
+  - 인증 미요구 (Caddy 가 unauthenticated 호출)
+  - 도메인이 `{slug}.{preview_domain}` 형태인지 검증 → 400 `preview.wrong_domain`
+  - workspace.id 룩업 → 미존재/archived 면 404 `preview.unknown`
+  - 정상이면 200 `{domain: ...}`
+- 결과: Caddy on-demand TLS 가 임의 호스트명에 cert 발급 못 함 (사용자 워크스페이스만 통과)
+- `app.py` 가 `preview.ask_router` include
+
+운영 가이드:
+- `docs/operations/install.md` — 신규. 사용자 self-host 절차 8 step:
+  1. DNS / Docker prerequisites
+  2. `.env` 작성 (`openssl rand -hex 32` 으로 6개 시크릿 + 도메인 + ACME 이메일)
+  3. `docker compose up -d` 부팅
+  4. 매직 링크 로그인
+  5. `--profile metrics` 옵션
+  6. **GAPT를 GAPT에 등록 (dogfood 절차 명시)** — 프로젝트 생성 → dev/prod env → SSH 키 vault wire → 워크스페이스 → 첫 PR
+  7. 백업 정책 (4개 volume + .env)
+  8. 업그레이드 절차
+  - Troubleshooting (Caddy cert / Slack webhook / Prometheus scrape)
+
+**테스트 (`tests/caddy/test_routes.py` +3 case):**
+- ask 가 알려진 워크스페이스 → 200 (인증 불필요 검증)
+- ask 가 모르는 슬러그 → 404 `preview.unknown`
+- ask 가 잘못된 부모 도메인 → 400 `preview.wrong_domain`
+
+**Gate:** server ruff/mypy clean (91 src), 349 server tests (+3). compose 파일 syntax 검증 (compose config 통과 가정).
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *실제 VPS 가 있으면 가능*:**
+
+```bash
+# 1. VPS 에서 GAPT 클론 + .env 작성 (install.md §1-2)
+# 2. 부팅
+cd compose && docker compose -f docker-compose.prod.yml up -d
+
+# 3. 헬스체크
+docker compose -f docker-compose.prod.yml ps  # 모두 healthy 까지 ~30s
+curl https://gapt.example.com/health
+
+# 4. (옵션) 메트릭
+docker compose -f docker-compose.prod.yml --profile metrics up -d
+# Grafana 는 호스트 미노출 — Caddy 뒤로 reverse_proxy 추가하거나
+# `docker exec grafana ...` 로 임시 검증
+
+# 5. Caddy on-demand TLS 보안 검증
+curl https://random-attacker-slug.preview.gapt.example.com/
+# → Caddy 가 cert 발급 거부 (ask endpoint 가 404 반환)
+
+# 6. 실제 dogfood
+#    a. UI 에서 GAPT 자체를 프로젝트로 등록 (install.md §6)
+#    b. dev env = local compose, prod env = remote_ssh → 이 VPS
+#    c. 워크스페이스 안에서 채팅으로 다음 PR 작성
+#    d. CI 그린 → 머지 → deploy panel 에서 prod 트리거
+#    e. progress 카드에 사이클 로그 직접 기록
+```
+
+#### Plan 카드 대비 변경
+
+- **실제 dogfood 실행 미포함**: assistant 가 사용자 VPS / SSH 키 / GitHub OAuth 에 접근 없음. install.md §6 절차 + 사용자 별도 PR 로 검증.
+- **첫 PR 사이클 로그 미작성**: 위와 동일 사유.
+- **GAPT 의 메일 SMTP wiring 미구현**: 매직 링크 토큰이 콘솔 로그에만 출력 — 운영 단계에서 SMTP 어댑터 (M2).
+- **Cycle 4.7 의 Grafana JSON 이 여기로 흡수**: 4.7 deferred 카탈로그 → 본 cycle 의 compose/grafana/provisioning/ 으로 ship.
+### Cycle 4.11 — Geny 첫 어댑트 인프라 + 운영 가이드 (✅ assistant 측 완료 — *this commit*, 실 첫 어댑트는 사용자 단계)
+
+[plan §4.11](../../plan/m1/e4_integration_dogfood_geny.md#cycle-411-——-geny-첫-어댑트-m1-마지막-게이트-1-pr).
+
+**스코프 분리**: plan 의 "Geny에 첫 어댑트 사이클 실행 + 데스크탑 Cursor 0회 + prod 배포 + 학습 정리" 는 사용자 자신이 자신의 GAPT 인스턴스에서 Geny 레포에 대해 직접 수행해야 검증 가능. 본 cycle 은 **그것을 가능하게 하는 미싱 기능 + 운영 가이드** 까지. 실 첫 어댑트 사이클 + lessons 파일 작성은 사용자 별도 PR.
+
+**미싱 기능 보강: 다중 compose 파일 체인 (Geny 의 G-1 함정)**
+
+[docs/12_geny_case_study.md §12.5 G-1](../../12_geny_case_study.md#g-1) — Geny 는 `docker-compose.yml -f dev.yml -f dev-core.yml` 처럼 *여러 compose 파일을 체인* 으로 사용. 기존 GAPT 의 `DeployRequest.compose_path: str` 은 단일 파일만 지원했음. Cycle 4.11 에서 추가:
+
+- `DeployRequest.compose_paths: list[str]` (default `[]`) + `resolved_compose_paths()` helper
+- `LocalComposeTarget` 가 `_compose_flags(paths)` 로 `-f a -f b ...` 체인 argv 생성. pull / up / rollback 모두 동일 패턴.
+- `DeployOrchestrator.deploy/rollback` 가 `compose_paths` 인자 받음
+- `routers/deploy.py` 가 env_row.deploy_target_config 의 `compose_paths` 필드를 파싱 → orchestrator 로 전달
+- 단일 path 의 기존 behavior 100% 호환 (빈 `compose_paths` → fallback)
+
+테스트:
+- `tests/deploy/test_local.py::test_deploy_chains_multiple_compose_files` — `compose_paths=[a, b]` 인 deploy 가 pull/up argv 에 `-f a -f b` 를 *순서대로* 포함
+
+**운영 가이드 (`docs/operations/geny-adapt.md`):**
+
+[12_geny_case_study.md](../../12_geny_case_study.md) §12.3 Step 1–9 를 실제 curl / UI 절차로 변환:
+
+1. 프로젝트 등록 (`POST /api/projects` payload)
+2. dev + prod env 생성 (각각 3-file compose chain, prod 는 `require_2fa: true`)
+3. 시크릿 (`.env.*` + SSH key) SecretVault 등록
+4. 워크스페이스 생성 + Sysbox sandbox 부팅 + compose up + Caddy 서브도메인
+5. 채팅 첫 메시지로 도메인 시드 (`CLAUDE.md` + 한 문단 컨텍스트 — S18 메모리에 영구 저장)
+6. 실제 cycle 실행 (read → edit → test → commit → push → PR → CI → merge → deploy dev → deploy prod 2FA)
+7. §12.5 함정 8 가지 (sudo HOME / 다중 compose / vendor 크기 / 1500줄 파일 line-range / Bash vs gapt_bash 게이트 우회 등) 체크리스트
+8. After-action review (`analysis/{date}_geny_first_adapt_lessons.md` 템플릿)
+
+**Gate:** server ruff/mypy clean (91 src), 350 server tests (+1: multi-compose chain test).
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — *Geny 레포 + GAPT 인스턴스 보유 시 가능*:**
+
+본 cycle 자체가 **사용자의 Geny 첫 어댑트** 가 가능하게 하는 인프라. 사용자 측 검증 시나리오:
+
+```bash
+# 운영 가이드 따라 절차 실행:
+# 1. docs/operations/install.md — GAPT 인스턴스 부팅 (4.10)
+# 2. docs/operations/geny-adapt.md — Geny 등록 + 시크릿 + 워크스페이스 + 첫 PR 사이클
+#
+# 사용자가 검증할 DoD 항목:
+#  - [ ] Geny 의 cycle 1 개를 GAPT 안에서 완수 (desktop IDE 0회)
+#  - [ ] 비용 ≤ 일 cap
+#  - [ ] prod 배포 성공 (2FA gate 작동)
+#  - [ ] 모든 도구 호출이 audit 에 보임
+#  - [ ] 다음 cycle 도 GAPT 에서 하고 싶다고 느낌
+```
+
+#### Plan 카드 대비 변경
+
+- **실제 첫 어댑트 사이클 미실행**: assistant 가 사용자 Geny GitHub 권한 / Anthropic API 키 / VPS 에 접근 없음. 사용자 별도 PR.
+- **`analysis/20260XXX_geny_first_adapt_lessons.md` 미작성**: 사용자가 실제 사이클을 끝낸 뒤 채우는 템플릿이 운영 가이드 §8 에 명시.
+- **추가 GAPT 도구 PR 미발생**: plan 의 "추가 GAPT 도구 필요 시 executor 에 PR" — 첫 어댑트 동안 사용자가 부족한 도구를 발견하면 그때 PR. 본 cycle 은 *이미 발견된* G-1 (다중 compose) 만 처리.
+- **데스크탑 Cursor 0회 검증 자동화 없음**: 사용자 자기보고. M2 에서 active window 추적 / 시간 추적 도구 통합 검토.
+### Cycle 4.12 — M1 종합 검증 + 사용자 검토 (✅ assistant 측 완료 — *this commit*, soak/데모 영상 사용자 단계)
+
+[plan §4.12](../../plan/m1/e4_integration_dogfood_geny.md#cycle-412-——-m1-종합-검증--사용자-검토-1-pr).
+
+**스코프 분리**: plan 의 "데모 영상 + 1주일 soak + 격리 9 시나리오 재실행" 중:
+- 데모 영상: 라이브 녹화 필요 — 사용자 단계.
+- 1주일 soak: 실 환경 + 시간 필요 — 사용자 단계 (4.7 의 `/metrics` 가 누수 감시 surface 제공).
+- 격리 9 시나리오: 6개는 기존 `tests/sandbox/` + `tests/e2e/` 에서 CI 자동 실행됨. Sysbox 실 runtime 필요한 3개는 `sandbox_use_real_docker=true` 모드 — 사용자 VPS 단계.
+
+**구성:**
+- `docs/progress/m1/_summary.md` — 신규. M1 전체 (E1–E4) 종합:
+  - DoD 6개 체크리스트 (`docs/11_roadmap.md` §11.3 vs 실 진행)
+  - M1-E4 11 cycle 매트릭스
+  - 350 server tests · 89 web tests
+  - 사용자가 직접 해야 할 4개 항목 (dogfood / Geny / soak / 데모 영상)
+  - M2 hand-off 노트 (PolicyEngine 4계층 확장 슬롯, DeployTarget K8s 슬롯, NotificationService 채널 슬롯, oneshot endpoint M5 cron seed, /metrics 옵저버빌리티 seam)
+- `README.md` 갱신:
+  - 상단 status badge: Phase 0 → **M1-E4 complete (beta)**
+  - "시작하기" 섹션 전면 개편: self-host (compose.prod.yml) + Geny 어댑트 절차 + 로컬 dev 절차 + 테스트 실행 한 줄
+
+**Gate:** 본 cycle 은 문서/README 만 — 코드 변경 없음. 이전 cycle 들의 350 server tests · 89 web tests 가 그대로 유효.
+
+**🧪 사용자가 직접 테스트할 수 있는 부분 — 본 cycle 의 산출물 자체가 사용자 다음 단계 가이드:**
+
+```bash
+# 1. README "시작하기" 따라가서 self-host 부팅
+cd compose && docker compose -f docker-compose.prod.yml up -d
+
+# 2. docs/progress/m1/_summary.md 의 §"What the user still needs to do" 4개 항목 수행:
+#    (a) Dogfood: GAPT 를 GAPT 에 등록 + 다음 PR 머지 → 사이클 로그 progress/m1/dogfood_first_cycle.md
+#    (b) Geny 첫 어댑트: docs/operations/geny-adapt.md 따라 PR 1개 머지 + lessons 정리
+#    (c) 1주일 soak (Prometheus + Grafana 로 누수 감시)
+#    (d) 3분 데모 영상
+
+# 본 cycle 이 ship 한 뒤, 위 4개 가 완수되면 M1 DoD 6 개 모두 ✓
+```
+
+#### Plan 카드 대비 변경
+
+- **격리 9 시나리오 자동 재실행**: 6 개는 이미 CI 가 매 PR 마다 실행 중. 나머지 3 (Sysbox 실 runtime) 는 `GAPT_SANDBOX_USE_REAL_DOCKER=true` 환경에서만 의미 — 사용자 VPS 부팅 후 1회 검증.
+- **데모 영상 미작성**: 실 화면 녹화 필요. 사용자가 self-host 후 첫 cycle 돌릴 때 같이 녹화 권장.
+- **soak 테스트 미실행**: 1주일 + 실 VPS 필요. `/metrics` 의 `gapt_sessions_active` / `gapt_sandbox_count` gauge 가 감시 surface.
+- **CONTRIBUTING.md 미갱신**: 기존 [CONTRIBUTING.md](../../../CONTRIBUTING.md) 가 cadence 규칙을 이미 명시 — 본 cycle 에서 보강 없음.
+
+## DoD 진행
+
+[Plan 카드](../../plan/m1/e4_integration_dogfood_geny.md) DoD 8 개:
+
+- [ ] `LocalComposeTarget` + `RemoteSshTarget` + `WebhookTarget` 동작 (4.1)
+- [ ] prod 배포 2FA TOTP 필수 (4.2)
+- [ ] CI 결과 라이브 표시 (4.3)
+- [ ] PolicyEngine config override 4계층 + UI 편집 + audit (4.5)
+- [x] Audit dashboard (4.6)
+- [x] OTel + Prometheus exporter (4.7 — pull only; OTLP push deferred)
+- [~] 🎯 Dogfood: GAPT 가 GAPT 유지보수 (4.10 — 인프라/문서 ship, 실제 사이클 사용자 검증)
+- [~] 🎯 Geny 첫 어댑트: 외부 IDE 0회 (4.11 — 인프라 + 가이드 ship, 실 사이클 사용자 검증)
+
+## 사용자 검증 게이트
+
+각 cycle 의 ship 마다 *사용자가 직접 테스트 가능한 surface* 가 생기면 progress 카드에 명시. M1-E4 의 핵심 검증은 **4.10 dogfood + 4.11 geny adapt** — 둘 다 사용자가 운영 환경에서 직접 실행.
+
+## Drift (cycle 종료 시 누적 기록)
+
+M1-E4 종료 시점 누적 drift (사용자가 직접 수행해야 하는 단계 + 후속 cycle 로 미룬 항목):
+
+**사용자 단계로 미룬 (assistant 가 수행 불가):**
+- 실제 dogfood 첫 사이클 실행 + 사이클 로그 (4.10)
+- Geny 첫 어댑트 실행 + lessons 파일 (4.11)
+- 1주일 soak + 데모 영상 (4.12)
+
+**M2 로 deferred:**
+- ARQ background CI poller + SSE stream + GitHub Webhook ingress (4.3)
+- PolicyEngine L3 (org DB) + L4 (project DB + `.gapt/policy.yaml`) + PUT API + diff UI (4.5)
+- Audit subject before/after JSON diff viewer + per-actor pivot (4.6)
+- OTel SDK auto-init + OTLP push (4.7)
+- Per-user notification subscription UI + 이메일 채널 + cost cap 트리거 (4.8)
+- Project-scoped API tokens for oneshot (4.9) — M5 cron 과 함께
+- SMTP magic-link delivery (4.10) — M2 의 사용자 관리 cycle 과 함께
+
+**M2 추가 발견 항목** (cycle 4.6 audit dashboard 의 deferred 가 4.7/4.8 에 흡수, 4.7 의 Grafana JSON 이 4.10 에 흡수). 추가 drift 없음.
