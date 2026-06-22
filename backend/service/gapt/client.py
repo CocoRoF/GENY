@@ -156,8 +156,9 @@ class GaptClient:
         return await self.request("DELETE", path, **kw)
 
     # ----------------------------------------------------------- projects
-    async def list_projects(self) -> Any:
-        return await self.get("/_gapt/api/projects")
+    async def list_projects(self, *, include_archived: bool = False) -> Any:
+        params = {"include_archived": "true"} if include_archived else None
+        return await self.get("/_gapt/api/projects", params=params)
 
     async def get_project(self, project_id: str) -> Any:
         return await self.get(f"/_gapt/api/projects/{project_id}")
