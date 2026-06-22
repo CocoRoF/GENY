@@ -163,6 +163,11 @@ class ThinkingTriggerService:
         self._disabled_sessions: Set[str] = set()
         # session_id → consecutive trigger count (resets on user activity)
         self._consecutive_triggers: Dict[str, int] = {}
+        # session_id → last memory-compaction epoch (idle-compaction throttle).
+        self._last_compaction: Dict[str, float] = {}
+        # Min seconds between idle compactions per session (folding is one LLM call;
+        # bound the rate so a long idle doesn't re-fold repeatedly).
+        self._compact_min_interval_s: float = 600.0
         # session_id → category_id → last fire epoch (cooldown gate).
         self._last_category_fire: Dict[str, Dict[str, float]] = {}
         # session_id → preset_id (None = use bundled defaults)
@@ -397,6 +402,11 @@ class ThinkingTriggerService:
                 continue
             trigger_tasks.append((sid, self._fire_trigger(sid)))
             self._activity[sid] = now
+            # Idle = spare time → fold recent raw turns into the semantic rolling
+            # digest (compressed-first memory). Throttled per session.
+            if (now - self._last_compaction.get(sid, 0.0)) >= self._compact_min_interval_s:
+                self._last_compaction[sid] = now
+                trigger_tasks.append((sid, self._kick_memory_compaction(sid)))
         if trigger_tasks:
             results = await asyncio.gather(
                 *[coro for _, coro in trigger_tasks],
@@ -405,6 +415,24 @@ class ThinkingTriggerService:
             for (sid, _), result in zip(trigger_tasks, results):
                 if isinstance(result, Exception):
                     logger.debug("Trigger failed for %s: %s", sid, result)
+
+    async def _kick_memory_compaction(self, session_id: str) -> None:
+        """On idle, fold recent raw turns into the semantic rolling digest.
+
+        Reaches the session's memory manager and runs ``compact_now()`` (the
+        geny-executor ``MemoryRollup``). Best-effort — never breaks the tick loop."""
+        try:
+            from service.executor import get_agent_session_manager
+
+            agent = get_agent_session_manager().get_agent(session_id)
+            mm = getattr(agent, "_memory_manager", None) if agent else None
+            if mm is None or not hasattr(mm, "compact_now"):
+                return
+            await mm.compact_now()
+        except Exception:  # noqa: BLE001 — diagnostics only
+            logger.debug(
+                "memory compaction kick failed for %s", session_id, exc_info=True
+            )
 
     async def _fire_trigger(self, session_id: str) -> None:
         try:

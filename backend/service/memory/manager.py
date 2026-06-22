@@ -377,6 +377,45 @@ class SessionMemoryManager:
                 exc_info=True,
             )
 
+    async def compact_now(self) -> Optional[str]:
+        """Run the semantic memory rollup — the compressed view served first.
+
+        Folds the prior rolling digest + recent raw turns into a fresh
+        preservation-focused digest (geny-executor ``MemoryRollup``) and persists
+        it to the summary slot the Stage-2 retriever injects at L1. The LLM is the
+        offline memory model (``build_memory_llm``). Best-effort: returns the digest
+        or ``None`` (no provider / no model / nothing to compress / failure). This
+        replaces the old mechanical "Session End Summary" transcript dump.
+        """
+        if self._memory_provider is None:
+            return None
+        try:
+            from geny_executor.memory import MemoryRollup
+            from service.memory.memory_llm import build_memory_llm
+        except Exception:  # noqa: BLE001 — executor < 2.16.0 / import issue
+            logger.debug("compact_now: MemoryRollup unavailable", exc_info=True)
+            return None
+
+        llm = build_memory_llm()
+        if llm is None:
+            logger.debug("compact_now: no memory LLM configured — skipping")
+            return None
+
+        async def _summarize(instruction: str) -> str:
+            return await llm.complete(instruction, purpose="memory.rollup")
+
+        try:
+            rollup = MemoryRollup(self._memory_provider, summarize=_summarize)
+            digest = await rollup.summarize_segment()
+            if digest:
+                logger.info(
+                    "compact_now: rolling digest written (%d chars)", len(digest)
+                )
+            return digest
+        except Exception:  # noqa: BLE001 — never fatal
+            logger.warning("compact_now: rollup failed", exc_info=True)
+            return None
+
     async def _stm_get_recent(self, n: int) -> List[MemoryEntry]:
         if self._memory_provider is None or n <= 0:
             return []
@@ -2500,15 +2539,17 @@ class SessionMemoryManager:
         # location to keep daily-journal index pure).
         run_coro_sync(self._ltm_write_execution(summary_text))
 
-        # Persist session summary for future context injection on restore
-        run_coro_sync(self._stm_write_summary(summary_text))
+        # The L1 injection slot (read_summary) now gets the SEMANTIC rolling digest
+        # (compressed-first), NOT this mechanical transcript list. The mechanical
+        # text still lands in the executions LTM archive above for the raw record.
+        run_coro_sync(self.compact_now())
 
         # Vector store flushes on every write (executor file backend);
         # nothing extra to do here on auto_flush.
 
         logger.info(
-            "auto_flush: session summary (%d chars, %d messages) → long-term",
-            len(summary_text), len(all_entries),
+            "auto_flush: mechanical archive + semantic rolling digest (%d messages)",
+            len(all_entries),
         )
         return summary_text
 
