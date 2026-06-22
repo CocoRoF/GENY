@@ -326,6 +326,21 @@ also run inside the container.
 
 ## Progress log
 
+- **2026-06-22 — Phase 3 + Phase 4 DONE, end-to-end VERIFIED.** executor 2.22.0
+  `attach_runtime(sandbox=)` ships; Geny `agent_session_manager` provisions a GAPT
+  workspace per session (opt-in `GENY_GAPT_WORKSPACES`, default off) and passes
+  `sandbox=` at the attach seam; geny-backend on gapt-net + docker.sock + docker
+  CLI. GAPT UI/API/previews exposed via Geny nginx (`/_gapt`, `/preview`).
+  **Proven on :2222:** geny-backend → `docker exec -w /workspace gapt-ws-<id>` →
+  ran as `ubuntu`, wrote a file, `claude 2.1.185` present inside. Fixes en route:
+  vendored-lockfile `.gitignore` drop, Secure-cookie-over-http (manual cookie),
+  `ensure()` must run a command (not no-op `/start`) to force the container live.
+  Test guide + transplant writeup: [`../operations/gapt-test-guide.md`](../operations/gapt-test-guide.md).
+  Remaining polish: GAPT `WorkspaceSandbox` should pass `--runtime=sysbox-runc`
+  (workspace currently runc); P5 optional SDK-path tool sandbox.
+
+
+
 - **2026-06-22 — Phase 0** design + decisions locked (this report).
 - **2026-06-22 — Phase 1 DONE** (executor `2.21.1`, on PyPI). Absorbed the L1
   sandbox-execution primitive: `ContainerCLIRunner` + `SandboxHandle` Protocol +
