@@ -11,12 +11,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, AlertCircle, Loader2, RefreshCw, Terminal, Key,
-  ExternalLink, Settings as SettingsIcon, ArrowUpCircle, RotateCcw,
+  Loader2, RefreshCw, Terminal, Key,
+  ExternalLink, ArrowUpCircle, RotateCcw,
 } from 'lucide-react';
 
 import { llmBackendsApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import ApiBackendModal from './ApiBackendModal';
 import LocalBackendModal, { type LocalProviderId } from './LocalBackendModal';
@@ -24,23 +25,6 @@ import { PROVIDERS } from '@/lib/modelCatalog';
 
 const API_PROVIDERS = new Set(['anthropic', 'openai', 'google', 'vllm']);
 const LOCAL_PROVIDERS = new Set<string>(['ollama', 'lmstudio', 'custom']);
-
-
-type BadgeTone = 'good' | 'warn' | 'bad' | 'info';
-
-
-function Badge({ tone, children }: { tone: BadgeTone; children: React.ReactNode }) {
-  const cls =
-    tone === 'good' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    : tone === 'warn' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-    : tone === 'bad' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-    : 'bg-sky-500/15 text-sky-300 border-sky-500/30';
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[0.7rem] font-medium ${cls}`}>
-      {children}
-    </span>
-  );
-}
 
 
 function renderDetail(
@@ -88,33 +72,21 @@ function ProviderCard({
     : null;
   const recheckActive = recheckLoading === recheckTarget;
 
-  let tone: BadgeTone;
+  let tone: CardStatusTone;
   let badgeLabel: string;
-  let badgeIcon: React.ReactNode = null;
   if (provider.available && provider.auth_ok) {
     tone = 'good';
     badgeLabel = t('settings.llmBackends.badge.ready');
-    badgeIcon = <CheckCircle2 className="w-3 h-3" />;
   } else if (provider.auth_ok === false) {
     tone = 'warn';
     badgeLabel = t('settings.llmBackends.badge.loginRequired');
-    badgeIcon = <AlertCircle className="w-3 h-3" />;
   } else if (!provider.available) {
     tone = 'bad';
     badgeLabel = t('settings.llmBackends.badge.notConfigured');
-    badgeIcon = <AlertCircle className="w-3 h-3" />;
   } else {
-    tone = 'info';
+    tone = 'neutral';
     badgeLabel = t('settings.llmBackends.badge.idle');
   }
-
-  // Status-tinted icon tile (gives each card a clear, colourful anchor).
-  const tileCls = {
-    good: 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 ring-emerald-500/20',
-    warn: 'bg-amber-500/10 text-amber-500 dark:text-amber-400 ring-amber-500/20',
-    bad: 'bg-rose-500/10 text-rose-500 dark:text-rose-400 ring-rose-500/20',
-    info: 'bg-sky-500/10 text-sky-500 dark:text-sky-400 ring-sky-500/20',
-  }[tone];
 
   const detail = renderDetail(provider, t);
   const installHelp = renderInstallHelp(provider, (k) => t(k));
@@ -123,102 +95,71 @@ function ProviderCard({
     : null;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <SettingsCard
       onClick={() => onOpenSettings(provider.provider)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpenSettings(provider.provider);
-        }
-      }}
-      className="group relative rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 flex flex-col gap-3 text-left cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[var(--primary-color)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/40"
-      aria-label={t('settings.llmBackends.cardAriaLabel', { label: provider.label })}
-    >
-      {/* Header: icon tile · title/id · badge */}
-      <div className="flex items-start gap-3">
-        <span
-          className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ring-1 ${tileCls}`}
-        >
-          {isCli ? <Terminal className="w-[18px] h-[18px]" /> : <Key className="w-[18px] h-[18px]" />}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-[0.9375rem] leading-tight truncate">
-              {provider.label}
-            </span>
-            <span className="text-[0.625rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
-              {provider.provider}
-            </span>
-            <span className="text-[0.6rem] uppercase tracking-wider text-[var(--text-tertiary)] opacity-70">
-              {isCli ? 'CLI' : 'API'}
-            </span>
-          </div>
-          <div className="mt-1.5 text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed break-all">
-            {detail}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          <Badge tone={tone}>
-            {badgeIcon}
-            {badgeLabel}
-          </Badge>
-          <SettingsIcon className="w-3.5 h-3.5 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-      </div>
-
-      {/* Auth-method chip + binary version */}
-      {(authMethodKey || provider.binary_version) && (
-        <div className="flex items-center gap-2 text-[0.7rem] text-[var(--text-tertiary)] pl-[52px]">
+      ariaLabel={t('settings.llmBackends.cardAriaLabel', { label: provider.label })}
+      icon={
+        isCli
+          ? <Terminal className="w-[18px] h-[18px]" />
+          : <Key className="w-[18px] h-[18px]" />
+      }
+      title={provider.label}
+      meta={
+        <>
+          <span className="font-mono">{provider.provider}</span>
+          <span className="opacity-50">·</span>
+          <span className="uppercase tracking-wide">{isCli ? 'CLI' : 'API'}</span>
+        </>
+      }
+      status={{ tone, label: badgeLabel }}
+      footer={
+        <>
           {authMethodKey && (
-            <>
-              <span>{t('settings.llmBackends.auth')}:</span>
-              <Badge tone="info">{t(authMethodKey)}</Badge>
-            </>
+            <span className="text-[0.7rem] text-[var(--text-tertiary)]">
+              {t('settings.llmBackends.auth')}:{' '}
+              <span className="text-[var(--text-secondary)]">{t(authMethodKey)}</span>
+            </span>
           )}
           {provider.binary_version && (
-            <span className="font-mono">· {provider.binary_version}</span>
+            <span className="text-[0.7rem] text-[var(--text-tertiary)] font-mono">
+              {provider.binary_version}
+            </span>
           )}
-        </div>
-      )}
-
-      {/* Install help (only when present) */}
-      {installHelp && (
-        <div className="text-[0.75rem] text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] rounded p-2 leading-relaxed">
-          {installHelp}
-        </div>
-      )}
-
-      {/* CLI re-check + docs link */}
-      {recheckTarget && (
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-color)] text-[0.75rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-            onClick={(e) => { e.stopPropagation(); onRecheck(recheckTarget); }}
-            disabled={recheckActive}
-            aria-label={t('settings.llmBackends.reCheck')}
-          >
-            {recheckActive
-              ? <Loader2 className="w-3 h-3 animate-spin" />
-              : <RefreshCw className="w-3 h-3" />}
-            {t('settings.llmBackends.reCheck')}
-          </button>
+          {recheckTarget && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border-color)] text-[0.7rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              onClick={(e) => { e.stopPropagation(); onRecheck(recheckTarget); }}
+              disabled={recheckActive}
+              aria-label={t('settings.llmBackends.reCheck')}
+            >
+              {recheckActive
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <RefreshCw className="w-3 h-3" />}
+              {t('settings.llmBackends.reCheck')}
+            </button>
+          )}
           {provider.provider === 'claude_code_cli' && (
             <a
               href="https://docs.anthropic.com/claude/code"
               target="_blank"
               rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1 text-[0.75rem] text-sky-400 hover:underline"
+              className="inline-flex items-center gap-1 text-[0.7rem] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline"
             >
               {t('settings.llmBackends.docs')} <ExternalLink className="w-3 h-3" />
             </a>
           )}
-        </div>
-      )}
-    </div>
+          {installHelp && (
+            <span className="basis-full text-[0.72rem] text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] rounded-md px-2 py-1.5 leading-relaxed">
+              {installHelp}
+            </span>
+          )}
+        </>
+      }
+    >
+      {detail}
+    </SettingsCard>
   );
 }
 
@@ -262,72 +203,68 @@ function ClaudeCodeVersionCard() {
 
   const upToDate = st && st.current && st.latest && st.current === st.latest;
 
+  const btnCls =
+    'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border ' +
+    'border-[var(--border-color)] text-[0.8rem] text-[var(--text-secondary)] ' +
+    'hover:bg-[var(--bg-hover)] disabled:opacity-50';
+
   return (
-    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3.5 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Terminal className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
-          <span className="text-[0.875rem] font-semibold">Claude Code CLI 버전</span>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {st && (
-            <Badge tone={upToDate ? 'good' : st.update_available ? 'warn' : 'info'}>
-              {loading ? '…' : st.current ? `v${st.current}` : '미설치'}
-            </Badge>
-          )}
+    <SettingsCard
+      icon={<Terminal className="w-[18px] h-[18px]" />}
+      title="Claude Code CLI 버전"
+      meta={st?.current ? <span className="font-mono">v{st.current}</span> : '미설치'}
+      status={
+        st
+          ? {
+              tone: upToDate ? 'good' : st.update_available ? 'warn' : 'neutral',
+              label: loading ? '…' : upToDate ? '최신' : st.update_available ? '업데이트 가능' : '확인',
+            }
+          : undefined
+      }
+      footer={
+        <>
+          <button type="button" className={btnCls} onClick={refresh} disabled={loading || !!busy}>
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            새로고침
+          </button>
           <button
             type="button"
-            className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-color)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-            onClick={refresh}
-            disabled={loading || !!busy}
-            title="새로고침"
+            className={btnCls}
+            onClick={doUpdate}
+            disabled={!!busy || loading || !!upToDate}
           >
-            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            {busy === 'update' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
+            최신으로 업데이트
           </button>
-        </div>
-      </div>
-
-      <div className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed">
-        {st?.current
-          ? upToDate
-            ? '최신 버전을 사용 중입니다.'
-            : st.latest
-              ? <>최신 버전 <span className="font-medium text-[var(--text-primary)]">v{st.latest}</span> 사용 가능합니다.</>
-              : '최신 버전 정보를 확인할 수 없습니다.'
-          : 'Claude Code CLI가 설치되어 있지 않습니다.'}
-        {st?.pinned && (
-          <span className="text-[var(--text-tertiary)]"> · 고정: {st.pinned === 'latest' ? '최신' : `v${st.pinned}`}</span>
-        )}
-      </div>
-
-      {err && (
-        <div className="text-[0.75rem] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded p-2 break-all">
-          {err}
-        </div>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={doRollback}
+            disabled={!!busy || loading || !st?.can_rollback}
+            title={st?.previous ? `v${st.previous} 으로 롤백` : '롤백할 이전 버전이 없습니다'}
+          >
+            {busy === 'rollback' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            롤백{st?.previous ? ` (v${st.previous})` : ''}
+          </button>
+          {err && (
+            <span className="basis-full text-[0.72rem] text-[var(--danger-color)] bg-[var(--bg-tertiary)] rounded-md px-2 py-1.5 break-all">
+              {err}
+            </span>
+          )}
+        </>
+      }
+    >
+      {st?.current
+        ? upToDate
+          ? '최신 버전을 사용 중입니다.'
+          : st.latest
+            ? <>최신 버전 <span className="font-medium text-[var(--text-primary)]">v{st.latest}</span> 사용 가능합니다.</>
+            : '최신 버전 정보를 확인할 수 없습니다.'
+        : 'Claude Code CLI가 설치되어 있지 않습니다.'}
+      {st?.pinned && (
+        <span className="text-[var(--text-tertiary)]"> · 고정: {st.pinned === 'latest' ? '최신' : `v${st.pinned}`}</span>
       )}
-
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-          onClick={doUpdate}
-          disabled={!!busy || loading || !!upToDate}
-        >
-          {busy === 'update' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
-          최신으로 업데이트
-        </button>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-          onClick={doRollback}
-          disabled={!!busy || loading || !st?.can_rollback}
-          title={st?.previous ? `v${st.previous} 으로 롤백` : '롤백할 이전 버전이 없습니다'}
-        >
-          {busy === 'rollback' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-          롤백{st?.previous ? ` (v${st.previous})` : ''}
-        </button>
-      </div>
-    </div>
+    </SettingsCard>
   );
 }
 
