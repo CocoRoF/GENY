@@ -338,9 +338,35 @@ also run inside the container.
     `SandboxHandle`; pin → `geny-executor>=2.21.1`. GAPT tests green.
   - **Vendored** GAPT into [`Geny/gapt/`](../../gapt/) (copy @ `d15a592`,
     [`UPSTREAM.md`](../../gapt/UPSTREAM.md)); README updated.
-  - **Next:** merged compose (GAPT services + `gapt-net` + docker.sock into
-    `geny-backend`) + **sysbox host prep on the `:2222` server**, then Phase 3
-    (`GaptClient` + `GaptWorkspaceProvider` wired at the `attach_runtime` seam).
+  - **sysbox on :2222 DONE** — sysbox-ce 0.7.0 installed + `sysbox-runc`
+    enabled (zero-downtime via daemon.json jq-add + `systemctl reload docker`;
+    uid-map isolation verified). One outage occurred mid-process from a
+    stop-docker attempt (2.3G buildkit cold-read wedged dockerd) — recovered;
+    see [[feedback_2222_dockerd_restart_hazard]].
+  - **GAPT stack LIVE on :2222** — vendored tunnel compose + `deploy/gapt`
+    override (no `tunnel` profile → GAPT cloudflared off; behind Geny nginx).
+    gapt-server **healthy**, `/health` 200, admin login 204, alembic migrated,
+    `gapt-workspace:latest` image built. Brought up **additively, zero
+    disruption** (geny-x stayed 200). Fixed: root `.gitignore` had dropped 181
+    vendored files incl. lockfiles → re-included (`!/gapt/**`).
+  - **geny-backend wired (P3 infra) + VERIFIED** — backend image gained the
+    docker CLI; recreated on `gapt-net` + `/var/run/docker.sock` + GAPT env.
+    Verified: backend healthy, `docker` 28.5.2 inside, **backend →
+    gapt-server/health 200**.
+  - **`GaptClient` + `GaptWorkspaceProvider` + `GaptSandboxHandle`** shipped
+    (`backend/service/gapt/`, 6 tests).
+
+- **2026-06-22 — Phase 3 (remaining): the session-build wiring.** Route a Geny
+  session through a GAPT workspace at the `attach_runtime` seam
+  ([agent_session.py:2564](../../backend/service/executor/agent_session.py)).
+  `_build_pipeline` is **sync**, so provisioning (async) must run in the
+  async create path and pass a `GaptSandboxHandle` in. **Recommended approach:**
+  extend the executor's `attach_runtime(sandbox=…)` so it wraps the resolved
+  `claude_code_cli` client with `ContainerCLIRunner` internally — reuses Geny's
+  existing CredentialBundle resolution instead of replicating cli kwargs
+  ([[feedback_extend_executor_not_adapter_layer]]). Gate behind a per-session
+  flag (default OFF) so the live host chat path is untouched until verified.
+  Then P4 (UI proxy: nginx `/_gapt` + `/preview` → `gapt-caddy`).
 
 ## Appendix — verified seam map
 
