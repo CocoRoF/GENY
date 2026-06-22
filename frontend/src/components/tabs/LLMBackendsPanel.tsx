@@ -88,36 +88,33 @@ function ProviderCard({
     : null;
   const recheckActive = recheckLoading === recheckTarget;
 
-  let badge: React.ReactNode;
-  let leftBorder: string;
+  let tone: BadgeTone;
+  let badgeLabel: string;
+  let badgeIcon: React.ReactNode = null;
   if (provider.available && provider.auth_ok) {
-    badge = (
-      <Badge tone="good">
-        <CheckCircle2 className="w-3 h-3" />
-        {t('settings.llmBackends.badge.ready')}
-      </Badge>
-    );
-    leftBorder = 'var(--success-color)';
+    tone = 'good';
+    badgeLabel = t('settings.llmBackends.badge.ready');
+    badgeIcon = <CheckCircle2 className="w-3 h-3" />;
   } else if (provider.auth_ok === false) {
-    badge = (
-      <Badge tone="warn">
-        <AlertCircle className="w-3 h-3" />
-        {t('settings.llmBackends.badge.loginRequired')}
-      </Badge>
-    );
-    leftBorder = 'var(--warning-color)';
+    tone = 'warn';
+    badgeLabel = t('settings.llmBackends.badge.loginRequired');
+    badgeIcon = <AlertCircle className="w-3 h-3" />;
   } else if (!provider.available) {
-    badge = (
-      <Badge tone="bad">
-        <AlertCircle className="w-3 h-3" />
-        {t('settings.llmBackends.badge.notConfigured')}
-      </Badge>
-    );
-    leftBorder = 'var(--text-muted)';
+    tone = 'bad';
+    badgeLabel = t('settings.llmBackends.badge.notConfigured');
+    badgeIcon = <AlertCircle className="w-3 h-3" />;
   } else {
-    badge = <Badge tone="info">{t('settings.llmBackends.badge.idle')}</Badge>;
-    leftBorder = 'var(--text-muted)';
+    tone = 'info';
+    badgeLabel = t('settings.llmBackends.badge.idle');
   }
+
+  // Status-tinted icon tile (gives each card a clear, colourful anchor).
+  const tileCls = {
+    good: 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 ring-emerald-500/20',
+    warn: 'bg-amber-500/10 text-amber-500 dark:text-amber-400 ring-amber-500/20',
+    bad: 'bg-rose-500/10 text-rose-500 dark:text-rose-400 ring-rose-500/20',
+    info: 'bg-sky-500/10 text-sky-500 dark:text-sky-400 ring-sky-500/20',
+  }[tone];
 
   const detail = renderDetail(provider, t);
   const installHelp = renderInstallHelp(provider, (k) => t(k));
@@ -136,33 +133,44 @@ function ProviderCard({
           onOpenSettings(provider.provider);
         }
       }}
-      className="rounded-[var(--border-radius-lg)] border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 flex flex-col gap-3 text-left cursor-pointer transition-all hover:bg-[var(--bg-hover)] hover:border-[var(--primary-color)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/40"
-      style={{ borderLeft: `3px solid ${leftBorder}` }}
+      className="group relative rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 flex flex-col gap-3 text-left cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[var(--primary-color)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/40"
       aria-label={t('settings.llmBackends.cardAriaLabel', { label: provider.label })}
     >
-      {/* Title row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {isCli
-            ? <Terminal className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
-            : <Key className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />}
-          <span className="font-semibold text-[0.9375rem] truncate">{provider.label}</span>
-          <span className="text-[0.7rem] text-[var(--text-tertiary)] font-mono">{provider.provider}</span>
+      {/* Header: icon tile · title/id · badge */}
+      <div className="flex items-start gap-3">
+        <span
+          className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ring-1 ${tileCls}`}
+        >
+          {isCli ? <Terminal className="w-[18px] h-[18px]" /> : <Key className="w-[18px] h-[18px]" />}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[0.9375rem] leading-tight truncate">
+              {provider.label}
+            </span>
+            <span className="text-[0.625rem] font-mono px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
+              {provider.provider}
+            </span>
+            <span className="text-[0.6rem] uppercase tracking-wider text-[var(--text-tertiary)] opacity-70">
+              {isCli ? 'CLI' : 'API'}
+            </span>
+          </div>
+          <div className="mt-1.5 text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed break-all">
+            {detail}
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {badge}
-          <SettingsIcon className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <Badge tone={tone}>
+            {badgeIcon}
+            {badgeLabel}
+          </Badge>
+          <SettingsIcon className="w-3.5 h-3.5 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-      </div>
-
-      {/* Detail line */}
-      <div className="text-[0.8125rem] text-[var(--text-secondary)] leading-relaxed break-all">
-        {detail}
       </div>
 
       {/* Auth-method chip + binary version */}
       {(authMethodKey || provider.binary_version) && (
-        <div className="flex items-center gap-2 text-[0.7rem] text-[var(--text-tertiary)]">
+        <div className="flex items-center gap-2 text-[0.7rem] text-[var(--text-tertiary)] pl-[52px]">
           {authMethodKey && (
             <>
               <span>{t('settings.llmBackends.auth')}:</span>
