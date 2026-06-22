@@ -58,6 +58,11 @@ class GaptClient:
         )
         self._login_lock = asyncio.Lock()
         self._authed = False
+        # Captured ``name=value`` cookie string. We send it manually rather
+        # than rely on httpx's jar: GAPT marks the session cookie ``Secure``
+        # in prod, which the jar would refuse to store/send over the internal
+        # plain-http hop (gapt-server:8088). Mirrors the gapt-mcp client.
+        self._cookie: Optional[str] = None
 
     @property
     def configured(self) -> bool:
@@ -84,6 +89,18 @@ class GaptClient:
                     f"GAPT login failed (check GAPT_ADMIN_ID / GAPT_ADMIN_PASSWORD): "
                     f"{resp.text[:200]}",
                 )
+            # Capture the session cookie name=value manually (Secure flag would
+            # otherwise drop it from the jar over the internal http hop).
+            pairs = [
+                sc.split(";", 1)[0].strip()
+                for sc in resp.headers.get_list("set-cookie")
+                if sc.split(";", 1)[0].strip()
+            ]
+            if not pairs:
+                raise GaptApiError(
+                    500, "auth.no_cookie", "GAPT login returned no session cookie"
+                )
+            self._cookie = "; ".join(pairs)
             self._authed = True
 
     # --------------------------------------------------------------- request
@@ -99,12 +116,18 @@ class GaptClient:
             raise GaptApiError(0, "gapt.not_configured", "GAPT_BASE_URL is not set")
         if not self._authed:
             await self._login()
-        resp = await self._client.request(method, path, params=params, json=json)
+        headers = {"Cookie": self._cookie} if self._cookie else None
+        resp = await self._client.request(
+            method, path, params=params, json=json, headers=headers
+        )
         if resp.status_code == 401:
             # Session expired/missing — re-login once and retry.
             self._authed = False
             await self._login()
-            resp = await self._client.request(method, path, params=params, json=json)
+            headers = {"Cookie": self._cookie} if self._cookie else None
+            resp = await self._client.request(
+                method, path, params=params, json=json, headers=headers
+            )
         if resp.status_code >= 400:
             code, reason = "gapt.error", resp.text[:300]
             try:
