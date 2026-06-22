@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Search,
   GitGraph,
+  Sparkles,
   FileText,
   PanelLeftClose,
   PanelLeftOpen,
@@ -43,6 +44,34 @@ const IMPORTANCE_DOT: Record<string, string> = {
   medium: '#3b82f6',
   low: '#64748b',
 };
+
+// Time-series categories — render their files grouped under date headers
+// (newest day first) instead of one flat list, so daily / observations /
+// executions read by date.
+const DATE_GROUPED_CATEGORIES = new Set([
+  'daily',
+  'observations',
+  'executions',
+  'dms',
+]);
+
+type _FileLike = { modified?: string; created?: string };
+
+/** Group files into ``[YYYY-MM-DD, files][]`` sorted newest-day first. Files
+ *  with no date fall into an "—" bucket sorted last. */
+function groupFilesByDate<T extends _FileLike>(files: T[]): Array<[string, T[]]> {
+  const buckets: Record<string, T[]> = {};
+  for (const f of files) {
+    const raw = f.modified || f.created || '';
+    const day = raw.length >= 10 ? raw.slice(0, 10) : '—';
+    (buckets[day] ||= []).push(f);
+  }
+  return Object.entries(buckets).sort((a, b) => {
+    if (a[0] === '—') return 1;
+    if (b[0] === '—') return -1;
+    return b[0].localeCompare(a[0]);
+  });
+}
 
 export default function OpsidianSidebar() {
   const {
@@ -173,6 +202,21 @@ export default function OpsidianSidebar() {
       }
     }
   };
+
+  const renderFileRow = (f: (typeof files)[string]) => (
+    <button
+      key={f.filename}
+      className={`obs-sb-file ${selectedFile === f.filename ? 'active' : ''}`}
+      onClick={() => handleFileClick(f.filename)}
+      title={f.filename}
+    >
+      <span
+        className="obs-sb-imp-dot"
+        style={{ background: IMPORTANCE_DOT[f.importance] || IMPORTANCE_DOT.medium }}
+      />
+      <span className="obs-sb-file-title">{f.title || f.filename}</span>
+    </button>
+  );
 
   const handleRefresh = async () => {
     if (!selectedSessionId) return;
@@ -325,6 +369,13 @@ export default function OpsidianSidebar() {
         >
           <MessageSquare size={13} /> {t('opsidian.conversation')}
         </button>
+        <button
+          className={`obs-sb-view-btn ${viewMode === 'digest' ? 'active' : ''}`}
+          onClick={() => setViewMode('digest')}
+          title={t('opsidian.digestHint')}
+        >
+          <Sparkles size={13} /> {t('opsidian.digest')}
+        </button>
       </div>
 
       {/* Content */}
@@ -371,20 +422,14 @@ export default function OpsidianSidebar() {
                     </button>
                     {expanded && !isEmpty && (
                       <div className="obs-sb-cat-files">
-                        {catFiles.map((f) => (
-                          <button
-                            key={f.filename}
-                            className={`obs-sb-file ${selectedFile === f.filename ? 'active' : ''}`}
-                            onClick={() => handleFileClick(f.filename)}
-                            title={f.filename}
-                          >
-                            <span
-                              className="obs-sb-imp-dot"
-                              style={{ background: IMPORTANCE_DOT[f.importance] || IMPORTANCE_DOT.medium }}
-                            />
-                            <span className="obs-sb-file-title">{f.title || f.filename}</span>
-                          </button>
-                        ))}
+                        {DATE_GROUPED_CATEGORIES.has(cat)
+                          ? groupFilesByDate(catFiles).map(([day, dayFiles]) => (
+                              <div key={day} className="obs-sb-date-group">
+                                <div className="obs-sb-date-label">{day}</div>
+                                {dayFiles.map((f) => renderFileRow(f))}
+                              </div>
+                            ))
+                          : catFiles.map((f) => renderFileRow(f))}
                       </div>
                     )}
                   </div>

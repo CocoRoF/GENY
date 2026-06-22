@@ -2359,6 +2359,17 @@ export const memoryApi = {
       }>;
     }>(`/api/agents/${sessionId}/memory/categories`),
 
+  /** GET /api/agents/{sid}/memory/summary — the compressed-first view: the
+   *  rolling digest (Stage-2 L1) + the durable evergreen (pinned critical).
+   *  These are what the agent is served before any raw memory. */
+  getSummary: (sessionId: string) =>
+    apiCall<{
+      digest: string;
+      evergreen: string;
+      has_digest: boolean;
+      has_evergreen: boolean;
+    }>(`/api/agents/${sessionId}/memory/summary`),
+
   /** POST /api/agents/{sid}/memory/links — create link */
   createLink: (sessionId: string, sourceFilename: string, targetFilename: string) =>
     apiCall<{ message: string }>(`/api/agents/${sessionId}/memory/links`, {
