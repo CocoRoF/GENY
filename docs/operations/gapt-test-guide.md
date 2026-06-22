@@ -130,12 +130,14 @@ GAPT's old bespoke `SandboxedCLIProcessRunner` was deleted and now imports this.
 ### L2 — the sandbox/project *platform* → **GAPT**, vendored into Geny
 
 GAPT (Postgres-backed project/workspace/sandbox model, per-workspace containers,
-git/fs/terminal/services/preview/deploy, 41-tool MCP) stays the owner and was
-**vendored into `Geny/gapt/`** (copy, see [`../../gapt/UPSTREAM.md`](../../gapt/UPSTREAM.md)).
+git/fs/terminal/services/preview/deploy, 41-tool MCP) stays the owner and is wired
+in as a **git submodule at `Geny/gapt/`** (tracks `main`; `git pull` auto-rolls it
+via `.githooks/post-merge`; on a `git reset`-style deploy run
+`git submodule update --init --recursive gapt`).
 On `:2222` it runs as its **own compose stack** (`gapt-server` / `gapt-postgres`
 / `gapt-caddy` / redis / seaweedfs) on the `gapt-net` network, **behind Geny's
 nginx** (`/_gapt`, `/preview` → `gapt-caddy`); GAPT's own cloudflared stays off.
-Deploy: vendored tunnel compose + [`../../deploy/gapt/docker-compose.geny.yml`](../../deploy/gapt/docker-compose.geny.yml).
+Deploy: GAPT's tunnel compose + [`../../deploy/gapt/docker-compose.geny.yml`](../../deploy/gapt/docker-compose.geny.yml).
 Workspace isolation runtime: `sysbox-runc` is installed on the host (used by
 GAPT's `Sandbox` model; the persistent workspace container currently runs on
 `runc` — passing `--runtime=sysbox-runc` to `WorkspaceSandbox` is a GAPT-side

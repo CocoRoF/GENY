@@ -99,7 +99,7 @@ The backend is built on [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-
 │   ├── ContainerCLIRunner + SandboxHandle (run CLI in a sandbox) │
 │   └── ExecutorErrorCode taxonomy                                 │
 │                                                                  │
-│  gapt/  ← vendored GAPT sub-repo (sandbox/devops platform)       │
+│  gapt/  ← GAPT submodule (sandbox/devops platform)               │
 │   ├── server/  FastAPI control plane (projects/workspaces/…)     │
 │   ├── per-workspace containers (git · fs · terminal · preview)  │
 │   └── deploy pipeline (compose / ssh / webhook targets)          │
@@ -144,7 +144,7 @@ Session memory routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Me
 Redis-backed session metadata sharding lets multiple backend pods serve one user — useful for cloud deployments.
 
 ### 📦 Sandboxed projects & deploy (GAPT)
-Project / workspace / sandbox / deploy is delegated to **[GAPT](gapt/UPSTREAM.md)** (`geny-adapted-project-toolkit`), vendored under [`gapt/`](gapt/). GAPT runs each workspace in its own isolated container (git · file ops · terminal · dev-server preview · compose/ssh deploy targets), Postgres-backed and Caddy-routed. Geny keeps its own agent runtime (persona · voice · emotion · memory) and points sessions at a GAPT workspace via the executor's `ContainerCLIRunner` — so the agent edits code inside the sandbox while Geny's moat stays host-side. Agents can also drive GAPT directly through its 41-tool MCP. Design: [`docs/analysis/gapt-integration-plan.md`](docs/analysis/gapt-integration-plan.md).
+Project / workspace / sandbox / deploy is delegated to **[GAPT](https://github.com/CocoRoF/geny-adapted-project-toolkit)** (`geny-adapted-project-toolkit`), wired in as a **git submodule** at [`gapt/`](gapt/) (tracks `main`; `git pull` auto-rolls it via [`.githooks/post-merge`](.githooks/post-merge)). GAPT runs each workspace in its own isolated container (git · file ops · terminal · dev-server preview · compose/ssh deploy targets), Postgres-backed and Caddy-routed. Geny keeps its own agent runtime (persona · voice · emotion · memory) and points sessions at a GAPT workspace via the executor's `ContainerCLIRunner` — so the agent edits code inside the sandbox while Geny's moat stays host-side. Agents can also drive GAPT directly through its 41-tool MCP. Design: [`docs/analysis/gapt-integration-plan.md`](docs/analysis/gapt-integration-plan.md) · Deploy + test: [`docs/operations/gapt-test-guide.md`](docs/operations/gapt-test-guide.md).
 
 ---
 
@@ -191,7 +191,7 @@ geny/
 │       ├── store/                    # Zustand stores
 │       └── types/                    # shared TypeScript types
 ├── vendor/geny-avatar/               # puppet-editor submodule
-├── gapt/                             # vendored GAPT sub-repo (see gapt/UPSTREAM.md)
+├── gapt/                             # GAPT git submodule (tracks main)
 │   ├── server/                       # FastAPI control plane (projects/workspaces/…)
 │   ├── compose/                      # GAPT compose stacks (postgres/redis/caddy/…)
 │   ├── docker/workspace/             # per-workspace sandbox image
@@ -257,9 +257,15 @@ Other commands:
 ### 🐳 Docker (manual)
 
 ```bash
-# 1. Clone with submodules (geny-avatar + geny-licensed-assets)
+# 1. Clone with submodules (gapt + geny-avatar + geny-licensed-assets)
 git clone --recurse-submodules https://github.com/CocoRoF/Geny.git
 cd Geny
+# Already cloned without --recurse-submodules? Pull them in:
+#   git submodule update --init --recursive
+# Auto-roll the main-tracking submodules (gapt, geny-avatar) on every pull:
+#   git config core.hooksPath .githooks   # one-time; runs `submodule update --remote`
+# Update GAPT to the latest upstream main on demand:
+#   git submodule update --remote gapt && git add gapt && git commit -m "chore: bump gapt"
 
 # 2. Configure
 cp backend/.env.example backend/.env

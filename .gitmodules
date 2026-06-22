@@ -11,3 +11,7 @@
 	# latest geny-avatar main. Enable the hook per clone with:
 	#   git config core.hooksPath .githooks
 	branch = main
+[submodule "gapt"]
+	path = gapt
+	url = https://github.com/CocoRoF/geny-adapted-project-toolkit.git
+	branch = main
