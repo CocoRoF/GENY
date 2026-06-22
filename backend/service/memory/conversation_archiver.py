@@ -1141,6 +1141,19 @@ class ConversationArchiver:
             from service.memory.sync_async_bridge import run_coro_sync
 
             notes = self._provider.notes()
+
+            # Archive rotation: when a rollup file outgrows the cap, move its
+            # older half to a numbered archive note (raw preserved — "원본 보관")
+            # and keep only the recent tail live. Bounds the file Opsidian renders
+            # + the executor reads; the rolling digest already holds the gist.
+            new_body = self._maybe_rotate_body(
+                notes=notes,
+                run_coro_sync=run_coro_sync,
+                target_rel=target_rel,
+                new_meta=new_meta,
+                new_body=new_body,
+            )
+
             try:
                 importance_enum = _Importance(
                     new_meta.get("importance_max")
@@ -1188,6 +1201,75 @@ class ConversationArchiver:
                 target_rel, exc_info=True,
             )
             return False
+
+    #: Rotate a conversations rollup once it crosses this size; keep ~this much
+    #: of the most-recent tail live and archive the older head.
+    _ROTATE_CAP_BYTES = 256 * 1024
+    _ROTATE_KEEP_TAIL_BYTES = 96 * 1024
+
+    def _maybe_rotate_body(
+        self, *, notes, run_coro_sync, target_rel: str,
+        new_meta: Dict[str, Any], new_body: str,
+    ) -> str:
+        """Archive the older half of an oversized rollup; return the body to keep
+        live (the recent tail). Raw is preserved in a numbered archive note, never
+        deleted. Best-effort — on any issue the full body is returned unchanged."""
+        try:
+            if len(new_body.encode("utf-8")) <= self._ROTATE_CAP_BYTES:
+                return new_body
+            import re as _re
+
+            anchors = [m.start() for m in _re.finditer(r"(?m)^## ", new_body)]
+            if len(anchors) < 4:
+                return new_body  # too few turns to split safely
+            split = None
+            for a in anchors[1:]:
+                if len(new_body[a:].encode("utf-8")) <= self._ROTATE_KEEP_TAIL_BYTES:
+                    split = a
+                    break
+            if split is None:
+                split = anchors[len(anchors) // 2]
+            head = new_body[:split].rstrip()
+            tail = new_body[split:].lstrip("\n")
+            if not head.strip() or not tail.strip():
+                return new_body
+
+            from geny_executor.memory.provider import (
+                Importance as _Imp,
+                NoteDraft,
+                Scope,
+            )
+
+            base = Path(target_rel).name
+            base = base[:-3] if base.endswith(".md") else base
+            existing = run_coro_sync(notes.list(category=CATEGORY)) or []
+            seq = 1 + sum(
+                1 for n in existing
+                if getattr(n, "filename", "").startswith(f"{base}.")
+                and ".archive." in getattr(n, "filename", "")
+            )
+            archive_name = f"{base}.{seq:03d}.archive.md"
+            run_coro_sync(notes.write(NoteDraft(
+                title=f"{new_meta.get('title', base)} (archive {seq})",
+                body=head,
+                category=CATEGORY,
+                tags=list(new_meta.get("tags") or []) + ["archive"],
+                importance=_Imp.LOW,
+                scope=Scope.SESSION,
+                filename=archive_name,
+                frontmatter={"archived": True, "archive_seq": seq},
+            )))
+            logger.info(
+                "conversation_archiver: rotated %s → %s (%d bytes archived, %d kept)",
+                target_rel, archive_name, len(head), len(tail),
+            )
+            return tail
+        except Exception:  # noqa: BLE001 — rotation must never break archiving
+            logger.warning(
+                "conversation_archiver: rotation failed for %s",
+                target_rel, exc_info=True,
+            )
+            return new_body
 
     def _locate_or_initialise(
         self,
