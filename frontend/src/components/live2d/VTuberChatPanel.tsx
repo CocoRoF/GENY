@@ -191,12 +191,31 @@ export default function VTuberChatPanel({
     };
   }, []);
 
-  // Auto-scroll on new messages
+  // Stick-to-bottom: follow new messages AND streaming/progress growth (which
+  // mutate the DOM without changing the `messages` array). A MutationObserver
+  // keeps the view pinned to the bottom while the user is already there; if they
+  // scroll up to read history we stop yanking them down until they return.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = () =>
+      el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    let stick = true;
+    const onScroll = () => {
+      stick = nearBottom();
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const mo = new MutationObserver(() => {
+      if (stick) el.scrollTop = el.scrollHeight;
+    });
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    // initial pin
+    el.scrollTop = el.scrollHeight;
+    return () => {
+      mo.disconnect();
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [historyLoaded]);
 
   // Load history + subscribe SSE when roomId is available
   useEffect(() => {
