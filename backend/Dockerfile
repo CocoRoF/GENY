@@ -27,6 +27,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g --silent @anthropic-ai/claude-code@latest && \
     claude --version
 
+# ── Docker CLI (GAPT sandbox exec) ───────────────────────────────────
+# The executor's ContainerCLIRunner shells out to `docker exec` against
+# the host-mounted /var/run/docker.sock to run the agent CLI inside a
+# GAPT workspace sandbox (gapt-ws-<id>). Client binary only — the daemon
+# is the host's.
+COPY --from=docker:28-cli /usr/local/bin/docker /usr/local/bin/docker
+
 WORKDIR /app
 
 # ── Python dependencies (layer cache) ─────────────────────────────────
