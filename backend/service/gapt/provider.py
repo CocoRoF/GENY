@@ -11,6 +11,7 @@ then return a handle.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -40,11 +41,25 @@ class GaptSandboxHandle:
 
     async def ensure(self) -> None:
         # Bring the workspace container live before the executor's docker exec.
-        # ``/start`` is a no-op when the workspace is already "running" (and the
-        # container may have been prebooted-then-released), so run a trivial
-        # command — that path triggers GAPT's WorkspaceSandbox.ensure()
-        # (docker run) and the container stays up. Idempotent; non-fatal if it
-        # races (the docker exec surfaces the real error if it's truly down).
+        # Prefer a direct `docker start` (idempotent): it works regardless of
+        # GAPT's workspace *status* field — which can stick at 'creating' and
+        # gates GAPT's own API (run_command would 409). The container is
+        # prebooted at create time, so `docker start` is usually a no-op.
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "start", self.container_name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await proc.communicate()
+            if proc.returncode == 0:
+                return
+            # Non-zero usually means the container doesn't exist yet — fall
+            # through and ask GAPT to (re)create it.
+        except Exception:  # noqa: BLE001 - docker CLI missing/unreachable
+            pass
+        # Fallback: GAPT (re)creates the container. run_command is status-gated
+        # but triggers WorkspaceSandbox.ensure() (docker run) when allowed.
         try:
             await self._client.run_command(self.workspace_id, "true")
         except GaptApiError as exc:
