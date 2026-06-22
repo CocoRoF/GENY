@@ -34,6 +34,9 @@ services:
       GAPT_ADMIN_PASSWORD: ${GAPT_ADMIN_PASSWORD:?GAPT_ADMIN_PASSWORD required}
       # The host has sysbox-runc registered (zero-downtime SIGHUP enable).
       GAPT_SANDBOX_RUNTIME: ${GAPT_SANDBOX_RUNTIME:-sysbox-runc}
+      # Workspace containers (gapt-ws-<id>, what Geny execs into) on sysbox
+      # for kernel-level isolation. Empty = runc.
+      GAPT_WORKSPACE_RUNTIME: ${GAPT_WORKSPACE_RUNTIME:-}
     networks:
       default: {}
       gapt-net:
