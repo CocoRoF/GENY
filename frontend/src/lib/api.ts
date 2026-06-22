@@ -1710,6 +1710,23 @@ export const healthApi = {
   check: () => apiCall<HealthStatus>('/health'),
 };
 
+// ==================== GAPT API ====================
+
+export interface GaptStatus {
+  /** GAPT_BASE_URL is set on the backend */
+  configured: boolean;
+  /** GAPT control plane answered /health */
+  running: boolean;
+  base_url: string;
+  /** same-origin path to the GAPT SPA (via nginx) */
+  ui_path: string;
+}
+
+export const gaptApi = {
+  /** GET /api/gapt/status — is the GAPT platform wired up + reachable? */
+  status: () => apiCall<GaptStatus>('/api/gapt/status'),
+};
+
 // ==================== Config API ====================
 
 import type {

@@ -1,13 +1,13 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
-import { configApi } from '@/lib/api';
-import { Menu, Sun, Moon, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette } from 'lucide-react';
+import { configApi, gaptApi } from '@/lib/api';
+import { Menu, Sun, Moon, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette, Container } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,23 @@ export default function Header() {
 
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
+
+  // GAPT detection — show the GAPT button only when the platform is reachable.
+  const [gaptUrl, setGaptUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const s = await gaptApi.status();
+        if (alive) setGaptUrl(s.running ? s.ui_path : null);
+      } catch {
+        if (alive) setGaptUrl(null);
+      }
+    };
+    check();
+    const id = setInterval(check, 15000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const isHealthy = healthStatus === 'connected';
 
@@ -111,6 +128,20 @@ export default function Header() {
         >
           <Layers size={14} />
         </Link>
+
+        {/* ── GAPT — shown only when the GAPT platform is detected ── */}
+        {gaptUrl && (
+          <a
+            href={gaptUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:flex items-center justify-center gap-1 h-8 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+            title={t('header.gapt')}
+          >
+            <Container size={14} />
+            <span className="text-[0.6875rem] font-semibold tracking-wide">GAPT</span>
+          </a>
+        )}
 
         {/* ── Language Toggle ── */}
         <div className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
