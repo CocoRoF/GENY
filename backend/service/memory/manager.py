@@ -413,6 +413,14 @@ class SessionMemoryManager:
                 logger.info(
                     "compact_now: rolling digest written (%d chars)", len(digest)
                 )
+            # L2 daily digest — idempotent per day (overwrites as the day
+            # progresses), giving a date-navigable series of compressed digests.
+            try:
+                day_key = datetime.now(_get_tz()).strftime("%Y-%m-%d")
+                if hasattr(rollup, "rollup_daily"):
+                    await rollup.rollup_daily(day=day_key)
+            except Exception:  # noqa: BLE001 — daily is best-effort
+                logger.debug("compact_now: daily rollup failed", exc_info=True)
             if evergreen:
                 try:
                     ever = await rollup.rollup_evergreen()
