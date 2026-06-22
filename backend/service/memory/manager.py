@@ -377,22 +377,24 @@ class SessionMemoryManager:
                 exc_info=True,
             )
 
-    async def compact_now(self) -> Optional[str]:
+    async def compact_now(self, *, evergreen: bool = False) -> Optional[str]:
         """Run the semantic memory rollup — the compressed view served first.
 
         Folds the prior rolling digest + recent raw turns into a fresh
         preservation-focused digest (geny-executor ``MemoryRollup``) and persists
-        it to the summary slot the Stage-2 retriever injects at L1. The LLM is the
-        offline memory model (``build_memory_llm``). Best-effort: returns the digest
-        or ``None`` (no provider / no model / nothing to compress / failure). This
-        replaces the old mechanical "Session End Summary" transcript dump.
+        it to the summary slot the Stage-2 retriever injects at L1 (always-injected
+        "압축본 선행"). When ``evergreen=True`` (a slower cadence, and at session
+        close), also merges it into the durable L3 evergreen note (a pinned
+        ``critical`` note — also always-injected + never compacted). The LLM is the
+        offline memory model (``build_memory_llm``). Best-effort: returns the
+        rolling digest or ``None``. Replaces the mechanical transcript summary.
         """
         if self._memory_provider is None:
             return None
         try:
             from geny_executor.memory import MemoryRollup
             from service.memory.memory_llm import build_memory_llm
-        except Exception:  # noqa: BLE001 — executor < 2.16.0 / import issue
+        except Exception:  # noqa: BLE001 — executor too old / import issue
             logger.debug("compact_now: MemoryRollup unavailable", exc_info=True)
             return None
 
@@ -411,6 +413,15 @@ class SessionMemoryManager:
                 logger.info(
                     "compact_now: rolling digest written (%d chars)", len(digest)
                 )
+            if evergreen:
+                try:
+                    ever = await rollup.rollup_evergreen()
+                    if ever:
+                        logger.info(
+                            "compact_now: evergreen updated (%d chars)", len(ever)
+                        )
+                except Exception:  # noqa: BLE001 — evergreen is best-effort
+                    logger.warning("compact_now: evergreen failed", exc_info=True)
             return digest
         except Exception:  # noqa: BLE001 — never fatal
             logger.warning("compact_now: rollup failed", exc_info=True)
@@ -2540,9 +2551,10 @@ class SessionMemoryManager:
         run_coro_sync(self._ltm_write_execution(summary_text))
 
         # The L1 injection slot (read_summary) now gets the SEMANTIC rolling digest
-        # (compressed-first), NOT this mechanical transcript list. The mechanical
-        # text still lands in the executions LTM archive above for the raw record.
-        run_coro_sync(self.compact_now())
+        # (compressed-first), NOT this mechanical transcript list. At session close
+        # we also fold the durable L3 evergreen. The mechanical text still lands in
+        # the executions LTM archive above for the raw record.
+        run_coro_sync(self.compact_now(evergreen=True))
 
         # Vector store flushes on every write (executor file backend);
         # nothing extra to do here on auto_flush.
