@@ -14,6 +14,7 @@ import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import SearchPanel from './SearchPanel';
 import RightPanel from './RightPanel';
 import ConversationView from './ConversationView';
+import DigestPanel from './DigestPanel';
 
 export default function OpsidianView() {
   const searchParams = useSearchParams();
@@ -162,6 +163,14 @@ export default function OpsidianView() {
           {viewMode === 'conversation' && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               <ConversationView />
+            </div>
+          )}
+          {/* Compressed-first view: rolling digest + durable evergreen */}
+          {viewMode === 'digest' && (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {selectedSessionId ? (
+                <DigestPanel sessionId={selectedSessionId} />
+              ) : null}
             </div>
           )}
         </div>

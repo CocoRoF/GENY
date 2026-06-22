@@ -187,6 +187,36 @@ async def get_memory_graph(request: Request, session_id: str = Path(...)):
     }
 
 
+@router.get("/{session_id}/memory/summary")
+async def get_memory_summary(request: Request, session_id: str = Path(...)):
+    """The session's compressed-first view: the rolling DIGEST (always-injected
+    Stage-2 L1) + the durable EVERGREEN (always-injected pinned critical).
+
+    The rolling digest lives at ``transcripts/summary.md`` — outside the
+    ``memory/`` note tree the other endpoints read — so it is otherwise invisible
+    in Opsidian. This surfaces both compressed tiers for the viewer.
+    """
+    provider = _get_provider(session_id)
+    digest = ""
+    evergreen = ""
+    try:
+        digest = (await provider.stm().read_summary()) or ""
+    except Exception:  # noqa: BLE001
+        digest = ""
+    try:
+        evergreen = (
+            await provider.notes().load_pinned(category="critical", max_chars=8000)
+        ) or ""
+    except Exception:  # noqa: BLE001
+        evergreen = ""
+    return {
+        "digest": digest,
+        "evergreen": evergreen,
+        "has_digest": bool(digest.strip()),
+        "has_evergreen": bool(evergreen.strip()),
+    }
+
+
 # ============================================================================
 # Endpoints — CRUD
 # ============================================================================

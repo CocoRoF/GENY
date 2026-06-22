@@ -1632,3 +1632,41 @@ html.light .opsidian-hub {
   background: var(--obs-border);
   margin: 0 6px;
 }
+
+/* ── Date-grouped categories (daily / observations / executions / dms) ── */
+.obs-sb-date-group { margin-bottom: 4px; }
+.obs-sb-date-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #94a3b8);
+  padding: 3px 8px 2px 22px;
+  text-transform: none;
+  opacity: 0.85;
+}
+
+/* ── Digest panel (compressed-first view) ── */
+.obs-digest { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.obs-digest-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-secondary, #f8fafc);
+}
+.obs-digest-title { font-weight: 600; font-size: 13px; }
+.obs-digest-sub { font-size: 11px; color: var(--text-muted, #94a3b8); }
+.obs-digest-refresh {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--text-muted, #94a3b8); display: inline-flex; padding: 4px;
+}
+.obs-digest-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; }
+.obs-digest-section { margin-bottom: 22px; }
+.obs-digest-h {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-muted, #64748b);
+  margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+.obs-digest-empty { font-size: 12px; color: var(--text-muted, #94a3b8); font-style: italic; }
+.obs-spin { animation: obs-spin-kf 0.8s linear infinite; }
+@keyframes obs-spin-kf { to { transform: rotate(360deg); } }

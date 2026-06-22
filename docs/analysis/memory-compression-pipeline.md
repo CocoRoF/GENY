@@ -237,11 +237,18 @@ Per the standing principle ([[feedback_extend_executor_not_adapter_layer]]):
     rotates it); a flapped compaction is skipped (best-effort) and retried next idle.
     Consider stabilizing the CLI config / rolling the CLI forward to 2.1.185.
 
+- **2026-06-22 — L3 EVERGREEN DONE + VERIFIED (executor 2.18.0 + Geny):**
+  `MemoryRollup.rollup_evergreen` maintains a rewritable pinned `critical` evergreen
+  note (always-injected L1.5, never compacted); `compact_now(evergreen=)` wires it;
+  idle merges it on a slower ≥1800s cadence; session-close runs a full rollup. Live
+  test (session 18da9654): `segment_written + evergreen_written`; evergreen preserved
+  identity (엘렌), nickname (사장님), a durable Skyrim fact, recent game context. ✅
+  Both compressed-first tiers (L1 recent + L3 durable) now maintained + always injected.
+
 ### Remaining
-- **Phase 1b (executor):** L3 evergreen (rewritable pinned `critical` note, always
-  injected + preserved) + L2 daily/topic rollups + L4 compressed `render_vault_map` +
-  swap the in-context (Stage 2/4) placeholder compactor for the strong LLM compactor
-  (context-pressure path).
+- **Phase 1b leftover (executor/Geny):** L2 daily/topic rollups + L4 compressed
+  `render_vault_map` + swap the in-context (Stage 2/4) placeholder compactor for the
+  strong LLM compactor (context-pressure path).
 - **Phase 2 (Geny):** wire the host LLM `summarize` callable + trigger `MemoryRollup.run()`
   from the idle/thinking-trigger detector; replace `manager.py` mechanical "Session End
   Summary"; configure `MemoryHooks` compressed-first budget. ← first visible prod effect.
