@@ -60,7 +60,10 @@ class GaptWorkspaceProvider:
         self._client = client
 
     async def _find_project_by_slug(self, slug: str) -> Optional[dict]:
-        projects = await self._client.list_projects()
+        # include_archived: GAPT archives empty projects, and an archived
+        # project still accepts new workspaces — so reuse it by id rather than
+        # hit a 409 slug-taken on a blind create.
+        projects = await self._client.list_projects(include_archived=True)
         items = projects.get("projects") if isinstance(projects, dict) else projects
         for p in items or []:
             if isinstance(p, dict) and p.get("slug") == slug:
@@ -87,9 +90,18 @@ class GaptWorkspaceProvider:
         existing = await self._find_project_by_slug(slug)
         if existing:
             return existing
-        created = await self._client.create_project(
-            slug=slug, display_name=display_name, git_remote_url=git_remote_url
-        )
+        try:
+            created = await self._client.create_project(
+                slug=slug, display_name=display_name, git_remote_url=git_remote_url
+            )
+        except GaptApiError as exc:
+            # Race / archived edge: another caller created it, or it exists but
+            # was filtered — re-find (include_archived) and reuse.
+            if exc.status == 409:
+                found = await self._find_project_by_slug(slug)
+                if found:
+                    return found
+            raise
         if not isinstance(created, dict):
             raise GaptApiError(500, "project.create_bad_response", str(created)[:200])
         return created
