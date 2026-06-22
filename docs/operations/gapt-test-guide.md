@@ -122,8 +122,15 @@ reusable API (no host-side hacks):
   attach a `SandboxHandle` and the pipeline wraps the `claude_code_cli` client
   it resolves *from the credential bundle* with `ContainerCLIRunner` — **reusing
   the exact kwargs it already computed** (api_key, mcp_config, allow_tools,
-  workspace_dir, CLI MCP passthrough). SDK providers ignore it. (See
-  `core/pipeline.py::_build_client_for`.)
+  workspace_dir, CLI MCP passthrough). (See `core/pipeline.py::_build_client_for`.)
+- **SDK-provider tool sandboxing (2.23.0)** — for non-CLI providers
+  (anthropic/openai/google/vllm) the agent loop runs in the executor and tools
+  dispatch host-side; so `attach_runtime(sandbox=)` *also* stamps the sandbox
+  onto the Tool stage, and the built-in **bash / read / write / edit / grep /
+  glob** tools route their I/O through `docker exec` into the container
+  (`tools/_sandbox.py`). Net: **every provider** — CLI or SDK — runs the agent's
+  file/shell work inside the GAPT workspace. Gated by `ToolContext.sandbox`
+  (unset = host execution, unchanged).
 
 GAPT's old bespoke `SandboxedCLIProcessRunner` was deleted and now imports this.
 
