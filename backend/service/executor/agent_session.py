@@ -440,6 +440,7 @@ class AgentSession:
         species: Optional[str] = None,
         growth_tree_id: Optional[str] = None,
         personality_archetype: Optional[str] = None,
+        gapt_sandbox: Optional[Any] = None,
     ):
         """Initialize AgentSession.
 
@@ -488,6 +489,10 @@ class AgentSession:
 
         # Execution settings
         self._working_dir = working_dir
+        # Optional GAPT workspace sandbox (executor SandboxHandle). When set,
+        # _build_pipeline passes it to attach_runtime(sandbox=) so the
+        # claude_code_cli client runs inside the workspace container.
+        self._gapt_sandbox = gapt_sandbox
         self._model_name = model_name
         self._max_turns = max_turns
         self._timeout = timeout
@@ -2559,6 +2564,14 @@ class AgentSession:
             # They remain defined locally only so the older code paths
             # below (e.g. system-prompt builders) compile; nothing
             # downstream of this block consumes the legacy values.
+
+        # GAPT sandbox: when this session is bound to a GAPT workspace, hand
+        # the executor the SandboxHandle. attach_runtime(sandbox=) wraps the
+        # resolved claude_code_cli client in a ContainerCLIRunner so the agent
+        # CLI runs inside the workspace container (executor >=2.22.0). No-op for
+        # SDK providers + when no sandbox is bound (default host execution).
+        if getattr(self, "_gapt_sandbox", None) is not None:
+            attach_kwargs["sandbox"] = self._gapt_sandbox
 
         self._pipeline = self._prebuilt_pipeline
         self._pipeline.attach_runtime(**attach_kwargs)

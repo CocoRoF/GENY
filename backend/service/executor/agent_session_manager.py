@@ -1015,11 +1015,43 @@ class AgentSessionManager:
             )
 
         # Create AgentSession
+        # ── GAPT workspace binding (opt-in via GENY_GAPT_WORKSPACES) ───────
+        # When enabled and the GAPT control plane is reachable, provision a
+        # GAPT workspace and bind this session to it: the executor's
+        # attach_runtime(sandbox=) then runs the claude_code_cli agent inside
+        # the workspace's sysbox container instead of on the host. Best-effort
+        # — any failure logs and falls back to host execution, so the live
+        # chat path is never broken by GAPT being down.
+        gapt_sandbox = None
+        if os.getenv("GENY_GAPT_WORKSPACES", "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                from service.gapt import GaptWorkspaceProvider, get_gapt_client
+
+                _gc = get_gapt_client()
+                if _gc.configured:
+                    gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
+                        project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
+                        workspace_name=session_id,
+                    )
+                    logger.info(
+                        "[%s] bound to GAPT workspace %s",
+                        session_id,
+                        gapt_sandbox.container_name,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[%s] GAPT workspace provisioning failed; using host execution",
+                    session_id,
+                    exc_info=True,
+                )
+                gapt_sandbox = None
+
         agent = await AgentSession.create(
             working_dir=request.working_dir,
             model_name=resolved_model,
             session_name=request.session_name,
             session_id=session_id,
+            gapt_sandbox=gapt_sandbox,
             system_prompt=system_prompt,
             env_vars=request.env_vars,
             mcp_config=merged_mcp_config,
