@@ -1,0 +1,125 @@
+"""HTTP-level: `GET /_gapt/api/policies` returns the merged table."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import textwrap
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import psycopg
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from gapt_server.app import create_app
+from gapt_server.container import build_container
+from gapt_server.domains.audit.sink import InMemoryAuditSink
+from gapt_server.domains.auth.session import InMemorySessionStore
+from gapt_server.routers.auth import set_session_store
+from gapt_server.settings import Settings
+from tests._helpers.fake_sandbox import FakeSandboxBackend
+from tests._helpers.db_guard import assert_safe_to_reset
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+
+SERVER_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _require_dsn() -> str:
+    dsn = os.environ.get("GAPT_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("GAPT_TEST_POSTGRES_DSN unset")
+    return dsn
+
+
+def _reset_and_upgrade(sync_dsn: str) -> None:
+    assert_safe_to_reset(sync_dsn)
+    with psycopg.connect(sync_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE")
+        cur.execute("CREATE SCHEMA public")
+    env = os.environ.copy()
+    env["GAPT_POSTGRES_DSN"] = sync_dsn
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=SERVER_ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+
+@dataclass
+class _Fx:
+    app: FastAPI
+
+
+@pytest_asyncio.fixture
+async def fx(tmp_path: Path) -> AsyncIterator[_Fx]:
+    sync_dsn = _require_dsn()
+    _reset_and_upgrade(sync_dsn)
+
+    # Drop a YAML override file so we can verify the route reports it.
+    config = tmp_path / "policies.yaml"
+    config.write_text(
+        textwrap.dedent(
+            """
+            actions:
+              git.push.protected:
+                decision: allow
+                reason: local CI is the gate
+            """
+        ).strip()
+    )
+
+    settings = Settings(
+        postgres_dsn=sync_dsn,
+        policy_config_path=str(config),
+    )
+    audit = InMemoryAuditSink()
+    sandbox = FakeSandboxBackend()
+    container = build_container(settings, audit_sink=audit, sandbox_backend=sandbox)
+    set_session_store(InMemorySessionStore())
+    app = create_app(settings=settings, container=container)
+    try:
+        yield _Fx(app=app)
+    finally:
+        await container.aclose()
+
+
+async def _login_as_admin(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/_gapt/api/auth/login", json={"id": "admin", "password": "admin"}
+    )
+    assert resp.status_code == 204, resp.text
+
+
+@pytest.mark.asyncio
+async def test_get_policies_returns_merged_table_with_source_layers(fx: _Fx) -> None:
+    async with AsyncClient(transport=ASGITransport(app=fx.app), base_url="http://test") as client:
+        await _login_as_admin(client)
+        resp = await client.get("/_gapt/api/policies")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        rows = {r["action"]: r for r in body["rows"]}
+        # Overridden action shows source=server.
+        assert rows["git.push.protected"]["source"] == "server"
+        assert rows["git.push.protected"]["decision"] == "allow"
+        assert "local CI" in rows["git.push.protected"]["reason"]
+        # Non-overridden action keeps source=builtin.
+        assert rows["secret.create"]["source"] == "builtin"
+        assert rows["secret.create"]["decision"] == "deny"
+        # Invariant floors come back so the UI can paint them.
+        assert "deploy.prod" in body["invariants"]
+
+
+@pytest.mark.asyncio
+async def test_get_policies_requires_auth(fx: _Fx) -> None:
+    async with AsyncClient(transport=ASGITransport(app=fx.app), base_url="http://test") as client:
+        resp = await client.get("/_gapt/api/policies")
+        assert resp.status_code == 401
