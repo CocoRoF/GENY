@@ -1,0 +1,821 @@
+"""`LocalComposeTarget` — same-host `docker compose` driver.
+
+Runs `docker compose -f <compose_path> --project-name gapt-prod-{slug}
+up -d` against the user's host docker (or against a dedicated Sysbox
+sandbox in M2). Secrets are passed as environment variables to the
+subprocess so they never land in argv / process listing — the parent
+zeroizes the dict on completion.
+
+Post-up routing
+---------------
+After a successful `up -d`, the target optionally:
+  1. Identifies the *primary* service container (from
+     `target_options.primary_service` + `primary_port`, or first
+     service with an exposed port).
+  2. Joins it to the shared `gapt-net` docker network (no compose-
+     file mutation; uses `docker network connect`).
+  3. Registers a Caddy reverse-proxy route at
+     `prod-<env-slug>.<preview-domain>` via the injected
+     SubdomainManager.
+
+Both routing dependencies (network name, subdomain manager) are
+optional kwargs — if the SubdomainManager is None we skip routing
+silently and the operator is responsible for exposing the stack
+their own way (compose `ports:`, an external proxy, etc.).
+
+Rollback strategy: snapshot the running image digests *before* the
+`up` and restore them after a failure. We treat the user's previous
+state as the source of truth for "what to roll back to" rather than
+relying on a registry version log.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import shutil
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from gapt_server.domains.deploy import ports as ports_mod
+from gapt_server.domains.deploy.protocol import (
+    DeployContext,
+    DeployResult,
+    DeployStatus,
+    DeployStatusKind,
+    DeployTargetError,
+    RollbackResult,
+)
+
+if TYPE_CHECKING:
+    from gapt_server.domains.caddy.subdomain import SubdomainManager
+
+logger = logging.getLogger(__name__)
+
+ComposeRunner = Callable[
+    [list[str], dict[str, str]],
+    Awaitable[tuple[int, str, str]],
+]
+
+
+async def _default_runner(argv: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+    # Merge over os.environ so PATH / HOME / etc. still resolve. The
+    # caller's env values override OS values (so secrets win over any
+    # leftover dev shell state).
+    merged = {**os.environ, **env}
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        env=merged,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_b, stderr_b = await proc.communicate()
+    return (
+        proc.returncode if proc.returncode is not None else -1,
+        stdout_b.decode("utf-8", errors="replace"),
+        stderr_b.decode("utf-8", errors="replace"),
+    )
+
+
+def _compose_flags(paths: list[str]) -> list[str]:
+    """Chain `-f a -f b ...` for every path. Empty input falls back to
+    a single `-f docker-compose.yml` to keep the argv shape consistent."""
+    chosen = paths or ["docker-compose.yml"]
+    out: list[str] = []
+    for p in chosen:
+        out.extend(["-f", p])
+    return out
+
+
+def _ensure_binary(override: str | None, name: str) -> str:
+    if override:
+        return override
+    found = shutil.which(name)
+    if found is None:
+        raise DeployTargetError(
+            "deploy.tool_missing",
+            f"{name!r} not on PATH; install docker compose before deploying",
+        )
+    return found
+
+
+@dataclass
+class _LocalRunState:
+    """Per-run progress capture used by the polling `status()`
+    endpoint. The orchestrator can call `status(ctx)` mid-run to
+    populate the SSE log tail."""
+
+    status: DeployStatusKind = DeployStatusKind.PENDING
+    log_tail: str = ""
+    exec_code: str | None = None
+    finished_at: datetime | None = None
+    prior_image_digests: dict[str, str] = field(default_factory=dict)
+    # Populated by the post-up routing step. None until either the
+    # routing succeeds or it's skipped (no SubdomainManager injected).
+    bound_url: str | None = None
+
+
+@dataclass
+class LocalComposeTarget:
+    """Compose driver bound to a user-chosen project name prefix."""
+
+    name: str = "local_compose"
+    docker_binary: str | None = None
+    runner: ComposeRunner = field(default=_default_runner)
+    project_prefix: str = "gapt-prod"
+    # When set, the post-up routing step joins the primary container
+    # to this docker network and registers a Caddy preview subdomain.
+    # When None, no routing happens — `compose up -d` lands the stack
+    # and the operator wires their own exposure.
+    subdomain_manager: SubdomainManager | None = None
+    routing_network: str = "gapt-net"
+    _runs: dict[str, _LocalRunState] = field(default_factory=dict)
+
+    def _compose_project(self, request_project_id: str) -> str:
+        # ULIDs are 26 chars; the prefix + ULID is fine for compose
+        # project names (DNS-friendly characters only).
+        return f"{self.project_prefix}-{request_project_id.lower()}"
+
+    def _bin(self) -> str:
+        return _ensure_binary(self.docker_binary, "docker")
+
+    async def _run(self, argv: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+        return await self.runner(argv, env)
+
+    async def _snapshot_images(  # noqa: PLR0912 — JSON vs NDJSON dual parse keeps branch count high
+        self, project: str, env: dict[str, str]
+    ) -> dict[str, str]:
+        """Capture the digest of every running service so we can roll
+        back. `docker compose ps --format json` returns one line per
+        service when there is one, or a JSON array when there are
+        many — accept both."""
+        exit_code, stdout, _ = await self._run(
+            [self._bin(), "compose", "-p", project, "ps", "--format", "json"],
+            env,
+        )
+        if exit_code != 0:
+            return {}
+        out: dict[str, str] = {}
+        raw = stdout.strip()
+        if not raw:
+            return out
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            # The newline-delimited variant.
+            for raw_line in raw.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                service = obj.get("Service") or obj.get("Name")
+                image = obj.get("Image")
+                if isinstance(service, str) and isinstance(image, str):
+                    out[service] = image
+            return out
+        if isinstance(parsed, list):
+            for obj in parsed:
+                if not isinstance(obj, dict):
+                    continue
+                service = obj.get("Service") or obj.get("Name")
+                image = obj.get("Image")
+                if isinstance(service, str) and isinstance(image, str):
+                    out[service] = image
+        elif isinstance(parsed, dict):
+            service = parsed.get("Service") or parsed.get("Name")
+            image = parsed.get("Image")
+            if isinstance(service, str) and isinstance(image, str):
+                out[service] = image
+        return out
+
+    async def _ps_services(
+        self, project: str, env: dict[str, str]
+    ) -> list[dict[str, object]]:
+        """`docker compose ps --format json` → list of service rows.
+        Returns [] on any parse error so callers can skip routing
+        without crashing the whole deploy."""
+        rc, stdout, _ = await self._run(
+            [self._bin(), "compose", "-p", project, "ps", "--format", "json"],
+            env,
+        )
+        if rc != 0 or not stdout.strip():
+            return []
+        try:
+            parsed = json.loads(stdout)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except json.JSONDecodeError:
+            # NDJSON variant — one row per line.
+            rows: list[dict[str, object]] = []
+            for raw in stdout.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    rows.append(obj)
+            return rows
+
+    async def _route_primary_service(
+        self,
+        *,
+        project: str,
+        request: DeployRequest,
+        env: dict[str, str],
+    ) -> tuple[Any, str] | None:
+        """Connect the primary service container to gapt-net and
+        register a Caddy preview subdomain. Returns
+        `(initial_binding, bound_url)` on success — the caller uses
+        the binding to drive `auto_tune_preview_route` post-deploy.
+        Returns None when routing
+        was skipped (no SubdomainManager wired) / impossible (no
+        published ports / can't find primary service).
+
+        Primary service selection:
+          1. `target_options.primary_service` if set — explicit win.
+          2. First service in `docker compose ps` with a published
+             port (heuristic — usually the web tier).
+        Primary port selection:
+          1. `target_options.primary_port` if set.
+          2. The first published port on the primary container.
+        """
+        if self.subdomain_manager is None:
+            return None
+
+        rows = await self._ps_services(project, env)
+        if not rows:
+            return None
+
+        # Resolve primary service. Priority mirrors
+        # `routers/deploy.stack_reroute` so deploy + reroute pick the
+        # same container without the operator having to manually
+        # specify primary_service each time:
+        #   1. `target_options.primary_service` — explicit win.
+        #   2. Reverse-proxy service names (nginx / proxy / gateway
+        #      / traefik / caddy / envoy). Stacks that ship one of
+        #      these almost always use it as the fan-out point — any
+        #      `/api/*` XHR the SPA makes assumes same-origin, so
+        #      bypassing nginx to hit the frontend container directly
+        #      breaks the app.
+        #   3. Frontend service names (frontend / web / app).
+        #   4. First service with a published port.
+        #   5. First service at all (last resort).
+        wanted_service = request.target_options.get("primary_service")
+        reverse_proxy_names = {
+            "nginx", "proxy", "gateway", "traefik", "caddy", "envoy"
+        }
+        frontend_names = {"frontend", "web", "app"}
+        primary_row: dict[str, object] | None = None
+        if isinstance(wanted_service, str) and wanted_service:
+            for row in rows:
+                if row.get("Service") == wanted_service or row.get("Name") == wanted_service:
+                    primary_row = row
+                    break
+        if primary_row is None:
+            for row in rows:
+                if row.get("Service") in reverse_proxy_names:
+                    primary_row = row
+                    break
+        if primary_row is None:
+            for row in rows:
+                if row.get("Service") in frontend_names:
+                    primary_row = row
+                    break
+        if primary_row is None:
+            for row in rows:
+                if row.get("Publishers") or row.get("Ports"):
+                    primary_row = row
+                    break
+        if primary_row is None:
+            primary_row = rows[0]
+
+        container_name = primary_row.get("Name")
+        if not isinstance(container_name, str) or not container_name:
+            return None
+
+        # Resolve primary port. Prefer explicit setting; else first
+        # published port (TargetPort, not host port — Caddy on
+        # gapt-net hits the container directly).
+        wanted_port_raw = request.target_options.get("primary_port")
+        primary_port: int | None = None
+        try:
+            primary_port = int(wanted_port_raw) if wanted_port_raw is not None else None
+        except (TypeError, ValueError):
+            primary_port = None
+        if primary_port is None:
+            publishers = primary_row.get("Publishers")
+            if isinstance(publishers, list):
+                for pub in publishers:
+                    if isinstance(pub, dict):
+                        tp = pub.get("TargetPort")
+                        try:
+                            primary_port = int(tp) if tp is not None else None
+                        except (TypeError, ValueError):
+                            primary_port = None
+                        if primary_port:
+                            break
+        # Reverse-proxy container without a published port — happens
+        # when the user only exposes nginx via the wider stack's
+        # networking. Default to 80 (HTTP) — auto-tune will flip it
+        # to 443 if the upstream is TLS-terminating.
+        if primary_port is None and primary_row.get("Service") in reverse_proxy_names:
+            primary_port = 80
+        if primary_port is None:
+            # No port to route — leave it; the deploy still succeeded.
+            return None
+
+        # Connect to gapt-net. Idempotent: docker emits "already in
+        # network" on a re-connect; we treat that as success.
+        rc, _, err = await self._run(
+            [self._bin(), "network", "connect", self.routing_network, container_name],
+            env,
+        )
+        if rc != 0 and "already exists" not in err.lower() and "already in" not in err.lower():
+            logger.warning(
+                "deploy.network_connect_failed container=%s err=%s",
+                container_name,
+                err.strip()[:300],
+            )
+            return None
+
+        # Register the Caddy route. Slug is per-environment so
+        # multiple envs of the same project don't clobber each other.
+        # Path mode by default (single apex domain, no wildcard DNS
+        # needed). Subdomain mode is opt-in via the env's
+        # `target_options.preview_mode`.
+        # Slug resolution: operator-overridden `preview_slug` in
+        # target_options wins (validated DNS-safe regex), else the
+        # `prod-<env>-<project>` default. Keeping the regex inline
+        # here avoids a circular import with deploy router helpers.
+        import re as _re  # noqa: PLC0415
+
+        from gapt_server.domains.caddy.subdomain import (  # noqa: PLC0415
+            PreviewMode,
+            SubdomainBinding,
+        )
+
+        _SLUG_RE = _re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+        override = request.target_options.get("preview_slug")
+        slug = f"prod-{request.environment}-{request.project_id}".lower()
+        if isinstance(override, str):
+            candidate = override.strip().lower()
+            if candidate and _SLUG_RE.match(candidate):
+                slug = candidate
+        mode_str = request.target_options.get("preview_mode", "path")
+        mode = (
+            PreviewMode.SUBDOMAIN
+            if str(mode_str).lower() == "subdomain"
+            else PreviewMode.PATH
+        )
+        # In path mode, `strip_prefix=True` is the safe default —
+        # most prod images are NOT basePath-aware (the HTML they
+        # ship emits root-relative `/_next/static/...`, `/favicon.png`,
+        # etc.). With strip_prefix=True Caddy hands the upstream a
+        # clean `/...` URL and the SubdomainManager's Referer-fallback
+        # route catches root-relative asset requests. The previous
+        # default (False) silently broke any app that wasn't compiled
+        # with `NEXT_PUBLIC_BASE_PATH` baked in.
+        #
+        # Opt-out via `target_options.strip_prefix = false` for
+        # basePath-baked builds (Next.js with `basePath` set at
+        # build time, etc.) where the app expects to see the prefix.
+        # Subdomain mode never strips — the host *IS* the basePath.
+        strip_opt = request.target_options.get("strip_prefix")
+        strip_prefix = (
+            True if strip_opt is None else bool(strip_opt)
+        ) and mode == PreviewMode.PATH
+
+        # Upstream transport options — set when the operator's stack
+        # fronts its services with its own nginx/traefik that forces
+        # HTTPS or uses `server_name` matching against a public
+        # domain. Defaults stay safe (plain HTTP, no Host rewrite).
+        upstream_scheme = str(
+            request.target_options.get("upstream_scheme", "http")
+        ).lower()
+        upstream_host_header = request.target_options.get("upstream_host_header")
+        if upstream_host_header == "":
+            upstream_host_header = None
+        upstream_tls_insecure = bool(
+            request.target_options.get("upstream_tls_insecure", False)
+        )
+
+        binding = SubdomainBinding(
+            workspace_slug=slug,
+            upstream_host=container_name,
+            upstream_port=primary_port,
+            mode=mode,
+            strip_prefix=strip_prefix,
+            upstream_scheme=upstream_scheme,
+            upstream_host_header=upstream_host_header,
+            upstream_tls_insecure=upstream_tls_insecure,
+        )
+        host = await self.subdomain_manager.register(binding)
+        return (binding, f"https://{host}")
+
+    def _ports_override_path(self, compose_paths: list[str]) -> Path:
+        """Stable location of the generated ports override — beside
+        the first compose file under the worktree's `.gapt/` dir so
+        the operator can inspect what GAPT changed, and so rollback
+        can deterministically re-include it."""
+        base = Path((compose_paths or ["docker-compose.yml"])[0])
+        return base.parent / ".gapt" / "ports.override.yml"
+
+    def _rollback_override_path(self, compose_paths: list[str]) -> Path:
+        """Where the rollback image-pin override is written (sibling of
+        the ports override)."""
+        base = Path((compose_paths or ["docker-compose.yml"])[0])
+        return base.parent / ".gapt" / "rollback.override.yml"
+
+    async def _preflight_ports(
+        self,
+        *,
+        project: str,
+        request: DeployRequest,
+        env: dict[str, str],
+    ) -> tuple[list[str], list[str]]:
+        """Reconcile host-port publishes before `up` (see
+        `deploy.ports` module docstring). Returns the possibly-
+        extended compose path list + log lines for the run tail.
+        Raises DeployTargetError for strict-policy conflicts; any
+        other failure is the caller's cue to proceed un-reconciled
+        (diagnostics must never block a deploy that might work)."""
+        paths = request.resolved_compose_paths()
+        policy = str(request.target_options.get("ports_policy", "auto")).lower()
+
+        rc, out, err = await self._run(
+            [
+                self._bin(),
+                "compose",
+                "-p",
+                project,
+                *_compose_flags(paths),
+                "config",
+                "--format",
+                "json",
+            ],
+            env,
+        )
+        config: dict[str, Any] | None = None
+        if rc == 0:
+            try:
+                parsed = json.loads(out)
+                config = parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                config = None
+        if config is None:
+            # Older compose emits YAML only (no --format flag).
+            rc2, out2, _ = await self._run(
+                [
+                    self._bin(),
+                    "compose",
+                    "-p",
+                    project,
+                    *_compose_flags(paths),
+                    "config",
+                ],
+                env,
+            )
+            if rc2 == 0:
+                import yaml  # noqa: PLC0415
+
+                parsed2 = yaml.safe_load(out2)
+                config = parsed2 if isinstance(parsed2, dict) else None
+        if config is None:
+            raise RuntimeError(f"compose config unavailable: {err.strip()[:200]}")
+
+        services_ports = ports_mod.parse_compose_ports(config)
+        if not services_ports:
+            return paths, []
+
+        def _read_proc(path: str) -> str:
+            try:
+                return Path(path).read_text(encoding="utf-8")
+            except OSError:
+                return ""
+
+        tcp4 = await asyncio.to_thread(_read_proc, "/proc/net/tcp")
+        tcp6 = await asyncio.to_thread(_read_proc, "/proc/net/tcp6")
+        listening = ports_mod.parse_proc_net_listen_ports(tcp4, tcp6)
+        ps_rc, ps_out, _ = await self._run(
+            [self._bin(), "ps", "--format", "json"], env
+        )
+        ps_text = ps_out if ps_rc == 0 else ""
+        # Our own previous run's docker-proxy listeners must not count
+        # as conflicts — re-deploying onto the same ports is the norm.
+        listening -= ports_mod.docker_project_ports(ps_text, project=project)
+        # Host-listener conflicts have no container name to attribute, so
+        # label them "a host process" (not "") — otherwise strict's
+        # message reads "...already in use." with no clue whether the
+        # holder is a container or some host daemon. Docker-published
+        # ports below overwrite this with the real container name.
+        occupied: dict[int, str] = dict.fromkeys(listening, "a host process")
+        occupied.update(
+            ports_mod.parse_docker_published_ports(ps_text, exclude_project=project)
+        )
+
+        plan = ports_mod.plan_port_overrides(
+            services_ports=services_ports, occupied=occupied, policy=policy
+        )
+        override_path = self._ports_override_path(paths)
+        if plan.override_yaml is None:
+            # Nothing to override this run — drop any stale file so
+            # rollback doesn't resurrect last run's remaps.
+            await asyncio.to_thread(lambda: override_path.unlink(missing_ok=True))
+            return paths, plan.log_lines
+
+        def _write() -> None:
+            override_path.parent.mkdir(parents=True, exist_ok=True)
+            override_path.write_text(plan.override_yaml or "", encoding="utf-8")
+
+        await asyncio.to_thread(_write)
+        return [*paths, str(override_path)], plan.log_lines
+
+    async def deploy(self, ctx: DeployContext) -> DeployResult:
+        request = ctx.request
+        project = self._compose_project(request.project_id)
+        env = dict(request.env_secrets)
+        state = _LocalRunState(status=DeployStatusKind.RUNNING)
+        self._runs[ctx.run_id] = state
+
+        try:
+            state.prior_image_digests = await self._snapshot_images(project, env)
+
+            # Host-port preflight — GAPT manages the infra, so a
+            # "port is already allocated" failure is avoidable: remap
+            # (auto), refuse with the holder named (strict), or strip
+            # publishing entirely (unpublish). Routing never depends
+            # on host ports (Caddy dials over gapt-net).
+            compose_paths = request.resolved_compose_paths()
+            try:
+                compose_paths, preflight_lines = await self._preflight_ports(
+                    project=project, request=request, env=env
+                )
+            except DeployTargetError as exc:
+                state.status = DeployStatusKind.FAILED
+                state.exec_code = exc.code
+                state.log_tail = f"[gapt] {exc}\n"
+                state.finished_at = datetime.now(tz=UTC)
+                return DeployResult(
+                    run_id=ctx.run_id,
+                    status=state.status,
+                    log=state.log_tail,
+                    exec_code=state.exec_code,
+                )
+            except Exception as exc:
+                preflight_lines = [
+                    f"[gapt] port preflight skipped ({type(exc).__name__}: {exc})"
+                ]
+            for line in preflight_lines:
+                state.log_tail = (state.log_tail + line + "\n")[-2000:]
+
+            pull_exit, pull_out, pull_err = await self._run(
+                [
+                    self._bin(),
+                    "compose",
+                    "-p",
+                    project,
+                    *_compose_flags(compose_paths),
+                    "pull",
+                ],
+                env,
+            )
+            state.log_tail = (state.log_tail + pull_out + pull_err)[-2000:]
+            if pull_exit != 0:
+                state.status = DeployStatusKind.FAILED
+                state.exec_code = "deploy.compose_pull_failed"
+                state.finished_at = datetime.now(tz=UTC)
+                return DeployResult(
+                    run_id=ctx.run_id,
+                    status=state.status,
+                    log=state.log_tail,
+                    exec_code=state.exec_code,
+                )
+
+            up_argv: list[str] = [
+                self._bin(),
+                "compose",
+                "-p",
+                project,
+                *_compose_flags(compose_paths),
+                "up",
+                "-d",
+                "--remove-orphans",
+            ]
+            # Per-deploy build flag — `target_options.build = true`
+            # triggers `docker compose up -d --build`. Use this when
+            # the compose service uses `build: .` and you want a
+            # fresh build every deploy (otherwise compose reuses the
+            # cached image). No-op for image: services.
+            if bool(request.target_options.get("build", False)):
+                up_argv.append("--build")
+            up_exit, up_out, up_err = await self._run(up_argv, env)
+            state.log_tail = (state.log_tail + up_out + up_err)[-2000:]
+            if up_exit != 0:
+                state.status = DeployStatusKind.FAILED
+                state.exec_code = "deploy.compose_up_failed"
+                state.finished_at = datetime.now(tz=UTC)
+                return DeployResult(
+                    run_id=ctx.run_id,
+                    status=state.status,
+                    log=state.log_tail,
+                    exec_code=state.exec_code,
+                )
+
+            # Post-up routing — best-effort. Failure here doesn't fail
+            # the deploy (the stack is up; routing is the cherry on
+            # top). We log the failure into log_tail so the user sees
+            # it in the SSE stream.
+            tuned_options: dict[str, Any] | None = None
+            try:
+                routed = await self._route_primary_service(
+                    project=project,
+                    request=request,
+                    env=env,
+                )
+                if routed is not None:
+                    initial_binding, bound_url = routed
+                    state.bound_url = bound_url
+                    state.log_tail = (
+                        state.log_tail
+                        + f"\n[gapt] routed prod stack → {bound_url}\n"
+                    )[-2000:]
+                    # Auto-tune: HEAD-probe the URL we just registered
+                    # and re-register with corrected upstream transport
+                    # if the response matches a known misconfiguration
+                    # (TLS-terminator nginx, etc.). Without this the
+                    # operator's first deploy of a Cloudflare-origin-
+                    # cert stack silently 301s to the apex and the
+                    # preview URL appears broken until they discover
+                    # the Re-route modal.
+                    from gapt_server.domains.caddy.subdomain import (  # noqa: PLC0415
+                        auto_tune_preview_route,
+                    )
+
+                    try:
+                        result = await auto_tune_preview_route(
+                            initial_binding=initial_binding,
+                            bound_url=bound_url,
+                            manager=self.subdomain_manager,
+                        )
+                        for line in result.log_lines:
+                            state.log_tail = (state.log_tail + line + "\n")[-2000:]
+                        if result.was_tuned:
+                            # Propagate the tuned upstream-* fields so
+                            # the router can persist them to
+                            # `Environment.deploy_target_config`. The
+                            # set mirrors the SubdomainBinding fields
+                            # the StackRerouteBody / config knows about.
+                            b = result.final_binding
+                            tuned_options = {
+                                "upstream_scheme": b.upstream_scheme,
+                                "upstream_port": b.upstream_port,
+                                "primary_port": b.upstream_port,
+                                "upstream_tls_insecure": b.upstream_tls_insecure,
+                                "upstream_host_header": b.upstream_host_header,
+                            }
+                            state.log_tail = (
+                                state.log_tail
+                                + f"[gapt] auto-tune persisted to env config: {tuned_options}\n"
+                            )[-2000:]
+                    except Exception as exc:
+                        logger.warning("deploy.auto_tune_failed", exc_info=exc)
+                        state.log_tail = (
+                            state.log_tail
+                            + f"\n[gapt] auto-tune skipped: {exc}\n"
+                        )[-2000:]
+            except Exception as exc:
+                logger.warning("deploy.routing_failed", exc_info=exc)
+                state.log_tail = (
+                    state.log_tail + f"\n[gapt] routing step failed: {exc}\n"
+                )[-2000:]
+
+            state.status = DeployStatusKind.SUCCESS
+            state.finished_at = datetime.now(tz=UTC)
+            return DeployResult(
+                run_id=ctx.run_id,
+                status=state.status,
+                log=state.log_tail,
+                bound_url=state.bound_url,
+                tuned_target_options=tuned_options,
+            )
+        finally:
+            # Zeroize the secret dict so a heap dump can't surface it.
+            for key in list(env.keys()):
+                env[key] = ""
+
+    async def status(self, ctx: DeployContext) -> DeployStatus:
+        state = self._runs.get(ctx.run_id)
+        if state is None:
+            return DeployStatus(
+                run_id=ctx.run_id,
+                status=DeployStatusKind.PENDING,
+            )
+        return DeployStatus(
+            run_id=ctx.run_id,
+            status=state.status,
+            log_tail=state.log_tail,
+            exec_code=state.exec_code,
+            finished_at=state.finished_at,
+        )
+
+    async def rollback(self, ctx: DeployContext, *, to_version: str) -> RollbackResult:
+        """Restore the digest snapshot we captured before `deploy()`.
+
+        If the orchestrator passes an explicit `to_version` (e.g. a
+        registry tag from the user) we use that for *every* service.
+        Otherwise we restore each service to the digest we captured."""
+        state = self._runs.get(ctx.run_id)
+        request = ctx.request
+        project = self._compose_project(request.project_id)
+        env = dict(request.env_secrets)
+        snapshot = state.prior_image_digests if state else {}
+        # Re-include the port override the failed deploy generated —
+        # rolling back to the original compose alone would re-request
+        # the conflicting host port and fail the rollback too.
+        compose_paths = request.resolved_compose_paths()
+        ports_override = self._ports_override_path(compose_paths)
+        if ports_override.exists():
+            compose_paths = [*compose_paths, str(ports_override)]
+
+        # Pin images via a generated `image:` override chained as the
+        # last -f. Pre-fix rollback only set `COMPOSE_IMAGE_<svc>` env
+        # vars, which a real compose file never references — so `up`
+        # re-pulled the SAME (broken) tag and rollback was a silent
+        # no-op that still reported ROLLED_BACK. The override actually
+        # forces compose to the captured image refs (mirrors how the
+        # port preflight injects its override).
+        pins: dict[str, str] = {}
+        if to_version:
+            pins = {svc: to_version for svc in snapshot}
+        else:
+            pins = dict(snapshot)
+        rollback_override = self._rollback_override_path(compose_paths)
+        if pins:
+            lines = ["# Generated by GAPT rollback — image pins.", "services:"]
+            for svc in sorted(pins):
+                lines.append(f"  {json.dumps(svc)}:")
+                lines.append(f"    image: {json.dumps(pins[svc])}")
+            try:
+                rollback_override.parent.mkdir(parents=True, exist_ok=True)
+                rollback_override.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                compose_paths = [*compose_paths, str(rollback_override)]
+            except OSError:
+                # Can't write the override (read-only worktree?) — fall
+                # through; the up below will then be a genuine no-op and
+                # we report it honestly via the empty-pin guard.
+                pins = {}
+
+        try:
+            if not pins:
+                # Nothing to restore (no snapshot captured / override
+                # unwritable). Report HONESTLY instead of claiming a
+                # rollback that did nothing.
+                return RollbackResult(
+                    run_id=ctx.run_id,
+                    status=DeployStatusKind.FAILED,
+                    restored_version=to_version or "snapshot",
+                    log=(
+                        "[gapt] rollback could not pin any image (no prior "
+                        "snapshot or override unwritable) — stack left as-is."
+                    ),
+                    exec_code="deploy.rollback_nothing_to_restore",
+                )
+            up_exit, up_out, up_err = await self._run(
+                [
+                    self._bin(),
+                    "compose",
+                    "-p",
+                    project,
+                    *_compose_flags(compose_paths),
+                    "up",
+                    "-d",
+                ],
+                env,
+            )
+            if up_exit != 0:
+                return RollbackResult(
+                    run_id=ctx.run_id,
+                    status=DeployStatusKind.FAILED,
+                    restored_version=to_version or "snapshot",
+                    log=(up_out + up_err)[-2000:],
+                    exec_code="deploy.rollback_failed",
+                )
+            return RollbackResult(
+                run_id=ctx.run_id,
+                status=DeployStatusKind.ROLLED_BACK,
+                restored_version=to_version or "snapshot",
+                log=(up_out + up_err)[-2000:],
+            )
+        finally:
+            for key in list(env.keys()):
+                env[key] = ""

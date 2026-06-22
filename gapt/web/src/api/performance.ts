@@ -1,0 +1,252 @@
+import { apiFetch, apiGet, apiPost } from "@/api/client";
+
+export type ContainerCategory = "workspace" | "prod" | "infra" | "other";
+
+export interface ContainerSummary {
+  id: string;
+  name: string;
+  image: string;
+  category: ContainerCategory;
+  workspace_id: string | null;
+  project_id: string | null;
+  project_slug: string | null;
+  project_display_name: string | null;
+  workspace_name: string | null;
+  environment_id: string | null;
+  environment_name: string | null;
+  compose_project: string | null;
+  compose_service: string | null;
+  status: string;
+  started_at: string | null;
+  created_at: string | null;
+}
+
+export interface ContainerLimits {
+  cpu_quota_us: number | null;
+  cpu_period_us: number | null;
+  nano_cpus: number | null;
+  cpus_effective: number | null;
+  mem_bytes: number | null;
+  memswap_bytes: number | null;
+  pids_limit: number | null;
+  runtime: string;
+  network_mode: string;
+  networks: string[];
+  mount_count: number;
+}
+
+export interface ContainerStats {
+  cpu_pct: number;
+  online_cpus: number;
+  mem_bytes: number;
+  mem_limit_bytes: number | null;
+  mem_pct: number;
+  net_rx_bytes: number;
+  net_tx_bytes: number;
+  block_rx_bytes: number;
+  block_tx_bytes: number;
+  pids: number | null;
+}
+
+/** Phase E.2 — non-archived agent-session counters aggregated for
+ *  the workspace this container hosts. `null` for infra containers. */
+export interface SessionMetrics {
+  cost_usd_total: number;
+  input_tokens_total: number;
+  output_tokens_total: number;
+  session_count: number;
+}
+
+export interface ContainerSample {
+  summary: ContainerSummary;
+  limits: ContainerLimits;
+  stats: ContainerStats | null;
+  session_metrics?: SessionMetrics | null;
+}
+
+export interface ProjectRow {
+  id: string;
+  slug: string;
+  display_name: string;
+  /** ISO timestamp if archived, otherwise null. Frontend uses this to
+   * route the project's containers into the archived/orphan bucket
+   * (so the user can clean them up) while still showing the human-
+   * readable name in the dashboard. */
+  archived_at?: string | null;
+}
+
+/** Dev-server process running inside a workspace container.
+ * Sourced from ServiceRegistry — `npm run dev`, `python -m http.server`,
+ * etc. These don't surface as separate docker containers (they run via
+ * `docker exec`), so the dashboard needs this side-channel to show
+ * what's actually live inside a workspace. */
+export interface WorkspaceServiceRow {
+  label: string;
+  cmd: string;
+  port: number | null;
+  auto_port: number | null;
+  state: string;
+  bound_url: string | null;
+}
+
+export interface WorkspaceRow {
+  id: string;
+  project_id: string;
+  /** Phase N.5 — workspace identity is now ``name`` (was ``branch``
+   *  in pre-N.5). Per-repo branches aren't exposed on this row; the
+   *  full WorkspaceResponse from /workspaces/{id} carries them. */
+  name: string;
+  status: string;
+  services?: WorkspaceServiceRow[];
+}
+
+export interface EnvironmentRow {
+  id: string;
+  project_id: string;
+  name: string;
+  /** Snapshot of the most recent DeployRun for this env. Populated even
+   * when the stack is currently down — lets the dashboard render a
+   * "stopped · last deployed X ago" placeholder. */
+  last_deploy_status?: string | null;
+  last_deploy_at?: string | null;
+  last_deploy_version?: string | null;
+  last_bound_url?: string | null;
+}
+
+export interface ContainersResponse {
+  samples: ContainerSample[];
+  projects: ProjectRow[];
+  workspaces: WorkspaceRow[];
+  environments: EnvironmentRow[];
+  total_containers: number;
+  running_containers: number;
+  total_cpu_pct: number;
+  total_mem_bytes: number;
+  /** Phase E.2 — live host GPU samples, folded into the same payload
+   *  so the dashboard no longer fetches `/gpu` separately. Empty
+   *  array when no NVIDIA driver is present. */
+  gpus?: GpuRow[];
+  /** Phase E.2 — current `--gpus` value applied to new workspace
+   *  containers. `null` = CPU-only. */
+  applied_gpu_policy?: string | null;
+}
+
+export interface HostInfo {
+  cpus: number;
+  mem_total_bytes: number;
+  docker_version: string;
+  runtime: string;
+}
+
+export interface GpuRow {
+  index: number;
+  name: string;
+  driver_version: string;
+  utilization_pct: number;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+  memory_pct: number;
+  temperature_c: number | null;
+  power_watts: number | null;
+}
+
+export interface GpusResponse {
+  available: boolean;
+  gpus: GpuRow[];
+  /** Phase E.1 — normalised `--gpus` value currently applied to new
+   *  workspace containers. `null` = CPU-only. Set via the env var
+   *  named in `policy_env_var`. */
+  applied_policy: string | null;
+  /** Name of the env var the operator should set to change the
+   *  policy. Hard-coded server-side as "GAPT_WORKSPACE_GPUS". */
+  policy_env_var: string;
+}
+
+export interface LogsResponse {
+  container_id: string;
+  text: string;
+  truncated_to_tail: number;
+}
+
+export const listContainers = () => apiGet<ContainersResponse>("/_gapt/api/performance/containers");
+
+export const getContainer = (id: string) =>
+  apiGet<ContainerSample>(`/_gapt/api/performance/containers/${id}`);
+
+export const getHostInfo = () => apiGet<HostInfo>("/_gapt/api/performance/host");
+
+export const getGpuInfo = () => apiGet<GpusResponse>("/_gapt/api/performance/gpu");
+
+export const stopContainer = (id: string) =>
+  apiPost<{ container_id: string; action: string; ok: boolean }>(
+    `/_gapt/api/performance/containers/${id}/stop`,
+  );
+
+export const killContainer = (id: string) =>
+  apiPost<{ container_id: string; action: string; ok: boolean }>(
+    `/_gapt/api/performance/containers/${id}/kill`,
+  );
+
+export const restartContainer = (id: string) =>
+  apiPost<{ container_id: string; action: string; ok: boolean }>(
+    `/_gapt/api/performance/containers/${id}/restart`,
+  );
+
+export const fetchContainerLogs = (id: string, tail = 500) =>
+  apiFetch<LogsResponse>(`/_gapt/api/performance/containers/${id}/logs?tail=${tail}`, {
+    method: "GET",
+  });
+
+// ───────────────────────────────────── orphan cleanup ──
+
+export interface OrphanTarget {
+  container_id: string;
+  container_name: string;
+  category: ContainerCategory;
+  workspace_id: string | null;
+  environment_id: string | null;
+  worktree_path: string | null;
+  status: string;
+}
+
+/** An archived project the server will DB-purge along with the
+ * container cleanup. Cascade counts come from the FK chain
+ * (workspaces / environments / deploy_runs) so the modal can show
+ * "5 more rows will be deleted with this project". */
+export interface ArchivedProjectPurge {
+  project_id: string;
+  display_name: string;
+  cascade_workspaces: number;
+  cascade_environments: number;
+  cascade_deploy_runs: number;
+}
+
+export interface OrphanPlan {
+  containers: OrphanTarget[];
+  caddy_route_ids: string[];
+  worktree_paths: string[];
+  archived_projects: ArchivedProjectPurge[];
+}
+
+export interface CleanupOutcome {
+  container_id: string;
+  container_name: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface CleanupReport {
+  containers: CleanupOutcome[];
+  caddy_routes_removed: string[];
+  worktrees_removed: string[];
+  worktree_errors: { path: string; reason: string }[];
+  projects_purged: string[];
+  project_purge_errors: { project_id: string; reason: string }[];
+}
+
+export const previewOrphanCleanup = () => apiGet<OrphanPlan>("/_gapt/api/performance/orphans");
+
+export const cleanupOrphans = (remove_worktrees: boolean) =>
+  apiPost<CleanupReport>("/_gapt/api/performance/cleanup/orphans", {
+    remove_worktrees,
+  });

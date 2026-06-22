@@ -1,0 +1,50 @@
+{
+  "name": "gapt-default",
+  "metadata": {
+    "owner": "gapt",
+    "tags": ["m1-e2", "claude-code-cli", "production"],
+    "version": "v1",
+    "description": "기본 매니페스트 — Claude Code CLI로 sonnet 8K tokens. 대부분의 작업에 적합."
+  },
+  "stages": [
+    { "order": 1, "name": "input", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 2, "name": "context", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 3, "name": "system", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 4, "name": "guard", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 5, "name": "cache", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    {
+      "order": 6,
+      "name": "api",
+      "active": true,
+      "artifact": "default",
+      "config": {
+        "provider": "claude_code_cli",
+        "model": "sonnet",
+        "max_tokens": 8192
+      },
+      "strategies": {}
+    },
+    { "order": 7, "name": "token", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 8, "name": "think", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 9, "name": "parse", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 10, "name": "tool", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 11, "name": "tool_review", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 12, "name": "agent", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 13, "name": "task_registry", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 14, "name": "evaluate", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 15, "name": "hitl", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 16, "name": "loop", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 17, "name": "emit", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 18, "name": "memory", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 19, "name": "summarize", "active": true, "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 20, "name": "persist", "active": false, "_gapt_note_M8": "Disabled in Phase M.8. The executor's s20_persist stage loads `NoPersister()` by default and would silently no-op; GAPT's authoritative persistence is the `session_events` table fed by the SessionEventBus persister (see `routers/sessions.py::_build_runtime_from_handle`). Keeping s20 active with NoPersister was misleading to operators reading the manifest. Re-enable when adopting executor-side checkpoints.", "artifact": "default", "config": {}, "strategies": {} },
+    { "order": 21, "name": "yield", "active": true, "artifact": "default", "config": {}, "strategies": {} }
+  ],
+  "tools": {
+    "built_in": [],
+    "external": [],
+    "mcp_servers": []
+  },
+  "max_iterations": 10,
+  "cost_budget_usd": 1.0
+}

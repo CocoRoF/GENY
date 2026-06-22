@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/* Tailwind v4 design tokens — paired with <html data-theme="light|dark">.
+ * Variables drive both Tailwind utility colors and our hand-written
+ * components. Each theme overrides the same names so any new component
+ * can use `bg-bg` `text-fg` `border-border` without per-theme logic. */
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-bg-elevated: #14181d;
+  --color-bg-subtle: #1a1f26;
+  --color-fg: #e8eaed;
+  --color-fg-muted: #9aa3ad;
+  --color-fg-subtle: #6b7280;
+  --color-border: #2a2f36;
+  --color-border-strong: #3a4049;
+  --color-accent: #6ea8fe;
+  --color-accent-fg: #0b0d10;
+  --color-success: #4ade80;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-surface: #14181d;
+  --color-surface-hover: #1c2128;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Inter", "Pretendard", "Apple SD Gothic Neo",
+    "Noto Sans KR", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+:root[data-theme="light"] {
+  --color-bg: #fafbfc;
+  --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #f3f4f6;
+  --color-fg: #1f2328;
+  --color-fg-muted: #57606a;
+  --color-fg-subtle: #6e7781;
+  --color-border: #d0d7de;
+  --color-border-strong: #afb8c1;
+  --color-accent: #1f6feb;
+  --color-accent-fg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f4f6;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color-scheme: dark light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* sr-only — visually hide labels but keep them in the accessibility
+ * tree. Used by inputs whose label is conveyed via surrounding chrome. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar polish for dark mode. */
+:root[data-theme="dark"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
