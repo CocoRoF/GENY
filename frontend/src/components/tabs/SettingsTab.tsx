@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { configApi } from '@/lib/api';
 import LLMBackendsPanel from './LLMBackendsPanel';
+import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import { PROVIDERS } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 import { twMerge } from 'tailwind-merge';
@@ -291,37 +292,30 @@ export default function SettingsTab() {
                     : plainStatus === 'default'
                       ? t('common.usingDefaults')
                       : t('common.notConfigured');
-                const activeColor = hasEnabledField
-                  ? 'var(--success-color)'
-                  : plainStatus === 'default'
-                    ? 'var(--text-secondary)' // calm "set to default" tone
-                    : 'var(--info-color, #3b82f6)';
-                const badgeBg = hasEnabledField
-                  ? 'rgba(16, 185, 129, 0.15)'
-                  : plainStatus === 'default'
-                    ? 'var(--bg-tertiary)'
-                    : 'rgba(59, 130, 246, 0.15)';
+                // Restrained status dot: active/explicit → good, otherwise neutral.
+                const tone: CardStatusTone = isActive ? 'good' : 'neutral';
 
                 return (
-                  <div key={schema.name}
-                       className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius-lg)] py-4 px-5 cursor-pointer transition-all hover:bg-[var(--bg-hover)]"
-                       style={{ borderLeft: `3px solid ${isActive ? activeColor : 'var(--text-muted)'}`, opacity: isActive ? 1 : 0.8 }}
-                       onClick={() => openEdit(schema.name)}>
-                    <div className="flex items-start gap-3.5">
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-[0.9375rem] font-semibold text-[var(--text-primary)] mb-1">{ls.display_name}</h4>
-                        <p className="text-[0.8125rem] text-[var(--text-secondary)] leading-[1.4] line-clamp-2">{ls.description}</p>
-                      </div>
-                      <span className={`shrink-0 inline-block py-1 px-2.5 rounded-[12px] text-[0.75rem] font-medium ${isActive ? '' : 'text-[var(--text-muted)] bg-[var(--bg-tertiary)]'}`}
-                            style={isActive ? { color: activeColor, background: badgeBg } : {}}>
-                        {badgeLabel}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-[var(--border-color)]">
-                      <span className="text-[0.75rem] text-[var(--text-muted)]">{t('settings.fieldsConfigured', { count: configured, total })}</span>
-                      {!config.valid && <span className="text-[0.75rem] text-[var(--warning-color)] inline-flex items-center gap-1"><AlertTriangle size={12} /> {t('settings.issues', { count: config.errors?.length || 0 })}</span>}
-                    </div>
-                  </div>
+                  <SettingsCard
+                    key={schema.name}
+                    title={ls.display_name}
+                    status={{ tone, label: badgeLabel }}
+                    onClick={() => openEdit(schema.name)}
+                    footer={
+                      <>
+                        <span className="text-[0.72rem] text-[var(--text-tertiary)]">
+                          {t('settings.fieldsConfigured', { count: configured, total })}
+                        </span>
+                        {!config.valid && (
+                          <span className="text-[0.72rem] text-[var(--warning-color)] inline-flex items-center gap-1">
+                            <AlertTriangle size={12} /> {t('settings.issues', { count: config.errors?.length || 0 })}
+                          </span>
+                        )}
+                      </>
+                    }
+                  >
+                    <span className="line-clamp-2">{ls.description}</span>
+                  </SettingsCard>
                 );
               })}
             </div>
