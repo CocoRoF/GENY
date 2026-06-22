@@ -118,19 +118,21 @@ async def test_provider_get_or_create_returns_handle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_handle_ensure_calls_start() -> None:
+async def test_sandbox_handle_ensure_forces_container_live() -> None:
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/login"):
             return httpx.Response(204, headers={"set-cookie": "gapt_session=s"})
-        if request.url.path == "/_gapt/api/workspaces/WS9/start":
-            calls.append("start")
-            return httpx.Response(204)
+        # ensure() runs a trivial command — the path that triggers GAPT's
+        # WorkspaceSandbox.ensure() (docker run), not the no-op /start.
+        if request.url.path == "/_gapt/api/workspaces/WS9/tests/run":
+            calls.append("run_command")
+            return httpx.Response(200, text='data: {"type":"log","line":"ok"}\n')
         return httpx.Response(404)
 
     c = _client(handler)
     handle = GaptSandboxHandle(c, "WS9")
     await handle.ensure()
-    assert calls == ["start"]
+    assert calls == ["run_command"]
     await c.aclose()

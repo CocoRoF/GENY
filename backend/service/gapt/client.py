@@ -205,6 +205,22 @@ class GaptClient:
     async def stop_workspace(self, workspace_id: str) -> Any:
         return await self.post(f"/_gapt/api/workspaces/{workspace_id}/stop")
 
+    async def run_command(
+        self, workspace_id: str, command: str, *, cwd: Optional[str] = None
+    ) -> Any:
+        """Run a shell command in the workspace container (SSE-streamed text).
+
+        Side effect that matters for us: this path calls GAPT's internal
+        ``WorkspaceSandbox.ensure()`` (``docker run`` of ``gapt-ws-<id>``), so a
+        trivial command (``true``) reliably brings the container live —
+        ``/start`` is a no-op when the workspace is already ``running``."""
+        body: dict[str, Any] = {"command": command}
+        if cwd:
+            body["cwd"] = cwd
+        return await self.post(
+            f"/_gapt/api/workspaces/{workspace_id}/tests/run", json=body
+        )
+
     async def wait_workspace_running(
         self, workspace_id: str, *, timeout_s: float = 180.0, interval_s: float = 2.0
     ) -> dict:
