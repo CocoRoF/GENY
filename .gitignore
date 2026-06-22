@@ -357,10 +357,3 @@ data/geny_agent_sessions/
 # Voice Studio runtime data (synthesis history sqlite + generated audio)
 backend/data/voice_studio/
 
-# ── Vendored GAPT sub-repo (gapt/) ───────────────────────────────────
-# Committed wholesale — the rsync vendor step already drops junk
-# (.git/venvs/node_modules/caches/.gapt). Re-include the whole subtree
-# so Geny's global file-pattern ignores (uv.lock, pnpm-lock.yaml,
-# tests/, *.jsonl, ...) don't silently drop GAPT's build inputs.
-!/gapt/**/
-!/gapt/**

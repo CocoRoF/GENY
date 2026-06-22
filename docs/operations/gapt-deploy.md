@@ -35,8 +35,11 @@ already installed + enabled (see the integration plan's progress log).
 ## Prerequisites (host, one-time)
 
 ```bash
-# 1) latest Geny main (brings gapt/ + deploy/gapt/)
+# 1) latest Geny main + the gapt submodule (gapt/ is a git submodule, so a
+#    bare reset leaves it empty — sync it explicitly after).
 cd /home/hrjang/docker_web/Geny && sudo git fetch origin && sudo git reset --hard origin/main
+sudo git submodule sync --recursive
+sudo git submodule update --init --recursive gapt   # populate/roll gapt/
 
 # 2) workspace storage dirs, owned by uid 1000 (the gapt user)
 sudo mkdir -p /workspace /var/lib/gapt-bare /home/hrjang/.claude
