@@ -11,10 +11,11 @@ Two layers of assertion:
    "we considered it" and "we forgot" matters when the partition
    strategy lands in G6.2.
 
-2. **Bridge forwarding** — :class:`_GenyToolAdapter.capabilities()`
-   reads the wrapped tool's class-level ``CAPABILITIES`` attribute
-   and returns it verbatim. A bridge that drops the attribute would
-   defeat the entire point of G6.1.
+2. **capabilities() forwarding** — ``BaseTool.capabilities()`` reads the
+   tool's class-level ``CAPABILITIES`` attribute and returns it verbatim
+   (Geny tools are executor ``Tool``s now, so there is no separate bridge;
+   ``capabilities()`` lives on the tool itself). A tool that drops the
+   attribute would defeat the entire point of G6.1.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import pytest
 pytest.importorskip("geny_executor")
 from geny_executor.tools.base import ToolCapabilities  # noqa: E402
 
-from service.executor.tool_bridge import _GenyToolAdapter  # noqa: E402
+from tools.base import BaseTool  # noqa: E402
 
 
 # ── Inventory: read every tool module and assert CAPABILITIES is set ──
@@ -121,11 +122,11 @@ def test_total_tool_count_unchanged() -> None:
     assert len(_tool_classes()) == 40
 
 
-# ── Bridge forwarding ────────────────────────────────────────────────
+# ── capabilities() forwarding ────────────────────────────────────────
 
 
-class _StubToolWithCaps:
-    """Minimal stand-in for a Geny BaseTool with a CAPABILITIES attr."""
+class _StubToolWithCaps(BaseTool):
+    """A Geny BaseTool with a CAPABILITIES attr."""
 
     name = "stub_caps"
     description = "stub"
@@ -135,34 +136,31 @@ class _StubToolWithCaps:
         network_egress=False, max_result_chars=12345,
     )
 
-    async def arun(self, **_: object) -> str:  # pragma: no cover - not exercised
+    def run(self, **_: object) -> str:  # pragma: no cover - not exercised
         return ""
 
 
-class _StubToolNoCaps:
+class _StubToolNoCaps(BaseTool):
     name = "stub_nocaps"
     description = "stub"
     parameters = {"type": "object", "properties": {}}
 
-    async def arun(self, **_: object) -> str:  # pragma: no cover
+    def run(self, **_: object) -> str:  # pragma: no cover
         return ""
 
 
-def test_bridge_returns_declared_capabilities() -> None:
-    adapter = _GenyToolAdapter(_StubToolWithCaps())
-    caps = adapter.capabilities({})
+def test_tool_returns_declared_capabilities() -> None:
+    caps = _StubToolWithCaps().capabilities({})
     assert caps is _StubToolWithCaps.CAPABILITIES
     assert caps.concurrency_safe is True
     assert caps.read_only is True
     assert caps.max_result_chars == 12345
 
 
-def test_bridge_falls_back_to_fail_closed_default() -> None:
-    """When the wrapped tool has no CAPABILITIES, the bridge returns a
-    fresh ``ToolCapabilities()`` — Stage 10 then treats it as
-    serialize-by-default."""
-    adapter = _GenyToolAdapter(_StubToolNoCaps())
-    caps = adapter.capabilities({})
+def test_tool_falls_back_to_fail_closed_default() -> None:
+    """When the tool has no CAPABILITIES, ``capabilities()`` returns a fresh
+    ``ToolCapabilities()`` — Stage 10 treats it as serialize-by-default."""
+    caps = _StubToolNoCaps().capabilities({})
     assert isinstance(caps, ToolCapabilities)
     assert caps.concurrency_safe is False
     assert caps.read_only is False

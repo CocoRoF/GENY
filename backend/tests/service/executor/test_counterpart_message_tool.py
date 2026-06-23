@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from service.executor.tool_bridge import _GenyToolAdapter
+from tools.base import _probe_param
 from tools.built_in import geny_tools
 
 
@@ -115,12 +115,11 @@ def test_schema_does_not_expose_target_session_id() -> None:
     assert "content" in props
 
 
-def test_adapter_probe_injects_session_id() -> None:
-    """`session_id` is a declared run() parameter, so the Cycle-6 probe
-    recognises it and the adapter injects ToolContext.session_id."""
+def test_probe_injects_session_id() -> None:
+    """`session_id` is a declared run() parameter, so the probe recognises it
+    and execute() injects ToolContext.session_id."""
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
-    assert adapter._accepts_session_id is True
+    assert _probe_param(tool, "session_id", kwargs_counts=True) is True
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -137,7 +136,7 @@ async def test_vtuber_sends_to_linked_sub_worker(patched_world) -> None:
     })
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "please create test.txt"},
@@ -166,7 +165,7 @@ async def test_sub_worker_replies_to_linked_vtuber(patched_world) -> None:
     })
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "done"},
@@ -192,7 +191,7 @@ async def test_no_linked_counterpart_returns_error(patched_world) -> None:
     })
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "hi"},
@@ -216,7 +215,7 @@ async def test_linked_counterpart_deleted_returns_error(patched_world) -> None:
     })
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "hi"},
@@ -239,7 +238,7 @@ async def test_empty_content_returns_error(patched_world) -> None:
     })
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "   "},
@@ -257,7 +256,7 @@ async def test_unknown_caller_returns_error(patched_world) -> None:
     install({})  # nothing registered
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = _GenyToolAdapter(tool)
+    adapter = tool
 
     result = await adapter.execute(
         {"content": "hi"},

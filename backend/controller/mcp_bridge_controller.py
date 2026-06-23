@@ -192,8 +192,9 @@ async def _execute_tool(
       * Unexpected exceptions still set ``isError: True`` but the
         ``text`` field is sanitised (full detail goes to logger).
     """
+    from geny_executor.tools.base import ToolContext
     from service.executor.agent_session_manager import get_agent_session_manager
-    from tools.base import INJECTED_PARAM_NAMES, ToolError
+    from tools.base import INJECTED_PARAM_NAMES
 
     manager = get_agent_session_manager()
     loader = getattr(manager, "_tool_loader", None)
@@ -207,110 +208,32 @@ async def _execute_tool(
             "isError": True,
         }
 
+    # Strip any host-injected param names the LLM may have hallucinated; the
+    # tool's execute() re-injects them from the trusted ToolContext below.
     call_input = dict(arguments or {})
-    # Strip any host-injected param names the LLM may have hallucinated.
-    # The registered schema hides these from the LLM, but a misbehaving
-    # client could still smuggle one through — never honour it.
     for hidden in INJECTED_PARAM_NAMES:
         call_input.pop(hidden, None)
 
-    # Now inject from the trusted session context. Probe the signature
-    # once per call (cheap; tool resolution is the hot path, not this).
-    try:
-        import inspect
-
-        fn = getattr(tool, "arun", None) or getattr(tool, "run", None)
-        if fn is not None:
-            sig = inspect.signature(fn)
-            accepts_sid = "session_id" in sig.parameters or any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-            )
-            if accepts_sid:
-                call_input["session_id"] = session_id
-    except (TypeError, ValueError):
-        pass
-
-    try:
-        if hasattr(tool, "arun"):
-            result = await tool.arun(**call_input)
-        elif hasattr(tool, "run"):
-            import asyncio
-
-            run_fn = tool.run
-            if asyncio.iscoroutinefunction(run_fn):
-                result = await run_fn(**call_input)
-            else:
-                result = await asyncio.to_thread(lambda: run_fn(**call_input))
-        else:
-            return {
-                "content": [
-                    {"type": "text", "text": f"Tool '{name}' has no run/arun method"},
-                ],
-                "isError": True,
-            }
-    except ToolError as exc:
-        logger.info("mcp_bridge: tool '%s' raised ToolError: %s", name, exc.user_message)
+    # Unified dispatch: every Geny tool IS an executor Tool, so its execute()
+    # is the SINGLE source of truth for session_id injection + ToolError /
+    # legacy-{"error"} / exception sanitisation — identical to the Stage-10
+    # path. The claude_code_cli MCP bridge no longer carries its own copy.
+    if not hasattr(tool, "execute"):
         return {
-            "content": [{"type": "text", "text": exc.user_message}],
+            "content": [{"type": "text", "text": f"Tool '{name}' is not executable"}],
             "isError": True,
         }
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "mcp_bridge: tool '%s' raised: %s", name, exc, exc_info=True,
-        )
-        return {
-            "content": [{"type": "text", "text": _sanitize_exception_message(name, exc)}],
-            "isError": True,
-        }
+    result = await tool.execute(call_input, ToolContext(session_id=session_id))
 
-    if isinstance(result, str):
-        text = result
+    content = result.content
+    if isinstance(content, str):
+        text = content
     else:
         try:
-            text = json.dumps(result, ensure_ascii=False, default=str)
+            text = json.dumps(content, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
-            text = str(result)
-
-    is_err = _detect_legacy_error_envelope(text)
-    return {"content": [{"type": "text", "text": text}], "isError": is_err}
-
-
-def _detect_legacy_error_envelope(text: str) -> bool:
-    """Return True iff ``text`` parses to a dict with an ``error`` key.
-
-    Mirrors :func:`tool_bridge._detect_legacy_error_envelope` — same
-    detector for the MCP path. Catches the legacy
-    ``json.dumps({"error": "..."})`` soft-failure that
-    ``blog_agent_*`` and similar tools historically used. Once those
-    holdouts migrate to :class:`ToolError`, this helper can be
-    retired; until then it prevents the silent-success envelope from
-    reaching the LLM.
-    """
-    s = text.lstrip()
-    if not s.startswith("{"):
-        return False
-    try:
-        body = json.loads(s)
-    except (ValueError, json.JSONDecodeError):
-        return False
-    return isinstance(body, dict) and "error" in body
-
-
-def _sanitize_exception_message(tool_name: str, exc: BaseException) -> str:
-    """Produce a clean, LLM-safe message for an unexpected exception.
-
-    Python class names, module paths, and method names are noise for
-    the LLM and a footgun for ops (they hint at internals to anyone
-    poking at the surface). The operator-facing detail lives in
-    ``logger.warning`` at the call site; the LLM only ever sees this
-    short string.
-    """
-    msg = str(exc)
-    if "got an unexpected keyword argument" in msg:
-        return f"Tool '{tool_name}' rejected an unknown argument."
-    if "missing" in msg and "required positional argument" in msg:
-        return f"Tool '{tool_name}' was called without a required argument."
-    return f"Tool '{tool_name}' failed: {type(exc).__name__}"
+            text = str(content)
+    return {"content": [{"type": "text", "text": text}], "isError": bool(result.is_error)}
 
 
 # ─── RPC dispatcher ─────────────────────────────────────────────
