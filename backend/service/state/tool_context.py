@@ -1,9 +1,9 @@
 """Turn-scoped ContextVar bridge for game tools (PR-X3-6).
 
 `BaseTool.run(**kwargs)` is called by the executor through
-``_GenyToolAdapter`` with only the LLM-supplied input kwargs plus an
-optional ``session_id`` injection. Neither ``PipelineState`` nor the
-per-turn ``MutationBuffer`` crosses that boundary.
+``BaseTool.execute`` (the unified dispatch in ``tools.base``) with only the
+LLM-supplied input kwargs plus an optional ``session_id`` injection. Neither
+``PipelineState`` nor the per-turn ``MutationBuffer`` crosses that boundary.
 
 The game tools (``feed`` / ``play`` / ``gift`` / ``talk``) need to push
 mutations onto the same buffer that ``SessionRuntimeRegistry.persist``

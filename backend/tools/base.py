@@ -3,6 +3,14 @@ Tools Base Module
 
 Provides base interfaces and decorators for tool definition.
 
+``BaseTool`` and ``ToolWrapper`` ARE ``geny_executor.tools.base.Tool``
+subclasses — Geny tools consume the executor's tool abstraction directly
+instead of a parallel one. Authoring stays ergonomic (write ``run()`` +
+a Google-style docstring → auto JSON schema), but the resulting object is a
+real executor ``Tool``: it implements ``name`` / ``description`` /
+``input_schema`` / ``async execute(input, context)`` and is dispatched by the
+executor's Stage 10 (and the MCP bridge) with no separate adapter.
+
 Usage:
     # Method 1: @tool decorator (for simple tools)
     from tools.base import tool
@@ -22,16 +30,32 @@ Usage:
         def run(self, param: str) -> str:
             return result
 """
+import asyncio
 import functools
 import inspect
 import json
-from abc import ABC, abstractmethod
-from typing import Any, Callable, ClassVar, Dict, FrozenSet, List, Optional, Union, get_type_hints
+import logging
+from abc import abstractmethod
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Union,
+    get_type_hints,
+)
+
+from geny_executor.tools.base import Tool, ToolCapabilities, ToolContext, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 # Names the host injects into a tool call from runtime context (NOT from the
 # LLM). The schema generator strips these from `properties` and `required`
-# so the LLM never sees — or hallucinates — them; the adapter overwrites
+# so the LLM never sees — or hallucinates — them; ``execute`` overwrites
 # them from the trusted `ToolContext` before dispatch.
 #
 # Adding a name here is the *only* place a new injected parameter needs to
@@ -42,16 +66,16 @@ INJECTED_PARAM_NAMES: FrozenSet[str] = frozenset({"session_id", "web_search_conf
 class ToolError(Exception):
     """Raised by tools to signal a structured failure to the LLM.
 
-    The adapter (Stage-10 dispatch + MCP bridge) catches this and surfaces
-    a clean ``isError=true`` envelope with the message text. Use this
-    instead of returning ``json.dumps({"error": ...})`` — that pattern
-    historically came back to the LLM as ``isError=false`` (a silent
-    success containing an error string), which the LLM happily
-    paraphrased as "맡겼어, 잠깐만" while nothing actually happened.
+    ``execute`` (Stage-10 dispatch + the MCP bridge) catches this and surfaces
+    a clean ``isError=true`` envelope with the message text. Use this instead
+    of returning ``json.dumps({"error": ...})`` — that pattern historically
+    came back to the LLM as ``isError=false`` (a silent success containing an
+    error string), which the LLM happily paraphrased as "맡겼어, 잠깐만" while
+    nothing actually happened.
 
-    Pass ``user_message`` for the safe text shown to the LLM (no class
-    names, no module paths, no tracebacks). Diagnostic detail goes to
-    logger.error via the adapter — never to the LLM.
+    Pass ``user_message`` for the safe text shown to the LLM (no class names,
+    no module paths, no tracebacks). Diagnostic detail goes to logger.error
+    via the dispatcher — never to the LLM.
     """
 
     def __init__(self, message: str, *, code: Optional[str] = None) -> None:
@@ -60,16 +84,192 @@ class ToolError(Exception):
         self.code = code
 
 
-class BaseTool(ABC):
-    """
-    Base class for tools
+# ─────────────────────────────────────────────────────────────────
+# Shared dispatch helpers (single source of truth for tool execution)
+# ─────────────────────────────────────────────────────────────────
 
-    All custom tools should inherit from this class.
+
+def _detect_legacy_error_envelope(result_str: str) -> bool:
+    """Return True iff ``result_str`` parses to a dict with an ``error`` key.
+
+    Pre-PR-#1 tools (notably ``blog_agent_*``) returned
+    ``json.dumps({"error": "..."})`` to signal failure while keeping the
+    host's success/error envelope at "OK" — which the LLM then paraphrased as
+    "맡겼어, 잠깐만" while nothing actually happened. New code raises
+    :class:`ToolError`; this detector handles the holdouts until they migrate.
+    """
+    s = result_str.lstrip()
+    if not s.startswith("{"):
+        return False
+    try:
+        body = json.loads(s)
+    except (ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(body, dict) and "error" in body
+
+
+def _sanitize_exception_message(tool_name: str, exc: BaseException) -> str:
+    """Surface a clean, LLM-safe error message for an unexpected exception.
+
+    Strips Python class names and module paths — the LLM doesn't need
+    "BlogAgentStatusTool.run() got an unexpected keyword argument 'fake_arg'"
+    leaking through. The operator-facing detail goes to ``logger.warning`` at
+    the call site.
+    """
+    msg = str(exc)
+    if "got an unexpected keyword argument" in msg:
+        return f"Tool '{tool_name}' rejected an unknown argument."
+    if "missing" in msg and "required positional argument" in msg:
+        return f"Tool '{tool_name}' was called without a required argument."
+    return f"Tool '{tool_name}' failed: {type(exc).__name__}"
+
+
+def _probe_param(tool: Any, param_name: str, *, kwargs_counts: bool) -> bool:
+    """Inspect a tool's authoritative signature for ``param_name``.
+
+    Probes ``func`` (ToolWrapper's wrapped function) → ``run`` (BaseTool
+    subclass override) → ``arun`` in order; the first inspectable target is
+    authoritative (the kwargs flow through that signature). When
+    ``kwargs_counts`` is True a bare ``**kwargs`` also satisfies the probe
+    (used for ``session_id``, which is safe to spray); when False only an
+    explicit named parameter counts (used for ``web_search_config``, which
+    must only reach tools that opt in by naming it). Inspection failure →
+    False (omit the injection rather than crash).
+    """
+    for fn in (
+        getattr(tool, "func", None),
+        getattr(tool, "run", None),
+        getattr(tool, "arun", None),
+    ):
+        if fn is None:
+            continue
+        try:
+            sig = inspect.signature(fn)
+        except (TypeError, ValueError):
+            continue
+        for param in sig.parameters.values():
+            if param.name == param_name:
+                return True
+            if kwargs_counts and param.kind is inspect.Parameter.VAR_KEYWORD:
+                return True
+        return False  # first inspectable target is authoritative
+    return False
+
+
+async def _dispatch_geny_tool(
+    tool: Any,
+    input: Dict[str, Any],
+    context: Optional[ToolContext],
+    *,
+    accepts_session_id: bool,
+    accepts_web_search_config: bool,
+) -> ToolResult:
+    """Unified Geny-tool dispatch — the SINGLE place tool calls are executed.
+
+    Overwrites host-injected parameters (``session_id`` etc.) from the trusted
+    ``ToolContext`` regardless of what the LLM supplied (the schema generator
+    hides them, so any value the LLM passed is a hallucination). Normalises the
+    result to a string and maps failures (``ToolError`` / legacy
+    ``{"error": ...}`` envelopes / unexpected exceptions) to a clean
+    ``ToolResult(is_error=True)`` with no tracebacks or class names leaking to
+    the LLM.
+    """
+    name = getattr(tool, "name", "unknown_tool")
+    # Copy so injection never mutates the caller's pending-call entry.
+    call_input = dict(input or {})
+    if accepts_session_id and context and getattr(context, "session_id", None):
+        call_input["session_id"] = context.session_id
+    if accepts_web_search_config and context:
+        ws_cfg = (getattr(context, "extras", None) or {}).get("web_search")
+        if ws_cfg:
+            call_input["web_search_config"] = ws_cfg
+
+    try:
+        result = await tool.arun(**call_input)
+        if isinstance(result, str):
+            result_str = result
+        else:
+            try:
+                result_str = json.dumps(result, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                result_str = str(result)
+        return ToolResult(
+            content=result_str,
+            is_error=_detect_legacy_error_envelope(result_str),
+        )
+    except ToolError as exc:
+        logger.info("tool '%s' raised ToolError: %s", name, exc.user_message)
+        return ToolResult(content=exc.user_message, is_error=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tool '%s' execution failed: %s", name, exc, exc_info=True)
+        return ToolResult(
+            content=_sanitize_exception_message(name, exc), is_error=True
+        )
+
+
+class _GenyToolExecuteMixin:
+    """Shared executor-``Tool`` surface for BaseTool + ToolWrapper.
+
+    Both author tools via ``run`` / ``arun`` + an auto-generated ``parameters``
+    schema. This mixin exposes that as the executor's ``Tool`` contract
+    (``input_schema`` + ``execute`` + ``capabilities``) so the object IS a real
+    executor tool with no separate adapter."""
+
+    def _injection_support(self) -> tuple[bool, bool]:
+        """``(accepts_session_id, accepts_web_search_config)``, probed once
+        and cached on the instance.
+
+        Computed LAZILY (not in ``__init__``) on purpose: some BaseTool
+        subclasses (e.g. ``HttpToolAdapter``) set their attributes directly
+        and never call ``super().__init__()``, so an __init__-time probe would
+        silently miss them and drop ``session_id`` injection."""
+        cached = self.__dict__.get("_geny_injection_support")
+        if cached is None:
+            cached = (
+                _probe_param(self, "session_id", kwargs_counts=True),
+                _probe_param(self, "web_search_config", kwargs_counts=False),
+            )
+            self.__dict__["_geny_injection_support"] = cached
+        return cached
+
+    @property
+    def input_schema(self) -> Dict[str, Any]:
+        params = getattr(self, "parameters", None)
+        if params is None:
+            params = {"type": "object", "properties": {}}
+        return params
+
+    def capabilities(self, input: Dict[str, Any]) -> ToolCapabilities:
+        declared = getattr(type(self), "CAPABILITIES", None) or getattr(
+            self, "CAPABILITIES", None
+        )
+        if isinstance(declared, ToolCapabilities):
+            return declared
+        return ToolCapabilities()
+
+    async def execute(
+        self, input: Dict[str, Any], context: Optional[ToolContext] = None
+    ) -> ToolResult:
+        accepts_session_id, accepts_web_search_config = self._injection_support()
+        return await _dispatch_geny_tool(
+            self,
+            input,
+            context,
+            accepts_session_id=accepts_session_id,
+            accepts_web_search_config=accepts_web_search_config,
+        )
+
+
+class BaseTool(_GenyToolExecuteMixin, Tool):
+    """
+    Base class for tools — a real geny-executor ``Tool``.
+
+    All custom tools should inherit from this class and implement ``run``.
 
     Attributes:
         name: Tool name (must be unique)
         description: Tool description (used by Claude for tool selection)
-        parameters: Parameter schema (can be auto-generated)
+        parameters: Parameter schema (auto-generated from ``run`` when unset)
 
     Example:
         class MyTool(BaseTool):
@@ -84,10 +284,8 @@ class BaseTool(ABC):
     description: str = ""
     parameters: Optional[Dict[str, Any]] = None
     # Optional executor-side runtime traits (`geny_executor.tools.base.ToolCapabilities`).
-    # Subclasses opt in by setting this; the adapter forwards to executor's
-    # `Tool.capabilities()` when set, else falls back to the fail-closed default.
-    # Stored as `Any` to avoid an import-time dependency on geny_executor at
-    # tools/base.py load — the adapter does the typed read.
+    # Subclasses opt in by setting this; :meth:`capabilities` forwards it to
+    # Stage 10, else falls back to the fail-closed default.
     CAPABILITIES: Optional[Any] = None
     # Per-tool override for the host-injected parameter set. Defaults to
     # the module-level `INJECTED_PARAM_NAMES`. A tool that genuinely wants
@@ -106,12 +304,10 @@ class BaseTool(ABC):
         """Generate parameter schema from run method signature and docstring.
 
         Excludes :class:`INJECTED_PARAM_NAMES` (e.g. ``session_id``) from
-        both ``properties`` and ``required`` — those are filled by the
-        host adapter from trusted context, never by the LLM. Sets
+        both ``properties`` and ``required`` — those are filled by
+        :meth:`execute` from trusted context, never by the LLM. Sets
         ``additionalProperties: False`` so hallucinated args are rejected
-        by the schema validator before they reach :meth:`run` (avoiding
-        the ``TypeError: unexpected keyword argument`` traceback that
-        used to surface to the LLM).
+        by the schema validator before they reach :meth:`run`.
         """
         schema: Dict[str, Any] = {
             "type": "object",
@@ -210,7 +406,7 @@ class BaseTool(ABC):
     @abstractmethod
     def run(self, **kwargs) -> str:
         """
-        Execute the tool
+        Execute the tool (authoring entry point).
 
         Args:
             **kwargs: Tool parameters
@@ -241,16 +437,26 @@ class BaseTool(ABC):
         }
 
 
-class ToolWrapper:
+class ToolWrapper(_GenyToolExecuteMixin, Tool):
     """
-    Function wrapper created by @tool decorator
+    Function wrapper created by @tool decorator — a real geny-executor ``Tool``.
 
-    Wraps regular functions to be compatible with BaseTool interface.
+    Wraps regular functions to be compatible with the tool interface.
     """
+
+    # Class-level attrs so they override the executor ``Tool``'s abstract
+    # ``name`` / ``description`` properties at class-creation time; __init__
+    # sets the real per-instance values.
+    name: str = ""
+    description: str = ""
+    parameters: Optional[Dict[str, Any]] = None
 
     # Mirror BaseTool's INJECTED_PARAMS so the schema generator hides
     # host-injected parameters from the LLM here too.
     INJECTED_PARAMS: ClassVar[FrozenSet[str]] = INJECTED_PARAM_NAMES
+    # Authors may set this on the wrapped function (rare); kept for parity
+    # with BaseTool so :meth:`capabilities` can read it.
+    CAPABILITIES: Optional[Any] = None
 
     def __init__(self, func: Callable, name: Optional[str] = None, description: Optional[str] = None):
         self.func = func
@@ -258,6 +464,8 @@ class ToolWrapper:
         self.description = description or func.__doc__ or f"Tool: {self.name}"
         self.parameters = self._generate_parameters_schema()
         self.is_async = inspect.iscoroutinefunction(func)
+        # Carry an author-declared CAPABILITIES off the function if present.
+        self.CAPABILITIES = getattr(func, "CAPABILITIES", None)
 
         # Copy function metadata
         functools.update_wrapper(self, func)

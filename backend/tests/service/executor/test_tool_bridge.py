@@ -1,27 +1,19 @@
-"""Regression tests for `_GenyToolAdapter`'s signature probe + arg map.
+"""Regression tests for the unified Geny-tool dispatch (tools.base).
 
-Cycle 20260420_6: fixes the probe misdirection that was silently
-injecting ``session_id`` into every `BaseTool` subclass — even those
-whose concrete ``run()`` didn't accept it — because the probe inspected
-`arun`'s inherited `**kwargs` forwarder instead of the authoritative
-`run` override.
+Geny tools are now real ``geny_executor.tools.base.Tool`` instances — the old
+``_GenyToolAdapter`` is gone; ``BaseTool`` / ``ToolWrapper`` implement
+``execute()`` directly via the shared dispatch in :mod:`tools.base`. These
+tests pin the same contract the adapter used to guarantee:
 
-See ``dev_docs/20260420_6/analysis/01_probe_misdirection.md``.
+- the signature probe (``_probe_param``) injects ``session_id`` iff the
+  authoritative callable (func for ToolWrapper, run for BaseTool, arun
+  fallback) accepts it — explicit or via ``**kwargs``;
+- ``execute()`` overwrites LLM-supplied injected params with the trusted
+  ``ToolContext``;
+- ``execute()`` does not mutate the caller's input dict.
 
-The matrix here covers every tool shape the adapter has to handle:
-
-- BaseTool subclass, ``run`` without ``session_id`` → no inject
-- BaseTool subclass, ``run`` with ``session_id`` → inject
-- BaseTool subclass, ``run`` with ``**kwargs`` → inject (safe)
-- ``@tool``-decorated function without ``session_id`` → no inject
-- ``@tool``-decorated function with ``session_id`` → inject
-- Duck-typed object with only ``arun`` → probe ``arun`` (fallback)
-- Unreadable signature (partial / C-callable) → False (safe default)
-
-Plus: ``execute`` must not mutate the caller's input dict, and a
-real-world smoke against ``SendDirectMessageExternalTool`` (the tool that
-actually broke in production) with ``_resolve_session`` monkey-patched
-so no live SessionStore is required.
+Plus a real-world smoke against ``SendDirectMessageExternalTool`` (the tool
+that broke in production) with its session helpers monkey-patched.
 """
 
 from __future__ import annotations
@@ -30,8 +22,8 @@ from typing import Any, Dict
 
 import pytest
 
-from service.executor.tool_bridge import _GenyToolAdapter
-from tools.base import BaseTool, tool as tool_decorator
+from geny_executor.tools.base import ToolContext
+from tools.base import BaseTool, _probe_param, tool as tool_decorator
 
 
 class _BaseToolNoSessionId(BaseTool):
@@ -87,27 +79,19 @@ class _DuckTypedAsyncOnly:
 
 
 class _UnreadableSignature:
-    """Tool whose `run`/`arun` have no introspectable signature.
-
-    Simulated by pointing the methods at a C-implemented callable
-    whose ``inspect.signature`` raises ``ValueError``. We want the
-    probe to *catch* the raise and return False (safe default), not
-    propagate it and blow up adapter construction."""
+    """Tool whose `run`/`arun` have no introspectable signature."""
 
     name = "unreadable_tool"
     description = "has an uninspectable signature"
     parameters = {"type": "object", "properties": {}}
 
 
-class _SimpleContext:
-    """Minimal stand-in for :class:`geny_executor.tools.base.ToolContext`."""
-
-    def __init__(self, session_id: str = "sess-xyz") -> None:
-        self.session_id = session_id
+def _ctx(session_id: str = "sess-xyz") -> ToolContext:
+    return ToolContext(session_id=session_id)
 
 
 # ─────────────────────────────────────────────────────────────────
-# Probe matrix
+# Probe matrix — _probe_param(session_id)
 # ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -122,33 +106,40 @@ class _SimpleContext:
     ],
 )
 def test_probe_matches_concrete_signature(tool_factory, expected) -> None:
-    """The probe returns True iff the *authoritative* callable (func
-    for ToolWrapper, run for BaseTool subclass, arun as fallback)
-    accepts session_id — explicit or via **kwargs."""
+    """The probe returns True iff the *authoritative* callable (func for
+    ToolWrapper, run for BaseTool subclass, arun fallback) accepts
+    session_id — explicit or via **kwargs."""
     tool = tool_factory()
-    adapter = _GenyToolAdapter(tool)
-    assert adapter._accepts_session_id is expected, (
-        f"probe returned {adapter._accepts_session_id} for "
-        f"{type(tool).__name__}; expected {expected}"
+    got = _probe_param(tool, "session_id", kwargs_counts=True)
+    assert got is expected, (
+        f"probe returned {got} for {type(tool).__name__}; expected {expected}"
     )
 
 
-def test_probe_unreadable_signature_returns_false(monkeypatch) -> None:
-    """C-implemented / uninspectable callables must probe False — the
-    adapter must never crash on construction, and omitting the
-    injection is the safe default."""
-    from service.executor import tool_bridge as tb
+def test_probe_explicit_only_for_web_search_config() -> None:
+    """``web_search_config`` only injects when EXPLICITLY named — a bare
+    ``**kwargs`` must NOT count (kwargs_counts=False)."""
+    assert _probe_param(_BaseToolVarKeyword(), "web_search_config", kwargs_counts=False) is False
 
-    def _always_raise(fn):
+    @tool_decorator(name="ws", description="x")
+    def _fn(web_search_config: dict = None) -> str:  # type: ignore[assignment]
+        return "ok"
+
+    assert _probe_param(_fn, "web_search_config", kwargs_counts=False) is True
+
+
+def test_probe_unreadable_signature_returns_false(monkeypatch) -> None:
+    """Uninspectable callables must probe False — no crash, omit injection."""
+    import tools.base as tb
+
+    def _always_raise(_fn):
         raise ValueError("simulated uninspectable callable")
 
     monkeypatch.setattr(tb.inspect, "signature", _always_raise)
 
     tool = _UnreadableSignature()
     tool.run = lambda **kwargs: None
-
-    adapter = _GenyToolAdapter(tool)
-    assert adapter._accepts_session_id is False
+    assert _probe_param(tool, "session_id", kwargs_counts=True) is False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -159,9 +150,8 @@ def test_probe_unreadable_signature_returns_false(monkeypatch) -> None:
 async def test_execute_no_session_tool_runs_without_injection() -> None:
     """The DM-shape tool (no session_id in run) must complete without
     ``TypeError`` — the production bug."""
-    adapter = _GenyToolAdapter(_BaseToolNoSessionId())
-    result = await adapter.execute(
-        {"target": "alice", "content": "hi"}, _SimpleContext()
+    result = await _BaseToolNoSessionId().execute(
+        {"target": "alice", "content": "hi"}, _ctx()
     )
     assert result.is_error is False, result.content
     assert "no-session:alice:hi" in str(result.content)
@@ -169,57 +159,37 @@ async def test_execute_no_session_tool_runs_without_injection() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_session_tool_receives_injected_id() -> None:
-    """Memory/knowledge shape: ``run`` declares session_id, adapter
-    fills it in from context."""
-    adapter = _GenyToolAdapter(_BaseToolWithSessionId())
-    result = await adapter.execute({"key": "notes"}, _SimpleContext("sess-42"))
+    result = await _BaseToolWithSessionId().execute({"key": "notes"}, _ctx("sess-42"))
     assert result.is_error is False
     assert "with-session:sess-42:notes" in str(result.content)
 
 
 @pytest.mark.asyncio
 async def test_execute_session_tool_overrides_llm_supplied_id() -> None:
-    """If the LLM hallucinates a ``session_id`` in input, adapter must
-    **overwrite** it with the trusted ``ToolContext.session_id``.
-
-    Pre-PR-#1 (Phase A2) this used ``setdefault`` — meaning a
-    hallucinated session_id from the LLM would survive into the tool
-    call. The schema generator now hides ``session_id`` from the LLM
-    in the first place (see :data:`tools.base.INJECTED_PARAM_NAMES`),
-    but a misbehaving client could still smuggle one through; this
-    test pins the new contract that we never honour LLM-supplied
-    injected params.
-    """
-    adapter = _GenyToolAdapter(_BaseToolWithSessionId())
-    result = await adapter.execute(
-        {"session_id": "llm-hallucinated", "key": "notes"},
-        _SimpleContext("ctx-sess"),
+    """A hallucinated ``session_id`` from the LLM is overwritten by the
+    trusted ``ToolContext.session_id``."""
+    result = await _BaseToolWithSessionId().execute(
+        {"session_id": "llm-hallucinated", "key": "notes"}, _ctx("ctx-sess")
     )
-    # The trusted context wins; the hallucinated value is dropped.
     assert "with-session:ctx-sess:notes" in str(result.content)
     assert "llm-hallucinated" not in str(result.content)
 
 
 @pytest.mark.asyncio
 async def test_execute_does_not_mutate_caller_input() -> None:
-    """The caller's ``input`` dict must be untouched after execute —
-    adapters are cached in GenyToolProvider and stages can retry."""
-    adapter = _GenyToolAdapter(_BaseToolWithSessionId())
+    tool = _BaseToolWithSessionId()
     caller_input: Dict[str, Any] = {"key": "x"}
     snapshot = dict(caller_input)
-    await adapter.execute(caller_input, _SimpleContext())
+    await tool.execute(caller_input, _ctx())
     assert caller_input == snapshot, (
-        f"adapter mutated caller's input: before={snapshot}, after={caller_input}"
+        f"execute mutated caller's input: before={snapshot}, after={caller_input}"
     )
 
 
 @pytest.mark.asyncio
 async def test_execute_tool_wrapper_without_session_id() -> None:
-    """@tool-decorated function whose signature lacks session_id
-    must not receive the injection, even when context has one."""
-    adapter = _GenyToolAdapter(_fn_no_session)
-    result = await adapter.execute(
-        {"target": "alice", "content": "hi"}, _SimpleContext()
+    result = await _fn_no_session.execute(
+        {"target": "alice", "content": "hi"}, _ctx()
     )
     assert result.is_error is False, result.content
     assert "fn-no-session:alice:hi" in str(result.content)
@@ -227,27 +197,18 @@ async def test_execute_tool_wrapper_without_session_id() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_tool_wrapper_with_session_id() -> None:
-    """@tool-decorated function with session_id in signature receives
-    the injection from context."""
-    adapter = _GenyToolAdapter(_fn_with_session)
-    result = await adapter.execute({"key": "notes"}, _SimpleContext("sess-1"))
+    result = await _fn_with_session.execute({"key": "notes"}, _ctx("sess-1"))
     assert result.is_error is False
     assert "fn-with-session:sess-1:notes" in str(result.content)
 
 
 # ─────────────────────────────────────────────────────────────────
-# Real-world smoke: SendDirectMessageExternalTool via the adapter
+# Real-world smoke: SendDirectMessageExternalTool
 # ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_send_direct_message_external_adapter_no_type_error(monkeypatch) -> None:
-    """End-to-end smoke on the exact class that failed in production.
-
-    Monkey-patches ``_resolve_session`` / ``_get_inbox_manager`` /
-    ``_trigger_dm_response`` so the tool runs without a live
-    SessionStore or ChatStore. Asserts the adapter's kwargs pass
-    through to ``run`` without raising, which was the LOG error
-    that triggered this cycle."""
+async def test_send_direct_message_external_no_type_error(monkeypatch) -> None:
+    """End-to-end smoke on the exact class that failed in production."""
     from tools.built_in import geny_tools
 
     class _FakeAgent:
@@ -262,28 +223,18 @@ async def test_send_direct_message_external_adapter_no_type_error(monkeypatch) -
         geny_tools, "_resolve_session", lambda _: (_FakeAgent(), "resolved-sid")
     )
     monkeypatch.setattr(geny_tools, "_get_inbox_manager", lambda: _FakeInbox())
-    monkeypatch.setattr(
-        geny_tools,
-        "_trigger_dm_response",
-        lambda **kwargs: None,
-    )
+    monkeypatch.setattr(geny_tools, "_trigger_dm_response", lambda **kwargs: None)
 
     tool = geny_tools.SendDirectMessageExternalTool()
-    adapter = _GenyToolAdapter(tool)
-
-    # The production bug: probe returned True, adapter injected
-    # session_id, run raised TypeError. Assert the probe now gets it
-    # right and the call returns cleanly.
-    assert adapter._accepts_session_id is False, (
-        "SendDirectMessageExternalTool.run does not declare session_id and "
-        "has no **kwargs — probe must return False"
+    assert _probe_param(tool, "session_id", kwargs_counts=True) is False, (
+        "SendDirectMessageExternalTool.run declares no session_id and no "
+        "**kwargs — probe must return False"
     )
 
-    result = await adapter.execute(
-        {"target_session_id": "sub-worker", "content": "안녕"},
-        _SimpleContext("vtuber-session"),
+    result = await tool.execute(
+        {"target_session_id": "sub-worker", "content": "안녕"}, _ctx("vtuber-session")
     )
     assert result.is_error is False, (
-        f"SendDirectMessageExternalTool adapter still errors: {result.content}"
+        f"SendDirectMessageExternalTool still errors: {result.content}"
     )
     assert "delivered_to" in str(result.content) or "success" in str(result.content)

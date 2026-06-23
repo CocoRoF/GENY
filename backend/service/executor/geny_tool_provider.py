@@ -45,12 +45,10 @@ class GenyToolProvider:
     ``manifest.tools.external``; this provider never filters by preset
     itself, keeping responsibility clean.
 
-    :meth:`get` returns a :class:`Tool` adapter on demand. The adapter
-    bridges Geny's ``BaseTool.run(**kwargs)`` / ``ToolWrapper.arun``
-    into executor's ``async Tool.execute(input, context)`` shape. The
-    full adapter is imported lazily so *importing this module* does
-    not require ``geny-executor`` at boot time — matters while this
-    file still ships as dead code alongside the legacy tool_bridge.
+    :meth:`get` returns the tool directly — Geny's ``BaseTool`` /
+    ``ToolWrapper`` ARE ``geny_executor.tools.base.Tool`` subclasses now
+    (they implement ``async execute(input, context)`` themselves), so no
+    adapter is needed. The legacy ``_GenyToolAdapter`` is gone.
     """
 
     def __init__(self, tool_loader: Any) -> None:
@@ -75,12 +73,12 @@ class GenyToolProvider:
         return list(all_tools.keys())
 
     def get(self, name: str) -> Optional[Any]:
-        """Return an executor-compatible :class:`Tool` adapter for
-        *name*, or ``None`` if the loader does not supply that tool.
+        """Return the executor :class:`Tool` for *name*, or ``None`` if the
+        loader does not supply it.
 
-        Adapters are cached per name so the pipeline registering the
-        same tool across multiple sessions does not pay for repeated
-        adaptation.
+        Geny tools are already ``Tool`` instances (BaseTool / ToolWrapper),
+        so this just forwards the loader's tool — no adaptation. Cached per
+        name to keep repeated lookups cheap.
         """
         if name in self._cache:
             return self._cache[name]
@@ -89,8 +87,5 @@ class GenyToolProvider:
         if base is None:
             return None
 
-        from service.executor.tool_bridge import _GenyToolAdapter
-
-        adapter = _GenyToolAdapter(base)
-        self._cache[name] = adapter
-        return adapter
+        self._cache[name] = base
+        return base
