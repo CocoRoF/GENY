@@ -6,7 +6,7 @@ Tracks [01_PLAN.md](01_PLAN.md). One row per phase.
 |---|---|---|
 | **P0** | executor `SandboxExecTool` + public container-exec API + spec ser/de + tests | ✅ **DONE** — geny-executor **2.30.0** (commit b02b594), full suite 4394 passed |
 | **P1** | GAPT snapshot subsystem: `snapshots` table + Alembic migration + `domains/snapshots/` service (capture/restore/list/diff/activity/delete) + `routers/snapshots.py`; artifacts force-included | ✅ **DONE** — gapt main `bdd93e2` (PR #8). Activation = 2223 redeploy (entrypoint runs `alembic upgrade head`). |
-| **P2** | Geny `sandbox_tool_packs` store + pack-loader + adapter (build `SandboxExecTool` w/ `GaptSandboxHandle`); a hand-written pack runs e2e | ⬜ |
+| **P2** | Geny `sandbox_tool_packs` store + pack-loader + adapter (build `SandboxExecTool` w/ `PackSandboxHandle`); a hand-written pack runs e2e | ✅ **DONE** — Geny main `8f62a6f0` (PR #1053); 5 tests |
 | **P3** | Save/test API + project-per-pack provisioning + `tool_save` snapshot — `POST /api/sandbox-tool-packs` | ⬜ |
 | **P4** | Authoring loop: `env(action="forge_tool")` + bundled `tool-builder` skill | ⬜ |
 | **P5** | Reuse across sessions: env opt-in + cold restore-from-snapshot; tool authored in A callable in B; skills surface | ⬜ |
@@ -42,12 +42,27 @@ sets), `tests/domains/snapshots/test_snapshot_mechanics.py`.
 - **Activation**: redeploy GAPT on 2223 (docker-entrypoint runs `alembic upgrade
   head` → creates the table). Do this alongside the end-to-end wiring (P2–P5).
 
-## Next: P2 (Geny pack store + loader)
-Build the Geny side using executor `SandboxExecTool` (2.30.0) + GAPT snapshot
-API (GaptClient): `sandbox_tool_packs` table + `service/sandbox_tool_packs/` +
-pack-loader (restore workspace from snapshot → build SandboxExecTool with
-GaptSandboxHandle + register skills) → ToolLoader/GenyToolProvider. A
-hand-written pack should run e2e.
+## P2 DONE (Geny pack store + loader) — summary
+Geny main `8f62a6f0` (PR #1053). gapt submodule bumped to snapshot-capable `bdd93e2`.
+- `service/sandbox_tool_packs/`: `models.py` (SandboxToolPackDefinition /
+  SandboxToolSpec = exact executor SandboxExecTool spec / PackSkill), `store.py`
+  (DB CRUD, UNIQUE pack_id+name, enabled default OFF), `loader.py`
+  (`PackSandboxHandle` cold-restore-from-snapshot · `load_pack` → SandboxExecTool[]
+  + Skill[] · `SandboxToolPackProvider` aggregates enabled packs).
+- `service/database/models/sandbox_tool_pack.py` (SandboxToolPackModel) registered
+  in APPLICATION_MODELS (auto table creation).
+- `service/gapt/client.py`: 7 snapshot methods (create/list/get/diff/activity/
+  restore/delete) calling GAPT P1.
+- Tests (5): load builds tools+skills (shared handle); warm boot idempotent; cold
+  re-provision+restore-from-snapshot; tool executes in pack workspace (JSON in/out);
+  provider aggregation. Store CRUD itself runs on Postgres (CI).
+
+## Next: P3 (save/test API + project-per-pack + tool_save snapshot)
+The CREATE flow: provision a dedicated GAPT project+workspace for a pack, let the
+agent write+test tool code there, then `POST /api/sandbox-tool-packs` →
+materialize (GAPT snapshot kind=tool_save via GaptClient.create_snapshot) + persist
+the pack row. Plus `/{id}/test` (run a tool with sample input) + list/get/delete +
+enable. Controller + service-level create orchestration.
 
 ## (archived) P1 resume notes
 
