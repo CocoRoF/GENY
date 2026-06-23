@@ -725,27 +725,64 @@ class AgentSessionManager:
         if os.getenv("GENY_GAPT_WORKSPACES", "1").strip().lower() not in (
             "0", "false", "no", "off", ""
         ):
+            # claude_code_cli on a ROTATING subscription OAuth login
+            # (in_modal_login / host_mount) CANNOT run in a sandbox: the
+            # refreshToken rotates on refresh, so geny-backend + each
+            # per-session workspace copy invalidate each other server-side ->
+            # 401 on every chat. Only sandbox the CLI when a NON-rotating setup
+            # token is configured (auth_mode == "setup_token" -> we inject
+            # CLAUDE_CODE_OAUTH_TOKEN, safe to share). Otherwise run it on the
+            # host (single OAuth instance). SDK backends (API key) always
+            # sandbox fine. See feedback_claude_oauth_no_share.
+            _skip_for_cli_oauth = False
             try:
-                from service.gapt import GaptWorkspaceProvider, get_gapt_client
+                from service.environment.role_defaults import resolve_env_id as _rev
 
-                _gc = get_gapt_client()
-                if _gc.configured:
-                    gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
-                        project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
-                        workspace_name=session_id,
+                _provider = self._extract_primary_provider(_rev(request.role, env_id))
+                if _provider == "claude_code_cli":
+                    from service.config.manager import get_config_manager
+                    from service.config.sub_config.general.cli_backends_config import (
+                        CLIBackendClaudeCodeConfig,
                     )
-                    logger.info(
-                        "[%s] bound to GAPT workspace %s",
-                        session_id,
-                        gapt_sandbox.container_name,
-                    )
+
+                    _cfg = get_config_manager().load_config(CLIBackendClaudeCodeConfig)
+                    if (getattr(_cfg, "auth_mode", "") or "").strip() != "setup_token":
+                        _skip_for_cli_oauth = True
+                        logger.info(
+                            "[%s] claude_code_cli on OAuth (auth_mode=%s) -> host "
+                            "execution; sandbox requires a setup token",
+                            session_id,
+                            getattr(_cfg, "auth_mode", "?"),
+                        )
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "[%s] GAPT workspace provisioning failed; using host execution",
+                    "[%s] sandbox provider/auth pre-check failed; proceeding",
                     session_id,
                     exc_info=True,
                 )
-                gapt_sandbox = None
+
+            if not _skip_for_cli_oauth:
+                try:
+                    from service.gapt import GaptWorkspaceProvider, get_gapt_client
+
+                    _gc = get_gapt_client()
+                    if _gc.configured:
+                        gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
+                            project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
+                            workspace_name=session_id,
+                        )
+                        logger.info(
+                            "[%s] bound to GAPT workspace %s",
+                            session_id,
+                            gapt_sandbox.container_name,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[%s] GAPT workspace provisioning failed; using host execution",
+                        session_id,
+                        exc_info=True,
+                    )
+                    gapt_sandbox = None
 
         # Prepare system prompt — using modular prompt builder
         system_prompt = self._build_system_prompt(
