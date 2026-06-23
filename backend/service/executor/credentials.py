@@ -279,6 +279,21 @@ class CredentialBundleBuilder:
         if claude_cli.settings_path:
             extras["settings_path"] = claude_cli.settings_path
 
+        # setup_token mode: the user pasted a long-lived ``claude setup-token``
+        # value (stored in the ``api_key`` field — see ClaudeCodeAuthModal
+        # ``saveToken``). Hand it to EVERY CLI spawn — the host runner AND each
+        # sandbox container — via ``CLAUDE_CODE_OAUTH_TOKEN`` (executor 2.24.0
+        # threads ``env_extras`` through to the ContainerCLIRunner ``--env``).
+        # Unlike the rotating OAuth credential file, a setup token is
+        # non-rotating, so it is safe to share across geny-backend + all
+        # per-session GAPT workspaces. The OAuth-file approach 401s precisely
+        # because refresh rotates the token and the shared copies invalidate
+        # each other.
+        if mode == "setup_token" and claude_cli.api_key:
+            extras["env_extras"] = {
+                "CLAUDE_CODE_OAUTH_TOKEN": claude_cli.api_key
+            }
+
         # Phase I — Geny tools MCP bridge. When the caller wires a
         # session-scoped bridge context, we synthesise the MCP config
         # that points the CLI at our stdio bridge subprocess. The
