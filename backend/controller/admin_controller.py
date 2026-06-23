@@ -379,7 +379,6 @@ _LIFESPAN_KEYS = (
     "tool_loader",
     "mcp_loader",
     "global_mcp_config",
-    "shared_folder_manager",
     "ws_abandoned_detector",
     "environment_service",
     "task_runner",

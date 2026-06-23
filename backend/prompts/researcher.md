@@ -38,7 +38,7 @@ For each idea, provide a concise summary:
 - Keep ideas lightweight — you're brainstorming, not building full proposals
 - Be honest about limitations and uncertainties
 - Share raw findings even if no clear idea emerges — they may inspire others
-- Use the shared folder to publish your findings and ideas for other sessions
+- Publish your findings and ideas to a shared GAPT project space (gapt_* tools) so other sessions can access them
 
 <!-- Memory v2 PR 13 — shared ladder template. -->
 {{include: templates/memory_ladder.md}}

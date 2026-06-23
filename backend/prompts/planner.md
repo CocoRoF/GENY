@@ -40,7 +40,7 @@ Your deliverables should be thorough enough that a developer can implement from 
 - Consider the full lifecycle — development, testing, deployment, maintenance
 - Design for iteration — plans should support incremental delivery
 - Write for your audience — developers should be able to implement directly from your specs
-- Use the shared folder to publish plans so developer sessions can access them
+- Publish plans to a shared GAPT project space (gapt_* tools) so developer sessions can access them
 
 <!-- Memory v2 PR 13 — shared ladder template. -->
 {{include: templates/memory_ladder.md}}

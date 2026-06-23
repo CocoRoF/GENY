@@ -14,7 +14,6 @@ const StorageTab = dynamic(() => import('@/components/tabs/StorageTab'));
 const SessionEnvironmentTab = dynamic(() => import('@/components/tabs/SessionEnvironmentTab'), { ssr: false });
 const InfoTab = dynamic(() => import('@/components/tabs/InfoTab'));
 const SettingsTab = dynamic(() => import('@/components/tabs/SettingsTab'));
-const SharedFolderTab = dynamic(() => import('@/components/tabs/SharedFolderTab'));
 const SessionToolsTab = dynamic(() => import('@/components/tabs/SessionToolsTab'));
 // Cycle 20260503_3 — the in-Geny ``MemoryTab`` was retired in favour
 // of opening the canonical Opsidian app (``/opsidian``) in a new
@@ -42,7 +41,6 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   storage: StorageTab,
   sessionEnvironment: SessionEnvironmentRootTab,
   graph: SessionEnvironmentTab,
-  sharedFolder: SharedFolderTab,
   info: InfoTab,
   settings: SettingsTab,
   sessionTools: SessionToolsTab,

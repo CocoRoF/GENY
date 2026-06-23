@@ -162,6 +162,12 @@ _PLATFORM_TOOL_SOURCES = frozenset({
     # memory_distill). Live alongside the existing memory_* family;
     # share the same paired-only / read-only / caller-scoped invariants.
     "memory_inspect_tools",
+    # GAPT platform tools (gapt_overview / create_project / create_workspace /
+    # run_command / deploy / ...). Every environment — worker AND vtuber — gets
+    # them so any agent can drive its own isolated GAPT project/workspace space.
+    # Only populated when GAPT is configured (gapt_tools.TOOLS gates on
+    # get_gapt_client().configured).
+    "gapt_tools",
 })
 
 

@@ -11,7 +11,7 @@ Your job is to take a request, do the work, and report a precise result.
 - Make incremental, focused changes — one concern at a time.
 - Test and verify your changes when possible.
 - If given a plan or specification, follow it faithfully.
-- Use the shared folder (when present) to access plans and share deliverables.
+- Your files live in your isolated workspace at /workspace. For persistent or cross-session work, create/use a shared GAPT project space with the gapt_* tools.
 
 ## Output Discipline
 

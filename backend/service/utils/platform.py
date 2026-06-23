@@ -7,8 +7,8 @@ NOTE: Historically this module also held Claude-CLI-specific subprocess
 helpers (WindowsProcessWrapper, AsyncStreamWriter/Reader,
 create_subprocess_cross_platform, get_claude_env_vars). Those were
 deleted in cycle 20260424_2 PR-4 along with the ClaudeProcess chain.
-What remains is range-generic — used by memory/, shared_folder/,
-executor/, etc. PR-5 will relocate it to ``service/utils/platform.py``.
+What remains is range-generic — used by memory/, executor/, etc.
+PR-5 will relocate it to ``service/utils/platform.py``.
 """
 import os
 import platform

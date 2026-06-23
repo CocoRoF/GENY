@@ -36,7 +36,6 @@ from controller.tool_settings_controller import router as tool_settings_router
 from controller.gapt_controller import router as gapt_router  # GAPT integration status
 from controller.llm_backends_controller import router as llm_backends_router
 from controller.mcp_bridge_controller import router as mcp_bridge_router
-from controller.shared_folder_controller import router as shared_folder_router
 from controller.chat_controller import router as chat_router
 from controller.upload_controller import router as upload_router
 from controller.tool_preset_controller import router as tool_preset_router
@@ -329,26 +328,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("   - Custom tools (DB): skipped — database unavailable")
 
-    # Initialize Shared Folder
-    print_step_banner("SHARED", "SHARED FOLDER", "Initializing shared folder for cross-session collaboration...")
-    from service.shared_folder import get_shared_folder_manager
-    from service.config.sub_config.general.shared_folder_config import SharedFolderConfig
-    shared_folder_cfg = config_manager.load_config(SharedFolderConfig)
-    shared_mgr = get_shared_folder_manager()
-    # Apply custom path from config if set
-    if shared_folder_cfg.shared_folder_path:
-        shared_mgr.update_path(shared_folder_cfg.shared_folder_path)
-    app.state.shared_folder_manager = shared_mgr
-    logger.info(f"   - Shared folder: {shared_mgr.shared_path}")
-    logger.info(f"   - Enabled: {shared_folder_cfg.enabled}")
-    logger.info(f"   - Link name: {shared_folder_cfg.link_name}")
-
-    # Pass shared folder config to agent manager for session initialization
-    agent_manager.set_shared_folder_config(
-        enabled=shared_folder_cfg.enabled,
-        shared_folder_manager=shared_mgr,
-        link_name=shared_folder_cfg.link_name,
-    )
+    # (Shared folder removed — sessions now use isolated GAPT workspaces.)
 
     # Start background idle monitor (transitions idle sessions to IDLE status)
     await agent_manager.start_idle_monitor()
@@ -877,7 +857,6 @@ app.include_router(tool_settings_router)  # Per-environment tool settings schema
 app.include_router(gapt_router)  # GAPT integration status (header button detection)
 app.include_router(llm_backends_router)  # LLM backend health + Claude Code login + subagent listing (Phase E4)
 app.include_router(mcp_bridge_router)  # Phase I — internal MCP endpoint for claude_code_cli tool wrap
-app.include_router(shared_folder_router)  # Shared folder
 app.include_router(chat_router)  # Chat broadcast
 app.include_router(upload_router)  # File / image uploads (multipart)
 app.include_router(tool_preset_router)  # Tool preset management
