@@ -225,6 +225,55 @@ class GaptClient:
     async def workspace_stats(self) -> Any:
         return await self.get("/_gapt/api/workspaces/stats")
 
+    # ----------------------------------------------------------- snapshots
+    # Sandbox Tool Packs — git-grade workspace checkpoints (GAPT P1).
+    async def create_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        label: str = "",
+        session_id: Optional[str] = None,
+        kind: str = "manual",
+        include_ignored: Optional[bool] = None,
+    ) -> Any:
+        body: dict[str, Any] = {"label": label, "kind": kind}
+        if session_id is not None:
+            body["session_id"] = session_id
+        if include_ignored is not None:
+            body["include_ignored"] = include_ignored
+        return await self.post(
+            f"/_gapt/api/workspaces/{workspace_id}/snapshots", json=body
+        )
+
+    async def list_snapshots(self, workspace_id: str) -> Any:
+        return await self.get(f"/_gapt/api/workspaces/{workspace_id}/snapshots")
+
+    async def get_snapshot(self, snapshot_id: str) -> Any:
+        return await self.get(f"/_gapt/api/snapshots/{snapshot_id}")
+
+    async def snapshot_diff(self, snapshot_id: str) -> Any:
+        return await self.get(f"/_gapt/api/snapshots/{snapshot_id}/diff")
+
+    async def snapshot_activity(self, snapshot_id: str) -> Any:
+        return await self.get(f"/_gapt/api/snapshots/{snapshot_id}/activity")
+
+    async def restore_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        target_workspace_id: Optional[str] = None,
+        clean: bool = True,
+    ) -> Any:
+        body: dict[str, Any] = {"clean": clean}
+        if target_workspace_id is not None:
+            body["target_workspace_id"] = target_workspace_id
+        return await self.post(
+            f"/_gapt/api/snapshots/{snapshot_id}/restore", json=body
+        )
+
+    async def delete_snapshot(self, snapshot_id: str) -> Any:
+        return await self.delete(f"/_gapt/api/snapshots/{snapshot_id}")
+
     # ----------------------------------------------------------- deploy
     async def list_environments(self, project_id: str) -> Any:
         return await self.get(f"/_gapt/api/projects/{project_id}/environments")
