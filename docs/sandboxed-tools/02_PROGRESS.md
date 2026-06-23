@@ -7,7 +7,7 @@ Tracks [01_PLAN.md](01_PLAN.md). One row per phase.
 | **P0** | executor `SandboxExecTool` + public container-exec API + spec ser/de + tests | ✅ **DONE** — geny-executor **2.30.0** (commit b02b594), full suite 4394 passed |
 | **P1** | GAPT snapshot subsystem: `snapshots` table + Alembic migration + `domains/snapshots/` service (capture/restore/list/diff/activity/delete) + `routers/snapshots.py`; artifacts force-included | ✅ **DONE** — gapt main `bdd93e2` (PR #8). Activation = 2223 redeploy (entrypoint runs `alembic upgrade head`). |
 | **P2** | Geny `sandbox_tool_packs` store + pack-loader + adapter (build `SandboxExecTool` w/ `PackSandboxHandle`); a hand-written pack runs e2e | ✅ **DONE** — Geny main `8f62a6f0` (PR #1053); 5 tests |
-| **P3** | Save/test API + project-per-pack provisioning + `tool_save` snapshot — `POST /api/sandbox-tool-packs` | ⬜ |
+| **P3** | Save/test/manage API + `tool_save` snapshot — `POST /api/sandbox-tool-packs` | ✅ **DONE** — Geny main `a29f4f1c` (PR #1054); builder + controller + 8 tests |
 | **P4** | Authoring loop: `env(action="forge_tool")` + bundled `tool-builder` skill | ⬜ |
 | **P5** | Reuse across sessions: env opt-in + cold restore-from-snapshot; tool authored in A callable in B; skills surface | ⬜ |
 | **P6** | Migrate `python_inline` → sandbox (retire host `exec()`); (P7 optional) GAPT frontend snapshot button + snapshot-graph/pack-manager UI | ⬜ |
@@ -57,12 +57,28 @@ Geny main `8f62a6f0` (PR #1053). gapt submodule bumped to snapshot-capable `bdd9
   re-provision+restore-from-snapshot; tool executes in pack workspace (JSON in/out);
   provider aggregation. Store CRUD itself runs on Postgres (CI).
 
-## Next: P3 (save/test API + project-per-pack + tool_save snapshot)
-The CREATE flow: provision a dedicated GAPT project+workspace for a pack, let the
-agent write+test tool code there, then `POST /api/sandbox-tool-packs` →
-materialize (GAPT snapshot kind=tool_save via GaptClient.create_snapshot) + persist
-the pack row. Plus `/{id}/test` (run a tool with sample input) + list/get/delete +
-enable. Controller + service-level create orchestration.
+## P3 DONE (save/test/manage API) — summary
+Geny main `a29f4f1c` (PR #1054).
+- `service/sandbox_tool_packs/builder.py`: `save_pack` (GAPT `create_snapshot`
+  kind=tool_save, include_ignored → persist, enabled=False), `test_tool` (build
+  SandboxExecTool + execute a spec with sample input), `resave_pack`.
+- `controller/sandbox_tool_packs_controller.py`: GET list/{id}, POST /test, POST
+  (save), POST /{id}/resave, PATCH /{id}/enabled, DELETE (+ snapshot cleanup).
+- `main.py`: router mounted + store `set_database` at boot.
+- 8 pack tests pass. (Note: P3 saves the *authoring* workspace as the pack
+  workspace; the snapshot is the durable truth — reuse restores it. Dedicated
+  per-pack project provisioning is a refinement deferred to P5 wiring.)
+
+## Next: P4 (authoring loop — agent creates a pack unattended)
+- executor: `env(action="forge_tool")` on the controller — register a
+  `SandboxExecTool` live this turn (mirrors `create_skill`), so a freshly-saved
+  tool is callable immediately.
+- executor: bundled `tool-builder` skill (progressive) teaching the loop: write
+  `main.<ext>` (stdin→stdout JSON) + skill docs via sandbox-routed Write/Bash →
+  test → save (POST /api/sandbox-tool-packs) → verify next turn.
+Then P5: env opt-in (global registry → env tool selection / SandboxToolPackProvider
+into the session) + cross-session reuse + cold restore live verification; P6:
+python_inline→sandbox migration + UI; deploy (GAPT 2223 + Geny).
 
 ## (archived) P1 resume notes
 
