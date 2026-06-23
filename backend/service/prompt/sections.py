@@ -694,7 +694,7 @@ def build_agent_prompt(
     mode: PromptMode = PromptMode.FULL,
     context_files: Optional[Dict[str, str]] = None,
     extra_system_prompt: Optional[str] = None,
-    shared_folder_path: Optional[str] = None,
+    in_gapt_workspace: bool = False,
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
@@ -705,14 +705,15 @@ def build_agent_prompt(
         ---
         [Template prompt]      additional specialization (from prompt template)
         ---
-        [Shared folder info]   shared folder instructions (if enabled)
+        [GAPT workspace]       sandbox + gapt_* tool guidance (when bound)
 
     Layers:
         1. Role prompt — auto-loaded from ``prompts/{role}.md``.
            Worker has none.  Fallback: empty.
         2. Template prompt — optional specialization from ``extra_system_prompt``.
            Selected independently via the Prompt Template dropdown.
-        3. Shared folder — auto-appended when enabled.
+        3. GAPT workspace — auto-appended when the session is bound to a GAPT
+           workspace (the agent runs inside an isolated sandbox container).
 
     Design philosophy:
     - Claude API receives full tool schemas via MCP — no tool listing needed.
@@ -743,7 +744,9 @@ def build_agent_prompt(
         mode: Prompt detail level.
         context_files: Bootstrap file dict ``{filename: content}``.
         extra_system_prompt: Additional specialization prompt (from template or manual input).
-        shared_folder_path: Relative path to the shared folder (e.g. ``_shared``).
+        in_gapt_workspace: True when this session is bound to a GAPT workspace
+            (the agent runs inside an isolated sandbox container at
+            ``/workspace``). Appends the GAPT workspace + tool guidance section.
 
     Returns:
         Assembled system prompt string.
@@ -810,14 +813,23 @@ def build_agent_prompt(
         parts.append("---")
         parts.append(extra_system_prompt.strip())
 
-    # Shared folder section
-    if shared_folder_path:
-        shared_section = (
+    # GAPT workspace section — the agent runs inside an isolated, persistent
+    # sandbox container. Tell it where it works + how to make separate spaces.
+    if in_gapt_workspace:
+        gapt_section = (
             "---\n"
-            f"Shared Folder: ./{shared_folder_path}/\n"
-            f"A shared directory accessible by ALL sessions. "
-            f"Use it to exchange files, data, and artifacts between sessions."
+            "Workspace: you run inside an isolated, persistent sandbox container "
+            "at /workspace. Create and edit files there — they persist for this "
+            "session and are isolated from the host and from other sessions. "
+            "There is no host-shared folder.\n"
+            "When you need a SEPARATE persistent project space (its own files, "
+            "git history, and deploy targets), use the GAPT tools:\n"
+            "- gapt_overview / gapt_list_projects / gapt_list_workspaces — see what exists\n"
+            "- gapt_create_project / gapt_create_workspace — make a new independent space\n"
+            "- gapt_run_command — run a shell command inside a workspace\n"
+            "- gapt_list_environments / gapt_deploy — deploy a project\n"
+            "Each project is a fully isolated space that persists across sessions."
         )
-        parts.append(shared_section)
+        parts.append(gapt_section)
 
     return "\n\n".join(parts)

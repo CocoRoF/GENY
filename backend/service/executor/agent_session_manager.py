@@ -138,11 +138,6 @@ class AgentSessionManager:
         # Persistent session metadata store (sessions.json)
         self._store = get_session_store()
 
-        # Shared folder configuration
-        self._shared_folder_enabled: bool = False
-        self._shared_folder_manager = None  # SharedFolderManager instance
-        self._shared_folder_link_name: str = "_shared"
-
         # Database reference (for per-session memory/log DB wiring)
         self._app_db = None
 
@@ -323,50 +318,6 @@ class AgentSessionManager:
         self._tool_loader = tool_loader
         logger.info("AgentSessionManager: tool_loader set for preset-based tool filtering")
 
-    def set_shared_folder_config(
-        self,
-        enabled: bool = True,
-        shared_folder_manager=None,
-        link_name: str = "_shared",
-    ) -> None:
-        """Configure shared folder for automatic linking on session creation.
-
-        Args:
-            enabled: Whether to create shared folder links in new sessions.
-            shared_folder_manager: SharedFolderManager instance.
-            link_name: Name of the symlink in each session's storage dir.
-        """
-        self._shared_folder_enabled = enabled
-        self._shared_folder_manager = shared_folder_manager
-        self._shared_folder_link_name = link_name
-        logger.info(
-            f"Shared folder config: enabled={enabled}, link_name={link_name}"
-        )
-
-    def _link_shared_folder(self, storage_path: str, session_id: str) -> None:
-        """Create shared folder link in a session's storage directory."""
-        if not self._shared_folder_enabled or self._shared_folder_manager is None:
-            return
-        try:
-            ok = self._shared_folder_manager.link_to_session(
-                session_storage_path=storage_path,
-                link_name=self._shared_folder_link_name,
-            )
-            if ok:
-                logger.info(f"[{session_id}] Shared folder linked: {self._shared_folder_link_name}")
-            else:
-                logger.warning(f"[{session_id}] Failed to link shared folder")
-        except Exception as e:
-            logger.warning(f"[{session_id}] Shared folder link error: {e}")
-
-    def _build_shared_folder_context(self) -> str:
-        """Build a concise system-prompt fragment about the shared folder."""
-        link = self._shared_folder_link_name or "_shared"
-        return (
-            f"Shared folder: ./{link}/ (shared across all sessions). "
-            f"Use it to exchange files between sessions."
-        )
-
     # ========================================================================
     # Provider Resolution (Phase E2)
     # ========================================================================
@@ -530,6 +481,7 @@ class AgentSessionManager:
         self,
         request: CreateSessionRequest,
         session_id: Optional[str] = None,
+        in_gapt_workspace: bool = False,
     ) -> str:
         """Build the system prompt using the modular prompt builder.
 
@@ -541,6 +493,9 @@ class AgentSessionManager:
         Args:
             request: Session creation request.
             session_id: Pre-generated session ID (for Geny platform awareness).
+            in_gapt_workspace: True when the session is bound to a GAPT
+                workspace — the agent's cwd is the container's /workspace, so
+                the prompt describes that + the gapt_* tools.
 
         Returns:
             Assembled system prompt string.
@@ -589,17 +544,14 @@ class AgentSessionManager:
         # Determine prompt mode
         mode = PromptMode.FULL
 
-        # Resolve shared folder path for prompt inclusion
-        shared_folder_path: str | None = None
-        if self._shared_folder_enabled and self._shared_folder_manager:
-            shared_folder_path = self._shared_folder_link_name or "_shared"
-
-        # Build prompt
+        # Build prompt — when bound to a GAPT workspace the agent's cwd is the
+        # container's /workspace, so describe that (not the host path). The
+        # binding itself happens in the async create path before this is called.
         prompt = build_agent_prompt(
             agent_name="Great Agent",
             role=role,
             agent_id=None,
-            working_dir=request.working_dir,
+            working_dir=("/workspace" if in_gapt_workspace else request.working_dir),
             model=request.model,
             session_id=session_id,
             session_name=request.session_name,
@@ -607,7 +559,7 @@ class AgentSessionManager:
             mode=mode,
             context_files=context_files if context_files else None,
             extra_system_prompt=request.system_prompt,
-            shared_folder_path=shared_folder_path,
+            in_gapt_workspace=in_gapt_workspace,
         )
 
         # Memory v2 PR 11 — memory_context append removed (see comment
@@ -761,10 +713,45 @@ class AgentSessionManager:
             extra_mcp=request.mcp_config,
         )
 
+        # ── GAPT workspace binding ────────────────────────────────────────
+        # Every session runs inside its own isolated, persistent GAPT
+        # workspace (a sysbox container): the executor's attach_runtime(sandbox=)
+        # runs the agent's fs/shell tools inside the workspace instead of on the
+        # host. Default ON; set GENY_GAPT_WORKSPACES=0 to force host execution.
+        # Best-effort — if GAPT is unreachable we log and fall back to host so
+        # the live chat path is never broken by GAPT being down. Provisioned
+        # here (before the prompt) so the prompt can describe the /workspace cwd.
+        gapt_sandbox = None
+        if os.getenv("GENY_GAPT_WORKSPACES", "1").strip().lower() not in (
+            "0", "false", "no", "off", ""
+        ):
+            try:
+                from service.gapt import GaptWorkspaceProvider, get_gapt_client
+
+                _gc = get_gapt_client()
+                if _gc.configured:
+                    gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
+                        project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
+                        workspace_name=session_id,
+                    )
+                    logger.info(
+                        "[%s] bound to GAPT workspace %s",
+                        session_id,
+                        gapt_sandbox.container_name,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[%s] GAPT workspace provisioning failed; using host execution",
+                    session_id,
+                    exc_info=True,
+                )
+                gapt_sandbox = None
+
         # Prepare system prompt — using modular prompt builder
         system_prompt = self._build_system_prompt(
             request,
             session_id=session_id,
+            in_gapt_workspace=gapt_sandbox is not None,
         )
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 
@@ -1014,38 +1001,8 @@ class AgentSessionManager:
                 session_id, _vtuber_sub_worker_notice()
             )
 
-        # Create AgentSession
-        # ── GAPT workspace binding (opt-in via GENY_GAPT_WORKSPACES) ───────
-        # When enabled and the GAPT control plane is reachable, provision a
-        # GAPT workspace and bind this session to it: the executor's
-        # attach_runtime(sandbox=) then runs the claude_code_cli agent inside
-        # the workspace's sysbox container instead of on the host. Best-effort
-        # — any failure logs and falls back to host execution, so the live
-        # chat path is never broken by GAPT being down.
-        gapt_sandbox = None
-        if os.getenv("GENY_GAPT_WORKSPACES", "").strip().lower() in ("1", "true", "yes", "on"):
-            try:
-                from service.gapt import GaptWorkspaceProvider, get_gapt_client
-
-                _gc = get_gapt_client()
-                if _gc.configured:
-                    gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
-                        project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
-                        workspace_name=session_id,
-                    )
-                    logger.info(
-                        "[%s] bound to GAPT workspace %s",
-                        session_id,
-                        gapt_sandbox.container_name,
-                    )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "[%s] GAPT workspace provisioning failed; using host execution",
-                    session_id,
-                    exc_info=True,
-                )
-                gapt_sandbox = None
-
+        # Create AgentSession (gapt_sandbox was provisioned before the prompt
+        # build above so the prompt can describe the /workspace cwd).
         agent = await AgentSession.create(
             working_dir=request.working_dir,
             model_name=resolved_model,
@@ -1105,11 +1062,6 @@ class AgentSessionManager:
             agent._mcp_bridge_token = mcp_bridge_token
         except Exception:
             pass
-
-        # Link shared folder into session's storage directory
-        storage = agent.storage_path if hasattr(agent, 'storage_path') else None
-        if storage:
-            self._link_shared_folder(storage, session_id)
 
         # Create SessionInfo
         session_info = agent.get_session_info()

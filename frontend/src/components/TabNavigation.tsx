@@ -33,7 +33,7 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 // moved to /environments?tab=... top-level tabs (#553). The Header
 // component owns the entry point to /environments via its dedicated
 // link button, so nothing in this strip points to it anymore.
-const GLOBAL_TAB_IDS = ['main', 'sharedFolder', 'settings'] as const;
+const GLOBAL_TAB_IDS = ['main', 'settings'] as const;
 // SESSION_TAB_DEFS:
 //   - ``id`` — pairs with ``activeTab`` so the strip highlights the
 //     right entry.
