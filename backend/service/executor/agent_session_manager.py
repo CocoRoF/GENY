@@ -898,9 +898,6 @@ class AgentSessionManager:
         # overlaid on the seed so one-shot sub-workers run with that config.
         from service.agent_types import SubagentRegistryBuilder
 
-        subagent_registry = SubagentRegistryBuilder(
-            env_overrides=self._env_subworker_types(env_id),
-        ).build()
         adhoc_providers: list = []
         if self._tool_loader is not None:
             from service.executor.geny_tool_provider import GenyToolProvider
@@ -959,6 +956,17 @@ class AgentSessionManager:
                     skill_watcher.start()
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"  skill registry install skipped: {exc}", exc_info=True)
+
+        # Build the sub-worker registry AFTER the adhoc providers so env-declared
+        # sub-workers inherit them (GenyToolProvider/Skill/...) and can therefore
+        # resolve CUSTOM tools + skills in their allowed_tools — not just
+        # framework built-ins. This is what lets e.g. a VTuber delegate GAPT work
+        # to a sub-worker carrying the gapt_* tools while the main session stays
+        # lean (no gapt_* in its own roster).
+        subagent_registry = SubagentRegistryBuilder(
+            env_overrides=self._env_subworker_types(env_id),
+            adhoc_providers=adhoc_providers,
+        ).build()
 
         prebuilt_pipeline = await self._environment_service.instantiate_pipeline(
             env_id,

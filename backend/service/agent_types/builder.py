@@ -48,6 +48,7 @@ class SubagentRegistryBuilder:
         extra: Optional[List[Any]] = None,
         *,
         env_overrides: Optional[List[Any]] = None,
+        adhoc_providers: Any = (),
     ) -> None:
         self._extra = list(extra or [])
         self._env_overrides = [
@@ -55,6 +56,11 @@ class SubagentRegistryBuilder:
             for c in (env_overrides or [])
             if isinstance(c, dict) and c.get("agent_type")
         ]
+        # Providers (GenyToolProvider / SkillToolProvider / …) passed through to
+        # every env-declared sub-worker's sub-pipeline so it can resolve CUSTOM
+        # tools + skills, not just framework built-ins. Built once per session
+        # by the session manager and shared with the parent pipeline.
+        self._adhoc_providers = tuple(adhoc_providers or ())
 
     def build(self) -> Optional[Any]:
         """Return a fresh registry, or ``None`` when geny-executor is
@@ -73,11 +79,22 @@ class SubagentRegistryBuilder:
         disabled = {at for at, c in overrides.items() if c.get("enabled") is False}
         registered: set[str] = set()
 
+        # Provider-aware factory so env-declared sub-workers can carry custom
+        # tools + skills (see build_descriptor_from_config docstring).
+        sub_factory = None
+        if self._adhoc_providers:
+            try:
+                from service.agent_types.factories import make_subagent_factory
+
+                sub_factory = make_subagent_factory(self._adhoc_providers)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("subagent factory build skipped: %s", exc)
+
         # 1. Env-declared precise overrides win (register first).
         for at, cfg in overrides.items():
             if at in disabled:
                 continue
-            d = build_descriptor_from_config(cfg)
+            d = build_descriptor_from_config(cfg, factory=sub_factory)
             if d is None:
                 continue
             try:

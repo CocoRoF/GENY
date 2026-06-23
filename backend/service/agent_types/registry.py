@@ -149,14 +149,20 @@ SUBWORKER_CONFIG_KEYS = (
 )
 
 
-def build_descriptor_from_config(cfg: Any) -> Optional[Any]:
+def build_descriptor_from_config(cfg: Any, *, factory: Any = None) -> Optional[Any]:
     """Build one :class:`SubagentTypeDescriptor` from a plain config dict.
 
     Used for the per-env precise Sub-Worker roster
     (``host_selections.extras.subworker_types``). Carries the editable fields
     (description / provider / model / system_prompt / allowed_tools) onto the
-    descriptor; the default factory honours them when it builds the one-shot
-    sub-worker pipeline. Returns None for an empty / unbuildable entry.
+    descriptor; the factory honours them when it builds the one-shot sub-worker
+    pipeline. Returns None for an empty / unbuildable entry.
+
+    ``factory`` overrides the default sub-agent factory — the session manager
+    passes a provider-aware factory (built via
+    ``factories.make_subagent_factory(adhoc_providers)``) so the sub-worker can
+    resolve CUSTOM tools (gapt_*, web_search, …) + skills, not just framework
+    built-ins.
     """
     if SubagentTypeDescriptor is None or not isinstance(cfg, dict):
         return None
@@ -166,7 +172,7 @@ def build_descriptor_from_config(cfg: Any) -> Optional[Any]:
 
     kwargs: dict[str, Any] = {
         "agent_type": agent_type,
-        "factory": _resolve_default_factory(),
+        "factory": factory or _resolve_default_factory(),
     }
     if cfg.get("description"):
         kwargs["description"] = str(cfg["description"])
