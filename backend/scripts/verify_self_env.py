@@ -30,16 +30,29 @@ def _check(label, cond):
 
 async def main(preset_id: str) -> None:
     print(f"=== self-modifying environment :: {preset_id} ===")
+    is_vtuber = "vtuber" in preset_id.lower()
     tl = ToolLoader()
     tl.load_all()
+    # Mirror the session manager's wiring: GenyToolProvider (get-style) +
+    # SkillToolProvider (MCP-style). instantiate_pipeline routes each to the
+    # right executor channel so skills surface + the controller finds them.
+    from service.skills import attach_provider, install_skill_registry
+    skreg, _ = install_skill_registry(role="vtuber" if is_vtuber else "worker")
+    providers = [GenyToolProvider(tl)]
+    sp = attach_provider(skreg)
+    if sp is not None:
+        providers.append(sp)
     svc = EnvironmentService()
     pipe = await svc.instantiate_pipeline(
-        preset_id, api_key="sk-test",
-        adhoc_providers=[GenyToolProvider(tl)], strict=False,
+        preset_id, api_key="sk-test", adhoc_providers=providers, strict=False,
     )
-    # Geny installs these at session build; do the same here.
-    from geny_executor.stages.s03_system.builders import MutablePromptBuilder
     pipe.attach_runtime(env_settings_schemas=get_tool_setting_schemas())
+    # The worker path installs a MutablePromptBuilder at session build (prompt
+    # editable); the VTuber path keeps DynamicPersona (prompt edit reports
+    # locked — by design). Mirror that here so the test reflects real sessions.
+    if not is_vtuber:
+        from geny_executor.stages.s03_system.builders import MutablePromptBuilder
+        pipe.attach_runtime(system_builder=MutablePromptBuilder("you are a worker"))
     env = pipe.environment
 
     ok = True
@@ -78,14 +91,24 @@ async def main(preset_id: str) -> None:
     ok &= _check("model is REFUSED (core)", not env.set_config("model", "x")[0])
     ok &= _check("provider is REFUSED (core)", not env.set_config("provider", "openai")[0])
 
-    print("\n5) prompt + skills")
+    print("\n5) prompt (worker: editable; VTuber: DynamicPersona, locked)")
     p_ok = env.set_prompt("you are a test persona")[0]
-    print(f"  [{'PASS' if p_ok else 'INFO'}] set_prompt "
-          f"({'editable' if p_ok else 'locked — VTuber DynamicPersona, expected'})")
+    if is_vtuber:
+        print(f"  [{'PASS' if not p_ok else 'WARN'}] set_prompt locked (expected for VTuber)")
+        ok &= (not p_ok)
+    else:
+        ok &= _check("set_prompt editable (worker)", p_ok)
+
+    print("\n6) skills — surfaced as tools + author a new one")
+    surfaced = [n for n in pipe.tool_registry.list_names() if n in set(
+        env._skill_registry.list_ids() if env._skill_registry else [])]
+    ok &= _check(f"baseline skills surfaced as tools ({len(surfaced)})", len(surfaced) > 0)
     env.create_skill("probe-skill", "a probe", "# Probe\nstep 1.")
     ok &= _check("create_skill enabled it", "probe-skill" in env.active_skills())
+    if surfaced:
+        ok &= _check(f"disable_skill({surfaced[0]})", env.disable_skill(surfaced[0])[0])
 
-    print("\n6) overlay (what env_save persists) + changelog")
+    print("\n7) overlay (what env_save persists) + changelog")
     ov = env.overlay()
     ok &= _check("overlay carries tool_settings", "web_search" in (ov.get("tool_settings") or {}))
     ok &= _check("overlay carries config", bool(ov.get("config", {}).get("model")))

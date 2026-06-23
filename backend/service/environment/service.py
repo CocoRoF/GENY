@@ -776,13 +776,31 @@ class EnvironmentService:
         manifest = self.load_manifest(env_id)
         if manifest is None:
             raise EnvironmentNotFoundError(env_id)
+        # Route providers to the correct executor channel by capability:
+        #   * get-style (``get`` + ``list_names``) → ``adhoc_providers`` —
+        #     resolve manifest.tools.external by name (GenyToolProvider, …).
+        #   * MCP-style (``startup``/``list_tools``, no ``get``) →
+        #     ``tool_providers`` — STARTED via register_providers so their
+        #     tools (e.g. the SkillToolProvider's per-skill tools) actually
+        #     register, and so the self-modifying-env controller can find the
+        #     skill registry. Passing these via adhoc never started them (skills
+        #     silently surfaced 0 tools) and risked a ``.get`` crash.
+        get_style, started_style = [], []
+        for p in adhoc_providers or ():
+            if callable(getattr(p, "get", None)) and callable(getattr(p, "list_names", None)):
+                get_style.append(p)
+            elif callable(getattr(p, "startup", None)) or callable(getattr(p, "list_tools", None)):
+                started_style.append(p)
+            else:
+                get_style.append(p)
         return await Pipeline.from_manifest_async(
             manifest,
             credentials=credentials,
             api_key=api_key,
             subagent_registry=subagent_registry,
             strict=strict,
-            adhoc_providers=adhoc_providers,
+            adhoc_providers=get_style,
+            tool_providers=started_style or None,
         )
 
     # ── Reconcile ──────────────────────────────────────────────
