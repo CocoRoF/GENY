@@ -41,6 +41,7 @@ from controller.upload_controller import router as upload_router
 from controller.tool_preset_controller import router as tool_preset_router
 from controller.tool_controller import router as tool_catalog_router
 from controller.custom_tools_controller import router as custom_tools_router  # Phase B — DB-backed user tools
+from controller.sandbox_tool_packs_controller import router as sandbox_tool_packs_router  # Sandbox Tool Packs
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
 from controller.permission_controller import router as permission_router  # PR-E.2.1
@@ -327,6 +328,16 @@ async def lifespan(app: FastAPI):
         logger.info(f"   - Custom tools (DB): {added} loaded (seeded {seeded} new sample)")
     else:
         logger.info("   - Custom tools (DB): skipped — database unavailable")
+
+    # Sandbox Tool Packs — [GAPT env + tools + skills] bundles. The store is
+    # DB-backed; the table auto-creates via APPLICATION_MODELS. Loading enabled
+    # packs into a session happens at session build (env opt-in, later phase).
+    from service.sandbox_tool_packs import get_sandbox_tool_pack_store
+    if app_db is not None:
+        get_sandbox_tool_pack_store().set_database(app_db)
+        logger.info("   - Sandbox Tool Packs: store wired")
+    else:
+        logger.info("   - Sandbox Tool Packs: skipped — database unavailable")
 
     # (Shared folder removed — sessions now use isolated GAPT workspaces.)
 
@@ -862,6 +873,7 @@ app.include_router(upload_router)  # File / image uploads (multipart)
 app.include_router(tool_preset_router)  # Tool preset management
 app.include_router(tool_catalog_router)  # Tool catalog API
 app.include_router(custom_tools_router)  # Custom tools CRUD (Phase B — DB-backed)
+app.include_router(sandbox_tool_packs_router)  # Sandbox Tool Packs (env+tools+skills bundles)
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)
 app.include_router(permission_router)  # Permission rules CRUD (PR-E.2.1)
