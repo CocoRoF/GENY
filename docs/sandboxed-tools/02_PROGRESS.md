@@ -12,6 +12,24 @@ Tracks [01_PLAN.md](01_PLAN.md). One row per phase.
 | **P5** | Reuse across sessions: env opt-in + cold restore-from-snapshot; tool authored in A callable in B; skills surface | ⬜ |
 | **P6** | Migrate `python_inline` → sandbox (retire host `exec()`); (P7 optional) GAPT frontend snapshot button + snapshot-graph/pack-manager UI | ⬜ |
 
+## ✅ LIVE-VERIFIED on prod (P0–P3) — 2026-06-23
+Deployed + e2e-verified on the real shared host (Geny 2222 + GAPT 2223, one docker daemon):
+- **GAPT 2223** (gapt main `4f0fff6`): migration applied (`snapshots` table+enum);
+  capture→mutate→**restore byte-identical** (file reverted to V1), row persists,
+  activity/diff endpoints work. Found+fixed 3 bugs via live e2e: (1) auto `git init`
+  for non-git workspaces, (2) `db.commit()` on create/delete (get_db_session
+  doesn't auto-commit), (3) unborn-HEAD parent (`git rev-parse HEAD` prints literal
+  "HEAD" → `--verify`). gapt PRs #9/#10/#11.
+- **Geny 2222** (main `faece1fe`): executor **2.30.0**, `sandbox_tool_packs` table
+  auto-created, store/controller/loader wired, GAPT reachable, backend can
+  `docker exec` gapt-ws.
+- **FULL PACK E2E**: in-memory pack → `load_pack` → tool's code ran INSIDE a live
+  GAPT workspace via SandboxExecTool→sandbox_exec→docker exec →
+  `{"echo": {"msg": "hello-sandbox-tool"}, "ok": true}`; skills loaded too.
+
+The foundation (capability + snapshots + persistence + load+run) is proven on real
+infra. P4/P5 build on this verified base.
+
 ## P0 notes (done)
 - `tools/built_in/sandbox_exec_tool.py` — `SandboxExecTool` (stdin JSON → stdout
   JSON; no host fallback; `to_dict`/`from_dict`). NOT in `BUILT_IN_TOOL_CLASSES`.
