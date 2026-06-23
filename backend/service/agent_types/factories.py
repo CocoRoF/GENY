@@ -67,12 +67,23 @@ def _build_sub_manifest(
         ToolsSnapshot,
     ) = _executor_imports()
 
+    # Advertise the requested tools on BOTH built_in (framework tools like
+    # Bash/Read/Write resolved by the executor's BuiltInToolProvider) AND
+    # external (Geny custom tools like gapt_* resolved by GenyToolProvider).
+    # Each name resolves from whichever provider actually has it; the other
+    # provider simply doesn't match it. This is what lets a sub-worker carry
+    # CUSTOM tools — previously only built_in was set, so custom tools were
+    # silently dropped (no provider matched them).
+    _wildcard = allowed_tools == ("*",)
     m = EnvironmentManifest(
         metadata=EnvironmentMetadata(id="subagent-runtime", name="subagent"),
         model={"model": model} if model else {},
         pipeline={"single_turn": True, "max_iterations": 6},
         stages=[],
-        tools=ToolsSnapshot(built_in=["*"] if allowed_tools == ("*",) else list(allowed_tools)),
+        tools=ToolsSnapshot(
+            built_in=["*"] if _wildcard else list(allowed_tools),
+            external=[] if _wildcard else list(allowed_tools),
+        ),
     )
     m.set_stage_entries([
         StageManifestEntry(order=1, name="input"),
@@ -99,85 +110,92 @@ def _build_sub_manifest(
     return m
 
 
-async def _default_subagent_factory(ctx: Any) -> Any:
-    """Async PipelineFactory entrypoint.
+def make_subagent_factory(adhoc_providers: Any = ()):
+    """Build an async :data:`PipelineFactory` that provisions a sub-worker
+    WITH the given adhoc providers passed through to its sub-pipeline.
 
-    Receives a :class:`SubAgentBuildContext`; returns a built Pipeline.
-    The provider comes from ``ctx.descriptor.provider`` (None ⇒ inherit
-    parent). Credentials flow straight from ``ctx.credentials``.
+    Passing the parent session's providers (``GenyToolProvider`` /
+    ``ConnectorToolProvider`` / ``SkillToolProvider``) is what lets a
+    sub-worker resolve **custom** tools (``gapt_*``, ``web_search``, …) and
+    **skills** declared in its ``allowed_tools`` — not just framework
+    built-ins. Without them the sub-manifest can name a custom tool but no
+    provider matches it, so the sub-worker silently has nothing.
 
-    Provider resolution (geny-executor 2.2.0): delegated wholesale to
-    :func:`geny_executor.stages.s12_agent.subagent_type.
-    resolve_subagent_provider` — THE single library home for the
-    resolution order (descriptor pin → typed ``ctx.parent_provider`` →
-    legacy ``parent_state_shared['primary_provider']`` → the bundle's
-    ``preferred_provider()``). The old hardcoded ``"anthropic"``
-    last-resort is gone: when nothing resolves we now raise a loud
-    :class:`ConfigError` instead of silently building a sub-agent on a
-    backend the user never configured.
+    Provider resolution is delegated to
+    :func:`geny_executor.stages.s12_agent.subagent_type.resolve_subagent_provider`
+    (descriptor pin → typed ``ctx.parent_provider`` → parent_state_shared →
+    bundle preference); a loud :class:`ConfigError` when nothing resolves.
     """
-    from geny_executor.llm_client.credentials import ConfigError
-    from geny_executor.stages.s12_agent.subagent_type import (
-        resolve_subagent_provider,
-    )
+    _providers = tuple(adhoc_providers or ())
 
-    desc = ctx.descriptor
-    provider = resolve_subagent_provider(ctx)
-    if not provider:
-        raise ConfigError(
-            f"subagent {desc.agent_type!r}: no provider could be resolved — "
-            "the descriptor declares none, the parent published no "
-            "primary_provider, and the credential bundle is empty. "
-            "Configure an LLM backend before delegating."
+    async def _factory(ctx: Any) -> Any:
+        from geny_executor.llm_client.credentials import ConfigError
+        from geny_executor.stages.s12_agent.subagent_type import (
+            resolve_subagent_provider,
         )
 
-    model_override = desc.model_override or None
-    allowed_tools = tuple(desc.allowed_tools or ())
+        desc = ctx.descriptor
+        provider = resolve_subagent_provider(ctx)
+        if not provider:
+            raise ConfigError(
+                f"subagent {desc.agent_type!r}: no provider could be resolved — "
+                "the descriptor declares none, the parent published no "
+                "primary_provider, and the credential bundle is empty. "
+                "Configure an LLM backend before delegating."
+            )
 
-    Pipeline, *_ = _executor_imports()
+        model_override = desc.model_override or None
+        allowed_tools = tuple(desc.allowed_tools or ())
 
-    sub_manifest = _build_sub_manifest(
-        provider=provider,
-        model=model_override,
-        allowed_tools=allowed_tools,
-    )
-    try:
-        sub_pipeline = await Pipeline.from_manifest_async(
-            sub_manifest,
-            credentials=ctx.credentials,
-            strict=False,
+        Pipeline, *_ = _executor_imports()
+
+        sub_manifest = _build_sub_manifest(
+            provider=provider,
+            model=model_override,
+            allowed_tools=allowed_tools,
         )
-    except Exception:
-        logger.exception(
-            "subagent factory: failed to build sub-pipeline for %s (provider=%s)",
-            desc.agent_type, provider,
-        )
-        raise
-
-    # Per-companion system prompt (executor 2.7.1) — when the descriptor
-    # declares one (set via the env editor's Sub-Agent panel → owned_subagent
-    # .system_prompt → SubAgentManager.spawn override), override the
-    # sub-pipeline's Stage-3 system builder so the sub-agent runs with that
-    # persona. Best-effort: a failure here must not break the build.
-    system_prompt = getattr(desc, "system_prompt", None)
-    if system_prompt:
         try:
-            from geny_executor.stages.s03_system.artifact.default.builders import (
-                ComposablePromptBuilder,
-                PersonaBlock,
+            sub_pipeline = await Pipeline.from_manifest_async(
+                sub_manifest,
+                credentials=ctx.credentials,
+                adhoc_providers=_providers,
+                strict=False,
             )
+        except Exception:
+            logger.exception(
+                "subagent factory: failed to build sub-pipeline for %s (provider=%s)",
+                desc.agent_type, provider,
+            )
+            raise
 
-            sub_pipeline.attach_runtime(
-                system_builder=ComposablePromptBuilder(
-                    blocks=[PersonaBlock(system_prompt)]
-                ),
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "subagent factory: system_prompt attach failed for %s",
-                desc.agent_type, exc_info=True,
-            )
-    return sub_pipeline
+        # Per-type system prompt (executor 2.7.1) — when the descriptor
+        # declares one (env editor's Sub-Agent panel), override the
+        # sub-pipeline's Stage-3 system builder. Best-effort.
+        system_prompt = getattr(desc, "system_prompt", None)
+        if system_prompt:
+            try:
+                from geny_executor.stages.s03_system.artifact.default.builders import (
+                    ComposablePromptBuilder,
+                    PersonaBlock,
+                )
+
+                sub_pipeline.attach_runtime(
+                    system_builder=ComposablePromptBuilder(
+                        blocks=[PersonaBlock(system_prompt)]
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "subagent factory: system_prompt attach failed for %s",
+                    desc.agent_type, exc_info=True,
+                )
+        return sub_pipeline
+
+    return _factory
+
+
+# Back-compat: a factory with NO adhoc providers (framework built-ins only).
+_default_subagent_factory = make_subagent_factory(())
 
 
 def make_default_subagent_factory():

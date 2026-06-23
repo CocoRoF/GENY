@@ -162,12 +162,11 @@ _PLATFORM_TOOL_SOURCES = frozenset({
     # memory_distill). Live alongside the existing memory_* family;
     # share the same paired-only / read-only / caller-scoped invariants.
     "memory_inspect_tools",
-    # GAPT platform tools (gapt_overview / create_project / create_workspace /
-    # run_command / deploy / ...). Every environment — worker AND vtuber — gets
-    # them so any agent can drive its own isolated GAPT project/workspace space.
-    # Only populated when GAPT is configured (gapt_tools.TOOLS gates on
-    # get_gapt_client().configured).
-    "gapt_tools",
+    # NOTE: gapt_tools intentionally NOT here. GAPT is heavy (9 tools) and is
+    # offered as a SKILL, not always-on context. Worker-family envs still get
+    # gapt_* via their full external roster (do-it-yourself). VTuber/persona
+    # envs stay lean: they get only the `gapt` skill description + a `gapt`
+    # sub-worker (see _declare_gapt_subworker) to delegate GAPT work to.
 })
 
 
@@ -389,7 +388,7 @@ def create_vtuber_env(
     manifest = build_manifest(
         "vtuber",
         provider=provider or "anthropic",
-        external_tools=list(all_tool_names or []),
+        external_tools=_without_gapt_tools(all_tool_names),
         built_in_tools=["*"],
     )
     manifest.metadata.id = VTUBER_ENV_ID
@@ -398,6 +397,7 @@ def create_vtuber_env(
         "VTuber 페르소나 환경 — 감정/음성/아바타 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
     _declare_owned_subagent(manifest)
+    _declare_gapt_subworker(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -432,6 +432,73 @@ def _declare_owned_subagent(manifest: "EnvironmentManifest") -> None:
         extras = manifest.host_selections.extras
         if extras.get("owned_subagent") is None:
             extras["owned_subagent"] = {"enabled": True}
+    except Exception:  # noqa: BLE001 — never fail template build on this
+        pass
+
+
+#: The GAPT control-plane tools — kept out of the always-on roster (heavy).
+#: A persona/VTuber env delegates GAPT work to a sub-worker carrying these;
+#: a worker env has them directly in its external roster.
+_GAPT_TOOL_NAMES = [
+    "gapt_overview",
+    "gapt_list_projects",
+    "gapt_create_project",
+    "gapt_list_workspaces",
+    "gapt_create_workspace",
+    "gapt_manage_workspace",
+    "gapt_run_command",
+    "gapt_list_environments",
+    "gapt_deploy",
+]
+
+def _without_gapt_tools(names: Optional[List[str]]) -> List[str]:
+    """Drop the gapt_* tools from a roster. Persona/VTuber envs delegate GAPT
+    to a sub-worker (see _declare_gapt_subworker), so the lean main agent does
+    NOT carry the 9 gapt_* schemas — it only sees the `gapt` skill."""
+    gapt = set(_GAPT_TOOL_NAMES)
+    return [n for n in (names or []) if n not in gapt]
+
+
+_GAPT_SUBWORKER_PROMPT = (
+    "You are a GAPT operator sub-worker. You manage independent, persistent "
+    "project/workspace/sandbox spaces on the GAPT platform via the gapt_* "
+    "tools. Typical flow: gapt_overview to see what exists; gapt_create_project "
+    "for a new independent space; gapt_create_workspace for an isolated "
+    "container; gapt_run_command to run commands inside it; gapt_deploy to "
+    "deploy. Each project is a fully isolated space that persists across "
+    "sessions. Do the requested GAPT task end-to-end and report the result "
+    "concisely."
+)
+
+
+def _declare_gapt_subworker(manifest: "EnvironmentManifest") -> None:
+    """Give a persona/VTuber env a one-shot ``gapt`` sub-worker carrying the
+    gapt_* tools, so the lean main agent can DELEGATE GAPT (sandbox/project)
+    work instead of holding 9 tool schemas in its own context.
+
+    The sub-worker resolves the custom gapt_* tools because the session manager
+    passes its adhoc providers (GenyToolProvider) into the sub-worker factory
+    (see SubagentRegistryBuilder(adhoc_providers=...)). Idempotent + additive:
+    a gapt type already declared by the env editor is left untouched.
+    """
+    try:
+        extras = manifest.host_selections.extras
+        existing = extras.get("subworker_types")
+        types = list(existing) if isinstance(existing, list) else []
+        if any(
+            isinstance(t, dict) and t.get("agent_type") == "gapt" for t in types
+        ):
+            return
+        types.append({
+            "agent_type": "gapt",
+            "description": (
+                "GAPT operator — create/manage independent project & workspace "
+                "(sandbox) spaces and deploy. Delegate any GAPT work here."
+            ),
+            "allowed_tools": list(_GAPT_TOOL_NAMES),
+            "system_prompt": _GAPT_SUBWORKER_PROMPT,
+        })
+        extras["subworker_types"] = types
     except Exception:  # noqa: BLE001 — never fail template build on this
         pass
 
@@ -473,7 +540,7 @@ def create_claude_code_vtuber_env(
     """
     manifest = build_manifest_for(
         "claude_code_vtuber",
-        external_tools=list(all_tool_names or []),
+        external_tools=_without_gapt_tools(all_tool_names),
         built_in_tools=["*"],
     )
     manifest.metadata.id = CLAUDE_CODE_VTUBER_ENV_ID
@@ -482,6 +549,7 @@ def create_claude_code_vtuber_env(
         "Claude Code CLI 백엔드 · VTuber 페르소나 환경 — 모든 도구."
     )
     _declare_owned_subagent(manifest)
+    _declare_gapt_subworker(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -504,7 +572,11 @@ def _backend_env(
     manifest = build_manifest(
         chain,
         provider=provider,
-        external_tools=list(all_names or []),
+        # VTuber presets drop gapt_* (delegated to the gapt sub-worker);
+        # worker presets keep them (do-it-yourself).
+        external_tools=(
+            _without_gapt_tools(all_names) if vtuber else list(all_names or [])
+        ),
         built_in_tools=["*"],
     )
     manifest.metadata.id = env_id
@@ -512,6 +584,7 @@ def _backend_env(
     manifest.metadata.description = description
     if vtuber:
         _declare_owned_subagent(manifest)
+        _declare_gapt_subworker(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
