@@ -2028,12 +2028,43 @@ class AgentSession:
             prompt = overlay.get("prompt")
             if isinstance(prompt, str) and prompt.strip():
                 env.set_prompt(prompt)
-            # 3. Re-enable the saved tool set (already-active ones are no-ops).
-            for name in overlay.get("active_tools", []) or []:
-                env.enable_tool(str(name))
-            # 4. Re-enable the saved skills.
-            for sid in overlay.get("active_skills", []) or []:
-                env.enable_skill(str(sid))
+            # 3. Tool settings (API keys, backends, …) — executor >=2.28.0.
+            for group, fields in (overlay.get("tool_settings") or {}).items():
+                if not isinstance(fields, dict):
+                    continue
+                for field, value in fields.items():
+                    env.set_setting(str(group), str(field), value)
+            # 4. Tunable config (model knobs + pipeline limits) — core stays
+            #    locked, so set_config silently refuses any core key.
+            cfg = overlay.get("config") or {}
+            for section in ("model", "pipeline"):
+                for key, value in (cfg.get(section) or {}).items():
+                    env.set_config(str(key), value)
+            # 5. Reconcile tools/skills to the EXACT saved set so a tool the
+            #    user disabled stays disabled (additive-only restore used to let
+            #    the manifest re-add it). The env tool is self-protected.
+            target_tools = {str(n) for n in (overlay.get("active_tools") or [])}
+            target_skills = {str(s) for s in (overlay.get("active_skills") or [])}
+            skill_ids = set()
+            sreg = getattr(env, "_skill_registry", None)
+            if sreg is not None:
+                try:
+                    skill_ids = set(sreg.list_ids())
+                except Exception:  # noqa: BLE001
+                    skill_ids = set()
+            # Enable the saved set (skills via enable_skill, others via enable_tool).
+            for sid in target_skills:
+                env.enable_skill(sid)
+            for name in target_tools - target_skills:
+                env.enable_tool(name)
+            # Disable anything currently active but NOT in the saved set.
+            for name in list(env.active_tools()):
+                if name == "env" or name in target_tools:
+                    continue
+                if name in skill_ids:
+                    env.disable_skill(name)
+                else:
+                    env.disable_tool(name)
             logger.info("[%s] env overlay restored", self._session_id)
         except Exception:  # noqa: BLE001
             logger.warning("[%s] env overlay restore failed", self._session_id, exc_info=True)
@@ -2672,6 +2703,14 @@ class AgentSession:
         _env_persist = self._make_env_persistence()
         if _env_persist is not None:
             attach_kwargs["env_persistence"] = _env_persist
+        # Tool-setting descriptors (executor >=2.28.0) so env get_settings can
+        # mask secrets accurately + describe what each tool needs (API keys, …).
+        try:
+            from service.tool_settings import get_tool_setting_schemas
+
+            attach_kwargs["env_settings_schemas"] = get_tool_setting_schemas()
+        except Exception:  # noqa: BLE001
+            logger.debug("[%s] tool-setting schemas unavailable", self._session_id)
 
         self._pipeline = self._prebuilt_pipeline
         self._pipeline.attach_runtime(**attach_kwargs)
