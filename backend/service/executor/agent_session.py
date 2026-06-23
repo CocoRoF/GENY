@@ -1955,6 +1955,90 @@ class AgentSession:
                 )
 
     # ========================================================================
+    # Self-modifying environment (session-scoped overlay persistence)
+    # ========================================================================
+
+    def _env_overlay_path(self) -> Optional[str]:
+        """Per-session file holding the saved env overlay, or None when the
+        session has no storage dir."""
+        sp = self._storage_path
+        if not sp:
+            return None
+        import os
+
+        return os.path.join(sp, "env_overlay.json")
+
+    def _make_env_persistence(self):
+        """Build the ``env_persistence`` callback the executor invokes on
+        ``env(action="save")`` — writes the overlay JSON to this session's own
+        storage (session-scoped). Returns None when there's no storage dir."""
+        path = self._env_overlay_path()
+        if not path:
+            return None
+        session_id = self._session_id
+
+        async def _persist(overlay: Dict[str, Any]) -> None:
+            import json
+            import os
+
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(overlay, fh, ensure_ascii=False)
+            os.replace(tmp, path)
+            logger.info("[%s] env overlay saved", session_id)
+
+        return _persist
+
+    def _restore_env_overlay(self) -> None:
+        """Re-apply a previously-saved env overlay (prompt / authored skills /
+        enabled tools + skills). Best-effort — additive (does not disable tools
+        absent from the overlay). Never blocks session start."""
+        path = self._env_overlay_path()
+        if not path:
+            return
+        import json
+        import os
+
+        if not os.path.isfile(path):
+            return
+        env = getattr(self._pipeline, "environment", None)
+        if env is None:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                overlay = json.load(fh)
+        except Exception:  # noqa: BLE001
+            logger.warning("[%s] env overlay unreadable; ignoring", self._session_id, exc_info=True)
+            return
+        try:
+            # 1. Authored skills (define before enabling them).
+            for sk in overlay.get("authored_skills", []) or []:
+                if not isinstance(sk, dict) or not sk.get("id"):
+                    continue
+                env.create_skill(
+                    sk["id"],
+                    sk.get("description", ""),
+                    sk.get("body", ""),
+                    allowed_tools=sk.get("allowed_tools", []) or [],
+                    execution_mode=sk.get("execution_mode", "inline") or "inline",
+                    enable=False,
+                )
+            # 2. Edited system prompt.
+            prompt = overlay.get("prompt")
+            if isinstance(prompt, str) and prompt.strip():
+                env.set_prompt(prompt)
+            # 3. Re-enable the saved tool set (already-active ones are no-ops).
+            for name in overlay.get("active_tools", []) or []:
+                env.enable_tool(str(name))
+            # 4. Re-enable the saved skills.
+            for sid in overlay.get("active_skills", []) or []:
+                env.enable_skill(str(sid))
+            logger.info("[%s] env overlay restored", self._session_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("[%s] env overlay restore failed", self._session_id, exc_info=True)
+
+    # ========================================================================
     # geny-executor Pipeline Mode
     # ========================================================================
 
@@ -2348,8 +2432,17 @@ class AgentSession:
                 tail_blocks=_tail_blocks,
             )
         else:
-            system_builder = ComposablePromptBuilder(
-                blocks=[PersonaBlock(persona_text), *_tail_blocks]
+            # MutablePromptBuilder (executor >=2.27.0) instead of a plain
+            # ComposablePromptBuilder so the session can edit its OWN persona
+            # via the built-in ``env`` tool (self-modifying environment) while
+            # the dynamic tail blocks (datetime / memory / spotlight) keep
+            # rendering each turn. The editable base = persona_text.
+            from geny_executor.stages.s03_system.builders import (
+                MutablePromptBuilder,
+            )
+
+            system_builder = MutablePromptBuilder(
+                prompt=persona_text, blocks=list(_tail_blocks)
             )
         # PR-D.5.1 — seed the executor 1.3.0 WorkspaceStack into
         # ToolContext.extras at session-build time. EnterWorktreeTool /
@@ -2573,8 +2666,18 @@ class AgentSession:
         if getattr(self, "_gapt_sandbox", None) is not None:
             attach_kwargs["sandbox"] = self._gapt_sandbox
 
+        # Self-modifying environment (executor >=2.26.0): persist the session's
+        # evolved env overlay to its OWN storage so ``env(action="save")`` is
+        # session-scoped + survives resume. Restored just below.
+        _env_persist = self._make_env_persistence()
+        if _env_persist is not None:
+            attach_kwargs["env_persistence"] = _env_persist
+
         self._pipeline = self._prebuilt_pipeline
         self._pipeline.attach_runtime(**attach_kwargs)
+        # Re-apply any previously-saved env overlay now that the controller is
+        # wired (best-effort; never blocks session start).
+        self._restore_env_overlay()
         # B.1 (cycle 20260426_1) — bridge UI session limits into the
         # bound Pipeline's PipelineConfig so user-supplied
         # ``max_iterations`` is enforced by the executor's iteration
