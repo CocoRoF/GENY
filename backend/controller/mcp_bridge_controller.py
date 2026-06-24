@@ -173,6 +173,8 @@ async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     seen: set[str] = set()
 
     if registry is not None:
+        # Session registry FIRST — carries env (executor built-in) + forged +
+        # per-env pack tools that the global loader does NOT have.
         try:
             for name in registry.list_names():
                 tool = registry.get(name)
@@ -180,22 +182,24 @@ async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
                     continue
                 seen.add(name)
                 tools.append(_describe_tool(name, tool))
-            return tools
-        except Exception:  # noqa: BLE001 — fall back to the loader on any registry issue
+        except Exception:  # noqa: BLE001
             logger.debug("mcp_bridge: registry listing failed for %s", session_id, exc_info=True)
 
+    # ALWAYS also union the global loader (the base Geny tool set the CLI has
+    # always seen: gapt_*, custom, list_tool_packs, use_tool_pack). The registry
+    # may be empty/partial for some provider paths, so this guarantees the CLI
+    # never loses its base tools; the registry adds env + session-scoped tools.
     manager = get_agent_session_manager()
     loader = getattr(manager, "_tool_loader", None)
-    if loader is None:
-        return tools
-    for name in loader.get_all_names():
-        if name in seen:
-            continue
-        tool = loader.get_tool(name)
-        if tool is None:
-            continue
-        seen.add(name)
-        tools.append(_describe_tool(name, tool))
+    if loader is not None:
+        for name in loader.get_all_names():
+            if name in seen:
+                continue
+            tool = loader.get_tool(name)
+            if tool is None:
+                continue
+            seen.add(name)
+            tools.append(_describe_tool(name, tool))
     return tools
 
 

@@ -1039,6 +1039,21 @@ class AgentSessionManager:
             f"  env_id: {env_id} → manifest-backed pipeline built "
             f"(adhoc_providers={len(adhoc_providers)})"
         )
+        # Diagnostic: the session's resolved active tool set. Confirms the
+        # sandbox-tool lifecycle toolset (env, gapt_run_command, list_tool_packs,
+        # use_tool_pack) is present for EVERY env (incl. VTuber). Real-app ground
+        # truth — out-of-process scripts can't see the wired registry.
+        try:
+            _envc = getattr(prebuilt_pipeline, "environment", None)
+            if _envc is not None:
+                _active = _envc.active_tools()
+                _life = [t for t in ("env", "gapt_run_command", "list_tool_packs", "use_tool_pack") if t in _active]
+                logger.info(
+                    "  active tools (%d): lifecycle=%s | all=%s",
+                    len(_active), _life, _active,
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("  active-tools diagnostic skipped", exc_info=True)
 
         # G14: bridge MCP prompts → skill registry. Runs *after*
         # instantiate_pipeline so the MCPManager has connected to its
