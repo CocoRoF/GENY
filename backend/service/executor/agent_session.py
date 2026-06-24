@@ -2746,12 +2746,18 @@ class AgentSession:
             # downstream of this block consumes the legacy values.
 
         # GAPT sandbox: when this session is bound to a GAPT workspace, hand
-        # the executor the SandboxHandle. attach_runtime(sandbox=) wraps the
-        # resolved claude_code_cli client in a ContainerCLIRunner so the agent
-        # CLI runs inside the workspace container (executor >=2.22.0). No-op for
-        # SDK providers + when no sandbox is bound (default host execution).
+        # the executor the SandboxHandle so tools (forge_tool / SandboxExecTool /
+        # gapt_* via the MCP bridge) execute IN the workspace (docker exec).
+        #
+        # containerize_cli=False (executor >=2.33.0): do NOT wrap the
+        # claude_code_cli client in a ContainerCLIRunner — the CLI keeps running
+        # on the HOST. This is what lets rotating-OAuth claude_code_cli sessions
+        # use sandboxed GAPT/forge tools without the in-container token-rotation
+        # 401 (the CLI's own auth stays on the host where it already works). No-op
+        # for SDK providers (they never spawn a CLI).
         if getattr(self, "_gapt_sandbox", None) is not None:
             attach_kwargs["sandbox"] = self._gapt_sandbox
+            attach_kwargs["containerize_cli"] = False
             # save_pack (executor >=2.32.0): let the agent persist
             # [this workspace + the tools it forged + skills it authored] as a
             # reusable Sandbox Tool Pack via env(action="save_pack").

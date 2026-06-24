@@ -695,6 +695,8 @@ def build_agent_prompt(
     context_files: Optional[Dict[str, str]] = None,
     extra_system_prompt: Optional[str] = None,
     in_gapt_workspace: bool = False,
+    gapt_workspace_id: Optional[str] = None,
+    gapt_cli_on_host: bool = False,
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
@@ -816,17 +818,41 @@ def build_agent_prompt(
     # GAPT workspace section — the agent runs inside an isolated, persistent
     # sandbox container. Tell it where it works + how to make separate spaces.
     if in_gapt_workspace:
+        wid = (gapt_workspace_id or "").strip()
+        wid_line = (
+            f"Your persistent, isolated GAPT workspace for this session is "
+            f"`{wid}` (mounted at /workspace).\n"
+            if wid
+            else "You have a persistent, isolated GAPT workspace at /workspace.\n"
+        )
+        if gapt_cli_on_host:
+            # claude_code_cli runs on the HOST (OAuth-safe); only the GAPT/forge
+            # tools execute inside the workspace. Be explicit so the agent does
+            # workspace work through those tools, not its host-side built-ins.
+            where_line = (
+                "IMPORTANT: your built-in Read/Write/Edit/Bash tools run on the "
+                "HOST, not in this workspace. To create, edit, run, and persist "
+                "code IN the workspace (the isolated sandbox), use the GAPT tools "
+                "and forge_tool:\n"
+                "- gapt_run_command — run a shell command inside the workspace\n"
+                "- forge_tool — turn a script in the workspace into a callable tool\n"
+                "- env(action=\"save_pack\") — save [workspace + tools + skills] as a reusable pack\n"
+            )
+        else:
+            where_line = (
+                "You run inside this workspace at /workspace — your file/shell "
+                "tools operate there directly. Files persist for this session and "
+                "are isolated from the host and other sessions. Use forge_tool to "
+                "turn a script into a callable tool, and env(action=\"save_pack\") "
+                "to save [workspace + tools + skills] as a reusable pack.\n"
+            )
         gapt_section = (
             "---\n"
-            "Workspace: you run inside an isolated, persistent sandbox container "
-            "at /workspace. Create and edit files there — they persist for this "
-            "session and are isolated from the host and from other sessions. "
-            "There is no host-shared folder.\n"
-            "When you need a SEPARATE persistent project space (its own files, "
-            "git history, and deploy targets), use the GAPT tools:\n"
+            + wid_line
+            + where_line
+            + "For a SEPARATE persistent project space (own files, git, deploy):\n"
             "- gapt_overview / gapt_list_projects / gapt_list_workspaces — see what exists\n"
             "- gapt_create_project / gapt_create_workspace — make a new independent space\n"
-            "- gapt_run_command — run a shell command inside a workspace\n"
             "- gapt_list_environments / gapt_deploy — deploy a project\n"
             "Each project is a fully isolated space that persists across sessions."
         )

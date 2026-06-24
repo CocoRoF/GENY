@@ -116,55 +116,86 @@ def require_mcp_bridge_auth(
 # ─── Tool registry access ───────────────────────────────────────
 
 
-def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
+def _describe_tool(name: str, tool: Any) -> Dict[str, Any]:
+    """MCP-shaped descriptor for one tool."""
+    description = getattr(tool, "description", "") or ""
+    # Geny ``BaseTool`` exposes params as ``parameters`` (legacy) or
+    # ``input_schema`` (newer). Adapt to MCP's ``inputSchema``.
+    schema: Dict[str, Any] = (
+        getattr(tool, "input_schema", None)
+        or getattr(tool, "parameters", None)
+        or {"type": "object", "properties": {}, "additionalProperties": False}
+    )
+    return {
+        "name": name,
+        "description": description if isinstance(description, str) else str(description),
+        "inputSchema": schema,
+    }
+
+
+async def _session_runtime(session_id: str):
+    """Resolve the LIVE session's (tool_registry, env_controller, sandbox).
+
+    This is what makes ``env`` / ``forge_tool`` / ``save_pack`` and session-scoped
+    tools (forged tools, per-env packs) reachable from claude_code_cli: they live
+    on the session's pipeline — NOT the global loader — and need the env
+    controller + sandbox in their ToolContext. Returns ``(None, None, None)`` when
+    no live session (the caller falls back to the global loader)."""
+    try:
+        from service.executor.agent_session_manager import get_agent_session_manager
+
+        manager = get_agent_session_manager()
+        agent = await manager.ensure_session_live(session_id)
+        if agent is None:
+            return None, None, None
+        pipeline = getattr(agent, "_pipeline", None)
+        registry = getattr(pipeline, "_tool_registry", None) if pipeline is not None else None
+        env = getattr(pipeline, "environment", None) if pipeline is not None else None
+        sandbox = getattr(agent, "_gapt_sandbox", None)
+        return registry, env, sandbox
+    except Exception:  # noqa: BLE001 — never break dispatch on a runtime miss
+        logger.debug("mcp_bridge: session runtime unavailable for %s", session_id, exc_info=True)
+        return None, None, None
+
+
+async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     """Return MCP-shaped tool descriptors for the session.
 
-    Pulls from the shared ``ToolLoader`` on the agent manager (the
-    same source ``s10_tool`` consults) and adapts each tool's
-    ``input_schema`` to MCP's ``inputSchema`` field naming.
-
-    Notes:
-      * The legacy ``agent._allowed_tools`` filter was removed in PR #1
-        (Phase A2) — nothing in Geny ever set the attribute, so the
-        gate was a no-op that suggested a filter that wasn't there.
-        The single source of truth for tool exposure is the env
-        manifest's ``tools.external`` (consumed at pipeline build
-        time); the MCP bridge intentionally advertises everything
-        registered with the loader and lets dispatch decide whether
-        a given call is honoured.
-      * Schemas come straight from the tool — ``BaseTool``'s schema
-        generator now hides host-injected params (``session_id``)
-        and sets ``additionalProperties: False``, so the
-        registered schema is already LLM-safe.
+    Prefers the session's live pipeline registry (built-ins + env-enabled +
+    forged + per-env pack tools — exactly the active set), so claude_code_cli sees
+    the SAME tools an SDK agent would. Falls back to the shared ``ToolLoader``
+    when there's no live session (older path / not yet built).
     """
     from service.executor.agent_session_manager import get_agent_session_manager
+
+    registry, _env, _sb = await _session_runtime(session_id)
+    tools: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    if registry is not None:
+        try:
+            for name in registry.list_names():
+                tool = registry.get(name)
+                if tool is None or name in seen:
+                    continue
+                seen.add(name)
+                tools.append(_describe_tool(name, tool))
+            return tools
+        except Exception:  # noqa: BLE001 — fall back to the loader on any registry issue
+            logger.debug("mcp_bridge: registry listing failed for %s", session_id, exc_info=True)
 
     manager = get_agent_session_manager()
     loader = getattr(manager, "_tool_loader", None)
     if loader is None:
-        return []
-
-    tools: List[Dict[str, Any]] = []
+        return tools
     for name in loader.get_all_names():
+        if name in seen:
+            continue
         tool = loader.get_tool(name)
         if tool is None:
             continue
-        description = getattr(tool, "description", "") or ""
-        # Geny ``BaseTool`` exposes JSON-Schema params either as a
-        # ``parameters`` dict (legacy) or an ``input_schema`` dict
-        # (newer). Adapt to MCP's ``inputSchema`` field.
-        schema: Dict[str, Any] = (
-            getattr(tool, "input_schema", None)
-            or getattr(tool, "parameters", None)
-            or {"type": "object", "properties": {}, "additionalProperties": False}
-        )
-        tools.append(
-            {
-                "name": name,
-                "description": description if isinstance(description, str) else str(description),
-                "inputSchema": schema,
-            }
-        )
+        seen.add(name)
+        tools.append(_describe_tool(name, tool))
     return tools
 
 
@@ -196,12 +227,15 @@ async def _execute_tool(
     from service.executor.agent_session_manager import get_agent_session_manager
     from tools.base import INJECTED_PARAM_NAMES
 
-    manager = get_agent_session_manager()
-    loader = getattr(manager, "_tool_loader", None)
-    if loader is None:
-        raise HTTPException(status_code=500, detail="tool loader not available")
-
-    tool = loader.get_tool(name)
+    # Resolve from the LIVE session first — that registry carries the env tool,
+    # forged tools, and per-env pack tools (+ the env controller + sandbox needed
+    # in the ToolContext). Fall back to the global loader when no live session.
+    registry, env_controller, sandbox = await _session_runtime(session_id)
+    tool = registry.get(name) if registry is not None else None
+    if tool is None:
+        manager = get_agent_session_manager()
+        loader = getattr(manager, "_tool_loader", None)
+        tool = loader.get_tool(name) if loader is not None else None
     if tool is None:
         return {
             "content": [{"type": "text", "text": f"Tool '{name}' not found"}],
@@ -223,7 +257,16 @@ async def _execute_tool(
             "content": [{"type": "text", "text": f"Tool '{name}' is not executable"}],
             "isError": True,
         }
-    result = await tool.execute(call_input, ToolContext(session_id=session_id))
+    # Full context: env controller (so `env`/`forge_tool`/`save_pack` reach the
+    # session's controller) + sandbox (so sandboxed tools docker-exec into the
+    # workspace) + workdir. Without these the CLI's GAPT/forge tools no-op.
+    ctx = ToolContext(
+        session_id=session_id,
+        environment=env_controller,
+        sandbox=sandbox,
+        working_dir="/workspace" if sandbox is not None else None,
+    )
+    result = await tool.execute(call_input, ctx)
 
     content = result.content
     if isinstance(content, str):
@@ -328,7 +371,7 @@ async def mcp_rpc(
 
     if method == "tools/list":
         try:
-            tools = _list_session_tools(session_id)
+            tools = await _list_session_tools(session_id)
         except Exception as exc:  # noqa: BLE001
             logger.error("mcp_bridge: tools/list failed: %s", exc, exc_info=True)
             return JsonRpcResponse(id=request.id, error=_err(-32603, str(exc)))
