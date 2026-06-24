@@ -22,12 +22,15 @@ import {
   Wrench,
   BookOpen,
   Camera,
+  ScrollText,
+  X,
 } from 'lucide-react';
 import {
   sandboxToolPacksApi,
   type SandboxToolPackSummary,
   type SandboxToolPackDetail,
 } from '@/lib/api';
+import SnapshotLogView from '@/components/sandbox/SnapshotLogView';
 
 export default function SandboxToolPacksPage() {
   const [packs, setPacks] = useState<SandboxToolPackSummary[]>([]);
@@ -36,6 +39,7 @@ export default function SandboxToolPacksPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, SandboxToolPackDetail>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [logPack, setLogPack] = useState<SandboxToolPackSummary | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -138,10 +142,17 @@ export default function SandboxToolPacksPage() {
         ) : packs.length === 0 ? (
           <div className="py-16 text-center border border-dashed border-[hsl(var(--border))] rounded-lg">
             <Boxes size={28} className="mx-auto mb-3 text-[hsl(var(--muted-foreground))]" />
-            <p className="text-[0.875rem] font-medium">No packs yet</p>
+            <p className="text-[0.875rem] font-medium">아직 저장된 팩이 없습니다</p>
             <p className="text-[0.8125rem] text-[hsl(var(--muted-foreground))] mt-1">
-              An agent creates one from chat: build a tool in its workspace, then
-              <code className="mx-1 px-1 rounded bg-[hsl(var(--muted))]">env save_pack</code>.
+              채팅에서 에이전트가 워크스페이스에 도구를 만들고
+              <code className="mx-1 px-1 rounded bg-[hsl(var(--muted))]">env save_pack</code>
+              하면 여기에 나타납니다.
+            </p>
+            <p className="text-[0.75rem] text-amber-400/90 mt-3 max-w-md mx-auto">
+              ⚠ 도구 제작에는 <b>샌드박스가 붙는 세션</b>이 필요합니다. claude_code_cli
+              구독 OAuth 세션은 샌드박스가 없어 제작이 불가합니다(에이전트가 "만들었다"고
+              해도 실제로는 저장되지 않음). API키 백엔드 환경이나 setup-token을 쓰세요.
+              실제로 무슨 일이 있었는지는 <b>Sandbox Logs</b>에서 확인할 수 있습니다.
             </p>
           </div>
         ) : (
@@ -192,6 +203,13 @@ export default function SandboxToolPacksPage() {
                           p.enabled ? 'translate-x-5' : ''
                         }`}
                       />
+                    </button>
+                    <button
+                      onClick={() => setLogPack(p)}
+                      className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                      title="빌드 로그 (이 팩을 만든 에이전트 활동·diff)"
+                    >
+                      <ScrollText size={15} />
                     </button>
                     <button
                       onClick={() => void onDelete(p)}
@@ -270,6 +288,38 @@ export default function SandboxToolPacksPage() {
           </div>
         )}
       </div>
+
+      {/* Build-log modal */}
+      {logPack && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setLogPack(null)}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-2 min-w-0">
+                <ScrollText size={16} />
+                <span className="font-medium truncate">{logPack.name} · 빌드 로그</span>
+              </div>
+              <button
+                onClick={() => setLogPack(null)}
+                className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <SnapshotLogView
+                loadActivity={() => sandboxToolPacksApi.activity(logPack.id)}
+                loadDiff={() => sandboxToolPacksApi.diff(logPack.id)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

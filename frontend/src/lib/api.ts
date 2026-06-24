@@ -3555,6 +3555,37 @@ export interface SandboxToolPackDetail extends SandboxToolPackSummary {
   updated_at?: string | null;
 }
 
+// Activity = the agent's chat + tool trail captured in a snapshot (ground truth
+// of what happened in the sandbox). Diff = the unified diff the snapshot added.
+export interface SnapshotToolUse {
+  tool: string;
+  input?: string | null;
+  output?: string | null;
+  is_error?: boolean;
+}
+export interface SnapshotTurn {
+  user?: string;
+  assistant?: string;
+  cost_usd?: number;
+  tool_uses?: SnapshotToolUse[];
+}
+export interface SnapshotActivity {
+  turns?: SnapshotTurn[];
+  total_cost_usd?: number;
+}
+export interface SnapshotActivityResponse {
+  snapshot_ref?: string;
+  snapshot_id?: string;
+  activity?: SnapshotActivity;
+  stats?: Record<string, unknown>;
+}
+export interface SnapshotDiffResponse {
+  snapshot_ref?: string;
+  unified?: string;
+  truncated?: boolean;
+  stats?: Record<string, unknown>;
+}
+
 export const sandboxToolPacksApi = {
   list: () =>
     apiCall<{ packs: SandboxToolPackSummary[] }>('/api/sandbox-tool-packs'),
@@ -3571,5 +3602,46 @@ export const sandboxToolPacksApi = {
     apiCall<{ ok: boolean; pack_id: string }>(
       `/api/sandbox-tool-packs/${encodeURIComponent(packId)}`,
       { method: 'DELETE' },
+    ),
+  activity: (packId: string) =>
+    apiCall<SnapshotActivityResponse>(
+      `/api/sandbox-tool-packs/${encodeURIComponent(packId)}/activity`,
+    ),
+  diff: (packId: string) =>
+    apiCall<SnapshotDiffResponse>(
+      `/api/sandbox-tool-packs/${encodeURIComponent(packId)}/diff`,
+    ),
+};
+
+// ==================== Sandbox Logs (observability) ====================
+
+export interface SandboxSummary {
+  id: string;
+  name: string | null;
+  status: string | null;
+  snapshot_count: number;
+}
+export interface SnapshotSummary {
+  id: string;
+  kind: string;
+  label: string;
+  created_at: string | null;
+  stats: Record<string, unknown>;
+  summary: { turns: number; tool_calls: number };
+}
+
+export const sandboxLogsApi = {
+  list: () => apiCall<{ sandboxes: SandboxSummary[] }>('/api/sandboxes'),
+  snapshots: (workspaceId: string) =>
+    apiCall<{ workspace_id: string; snapshots: SnapshotSummary[] }>(
+      `/api/sandboxes/${encodeURIComponent(workspaceId)}/snapshots`,
+    ),
+  snapshot: (snapshotId: string) =>
+    apiCall<SnapshotActivityResponse>(
+      `/api/sandboxes/snapshots/${encodeURIComponent(snapshotId)}`,
+    ),
+  diff: (snapshotId: string) =>
+    apiCall<SnapshotDiffResponse>(
+      `/api/sandboxes/snapshots/${encodeURIComponent(snapshotId)}/diff`,
     ),
 };

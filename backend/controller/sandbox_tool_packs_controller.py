@@ -117,6 +117,43 @@ async def get_pack(pack_id: str, _auth: dict = Depends(require_auth)) -> Dict[st
         raise HTTPException(status_code=404, detail={"code": "pack.not_found", "reason": pack_id})
 
 
+@router.get("/{pack_id}/activity")
+async def get_pack_activity(
+    pack_id: str, _auth: dict = Depends(require_auth)
+) -> Dict[str, Any]:
+    """The build log of the pack's snapshot — the agent's chat + tool trail that
+    produced it (the ground truth of what actually happened in the sandbox)."""
+    try:
+        pack = get_sandbox_tool_pack_store().get(pack_id)
+    except SandboxToolPackNotFound:
+        raise HTTPException(status_code=404, detail={"code": "pack.not_found", "reason": pack_id})
+    if not pack.snapshot_ref:
+        return {"snapshot_ref": "", "activity": {}, "stats": {}}
+    try:
+        data = await _gapt().snapshot_activity(pack.snapshot_ref)
+    except GaptApiError as exc:
+        raise HTTPException(status_code=502, detail={"code": exc.code, "reason": exc.reason})
+    return {"snapshot_ref": pack.snapshot_ref, **(data if isinstance(data, dict) else {"activity": data})}
+
+
+@router.get("/{pack_id}/diff")
+async def get_pack_diff(
+    pack_id: str, _auth: dict = Depends(require_auth)
+) -> Dict[str, Any]:
+    """The unified diff the pack's snapshot introduced (what files/code it added)."""
+    try:
+        pack = get_sandbox_tool_pack_store().get(pack_id)
+    except SandboxToolPackNotFound:
+        raise HTTPException(status_code=404, detail={"code": "pack.not_found", "reason": pack_id})
+    if not pack.snapshot_ref:
+        return {"snapshot_ref": "", "unified": "", "truncated": False, "stats": {}}
+    try:
+        data = await _gapt().snapshot_diff(pack.snapshot_ref)
+    except GaptApiError as exc:
+        raise HTTPException(status_code=502, detail={"code": exc.code, "reason": exc.reason})
+    return {"snapshot_ref": pack.snapshot_ref, **(data if isinstance(data, dict) else {})}
+
+
 # ── test (pre-save) ──────────────────────────────────────────────────
 
 

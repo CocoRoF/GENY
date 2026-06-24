@@ -42,6 +42,7 @@ from controller.tool_preset_controller import router as tool_preset_router
 from controller.tool_controller import router as tool_catalog_router
 from controller.custom_tools_controller import router as custom_tools_router  # Phase B — DB-backed user tools
 from controller.sandbox_tool_packs_controller import router as sandbox_tool_packs_router  # Sandbox Tool Packs
+from controller.sandbox_observability_controller import router as sandbox_observability_router  # Sandbox Logs
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
 from controller.permission_controller import router as permission_router  # PR-E.2.1
@@ -874,6 +875,7 @@ app.include_router(tool_preset_router)  # Tool preset management
 app.include_router(tool_catalog_router)  # Tool catalog API
 app.include_router(custom_tools_router)  # Custom tools CRUD (Phase B — DB-backed)
 app.include_router(sandbox_tool_packs_router)  # Sandbox Tool Packs (env+tools+skills bundles)
+app.include_router(sandbox_observability_router)  # Sandbox Logs (snapshot activity/diff viewer)
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)
 app.include_router(permission_router)  # Permission rules CRUD (PR-E.2.1)
