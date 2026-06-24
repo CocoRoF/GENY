@@ -1990,6 +1990,62 @@ class AgentSession:
 
         return _persist
 
+    def _make_pack_persistence(self):
+        """Build the ``pack_persistence`` callback the executor invokes on
+        ``env(action="save_pack")``: snapshot the session's GAPT workspace
+        (``tool_save``, artifacts included) and persist a reusable Sandbox Tool
+        Pack (disabled by default — the owner enables it for an environment).
+        Returns None when GAPT isn't configured."""
+        session_id = self._session_id
+
+        async def _persist(payload: Dict[str, Any]) -> Dict[str, Any]:
+            from service.gapt import get_gapt_client
+            from service.sandbox_tool_packs import builder, get_sandbox_tool_pack_store
+            from service.sandbox_tool_packs.models import PackSkill, SandboxToolSpec
+
+            sandbox = payload.get("sandbox")
+            wid = getattr(sandbox, "workspace_id", None)
+            if not wid:
+                raise RuntimeError("the session has no GAPT workspace to snapshot")
+            gc = get_gapt_client()
+            if not gc.configured:
+                raise RuntimeError("GAPT is not configured on this host")
+            # Resolve the project the workspace belongs to (for cold reuse).
+            ws = await gc.get_workspace(wid)
+            project_ref = ""
+            if isinstance(ws, dict):
+                project_ref = ws.get("project_id") or (ws.get("project") or {}).get("id") or ""
+            tools = [SandboxToolSpec(**t) for t in (payload.get("tools") or [])]
+            skills = [
+                PackSkill(
+                    id=s["id"],
+                    description=s.get("description", ""),
+                    body=s.get("body", ""),
+                    allowed_tools=list(s.get("allowed_tools", []) or []),
+                )
+                for s in (payload.get("skills") or [])
+                if isinstance(s, dict) and s.get("id")
+            ]
+            store = get_sandbox_tool_pack_store()
+            saved = await builder.save_pack(
+                store,
+                gc,
+                name=payload.get("name") or "pack",
+                description=payload.get("description") or "",
+                project_ref=project_ref,
+                workspace_ref=wid,
+                tools=tools,
+                skills=skills,
+                created_by=session_id,
+                enabled=False,
+            )
+            logger.info(
+                "[%s] saved sandbox tool pack %s (%s)", session_id, saved.name, saved.id
+            )
+            return {"pack_id": saved.id, "name": saved.name}
+
+        return _persist
+
     def _restore_env_overlay(self) -> None:
         """Re-apply a previously-saved env overlay (prompt / authored skills /
         enabled tools + skills). Best-effort — additive (does not disable tools
@@ -2696,6 +2752,12 @@ class AgentSession:
         # SDK providers + when no sandbox is bound (default host execution).
         if getattr(self, "_gapt_sandbox", None) is not None:
             attach_kwargs["sandbox"] = self._gapt_sandbox
+            # save_pack (executor >=2.32.0): let the agent persist
+            # [this workspace + the tools it forged + skills it authored] as a
+            # reusable Sandbox Tool Pack via env(action="save_pack").
+            _pack_persist = self._make_pack_persistence()
+            if _pack_persist is not None:
+                attach_kwargs["pack_persistence"] = _pack_persist
 
         # Self-modifying environment (executor >=2.26.0): persist the session's
         # evolved env overlay to its OWN storage so ``env(action="save")`` is

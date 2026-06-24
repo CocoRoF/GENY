@@ -18,7 +18,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { agentApi, subagentTypeApi, type SubagentTypeRow } from '@/lib/api';
+import {
+  agentApi,
+  subagentTypeApi,
+  type SubagentTypeRow,
+  sandboxToolPacksApi,
+  type SandboxToolPackSummary,
+} from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
 import type { TriggerPresetSummary } from '@/types/triggerPreset';
@@ -330,6 +336,121 @@ export function TriggerEnvPicker() {
           비워두면 기본 트리거 프리셋을 사용합니다.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * SandboxToolPacksPicker — opt this environment into one or more Sandbox Tool
+ * Packs. Only ENABLED packs are selectable (the global owner gate); the
+ * selection is written to `host_selections.extras.sandbox_tool_packs`. A pack's
+ * tools + skills load for every session of this env, each running in the pack's
+ * own snapshotted workspace.
+ */
+export function SandboxToolPacksPicker() {
+  const draft = useEnvironmentDraftStore((s) => s.draft);
+  const setSandboxToolPacks = useEnvironmentDraftStore(
+    (s) => s.setSandboxToolPacks,
+  );
+
+  const [packs, setPacks] = useState<SandboxToolPackSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrorText(null);
+    sandboxToolPacksApi
+      .list()
+      .then((res) => {
+        if (!cancelled) setPacks(res.packs || []);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorText(err instanceof Error ? err.message : String(err));
+          setPacks([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selected = useMemo(() => {
+    const raw = draft?.host_selections?.extras?.sandbox_tool_packs;
+    return Array.isArray(raw) ? (raw as string[]) : [];
+  }, [draft]);
+
+  const enabledPacks = useMemo(() => packs.filter((p) => p.enabled), [packs]);
+
+  const toggle = useCallback(
+    (packId: string) => {
+      const set = new Set(selected);
+      if (set.has(packId)) set.delete(packId);
+      else set.add(packId);
+      setSandboxToolPacks(Array.from(set));
+    },
+    [selected, setSandboxToolPacks],
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+        샌드박스 도구 팩 (Sandbox Tool Packs)
+      </label>
+      {loading ? (
+        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] animate-pulse">
+          로딩 중…
+        </p>
+      ) : errorText ? (
+        <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">
+          {errorText}
+        </p>
+      ) : enabledPacks.length === 0 ? (
+        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+          활성화된 팩이 없습니다. 팩 관리자에서 팩을 먼저 enable 하세요.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {enabledPacks.map((p) => {
+            const on = selected.includes(p.id);
+            return (
+              <label
+                key={p.id}
+                className="flex items-start gap-2 px-2.5 py-1.5 rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]/40 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(p.id)}
+                  className="mt-0.5 accent-violet-500"
+                />
+                <span className="min-w-0">
+                  <span className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+                    {p.name}
+                  </span>
+                  <span className="text-[0.7rem] text-[hsl(var(--muted-foreground))] ml-1.5">
+                    {p.tool_count} tool{p.tool_count === 1 ? '' : 's'} · {p.skill_count} skill
+                    {p.skill_count === 1 ? '' : 's'}
+                  </span>
+                  {p.description && (
+                    <span className="block text-[0.7rem] text-[hsl(var(--muted-foreground))] truncate">
+                      {p.description}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+        선택한 팩의 도구·스킬이 이 환경의 모든 세션에 로드됩니다.
+      </p>
     </div>
   );
 }

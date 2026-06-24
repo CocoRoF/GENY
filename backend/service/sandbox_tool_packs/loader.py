@@ -17,7 +17,7 @@ so the tool always runs in the exact environment it was saved with.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from service.gapt.client import GaptApiError
 from service.sandbox_tool_packs.models import (
@@ -129,11 +129,18 @@ class SandboxToolPackProvider:
     into the session's SkillRegistry by the caller.
     """
 
-    def __init__(self, *, store: Any, gapt_client: Any) -> None:
+    def __init__(
+        self, *, store: Any, gapt_client: Any, pack_ids: Optional[List[str]] = None
+    ) -> None:
         self._tools: dict[str, Any] = {}
         self._skills: List[Any] = []
         self._pack_of: dict[str, str] = {}  # tool name → pack name (diagnostics)
+        # ``pack_ids`` (per-env opt-in) narrows to those packs; ``enabled`` stays
+        # the global gate (decision C: global registry + per-env opt-in).
+        selected = set(pack_ids) if pack_ids is not None else None
         for pack in store.list_enabled():
+            if selected is not None and pack.id not in selected:
+                continue
             try:
                 tools, skills = load_pack(pack, gapt_client=gapt_client)
             except Exception:  # noqa: BLE001 — one broken pack never sinks the rest

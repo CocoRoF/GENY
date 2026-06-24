@@ -392,6 +392,13 @@ export interface EnvironmentDraftState {
    */
   setSubworkerTypes: (types: SubworkerTypeConfig[]) => void;
   /**
+   * Set (or clear) the env's opt-in Sandbox Tool Packs, written to
+   * `host_selections.extras.sandbox_tool_packs` (a list of pack ids). A pack
+   * loads for a session only when it is BOTH globally enabled AND selected
+   * here. An empty list drops the entry (and prunes empty containers).
+   */
+  setSandboxToolPacks: (packIds: string[]) => void;
+  /**
    * Set (or clear) one per-environment tool's settings, written to
    * `host_selections.extras.tool_settings[<key>]` (e.g. `web_search`). This
    * mirrors `setOwnedSubagent` / `setSubworkerTypes`: passing a non-empty
@@ -745,6 +752,35 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
         extras.subworker_types = clean;
       } else {
         delete extras.subworker_types;
+      }
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setSandboxToolPacks: (packIds) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      const clean = Array.from(
+        new Set((packIds ?? []).map((p) => String(p).trim()).filter(Boolean)),
+      );
+      if (clean.length > 0) {
+        extras.sandbox_tool_packs = clean;
+      } else {
+        delete extras.sandbox_tool_packs;
       }
       next.host_selections =
         Object.keys(extras).length > 0

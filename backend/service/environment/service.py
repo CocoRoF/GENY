@@ -744,6 +744,7 @@ class EnvironmentService:
         subagent_registry: Optional[Any] = None,
         strict: bool = True,
         adhoc_providers: Sequence[Any] = (),
+        extra_external_tools: Sequence[str] = (),
     ) -> Pipeline:
         """Load the manifest and build a Pipeline via the library helper.
 
@@ -776,6 +777,13 @@ class EnvironmentService:
         manifest = self.load_manifest(env_id)
         if manifest is None:
             raise EnvironmentNotFoundError(env_id)
+        # Sandbox tool packs (per-env opt-in): union the selected packs' tool
+        # names into tools.external so they activate like custom tools. The
+        # pack provider (resolving these names) is passed in adhoc_providers.
+        if extra_external_tools:
+            existing = list(getattr(manifest.tools, "external", None) or [])
+            merged = existing + [t for t in extra_external_tools if t not in existing]
+            manifest.tools.external = merged
         # Route providers to the correct executor channel by capability:
         #   * get-style (``get`` + ``list_names``) → ``adhoc_providers`` —
         #     resolve manifest.tools.external by name (GenyToolProvider, …).

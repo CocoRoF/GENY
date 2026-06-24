@@ -383,6 +383,25 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return []
 
+    def _env_sandbox_tool_pack_ids(self, env_id: Optional[str]) -> List[str]:
+        """The env's opt-in Sandbox Tool Pack ids, or ``[]``.
+
+        Stored in ``host_selections.extras.sandbox_tool_packs`` — a list of pack
+        ids the env editor's pack panel selects. A pack loads only when it is
+        BOTH globally enabled AND listed here (decision C: global registry +
+        per-env opt-in). Empty → no packs for this session."""
+        if not env_id or self._environment_service is None:
+            return []
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return []
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            val = extras.get("sandbox_tool_packs")
+            return [str(p).strip() for p in val if p] if isinstance(val, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+
     def _env_host_selection(
         self, env_id: Optional[str], category: str
     ) -> Optional[List[str]]:
@@ -957,6 +976,48 @@ class AgentSessionManager:
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"  skill registry install skipped: {exc}", exc_info=True)
 
+        # Sandbox Tool Packs (per-env opt-in): load the packs this env selected
+        # (and that are globally enabled), surface their tools as a get-style
+        # provider, register their skills, and remember the tool names so they
+        # get unioned into manifest.tools.external (→ active for the session).
+        pack_tool_names: list = []
+        try:
+            pack_ids = self._env_sandbox_tool_pack_ids(env_id)
+            if pack_ids:
+                from service.gapt import get_gapt_client
+                from service.sandbox_tool_packs import (
+                    SandboxToolPackProvider,
+                    get_sandbox_tool_pack_store,
+                )
+
+                _gc = get_gapt_client()
+                if _gc.configured:
+                    pack_provider = SandboxToolPackProvider(
+                        store=get_sandbox_tool_pack_store(),
+                        gapt_client=_gc,
+                        pack_ids=pack_ids,
+                    )
+                    pack_tool_names = pack_provider.list_names()
+                    if pack_tool_names:
+                        adhoc_providers.append(pack_provider)
+                        if skill_registry is not None:
+                            for sk in pack_provider.skills():
+                                try:
+                                    skill_registry.register(sk)
+                                except Exception:  # noqa: BLE001
+                                    logger.debug(
+                                        "  pack skill %s already present",
+                                        getattr(sk, "id", "?"),
+                                    )
+                        logger.info(
+                            "  sandbox_tool_packs: %d tool(s) from %d pack(s)",
+                            len(pack_tool_names), len(pack_ids),
+                        )
+                else:
+                    logger.warning("  sandbox_tool_packs: GAPT not configured; skipped")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"  sandbox_tool_packs load skipped: {exc}", exc_info=True)
+
         # Build the sub-worker registry AFTER the adhoc providers so env-declared
         # sub-workers inherit them (GenyToolProvider/Skill/...) and can therefore
         # resolve CUSTOM tools + skills in their allowed_tools — not just
@@ -973,6 +1034,7 @@ class AgentSessionManager:
             credentials=credentials,
             subagent_registry=subagent_registry,
             adhoc_providers=adhoc_providers,
+            extra_external_tools=pack_tool_names,
         )
         logger.info(
             f"  env_id: {env_id} → manifest-backed pipeline built "

@@ -56,7 +56,7 @@ dependencies = [
     # discord / slack / ntfy) so Geny declares channels in config and the
     # executor builds them (no host transport code). Keep in sync with
     # requirements.txt.
-    "geny-executor>=2.31.0,<3.0.0",
+    "geny-executor>=2.32.0,<3.0.0",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

@@ -182,6 +182,17 @@ class PythonInlineConfig(BaseModel):
             "which one is the tool."
         ),
     )
+    run_in_sandbox: bool = Field(
+        default=False,
+        description=(
+            "When true, the source is NEVER exec()'d on the host — it runs "
+            "ISOLATED inside the session's sandbox (stdin JSON → the tool's "
+            "run/arun → stdout). Host-internal access (service.*, geny_executor.*) "
+            "is intentionally NOT available in this mode; use it for untrusted / "
+            "self-authored code. When false (default), the source runs in-process "
+            "with full host privilege (the legacy single-admin path)."
+        ),
+    )
 
 
 CustomToolConfig = Union[

@@ -37,6 +37,7 @@ import {
   Bot,
   Workflow,
   SlidersHorizontal,
+  Boxes,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
@@ -58,6 +59,7 @@ import {
   TriggerEnvPicker,
   OwnedSubagentPicker,
   SubworkerTypesPicker,
+  SandboxToolPacksPicker,
 } from './HostSelectionPickers';
 import ToolSettingsPicker from './ToolSettingsPicker';
 
@@ -77,7 +79,8 @@ type Panel =
   | 'triggers'
   | 'subagent'
   | 'subworker'
-  | 'tool_settings';
+  | 'tool_settings'
+  | 'sandbox_tool_packs';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -89,6 +92,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   subagent: 'globals.subagent',
   subworker: 'globals.subworker',
   tool_settings: 'globals.toolSettings',
+  sandbox_tool_packs: 'globals.sandboxToolPacks',
 };
 
 const HEADER_PALETTE = {
@@ -153,6 +157,11 @@ export default function GlobalSettingsView() {
         | Record<string, unknown>
         | undefined) ?? {},
     ).length > 0;
+
+  // ★ on the Tool Packs nav row when this env opted into any pack.
+  const sandboxPacksSelected =
+    Array.isArray(draft.host_selections?.extras?.sandbox_tool_packs) &&
+    (draft.host_selections?.extras?.sandbox_tool_packs as unknown[]).length > 0;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -273,6 +282,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('tool_settings')}
               badge={toolSettingsConfigured ? '★' : undefined}
             />
+            <SubTabButton
+              icon={Boxes}
+              label="Tool Packs"
+              active={panel === 'sandbox_tool_packs'}
+              onClick={() => setPanel('sandbox_tool_packs')}
+              badge={sandboxPacksSelected ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -375,6 +391,16 @@ export default function GlobalSettingsView() {
                   )}
                 />
                 <ToolSettingsPicker />
+              </div>
+            )}
+
+            {panel === 'sandbox_tool_packs' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title="Sandbox Tool Packs"
+                  description="Opt this environment into reusable Sandbox Tool Packs — each loads its tools + skills into every session, running in the pack's own snapshotted workspace."
+                />
+                <SandboxToolPacksPicker />
               </div>
             )}
           </div>

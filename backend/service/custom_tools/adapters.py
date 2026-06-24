@@ -419,6 +419,71 @@ class BuiltinAliasAdapter(BaseTool):
 # ── Python-inline backend ────────────────────────────────────────
 
 
+# Harness executed INSIDE the sandbox for run_in_sandbox inline tools. It
+# provides minimal BaseTool/ToolError shims (the host's are unavailable by
+# design), execs the user source, instantiates the class, runs it on the stdin
+# request, and emits {"result": ...} or {"error": ...} on stdout. __CLASS_NAME__
+# is substituted per tool.
+_INLINE_SANDBOX_HARNESS = '''\
+import sys, json, asyncio, logging, typing
+
+
+class ToolError(Exception):
+    def __init__(self, message="", code=None):
+        super().__init__(message)
+        self.code = code
+
+
+class BaseTool:
+    name = ""
+    description = ""
+    parameters = None
+    CAPABILITIES = None
+
+    def __init__(self, *a, **k):
+        pass
+
+
+def _main():
+    ns = {
+        "__name__": "inline_tool",
+        "BaseTool": BaseTool,
+        "ToolError": ToolError,
+        "asyncio": asyncio,
+        "json": json,
+        "logging": logging,
+        "typing": typing,
+    }
+    with open("tool.py", "r", encoding="utf-8") as fh:
+        exec(compile(fh.read(), "tool.py", "exec"), ns)
+    cls = ns.get("__CLASS_NAME__")
+    if cls is None:
+        print(json.dumps({"error": "class __CLASS_NAME__ not defined"}))
+        sys.exit(1)
+    inst = cls()
+    raw = sys.stdin.read() or "{}"
+    req = json.loads(raw)
+
+    async def _call():
+        if hasattr(inst, "arun"):
+            return await inst.arun(**req)
+        if hasattr(inst, "run"):
+            r = inst.run(**req)
+            return await r if asyncio.iscoroutine(r) else r
+        raise ToolError("inline tool has no run/arun method")
+
+    try:
+        out = asyncio.run(_call())
+    except Exception as exc:
+        print(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}))
+        sys.exit(1)
+    print(json.dumps({"result": out}, default=str))
+
+
+_main()
+'''
+
+
 class PythonInlineAdapter(BaseTool):
     """Loads a complete BaseTool subclass from inline Python source stored
     in the DB row. The "make a tool fully in the web" backend kind.
@@ -450,6 +515,24 @@ class PythonInlineAdapter(BaseTool):
         self._defn = defn
         self._cfg = cfg
 
+        if cfg.run_in_sandbox:
+            # SANDBOX mode: never exec the source on the host — not even at load.
+            # Syntax-check only; the real run happens inside the session sandbox
+            # (see execute). Metadata comes from the DB row (no host instance).
+            try:
+                compile(cfg.source_code, f"<python_inline:{cfg.class_name}>", "exec")
+            except SyntaxError as exc:
+                raise ToolError(
+                    f"inline source syntax error at line {exc.lineno}: {exc.msg}",
+                    code="INLINE_SYNTAX",
+                ) from exc
+            self._underlying = None
+            self.name = defn.name
+            self.description = defn.description
+            self.parameters = _hygiene(dict(defn.input_schema or {}))
+            self.CAPABILITIES = _to_executor_capabilities(defn)
+            return
+
         underlying = _compile_python_inline(cfg)
         self._underlying = underlying
 
@@ -469,6 +552,63 @@ class PythonInlineAdapter(BaseTool):
             or getattr(underlying, "CAPABILITIES", None)
             or _to_executor_capabilities(defn)
         )
+
+    async def execute(self, input: Dict[str, Any], context: Any = None) -> Any:
+        """Sandbox-routed when ``run_in_sandbox`` is set and a sandbox is
+        attached; otherwise the normal in-process dispatch (host privilege)."""
+        if self._cfg.run_in_sandbox:
+            sandbox = getattr(context, "sandbox", None) if context else None
+            if sandbox is None:
+                from tools.base import ToolResult  # noqa: PLC0415
+
+                return ToolResult(
+                    content=(
+                        f"inline tool '{self.name}' is sandbox-only but no sandbox "
+                        "is attached to this session"
+                    ),
+                    is_error=True,
+                )
+            return await self._execute_in_sandbox(input or {}, sandbox)
+        return await super().execute(input, context)
+
+    async def _execute_in_sandbox(self, input: Dict[str, Any], sandbox: Any) -> Any:
+        """Run the inline source ISOLATED inside ``sandbox``: write the source +
+        a tiny harness, then exec ``python3 harness`` with the request on stdin
+        and read the result off stdout. No host access by design."""
+        import json as _json  # noqa: PLC0415
+
+        from tools.base import ToolResult  # noqa: PLC0415
+
+        from geny_executor.tools import sandbox_exec, sb_write_bytes  # noqa: PLC0415
+
+        base = f".gapt/inline/{self.name}"
+        await sb_write_bytes(
+            sandbox, f"{base}/tool.py", self._cfg.source_code.encode("utf-8"),
+            workdir="/workspace",
+        )
+        harness = _INLINE_SANDBOX_HARNESS.replace("__CLASS_NAME__", self._cfg.class_name)
+        await sb_write_bytes(
+            sandbox, f"{base}/_run.py", harness.encode("utf-8"), workdir="/workspace",
+        )
+        rc, out, err = await sandbox_exec(
+            sandbox,
+            ["python3", "_run.py"],
+            cwd=f"/workspace/{base}",
+            input_bytes=_json.dumps(input).encode("utf-8"),
+            timeout_s=120.0,
+        )
+        text = out.decode("utf-8", "replace").strip()
+        if rc != 0 or not text:
+            detail = (err.decode("utf-8", "replace").strip() or text)[:600]
+            return ToolResult(content=f"inline tool '{self.name}' failed: {detail}", is_error=True)
+        try:
+            payload = _json.loads(text.splitlines()[-1])
+        except Exception:  # noqa: BLE001
+            return ToolResult(content=text)
+        if isinstance(payload, dict) and payload.get("error"):
+            return ToolResult(content=str(payload["error"]), is_error=True)
+        result = payload.get("result") if isinstance(payload, dict) else payload
+        return ToolResult(content=result if isinstance(result, str) else _json.dumps(result))
 
     async def arun(self, **kwargs: Any) -> str:
         underlying = self._underlying

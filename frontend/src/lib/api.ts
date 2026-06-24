@@ -3507,3 +3507,69 @@ export interface WhiteboardOrganizerSuggestion {
   cooldown_until: string | null;
   extra: Record<string, unknown>;
 }
+
+// ==================== Sandbox Tool Packs API ====================
+//
+// A pack = an independent GAPT environment (workspace restorable from a
+// snapshot) + the tools whose code runs inside it + the skills documenting
+// them. Agents author + save packs from chat (env save_pack); this surface
+// lists/inspects them, gates them (enabled), and deletes them.
+
+export interface SandboxToolPackSummary {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  tool_count: number;
+  skill_count: number;
+  workspace_ref: string;
+  snapshot_ref: string;
+  project_ref: string;
+}
+
+export interface SandboxToolSpecDTO {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  runtime: string;
+  entrypoint: string;
+  argv: string[];
+  timeout_s: number;
+  workdir: string;
+  network_egress: boolean;
+  read_only: boolean;
+}
+
+export interface PackSkillDTO {
+  id: string;
+  description: string;
+  body: string;
+  allowed_tools: string[];
+}
+
+export interface SandboxToolPackDetail extends SandboxToolPackSummary {
+  tools: SandboxToolSpecDTO[];
+  skills: PackSkillDTO[];
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export const sandboxToolPacksApi = {
+  list: () =>
+    apiCall<{ packs: SandboxToolPackSummary[] }>('/api/sandbox-tool-packs'),
+  get: (packId: string) =>
+    apiCall<SandboxToolPackDetail>(
+      `/api/sandbox-tool-packs/${encodeURIComponent(packId)}`,
+    ),
+  setEnabled: (packId: string, enabled: boolean) =>
+    apiCall<SandboxToolPackSummary>(
+      `/api/sandbox-tool-packs/${encodeURIComponent(packId)}/enabled`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+    ),
+  remove: (packId: string) =>
+    apiCall<{ ok: boolean; pack_id: string }>(
+      `/api/sandbox-tool-packs/${encodeURIComponent(packId)}`,
+      { method: 'DELETE' },
+    ),
+};
