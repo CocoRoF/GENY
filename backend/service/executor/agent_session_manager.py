@@ -1011,12 +1011,29 @@ class AgentSessionManager:
             adhoc_providers=adhoc_providers,
         ).build()
 
+        # Sandbox-tool lifecycle toolset — guarantee EVERY env (incl. lean VTuber
+        # personas + already-created envs) can do the full self-service loop:
+        #   [create] env(forge_tool)  [save] env(save_pack)  ← env tool: universal
+        #   write/test code in /workspace → gapt_run_command
+        #   [list] list_tool_packs    [use] use_tool_pack
+        # Injected at instantiate-time (unioned into tools.external) so no per-env
+        # reseed is needed. Only meaningful when GAPT is configured.
+        lifecycle_tools: list = []
+        try:
+            from service.gapt import get_gapt_client as _ggc
+
+            if _ggc().configured:
+                lifecycle_tools = ["gapt_run_command", "list_tool_packs", "use_tool_pack"]
+        except Exception:  # noqa: BLE001
+            lifecycle_tools = []
+        _extra_tools = list(dict.fromkeys([*lifecycle_tools, *pack_tool_names]))
+
         prebuilt_pipeline = await self._environment_service.instantiate_pipeline(
             env_id,
             credentials=credentials,
             subagent_registry=subagent_registry,
             adhoc_providers=adhoc_providers,
-            extra_external_tools=pack_tool_names,
+            extra_external_tools=_extra_tools,
         )
         logger.info(
             f"  env_id: {env_id} → manifest-backed pipeline built "
