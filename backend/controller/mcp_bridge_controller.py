@@ -152,15 +152,20 @@ async def _session_runtime(session_id: str):
         manager = get_agent_session_manager()
         agent = manager.get_agent(session_id)
         if agent is None:
-            return None, None, None
+            return None, None, None, None
         pipeline = getattr(agent, "_pipeline", None)
         registry = getattr(pipeline, "_tool_registry", None) if pipeline is not None else None
         env = getattr(pipeline, "environment", None) if pipeline is not None else None
         sandbox = getattr(agent, "_gapt_sandbox", None)
-        return registry, env, sandbox
+        # The LIVE session tool context — carries extras (subagent_manager,
+        # agent_orchestrator, tool settings, …) + sandbox + environment +
+        # working_dir. Tools like SubAgentSpawn read context.extras, so the bridge
+        # MUST dispatch with this context, not a bare one.
+        base_ctx = getattr(env, "_tool_context", None) if env is not None else None
+        return registry, env, sandbox, base_ctx
     except Exception:  # noqa: BLE001 — never break dispatch on a runtime miss
         logger.debug("mcp_bridge: session runtime unavailable for %s", session_id, exc_info=True)
-        return None, None, None
+        return None, None, None, None
 
 
 async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
@@ -173,7 +178,7 @@ async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     """
     from service.executor.agent_session_manager import get_agent_session_manager
 
-    registry, _env, _sb = await _session_runtime(session_id)
+    registry, _env, _sb, _ctx = await _session_runtime(session_id)
     tools: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -237,9 +242,10 @@ async def _execute_tool(
     from tools.base import INJECTED_PARAM_NAMES
 
     # Resolve from the LIVE session first — that registry carries the env tool,
-    # forged tools, and per-env pack tools (+ the env controller + sandbox needed
-    # in the ToolContext). Fall back to the global loader when no live session.
-    registry, env_controller, sandbox = await _session_runtime(session_id)
+    # forged tools, and per-env pack tools (+ the env controller + sandbox + the
+    # live ToolContext whose extras hold subagent_manager/orchestrator/settings).
+    # Fall back to the global loader when no live session.
+    registry, env_controller, sandbox, base_ctx = await _session_runtime(session_id)
     tool = registry.get(name) if registry is not None else None
     if tool is None:
         manager = get_agent_session_manager()
@@ -266,15 +272,22 @@ async def _execute_tool(
             "content": [{"type": "text", "text": f"Tool '{name}' is not executable"}],
             "isError": True,
         }
-    # Full context: env controller (so `env`/`forge_tool`/`save_pack` reach the
-    # session's controller) + sandbox (so sandboxed tools docker-exec into the
-    # workspace) + workdir. Without these the CLI's GAPT/forge tools no-op.
-    ctx = ToolContext(
-        session_id=session_id,
-        environment=env_controller,
-        sandbox=sandbox,
-        working_dir="/workspace" if sandbox is not None else None,
-    )
+    # Prefer the session's LIVE ToolContext — it already carries everything a
+    # tool needs: extras (subagent_manager / agent_orchestrator / tool settings),
+    # sandbox, environment, working_dir, storage_path. Without extras, tools like
+    # SubAgentSpawn fail with NO_SUBAGENT_MANAGER. Fall back to a minimal context
+    # (env+sandbox) when there's no live session, then a bare one.
+    if base_ctx is not None:
+        ctx = base_ctx
+    elif env_controller is not None or sandbox is not None:
+        ctx = ToolContext(
+            session_id=session_id,
+            environment=env_controller,
+            sandbox=sandbox,
+            working_dir="/workspace" if sandbox is not None else None,
+        )
+    else:
+        ctx = ToolContext(session_id=session_id)
     result = await tool.execute(call_input, ctx)
 
     content = result.content
