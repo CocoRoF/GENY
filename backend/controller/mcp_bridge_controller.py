@@ -144,8 +144,13 @@ async def _session_runtime(session_id: str):
     try:
         from service.executor.agent_session_manager import get_agent_session_manager
 
+        # NON-BLOCKING get_agent — NOT ensure_session_live. The bridge runs
+        # INSIDE a live turn (the spawned CLI POSTs tools/list); ensure_session_live
+        # takes the per-session rehydrate lock + can rebuild → deadlocks/stalls the
+        # turn (CLI hangs waiting for its tool list → 0.0s). The agent is already
+        # live here, so get_agent is correct + safe.
         manager = get_agent_session_manager()
-        agent = await manager.ensure_session_live(session_id)
+        agent = manager.get_agent(session_id)
         if agent is None:
             return None, None, None
         pipeline = getattr(agent, "_pipeline", None)
