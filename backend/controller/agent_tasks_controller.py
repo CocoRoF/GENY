@@ -197,6 +197,27 @@ async def stop_task(
     rec = registry.get(task_id)
     if rec is None or _row_session_id(rec) not in _session_scope(session_id, True):
         raise HTTPException(404, "task not found")
+
+    # Already finished → nothing to stop (idempotent success).
+    if getattr(rec, "is_terminal", False):
+        return {"task_id": task_id, "stopped": False, "reason": "already terminal"}
+
+    # Sub-agent (mirror) tasks run in the SubAgentManager, NOT the task runner —
+    # route Stop to the manager (by sub_agent_id) and mark the mirror terminal.
+    if rec.kind == "subagent":
+        mgr = getattr(request.app.state, "subagent_manager", None)
+        sub_agent_id = (rec.payload or {}).get("sub_agent_id")
+        stopped = False
+        if mgr is not None and sub_agent_id:
+            try:
+                stopped = bool(await mgr.stop(sub_agent_id))
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(500, f"sub-agent stop failed: {exc}")
+        from geny_executor.stages.s13_task_registry import TaskStatus
+
+        registry.update_status(task_id, TaskStatus.CANCELLED, error="stopped by user")
+        return {"task_id": task_id, "stopped": stopped, "kind": "subagent"}
+
     runner = _runner(request)
     stopped = await runner.stop(task_id)
     if not stopped:
@@ -217,10 +238,26 @@ async def stream_task_output(
         raise HTTPException(404, "task not found")
 
     async def gen():
+        produced = False
         async for chunk in registry.stream_output(task_id):
+            produced = True
             yield chunk
+        # Fallback for tasks that don't stream incremental output — notably
+        # sub-agent (mirror) tasks, whose result/error is stashed in payload on
+        # completion (see PostgresTaskRegistryStore.update_status). Surface it so
+        # the 작업 탭 Output shows what the sub-agent produced.
+        if not produced:
+            cur = registry.get(task_id)
+            pl = (cur.payload or {}) if cur is not None else {}
+            text = pl.get("result") or pl.get("error") or getattr(cur, "error", None)
+            if not text and cur is not None and getattr(cur, "result", None):
+                text = cur.result
+            if text:
+                yield (text if isinstance(text, str) else str(text)).encode("utf-8")
 
-    return StreamingResponse(gen(), media_type="application/octet-stream")
+    # text/plain (not octet-stream) so the browser/modal shows it inline rather
+    # than downloading a file.
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

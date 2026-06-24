@@ -193,6 +193,20 @@ class PostgresTaskRegistryStore(TaskRegistry):
         if existing is None:
             return None
         existing.mark(status, result=result, error=error)
+        # ``result`` has no DB column (free-form) and ``record.result`` is lost on
+        # the next DB reload — so stash it into ``payload`` (which IS persisted),
+        # making it readable via to_dict()/_serialize and the /output fallback.
+        # This is what surfaces a sub-agent (mirror) task's output in the 작업 tab.
+        if result is not None or error is not None:
+            _p = dict(existing.payload or {})
+            if result is not None:
+                _p["result"] = (
+                    result if isinstance(result, str)
+                    else json.dumps(result, ensure_ascii=False, default=str)
+                )
+            if error is not None:
+                _p["error"] = error
+            existing.payload = _p
         # Pure UPDATE rather than a re-INSERT; we already validated
         # the row exists.
         self._execute_modify(

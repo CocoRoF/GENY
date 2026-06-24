@@ -76,6 +76,28 @@ export function TasksTab() {
   const [subagentTypes, setSubagentTypes] = useState<SubagentTypeRow[]>([]);
   // PR-F.6.6 — runner capacity meter.
   const [capacity, setCapacity] = useState<{ in_flight: number | null; max: number | null } | null>(null);
+  // Output viewer modal (fetches text with auth — avoids new-tab download/auth quirks).
+  const [outputRow, setOutputRow] = useState<BackgroundTaskRecord | null>(null);
+  const [outputText, setOutputText] = useState<string>('');
+  const [outputLoading, setOutputLoading] = useState(false);
+
+  const handleOutput = useCallback(
+    async (row: BackgroundTaskRecord) => {
+      if (!sessionId) return;
+      setOutputRow(row);
+      setOutputText('');
+      setOutputLoading(true);
+      try {
+        const txt = await backgroundTaskApi.output(sessionId, row.task_id);
+        setOutputText(txt || '(아직 출력이 없습니다 / no output yet)');
+      } catch (e) {
+        setOutputText(`출력을 불러오지 못했습니다: ${e instanceof Error ? e.message : e}`);
+      } finally {
+        setOutputLoading(false);
+      }
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     subagentTypeApi.list()
@@ -289,22 +311,28 @@ export function TasksTab() {
                       {formatDuration(row.started_at, row.completed_at)}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <a
-                        href={backgroundTaskApi.outputUrl(sessionId, row.task_id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
-                      >
-                        <Eye className="w-3 h-3" /> Output
-                      </a>
                       <button
                         type="button"
-                        onClick={() => handleSchedule(row)}
+                        onClick={() => handleOutput(row)}
                         className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
-                        title="Schedule a recurring cron job with the same payload"
+                        title="View this task's output"
                       >
-                        <Clock className="w-3 h-3" /> Schedule
+                        <Eye className="w-3 h-3" /> Output
                       </button>
+                      {/* Schedule = turn a re-runnable task into a cron. A
+                          sub-agent task is a one-shot mirror (it runs in the
+                          SubAgentManager, not the task runner), so rescheduling
+                          it is meaningless — hide it for kind="subagent". */}
+                      {row.kind !== 'subagent' && (
+                        <button
+                          type="button"
+                          onClick={() => handleSchedule(row)}
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
+                          title="Schedule a recurring cron job with the same payload"
+                        >
+                          <Clock className="w-3 h-3" /> Schedule
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={isTerminal}
@@ -387,6 +415,55 @@ export function TasksTab() {
           </div>
         </div>
       </EditorModal>
+
+      {/* Output viewer modal */}
+      {outputRow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setOutputRow(null)}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-lg border bg-white dark:bg-slate-900 dark:border-slate-700 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-slate-700">
+              <div className="min-w-0">
+                <div className="font-medium text-sm">
+                  {outputRow.kind} · {outputRow.task_id.slice(0, 12)}…
+                </div>
+                <div className="text-xs text-slate-500 truncate">
+                  {String((outputRow.payload as Record<string, unknown>)?.task || '')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOutputRow(null)}
+                className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-sm px-2"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 overflow-auto">
+              {outputLoading ? (
+                <div className="text-sm text-slate-500 animate-pulse">불러오는 중…</div>
+              ) : (
+                <pre className="text-xs whitespace-pre-wrap break-words font-mono">
+                  {outputText}
+                </pre>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => outputRow && void handleOutput(outputRow)}
+                className="text-xs px-3 py-1.5 rounded border dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                새로고침
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </TabShell>
   );
 }

@@ -674,6 +674,22 @@ export const backgroundTaskApi = {
 
   outputUrl: (sessionId: string, taskId: string) =>
     `${getBackendUrl()}/api/agents/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/output`,
+
+  /** Fetch the task's output as text (auth header + cookie). Used by the
+   *  Output modal — avoids the new-tab download/cross-origin quirks of a raw
+   *  link, and surfaces sub-agent results (now stashed server-side). */
+  output: async (sessionId: string, taskId: string): Promise<string> => {
+    const token = getToken();
+    const res = await fetch(
+      `${getBackendUrl()}/api/agents/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/output`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      },
+    );
+    if (!res.ok) throw new Error(`output fetch failed: ${res.status}`);
+    return res.text();
+  },
 };
 
 // ==================== Framework Tool Catalog API (PR-E.1.1) =====

@@ -67,6 +67,20 @@ def _make_on_event(app_state: Any):
                         aid, TaskStatus.FAILED, error=payload.get("error")
                     )
                 _maybe_alarm_vtuber(payload, ok=False)
+            elif event_type == "subagent.stopped":
+                # The manager stops by sub_agent_id (no assignment_id) — mark any
+                # of this sub-agent's still-running mirror tasks as cancelled.
+                sid = payload.get("sub_agent_id")
+                if sid:
+                    for rec in registry.list_all():
+                        if (
+                            rec.kind == "subagent"
+                            and not getattr(rec, "is_terminal", False)
+                            and (rec.payload or {}).get("sub_agent_id") == sid
+                        ):
+                            registry.update_status(
+                                rec.task_id, TaskStatus.CANCELLED, error="sub-agent stopped"
+                            )
         except Exception:  # noqa: BLE001 — surfacing must never break a run
             logger.debug(
                 "subagent on_event mirror failed (%s)", event_type, exc_info=True
