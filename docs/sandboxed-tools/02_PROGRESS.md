@@ -164,3 +164,33 @@ Design in [01_PLAN.md](01_PLAN.md) §4. Build in the GAPT repo
 snapshots/` service + `routers/snapshots.py`. Verify: snapshot → mutate →
 restore = byte-identical (incl. artifacts); activity replay shows chat+tool
 trail; parent graph + delete.
+
+## ✅ Orphan misdetection FIXED + create/reuse LIVE-VERIFIED — 2026-06-24
+
+**Bug:** GAPT's `_is_orphan` flagged a LIVE workspace as orphan when its *project*
+was archived. Geny reuses one project ("geny") for session + pack workspaces, and
+GAPT auto-archives a momentarily-empty project → "clean all" killed live workspaces.
+
+**Fix (gapt main `ef993ea`, PR #12):**
+- `_is_orphan`: a live (non-ARCHIVED) workspace row is never an orphan regardless of
+  project archive (only row-missing/row-ARCHIVED/exited-agent-sandbox qualify).
+- `WorkspaceService.create`: un-archives the project on workspace create (root-cause).
+- 6 unit tests.
+
+**Deployed both GAPT instances** (Geny submodule bumped → `81e60d41`):
+- 2223 (public): clean compose rebuild + recreate from ef993ea.
+- 2222 (Geny's GAPT): full rebuild via the correct `--env-file deploy/gapt/.env`
+  (the overlaid compose needs it; earlier silent failures were a missing
+  `GAPT_POSTGRES_PASSWORD`). Migration ran → `snapshots` table created; orphan fix
+  live; `geny` project un-archived.
+
+**Live create+save+reuse PASS on 2222:** author tool in a workspace → `save_pack`
+(tool_save snapshot + persist) → reload pack → run tool in its workspace →
+`{"sum":10}`. The orphan fix means pack workspaces are no longer killed, so they
+persist for reuse.
+
+**Known gap (enhancement):** cross-workspace cold-restore (restore a snapshot into a
+*fresh/different* workspace — disaster-recovery + fork) fails ("not a git repository")
+because the snapshot commit lives in the source workspace's local `.git`. Needs
+*portable snapshots* (git bundle in the object store). The common reuse path (pack's
+dedicated workspace persists, protected by the orphan fix) does not need it.
