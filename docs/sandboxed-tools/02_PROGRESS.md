@@ -246,3 +246,35 @@ write `tools/rev/main.py` via the docker-exec path → `forge_tool('rev')` → c
 bundle), reuse it (load + cross-workspace cold-restore); a pack bundles N tools +
 M skills. Remaining (polish): **P5** pack opt-in per env + agent-triggered save
 from chat; **P6** python_inline→sandbox migration + pack-manager/snapshot-graph UI.
+
+## ✅ P5 + P6 — full authoring/reuse loop + UI LIVE-VERIFIED — 2026-06-24
+
+**P5a — agent-triggered save (executor 2.32.0):** `env(action="save_pack")` →
+`PipelineEnvironment.save_pack` gathers forged tools + authored skills + the live
+sandbox, delegates to a host `pack_persistence` callback wired in
+`AgentSession._make_pack_persistence` (snapshots the session workspace via
+builder.save_pack, persists the pack disabled). LIVE on 2222: forge tool + author
+skill → save_pack → `{1 tool + 1 skill + snapshot}` persisted → reload + run
+`{"shout":"HI","packed":true}`. PASS.
+
+**P5b — per-env opt-in:** `host_selections.extras.sandbox_tool_packs` selects
+packs; `SandboxToolPackProvider(pack_ids=…)` loads only selected+enabled packs;
+session build registers their skills + unions their tool names into
+`manifest.tools.external` (new `instantiate_pipeline(extra_external_tools=…)`).
+LIVE: filter loads A+C, excludes B; no-filter loads all. PASS.
+
+**P6a — python_inline → sandbox (opt-in):** `PythonInlineConfig.run_in_sandbox`.
+When set, the source is NEVER exec()'d on the host (not even at load) — it runs
+isolated in the session sandbox via a stdin/stdout harness (no host access).
+LIVE: `underlying is None` (no host exec), sandbox run `{'doubled':42}`, no-sandbox
+refused. PASS. Default off preserves the legacy single-admin host path.
+
+**P6b — UI:** `/sandbox-tool-packs` manager (list / enable-disable / delete +
+tool·skill·snapshot detail), Header nav entry, and a "Tool Packs" panel in the
+env editor Global Settings writing `extras.sandbox_tool_packs`. Frontend
+typechecks clean.
+
+**Deployed 2222:** backend rebuilt (executor 2.32.0) + frontend rebuilt; nginx
+reloaded. The entire vision is now live: build a tool in a sandbox → save it +
+its environment as a portable pack → reuse it (per-env, cross-workspace), with
+isolation for inline code and a UI to manage it. Ready for real-usage verification.
