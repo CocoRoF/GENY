@@ -278,3 +278,26 @@ typechecks clean.
 reloaded. The entire vision is now live: build a tool in a sandbox → save it +
 its environment as a portable pack → reuse it (per-env, cross-workspace), with
 isolation for inline code and a UI to manage it. Ready for real-usage verification.
+
+## ✅ Observability + management 고도화 LIVE — 2026-06-24
+
+**Trigger:** user ran the flow in a VTuber (claude_code_cli OAuth) session; the
+agent *claimed* it built+saved "reverse-pack" but DB had 0 packs — the session
+had NO sandbox (`_skip_for_cli_oauth`: OAuth → host execution), so forge/save
+couldn't run and the agent role-played. No way to see the truth → built it.
+
+- **Backend**: pack controller `GET /{id}/activity` + `/{id}/diff`; new
+  `sandbox_observability_controller` — `GET /api/sandboxes`, `/{wid}/snapshots`,
+  `/snapshots/{sid}` (activity), `/snapshots/{sid}/diff` (proxy GAPT snapshot
+  endpoints: chat+tool trail + unified diff). All live (401 auth-gated).
+- **Frontend**: `SnapshotLogView` (activity = chat+tool calls, + colorized diff);
+  `/sandboxes` **Sandbox Logs** page (sandboxes→snapshots→log) + Header nav;
+  pack manager per-pack 빌드 로그 modal; empty-state explains the sandbox
+  prerequisite. `/sandboxes` + `/sandbox-tool-packs` → 200.
+- **Verified**: created a real demo pack (id 3364a1db, "Demo Echo Pack") so the
+  manager is non-empty; snapshot diff has real content; activity honestly shows 0
+  turns for a synthetic (no-session) save.
+
+**Capability note (not a code bug):** tool-building needs a sandbox-bound session.
+claude_code_cli subscription OAuth → no sandbox (use API-key env or a setup-token,
+see [[claude-oauth-no-share]]). Sandbox Logs is the ground-truth check.
