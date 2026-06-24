@@ -47,3 +47,13 @@ claude_code_cli runs on the **host** (OAuth-safe), but its `env`/`forge`/`save_p
 anthropic already binds + forge works (proven). Verify the bridge now passes
 environment+sandbox (env/forge reachable) and the claude_code_cli path provisions a
 workspace with `containerize_cli=False`.
+
+## ✅ DONE + LIVE-VERIFIED — 2026-06-24
+- executor 2.33.0 (PyPI): `containerize_cli` flag. Geny pinned >=2.33.0, deployed 2222.
+- MCP-bridge e2e: tools/list shows session tools (env); `env→forge_tool` via the
+  bridge works (env controller + sandbox wired); forged tool callable via bridge →
+  `{"up":"HI"}`. PASS.
+- Real claude_code_cli (VTuber) session: `bound to GAPT workspace … (tools
+  sandboxed; CLI on host)`. PASS — no OAuth skip, CLI stays host.
+- Net: claude_code_cli sessions (incl. VTuber, OAuth) can now use env/forge_tool/
+  save_pack/gapt_* + session/pack tools. No setup-token required for GAPT tools.
