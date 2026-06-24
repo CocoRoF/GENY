@@ -278,7 +278,8 @@ class CredentialBundleBuilder:
         # actually works (api_key mode). Subscription modes force it
         # off regardless of the per-card setting so OAuth has a chance.
         effective_bare_mode = bool(claude_cli.bare_mode) and mode == "api_key"
-        disallow_tools = _split_csv(claude_cli.disallow_tools_csv)
+        disallow_tools = list(_split_csv(claude_cli.disallow_tools_csv))
+        allow_tools = list(allow_tools)
         if self._sandbox_fs_isolation:
             # Sandbox the CLI at the tool layer: forbid its native host fs/shell
             # tools so it MUST use the bridged executor tools (which run in the
