@@ -217,3 +217,32 @@ migration / fork). Also archived leftover test workspaces.
 **Net:** sandbox tool **creation + reuse** works end-to-end + robustly — packs
 aren't false-killed (orphan fix), persist for normal reuse, and survive
 workspace loss via portable snapshots.
+
+## ✅ P4 — Authoring loop (forge_tool + tool-builder skill) LIVE-VERIFIED — 2026-06-24
+
+**executor 2.31.0** (PyPI; Geny pinned `>=2.31.0`):
+- **`env(action="forge_tool")`** — `PipelineEnvironment.forge_tool(name, entrypoint,
+  …)` builds a `SandboxExecTool` bound to the session's sandbox and registers it
+  in the live registry → a tool the agent just wrote + tested in its workspace is
+  callable next turn. Guards: needs a sandbox, no name clobber, name+entrypoint
+  required. +6 unit tests.
+- **Bundled `tool-builder` skill** (L1 SKILL.md + L2 REFERENCE.md) — teaches the
+  loop: write stdin/stdout-JSON script → test → forge → persist as a pack.
+- Drive-by: fixed a CI-flaky `_drain_stdin` (swallow benign ConnectionResetError/
+  BrokenPipeError on normal child exit) that was blocking the release.
+
+**Wiring (already present):** `AgentSession._build_pipeline` calls
+`attach_runtime(sandbox=gapt_sandbox)` for every GAPT-bound session, so
+`ctx.sandbox` = the session's GAPT workspace → `forge_tool` works in any live
+chat with no extra plumbing.
+
+**Live-verified on 2222** (backend rebuilt no-cache → executor 2.31.0, `forge_tool`
+action + `tool-builder` skill present, healthy): provision a session workspace →
+write `tools/rev/main.py` via the docker-exec path → `forge_tool('rev')` → call
+`rev({"s":"hello"})` → `{"rev":"olleh","forged":true}`. PASS.
+
+**Status:** the user's core ask is complete + live — author a tool in a sandbox
+(forge_tool), save it + its sandbox as a persistent pack (snapshot + portable
+bundle), reuse it (load + cross-workspace cold-restore); a pack bundles N tools +
+M skills. Remaining (polish): **P5** pack opt-in per env + agent-triggered save
+from chat; **P6** python_inline→sandbox migration + pack-manager/snapshot-graph UI.
