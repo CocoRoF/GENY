@@ -194,3 +194,26 @@ persist for reuse.
 because the snapshot commit lives in the source workspace's local `.git`. Needs
 *portable snapshots* (git bundle in the object store). The common reuse path (pack's
 dedicated workspace persists, protected by the orphan fix) does not need it.
+
+## ✅ Portable snapshots — robust cross-workspace reuse LIVE-VERIFIED — 2026-06-24
+
+**Gap closed:** snapshots were only restorable into the workspace they were
+captured in. Now each capture also writes a self-contained git **bundle** of the
+snapshot ref (host-side, to `<bare_root>/.snapshots/<id>.bundle`, recorded in
+`stats.bundle_path`); **restore is host-side + portable** — it inits the target
+repo if needed, fetches the commit from the bundle when absent, then `reset
+--hard`. (gapt main `74a955c`, PR #13; `_hg` wraps host git with
+`safe.directory=*`; +portable-bundle test; 12 snapshot/orphan tests pass.)
+
+**Deployed both instances** (Geny submodule → `e852a82f`): 2222 (full rebuild,
+`--env-file deploy/gapt/.env`) + 2223 (compose rebuild). Both healthy.
+
+**Live-verified on 2222 — true cross-workspace reuse:** create tool in workspace
+A → snapshot (bundle) → restore into a FRESH workspace B (no shared git) → run →
+`{"greeting":"hi Portable","from":"cold-restored-snapshot"}`. PASS. The Geny
+`PackSandboxHandle` cold-restore path now functions (disaster-recovery / host
+migration / fork). Also archived leftover test workspaces.
+
+**Net:** sandbox tool **creation + reuse** works end-to-end + robustly — packs
+aren't false-killed (orphan fix), persist for normal reuse, and survive
+workspace loss via portable snapshots.
