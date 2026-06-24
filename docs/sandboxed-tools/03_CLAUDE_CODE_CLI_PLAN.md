@@ -57,3 +57,21 @@ workspace with `containerize_cli=False`.
   sandboxed; CLI on host)`. PASS — no OAuth skip, CLI stays host.
 - Net: claude_code_cli sessions (incl. VTuber, OAuth) can now use env/forge_tool/
   save_pack/gapt_* + session/pack tools. No setup-token required for GAPT tools.
+
+## ✅ Self-service lifecycle [create→save→list→use] — ALL ENVS — 2026-06-24
+Gaps found by review + fixed:
+- [list]/[use] had NO agent tools → added built-in `list_tool_packs` + `use_tool_pack`
+  (tools/built_in/sandbox_tool_pack_tools.py).
+- VTuber envs had ONLY `env` (no gapt_run_command) → can't write code to /workspace.
+  Fix: inject lifecycle toolset [gapt_run_command, list_tool_packs, use_tool_pack]
+  into tools.external at instantiate-time for EVERY session (no per-env reseed).
+- MCP bridge tools/list now UNIONs session registry (env+forged+pack) + global loader
+  (base) — CLI sees env + session tools without losing base tools.
+
+LIVE-VERIFIED:
+- lifecycle_e2e (tool classes): create→save→list→use → loaded tool runs `{"hi":"Geny"}`. PASS.
+- Real VTuber (claude_code_cli) session: `active tools (115): lifecycle=['env',
+  'gapt_run_command','list_tool_packs','use_tool_pack']`; `bound to GAPT workspace …
+  (tools sandboxed; CLI on host)`. PASS.
+- Diagnostic log `active tools (N): lifecycle=[...]` added at session build for
+  ongoing real-app verification across all envs.
