@@ -75,3 +75,20 @@ LIVE-VERIFIED:
   (tools sandboxed; CLI on host)`. PASS.
 - Diagnostic log `active tools (N): lifecycle=[...]` added at session build for
   ongoing real-app verification across all envs.
+
+## ✅ Split-brain ELIMINATED — sandbox boundary moved to the tool layer — 2026-06-24
+WHY the limitation existed: claude_code_cli runs its NATIVE fs/shell tools wherever
+its process runs → on the host (when not containerized) → host/workspace split-brain.
+
+Fix (no containerization, no setup-token, no in-container networking): for a
+claude_code_cli session WITH a GAPT sandbox, disallow the CLI's native fs/shell
+tools (Bash/Read/Write/Edit/MultiEdit/NotebookEdit/Glob/Grep/LS) via
+--disallowedTools (CredentialBundleBuilder(sandbox_fs_isolation=True)). The agent
+then uses the bridged EXECUTOR tools (mcp__geny__Bash/Read/Write/…) which docker-
+exec INTO /workspace via ctx.sandbox — identical sandbox model to SDK providers.
+CLI stays on host (OAuth-safe) but has ZERO host access. One workspace, no split-brain.
+
+LIVE-VERIFIED: isolation ON disallow=[9 native fs/shell tools]; OFF=[]. Real VTuber
+session creates cleanly; active tools include env + gapt_run_command + list/use +
+the sandboxed mcp fs/shell tools. The whole environment is now uniformly sandboxed
+at the tool-execution layer regardless of provider.
