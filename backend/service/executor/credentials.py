@@ -148,14 +148,27 @@ class CredentialBundleBuilder:
     call so it picks up live edits.
     """
 
+    #: Claude Code's NATIVE fs/shell tools. When the session has a GAPT sandbox
+    #: we disallow these so the agent can't touch the host — it uses the bridged
+    #: executor equivalents (mcp__geny__Bash/Read/Write/…) instead, which execute
+    #: INSIDE the workspace via docker exec. This moves the sandbox boundary to
+    #: the tool layer so even a host-run claude_code_cli is fully sandboxed
+    #: (OAuth-safe, no in-container CLI, no setup token).
+    _NATIVE_FS_SHELL_TOOLS = (
+        "Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
+        "Glob", "Grep", "LS",
+    )
+
     def __init__(
         self,
         config_manager: Any | None = None,
         *,
         mcp_bridge: Optional[McpBridgeContext] = None,
+        sandbox_fs_isolation: bool = False,
     ) -> None:
         self._cm = config_manager or get_config_manager()
         self._mcp_bridge = mcp_bridge
+        self._sandbox_fs_isolation = sandbox_fs_isolation
 
     # ─────────────────────────────────────────────────────────── build ─
 
@@ -265,12 +278,23 @@ class CredentialBundleBuilder:
         # actually works (api_key mode). Subscription modes force it
         # off regardless of the per-card setting so OAuth has a chance.
         effective_bare_mode = bool(claude_cli.bare_mode) and mode == "api_key"
+        disallow_tools = _split_csv(claude_cli.disallow_tools_csv)
+        if self._sandbox_fs_isolation:
+            # Sandbox the CLI at the tool layer: forbid its native host fs/shell
+            # tools so it MUST use the bridged executor tools (which run in the
+            # GAPT workspace). Keep non-fs natives (WebFetch/Task/…) intact.
+            for _t in self._NATIVE_FS_SHELL_TOOLS:
+                if _t not in disallow_tools:
+                    disallow_tools.append(_t)
+            # If an allow-list was set, drop the native fs/shell tools from it so
+            # disallow definitively wins (avoid an allow/deny tie re-enabling them).
+            allow_tools = [a for a in allow_tools if a not in self._NATIVE_FS_SHELL_TOOLS]
         extras: Dict[str, Any] = {
             "workspace_root": claude_cli.workspace_root or None,
             "bare_mode": effective_bare_mode,
             "default_permission_mode": claude_cli.default_permission_mode or "default",
             "allow_tools": allow_tools,
-            "disallow_tools": _split_csv(claude_cli.disallow_tools_csv),
+            "disallow_tools": disallow_tools,
             "extra_args": _split_csv(claude_cli.extra_args_csv),
             "timeout_s": float(claude_cli.timeout_s) if claude_cli.timeout_s else 300.0,
         }

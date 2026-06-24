@@ -776,20 +776,16 @@ class AgentSessionManager:
                 )
                 gapt_sandbox = None
 
-        # Prepare system prompt — using modular prompt builder. When the backend
-        # is claude_code_cli the CLI runs on the HOST (containerize_cli=False), so
-        # its built-in file/shell tools are NOT in /workspace — tell the agent to
-        # use gapt_*/forge_tool for workspace work. SDK agents ARE sandboxed.
-        _cli_on_host = (
-            gapt_sandbox is not None
-            and self._extract_primary_provider(env_id) == "claude_code_cli"
-        )
+        # Prepare system prompt. With sandbox fs-isolation (claude_code_cli) the
+        # CLI's native host tools are disallowed and it uses the bridged executor
+        # tools that run IN /workspace — so EVERY sandboxed session (SDK or CLI)
+        # gets the unified "your file/shell tools operate in /workspace" message.
         system_prompt = self._build_system_prompt(
             request,
             session_id=session_id,
             in_gapt_workspace=gapt_sandbox is not None,
             gapt_workspace_id=(getattr(gapt_sandbox, "workspace_id", None) if gapt_sandbox else None),
-            gapt_cli_on_host=_cli_on_host,
+            gapt_cli_on_host=False,
         )
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 
@@ -861,7 +857,18 @@ class AgentSessionManager:
             session_id=session_id, token=mcp_bridge_token,
         )
 
-        credentials = CredentialBundleBuilder(mcp_bridge=mcp_bridge_ctx).build()
+        # When this claude_code_cli session has a GAPT sandbox, isolate it at the
+        # tool layer: disallow the CLI's native host fs/shell tools so it uses the
+        # bridged executor tools (which run IN the workspace). Eliminates the
+        # host/workspace split-brain for OAuth sessions without containerizing the
+        # CLI. (SDK providers are already sandboxed via Stage-10 ctx.sandbox.)
+        _fs_isolate = (
+            gapt_sandbox is not None
+            and self._extract_primary_provider(env_id) == "claude_code_cli"
+        )
+        credentials = CredentialBundleBuilder(
+            mcp_bridge=mcp_bridge_ctx, sandbox_fs_isolation=_fs_isolate
+        ).build()
 
         # Determine the active session's primary provider so we can
         # validate that the matching credentials are actually present —
