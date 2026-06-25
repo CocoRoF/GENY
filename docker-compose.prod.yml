@@ -122,6 +122,10 @@ services:
       # Default off → host execution unchanged. Flip to 1 to enable.
       - GENY_GAPT_WORKSPACES=${GENY_GAPT_WORKSPACES:-0}
       - GENY_GAPT_PROJECT_SLUG=${GENY_GAPT_PROJECT_SLUG:-geny}
+      # Sandbox Tool Packs self-service: an agent that builds+saves a pack has it
+      # auto-enabled + auto-opted-into its OWN env, so its future sessions auto-
+      # load it (zero owner steps). Default on; set false for the manual gate.
+      - GENY_PACK_AUTOLOAD_OWN=${GENY_PACK_AUTOLOAD_OWN:-true}
       # ── geny-avatar integration (Avatar settings category + key sync) ──
       # Reachable over geny-net-prod; the URL includes the avatar's basePath so
       # the client appends /api/…. Empty = avatar integration off.

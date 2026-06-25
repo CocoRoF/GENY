@@ -2034,6 +2034,17 @@ class AgentSession:
                 for s in (payload.get("skills") or [])
                 if isinstance(s, dict) and s.get("id")
             ]
+            # Self-service auto-loop (GENY_PACK_AUTOLOAD_OWN, default ON): an agent
+            # that BUILDS a pack should be able to keep using it with zero owner
+            # steps. So enable it + opt the CREATING env into it — the agent's
+            # future sessions auto-load it (forge_tool already made it live THIS
+            # session). Security: only auto-enables the agent's OWN pack for its
+            # OWN env (sandbox-isolated execution); OTHER envs still need explicit
+            # opt-in. Set GENY_PACK_AUTOLOAD_OWN=false to keep the manual gate.
+            import os as _os
+            autoload = _os.getenv("GENY_PACK_AUTOLOAD_OWN", "true").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
             store = get_sandbox_tool_pack_store()
             saved = await builder.save_pack(
                 store,
@@ -2045,14 +2056,56 @@ class AgentSession:
                 tools=tools,
                 skills=skills,
                 created_by=session_id,
-                enabled=False,
+                enabled=autoload,
             )
+            opted_in = False
+            if autoload and self._env_id:
+                opted_in = self._optin_env_to_pack(self._env_id, saved.id)
             logger.info(
-                "[%s] saved sandbox tool pack %s (%s)", session_id, saved.name, saved.id
+                "[%s] saved sandbox tool pack %s (%s) — autoload=%s opted_in=%s",
+                session_id, saved.name, saved.id, autoload, opted_in,
             )
-            return {"pack_id": saved.id, "name": saved.name}
+            return {
+                "pack_id": saved.id,
+                "name": saved.name,
+                "enabled": saved.enabled,
+                "auto_opted_in_env": self._env_id if opted_in else None,
+            }
 
         return _persist
+
+    def _optin_env_to_pack(self, env_id: str, pack_id: str) -> bool:
+        """Add ``pack_id`` to the env's ``host_selections.extras.sandbox_tool_packs``
+        so future sessions of this env auto-load the pack. Best-effort; the agent's
+        current session already has the tool live via forge_tool, so a failure here
+        only affects future-session auto-load, never this turn."""
+        try:
+            from service.environment.service import get_environment_service
+
+            svc = get_environment_service()
+            if svc is None:
+                return False
+            manifest = svc.load_manifest(env_id)
+            if manifest is None:
+                return False
+            hs = getattr(manifest, "host_selections", None)
+            if hs is None:
+                return False
+            extras = getattr(hs, "extras", None)
+            if extras is None:
+                extras = {}
+                hs.extras = extras
+            current = extras.get("sandbox_tool_packs")
+            ids = [str(p).strip() for p in current if p] if isinstance(current, list) else []
+            if pack_id in ids:
+                return True  # already opted in
+            ids.append(pack_id)
+            extras["sandbox_tool_packs"] = ids
+            svc.update_manifest(env_id, manifest)
+            return True
+        except Exception:  # noqa: BLE001 — never break save_pack on opt-in failure
+            logger.warning("[%s] auto opt-in env %s → pack %s failed", self._session_id, env_id, pack_id, exc_info=True)
+            return False
 
     def _restore_env_overlay(self) -> None:
         """Re-apply a previously-saved env overlay (prompt / authored skills /
