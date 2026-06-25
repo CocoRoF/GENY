@@ -19,19 +19,22 @@ A multi-agent <strong>VTuber + autonomous worker</strong> platform. Pair a chatt
 <a href="docs/error_codes.md">Error Codes</a>
 </p>
 
-<!-- 📸 IMAGE NEEDED: hero screenshot — the 3D city playground with agents walking + the VTuber chat panel and Live2D avatar overlaid -->
-> 📸 **Image needed** — _hero screenshot: the 3D city playground with agents walking, the VTuber chat panel, and the Live2D avatar._
+## 🌐 The Geny ecosystem — related projects
 
----
+These projects are built to work together. **Geny** is the product at the top of the stack; everything below is a building block you can also use on its own. **➡️ marks where you are.**
 
-## 🌐 The Geny ecosystem
+| Project | What it is | Role in the stack |
+|---|---|---|
+| ➡️ [**Geny**](https://github.com/CocoRoF/Geny) | Multi-agent VTuber + autonomous-worker platform | 🏛️ The product — uses every project below |
+| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · MIT | ⚙️ The engine everything runs on |
+| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | 🛠️ Where agents safely touch real repos |
+| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | 🎭 Where Geny's faces are made |
 
-Geny is the **product at the top of the stack** — it pulls together every project below into one experience: a talking avatar, an autonomous worker that does the real work, a sandbox where agents safely touch code, and the engine that drives it all.
-
-<!-- 📸 IMAGE NEEDED: a polished ecosystem diagram to replace the ASCII map below -->
+<details>
+<summary>📐 How they fit together</summary>
 
 ```
-                  Geny — the product (uses everything below)   ← you are here
+                  Geny — the product (uses everything below)
                     │
       ┌─────────────┼──────────────┐
  agent engine    avatars      sandbox + deploy
@@ -41,14 +44,12 @@ Geny is the **product at the top of the stack** — it pulls together every proj
   (the engine)  (avatar editor)  (AI DevOps platform)
 ```
 
-| Project | What it is | Role in the stack |
-|---|---|---|
-| [**Geny**](https://github.com/CocoRoF/Geny) | Multi-agent VTuber + autonomous-worker platform | 🏛️ The product — consumes every project below |
-| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · MIT | ⚙️ The engine everything runs on |
-| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | 🛠️ Where agents safely touch real repos |
-| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | 🎭 Where Geny's faces are made |
+</details>
 
-> **➡️ You are here: `Geny`** — the product that ties the whole ecosystem together.
+---
+
+<!-- 📸 IMAGE NEEDED: hero screenshot — the 3D city playground with agents walking + the VTuber chat panel and Live2D avatar overlaid -->
+> 📸 **Image needed** — _hero screenshot: the 3D city playground with agents walking, the VTuber chat panel, and the Live2D avatar._
 
 ---
 

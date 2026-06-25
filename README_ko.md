@@ -19,19 +19,22 @@
 <a href="docs/error_codes.md">Error Codes</a>
 </p>
 
-<!-- 📸 IMAGE NEEDED: hero 스크린샷 — 에이전트가 걸어다니는 3D 도시 + VTuber 채팅 패널 + Live2D 아바타 -->
-> 📸 **이미지 필요** — _hero 스크린샷: 에이전트가 걸어다니는 3D 도시, VTuber 채팅 패널, Live2D 아바타._
+## 🌐 Geny 에코시스템 — 연관 프로젝트
 
----
+이 프로젝트들은 함께 동작하도록 만들어졌습니다. **Geny** 가 스택 최상단의 제품이고, 그 아래는 전부 단독으로도 쓸 수 있는 빌딩 블록입니다. **➡️ 가 현재 위치입니다.**
 
-## 🌐 Geny 에코시스템
+| 프로젝트 | 무엇인가 | 스택에서의 역할 |
+|---|---|---|
+| ➡️ [**Geny**](https://github.com/CocoRoF/Geny) | 멀티 에이전트 VTuber + 자율 워커 플랫폼 | 🏛️ 최상위 제품 — 아래 전부를 사용 |
+| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · MIT | ⚙️ 모든 것이 돌아가는 엔진 |
+| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | 셀프호스트 AI DevOps 플랫폼 — 샌드박스·편집·빌드·배포 | 🛠️ 에이전트가 실제 레포를 안전하게 다루는 곳 |
+| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | AI 텍스처 생성 기반 2D 라이브 아바타 에디터 | 🎭 Geny 의 얼굴이 만들어지는 곳 |
 
-Geny 는 **스택 최상단의 제품**입니다 — 아래의 모든 프로젝트를 하나의 경험으로 묶습니다: 말하는 아바타, 실제 작업을 처리하는 자율 워커, 에이전트가 코드를 안전하게 다루는 샌드박스, 그리고 그 모두를 구동하는 엔진.
-
-<!-- 📸 IMAGE NEEDED: 아래 ASCII 맵을 대체할 다이어그램 -->
+<details>
+<summary>📐 서로 어떻게 연결되는가</summary>
 
 ```
-                  Geny — 최상위 제품 (아래 전부를 사용)   ← 현재 위치
+                  Geny — 최상위 제품 (아래 전부를 사용)
                     │
       ┌─────────────┼──────────────┐
    에이전트 엔진     아바타        샌드박스 + 배포
@@ -41,14 +44,12 @@ Geny 는 **스택 최상단의 제품**입니다 — 아래의 모든 프로젝�
   (엔진)        (아바타 에디터)  (AI DevOps 플랫폼)
 ```
 
-| 프로젝트 | 무엇인가 | 스택에서의 역할 |
-|---|---|---|
-| [**Geny**](https://github.com/CocoRoF/Geny) | 멀티 에이전트 VTuber + 자율 워커 플랫폼 | 🏛️ 최상위 제품 — 아래 전부를 사용 |
-| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · MIT | ⚙️ 모든 것이 돌아가는 엔진 |
-| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | 셀프호스트 AI DevOps 플랫폼 — 샌드박스·편집·빌드·배포 | 🛠️ 에이전트가 실제 레포를 안전하게 다루는 곳 |
-| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | AI 텍스처 생성 기반 2D 라이브 아바타 에디터 | 🎭 Geny 의 얼굴이 만들어지는 곳 |
+</details>
 
-> **➡️ 현재 위치: `Geny`** — 에코시스템 전체를 묶는 제품.
+---
+
+<!-- 📸 IMAGE NEEDED: hero 스크린샷 — 에이전트가 걸어다니는 3D 도시 + VTuber 채팅 패널 + Live2D 아바타 -->
+> 📸 **이미지 필요** — _hero 스크린샷: 에이전트가 걸어다니는 3D 도시, VTuber 채팅 패널, Live2D 아바타._
 
 ---
 
