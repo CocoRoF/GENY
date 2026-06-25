@@ -15,7 +15,7 @@ import {
   ExternalLink, ArrowUpCircle, RotateCcw,
 } from 'lucide-react';
 
-import { llmBackendsApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
+import { llmBackendsApi, syncApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
@@ -272,6 +272,28 @@ function LLMBackendsPanelInner() {
   const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [loading, setLoading] = useState(false);
+  // Cross-service key sync (Geny → GAPT + avatar)
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const handleSyncKeys = useCallback(async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const r = await syncApi.providerKeysNow();
+      const parts: string[] = [];
+      for (const [k, v] of Object.entries(r.results || {})) {
+        if (v && typeof v === 'object') {
+          parts.push(`${k.replace(/_API_KEY|_API_TOKEN|_KEY/g, '')}: ${Object.entries(v).map(([t, s]) => `${t}=${s}`).join(', ')}`);
+        }
+      }
+      setSyncMsg(parts.length ? parts.join(' · ') : '동기화할 키가 없습니다');
+    } catch (e: any) {
+      setSyncMsg(`동기화 실패: ${e?.message || e}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(null), 8000);
+    }
+  }, []);
   const [recheckLoading, setRecheckLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openProvider, setOpenProvider] = useState<string | null>(null);
@@ -332,18 +354,37 @@ function LLMBackendsPanelInner() {
             })}
           </p>
         </div>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50 shrink-0"
-          onClick={fetchHealth}
-          disabled={loading}
-        >
-          {loading
-            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            : <RefreshCw className="w-3.5 h-3.5" />}
-          {t('settings.llmBackends.refreshAll')}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Push Geny's provider keys to connected sister services (GAPT + avatar).
+               Auto-syncs on key change; this is a manual re-push. */}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+            onClick={handleSyncKeys}
+            disabled={syncing}
+            title="Geny의 프로바이더 키를 GAPT/avatar에 다시 전파"
+          >
+            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            키 동기화
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+            onClick={fetchHealth}
+            disabled={loading}
+          >
+            {loading
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <RefreshCw className="w-3.5 h-3.5" />}
+            {t('settings.llmBackends.refreshAll')}
+          </button>
+        </div>
       </div>
+      {syncMsg && (
+        <div className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[0.75rem] text-[var(--text-secondary)] px-3 py-2">
+          {syncMsg}
+        </div>
+      )}
 
       {/* Error */}
       {error && (

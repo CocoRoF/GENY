@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 
 from service.config.base import BaseConfig, ConfigField, FieldType, register_config
 from service.config.sub_config.general.env_utils import env_sync, read_env_defaults
+from service.sync.provider_key_sync import synced_env
 
 
 @register_config
@@ -102,7 +103,8 @@ class LLMCredentialsConfig(BaseConfig):
                 placeholder="sk-ant-…",
                 group="credentials",
                 secure=True,
-                apply_change=env_sync("ANTHROPIC_API_KEY"),
+                # synced_env = env_sync + propagate to GAPT vault (provider:anthropic)
+                apply_change=synced_env("ANTHROPIC_API_KEY"),
             ),
             ConfigField(
                 name="openai_api_key",
@@ -112,7 +114,8 @@ class LLMCredentialsConfig(BaseConfig):
                 placeholder="sk-…",
                 group="credentials",
                 secure=True,
-                apply_change=env_sync("OPENAI_API_KEY"),
+                # → GAPT vault (openai) + avatar config.json (id:openai)
+                apply_change=synced_env("OPENAI_API_KEY"),
             ),
             ConfigField(
                 name="google_api_key",
@@ -122,7 +125,8 @@ class LLMCredentialsConfig(BaseConfig):
                 placeholder="AIza…",
                 group="credentials",
                 secure=True,
-                apply_change=env_sync("GOOGLE_API_KEY"),
+                # → GAPT vault (google) + avatar config.json (id:gemini)
+                apply_change=synced_env("GOOGLE_API_KEY"),
             ),
             ConfigField(
                 name="base_url",

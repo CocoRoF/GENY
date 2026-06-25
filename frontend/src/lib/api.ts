@@ -1661,6 +1661,14 @@ export const gaptSettingsApi = {
   llmHealth: () => apiCall<any>('/api/gapt/settings/llm-health'),
 };
 
+/** Cross-service settings sync — Geny propagates shared provider keys to GAPT + avatar. */
+export const syncApi = {
+  /** Which sync targets are wired (no network probe). */
+  targets: () => apiCall<{ targets: Record<string, { configured: boolean }> }>('/api/sync/targets'),
+  /** Re-push every set provider key to all connected targets. */
+  providerKeysNow: () => apiCall<{ ok: boolean; results: Record<string, any> }>('/api/sync/provider-keys', { method: 'POST' }),
+};
+
 // ==================== Config API ====================
 
 import type {
