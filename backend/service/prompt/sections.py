@@ -190,75 +190,6 @@ class SectionLibrary:
     # and adds no value.
 
     # ========================================================================
-    # §4 Tool Style — NOT IN USE
-    # ========================================================================
-    # Claude CLI handles tool invocation guidelines natively.
-    # Kept for potential future use (e.g. role-specific tool policies).
-
-    @staticmethod
-    def tool_style() -> PromptSection:
-        """Tool invocation guidelines. NOT IN USE — Claude CLI handles this."""
-        content = """## Tool Usage Guidelines
-
-### Efficiency Principles
-- **Batch operations**: When multiple files need reading, read them in sequence rather than one at a time
-- **Targeted searches**: Use specific search queries; avoid overly broad searches
-- **Minimal writes**: Write files only when necessary; avoid creating unnecessary files
-- **Verify before modify**: Always read a file before editing it to understand current state
-
-### Error Handling in Tool Use
-- If a tool call fails, analyze the error and retry with corrected parameters
-- If a file doesn't exist, create it (don't ask)
-- If a command fails, check the output and debug
-- Never repeat the exact same failing tool call without modifying your approach
-
-### Output Processing
-- Extract relevant information from tool results
-- Don't dump raw tool output in your response unless specifically asked
-- Summarize large outputs to preserve context window space"""
-
-        return PromptSection(
-            name="tool_style",
-            content=content,
-            priority=25,
-            modes={PromptMode.FULL},
-        )
-
-    # ========================================================================
-    # §5 Safety — NOT IN USE
-    # ========================================================================
-    # Claude CLI provides built-in safety guidelines.
-    # Kept for potential future use (e.g. stricter project-specific policies).
-
-    @staticmethod
-    def safety() -> PromptSection:
-        """Safety guidelines. NOT IN USE — Claude CLI handles this."""
-        content = """## Safety Guidelines
-
-### Data Protection
-- Never expose API keys, tokens, passwords, or other secrets in your output
-- If you encounter credentials in code, note their presence but don't display them
-- Treat file contents as potentially sensitive
-
-### Destructive Operations
-- Before deleting files or directories, verify the path is correct
-- When modifying critical system files, create a backup first
-- Avoid running commands that could damage the system (rm -rf /, format, etc.)
-
-### Scope Boundaries
-- Stay within the assigned working directory
-- Do not access files outside the project scope unless explicitly instructed
-- Do not make network requests to unknown external services
-- Do not modify system configuration files"""
-
-        return PromptSection(
-            name="safety",
-            content=content,
-            priority=30,
-            modes={PromptMode.FULL, PromptMode.MINIMAL},
-        )
-
-    # ========================================================================
     # §6 Workspace — Working environment
     # ========================================================================
 
@@ -307,63 +238,6 @@ class SectionLibrary:
                 f"({weekday}, {part})"
             ),
             priority=45,
-            modes={PromptMode.FULL},
-        )
-
-    # ========================================================================
-    # §8 Context Efficiency — NOT IN USE
-    # ========================================================================
-    # Claude CLI and role .md files handle response style.
-    # Kept for potential future use.
-
-    @staticmethod
-    def context_efficiency() -> PromptSection:
-        """Token-efficient response guide. NOT IN USE."""
-        content = """## Context Efficiency
-
-Be mindful of context window limits. Follow these guidelines:
-- **Concise responses**: Don't repeat the question or task description in your answer
-- **Summarize large outputs**: If a tool returns extensive output, summarize key findings
-- **Avoid redundancy**: Don't explain what you're about to do AND then do it — just do it
-- **Progressive detail**: Start with a summary, add detail only when necessary
-- **Truncate tool results**: When tool output exceeds ~500 lines, extract only the relevant parts"""
-
-        return PromptSection(
-            name="context_efficiency",
-            content=content,
-            priority=50,
-            modes={PromptMode.FULL},
-        )
-
-    # ========================================================================
-    # §10 Status Reporting — NOT IN USE
-    # ========================================================================
-    # Role .md files can define their own reporting format.
-    # Kept for potential future use.
-
-    @staticmethod
-    def status_reporting() -> PromptSection:
-        """Worker progress reporting format. NOT IN USE."""
-        content = """## Status Reporting
-
-When reporting progress, use this format:
-
-```
-## Task Status Report
-- **Status**: COMPLETED | IN_PROGRESS | BLOCKED | FAILED
-- **Progress**: X/Y steps completed
-- **Summary**: Brief description of what was accomplished
-- **Output**: Key results or deliverables
-- **Issues**: Problems encountered (or "None")
-- **Next Steps**: What remains to be done (if IN_PROGRESS)
-```
-
-Always provide actionable information. If blocked, explain what's needed to unblock."""
-
-        return PromptSection(
-            name="status_reporting",
-            content=content,
-            priority=60,
             modes={PromptMode.FULL},
         )
 
@@ -722,9 +596,10 @@ def build_agent_prompt(
     - The system prompt only needs: Identity + Role Behavior + Context.
 
     Sections NOT included (handled by infrastructure):
-    - capabilities — removed; MCP provides tool schemas directly to Claude CLI.
-    - tool_style, safety, context_efficiency, status_reporting — handled by
-      Claude CLI natively or by role .md files when needed.
+    - Tool descriptions / usage style / safety / status formats — the model
+      receives full tool schemas via MCP and handles these natively; role .md
+      files cover anything role-specific. (These dead section builders were
+      removed in the 2026-06-25 prompt diet.)
 
     Args:
         agent_name: Display name for the agent.

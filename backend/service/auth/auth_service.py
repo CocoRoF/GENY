@@ -40,7 +40,12 @@ class AuthService:
     def __init__(self, app_db: AppDatabaseManager):
         self.app_db = app_db
         self.ALGORITHM = "HS256"
-        self.TOKEN_EXPIRE_HOURS = int(os.getenv("GENY_AUTH_TOKEN_HOURS", "24"))
+        # 30 days by default. The desktop connector is an always-on client that
+        # stores the JWT in the OS keychain and reuses it across restarts; a short
+        # (24h) lifetime made it silently log out between sessions. Override with
+        # GENY_AUTH_TOKEN_HOURS. The connector also refreshes on each launch, so a
+        # token stays alive indefinitely with regular use.
+        self.TOKEN_EXPIRE_HOURS = int(os.getenv("GENY_AUTH_TOKEN_HOURS", "720"))
         self._secret_key: Optional[str] = None
 
     @property

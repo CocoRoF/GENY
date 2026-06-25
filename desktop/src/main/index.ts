@@ -479,6 +479,58 @@ async function getStoredToken(): Promise<string | null> {
     return null
   }
 }
+async function storeToken(token: string): Promise<void> {
+  try {
+    const keytar = await import('keytar')
+    await keytar.default.setPassword('geny-connector', 'geny_auth_token', token)
+  } catch {
+    /* keychain unavailable — ignore */
+  }
+}
+async function clearStoredToken(): Promise<void> {
+  try {
+    const keytar = await import('keytar')
+    await keytar.default.deletePassword('geny-connector', 'geny_auth_token')
+  } catch {
+    /* ignore */
+  }
+}
+
+// Keep the connector logged in across restarts. The stored JWT is reused on
+// every launch; this validates it and — crucially — mints a FRESH-expiry token
+// (so the clock resets each launch and a regularly-used connector never logs
+// out). /api/auth/refresh requires a still-valid token, so:
+//   • 200 → token was valid; persist the new one (extended expiry).
+//   • 401 → token genuinely expired/revoked; drop it so the UI shows a clean
+//           "login needed" instead of the confusing "saved but not working".
+//   • network/other → keep the token (don't nuke a good token over a blip).
+// Returns true if we end up with a usable token.
+async function validateAndRefreshAuth(): Promise<boolean> {
+  const token = await getStoredToken()
+  const { serverUrl } = loadConfig()
+  if (!token || !serverUrl) return false
+  const base = serverUrl.replace(/\/+$/, '')
+  try {
+    const r = await fetch(`${base}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (r.ok) {
+      const j = await r.json().catch(() => null)
+      if (j?.access_token) await storeToken(j.access_token)
+      return true
+    }
+    if (r.status === 401 || r.status === 403) {
+      await clearStoredToken()
+      return false
+    }
+    return true // transient server error — assume still logged in
+  } catch {
+    return true // offline / unreachable — keep the token, retry later
+  }
+}
+
+let authRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 // Point the overlay at the server's transparent /overlay avatar page when logged
 // in (reusing the proven browser Live2D+TTS+WS stack), else a local placeholder.
@@ -508,7 +560,10 @@ let appQuitting = false
 app.on('before-quit', () => {
   appQuitting = true
 })
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  if (authRefreshTimer) clearInterval(authRefreshTimer)
+})
 
 // ── system tray: the always-available way to open settings / quit ───────────
 let tray: Tray | null = null
@@ -954,9 +1009,22 @@ app.whenReady().then(() => {
   createQuickChat()
   createTray()
 
-  // Show the right window for the current state: logged in → the /connector
-  // panel; logged out → the settings/login window. (Avatar overlay always runs.)
-  void refreshAll()
+  // Re-establish the session BEFORE deciding which window to show: validate the
+  // stored JWT and mint a fresh-expiry one (or drop it if truly dead), so a
+  // restart re-logs-in cleanly instead of showing "saved but not working". Then
+  // show the right window: logged in → the /connector panel; logged out → the
+  // settings/login window. (The avatar overlay always runs.)
+  void (async () => {
+    await validateAndRefreshAuth()
+    await refreshAll()
+  })()
+
+  // Keep a long-running connector authenticated: re-mint the token well within
+  // its lifetime so it never silently expires mid-session, and fall back to the
+  // login window if it ever becomes invalid.
+  authRefreshTimer = setInterval(() => {
+    void validateAndRefreshAuth().then((ok) => { if (!ok) void refreshAll() })
+  }, 12 * 60 * 60 * 1000)
 
   // GitHub Releases auto-update. Default ON; the toggle is read fresh on every
   // check, so changes take effect immediately.
