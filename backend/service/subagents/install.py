@@ -59,6 +59,7 @@ def _make_on_event(app_state: Any):
                     registry.update_status(
                         aid, TaskStatus.DONE, result=payload.get("text")
                     )
+                    _mirror_transcript(registry, aid, payload, ok=True)
                 _maybe_alarm_vtuber(payload, ok=True)
             elif event_type == "subagent.failed":
                 aid = payload.get("assignment_id")
@@ -66,6 +67,7 @@ def _make_on_event(app_state: Any):
                     registry.update_status(
                         aid, TaskStatus.FAILED, error=payload.get("error")
                     )
+                    _mirror_transcript(registry, aid, payload, ok=False)
                 _maybe_alarm_vtuber(payload, ok=False)
             elif event_type == "subagent.stopped":
                 # The manager stops by sub_agent_id (no assignment_id) — mark any
@@ -87,6 +89,61 @@ def _make_on_event(app_state: Any):
             )
 
     return _on_event
+
+
+def _mirror_transcript(registry: Any, aid: str, payload: Dict[str, Any], *, ok: bool) -> None:
+    """Replay a finished sub-agent's OWN tool trail into a session log.
+
+    executor ≥2.34.0 ships ``payload["transcript"]`` — the sub-agent's normalized
+    tool/result/error steps captured from its own pipeline. We write them into a
+    SessionLogger keyed by ``sub_agent_id`` (filesystem/URL-safe, no colon) so the
+    작업 탭 detail's ``getLogs(sub_agent_id)`` renders the sub-agent's REAL trail
+    via the same ExecutionTimeline the 세션 로그 tab uses — instead of falling back
+    to the owner session's pipeline-stage log (the wrong trail).
+
+    Each assignment is anchored by a COMMAND entry (the task); multiple
+    assignments to the same sub-agent append chronologically. Best-effort.
+    """
+    sub_agent_id = payload.get("sub_agent_id")
+    transcript = payload.get("transcript") or []
+    if not sub_agent_id or not transcript:
+        return  # pre-2.34.0 executor, or a no-op assignment — caller falls back
+    try:
+        from service.logging.session_logger import get_session_logger, LogLevel
+
+        slog = get_session_logger(sub_agent_id, create_if_missing=True)
+        if slog is None:
+            return
+        rec = registry.get(aid)
+        task = (rec.payload or {}).get("task") if rec is not None else None
+        slog.log_command(task or f"sub-agent assignment {aid}")
+        for step in transcript:
+            stype = step.get("type")
+            if stype == "tool":
+                name = step.get("name") or "tool"
+                tid = step.get("id") or None
+                slog.log_tool_use(
+                    tool_name=name,
+                    tool_input=step.get("input") or {},
+                    tool_id=tid,
+                )
+                slog.log_tool_result(
+                    tool_name=name,
+                    tool_id=tid,
+                    result=step.get("result"),
+                    is_error=bool(step.get("is_error")),
+                    duration_ms=step.get("duration_ms"),
+                )
+            elif stype == "error":
+                slog.log(LogLevel.ERROR, str(step.get("message") or "error"))
+        final = payload.get("text") if ok else payload.get("error")
+        if final:
+            if ok:
+                slog.log_response(str(final))
+            else:
+                slog.log(LogLevel.ERROR, str(final))
+    except Exception:  # noqa: BLE001 — mirroring must never break a run
+        logger.debug("subagent transcript mirror failed", exc_info=True)
 
 
 def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
