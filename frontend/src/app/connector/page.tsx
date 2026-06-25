@@ -97,6 +97,16 @@ export default function ConnectorPage() {
 
   const { setTheme } = useTheme();
   const [booted, setBooted] = useState(false);
+  // Desktop-only controls depend on window.connector, which doesn't exist during
+  // SSR. Reading it directly in render diverged SSR (false) from the connector's
+  // client render (true) → a hydration mismatch (React #418) that blanked the
+  // whole page INSIDE the connector (a plain browser has no window.connector, so
+  // it never mismatched — which is why it only broke in the desktop app). Resolve
+  // it after mount so SSR and the first client render agree.
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    setIsDesktop(typeof window !== 'undefined' && !!window.connector);
+  }, []);
   // The session the connector is bound to (?session = overlaySession). The
   // restore logic must always prefer THIS over "first VTuber" — otherwise a
   // restart can land on a different VTuber and overwrite overlaySession with it,
@@ -165,7 +175,6 @@ export default function ConnectorPage() {
   const isVTuber = current?.role === 'vtuber';
   const vtuberSessions = sessions.filter((s) => s.role === 'vtuber');
   const sid = selectedSessionId ?? '';
-  const isDesktop = typeof window !== 'undefined' && !!window.connector;
   const ready = isVTuber && !!current?.chat_room_id;
 
   return (
