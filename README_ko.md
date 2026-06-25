@@ -26,7 +26,7 @@
 | 프로젝트 | 무엇인가 | 스택에서의 역할 |
 |---|---|---|
 | ➡️ [**Geny**](https://github.com/CocoRoF/Geny) | 멀티 에이전트 VTuber + 자율 워커 플랫폼 | 최상위 제품 — 아래 전부를 사용 |
-| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · MIT | 모든 것이 돌아가는 엔진 |
+| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · Apache-2.0 | 모든 것이 돌아가는 엔진 |
 | [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | 셀프호스트 AI DevOps 플랫폼 — 샌드박스·편집·빌드·배포 | 에이전트가 실제 레포를 안전하게 다루는 곳 |
 | [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | AI 텍스처 생성 기반 2D 라이브 아바타 에디터 | Geny 의 얼굴이 만들어지는 곳 |
 
@@ -524,7 +524,7 @@ TOOLS = [search_database]
 
 **Geny 에코시스템** — 위 [Geny 에코시스템](#geny-에코시스템) 섹션 참조:
 
-- [**geny-executor**](https://github.com/CocoRoF/geny-executor) — Geny backend 가 돌아가는 21단계 에이전트 파이프라인 (MIT)
+- [**geny-executor**](https://github.com/CocoRoF/geny-executor) — Geny backend 가 돌아가는 21단계 에이전트 파이프라인 (Apache-2.0)
 - [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) — Geny 가 프로젝트 & 배포를 위임하는 샌드박스 / DevOps 플랫폼 (`gapt/` submodule)
 - [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) — Geny 에 아바타를 bake 하는 puppet 에디터 (`vendor/geny-avatar` submodule)
 
@@ -532,7 +532,7 @@ TOOLS = [search_database]
 
 ## 라이선스
 
-MIT.
+[Apache License 2.0](LICENSE). Copyright 2026 CocoRoF — [NOTICE](NOTICE) 참조.
 
 ---
 
