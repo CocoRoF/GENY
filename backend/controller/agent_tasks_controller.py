@@ -202,15 +202,25 @@ async def stop_task(
     if getattr(rec, "is_terminal", False):
         return {"task_id": task_id, "stopped": False, "reason": "already terminal"}
 
-    # Sub-agent (mirror) tasks run in the SubAgentManager, NOT the task runner —
-    # route Stop to the manager (by sub_agent_id) and mark the mirror terminal.
+    # Sub-agent (mirror) tasks run in the SubAgentManager, NOT the task runner.
+    # The mirror task_id IS the executor assignment_id, so cancel just THIS
+    # assignment (cancel_assignment) — NOT the whole sub-agent. Routing Stop to
+    # mgr.stop(sub_agent_id) used to destroy the owner's persistent companion,
+    # silently breaking all future delegation (integrity audit 2026-06-25).
     if rec.kind == "subagent":
         mgr = getattr(request.app.state, "subagent_manager", None)
         sub_agent_id = (rec.payload or {}).get("sub_agent_id")
         stopped = False
-        if mgr is not None and sub_agent_id:
+        if mgr is not None:
             try:
-                stopped = bool(await mgr.stop(sub_agent_id))
+                cancel = getattr(mgr, "cancel_assignment", None)
+                if cancel is not None:
+                    # task_id == assignment_id; cancels only this assignment,
+                    # leaves the persistent companion alive + reusable.
+                    stopped = bool(await cancel(task_id))
+                elif sub_agent_id:
+                    # Fallback for executor <2.35.0 (no cancel_assignment).
+                    stopped = bool(await mgr.stop(sub_agent_id))
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(500, f"sub-agent stop failed: {exc}")
         from geny_executor.stages.s13_task_registry import TaskStatus

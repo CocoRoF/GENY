@@ -612,8 +612,27 @@ def _build_subworker_run_event_metadata(
 #: Active command executions, keyed by session id (the in-flight holder dict).
 _active_executions: Dict[str, dict] = {}
 
+#: Per-session lock serializing the execute_command admission critical section
+#: (double-exec guard → trigger preempt → holder register → task create). Without
+#: it, two concurrent execute_command calls could both pass the is_executing()
+#: check across an await (revive/rehydrate) and clobber each other's holder,
+#: running two turns on one shared pipeline (integrity audit 2026-06-25). Only the
+#: brief admission section is held — NOT the turn itself — so in-turn tool calls
+#: (the MCP bridge) never contend with it (avoids the prior hot-path deadlock).
+_exec_locks: Dict[str, asyncio.Lock] = {}
+
 #: Sessions currently draining their inbox — re-entry guard for ``_drain_inbox``.
 _draining_sessions: Set[str] = set()
+
+
+def _get_exec_lock(session_id: str) -> asyncio.Lock:
+    """Get-or-create the admission lock for *session_id* (atomic in asyncio:
+    no await between get and store, so concurrent callers see the same lock)."""
+    lock = _exec_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _exec_locks[session_id] = lock
+    return lock
 
 
 def is_executing(session_id: str) -> bool:
@@ -1062,53 +1081,53 @@ async def execute_command(
         except Exception:
             pass  # best-effort
 
-    # 2. Double-execution guard — with trigger preemption
-    if is_executing(session_id):
-        if not is_trigger and is_trigger_executing(session_id):
-            # User message takes priority over trigger — abort the trigger
-            logger.info(
-                "[Executor:%s] preempting trigger for user message",
-                session_id[:8],
-            )
-            aborted = await abort_trigger_execution(session_id)
-            if not aborted:
-                logger.warning("[Executor:%s] trigger preemption failed", session_id[:8])
+    # 2-4a. Admission critical section — held under the per-session lock so the
+    # guard check, trigger preempt, holder register, AND task creation are atomic
+    # (no concurrent execute_command can clobber the holder or slip a second turn
+    # through across an await). The lock is released BEFORE awaiting the turn.
+    exec_id = uuid.uuid4().hex
+    async with _get_exec_lock(session_id):
+        # 2. Double-execution guard — with trigger preemption
+        if is_executing(session_id):
+            if not is_trigger and is_trigger_executing(session_id):
+                # User message takes priority over trigger — abort the trigger
+                logger.info(
+                    "[Executor:%s] preempting trigger for user message",
+                    session_id[:8],
+                )
+                aborted = await abort_trigger_execution(session_id)
+                if not aborted or is_executing(session_id):
+                    logger.warning("[Executor:%s] trigger preemption failed", session_id[:8])
+                    raise AlreadyExecutingError(
+                        f"Execution already in progress for session {session_id}"
+                    )
+            else:
+                logger.warning(
+                    "[Executor:%s] already executing (is_trigger=%s, current_is_trigger=%s)",
+                    session_id[:8], is_trigger, is_trigger_executing(session_id),
+                )
                 raise AlreadyExecutingError(
                     f"Execution already in progress for session {session_id}"
                 )
-            # Small yield to let cleanup propagate
-            await asyncio.sleep(0)
-        else:
-            logger.warning(
-                "[Executor:%s] already executing (is_trigger=%s, current_is_trigger=%s)",
-                session_id[:8], is_trigger, is_trigger_executing(session_id),
-            )
-            raise AlreadyExecutingError(
-                f"Execution already in progress for session {session_id}"
-            )
 
-    # 3. Register
-    session_logger = _get_session_logger(session_id, create_if_missing=True)
-    exec_id = uuid.uuid4().hex
-    cache_cursor = session_logger.get_cache_length() if session_logger else 0
-    holder: dict = {
-        "done": False,
-        "result": None,
-        "error": None,
-        "start_time": time.time(),
-        "cache_cursor": cache_cursor,
-        "is_trigger": is_trigger,
-        "task": None,
-        "exec_id": exec_id,
-    }
-    _active_executions[session_id] = holder
-    logger.info(
-        "[Executor:%s] holder registered: exec_id=%s, cache_cursor=%d",
-        session_id[:8], exec_id[:8], cache_cursor,
-    )
+        # 3. Register
+        session_logger = _get_session_logger(session_id, create_if_missing=True)
+        cache_cursor = session_logger.get_cache_length() if session_logger else 0
+        holder: dict = {
+            "done": False,
+            "result": None,
+            "error": None,
+            "start_time": time.time(),
+            "cache_cursor": cache_cursor,
+            "is_trigger": is_trigger,
+            "task": None,
+            "exec_id": exec_id,
+        }
+        _active_executions[session_id] = holder
 
-    # 4. Execute (blocking)
-    try:
+        # 4a. Create the turn task INSIDE the lock so register+task are atomic —
+        # a preempting caller can never observe a live holder whose task is None
+        # (which would let the trigger's turn start after a "successful" abort).
         exec_task = asyncio.create_task(
             _execute_core(
                 agent, session_id, prompt, holder,
@@ -1119,7 +1138,13 @@ async def execute_command(
             )
         )
         holder["task"] = exec_task
+        logger.info(
+            "[Executor:%s] holder registered: exec_id=%s, cache_cursor=%d",
+            session_id[:8], exec_id[:8], cache_cursor,
+        )
 
+    # 4b. Await the turn OUTSIDE the lock (so in-turn tool calls don't contend).
+    try:
         result = await exec_task
 
         # 5. Emit avatar state (best-effort, never raises)

@@ -527,14 +527,21 @@ function TaskDetailView({
     }
     setLogLoading(true);
     try {
-      // Prefer the sub-agent's own trail; fall back to the owning session's.
-      let src = subAgentId || ownerId;
-      let res = await commandApi.getLogs(src, 400).catch(() => null);
-      if ((!res || !res.entries?.length) && subAgentId) {
-        src = ownerId;
-        res = await commandApi.getLogs(src, 400).catch(() => null);
+      // THIS assignment's own trail first (per-assignment key = task_id with
+      // ':'→'_', matching the backend's trail_log_key), then the sub_agent_id
+      // (legacy concatenated log), then the owning session as a last resort.
+      const perAssignment = task.task_id.replace(/:/g, '_');
+      const candidates = [perAssignment, subAgentId, ownerId].filter(Boolean);
+      let used = '';
+      let res: Awaited<ReturnType<typeof commandApi.getLogs>> | null = null;
+      for (const c of candidates) {
+        res = await commandApi.getLogs(c, 400).catch(() => null);
+        if (res && res.entries?.length) {
+          used = c;
+          break;
+        }
       }
-      setLogSource(src);
+      setLogSource(used || candidates[0] || '');
       setEntries(res?.entries || []);
     } catch {
       setEntries([]);

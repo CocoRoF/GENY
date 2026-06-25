@@ -91,18 +91,29 @@ def _make_on_event(app_state: Any):
     return _on_event
 
 
+def trail_log_key(assignment_id: str) -> str:
+    """Session-log key for ONE assignment's tool trail.
+
+    Keyed PER ASSIGNMENT (not per sub_agent_id) so the 작업 detail shows only
+    THIS task's trail — the owned companion is reused across every delegation,
+    so a sub_agent_id key concatenated all tasks' steps (integrity audit
+    2026-06-25). The colon in assignment_id ("{sub_agent_id}:{uuid8}") is
+    swapped for "_" so the key is filesystem/URL-safe; the frontend applies the
+    same transform to task.task_id. (See TasksTab.tsx trailKey().)
+    """
+    return (assignment_id or "").replace(":", "_")
+
+
 def _mirror_transcript(registry: Any, aid: str, payload: Dict[str, Any], *, ok: bool) -> None:
-    """Replay a finished sub-agent's OWN tool trail into a session log.
+    """Replay a finished sub-agent's OWN tool trail into a per-assignment log.
 
     executor ≥2.34.0 ships ``payload["transcript"]`` — the sub-agent's normalized
     tool/result/error steps captured from its own pipeline. We write them into a
-    SessionLogger keyed by ``sub_agent_id`` (filesystem/URL-safe, no colon) so the
-    작업 탭 detail's ``getLogs(sub_agent_id)`` renders the sub-agent's REAL trail
-    via the same ExecutionTimeline the 세션 로그 tab uses — instead of falling back
-    to the owner session's pipeline-stage log (the wrong trail).
-
-    Each assignment is anchored by a COMMAND entry (the task); multiple
-    assignments to the same sub-agent append chronologically. Best-effort.
+    SessionLogger keyed by ``trail_log_key(assignment_id)`` so the 작업 탭 detail's
+    ``getLogs(...)`` renders the sub-agent's REAL trail via the same
+    ExecutionTimeline the 세션 로그 tab uses — instead of the owner session's
+    pipeline-stage log (the wrong trail). Anchored by a COMMAND entry (the task).
+    Best-effort: a raise here must not block the alarm.
     """
     sub_agent_id = payload.get("sub_agent_id")
     transcript = payload.get("transcript") or []
@@ -111,7 +122,7 @@ def _mirror_transcript(registry: Any, aid: str, payload: Dict[str, Any], *, ok: 
     try:
         from service.logging.session_logger import get_session_logger, LogLevel
 
-        slog = get_session_logger(sub_agent_id, create_if_missing=True)
+        slog = get_session_logger(trail_log_key(aid), create_if_missing=True)
         if slog is None:
             return
         rec = registry.get(aid)
@@ -253,11 +264,46 @@ def install_subagent_manager(app_state: Any, *, registry: Any) -> Optional[Any]:
         session_store=session_store,
         on_event=_make_on_event(app_state),
     )
+    _reconcile_orphaned_subagent_tasks(app_state)
     logger.info(
         "   ✅ subagent_manager wired (persistent sub-agents%s)",
         " + durable state" if session_store is not None else "",
     )
     return manager
+
+
+def _reconcile_orphaned_subagent_tasks(app_state: Any) -> None:
+    """Mark RUNNING sub-agent mirror tasks terminal on boot.
+
+    A mirror task only reaches a terminal state via a live subagent.completed/
+    failed/stopped event. The session_store persists only the companion's
+    conversation, NOT in-flight assignments — so a sub-agent assignment that was
+    running when Geny restarted can NEVER complete, leaving its 작업 row stuck at
+    RUNNING forever (integrity audit 2026-06-25). Sweep them to CANCELLED at boot.
+    Best-effort; never blocks startup.
+    """
+    registry = getattr(app_state, "task_registry", None)
+    if registry is None:
+        return
+    try:
+        from geny_executor.stages.s13_task_registry import TaskStatus
+
+        swept = 0
+        for rec in registry.list_all():
+            if (
+                rec.kind == "subagent"
+                and not getattr(rec, "is_terminal", False)
+            ):
+                registry.update_status(
+                    rec.task_id,
+                    TaskStatus.CANCELLED,
+                    error="interrupted by restart",
+                )
+                swept += 1
+        if swept:
+            logger.info("   ↻ reconciled %d orphaned sub-agent task(s) → cancelled", swept)
+    except Exception:  # noqa: BLE001 — never block boot
+        logger.debug("sub-agent task reconciliation failed", exc_info=True)
 
 
 __all__ = ["install_subagent_manager"]
