@@ -17,21 +17,24 @@ import {
   backgroundTaskApi,
   BackgroundTaskRecord,
   cronApi,
+  commandApi,
   subagentTypeApi,
   SubagentTypeRow,
   adminTelemetryApi,
 } from '@/lib/api';
-import { RefreshCw, Square, Eye, Plus, Clock, ListChecks } from 'lucide-react';
+import type { LogEntry } from '@/types';
+import { RefreshCw, Square, Eye, Plus, Clock, ListChecks, ChevronLeft, FileText, Activity } from 'lucide-react';
 import {
   TabShell,
   EditorModal,
-  Modal,
   ConfirmModal,
   EmptyState,
   StatusBadge,
   ActionButton,
   type BadgeTone,
 } from '@/components/layout';
+import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
+import ExecutionTimeline from '@/components/execution/ExecutionTimeline';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -78,29 +81,10 @@ export function TasksTab() {
   const [subagentTypes, setSubagentTypes] = useState<SubagentTypeRow[]>([]);
   // PR-F.6.6 — runner capacity meter.
   const [capacity, setCapacity] = useState<{ in_flight: number | null; max: number | null } | null>(null);
-  // Output viewer modal (fetches text with auth — avoids new-tab download/auth quirks).
-  const [outputRow, setOutputRow] = useState<BackgroundTaskRecord | null>(null);
-  const [outputText, setOutputText] = useState<string>('');
-  const [outputLoading, setOutputLoading] = useState(false);
+  // Inline detail view: when set, the tab renders the task's detail page
+  // (output + tool trail) instead of the list. Back clears it.
+  const [detailRow, setDetailRow] = useState<BackgroundTaskRecord | null>(null);
   const [stopRow, setStopRow] = useState<BackgroundTaskRecord | null>(null);
-
-  const handleOutput = useCallback(
-    async (row: BackgroundTaskRecord) => {
-      if (!sessionId) return;
-      setOutputRow(row);
-      setOutputText('');
-      setOutputLoading(true);
-      try {
-        const txt = await backgroundTaskApi.output(sessionId, row.task_id);
-        setOutputText(txt || '(아직 출력이 없습니다 / no output yet)');
-      } catch (e) {
-        setOutputText(`출력을 불러오지 못했습니다: ${e instanceof Error ? e.message : e}`);
-      } finally {
-        setOutputLoading(false);
-      }
-    },
-    [sessionId],
-  );
 
   useEffect(() => {
     subagentTypeApi.list()
@@ -145,6 +129,17 @@ export function TasksTab() {
     const id = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Keep the open detail's header (status/duration) fresh as the list polls.
+  useEffect(() => {
+    setDetailRow((cur) => {
+      if (!cur) return cur;
+      const next = rows.find((r) => r.task_id === cur.task_id);
+      return next && (next.status !== cur.status || next.completed_at !== cur.completed_at)
+        ? next
+        : cur;
+    });
+  }, [rows]);
 
   const handleStop = useCallback(
     async (taskId: string) => {
@@ -235,6 +230,7 @@ export function TasksTab() {
       title="Background Tasks"
       icon={ListChecks}
       actions={
+        detailRow ? undefined : (
         <>
           {capacity && (capacity.in_flight !== null || capacity.max !== null) && (
             <StatusBadge
@@ -269,10 +265,18 @@ export function TasksTab() {
             Refresh
           </ActionButton>
         </>
+        )
       }
       error={error}
       onDismissError={() => setError(null)}
     >
+      {detailRow ? (
+        <TaskDetailView
+          task={detailRow}
+          sessionId={sessionId}
+          onBack={() => setDetailRow(null)}
+        />
+      ) : (
       <div className="h-full min-h-0 overflow-y-auto p-4">
       {rows.length === 0 ? (
         <EmptyState
@@ -320,7 +324,7 @@ export function TasksTab() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
-                        <RowAction icon={Eye} onClick={() => handleOutput(row)} title="View this task's output">
+                        <RowAction icon={Eye} onClick={() => setDetailRow(row)} title="View output + tool trail">
                           Output
                         </RowAction>
                         {/* Schedule turns a re-runnable task into a cron. A
@@ -354,6 +358,7 @@ export function TasksTab() {
         </div>
       )}
       </div>
+      )}
 
       <EditorModal
         open={createOpen}
@@ -420,42 +425,6 @@ export function TasksTab() {
         </div>
       </EditorModal>
 
-      {/* Output viewer — reusable Modal package */}
-      <Modal
-        open={!!outputRow}
-        onClose={() => setOutputRow(null)}
-        size="2xl"
-        icon={<Eye className="w-4 h-4" />}
-        title={outputRow ? `${outputRow.kind} · ${outputRow.task_id.slice(0, 12)}…` : ''}
-        description={
-          outputRow
-            ? String((outputRow.payload as Record<string, unknown>)?.task || '') || undefined
-            : undefined
-        }
-        headerActions={
-          <button
-            type="button"
-            onClick={() => outputRow && void handleOutput(outputRow)}
-            disabled={outputLoading}
-            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-50"
-            title="새로고침"
-          >
-            <RefreshCw className={`w-3 h-3 ${outputLoading ? 'animate-spin' : ''}`} /> 새로고침
-          </button>
-        }
-        bodyClassName="bg-[hsl(var(--background))]/40"
-      >
-        {outputLoading ? (
-          <div className="text-sm text-[hsl(var(--muted-foreground))] animate-pulse py-8 text-center">
-            불러오는 중…
-          </div>
-        ) : (
-          <pre className="text-xs whitespace-pre-wrap break-words font-mono text-[hsl(var(--foreground))] leading-relaxed">
-            {outputText}
-          </pre>
-        )}
-      </Modal>
-
       {/* Stop confirmation — reusable ConfirmModal */}
       <ConfirmModal
         open={!!stopRow}
@@ -513,6 +482,155 @@ function RowAction({
       <Icon className="w-3 h-3" />
       {children}
     </button>
+  );
+}
+
+/**
+ * TaskDetailView — inline detail page for one task (rendered IN the tasks tab,
+ * not a modal). Shows the rendered Output (markdown) + the granular tool trail
+ * (ExecutionTimeline, the same view as the 세션 로그 tab). Back returns to the list.
+ *
+ * The tool trail is fetched for the sub-agent's own log when available
+ * (payload.sub_agent_id), falling back to the owning session's log — so a
+ * sub-agent task surfaces real TOOL/RESULT/RESPONSE entries.
+ */
+function TaskDetailView({
+  task,
+  sessionId,
+  onBack,
+}: {
+  task: BackgroundTaskRecord;
+  sessionId: string;
+  onBack: () => void;
+}) {
+  const [output, setOutput] = useState('');
+  const [outLoading, setOutLoading] = useState(true);
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [logLoading, setLogLoading] = useState(true);
+  const [logSource, setLogSource] = useState<string>('');
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [showAllLevels, setShowAllLevels] = useState(true);
+
+  const payload = (task.payload || {}) as Record<string, unknown>;
+  const subAgentId = typeof payload.sub_agent_id === 'string' ? payload.sub_agent_id : '';
+  const ownerId = typeof payload._session_id === 'string' ? payload._session_id : sessionId;
+  const taskLabel = typeof payload.task === 'string' ? payload.task : '';
+
+  const load = useCallback(async () => {
+    setOutLoading(true);
+    try {
+      setOutput(await backgroundTaskApi.output(sessionId, task.task_id));
+    } catch (e) {
+      setOutput(`출력을 불러오지 못했습니다: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setOutLoading(false);
+    }
+    setLogLoading(true);
+    try {
+      // Prefer the sub-agent's own trail; fall back to the owning session's.
+      let src = subAgentId || ownerId;
+      let res = await commandApi.getLogs(src, 400).catch(() => null);
+      if ((!res || !res.entries?.length) && subAgentId) {
+        src = ownerId;
+        res = await commandApi.getLogs(src, 400).catch(() => null);
+      }
+      setLogSource(src);
+      setEntries(res?.entries || []);
+    } catch {
+      setEntries([]);
+    } finally {
+      setLogLoading(false);
+    }
+  }, [sessionId, task.task_id, subAgentId, ownerId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="h-full min-h-0 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" /> 뒤로
+        </button>
+        <div className="min-w-0 flex items-center gap-2">
+          <span className="text-[var(--text-primary)] font-medium">{task.kind}</span>
+          <span className="font-mono text-xs text-[var(--text-muted)]">{task.task_id.slice(0, 16)}…</span>
+          <StatusBadge tone={STATUS_TONE[task.status]}>{task.status}</StatusBadge>
+          <span className="font-mono text-xs text-[var(--text-muted)]">
+            {formatDuration(task.started_at, task.completed_at)}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+        >
+          <RefreshCw className={`w-3 h-3 ${outLoading || logLoading ? 'animate-spin' : ''}`} /> 새로고침
+        </button>
+      </div>
+
+      {taskLabel && (
+        <div className="px-4 py-2 text-xs text-[var(--text-secondary)] border-b border-[var(--border-color)] bg-[var(--bg-tertiary)] truncate">
+          {taskLabel}
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Output (rendered markdown) */}
+        <section className="border-b border-[var(--border-color)]">
+          <div className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            <FileText className="w-3.5 h-3.5" /> 결과 (Output)
+          </div>
+          {outLoading ? (
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">불러오는 중…</div>
+          ) : output.trim() ? (
+            <div className="text-[var(--text-primary)]">
+              <MarkdownRenderer content={output} />
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)]">
+              아직 출력이 없습니다. (실행 중이거나 결과가 기록되지 않은 작업)
+            </div>
+          )}
+        </section>
+
+        {/* Granular tool trail */}
+        <section>
+          <div className="flex items-center gap-1.5 px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            <Activity className="w-3.5 h-3.5" /> 도구 로그 (Tool trail)
+            {logSource && (
+              <span className="font-mono normal-case font-normal text-[0.65rem] text-[var(--text-muted)]">
+                · {logSource.slice(0, 14)}
+              </span>
+            )}
+          </div>
+          {logLoading ? (
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">불러오는 중…</div>
+          ) : entries.length ? (
+            <div className="px-2 pb-4">
+              <ExecutionTimeline
+                entries={entries}
+                selectedIndex={selectedIdx}
+                onSelectEntry={setSelectedIdx}
+                showAllLevels={showAllLevels}
+                onToggleShowAll={() => setShowAllLevels((v) => !v)}
+                isExecuting={task.status === 'running'}
+              />
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)]">
+              이 작업의 도구 로그가 없습니다.
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   );
 }
 
