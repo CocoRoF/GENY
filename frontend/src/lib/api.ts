@@ -1640,6 +1640,27 @@ export const gaptApi = {
   status: () => apiCall<GaptStatus>('/api/gapt/status'),
 };
 
+/** Proxy to a connected GAPT instance's own settings (Cloudflare etc.). All
+ *  endpoints 412 when GAPT isn't configured; the GAPT category only renders
+ *  when gaptApi.status().running, so callers don't normally hit that. */
+export const gaptSettingsApi = {
+  getCloudflare: () => apiCall<any>('/api/gapt/settings/cloudflare'),
+  putCloudflare: (body: { api_token?: string; config: Record<string, any> }) =>
+    apiCall<any>('/api/gapt/settings/cloudflare', { method: 'PUT', body: JSON.stringify(body) }),
+  deleteCloudflare: () =>
+    apiCall<any>('/api/gapt/settings/cloudflare', { method: 'DELETE' }),
+  verifyCloudflare: (body?: Record<string, any>) =>
+    apiCall<any>('/api/gapt/settings/cloudflare/verify', { method: 'POST', body: JSON.stringify(body || {}) }),
+  tunnelSnapshot: () => apiCall<any>('/api/gapt/settings/cloudflare/tunnel/snapshot'),
+  ensureWildcard: (body?: Record<string, any>) =>
+    apiCall<any>('/api/gapt/settings/cloudflare/tunnel/ensure-wildcard', { method: 'POST', body: JSON.stringify(body || {}) }),
+  certStatus: () => apiCall<any>('/api/gapt/settings/cloudflare/cert/status'),
+  enableTotalTls: (body?: Record<string, any>) =>
+    apiCall<any>('/api/gapt/settings/cloudflare/cert/enable-total-tls', { method: 'POST', body: JSON.stringify(body || {}) }),
+  diagnose: () => apiCall<any>('/api/gapt/settings/diagnose'),
+  llmHealth: () => apiCall<any>('/api/gapt/settings/llm-health'),
+};
+
 // ==================== Config API ====================
 
 import type {

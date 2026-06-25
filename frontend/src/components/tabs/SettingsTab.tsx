@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { configApi } from '@/lib/api';
+import { configApi, gaptApi } from '@/lib/api';
 import LLMBackendsPanel from './LLMBackendsPanel';
+import GaptSettingsPanel from './GaptSettingsPanel';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import { PROVIDERS } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
@@ -89,6 +90,17 @@ export default function SettingsTab() {
     llmHealthLoaded && Object.keys(llmHealthProviders).length > 0
       ? Object.keys(llmHealthProviders).length
       : PROVIDERS.length;
+
+  // GAPT connection — the "GAPT" settings category appears only when a GAPT
+  // instance is wired up AND answering /health (same gate the header button uses).
+  const [gaptRunning, setGaptRunning] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    gaptApi.status()
+      .then((s) => { if (alive) setGaptRunning(!!s.running); })
+      .catch(() => { if (alive) setGaptRunning(false); });
+    return () => { alive = false; };
+  }, []);
 
   const loadConfigs = useCallback(async () => {
     try {
@@ -229,6 +241,18 @@ export default function SettingsTab() {
               <span className="flex-1">{t('settings.llmBackends.navLabel')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{llmBackendCount}</span>
             </button>
+            {/* Virtual 'GAPT' category — proxies a connected GAPT instance's own
+                 settings (Cloudflare etc.). Shown ONLY when GAPT is running, so it
+                 vanishes on a GAPT-less deployment. Mirrors the LLM Backends pattern. */}
+            {gaptRunning && (
+              <button
+                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'gapt' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                onClick={() => setSelectedCategory('gapt')}
+              >
+                <span className="flex-1">GAPT</span>
+                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+              </button>
+            )}
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
               return (
@@ -249,6 +273,8 @@ export default function SettingsTab() {
         <div className="flex-1 h-full min-h-0 overflow-y-auto p-3 md:p-5">
           {selectedCategory === 'llm_backends' ? (
             <LLMBackendsPanel />
+          ) : selectedCategory === 'gapt' ? (
+            <GaptSettingsPanel />
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4"><p className="text-[0.8125rem] text-[var(--text-muted)]">{t('settings.noConfigs')}</p></div>
           ) : (
