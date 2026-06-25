@@ -24,6 +24,8 @@ import {
   type SubagentTypeRow,
   sandboxToolPacksApi,
   type SandboxToolPackSummary,
+  personaPresetsApi,
+  type PersonaPresetSummary,
 } from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
@@ -334,6 +336,77 @@ export function TriggerEnvPicker() {
       ) : (
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           비워두면 기본 트리거 프리셋을 사용합니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * PersonaPresetPicker — attach a single Persona Preset to this environment.
+ * Stored at `host_selections.extras.persona_preset_id`; at session build the
+ * preset is compiled to a persona prompt and prepended to the system prompt.
+ * Leaving it unset removes the key (no persona overlay).
+ */
+export function PersonaPresetPicker() {
+  const draft = useEnvironmentDraftStore((s) => s.draft);
+  const setPersonaPresetId = useEnvironmentDraftStore((s) => s.setPersonaPresetId);
+
+  const [presets, setPresets] = useState<PersonaPresetSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErrorText(null);
+    personaPresetsApi
+      .list()
+      .then((res) => {
+        if (!cancelled) setPresets(res.presets || []);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorText(err instanceof Error ? err.message : String(err));
+          setPresets([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selected = useMemo(() => {
+    const raw = draft?.host_selections?.extras?.persona_preset_id;
+    return typeof raw === 'string' ? raw : '';
+  }, [draft]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
+        페르소나 프리셋
+      </label>
+      <select
+        value={selected}
+        onChange={(e) => setPersonaPresetId(e.target.value || null)}
+        disabled={loading}
+        className="w-full h-9 px-2.5 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.8125rem] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+      >
+        <option value="">적용 안 함</option>
+        {presets.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}{p.mbti ? ` · ${p.mbti}` : ''}
+          </option>
+        ))}
+      </select>
+      {errorText ? (
+        <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">{errorText}</p>
+      ) : (
+        <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+          이 환경의 세션에 적용할 페르소나(성격)를 선택합니다. 프리셋은 「페르소나 프리셋」 탭에서 만들 수 있어요.
         </p>
       )}
     </div>

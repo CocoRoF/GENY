@@ -33,6 +33,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Boxes,
+  Drama,
   Layers,
   Network,
   Plug,
@@ -51,6 +52,7 @@ export type EnvManagementTab =
   | 'skills'
   | 'custom_tools'
   | 'sandbox_packs'
+  | 'persona'
   | 'hooks'
   | 'permissions'
   | 'triggers';
@@ -61,6 +63,7 @@ const TAB_ORDER: EnvManagementTab[] = [
   'skills',
   'custom_tools',
   'sandbox_packs',
+  'persona',
   'hooks',
   'permissions',
   'triggers',
@@ -109,6 +112,13 @@ const TABS: TabDef[] = [
     fallbackLabel: 'Sandbox Tool Packs',
     fallbackHint: '샌드박스에서 만든 도구 팩 — 환경에 포함',
     key: 'sandbox_packs',
+  },
+  {
+    id: 'persona',
+    icon: Drama,
+    fallbackLabel: '페르소나 프리셋',
+    fallbackHint: 'MBTI·성격 슬라이더로 캐릭터 성격 만들기 — 환경에 적용',
+    key: 'persona',
   },
   {
     id: 'hooks',

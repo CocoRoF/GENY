@@ -375,6 +375,10 @@ export interface EnvironmentDraftState {
    *  empty deletes the key entirely so the env has no mapping and the
    *  backend falls back to the host-designated default preset. */
   setTriggerPresetId: (presetId: string | null) => void;
+  /** Set (or clear) the env's attached Persona Preset, stored at
+   *  ``host_selections.extras.persona_preset_id``. Passing ``null`` / empty
+   *  deletes the key so the env carries no persona overlay. */
+  setPersonaPresetId: (presetId: string | null) => void;
   /**
    * Declare (or clear) the persistent **sub-agent** an agent on this env
    * OWNS — written to `host_selections.extras.owned_subagent` as
@@ -695,6 +699,32 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       }
       // Keep `extras` only when it still has entries, so a cleared
       // mapping doesn't leave a dangling empty object in the manifest.
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setPersonaPresetId: (presetId) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      if (presetId) {
+        extras.persona_preset_id = presetId;
+      } else {
+        delete extras.persona_preset_id;
+      }
       next.host_selections =
         Object.keys(extras).length > 0
           ? { ...current, extras }

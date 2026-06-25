@@ -60,6 +60,7 @@ import {
   OwnedSubagentPicker,
   SubworkerTypesPicker,
   SandboxToolPacksPicker,
+  PersonaPresetPicker,
 } from './HostSelectionPickers';
 import ToolSettingsPicker from './ToolSettingsPicker';
 
@@ -80,7 +81,8 @@ type Panel =
   | 'subagent'
   | 'subworker'
   | 'tool_settings'
-  | 'sandbox_tool_packs';
+  | 'sandbox_tool_packs'
+  | 'persona';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -93,6 +95,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   subworker: 'globals.subworker',
   tool_settings: 'globals.toolSettings',
   sandbox_tool_packs: 'globals.sandboxToolPacks',
+  persona: 'globals.persona',
 };
 
 const HEADER_PALETTE = {
@@ -162,6 +165,11 @@ export default function GlobalSettingsView() {
   const sandboxPacksSelected =
     Array.isArray(draft.host_selections?.extras?.sandbox_tool_packs) &&
     (draft.host_selections?.extras?.sandbox_tool_packs as unknown[]).length > 0;
+
+  // ★ on the Persona nav row when this env has a persona preset attached.
+  const personaSelected =
+    typeof draft.host_selections?.extras?.persona_preset_id === 'string' &&
+    draft.host_selections.extras.persona_preset_id.length > 0;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -289,6 +297,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('sandbox_tool_packs')}
               badge={sandboxPacksSelected ? '★' : undefined}
             />
+            <SubTabButton
+              icon={Sparkles}
+              label={t('envManagement.globals.navPersona')}
+              active={panel === 'persona'}
+              onClick={() => setPanel('persona')}
+              badge={personaSelected ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -401,6 +416,16 @@ export default function GlobalSettingsView() {
                   description="Opt this environment into reusable Sandbox Tool Packs — each loads its tools + skills into every session, running in the pack's own snapshotted workspace."
                 />
                 <SandboxToolPacksPicker />
+              </div>
+            )}
+
+            {panel === 'persona' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title={t('envManagement.globals.persona.title')}
+                  description={t('envManagement.globals.persona.description')}
+                />
+                <PersonaPresetPicker />
               </div>
             )}
           </div>

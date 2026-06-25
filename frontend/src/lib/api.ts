@@ -3670,6 +3670,111 @@ export const sandboxToolPacksApi = {
     ),
 };
 
+// ==================== Persona Presets (persona builder) ====================
+
+export interface PersonaPresetSummary {
+  id: string;
+  name: string;
+  description: string;
+  mbti: string;
+  enneagram: string;
+  archetype: string;
+  is_template: boolean;
+}
+
+export interface OceanTraits {
+  openness: number;
+  conscientiousness: number;
+  extraversion: number;
+  agreeableness: number;
+  neuroticism: number;
+}
+export interface StyleTraits {
+  warmth: number;
+  humor: number;
+  playfulness: number;
+  formality: number;
+  assertiveness: number;
+  verbosity: number;
+  emoji: number;
+  enthusiasm: number;
+  directness: number;
+}
+export interface SpeechStyle {
+  honorific: string;
+  self_reference: string;
+  catchphrases: string[];
+  verbal_tics: string[];
+}
+export interface EmotionDefaults {
+  default_mood: string;
+  expressiveness: number;
+  preferred_tags: string[];
+}
+export interface PersonaIdentity {
+  display_name: string;
+  age_vibe: string;
+  role: string;
+  interests: string[];
+  backstory: string;
+}
+export interface PersonaPresetDefinition {
+  id?: string;
+  name: string;
+  description: string;
+  mbti: string;
+  enneagram: string;
+  archetype: string;
+  ocean: OceanTraits;
+  style: StyleTraits;
+  speech: SpeechStyle;
+  emotion: EmotionDefaults;
+  identity: PersonaIdentity;
+  prompt_override: string;
+  is_template?: boolean;
+  compiled_prompt?: string;
+}
+
+export interface PersonaFrameworks {
+  mbti: { code: string; label_ko: string }[];
+  enneagram: { code: string; label_ko: string }[];
+  archetypes: { code: string; label_ko: string }[];
+  ocean_axes: { key: string; label_ko: string; label_en: string; low: string; high: string }[];
+  style_axes: { key: string; label_ko: string; label_en: string; low: string; high: string }[];
+  honorifics: { code: string; label_ko: string }[];
+  emotion_tags: string[];
+}
+
+export const personaPresetsApi = {
+  list: () =>
+    apiCall<{ presets: PersonaPresetSummary[] }>('/api/persona-presets'),
+  frameworks: () => apiCall<PersonaFrameworks>('/api/persona-presets/frameworks'),
+  get: (id: string) =>
+    apiCall<PersonaPresetDefinition>(
+      `/api/persona-presets/${encodeURIComponent(id)}`,
+    ),
+  compile: (defn: PersonaPresetDefinition) =>
+    apiCall<{ compiled_prompt: string; char_count: number }>(
+      '/api/persona-presets/compile',
+      { method: 'POST', body: JSON.stringify(defn) },
+    ),
+  create: (defn: PersonaPresetDefinition) =>
+    apiCall<PersonaPresetDefinition>('/api/persona-presets', {
+      method: 'POST',
+      body: JSON.stringify(defn),
+    }),
+  update: (id: string, defn: PersonaPresetDefinition) =>
+    apiCall<PersonaPresetDefinition>(
+      `/api/persona-presets/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(defn) },
+    ),
+  remove: (id: string) =>
+    apiCall<{ ok: boolean; id: string }>(
+      `/api/persona-presets/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+};
+
 // ==================== Sandbox Logs (observability) ====================
 
 export interface SandboxSummary {

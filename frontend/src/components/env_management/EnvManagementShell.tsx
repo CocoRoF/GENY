@@ -53,6 +53,7 @@ import { McpServersTab } from '@/components/tabs/McpServersTab';
 import { TriggersTab } from '@/components/tabs/TriggersTab';
 import { CustomToolsTab } from '@/components/tabs/CustomToolsTab';
 import SandboxToolPacksManager from '@/components/sandbox_tool_packs/SandboxToolPacksManager';
+import PersonaPresetsManager from '@/components/persona_presets/PersonaPresetsManager';
 
 export interface EnvManagementShellProps {
   /** Called after a successful Save with the new env id. */
@@ -207,6 +208,12 @@ export default function EnvManagementShell({
       {activeTab === 'sandbox_packs' && (
         <RegistryTabSlot>
           <SandboxToolPacksManager embedded />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'persona' && (
+        <RegistryTabSlot>
+          <PersonaPresetsManager embedded />
         </RegistryTabSlot>
       )}
 
