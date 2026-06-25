@@ -89,18 +89,42 @@ async def save_pack(
             f"GAPT did not return a snapshot id for workspace {workspace_ref}"
         )
 
-    defn = SandboxToolPackDefinition(
-        name=name,
-        description=description,
-        project_ref=project_ref,
-        workspace_ref=workspace_ref,
-        snapshot_ref=snapshot_ref,
-        tools=list(tools),
-        skills=list(skills or []),
-        enabled=enabled,
-        created_by=created_by,
-    )
-    saved = store.create(defn)
+    # Pack names are unique. An agent that re-saves a tool (or two agents using
+    # the same name) must NOT fail — append a random hash suffix so the save
+    # always succeeds (self-service: forge → save just works). Resolve up-front
+    # via get_by_name, and retry on the create() race with a fresh suffix.
+    import secrets as _secrets
+    from service.sandbox_tool_packs.store import SandboxToolPackNameTaken
+
+    base_name = name
+    try:
+        if store.get_by_name(name) is not None:
+            name = f"{base_name}-{_secrets.token_hex(3)}"
+    except Exception:  # noqa: BLE001 — get_by_name is best-effort; create() still guards
+        pass
+
+    saved = None
+    for _attempt in range(6):
+        defn = SandboxToolPackDefinition(
+            name=name,
+            description=description,
+            project_ref=project_ref,
+            workspace_ref=workspace_ref,
+            snapshot_ref=snapshot_ref,
+            tools=list(tools),
+            skills=list(skills or []),
+            enabled=enabled,
+            created_by=created_by,
+        )
+        try:
+            saved = store.create(defn)
+            break
+        except SandboxToolPackNameTaken:
+            name = f"{base_name}-{_secrets.token_hex(3)}"
+    if saved is None:
+        raise RuntimeError(f"could not allocate a unique pack name for {base_name!r}")
+    if name != base_name:
+        logger.info("pack name %r taken → saved as %r", base_name, name)
     logger.info(
         "saved sandbox tool pack name=%s id=%s snapshot=%s tools=%d",
         saved.name, saved.id, snapshot_ref, len(saved.tools),

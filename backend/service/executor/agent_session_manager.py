@@ -1648,6 +1648,33 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001 — be conservative only on real signals
             return False
 
+    async def refresh_all_session_credentials(self) -> List[str]:
+        """Flag EVERY live session for rebuild after a global credential change
+        (LLM backend API keys in the LLM 백엔드 config).
+
+        The CredentialBundle is snapshotted into each session at build time
+        (``CredentialBundleBuilder().build()`` reads the live config), so a key
+        change in the config only reaches LIVE sessions when they rebuild. This
+        marks them all; the rebuild reconstructs the bundle with the new key on
+        the next turn (between-turn, never mid-turn — same path as
+        :meth:`propagate_env_update`). Without this, changing the OpenAI key in
+        the config left live sessions (and their embedding/Stage-6 clients) on
+        the stale key until manual restart.
+        """
+        affected: List[str] = []
+        for sid, agent in list(self._local_agents.items()):
+            try:
+                agent._needs_manifest_reload = True
+                affected.append(sid)
+            except Exception:  # noqa: BLE001
+                pass
+        if affected:
+            logger.info(
+                "🔑 LLM credentials changed → %d live session(s) flagged for "
+                "credential rebuild", len(affected),
+            )
+        return affected
+
     async def propagate_env_update(self, env_id: str) -> List[str]:
         """Flag every LIVE session bound to ``env_id`` so it rebuilds its
         pipeline from the freshly-saved manifest on its next access.

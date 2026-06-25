@@ -161,6 +161,11 @@ async def get_config(config_name: str):
 
 
 _GATEWAY_CHANNEL_CONFIGS = {"telegram", "discord", "slack", "kakao", "teams"}
+# Credential configs whose values are snapshotted into each session's
+# CredentialBundle at build time — a change must rebuild live sessions to take
+# effect (the LLM 백엔드 panel writes llm_credentials here). See
+# AgentSessionManager.refresh_all_session_credentials.
+_CREDENTIAL_CONFIGS = {"llm_credentials", "cli_backends", "media_credentials"}
 
 
 @router.put("/{config_name}")
@@ -202,6 +207,16 @@ async def update_config(
                 await reload_gateway(http_request.app.state)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"gateway reload after {config_name} save failed: {e}")
+
+        # Rebuild live sessions when LLM backend credentials change, so the new
+        # key reaches their (snapshotted) CredentialBundle — Stage-6 LLM AND the
+        # embedding/vector-memory clients — without a manual restart. Best-effort.
+        if config_name in _CREDENTIAL_CONFIGS:
+            try:
+                from service.executor.agent_session_manager import get_agent_session_manager
+                await get_agent_session_manager().refresh_all_session_credentials()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"credential refresh after {config_name} save failed: {e}")
 
         return {
             "success": True,

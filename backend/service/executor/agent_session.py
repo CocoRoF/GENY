@@ -1845,7 +1845,7 @@ class AgentSession:
         if not self._env_id:
             return None
         try:
-            from service.environment.service import get_environment_service
+            from service.environment import get_environment_service
 
             svc = get_environment_service()
             manifest = svc.load_manifest(self._env_id) if svc else None
@@ -1885,7 +1885,7 @@ class AgentSession:
         if not self._env_id:
             return {}
         try:
-            from service.environment.service import get_environment_service
+            from service.environment import get_environment_service
             from service.tool_settings import sanitize_tool_settings
 
             svc = get_environment_service()
