@@ -32,7 +32,8 @@ See [00_plan.md](00_plan.md).
       authenticated Geny user (GaptClient.issue_browser_session → Set-Cookie same
       origin); Header GAPT button does SSO then opens the SPA. Toggle:
       `GENY_GAPT_SSO_BYPASS` (default true), wired in compose.
-- [ ] Deploy + verify
+- [x] Deploy + verify — /api/gapt/sso sets GAPT cookie (bypass on); avatar
+      status running:true (4 key rows); GAPT panel full-width. All PASS.
 
 ## Phase 3 — model unify + reverse read
 - [x] reverse read surfaced — GAPT panel's `/diagnose` card shows Cloudflare/
