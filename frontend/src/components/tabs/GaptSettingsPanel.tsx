@@ -167,7 +167,7 @@ export default function GaptSettingsPanel() {
   const tunnelOptions = accountId ? tunnelsByAccount[accountId] || [] : [];
 
   return (
-    <div className="flex flex-col gap-5 max-w-3xl">
+    <div className="flex flex-col gap-5 w-full">
       {/* Header */}
       <div className="flex items-center gap-2">
         <Cloud className="w-5 h-5 text-[var(--primary-color)]" />
@@ -195,7 +195,7 @@ export default function GaptSettingsPanel() {
           )}
         </div>
         {diag ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             <Light ok={diag.provider_configured} label="Provider 구성됨" />
             <Light ok={diag.dns_resolves} label="DNS 해석" />
             <Light ok={diag.caddy_admin_reachable} label="Caddy admin 도달" />
@@ -242,7 +242,7 @@ export default function GaptSettingsPanel() {
             <p className="text-xs text-[var(--text-muted)] mt-1">검증하면 계정/존/터널 목록을 불러와 아래 드롭다운을 채웁니다.</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>Account</label>
               {accounts.length ? (
@@ -289,7 +289,7 @@ export default function GaptSettingsPanel() {
               <label className={labelCls}>Preview domain</label>
               <input className={inputCls} value={previewDomain} onChange={(e) => setPreviewDomain(e.target.value)} placeholder="gapt.example.com" />
             </div>
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 lg:col-span-3">
               <label className={labelCls}>Upstream</label>
               <input className={inputCls} value={upstream} onChange={(e) => setUpstream(e.target.value)} placeholder="http://localhost:38080" />
             </div>

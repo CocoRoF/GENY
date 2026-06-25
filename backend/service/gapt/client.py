@@ -103,6 +103,31 @@ class GaptClient:
             self._cookie = "; ".join(pairs)
             self._authed = True
 
+    async def issue_browser_session(self) -> "list[tuple[str, str]]":
+        """Fresh GAPT login → return ``[(cookie_name, cookie_value), …]`` for the
+        BROWSER (the Geny→GAPT SSO bypass). Independent of this client's own
+        session (GAPT's single-admin model allows many concurrent sessions), so
+        the browser always gets a current session id. The caller re-emits these
+        as cookies on the user's response with origin-appropriate attributes."""
+        resp = await self._client.post(
+            "/_gapt/api/auth/login", json={"id": self._id, "password": self._pw}
+        )
+        if resp.status_code not in (200, 204):
+            raise GaptApiError(
+                resp.status_code, "auth.login_failed",
+                f"GAPT login failed: {resp.text[:200]}",
+            )
+        out: "list[tuple[str, str]]" = []
+        for sc in resp.headers.get_list("set-cookie"):
+            head = sc.split(";", 1)[0].strip()
+            if "=" in head:
+                name, _, value = head.partition("=")
+                if name.strip():
+                    out.append((name.strip(), value.strip()))
+        if not out:
+            raise GaptApiError(500, "auth.no_cookie", "GAPT login returned no session cookie")
+        return out
+
     # --------------------------------------------------------------- request
     async def request(
         self,

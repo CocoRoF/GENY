@@ -114,10 +114,18 @@ services:
       - GAPT_BASE_URL=${GAPT_BASE_URL-http://gapt-server:8088}
       - GAPT_ADMIN_ID=${GAPT_ADMIN_ID:-admin}
       - GAPT_ADMIN_PASSWORD=${GAPT_ADMIN_PASSWORD:-admin}
+      # SSO bypass: an authenticated Geny user opens GAPT without a 2nd login
+      # (Geny establishes the GAPT session). Default on; set false to require
+      # GAPT's own login (e.g. when GAPT is exposed independently of Geny).
+      - GENY_GAPT_SSO_BYPASS=${GENY_GAPT_SSO_BYPASS:-true}
       # Opt-in: run agent sessions inside GAPT workspace sandboxes (sysbox).
       # Default off → host execution unchanged. Flip to 1 to enable.
       - GENY_GAPT_WORKSPACES=${GENY_GAPT_WORKSPACES:-0}
       - GENY_GAPT_PROJECT_SLUG=${GENY_GAPT_PROJECT_SLUG:-geny}
+      # ── geny-avatar integration (Avatar settings category + key sync) ──
+      # Reachable over geny-net-prod; the URL includes the avatar's basePath so
+      # the client appends /api/…. Empty = avatar integration off.
+      - GENY_AVATAR_BASE_URL=${GENY_AVATAR_BASE_URL-http://avatar-editor:3000/avatar-editor}
     volumes:
       # Host docker socket — the executor's ContainerCLIRunner shells out
       # to `docker exec` into GAPT workspace sandboxes (gapt-ws-<id>).

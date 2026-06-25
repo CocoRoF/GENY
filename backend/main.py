@@ -36,6 +36,7 @@ from controller.tool_settings_controller import router as tool_settings_router
 from controller.gapt_controller import router as gapt_router  # GAPT integration status
 from controller.gapt_settings_controller import router as gapt_settings_router  # GAPT settings proxy
 from controller.sync_controller import router as sync_router  # cross-service settings sync
+from controller.avatar_controller import router as avatar_router  # geny-avatar integration
 from controller.llm_backends_controller import router as llm_backends_router
 from controller.mcp_bridge_controller import router as mcp_bridge_router
 from controller.chat_controller import router as chat_router
@@ -871,6 +872,7 @@ app.include_router(tool_settings_router)  # Per-environment tool settings schema
 app.include_router(gapt_router)  # GAPT integration status (header button detection)
 app.include_router(gapt_settings_router)  # GAPT settings proxy (GAPT category in Settings)
 app.include_router(sync_router)  # cross-service provider-key sync
+app.include_router(avatar_router)  # geny-avatar integration (Avatar category)
 app.include_router(llm_backends_router)  # LLM backend health + Claude Code login + subagent listing (Phase E4)
 app.include_router(mcp_bridge_router)  # Phase I — internal MCP endpoint for claude_code_cli tool wrap
 app.include_router(chat_router)  # Chat broadcast

@@ -21,6 +21,19 @@ See [00_plan.md](00_plan.md).
       empty keys skipped; media_credentials visible in General; no boot errors.
   - Note: avatar sync inert until `GENY_AVATAR_BASE_URL` set in compose.
 
+## Follow-up enhancements (2026-06-25)
+- [x] GaptSettingsPanel full-width (was max-w-3xl) + 3-col grids
+- [x] Avatar settings category — `controller/avatar_controller.py` (status +
+      /settings/keys get/put proxy via AvatarClient); `AvatarSettingsPanel`
+      (connection + live key status + "Geny 키로 동기화"); gated on avatar status.
+- [x] GENY_AVATAR_BASE_URL wired in prod compose (http://avatar-editor:3000/avatar-editor)
+      → avatar category now appears + avatar key sync active.
+- [x] SSO bypass: `GET /api/gapt/sso` establishes a GAPT browser session for the
+      authenticated Geny user (GaptClient.issue_browser_session → Set-Cookie same
+      origin); Header GAPT button does SSO then opens the SPA. Toggle:
+      `GENY_GAPT_SSO_BYPASS` (default true), wired in compose.
+- [ ] Deploy + verify
+
 ## Phase 3 — model unify + reverse read
 - [x] reverse read surfaced — GAPT panel's `/diagnose` card shows Cloudflare/
       tunnel-mode/preview-domain/readiness (GAPT→Geny, read-only). Done in Phase 1.

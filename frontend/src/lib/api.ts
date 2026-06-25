@@ -1638,6 +1638,10 @@ export interface GaptStatus {
 export const gaptApi = {
   /** GET /api/gapt/status — is the GAPT platform wired up + reachable? */
   status: () => apiCall<GaptStatus>('/api/gapt/status'),
+  /** GET /api/gapt/sso — establish a GAPT browser session (login bypass) for the
+   *  authenticated Geny user; the Set-Cookie lands same-origin so opening the
+   *  GAPT SPA skips its login. No-op cookie when GENY_GAPT_SSO_BYPASS=false. */
+  sso: () => apiCall<{ bypass: boolean; ui_path: string; established?: string[] }>('/api/gapt/sso'),
 };
 
 /** Proxy to a connected GAPT instance's own settings (Cloudflare etc.). All
@@ -1659,6 +1663,14 @@ export const gaptSettingsApi = {
     apiCall<any>('/api/gapt/settings/cloudflare/cert/enable-total-tls', { method: 'POST', body: JSON.stringify(body || {}) }),
   diagnose: () => apiCall<any>('/api/gapt/settings/diagnose'),
   llmHealth: () => apiCall<any>('/api/gapt/settings/llm-health'),
+};
+
+/** geny-avatar integration — status + settings (image-gen keys) proxy. */
+export const avatarApi = {
+  status: () => apiCall<{ configured: boolean; running: boolean; base_url: string }>('/api/avatar/status'),
+  getKeys: () => apiCall<any>('/api/avatar/settings/keys'),
+  putKeys: (body: { set?: Record<string, string>; clear?: string[] }) =>
+    apiCall<any>('/api/avatar/settings/keys', { method: 'PUT', body: JSON.stringify(body) }),
 };
 
 /** Cross-service settings sync — Geny propagates shared provider keys to GAPT + avatar. */

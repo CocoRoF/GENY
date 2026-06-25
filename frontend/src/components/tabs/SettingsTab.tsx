@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { configApi, gaptApi } from '@/lib/api';
+import { configApi, gaptApi, avatarApi } from '@/lib/api';
 import LLMBackendsPanel from './LLMBackendsPanel';
 import GaptSettingsPanel from './GaptSettingsPanel';
+import AvatarSettingsPanel from './AvatarSettingsPanel';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import { PROVIDERS } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
@@ -94,11 +95,15 @@ export default function SettingsTab() {
   // GAPT connection — the "GAPT" settings category appears only when a GAPT
   // instance is wired up AND answering /health (same gate the header button uses).
   const [gaptRunning, setGaptRunning] = useState(false);
+  const [avatarRunning, setAvatarRunning] = useState(false);
   useEffect(() => {
     let alive = true;
     gaptApi.status()
       .then((s) => { if (alive) setGaptRunning(!!s.running); })
       .catch(() => { if (alive) setGaptRunning(false); });
+    avatarApi.status()
+      .then((s) => { if (alive) setAvatarRunning(!!s.running); })
+      .catch(() => { if (alive) setAvatarRunning(false); });
     return () => { alive = false; };
   }, []);
 
@@ -253,6 +258,17 @@ export default function SettingsTab() {
                 <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
               </button>
             )}
+            {/* Virtual 'Avatar' category — manages a connected geny-avatar's
+                 settings (image-gen keys). Shown only when avatar is running. */}
+            {avatarRunning && (
+              <button
+                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'avatar' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                onClick={() => setSelectedCategory('avatar')}
+              >
+                <span className="flex-1">Avatar</span>
+                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+              </button>
+            )}
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
               return (
@@ -275,6 +291,8 @@ export default function SettingsTab() {
             <LLMBackendsPanel />
           ) : selectedCategory === 'gapt' ? (
             <GaptSettingsPanel />
+          ) : selectedCategory === 'avatar' ? (
+            <AvatarSettingsPanel />
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 px-4"><p className="text-[0.8125rem] text-[var(--text-muted)]">{t('settings.noConfigs')}</p></div>
           ) : (

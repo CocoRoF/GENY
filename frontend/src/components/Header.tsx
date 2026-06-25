@@ -37,6 +37,23 @@ export default function Header() {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
+  // Open GAPT with SSO bypass: open the tab synchronously (avoids popup
+  // blocking), establish the GAPT session cookie via /api/gapt/sso, then point
+  // the tab at the SPA. Falls back to opening GAPT directly (its own login) if
+  // SSO fails or bypass is off.
+  const openGapt = useCallback(async () => {
+    const tab = window.open('', '_blank', 'noopener,noreferrer');
+    let url = gaptUrl || '/_gapt/app/';
+    try {
+      const r = await gaptApi.sso();
+      if (r?.ui_path) url = r.ui_path;
+    } catch {
+      /* SSO failed → GAPT will show its own login */
+    }
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+  }, [gaptUrl]);
+
   const isHealthy = healthStatus === 'connected';
 
   const switchLocale = (lang: Locale) => {
@@ -147,18 +164,20 @@ export default function Header() {
           <ScrollText size={14} />
         </Link>
 
-        {/* ── GAPT — shown only when the GAPT platform is detected ── */}
+        {/* ── GAPT — shown only when the GAPT platform is detected.
+             Establishes a GAPT browser session first (SSO bypass) so the SPA
+             opens already-logged-in. The tab is opened synchronously to avoid
+             popup blocking, then navigated once the session cookie is set. ── */}
         {gaptUrl && (
-          <a
-            href={gaptUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:flex items-center justify-center gap-1 h-8 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          <button
+            type="button"
+            onClick={openGapt}
+            className="hidden sm:flex items-center justify-center gap-1 h-8 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
             title={t('header.gapt')}
           >
             <Container size={14} />
             <span className="text-[0.6875rem] font-semibold tracking-wide">GAPT</span>
-          </a>
+          </button>
         )}
 
         {/* ── Language Toggle ── */}
