@@ -17,6 +17,13 @@ export { TabShell, type TabShellProps } from './TabShell';
 export { TwoPaneBody, type TwoPaneBodyProps } from './TwoPaneBody';
 export { DetailDrawer, type DetailDrawerProps } from './DetailDrawer';
 export { EditorModal, type EditorModalProps } from './EditorModal';
+export {
+  Modal,
+  ConfirmModal,
+  type ModalProps,
+  type ModalSize,
+  type ConfirmModalProps,
+} from './Modal';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './StatusBadge';
 export { ActionButton, type ActionButtonProps } from './ActionButton';

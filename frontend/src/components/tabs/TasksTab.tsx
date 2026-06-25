@@ -25,6 +25,8 @@ import { RefreshCw, Square, Eye, Plus, Clock, ListChecks } from 'lucide-react';
 import {
   TabShell,
   EditorModal,
+  Modal,
+  ConfirmModal,
   EmptyState,
   StatusBadge,
   ActionButton,
@@ -80,6 +82,7 @@ export function TasksTab() {
   const [outputRow, setOutputRow] = useState<BackgroundTaskRecord | null>(null);
   const [outputText, setOutputText] = useState<string>('');
   const [outputLoading, setOutputLoading] = useState(false);
+  const [stopRow, setStopRow] = useState<BackgroundTaskRecord | null>(null);
 
   const handleOutput = useCallback(
     async (row: BackgroundTaskRecord) => {
@@ -278,15 +281,15 @@ export function TasksTab() {
           description="Tools that submit background work (TaskCreate / Cron-fired jobs) will appear here."
         />
       ) : (
-        <div className="overflow-auto border rounded">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 sticky top-0">
-              <tr>
-                <th className="text-left px-3 py-2">Task ID</th>
-                <th className="text-left px-3 py-2">Kind</th>
-                <th className="text-left px-3 py-2">Status</th>
-                <th className="text-left px-3 py-2">Duration</th>
-                <th className="text-right px-3 py-2">Actions</th>
+        <div className="overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)]">
+          <table className="min-w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
+              <tr className="border-b border-[var(--border-color)]">
+                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Task ID</th>
+                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Kind</th>
+                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Status</th>
+                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Duration</th>
+                <th className="text-right font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -296,51 +299,52 @@ export function TasksTab() {
                   row.status === 'failed' ||
                   row.status === 'cancelled';
                 return (
-                  <tr key={row.task_id} className="border-t hover:bg-slate-50">
-                    <td className="px-3 py-2 font-mono text-xs">{row.task_id.slice(0, 12)}…</td>
-                    <td className="px-3 py-2">{row.kind}</td>
+                  <tr
+                    key={row.task_id}
+                    className="border-t border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
+                  >
+                    <td className="px-3 py-2 font-mono text-xs text-[var(--text-secondary)]">
+                      {row.task_id.slice(0, 12)}…
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-primary)]">{row.kind}</td>
                     <td className="px-3 py-2">
                       <StatusBadge tone={STATUS_TONE[row.status]}>{row.status}</StatusBadge>
                       {row.error && (
-                        <span className="ml-2 text-xs text-red-600 truncate inline-block max-w-xs align-middle">
+                        <span className="ml-2 text-xs text-rose-400 truncate inline-block max-w-xs align-middle">
                           {row.error}
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">
+                    <td className="px-3 py-2 font-mono text-xs text-[var(--text-muted)]">
                       {formatDuration(row.started_at, row.completed_at)}
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleOutput(row)}
-                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
-                        title="View this task's output"
-                      >
-                        <Eye className="w-3 h-3" /> Output
-                      </button>
-                      {/* Schedule = turn a re-runnable task into a cron. A
-                          sub-agent task is a one-shot mirror (it runs in the
-                          SubAgentManager, not the task runner), so rescheduling
-                          it is meaningless — hide it for kind="subagent". */}
-                      {row.kind !== 'subagent' && (
-                        <button
-                          type="button"
-                          onClick={() => handleSchedule(row)}
-                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mr-3"
-                          title="Schedule a recurring cron job with the same payload"
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <RowAction icon={Eye} onClick={() => handleOutput(row)} title="View this task's output">
+                          Output
+                        </RowAction>
+                        {/* Schedule turns a re-runnable task into a cron. A
+                            sub-agent task is a one-shot mirror (runs in the
+                            SubAgentManager, not the task runner) → hide it. */}
+                        {row.kind !== 'subagent' && (
+                          <RowAction
+                            icon={Clock}
+                            onClick={() => handleSchedule(row)}
+                            title="Schedule a recurring cron job with the same payload"
+                          >
+                            Schedule
+                          </RowAction>
+                        )}
+                        <RowAction
+                          icon={Square}
+                          danger
+                          disabled={isTerminal}
+                          onClick={() => setStopRow(row)}
+                          title={isTerminal ? 'Already finished' : 'Stop this task'}
                         >
-                          <Clock className="w-3 h-3" /> Schedule
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isTerminal}
-                        onClick={() => handleStop(row.task_id)}
-                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline disabled:text-slate-400 disabled:hover:no-underline"
-                      >
-                        <Square className="w-3 h-3" /> Stop
-                      </button>
+                          Stop
+                        </RowAction>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -416,55 +420,99 @@ export function TasksTab() {
         </div>
       </EditorModal>
 
-      {/* Output viewer modal */}
-      {outputRow && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setOutputRow(null)}
-        >
-          <div
-            className="w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-lg border bg-white dark:bg-slate-900 dark:border-slate-700 flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+      {/* Output viewer — reusable Modal package */}
+      <Modal
+        open={!!outputRow}
+        onClose={() => setOutputRow(null)}
+        size="2xl"
+        icon={<Eye className="w-4 h-4" />}
+        title={outputRow ? `${outputRow.kind} · ${outputRow.task_id.slice(0, 12)}…` : ''}
+        description={
+          outputRow
+            ? String((outputRow.payload as Record<string, unknown>)?.task || '') || undefined
+            : undefined
+        }
+        headerActions={
+          <button
+            type="button"
+            onClick={() => outputRow && void handleOutput(outputRow)}
+            disabled={outputLoading}
+            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-50"
+            title="새로고침"
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-slate-700">
-              <div className="min-w-0">
-                <div className="font-medium text-sm">
-                  {outputRow.kind} · {outputRow.task_id.slice(0, 12)}…
-                </div>
-                <div className="text-xs text-slate-500 truncate">
-                  {String((outputRow.payload as Record<string, unknown>)?.task || '')}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOutputRow(null)}
-                className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-sm px-2"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-4 overflow-auto">
-              {outputLoading ? (
-                <div className="text-sm text-slate-500 animate-pulse">불러오는 중…</div>
-              ) : (
-                <pre className="text-xs whitespace-pre-wrap break-words font-mono">
-                  {outputText}
-                </pre>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t dark:border-slate-700">
-              <button
-                type="button"
-                onClick={() => outputRow && void handleOutput(outputRow)}
-                className="text-xs px-3 py-1.5 rounded border dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                새로고침
-              </button>
-            </div>
+            <RefreshCw className={`w-3 h-3 ${outputLoading ? 'animate-spin' : ''}`} /> 새로고침
+          </button>
+        }
+        bodyClassName="bg-[hsl(var(--background))]/40"
+      >
+        {outputLoading ? (
+          <div className="text-sm text-[hsl(var(--muted-foreground))] animate-pulse py-8 text-center">
+            불러오는 중…
           </div>
-        </div>
-      )}
+        ) : (
+          <pre className="text-xs whitespace-pre-wrap break-words font-mono text-[hsl(var(--foreground))] leading-relaxed">
+            {outputText}
+          </pre>
+        )}
+      </Modal>
+
+      {/* Stop confirmation — reusable ConfirmModal */}
+      <ConfirmModal
+        open={!!stopRow}
+        onClose={() => setStopRow(null)}
+        onConfirm={async () => {
+          if (stopRow) await handleStop(stopRow.task_id);
+          setStopRow(null);
+        }}
+        title="작업 중지"
+        danger
+        confirmLabel="중지"
+        cancelLabel="취소"
+        message={
+          stopRow ? (
+            <span>
+              <span className="font-mono text-xs">{stopRow.task_id.slice(0, 12)}…</span> (
+              {stopRow.kind}) 작업을 중지할까요?
+              {stopRow.kind === 'subagent' && ' 실행 중인 서브에이전트가 취소됩니다.'}
+            </span>
+          ) : null
+        }
+      />
     </TabShell>
+  );
+}
+
+/** Compact, design-system row action (icon + label) used in the tasks table. */
+function RowAction({
+  icon: Icon,
+  children,
+  onClick,
+  disabled,
+  danger,
+  title,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        danger
+          ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10 disabled:hover:bg-transparent'
+          : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+      }`}
+    >
+      <Icon className="w-3 h-3" />
+      {children}
+    </button>
   );
 }
 
