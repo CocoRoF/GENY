@@ -168,6 +168,12 @@ export function ControlApp() {
     window.connector?.hotkeys.getQuickChat?.().then((h) => h && setQuickChatHotkey(h))
     window.connector?.appVersion?.().then(setVersion).catch(() => undefined)
     window.connector?.capture?.listSources?.().then(setSources).catch(() => undefined)
+    // Re-read the keychain whenever this window regains focus — the main process
+    // may have dropped an expired token on startup/refresh, so this avoids a
+    // stale "로그인됨" after the session actually lapsed.
+    const recheck = () => window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
   }, [])
 
   // Merge + persist a tuning change; sends the FULL object so main's shallow
@@ -230,8 +236,19 @@ export function ControlApp() {
     const base = serverUrl.trim().replace(/\/+$/, '')
     await window.connector?.serverConfig.set({ serverUrl: base })
     try {
-      const r = await fetch(`${base}/api/auth/status`)
+      // Send the stored JWT so the status reflects THIS connector's session — an
+      // unauthenticated /status always reads "로그인 필요" even when we're logged in.
+      const token = await window.connector?.secureStore.get(TOKEN_KEY)
+      const r = await fetch(`${base}/api/auth/status`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined)
       const j = await r.json()
+      if (token && !j.is_authenticated) {
+        // Stored token is dead — drop it so the UI shows a clean login prompt
+        // instead of the confusing "토큰이 저장됨" + "로그인 필요" combination.
+        await window.connector?.secureStore.delete(TOKEN_KEY)
+        setHasToken(false)
+      } else {
+        setHasToken(j.is_authenticated)
+      }
       stat(j.is_authenticated ? '연결됨 · 로그인 상태' : j.has_users ? '연결됨 · 로그인 필요' : '연결됨 · 초기 설정 필요', 'ok')
     } catch (e) {
       stat(`연결 실패 — ${(e as Error).message}`, 'err')
