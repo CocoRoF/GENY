@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { configApi, gaptApi } from '@/lib/api';
-import { Menu, Sun, Moon, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette, Container, Boxes, ScrollText } from 'lucide-react';
+import { Menu, Sun, Moon, BookOpen, Sliders, LogIn, LogOut, Brain, Layers, Palette, Container, ScrollText } from 'lucide-react';
 import Link from 'next/link';
 import LoginModal from '@/components/auth/LoginModal';
 import { Button } from '@/components/ui/button';
@@ -154,14 +154,8 @@ export default function Header() {
           <Layers size={14} />
         </Link>
 
-        {/* ── Sandbox Tool Packs manager — hidden on mobile ── */}
-        <Link
-          href="/sandbox-tool-packs"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
-          title="Sandbox Tool Packs"
-        >
-          <Boxes size={14} />
-        </Link>
+        {/* Sandbox Tool Packs moved INTO the environment editor (환경관리 →
+            Sandbox Tool Packs section), so the standalone header link is removed. */}
 
         {/* ── Sandbox Logs (snapshot activity/diff viewer) — hidden on mobile ── */}
         <Link
