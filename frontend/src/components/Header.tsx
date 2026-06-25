@@ -42,7 +42,10 @@ export default function Header() {
   // the tab at the SPA. Falls back to opening GAPT directly (its own login) if
   // SSO fails or bypass is off.
   const openGapt = useCallback(async () => {
-    const tab = window.open('', '_blank', 'noopener,noreferrer');
+    // Open the tab synchronously (avoids popup blocking) WITHOUT `noopener` —
+    // that flag makes window.open return null, which orphaned a blank tab and
+    // navigated the current one instead. With a handle we navigate this exact tab.
+    const tab = window.open('', '_blank');
     let url = gaptUrl || '/_gapt/app/';
     try {
       const r = await gaptApi.sso();
@@ -50,8 +53,13 @@ export default function Header() {
     } catch {
       /* SSO failed → GAPT will show its own login */
     }
-    if (tab) tab.location.href = url;
-    else window.location.href = url;
+    if (tab && !tab.closed) {
+      tab.location.replace(url);
+      try { tab.opener = null; } catch { /* same-origin best-effort */ }
+    } else {
+      // Popup blocked → fall back to same-tab navigation (no orphan tab).
+      window.location.href = url;
+    }
   }, [gaptUrl]);
 
   const isHealthy = healthStatus === 'connected';
