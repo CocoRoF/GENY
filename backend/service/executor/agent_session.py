@@ -2080,7 +2080,12 @@ class AgentSession:
         current session already has the tool live via forge_tool, so a failure here
         only affects future-session auto-load, never this turn."""
         try:
-            from service.environment.service import get_environment_service
+            # NOTE: get_environment_service is exported from the PACKAGE
+            # (service.environment.__init__), NOT service.environment.service —
+            # the `.service` path raises ImportError. (3 pre-existing usages at
+            # ~1848/1888/2083 use the broken `.service` path inside try/except,
+            # so they silently degrade their manifest reads — flagged separately.)
+            from service.environment import get_environment_service
 
             svc = get_environment_service()
             if svc is None:
