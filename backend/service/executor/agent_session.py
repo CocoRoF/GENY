@@ -344,28 +344,19 @@ def _bridge_cli_stream_event(
 
 
 _DEFAULT_WORKER_PROMPT = """\
-You are an autonomous AI agent. Complete the user's task step by step.
+You are an autonomous AI agent. Complete the user's task.
 
-When you have finished the task, end your response with [TASK_COMPLETE].
-If you need to continue working, end with [CONTINUE: next action].
-If you are blocked and cannot proceed, end with [BLOCKED: reason].
+End your response with [TASK_COMPLETE] when finished, [CONTINUE: next action] if
+more work remains, or [BLOCKED: reason] if you cannot proceed."""
 
-Be thorough, accurate, and concise."""
-
+# Loop-control signals only — the model already decides when to use tools and how
+# to decompose work; we just give it the pipeline's continue/complete vocabulary.
 _ADAPTIVE_PROMPT = """\
-## Execution Strategy
+## Completion Signals
 
-Classify the task and act accordingly:
-
-**Easy tasks** (factual Q&A, simple lookups, greetings, short explanations):
-Answer directly in one response. Do not use tools unless absolutely necessary.
-
-**Complex tasks** (coding, research, multi-step work, file operations):
-1. Plan: Decompose into clear steps
-2. Execute: Use tools to complete each step
-3. Verify: Check your work
-4. Signal [CONTINUE: next step] after each step
-5. Signal [TASK_COMPLETE] when all steps are done"""
+End each turn with [CONTINUE: next step] if more work remains, [TASK_COMPLETE] when
+the whole task is done, or [BLOCKED: reason] if you cannot proceed. A simple ask can
+be a single response ending in [TASK_COMPLETE]."""
 
 _DEFAULT_VTUBER_PROMPT = """\
 You are a friendly AI VTuber assistant. Engage in natural conversation

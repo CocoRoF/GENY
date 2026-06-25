@@ -131,17 +131,16 @@ class SectionLibrary:
         via MCP. Individual tool names are NOT listed here because
         Claude CLI receives full tool schemas through MCP automatically.
         """
+        # Tool categories are NOT listed — the model receives every platform
+        # tool's full schema via MCP. The prompt states only what the schemas
+        # can't: that this runs inside a multi-agent platform.
         parts = [
             "## Geny Platform",
             "",
-            "You are running inside the Geny multi-agent platform.",
-            "You have platform tools (provided via MCP) for:",
-            "- Managing agent sessions (list, create, inspect)",
-            "- Messaging (send/read messages to rooms or directly to other agents)",
-            "- Room collaboration (create rooms, add members)",
+            "You run inside the Geny multi-agent platform; your platform tools "
+            "(sessions, messaging, rooms, …) are provided via MCP.",
         ]
         if session_id:
-            parts.append("")
             parts.append(f"Your session ID: `{session_id}`")
 
         return PromptSection(
@@ -846,15 +845,15 @@ def build_agent_prompt(
                 "turn a script into a callable tool, and env(action=\"save_pack\") "
                 "to save [workspace + tools + skills] as a reusable pack.\n"
             )
+        # Tool names (gapt_*, forge_tool, …) are NOT listed — their schemas are
+        # provided to the model. The prompt states only the non-discoverable facts:
+        # where the workspace is, and that a separate persistent project space exists.
         gapt_section = (
             "---\n"
             + wid_line
             + where_line
-            + "For a SEPARATE persistent project space (own files, git, deploy):\n"
-            "- gapt_overview / gapt_list_projects / gapt_list_workspaces — see what exists\n"
-            "- gapt_create_project / gapt_create_workspace — make a new independent space\n"
-            "- gapt_list_environments / gapt_deploy — deploy a project\n"
-            "Each project is a fully isolated space that persists across sessions."
+            + "For work that must persist across sessions or be deployed, a separate, "
+            "fully-isolated GAPT project space is available via your project tools."
         )
         parts.append(gapt_section)
 

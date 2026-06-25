@@ -35,41 +35,19 @@ from geny_executor.stages.s03_system.artifact.default.builders import (
 # (rather than scattered across preset prompts or agent_session.py)
 # so a tool name change in ``memory_tools.py`` only ripples through
 # this single file.
+# Policy only — the concrete tool catalogue (names/args) is delivered to the
+# model via tool schemas, so the prompt carries only behaviour the schemas can't.
 _HOST_MEMORY_USAGE_AND_TOOLS = """\
 ## Memory Usage
 
-The host maintains a long-term memory for you. The **Pinned Facts**
-section in this prompt — when present — holds must-know facts about
-the user, the agent, and the ongoing work. Treat them as
-authoritative; never claim ignorance of anything stated there.
+You have a persistent long-term memory (its tools' schemas are provided to you).
+The **Pinned Facts** section of this prompt — when present — holds authoritative
+must-know facts about the user, you, and the ongoing work; never claim ignorance
+of anything stated there. The **Vault Map** summarises what's stored.
 
-When the user's intent is ambiguous and the answer might already be
-remembered, **consult memory before asking a clarification question
-the user may have already answered.** Walk the ladder:
-
-  1. Read the **Pinned Facts** and **Vault Map** sections of this
-     prompt — the answer is often already there.
-  2. ``memory_categories`` — discover the vault's category map: every
-     category with a 1-line description, file count, and last-modified
-     timestamp. Use this when you don't know which folder owns the
-     answer.
-  3. ``memory_list(category=…)`` — list the files inside one
-     category (filename, title, summary, importance, modified).
-  4. ``memory_read(filename=…)`` — open a specific note's body.
-  5. ``memory_search(query=…)`` — fuzzy / semantic search fallback
-     when the vault map doesn't make the right folder obvious.
-
-Write paths:
-
-  - ``memory_pin`` — pin a fact so it is **always** injected into
-    the system prompt (Pinned Facts tier). Use this for must-know
-    facts about the user, the persona, and binding decisions.
-  - ``memory_write`` — create a curated note under
-    ``topics`` / ``projects`` / ``insights`` / ``daily``.
-  - ``memory_update`` — modify an existing note.
-  - ``memory_link`` — create a wikilink between two notes.
-
-Do not announce the lookup; just do it."""
+When intent is ambiguous and the answer may already be remembered, consult memory
+before asking something the user may have already answered — and pin facts worth
+always knowing. Do this silently; don't announce the lookup."""
 
 
 class HostMemoryToolsBlock(PromptBlock):
