@@ -228,6 +228,36 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
         logger.debug("_maybe_alarm_vtuber failed", exc_info=True)
 
 
+def _make_credentials_provider(app_state: Any):
+    """Build the SubAgentManager ``credentials_provider`` callback.
+
+    Resolves an owner's Stage-6 credentials + primary provider so an **ad-hoc**
+    ``SubAgentSpawn`` (the LLM creating a NEW sub-agent, which can't supply the
+    bundle) authenticates — the owned companion already passes credentials at
+    host spawn (integrity audit 2026-06-25). Reads them off the owner's LIVE
+    AgentSession (non-blocking `get_agent`; the owner is running a turn when it
+    spawns, so its agent is live). Returns None ⇒ manager falls back as before.
+    """
+
+    def _resolve(owner_session_id: str):
+        try:
+            from service.executor.agent_session_manager import get_agent_session_manager
+
+            agent = get_agent_session_manager().get_agent(owner_session_id)
+            if agent is None:
+                return None
+            creds = getattr(agent, "_resolved_credentials", None)
+            prov = getattr(agent, "_primary_provider", None)
+            if creds is None and not prov:
+                return None
+            return {"credentials": creds, "provider": prov}
+        except Exception:  # noqa: BLE001 — best effort; manager falls back
+            logger.debug("credentials_provider resolve failed for %s", owner_session_id, exc_info=True)
+            return None
+
+    return _resolve
+
+
 def install_subagent_manager(app_state: Any, *, registry: Any) -> Optional[Any]:
     """Construct + return the SubAgentManager, or ``None`` if unavailable.
 
@@ -259,11 +289,21 @@ def install_subagent_manager(app_state: Any, *, registry: Any) -> Optional[Any]:
     except Exception:  # noqa: BLE001 — fall back to in-process-only persistence
         logger.debug("install_subagent_manager: session_store unavailable", exc_info=True)
 
-    manager = SubAgentManager(
-        registry,
-        session_store=session_store,
-        on_event=_make_on_event(app_state),
-    )
+    try:
+        manager = SubAgentManager(
+            registry,
+            session_store=session_store,
+            on_event=_make_on_event(app_state),
+            credentials_provider=_make_credentials_provider(app_state),
+        )
+    except TypeError:
+        # executor <2.36.0 — no credentials_provider kwarg (ad-hoc spawn won't
+        # inherit creds, but the owned companion still works).
+        manager = SubAgentManager(
+            registry,
+            session_store=session_store,
+            on_event=_make_on_event(app_state),
+        )
     _reconcile_orphaned_subagent_tasks(app_state)
     logger.info(
         "   ✅ subagent_manager wired (persistent sub-agents%s)",

@@ -1152,6 +1152,11 @@ class AgentSessionManager:
             env_id=env_id,
             memory_config=memory_config,
             prebuilt_pipeline=prebuilt_pipeline,
+            # Carry the owner's resolved credentials/provider so ad-hoc
+            # SubAgentSpawn + one-shot Agent sub-workers inherit Stage-6 auth
+            # (integrity audit 2026-06-25).
+            resolved_credentials=credentials,
+            primary_provider=primary_provider,
             persona_provider=self._persona_provider,
             lifecycle_bus=self._lifecycle_bus,
             state_provider=_session_state_provider,

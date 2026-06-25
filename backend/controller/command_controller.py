@@ -203,7 +203,7 @@ async def execute_batch_command(request: BatchCommandRequest, auth: dict = Depen
 # ========== Session Logs Endpoints ==========
 
 @router.get("/logs", response_model=List[Dict[str, Any]])
-async def list_all_session_logs():
+async def list_all_session_logs(_auth: dict = Depends(require_auth)):
     """
     List all available session log files.
 
@@ -218,6 +218,7 @@ async def get_session_logs(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of log entries"),
     level: Optional[str] = Query(None, description="Filter by log level. Single level (e.g. 'INFO') or comma-separated (e.g. 'INFO,COMMAND,RESPONSE')"),
     offset: int = Query(0, ge=0, description="Number of entries to skip (for pagination)"),
+    _auth: dict = Depends(require_auth),
 ):
     """
     Get log entries for a specific session.

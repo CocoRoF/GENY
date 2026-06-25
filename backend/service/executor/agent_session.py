@@ -441,6 +441,8 @@ class AgentSession:
         growth_tree_id: Optional[str] = None,
         personality_archetype: Optional[str] = None,
         gapt_sandbox: Optional[Any] = None,
+        resolved_credentials: Optional[Any] = None,
+        primary_provider: Optional[str] = None,
     ):
         """Initialize AgentSession.
 
@@ -493,6 +495,12 @@ class AgentSession:
         # _build_pipeline passes it to attach_runtime(sandbox=) so the
         # claude_code_cli client runs inside the workspace container.
         self._gapt_sandbox = gapt_sandbox
+        # The owner's resolved Stage-6 credential bundle + primary provider, kept
+        # so (a) ToolContext.extras can carry them for ad-hoc SubAgentSpawn /
+        # one-shot Agent sub-workers, and (b) the SubAgentManager credentials_provider
+        # callback can read them off the live agent (integrity audit 2026-06-25).
+        self._resolved_credentials = resolved_credentials
+        self._primary_provider = primary_provider
         self._model_name = model_name
         self._max_turns = max_turns
         self._timeout = timeout
@@ -2594,6 +2602,15 @@ class AgentSession:
             if _sa_manager is not None:
                 # SubAgent* tools — persistent sub-agents (executor 2.7.0).
                 _tool_extras["subagent_manager"] = _sa_manager
+        # Sub-agent credential/provider inheritance (audit 2026-06-25): the
+        # one-shot Agent tool (run_subagent) has no PipelineState handle, so it
+        # reads these from extras to seed its ephemeral sub-state's Stage-6 auth.
+        # (Ad-hoc persistent SubAgentSpawn inherits via the manager's
+        # credentials_provider callback, which reads the same fields off the agent.)
+        if self._resolved_credentials is not None:
+            _tool_extras["subagent_credentials"] = self._resolved_credentials
+        if self._primary_provider:
+            _tool_extras["subagent_parent_provider"] = self._primary_provider
 
         attach_kwargs: Dict[str, Any] = {
             "system_builder": system_builder,
@@ -4099,6 +4116,16 @@ class AgentSession:
         if not self._initialized or not self._pipeline:
             raise RuntimeError("AgentSession not initialized. Call initialize() first.")
 
+        # Mutual-exclusion backstop (audit 2026-06-25): one pipeline per session,
+        # so two concurrent turns would corrupt shared STM/per-turn state. The
+        # executor's per-session admission lock prevents this for the invoke path;
+        # this guard also covers a cross-path race (e.g. astream vs invoke). Reset
+        # in the finally below, so a normal sequential turn is never rejected.
+        if self._is_executing:
+            raise RuntimeError(
+                f"[{self._session_id}] a turn is already executing on this session"
+            )
+
         # Freshness check — auto-revive if idle, raise if hard limit
         self._check_freshness()
 
@@ -4203,6 +4230,13 @@ class AgentSession:
         """
         if not self._initialized or not self._pipeline:
             raise RuntimeError("AgentSession not initialized. Call initialize() first.")
+
+        # Mutual-exclusion backstop (audit 2026-06-25) — see invoke(); reset in
+        # the finally below, so a normal sequential turn is never rejected.
+        if self._is_executing:
+            raise RuntimeError(
+                f"[{self._session_id}] a turn is already executing on this session"
+            )
 
         # Freshness check — auto-revive if idle
         self._check_freshness()
