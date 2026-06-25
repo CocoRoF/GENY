@@ -52,6 +52,7 @@ import { PermissionsTab } from '@/components/tabs/PermissionsTab';
 import { McpServersTab } from '@/components/tabs/McpServersTab';
 import { TriggersTab } from '@/components/tabs/TriggersTab';
 import { CustomToolsTab } from '@/components/tabs/CustomToolsTab';
+import SandboxToolPacksManager from '@/components/sandbox_tool_packs/SandboxToolPacksManager';
 
 export interface EnvManagementShellProps {
   /** Called after a successful Save with the new env id. */
@@ -200,6 +201,12 @@ export default function EnvManagementShell({
       {activeTab === 'custom_tools' && (
         <RegistryTabSlot>
           <CustomToolsTab />
+        </RegistryTabSlot>
+      )}
+
+      {activeTab === 'sandbox_packs' && (
+        <RegistryTabSlot>
+          <SandboxToolPacksManager embedded />
         </RegistryTabSlot>
       )}
 

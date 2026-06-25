@@ -32,6 +32,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
+  Boxes,
   Layers,
   Network,
   Plug,
@@ -49,6 +50,7 @@ export type EnvManagementTab =
   | 'mcp'
   | 'skills'
   | 'custom_tools'
+  | 'sandbox_packs'
   | 'hooks'
   | 'permissions'
   | 'triggers';
@@ -58,6 +60,7 @@ const TAB_ORDER: EnvManagementTab[] = [
   'mcp',
   'skills',
   'custom_tools',
+  'sandbox_packs',
   'hooks',
   'permissions',
   'triggers',
@@ -99,6 +102,13 @@ const TABS: TabDef[] = [
     fallbackLabel: '커스텀 도구',
     fallbackHint: 'DB 등록된 사용자 도구 (HTTP / MCP 프록시 / 별칭)',
     key: 'custom_tools',
+  },
+  {
+    id: 'sandbox_packs',
+    icon: Boxes,
+    fallbackLabel: 'Sandbox Tool Packs',
+    fallbackHint: '샌드박스에서 만든 도구 팩 — 환경에 포함',
+    key: 'sandbox_packs',
   },
   {
     id: 'hooks',
