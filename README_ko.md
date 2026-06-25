@@ -39,17 +39,12 @@ Geny 는 **스택 최상단의 제품**입니다 — 아래의 모든 프로젝�
       ▼             ▼              ▼
  geny-executor  geny-avatar      GAPT
   (엔진)        (아바타 에디터)  (AI DevOps 플랫폼)
-      ▲
-      │ 엔진을 시각화 / 구동
-      │
- geny-executor-web (파이프라인 스튜디오)
 ```
 
 | 프로젝트 | 무엇인가 | 스택에서의 역할 |
 |---|---|---|
 | [**Geny**](https://github.com/CocoRoF/Geny) | 멀티 에이전트 VTuber + 자율 워커 플랫폼 | 🏛️ 최상위 제품 — 아래 전부를 사용 |
 | [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · MIT | ⚙️ 모든 것이 돌아가는 엔진 |
-| [**geny-executor-web**](https://github.com/CocoRoF/geny-executor-web) | 파이프라인 시각화 스튜디오 — React Flow + 실시간 WebSocket | 🔬 엔진을 보고·검사하고·실행 |
 | [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | 셀프호스트 AI DevOps 플랫폼 — 샌드박스·편집·빌드·배포 | 🛠️ 에이전트가 실제 레포를 안전하게 다루는 곳 |
 | [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | AI 텍스처 생성 기반 2D 라이브 아바타 에디터 | 🎭 Geny 의 얼굴이 만들어지는 곳 |
 
@@ -529,7 +524,6 @@ TOOLS = [search_database]
 **Geny 에코시스템** — 위 [Geny 에코시스템](#-geny-에코시스템) 섹션 참조:
 
 - [**geny-executor**](https://github.com/CocoRoF/geny-executor) — Geny backend 가 돌아가는 21단계 에이전트 파이프라인 (MIT)
-- [**geny-executor-web**](https://github.com/CocoRoF/geny-executor-web) — 그 파이프라인의 시각화 스튜디오
 - [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) — Geny 가 프로젝트 & 배포를 위임하는 샌드박스 / DevOps 플랫폼 (`gapt/` submodule)
 - [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) — Geny 에 아바타를 bake 하는 puppet 에디터 (`vendor/geny-avatar` submodule)
 
