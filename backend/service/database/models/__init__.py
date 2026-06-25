@@ -25,6 +25,7 @@ from service.database.models.environment import EnvironmentModel
 from service.database.models.trigger_preset import TriggerPresetModel
 from service.database.models.custom_tool import CustomToolModel
 from service.database.models.sandbox_tool_pack import SandboxToolPackModel
+from service.database.models.persona_preset import PersonaPresetModel
 
 __all__ = [
     'BaseModel',
@@ -43,6 +44,7 @@ __all__ = [
     'TriggerPresetModel',
     'CustomToolModel',
     'SandboxToolPackModel',
+    'PersonaPresetModel',
 ]
 
 # List of models used by the application
@@ -64,4 +66,5 @@ APPLICATION_MODELS = [
     TriggerPresetModel,
     CustomToolModel,
     SandboxToolPackModel,
+    PersonaPresetModel,
 ]

@@ -45,6 +45,7 @@ from controller.tool_preset_controller import router as tool_preset_router
 from controller.tool_controller import router as tool_catalog_router
 from controller.custom_tools_controller import router as custom_tools_router  # Phase B — DB-backed user tools
 from controller.sandbox_tool_packs_controller import router as sandbox_tool_packs_router  # Sandbox Tool Packs
+from controller.persona_presets_controller import router as persona_presets_router  # Persona Presets
 from controller.sandbox_observability_controller import router as sandbox_observability_router  # Sandbox Logs
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
@@ -342,6 +343,20 @@ async def lifespan(app: FastAPI):
         logger.info("   - Sandbox Tool Packs: store wired")
     else:
         logger.info("   - Sandbox Tool Packs: skipped — database unavailable")
+
+    # Persona Presets — structured persona definitions (Geny-only persona builder).
+    # DB-backed (table auto-creates via APPLICATION_MODELS); seed the starter
+    # presets after the store has its DB so the rows land in the table.
+    from service.persona_presets import (
+        get_persona_preset_store,
+        install_persona_templates,
+    )
+    if app_db is not None:
+        get_persona_preset_store().set_database(app_db)
+        seeded = install_persona_templates(get_persona_preset_store())
+        logger.info(f"   - Persona Presets: store wired, {seeded} starter preset(s) installed")
+    else:
+        logger.info("   - Persona Presets: skipped — database unavailable")
 
     # (Shared folder removed — sessions now use isolated GAPT workspaces.)
 
@@ -881,6 +896,7 @@ app.include_router(tool_preset_router)  # Tool preset management
 app.include_router(tool_catalog_router)  # Tool catalog API
 app.include_router(custom_tools_router)  # Custom tools CRUD (Phase B — DB-backed)
 app.include_router(sandbox_tool_packs_router)  # Sandbox Tool Packs (env+tools+skills bundles)
+app.include_router(persona_presets_router)  # Persona Presets (reusable persona definitions)
 app.include_router(sandbox_observability_router)  # Sandbox Logs (snapshot activity/diff viewer)
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)

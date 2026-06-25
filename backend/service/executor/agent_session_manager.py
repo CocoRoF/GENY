@@ -402,6 +402,42 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return []
 
+    def _env_persona_preset_id(self, env_id: Optional[str]) -> Optional[str]:
+        """The env's attached Persona Preset id, or ``None``.
+
+        Stored in ``host_selections.extras.persona_preset_id`` — set by the env
+        editor's Persona panel. When present, the preset is compiled to a persona
+        prompt and prepended to the session's system prompt at build time."""
+        if not env_id or self._environment_service is None:
+            return None
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return None
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            val = extras.get("persona_preset_id")
+            return str(val).strip() or None if val else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _compile_env_persona(self, env_id: Optional[str]) -> Optional[str]:
+        """Resolve + compile the env's attached persona preset, or ``None``.
+
+        Best-effort: a missing/deleted preset or an unwired store never blocks
+        session creation."""
+        preset_id = self._env_persona_preset_id(env_id)
+        if not preset_id:
+            return None
+        try:
+            from service.persona_presets import compile_persona, get_persona_preset_store
+
+            defn = get_persona_preset_store().get(preset_id)
+            text = compile_persona(defn)
+            return text.strip() or None
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"persona preset {preset_id} for env {env_id} not applied: {e}")
+            return None
+
     def _env_host_selection(
         self, env_id: Optional[str], category: str
     ) -> Optional[List[str]]:
@@ -1107,6 +1143,16 @@ class AgentSessionManager:
             from service.emit import install_affect_tag_emitter
 
             install_affect_tag_emitter(prebuilt_pipeline)
+
+        # Persona Preset (Geny persona builder) — if this env has one attached,
+        # compile it and prepend so the character identity leads the prompt, ahead
+        # of the role/behaviour base. Best-effort; never blocks session creation.
+        persona_block = self._compile_env_persona(env_id)
+        if persona_block:
+            system_prompt = (
+                f"{persona_block}\n\n---\n\n{system_prompt}" if system_prompt else persona_block
+            )
+            logger.info(f"  🎭 Persona preset applied (+{len(persona_block)} chars)")
 
         # Seed the persona provider with the assembled static prompt so the
         # DynamicPersonaSystemBuilder hands back exactly this text on the
