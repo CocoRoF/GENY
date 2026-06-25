@@ -1,55 +1,108 @@
-![](img/Geny_full_logo.png)
-# 🧞 Geny — *Geny Execute, Not You*
+<p align="center">
+  <img src="img/Geny_full_logo.png" alt="Geny" width="520"/>
+</p>
 
-> 지니가 할게, 넌 가만히 있어.
+<h1 align="center">🧞 Geny — <em>Geny Execute, Not You</em></h1>
 
-A multi-agent VTuber + autonomous worker platform. Pair a chatty Live2D / Spine VTuber with a tool-running Sub-Worker, watch them collaborate inside a 3D city, swap any of five LLM backends with one config click.
+<p align="center"><em>I'll handle it — you just sit back.</em></p>
 
-[한국어 README](README_ko.md) · [Architecture](docs/architecture.md) · [LLM Providers](docs/providers.md) · [Sessions & Delegation](docs/sessions.md) · [Environments](docs/environments.md) · [Error Codes](docs/error_codes.md)
+<p align="center">
+A multi-agent <strong>VTuber + autonomous worker</strong> platform. Pair a chatty Live2D / Spine VTuber with a tool-running Sub-Worker, watch them collaborate inside a 3D city, and swap any of five LLM backends with one config click.
+</p>
+
+<p align="center">
+<a href="README_ko.md">한국어 README</a> ·
+<a href="docs/architecture.md">Architecture</a> ·
+<a href="docs/providers.md">LLM Providers</a> ·
+<a href="docs/sessions.md">Sessions &amp; Delegation</a> ·
+<a href="docs/environments.md">Environments</a> ·
+<a href="docs/error_codes.md">Error Codes</a>
+</p>
+
+<!-- 📸 IMAGE NEEDED: hero screenshot — the 3D city playground with agents walking + the VTuber chat panel and Live2D avatar overlaid -->
+> 📸 **Image needed** — _hero screenshot: the 3D city playground with agents walking, the VTuber chat panel, and the Live2D avatar._
 
 ---
 
-## ⬇️ 데스크탑 접속기 다운로드 (Desktop connector)
+## 🌐 The Geny ecosystem
 
-데스크탑 하단에 떠 있는 **VTuber 접속기** — 서버는 그대로 두고, 화면 하단에 살아있는 아바타를 띄웁니다.
+Geny is the **product at the top of the stack** — it pulls together every project below into one experience: a talking avatar, an autonomous worker that does the real work, a sandbox where agents safely touch code, and the engine that drives it all.
 
-### 1) 설치 파일 — **[➡️ 최신 릴리스(Releases)에서 받기](https://github.com/CocoRoF/Geny/releases/latest)**
+<!-- 📸 IMAGE NEEDED: a polished ecosystem diagram to replace the ASCII map below -->
 
-| OS | 파일 | 설치 / 첫 실행 |
+```
+                  Geny — the product (uses everything below)   ← you are here
+                    │
+      ┌─────────────┼──────────────┐
+ agent engine    avatars      sandbox + deploy
+      │             │              │
+      ▼             ▼              ▼
+ geny-executor  geny-avatar      GAPT
+  (the engine)  (avatar editor)  (AI DevOps platform)
+      ▲
+      │ visualizes / drives the engine
+      │
+ geny-executor-web (pipeline studio)
+```
+
+| Project | What it is | Role in the stack |
 |---|---|---|
-| 🪟 **Windows** | `Geny-Setup-*.exe` | 더블클릭 → SmartScreen 경고 시 **자세히 → 실행** (현재 무서명) |
-| 🍎 **macOS** | `Geny-*.dmg` | 열어서 Applications 로 드래그 → 첫 실행은 **우클릭 → 열기** (Gatekeeper) |
+| [**Geny**](https://github.com/CocoRoF/Geny) | Multi-agent VTuber + autonomous-worker platform | 🏛️ The product — consumes every project below |
+| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · MIT | ⚙️ The engine everything runs on |
+| [**geny-executor-web**](https://github.com/CocoRoF/geny-executor-web) | Visual studio for the pipeline — React Flow + live WebSocket events | 🔬 See, inspect & run the engine |
+| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | 🛠️ Where agents safely touch real repos |
+| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | 🎭 Where Geny's faces are made |
+
+> **➡️ You are here: `Geny`** — the product that ties the whole ecosystem together.
+
+---
+
+## ⬇️ Desktop connector download
+
+A **VTuber connector** that floats at the bottom of your desktop — leave the server running, and a live avatar lives at the bottom of your screen.
+
+<!-- 📸 IMAGE NEEDED: the desktop connector — the floating avatar sitting at the bottom of a real desktop, tray menu open -->
+> 📸 **Image needed** — _the desktop connector: the floating avatar at the bottom of a real desktop, tray menu open._
+
+### 1) Installer — **[➡️ Get it from the latest Release](https://github.com/CocoRoF/Geny/releases/latest)**
+
+| OS | File | Install / first launch |
+|---|---|---|
+| 🪟 **Windows** | `Geny-Setup-*.exe` | Double-click → on the SmartScreen warning, **More info → Run anyway** (currently unsigned) |
+| 🍎 **macOS** | `Geny-*.dmg` | Open and drag to Applications → first launch: **right-click → Open** (Gatekeeper) |
 | 🐧 **Linux** | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x Geny-*.AppImage && ./Geny-*.AppImage` · deb: `sudo dpkg -i Geny-*.deb` |
 
-> 설치 파일이 안 보이면 릴리스가 빌드 중입니다 — 공개 repo라서 GitHub Actions 가 macOS/Windows/Linux 설치 파일을 자동 생성합니다.
+> No installer listed yet? The release is still building — this is a public repo, so GitHub Actions auto-builds the macOS / Windows / Linux installers.
 
-### 2) 실행 후 — **3가지만 입력하면 바로 사용**
+### 2) After launch — **just three fields and you're in**
 
-1. **Geny 서버 주소** — 기본값 `https://geny-x.hrletsgo.me` 가 채워져 있습니다 (직접 호스팅 중이면 그 주소).
-2. **admin 아이디**
-3. **admin 비밀번호**
+1. **Geny server address** — prefilled with `https://geny-x.hrletsgo.me` (or your own host if you self-host).
+2. **admin ID**
+3. **admin password**
 
-→ **로그인** 하면 토큰이 OS 키체인에 저장되고 하단에 아바타가 떠서 바로 사용 가능합니다. (아바타 드래그 = 이동, 트레이 아이콘 = 설정/업데이트/종료)
+→ **Log in** and the token is saved to your OS keychain; the avatar appears at the bottom of the screen, ready to use. (Drag the avatar to move it; the tray icon opens settings / updates / quit.)
 
-### 자동 업데이트
+### Auto-update
 
-v0.3.0 부터 접속기는 **GitHub Releases 를 통해 스스로 업데이트**합니다 — 실행 중 새 릴리스를 감지해 내려받고, 재시작 시 적용(트레이 → *업데이트 확인* 으로 수동 확인도 가능). Windows·Linux(AppImage) 는 무서명으로도 동작하며, macOS 자동 업데이트는 코드서명 이후 활성화됩니다. *한 번만 수동 설치하면 이후 버전은 자동.*
+From v0.3.0 the connector **updates itself via GitHub Releases** — it detects a new release while running, downloads it, and applies it on restart (you can also check manually via tray → *Check for updates*). Windows · Linux (AppImage) work unsigned; macOS auto-update turns on once the app is code-signed. *Install manually once, and every version after that is automatic.*
 
-### 소스에서 직접 빌드
+### Build from source
 
 ```bash
 git clone https://github.com/CocoRoF/Geny.git
 cd Geny/desktop
 npm install
-npm run dev          # 개발 실행
-npm run dist:win     # / dist:mac / dist:linux — 설치 파일 직접 생성
+npm run dev          # dev run
+npm run dist:win     # / dist:mac / dist:linux — build the installer yourself
 ```
 
-자세히: [`desktop/README.md`](desktop/README.md) · 설계: [`dev_docs/vtuber-desktop/PLAN.md`](dev_docs/vtuber-desktop/PLAN.md)
+More: [`desktop/README.md`](desktop/README.md) · design: [`dev_docs/vtuber-desktop/PLAN.md`](dev_docs/vtuber-desktop/PLAN.md)
 
 ---
 
 ## What Geny is
+
+<img src="img/Geny_Charactor.png" align="right" width="200" alt="Geny character"/>
 
 | Concept | What it does |
 |---|---|
@@ -58,13 +111,15 @@ npm run dist:win     # / dist:mac / dist:linux — 설치 파일 직접 생성
 | **Environment** | A serialisable [`EnvironmentManifest`](docs/environments.md) that pins every pipeline stage + provider + tool set. One artifact, deterministic reproduction. |
 | **3D City Playground** | Three.js / React Three Fiber dashboard — agents appear as characters walking a procedural city. |
 | **Five LLM backends** | `anthropic` / `openai` / `google` / `vllm` (self-host) / `claude_code_cli` — switch per env, no code change. |
-| **Stable error codes** | Every executor failure surfaces with a stable `exec.<component>.<reason>` code. Frontend renders localised, actionable Korean / English prompts. |
+| **Stable error codes** | Every executor failure surfaces with a stable `exec.<component>.<reason>` code. The frontend renders localised, actionable Korean / English prompts. |
 
-The backend is built on [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-executor) — a 21-stage manifest-driven agent pipeline (no LangChain, no LangGraph). The frontend is Next.js 16 with R3F-powered 3D, Pixi.js for whiteboard / 2D overlays, and a Korean/English i18n layer.
+The backend is built on [`geny-executor`](https://github.com/CocoRoF/geny-executor) — a 21-stage manifest-driven agent pipeline (no LangChain, no LangGraph). The frontend is Next.js 16 with R3F-powered 3D, Pixi.js for whiteboard / 2D overlays, and a Korean/English i18n layer.
 
 ---
 
 ## Architecture (high level)
+
+<!-- 📸 IMAGE NEEDED: a polished architecture diagram to replace / accompany the ASCII map below -->
 
 ```
 ┌────────────────────────── Geny ──────────────────────────────────┐
@@ -119,8 +174,14 @@ Every VTuber session is auto-paired with a Sub-Worker. The VTuber handles conver
 ### 🧠 Five LLM backends, one selector
 Settings → LLM Backends gives each of the 5 providers (Anthropic / OpenAI / Google / vLLM / Claude Code CLI) its own card with health probe + auth flow. Stage 6 of any environment picks one via dropdown — see [`docs/providers.md`](docs/providers.md).
 
+<!-- 📸 IMAGE NEEDED: Settings → LLM Backends — the five provider cards with health status -->
+> 📸 **Image needed** — _Settings → LLM Backends: the five provider cards with their health status._
+
 ### 🛠️ Manifest-driven environments
 Pipelines are defined as `EnvironmentManifest` JSON artifacts — 21 stages, one strategy per slot, version-controlled. The Environment editor in the UI lets you customise any preset (worker / VTuber / Sub-Worker) without touching code — see [`docs/environments.md`](docs/environments.md).
+
+<!-- 📸 IMAGE NEEDED: the Environment editor — the 21-stage manifest UI with strategy dropdowns -->
+> 📸 **Image needed** — _the Environment editor: the 21-stage manifest UI with strategy dropdowns._
 
 ### 🌐 Per-session MCP wrap (Claude Code CLI)
 When a session pins `claude_code_cli` as its Stage 6 backend, Geny attaches a per-session MCP bridge so the spawned CLI's LLM sees **Geny's tool registry** as `mcp__geny__<tool>` — file ops, web fetch, memory, blog publisher, sub-worker delegation — all callable natively inside the CLI's agentic loop.
@@ -131,14 +192,17 @@ Every executor exception carries a stable `exec.<component>.<reason>` code. The 
 ### 🏙️ 3D city playground
 Active sessions appear as walking characters in a procedural Kenney-asset city. A* pathfinding, bone-animated avatars, time-of-day cycle. R3F + Drei + Three.js.
 
+<!-- 📸 IMAGE NEEDED: the 3D city playground — agents walking the procedural city, time-of-day lighting -->
+> 📸 **Image needed** — _the 3D city playground: agents walking the procedural city under time-of-day lighting._
+
 ### 🎨 Live2D + Spine + AI-baked avatars
 Geny ships with a separate puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI, and bake the model straight into Geny's VTuber library.
 
 ### 🔊 TTS / STT / voice notes
-edge-tts for output, Whisper for input, OmniVoice integration for multi-speaker scenes. Voice-notes feature lets users dictate into the whiteboard.
+edge-tts for output, Whisper for input, OmniVoice integration for multi-speaker scenes. The voice-notes feature lets users dictate into the whiteboard.
 
 ### 📚 Knowledge whiteboard + memory v2
-Session memory routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Memory) — progressive disclosure, vault map, vector retrieval. Knowledge whiteboard exposes a collaborative Pixi.js canvas for diagram-style sessions.
+Session memory is routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Memory) — progressive disclosure, vault map, vector retrieval. The Knowledge whiteboard exposes a collaborative Pixi.js canvas for diagram-style sessions.
 
 ### 🤖 Multi-pod ready
 Redis-backed session metadata sharding lets multiple backend pods serve one user — useful for cloud deployments.
@@ -211,7 +275,7 @@ For the developer-facing internal architecture maps see [`backend/docs/`](backen
 | **3D engine** | Three.js, React Three Fiber, Drei |
 | **Avatars** | Live2D Cubism, Spine 4, [geny-avatar](https://github.com/CocoRoF/geny-avatar) editor |
 | **Backend** | Python 3.11+, FastAPI, Uvicorn |
-| **Agent pipeline** | [`geny-executor 2.1.0`](https://github.com/CocoRoF/geny-executor) (21 stages, 5 providers) |
+| **Agent pipeline** | [`geny-executor`](https://github.com/CocoRoF/geny-executor) (21 stages, 5 providers) |
 | **LLM SDKs** | `anthropic`, `openai`, `google-genai` + vLLM (OpenAI-compatible) + Claude Code CLI subprocess |
 | **MCP** | host-attached servers + per-session CLI MCP wrap |
 | **TTS / STT** | edge-tts (output), Whisper (input), OmniVoice (multi-speaker) |
@@ -295,7 +359,7 @@ For non-Docker development see the expandable section in [`docs/architecture.md`
 
 ## Avatar Editor (geny-avatar)
 
-Geny ships with a Next.js puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and bake the model directly into Geny's VTuber library (appears with the `(Editor)` suffix).
+Geny ships with a Next.js puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule under `vendor/geny-avatar`. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI (gpt-image-2 / SAM), and bake the model directly into Geny's VTuber library (it appears with the `(Editor)` suffix).
 
 `vendor/geny-avatar` tracks `main` via a versioned `post-merge` hook ([`.githooks/post-merge`](.githooks/post-merge)) — the server fast-forwards the submodule on every `git pull` without a pointer-bump dance.
 
@@ -326,7 +390,7 @@ Configure in `backend/.env`:
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis | `localhost` / `6379` / — |
 | `GENY_AGENT_STORAGE_ROOT` | Session storage path | `/data/geny_agent_sessions` (Docker) |
 
-Frontend's `API_URL` env (shell, build-time) overrides the backend target — see [`docs/architecture.md`](docs/architecture.md).
+The frontend's `API_URL` env (shell, build-time) overrides the backend target — see [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -348,10 +412,10 @@ curl -X POST http://localhost:8000/api/sessions \
 # List sessions
 curl http://localhost:8000/api/sessions
 
-# Send a chat message to the VTuber (auto-delegates to Sub-Worker for complex tasks)
+# Send a chat message to the VTuber (auto-delegates to the Sub-Worker for complex tasks)
 curl -X POST http://localhost:8000/api/chat/rooms/<room_id>/messages \
   -H "Content-Type: application/json" \
-  -d '{"content": "test.txt 만들어서 자기소개 적어놔"}'
+  -d '{"content": "Create test.txt and write a short self-introduction in it"}'
 
 # Stream session logs (SSE)
 curl -N http://localhost:8000/api/command/logs/<session_id>/stream
@@ -377,12 +441,12 @@ Full API reference → `/docs` (FastAPI auto-generated) when the backend is runn
 
 ### DB-backed Custom Tools (UI-driven — recommended)
 
-Register HTTP APIs as tools without writing Python. **환경관리 → 커스텀 도구** 탭:
+Register HTTP APIs as tools without writing Python — the **Environment Management → Custom Tools** tab:
 
 | Backend kind | What it does |
 |---|---|
 | `http` | Make an HTTP request. `${arg:foo}` / `${secret:KEY}` / `${session:session_id}` placeholders in URL, headers, body |
-| `mcp_proxy` | Re-expose an upstream MCP server's tool under a new name with optional schema overlay |
+| `mcp_proxy` | Re-expose an upstream MCP server's tool under a new name with an optional schema overlay |
 | `builtin_alias` | Metadata overlay on an existing `backend/tools/custom/*_tools.py` Python tool — Geny ships the `blog_agent_*` family as samples this way |
 
 Full guide → [`docs/custom_tools.md`](docs/custom_tools.md).
@@ -420,18 +484,18 @@ def search_database(query: str) -> str:
 TOOLS = [search_database]
 ```
 
-See [`backend/tools/README.md`](backend/tools/README.md). For richer ergonomics (description / schema editing / dry-run from UI) prefer the **DB-backed custom tools** path above.
+See [`backend/tools/README.md`](backend/tools/README.md). For richer ergonomics (description / schema editing / dry-run from the UI) prefer the **DB-backed custom tools** path above.
 
 ### Skills (SKILL.md)
 
-Slash-command-style skills bundled with each session. Geny ships three tiers:
+Slash-command-style skills bundled with each session. Geny ships several tiers:
 
 - `executor` — bundled inside `geny-executor` itself.
 - `geny` — first-party Geny skills (`backend/skills/bundled/`).
 - `sample` — Geny-shipped *templates* (`backend/skills/samples/`) you can copy into your own skills.
 - `user` — operator-supplied under `~/.geny/skills/` (opt-in via `skills.user_skills_enabled`).
 
-Manage via **환경관리 → SKILLS** tab.
+Manage via the **Environment Management → SKILLS** tab.
 
 ### Per-session MCP wrap (Claude Code CLI)
 
@@ -441,11 +505,11 @@ When a session's Stage 6 provider is `claude_code_cli`, Geny attaches its own to
 
 ## Error handling + i18n
 
-Every executor exception carries a stable [`ExecutorErrorCode`](https://github.com/CocoRoF/geny-executor/blob/main/docs/error_codes.md) like `exec.cli.auth_failed`. The backend threads it through `SessionLogger` onto the SSE payload; the frontend renders the localised message + actionable next step via `executor.<code>` i18n lookup. End-user sees:
+Every executor exception carries a stable [`ExecutorErrorCode`](https://github.com/CocoRoF/geny-executor/blob/main/docs/error_codes.md) like `exec.cli.auth_failed`. The backend threads it through `SessionLogger` onto the SSE payload; the frontend renders the localised message + actionable next step via an `executor.<code>` i18n lookup. Instead of the raw English server message, the end-user sees (Korean example):
 
 > Claude Code CLI 인증이 만료됐어요. 설정 → LLM 백엔드 → Claude Code (CLI) 카드의 ‘다시 로그인’을 누르거나 `ANTHROPIC_API_KEY` 를 붙여넣어 주세요.
 
-instead of the raw English server message. Detailed flow → [`docs/error_codes.md`](docs/error_codes.md).
+Detailed flow → [`docs/error_codes.md`](docs/error_codes.md).
 
 ---
 
@@ -461,6 +525,17 @@ instead of the raw English server message. Detailed flow → [`docs/error_codes.
 | Contributor | What | Link |
 |---|---|---|
 | <a href="https://github.com/SonAIengine"><img src="https://avatars.githubusercontent.com/u/166786347?v=4&s=48" width="48" height="48" alt="Son Seong Jun" title="Son Seong Jun"/></a> [`graph-tool-call`](https://github.com/SonAIengine/graph-tool-call) | Inspiration for Tool-Search-Logic | — |
+
+---
+
+## Related projects
+
+Part of **the Geny ecosystem** — see [The Geny ecosystem](#-the-geny-ecosystem) above:
+
+- [**geny-executor**](https://github.com/CocoRoF/geny-executor) — the 21-stage agent pipeline Geny's backend runs on (MIT)
+- [**geny-executor-web**](https://github.com/CocoRoF/geny-executor-web) — visual studio for that pipeline
+- [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) — the sandbox / DevOps platform Geny delegates projects & deploys to (submodule at `gapt/`)
+- [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) — the puppet editor that bakes avatars into Geny (submodule at `vendor/geny-avatar`)
 
 ---
 
@@ -485,4 +560,4 @@ See the [GitHub commit history](https://github.com/CocoRoF/Geny/commits/main) fo
 
 ---
 
-> _현재 사용자 모드: 한국어가 주 — 영어는 ENG 버튼으로 즉시 전환 가능._
+> _Primary user mode is Korean — switch to English instantly with the ENG button._
