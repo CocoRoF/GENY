@@ -16,10 +16,16 @@ See [00_plan.md](00_plan.md).
 - [x] `MediaCredentialsConfig` (fal_key/replicate_api_token, visible, synced_env)
 - [x] `sync_controller.py` (/api/sync/targets, /api/sync/provider-keys) + register
 - [x] Frontend "키 동기화" button in LLM Backends panel
-- [ ] Deploy + verify
+- [x] Deploy + verify — `/api/sync/provider-keys` pushed anthropic+openai to GAPT
+      vault (`gapt: pushed`); avatar gracefully skipped (GENY_AVATAR_BASE_URL unset);
+      empty keys skipped; media_credentials visible in General; no boot errors.
   - Note: avatar sync inert until `GENY_AVATAR_BASE_URL` set in compose.
 
 ## Phase 3 — model unify + reverse read
-- [ ] model default reconcile Geny↔GAPT
-- [ ] reverse read surfaced (diagnose card)
-- [ ] Deploy + verify
+- [x] reverse read surfaced — GAPT panel's `/diagnose` card shows Cloudflare/
+      tunnel-mode/preview-domain/readiness (GAPT→Geny, read-only). Done in Phase 1.
+- [SKIP] model-defaults unify Geny↔GAPT — REASSESSED as low-value: Geny sessions
+      and GAPT sandboxes are separate execution contexts; GAPT's default model is an
+      env-only Setting (`GAPT_DEFAULT_MANIFEST_ID`) with no clean write API. Forcing
+      a shared model is dubious. Revisit only on a concrete need (e.g. "GAPT sandbox
+      agents must use the model I pick in Geny") — then push via GAPT's manifest API.
