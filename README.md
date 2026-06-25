@@ -2,7 +2,7 @@
   <img src="img/Geny_full_logo.png" alt="Geny" width="520"/>
 </p>
 
-<h1 align="center">🧞 Geny — <em>Geny Execute, Not You</em></h1>
+<h1 align="center">Geny — <em>Geny Execute, Not You</em></h1>
 
 <p align="center"><em>I'll handle it — you just sit back.</em></p>
 
@@ -19,19 +19,19 @@ A multi-agent <strong>VTuber + autonomous worker</strong> platform. Pair a chatt
 <a href="docs/error_codes.md">Error Codes</a>
 </p>
 
-## 🌐 The Geny ecosystem — related projects
+## The Geny ecosystem
 
 These projects are built to work together. **Geny** is the product at the top of the stack; everything below is a building block you can also use on its own. **➡️ marks where you are.**
 
 | Project | What it is | Role in the stack |
 |---|---|---|
-| ➡️ [**Geny**](https://github.com/CocoRoF/Geny) | Multi-agent VTuber + autonomous-worker platform | 🏛️ The product — uses every project below |
-| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · MIT | ⚙️ The engine everything runs on |
-| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | 🛠️ Where agents safely touch real repos |
-| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | 🎭 Where Geny's faces are made |
+| ➡️ [**Geny**](https://github.com/CocoRoF/Geny) | Multi-agent VTuber + autonomous-worker platform | The product — uses every project below |
+| [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · MIT | The engine everything runs on |
+| [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | Where agents safely touch real repos |
+| [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | Where Geny's faces are made |
 
 <details>
-<summary>📐 How they fit together</summary>
+<summary>How they fit together</summary>
 
 ```
                   Geny — the product (uses everything below)
@@ -53,7 +53,7 @@ These projects are built to work together. **Geny** is the product at the top of
 
 ---
 
-## ⬇️ Desktop connector download
+## Desktop connector download
 
 A **VTuber connector** that floats at the bottom of your desktop — leave the server running, and a live avatar lives at the bottom of your screen.
 
@@ -64,9 +64,9 @@ A **VTuber connector** that floats at the bottom of your desktop — leave the s
 
 | OS | File | Install / first launch |
 |---|---|---|
-| 🪟 **Windows** | `Geny-Setup-*.exe` | Double-click → on the SmartScreen warning, **More info → Run anyway** (currently unsigned) |
-| 🍎 **macOS** | `Geny-*.dmg` | Open and drag to Applications → first launch: **right-click → Open** (Gatekeeper) |
-| 🐧 **Linux** | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x Geny-*.AppImage && ./Geny-*.AppImage` · deb: `sudo dpkg -i Geny-*.deb` |
+| **Windows** | `Geny-Setup-*.exe` | Double-click → on the SmartScreen warning, **More info → Run anyway** (currently unsigned) |
+| **macOS** | `Geny-*.dmg` | Open and drag to Applications → first launch: **right-click → Open** (Gatekeeper) |
+| **Linux** | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x Geny-*.AppImage && ./Geny-*.AppImage` · deb: `sudo dpkg -i Geny-*.deb` |
 
 > No installer listed yet? The release is still building — this is a public repo, so GitHub Actions auto-builds the macOS / Windows / Linux installers.
 
@@ -164,46 +164,46 @@ Geny ⇄ GAPT integration → [`docs/analysis/gapt-integration-plan.md`](docs/an
 
 ## Key features
 
-### 🎭 VTuber ↔ Sub-Worker pairing
+### VTuber ↔ Sub-Worker pairing
 Every VTuber session is auto-paired with a Sub-Worker. The VTuber handles conversation and personality; the Sub-Worker does real work. Delegation flows through a single MCP-bridged tool (`mcp__geny__send_direct_message_internal`) — see [`docs/sessions.md`](docs/sessions.md).
 
-### 🧠 Five LLM backends, one selector
+### Five LLM backends, one selector
 Settings → LLM Backends gives each of the 5 providers (Anthropic / OpenAI / Google / vLLM / Claude Code CLI) its own card with health probe + auth flow. Stage 6 of any environment picks one via dropdown — see [`docs/providers.md`](docs/providers.md).
 
 <!-- 📸 IMAGE NEEDED: Settings → LLM Backends — the five provider cards with health status -->
 > 📸 **Image needed** — _Settings → LLM Backends: the five provider cards with their health status._
 
-### 🛠️ Manifest-driven environments
+### Manifest-driven environments
 Pipelines are defined as `EnvironmentManifest` JSON artifacts — 21 stages, one strategy per slot, version-controlled. The Environment editor in the UI lets you customise any preset (worker / VTuber / Sub-Worker) without touching code — see [`docs/environments.md`](docs/environments.md).
 
 <!-- 📸 IMAGE NEEDED: the Environment editor — the 21-stage manifest UI with strategy dropdowns -->
 > 📸 **Image needed** — _the Environment editor: the 21-stage manifest UI with strategy dropdowns._
 
-### 🌐 Per-session MCP wrap (Claude Code CLI)
+### Per-session MCP wrap (Claude Code CLI)
 When a session pins `claude_code_cli` as its Stage 6 backend, Geny attaches a per-session MCP bridge so the spawned CLI's LLM sees **Geny's tool registry** as `mcp__geny__<tool>` — file ops, web fetch, memory, blog publisher, sub-worker delegation — all callable natively inside the CLI's agentic loop.
 
-### 🏷️ Stable error codes + i18n
+### Stable error codes + i18n
 Every executor exception carries a stable `exec.<component>.<reason>` code. The session log renders the matching Korean (or English) message + recommended next step instead of the raw English server error — see [`docs/error_codes.md`](docs/error_codes.md).
 
-### 🏙️ 3D city playground
+### 3D city playground
 Active sessions appear as walking characters in a procedural Kenney-asset city. A* pathfinding, bone-animated avatars, time-of-day cycle. R3F + Drei + Three.js.
 
 <!-- 📸 IMAGE NEEDED: the 3D city playground — agents walking the procedural city, time-of-day lighting -->
 > 📸 **Image needed** — _the 3D city playground: agents walking the procedural city under time-of-day lighting._
 
-### 🎨 Live2D + Spine + AI-baked avatars
+### Live2D + Spine + AI-baked avatars
 Geny ships with a separate puppet-editor service ([`geny-avatar`](https://github.com/CocoRoF/geny-avatar)) wired in as a git submodule. Upload a Spine or Cubism puppet, decompose layers, paint masks, regenerate textures with AI, and bake the model straight into Geny's VTuber library.
 
-### 🔊 TTS / STT / voice notes
+### TTS / STT / voice notes
 edge-tts for output, Whisper for input, OmniVoice integration for multi-speaker scenes. The voice-notes feature lets users dictate into the whiteboard.
 
-### 📚 Knowledge whiteboard + memory v2
+### Knowledge whiteboard + memory v2
 Session memory is routed through `geny-executor`'s Stage 2 (Context) + Stage 18 (Memory) — progressive disclosure, vault map, vector retrieval. The Knowledge whiteboard exposes a collaborative Pixi.js canvas for diagram-style sessions.
 
-### 🤖 Multi-pod ready
+### Multi-pod ready
 Redis-backed session metadata sharding lets multiple backend pods serve one user — useful for cloud deployments.
 
-### 📦 Sandboxed projects & deploy (GAPT)
+### Sandboxed projects & deploy (GAPT)
 Project / workspace / sandbox / deploy is delegated to **[GAPT](https://github.com/CocoRoF/geny-adapted-project-toolkit)** (`geny-adapted-project-toolkit`), wired in as a **git submodule** at [`gapt/`](gapt/) (tracks `main`; `git pull` auto-rolls it via [`.githooks/post-merge`](.githooks/post-merge)). GAPT runs each workspace in its own isolated container (git · file ops · terminal · dev-server preview · compose/ssh deploy targets), Postgres-backed and Caddy-routed. Geny keeps its own agent runtime (persona · voice · emotion · memory) and points sessions at a GAPT workspace via the executor's `ContainerCLIRunner` — so the agent edits code inside the sandbox while Geny's moat stays host-side. Agents can also drive GAPT directly through its 41-tool MCP. Design: [`docs/analysis/gapt-integration-plan.md`](docs/analysis/gapt-integration-plan.md) · Deploy + test: [`docs/operations/gapt-test-guide.md`](docs/operations/gapt-test-guide.md).
 
 ---
@@ -282,7 +282,7 @@ For the developer-facing internal architecture maps see [`backend/docs/`](backen
 
 ## Installation
 
-### ⚡ One-command (recommended) — `./geny up`
+### One-command (recommended) — `./geny up`
 
 The lite path: up and running with no GPU, no API key, no git submodule.
 
@@ -314,7 +314,7 @@ Other commands:
 > (OmniVoice) + STT (Whisper) turn on with `./geny up --full` when an NVIDIA GPU
 > is present.
 
-### 🐳 Docker (manual)
+### Docker (manual)
 
 ```bash
 # 1. Clone with submodules (gapt + geny-avatar + geny-licensed-assets)
@@ -433,7 +433,7 @@ Full API reference → `/docs` (FastAPI auto-generated) when the backend is runn
 
 ---
 
-## 🔌 Tools & Skills
+## Tools & Skills
 
 ### DB-backed Custom Tools (UI-driven — recommended)
 
@@ -526,7 +526,7 @@ Detailed flow → [`docs/error_codes.md`](docs/error_codes.md).
 
 ## Related projects
 
-Part of **the Geny ecosystem** — see [The Geny ecosystem](#-the-geny-ecosystem) above:
+Part of **the Geny ecosystem** — see [The Geny ecosystem](#the-geny-ecosystem) above:
 
 - [**geny-executor**](https://github.com/CocoRoF/geny-executor) — the 21-stage agent pipeline Geny's backend runs on (MIT)
 - [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) — the sandbox / DevOps platform Geny delegates projects & deploys to (submodule at `gapt/`)
