@@ -5,6 +5,7 @@ import "@xyflow/react/dist/style.css";
 import { ThemeProvider } from "@/lib/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthFailureListener from "@/components/AuthFailureListener";
+import ChunkReloadGuard from "@/components/ChunkReloadGuard";
 import { Toaster } from "@/components/ui/sonner";
 import LocaleHydrator from "@/components/LocaleHydrator";
 
@@ -83,6 +84,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} ${playfairDisplay.variable} ${jetbrainsMono.variable} ${inter.className} antialiased`}>
         <ThemeProvider>
+          <ChunkReloadGuard />
           <LocaleHydrator />
           <AuthFailureListener />
           <TooltipProvider delayDuration={300}>
