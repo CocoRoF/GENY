@@ -79,17 +79,23 @@ def compile_persona(defn: PersonaPresetDefinition) -> str:
     idn = defn.identity
     paras: List[str] = []
 
-    # ── Identity line ──
-    bits: List[str] = []
-    name = idn.display_name.strip() or defn.name.strip()
-    if name:
-        bits.append(f"You are {name}")
-    if idn.role.strip():
-        bits.append(f"— {idn.role.strip()}")
-    head = " ".join(bits).strip()
+    # ── Identity line ── Use ONLY an explicit character name; never the preset's
+    # library name (that's a management label, not a persona name — vtuber.md owns
+    # the "you have no settled name yet" behaviour when none is given).
+    name = idn.display_name.strip()
+    role = idn.role.strip()
+    if name and role:
+        lead = f"You are {name}, {role}."
+    elif name:
+        lead = f"You are {name}."
+    elif role:
+        lead = f"You are {role}."
+    else:
+        lead = ""
     extra = ". ".join(p.strip() for p in (idn.age_vibe, idn.backstory) if p.strip())
-    if head or extra:
-        paras.append((head + ("." if head and not head.endswith(".") else "") + (" " + extra + "." if extra else "")).strip())
+    para = (lead + (" " + extra + "." if extra else "")).strip()
+    if para:
+        paras.append(para)
 
     # ── Temperament: OCEAN synthesis + framework lines ──
     temper: List[str] = []
@@ -101,8 +107,11 @@ def compile_persona(defn: PersonaPresetDefinition) -> str:
     enn = defn.enneagram.strip().split("w")[0]
     if enn in ENNEAGRAM:
         temper.append(f"At your core (Enneagram {defn.enneagram.strip()}) you are {ENNEAGRAM[enn]['desc']}")
-    if defn.archetype.strip().lower() in ARCHETYPES:
-        temper.append(f"You play it as a {ARCHETYPES[defn.archetype.strip().lower()]['label_ko']} character: {ARCHETYPES[defn.archetype.strip().lower()]['desc']}")
+    arch = defn.archetype.strip().lower()
+    if arch in ARCHETYPES:
+        # The desc names the trope (LLM-effective) + grounds it behaviourally.
+        # The Korean label is UI-only and never enters the prompt.
+        temper.append(ARCHETYPES[arch]["desc"])
     if temper:
         paras.append(" ".join(temper))
 
