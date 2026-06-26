@@ -745,6 +745,7 @@ class EnvironmentService:
         strict: bool = True,
         adhoc_providers: Sequence[Any] = (),
         extra_external_tools: Sequence[str] = (),
+        satisfied_config: Optional[Any] = None,
     ) -> Pipeline:
         """Load the manifest and build a Pipeline via the library helper.
 
@@ -809,6 +810,7 @@ class EnvironmentService:
             strict=strict,
             adhoc_providers=get_style,
             tool_providers=started_style or None,
+            satisfied_config=satisfied_config,
         )
 
     # ── Reconcile ──────────────────────────────────────────────

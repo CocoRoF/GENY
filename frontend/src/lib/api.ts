@@ -1673,6 +1673,67 @@ export const avatarApi = {
     apiCall<any>('/api/avatar/settings/keys', { method: 'PUT', body: JSON.stringify(body) }),
 };
 
+// ==================== Google Workspace API ====================
+//
+// Connect a Google account entirely from the UI via the OAuth Device Flow.
+// The operator first stores a "Desktop / TV & Limited Input devices" OAuth
+// client (id + secret), then runs the device-code dance: connect() returns a
+// short user_code + verification_url, the UI polls poll() until the backend
+// reports the token exchange landed. Once connected, the Gmail / Calendar /
+// Drive / Tasks tools become available to agents automatically.
+
+export interface GoogleStatus {
+  /** An OAuth client (id + secret) has been stored. */
+  has_client: boolean;
+  /** A Google account is connected (tokens present). */
+  connected: boolean;
+}
+
+export interface GoogleSetClientResponse {
+  ok: boolean;
+  has_client: boolean;
+}
+
+export interface GoogleConnectResponse {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  /** Seconds between poll attempts. */
+  interval: number;
+  /** Seconds until the device_code expires. */
+  expires_in: number;
+}
+
+export type GooglePollStatus = 'pending' | 'connected' | 'error';
+
+export interface GooglePollResponse {
+  status: GooglePollStatus;
+  error?: string;
+}
+
+export const googleApi = {
+  /** GET /api/google/status — is a client stored / an account connected? */
+  status: () => apiCall<GoogleStatus>('/api/google/status'),
+  /** PUT /api/google/client — store the OAuth client id + secret. */
+  setClient: (clientId: string, clientSecret: string) =>
+    apiCall<GoogleSetClientResponse>('/api/google/client', {
+      method: 'PUT',
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    }),
+  /** POST /api/google/connect — begin the device flow (412 if no client set). */
+  connect: () =>
+    apiCall<GoogleConnectResponse>('/api/google/connect', { method: 'POST' }),
+  /** POST /api/google/poll — poll for the device-flow token exchange. */
+  poll: (deviceCode: string) =>
+    apiCall<GooglePollResponse>('/api/google/poll', {
+      method: 'POST',
+      body: JSON.stringify({ device_code: deviceCode }),
+    }),
+  /** POST /api/google/disconnect — drop the connected account. */
+  disconnect: () =>
+    apiCall<{ ok: boolean }>('/api/google/disconnect', { method: 'POST' }),
+};
+
 /** Cross-service settings sync — Geny propagates shared provider keys to GAPT + avatar. */
 export const syncApi = {
   /** Which sync targets are wired (no network probe). */

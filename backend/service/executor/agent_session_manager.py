@@ -959,16 +959,19 @@ class AgentSessionManager:
         # overlaid on the seed so one-shot sub-workers run with that config.
         from service.agent_types import SubagentRegistryBuilder
 
+        # Progressive disclosure: compute the env's satisfied config-token set once
+        # (global config / per-env tool-settings / feature flags incl. Google).
+        # Drives BOTH gating layers — GenyToolProvider (Geny tools) AND the
+        # executor's from_manifest filter (executor built-ins like google_*) — so
+        # an unconfigured tool never reaches the Agent engine.
+        from service.executor.tool_config_gate import compute_satisfied_config
+
+        satisfied_config = compute_satisfied_config(self._env_tool_settings(env_id))
+
         adhoc_providers: list = []
         if self._tool_loader is not None:
             from service.executor.geny_tool_provider import GenyToolProvider
-            from service.executor.tool_config_gate import compute_satisfied_config
 
-            # Progressive disclosure: tools whose required config (global config /
-            # per-env tool-settings / feature flags) isn't satisfied are hidden —
-            # GenyToolProvider returns None for them so they never register and
-            # never reach the executor's Agent engine.
-            satisfied_config = compute_satisfied_config(self._env_tool_settings(env_id))
             adhoc_providers.append(
                 GenyToolProvider(self._tool_loader, satisfied_config=satisfied_config)
             )
@@ -1102,6 +1105,7 @@ class AgentSessionManager:
             subagent_registry=subagent_registry,
             adhoc_providers=adhoc_providers,
             extra_external_tools=_extra_tools,
+            satisfied_config=satisfied_config,
         )
         logger.info(
             f"  env_id: {env_id} → manifest-backed pipeline built "

@@ -108,6 +108,16 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
+    # 5) Google Workspace connected (OAuth refresh token present) → unlocks the
+    # native google_* executor tools.
+    try:
+        from service.google import is_connected as _google_connected
+
+        if _google_connected():
+            satisfied.add("feature:google_connected")
+    except Exception:  # noqa: BLE001
+        pass
+
     return satisfied
 
 

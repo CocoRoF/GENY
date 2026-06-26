@@ -535,6 +535,51 @@ const ko: Translations = {
     },
   },
 
+  // ─── Google Workspace 연결 패널 ───
+  googleSettings: {
+    navLabel: 'Google',
+    title: 'Google Workspace',
+    subtitle: 'Google 계정을 연결하면 에이전트가 Gmail · 캘린더 · 드라이브 · Tasks를 사용할 수 있습니다. 아래 OAuth 클라이언트를 저장한 뒤 기기 인증으로 연결하세요.',
+    refresh: '새로고침',
+    loadError: 'Google 상태를 불러오지 못했습니다',
+
+    connected: '연결됨',
+    notConnected: '미연결',
+
+    clientSection: 'OAuth 클라이언트',
+    clientSet: '설정됨',
+    clientUnset: '미설정',
+    clientHelper: 'Google Cloud Console에서 OAuth 클라이언트를 "데스크톱 앱 / TV 및 입력 제한 기기" 유형으로 생성한 뒤, 클라이언트 ID와 시크릿을 여기에 붙여넣으세요.',
+    clientId: '클라이언트 ID',
+    clientSecret: '클라이언트 시크릿',
+    save: '저장',
+    saving: '저장 중…',
+    clientSaved: 'OAuth 클라이언트가 저장되었습니다',
+    saveError: '저장 실패',
+
+    connectSection: '계정 연결',
+    connect: '연결',
+    connecting: '연결 중…',
+    connectError: '연결을 시작하지 못했습니다',
+    connectNeedsClient: '먼저 위에서 OAuth 클라이언트를 저장하세요.',
+    deviceInstructions: '아래 코드를 복사한 뒤, 인증 주소에서 코드를 입력하세요.',
+    openVerification: '열기',
+    verificationUrlLabel: '인증 주소:',
+    waiting: '승인 대기 중…',
+    cancel: '취소',
+    timeout: '인증 시간이 만료되었습니다. 다시 시도하세요.',
+    connectedToast: 'Google 계정이 연결되었습니다',
+    errorToast: '연결에 실패했습니다',
+
+    connectedNote: 'Google 계정이 연결되어 있습니다.',
+    disconnect: '연결 해제',
+    disconnecting: '해제 중…',
+    disconnectedToast: 'Google 연결이 해제되었습니다',
+    disconnectError: '연결 해제 실패',
+
+    toolsNote: '연결되면 Gmail · 캘린더 · 드라이브 · Tasks 도구가 에이전트에게 자동으로 제공됩니다.',
+  },
+
   // ─── Info Tab ───
   info: {
     selectSession: '세션을 선택하세요',

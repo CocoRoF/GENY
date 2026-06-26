@@ -2617,6 +2617,18 @@ class AgentSession:
         for _ts_key, _ts_val in self._load_tool_settings().items():
             _tool_extras[_ts_key] = _ts_val
 
+        # Google Workspace OAuth token for the native google_* tools — minted
+        # fresh per session from the stored refresh token. None when not
+        # connected (the tools are gated out anyway via feature:google_connected).
+        try:
+            from service.google import google_tool_extras
+
+            _g = google_tool_extras()
+            if _g:
+                _tool_extras["google"] = _g
+        except Exception:  # noqa: BLE001 — never block session build on this
+            pass
+
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 

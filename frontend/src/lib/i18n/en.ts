@@ -541,6 +541,51 @@ const en = {
     },
   },
 
+  // ─── Google Workspace connection panel ───
+  googleSettings: {
+    navLabel: 'Google',
+    title: 'Google Workspace',
+    subtitle: 'Connect a Google account so agents can use Gmail, Calendar, Drive and Tasks. Save the OAuth client below, then connect via device authorization.',
+    refresh: 'Refresh',
+    loadError: 'Failed to load Google status',
+
+    connected: 'Connected',
+    notConnected: 'Not connected',
+
+    clientSection: 'OAuth client',
+    clientSet: 'Set',
+    clientUnset: 'Not set',
+    clientHelper: 'In the Google Cloud Console, create an OAuth client of type "Desktop app / TV & Limited Input devices", then paste its client ID and secret here.',
+    clientId: 'Client ID',
+    clientSecret: 'Client secret',
+    save: 'Save',
+    saving: 'Saving…',
+    clientSaved: 'OAuth client saved',
+    saveError: 'Save failed',
+
+    connectSection: 'Connect account',
+    connect: 'Connect',
+    connecting: 'Connecting…',
+    connectError: 'Failed to start connection',
+    connectNeedsClient: 'Save an OAuth client above first.',
+    deviceInstructions: 'Copy the code below, then enter it at the verification URL.',
+    openVerification: 'Open',
+    verificationUrlLabel: 'Verification URL:',
+    waiting: 'Waiting for approval…',
+    cancel: 'Cancel',
+    timeout: 'The authorization timed out. Please try again.',
+    connectedToast: 'Google account connected',
+    errorToast: 'Connection failed',
+
+    connectedNote: 'A Google account is connected.',
+    disconnect: 'Disconnect',
+    disconnecting: 'Disconnecting…',
+    disconnectedToast: 'Google disconnected',
+    disconnectError: 'Disconnect failed',
+
+    toolsNote: 'Once connected, the Gmail, Calendar, Drive and Tasks tools become available to agents automatically.',
+  },
+
   // ─── Info Tab ───
   info: {
     selectSession: 'Select a Session',
