@@ -586,6 +586,30 @@ const en = {
     toolsNote: 'Once connected, the Gmail, Calendar, Drive and Tasks tools become available to agents automatically.',
   },
 
+  // ─── Connectors (MCP ecosystem) ───
+  connectors: {
+    navLabel: 'Connectors',
+    title: 'Connectors',
+    subtitle: 'Enable and configure MCP connectors — GitHub, Notion, Composio, Slack, Postgres, Brave and more — from the UI.',
+    intro: 'Enabling a connector makes its MCP tools available to agents automatically (gated until it is configured).',
+    refresh: 'Refresh',
+    loading: 'Loading…',
+    empty: 'No connectors available.',
+    loadFailed: 'Failed to load connectors',
+    enable: 'Enable',
+    configure: 'Configure',
+    docs: 'Docs',
+    noFields: 'Nothing to configure.',
+    save: 'Save',
+    saving: 'Saving…',
+    saved: 'Connector saved',
+    saveFailed: 'Save failed',
+    active: 'Active',
+    inactive: 'Inactive',
+    notConfigured: 'Not configured',
+    stdioNote: 'requires node in the backend image',
+  },
+
   // ─── Info Tab ───
   info: {
     selectSession: 'Select a Session',

@@ -1734,6 +1734,64 @@ export const googleApi = {
     apiCall<{ ok: boolean }>('/api/google/disconnect', { method: 'POST' }),
 };
 
+// ==================== MCP Ecosystem Connectors ====================
+//
+// One-click MCP ecosystem connectors (GitHub, Notion, Composio, Slack,
+// Postgres, Brave, custom HTTP). Enabling a connector makes its MCP tools
+// available to agents automatically — gated until its required fields are
+// configured. Secure field values come back masked ("••••xxxx"); a value left
+// as the masked placeholder is ignored server-side, so the UI must not resend
+// masked secrets.
+
+/** Transport the connector's MCP server speaks over. */
+export type ConnectorTransport = 'http' | 'stdio';
+
+export interface ConnectorField {
+  name: string;
+  label: string;
+  required: boolean;
+  /** Render as a password input; value comes back masked from GET. */
+  secure: boolean;
+  placeholder?: string;
+  description?: string;
+}
+
+export interface Connector {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  transport: ConnectorTransport;
+  docs_url?: string;
+  config_name?: string;
+  enabled: boolean;
+  /** All required fields have values. */
+  configured: boolean;
+  fields: ConnectorField[];
+}
+
+export interface ConnectorDetail {
+  id: string;
+  enabled: boolean;
+  /** Current field values; secure ones are masked ("••••xxxx"). */
+  values: Record<string, string>;
+}
+
+export const connectorsApi = {
+  /** GET /api/connectors — list every connector + its enabled/configured state. */
+  list: () => apiCall<{ connectors: Connector[] }>('/api/connectors'),
+  /** GET /api/connectors/{id} — current values (secure fields masked). */
+  get: (id: string) =>
+    apiCall<ConnectorDetail>(`/api/connectors/${encodeURIComponent(id)}`),
+  /** PUT /api/connectors/{id} — set enabled + field values. Values left as the
+   *  masked placeholder are ignored server-side; don't resend masked secrets. */
+  update: (id: string, body: { enabled: boolean; values: Record<string, string> }) =>
+    apiCall<{ ok: boolean; id: string }>(`/api/connectors/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+};
+
 /** Cross-service settings sync — Geny propagates shared provider keys to GAPT + avatar. */
 export const syncApi = {
   /** Which sync targets are wired (no network probe). */

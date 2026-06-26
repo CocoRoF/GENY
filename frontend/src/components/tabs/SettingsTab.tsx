@@ -5,6 +5,7 @@ import { configApi, gaptApi, avatarApi } from '@/lib/api';
 import LLMBackendsPanel from './LLMBackendsPanel';
 import GaptSettingsPanel from './GaptSettingsPanel';
 import GoogleSettingsPanel from './GoogleSettingsPanel';
+import ConnectorsPanel from './ConnectorsPanel';
 import AvatarSettingsPanel from './AvatarSettingsPanel';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import { PROVIDERS } from '@/lib/modelCatalog';
@@ -16,7 +17,7 @@ import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 import Selector from '@/components/ui/Selector';
 import { TabShell, ActionButton } from '@/components/layout';
-import { Settings as SettingsIcon, Download, Upload, RefreshCw } from 'lucide-react';
+import { Settings as SettingsIcon, Download, Upload, RefreshCw, Boxes } from 'lucide-react';
 import { useI18n, type Locale } from '@/lib/i18n';
 import type { ConfigItem, ConfigCategory, ConfigField, ConfigSchema, ConfigI18nLocale } from '@/types';
 
@@ -270,6 +271,18 @@ export default function SettingsTab() {
               <span className="flex-1">{t('googleSettings.navLabel')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
             </button>
+            {/* Virtual 'Connectors' category — enable + configure MCP ecosystem
+                 connectors (GitHub, Notion, Composio, Slack, Postgres, Brave,
+                 custom HTTP) from the UI. Always shown (first-party Geny
+                 surface). Mirrors the Google category pattern. */}
+            <button
+              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'connectors' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              onClick={() => setSelectedCategory('connectors')}
+            >
+              <Boxes className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{t('connectors.navLabel')}</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+            </button>
             {/* Virtual 'Avatar' category — manages a connected geny-avatar's
                  settings (image-gen keys). Shown only when avatar is running. */}
             {avatarRunning && (
@@ -305,6 +318,8 @@ export default function SettingsTab() {
             <GaptSettingsPanel />
           ) : selectedCategory === 'google' ? (
             <GoogleSettingsPanel />
+          ) : selectedCategory === 'connectors' ? (
+            <ConnectorsPanel />
           ) : selectedCategory === 'avatar' ? (
             <AvatarSettingsPanel />
           ) : filtered.length === 0 ? (

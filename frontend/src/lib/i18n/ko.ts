@@ -580,6 +580,30 @@ const ko: Translations = {
     toolsNote: '연결되면 Gmail · 캘린더 · 드라이브 · Tasks 도구가 에이전트에게 자동으로 제공됩니다.',
   },
 
+  // ─── Connectors (MCP 생태계) ───
+  connectors: {
+    navLabel: '커넥터',
+    title: '커넥터',
+    subtitle: 'GitHub · Notion · Composio · Slack · Postgres · Brave 등 MCP 커넥터를 UI에서 켜고 설정하세요.',
+    intro: '커넥터를 켜면 해당 MCP 도구가 에이전트에게 자동으로 제공됩니다(설정이 완료될 때까지 비활성).',
+    refresh: '새로고침',
+    loading: '불러오는 중…',
+    empty: '사용 가능한 커넥터가 없습니다.',
+    loadFailed: '커넥터를 불러오지 못했습니다',
+    enable: '사용',
+    configure: '구성',
+    docs: '문서',
+    noFields: '설정할 항목이 없습니다.',
+    save: '저장',
+    saving: '저장 중…',
+    saved: '커넥터가 저장되었습니다',
+    saveFailed: '저장 실패',
+    active: '사용중',
+    inactive: '비활성',
+    notConfigured: '미설정',
+    stdioNote: '백엔드 이미지에 node/npx 필요',
+  },
+
   // ─── Info Tab ───
   info: {
     selectSession: '세션을 선택하세요',

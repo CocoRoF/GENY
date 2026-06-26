@@ -35,7 +35,22 @@ on → present), reversible flip.
    URL, enter the code, approve. Done → Gmail/Calendar/Drive/Tasks tools auto-appear
    for agents.
 
-## Next phases (per 01_REPORT.md)
-- Phase 2 — curated MCP connector registry (Notion/Slack/GitHub/Composio), config-gated.
-- Phase 3 — communication/data (email/Telegram/SMS/SQL/HTTP).
-- Phase 4 — VTuber-specific (OBS / live chat / screen).
+## Phase 2 — MCP Connector Registry ✅ DONE (deploying)
+Config-gated connectors to the MCP ecosystem (no executor change — uses existing
+executor MCP support). `service/mcp_connectors/catalog.py`: curated catalog
+(custom_http / github / notion / composio [HTTP, work anywhere] · slack / postgres /
+brave [stdio npx, need node in the backend image]) + a **dynamic hidden BaseConfig
+per connector** (`connector_<id>`) reusing config storage/validity/satisfied tokens.
+`configured_mcp_servers()` emits executor `mcp_server` dicts (secrets → headers/env)
+ONLY for enabled+complete connectors; `instantiate_pipeline(extra_mcp_servers=)` dedup-
+appends them to `manifest.tools.mcp_servers` (gate = omission). API
+`/api/connectors` (+ `/{id}` GET/PUT, secrets masked). Frontend: Settings → Connectors.
+**The `custom_http` connector = connect ANY remote MCP server from the UI** (the
+universal escape hatch). Adding more connectors = one catalog entry.
+
+## Remaining (now trivial — catalog entries or native tools)
+- Phase 3 (communication/data): Slack/Postgres/Brave already in the catalog; email
+  (SMTP) = a small native tool or MCP; generic HTTP = custom_http connector / WebFetch.
+- Phase 4 (VTuber): OBS / Twitch / YouTube-Live / Chzzk — most have MCP servers →
+  add to the catalog (HTTP ones work immediately; stdio need node). Screen-observe is
+  native (already has the screen-observation trigger system).
