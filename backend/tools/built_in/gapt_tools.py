@@ -89,6 +89,7 @@ class _GaptTool(BaseTool):
 
 class GaptOverviewTool(_GaptTool):
     name = "gapt_overview"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_overview")
     description = (
         "GAPT platform snapshot: all projects + workspace capacity stats. "
         "Start here to see what projects/workspaces exist."
@@ -107,6 +108,7 @@ class GaptOverviewTool(_GaptTool):
 
 class GaptListProjectsTool(_GaptTool):
     name = "gapt_list_projects"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_list_projects")
     description = "List all GAPT projects (id, slug, repos)."
 
     async def call(self, client: GaptClient, **_: Any) -> Any:
@@ -115,6 +117,7 @@ class GaptListProjectsTool(_GaptTool):
 
 class GaptCreateProjectTool(_GaptTool):
     name = "gapt_create_project"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_create_project")
     description = (
         "Create a GAPT project. Empty git_remote_url makes a blank project "
         "for later multi-repo setup."
@@ -140,6 +143,7 @@ class GaptCreateProjectTool(_GaptTool):
 
 class GaptListWorkspacesTool(_GaptTool):
     name = "gapt_list_workspaces"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_list_workspaces")
     description = "List a project's workspaces (name, status, selections)."
     parameters = {
         "type": "object",
@@ -154,6 +158,7 @@ class GaptListWorkspacesTool(_GaptTool):
 
 class GaptCreateWorkspaceTool(_GaptTool):
     name = "gapt_create_workspace"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_create_workspace")
     description = (
         "Create a sandbox workspace in a project. Async — poll gapt_list_workspaces "
         "until status='running'. Idempotent on (project, name)."
@@ -174,6 +179,7 @@ class GaptCreateWorkspaceTool(_GaptTool):
 
 class GaptManageWorkspaceTool(_GaptTool):
     name = "gapt_manage_workspace"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_manage_workspace")
     description = "Lifecycle action on a workspace: start, stop, or delete."
     parameters = {
         "type": "object",
@@ -199,6 +205,7 @@ class GaptManageWorkspaceTool(_GaptTool):
 
 class GaptRunCommandTool(_GaptTool):
     name = "gapt_run_command"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_run_command")
     description = (
         "Run a shell command inside a GAPT workspace container (captured output). "
         "Use for ad-hoc ops in any workspace (cwd is relative to /workspace)."
@@ -223,6 +230,7 @@ class GaptRunCommandTool(_GaptTool):
 
 class GaptListEnvironmentsTool(_GaptTool):
     name = "gapt_list_environments"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_list_environments")
     description = "List a project's deploy environments (id, name, kind, history)."
     parameters = {
         "type": "object",
@@ -237,6 +245,7 @@ class GaptListEnvironmentsTool(_GaptTool):
 
 class GaptDeployTool(_GaptTool):
     name = "gapt_deploy"
+    REQUIRED_CONFIG = ("config:gapt", "gapt_tool:gapt_deploy")
     description = (
         "Kick off an async deploy of an environment. Returns a run id; "
         "poll the deploy run for status."

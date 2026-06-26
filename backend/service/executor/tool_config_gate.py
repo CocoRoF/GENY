@@ -99,12 +99,35 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
-    # 4) GAPT connectivity
+    # 4) GAPT connectivity + per-tool gating.
+    #
+    # When GAPT is configured, the gapt_* tools are individually gated by
+    # ``gapt_tool:<name>`` tokens driven by :class:`GaptToolsConfig` (all tools
+    # default to enabled). Fail-OPEN: if the config can't be loaded for any
+    # reason (or every tool is enabled), emit ALL gapt_tool:* tokens so a config
+    # glitch never silently hides every GAPT tool. Only a subset is emitted when
+    # the user has explicitly turned some tools off.
     try:
         from service.gapt import get_gapt_client
 
         if get_gapt_client().configured:
             satisfied.add("config:gapt")
+
+            from service.config import get_config_manager
+            from service.config.sub_config.tools.gapt_tools_config import (
+                GaptToolsConfig,
+            )
+
+            tool_names = [f.name for f in GaptToolsConfig.get_fields_metadata()]
+            try:
+                cfg = get_config_manager().load_config(GaptToolsConfig)
+                enabled = [n for n in tool_names if getattr(cfg, n, True)]
+            except Exception:  # noqa: BLE001 — config load failed → fail OPEN
+                enabled = list(tool_names)
+            # Defensive: if nothing resolved as enabled (shouldn't happen given
+            # defaults), fall open to all so we never hide the whole toolset.
+            for name in (enabled or tool_names):
+                satisfied.add(f"gapt_tool:{name}")
     except Exception:  # noqa: BLE001
         pass
 
