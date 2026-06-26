@@ -105,17 +105,17 @@ def list_frameworks() -> Dict[str, object]:
 
 
 def _emotion_tags() -> List[str]:
-    """The recognised emotion-tag vocabulary, sourced from the sanitizer so the
-    builder's emotion picker stays in lockstep with what the avatar renders."""
+    """The *core* emotion vocabulary for the builder's mood pickers — the 6
+    canonical mood axes + neutral (single source of truth in the affect
+    taxonomy). The full 27-tag RECOGNIZED set stays valid at emit time; here we
+    surface only the core dispositions Geny actually expresses, per its affect
+    philosophy. Returned in canonical (not alphabetical) order."""
     try:
-        from service.utils.text_sanitizer import EMOTION_TAGS  # noqa: PLC0415
+        from service.affect.taxonomy import CORE_EMOTIONS  # noqa: PLC0415
 
-        return sorted(EMOTION_TAGS)
-    except Exception:  # noqa: BLE001 — fall back to a sane default set
-        return [
-            "joy", "sadness", "anger", "fear", "calm", "excitement", "surprise",
-            "curious", "playful", "confident", "shy", "neutral", "thoughtful",
-        ]
+        return list(CORE_EMOTIONS)
+    except Exception:  # noqa: BLE001 — fall back to the canonical core set
+        return ["joy", "sadness", "anger", "fear", "calm", "excitement", "neutral"]
 
 
 __all__ = [

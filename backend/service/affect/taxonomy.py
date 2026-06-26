@@ -36,6 +36,7 @@ from typing import Dict, Final, Tuple
 
 __all__ = [
     "MOOD_AXES",
+    "CORE_EMOTIONS",
     "AFFECT_TAG_MAPPING",
     "RECOGNIZED_TAGS",
     "coefficients_for",
@@ -52,6 +53,15 @@ MOOD_AXES: Final[Tuple[str, ...]] = (
     "calm",
     "excitement",
 )
+
+
+#: The curated *core* emotion set surfaced for human authoring (the persona
+#: builder's default-mood + preferred-emotions controls). It is the 6 canonical
+#: mood axes + the neutral resting state — the few emotions Geny actually
+#: expresses, which the richer ``RECOGNIZED_TAGS`` all fold back into. The full
+#: tag set stays valid at emit time; this is just the picker vocabulary so
+#: authors choose dispositions instead of the 27-tag long tail.
+CORE_EMOTIONS: Final[Tuple[str, ...]] = MOOD_AXES + ("neutral",)
 
 
 #: Tag → { mutation_path : coefficient-at-strength-1.0 }.
