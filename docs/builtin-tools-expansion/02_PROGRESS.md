@@ -28,12 +28,23 @@ on → present), reversible flip.
   (gated ✓). The actual OAuth round-trip + Google API calls need the user's Google
   Cloud OAuth client creds + device consent (done in the Google card).
 
+### ⚠️ FIX (2026-06-26) — Device Flow → Authorization Code flow
+Device flow was wrong: Google rejects Workspace scopes (gmail.modify/calendar/drive/
+tasks) with `invalid_scope` (device flow allows only a tiny allowlist), so connect
+502'd. Switched to the **auth-code flow** (public domain `geny-x.hrletsgo.me` now
+exists): `build_auth_url(redirect_uri)` (access_type=offline+prompt=consent, CSRF
+state) + PUBLIC `GET /api/google/callback` (state-authenticated) → `exchange_code`.
+Frontend opens the consent URL in a popup (redirect_uri = page origin + /api/google/
+callback), callback postMessages back. Dropped /connect + /poll. See
+`feedback_google_oauth_authcode` memory.
+
 ### User setup (one-time)
-1. Google Cloud Console → create an OAuth client of type **Desktop app / TV & Limited
-   Input devices** → copy client_id + client_secret.
-2. Geny → Settings → **Google** → paste id+secret → Save → **Connect** → open the shown
-   URL, enter the code, approve. Done → Gmail/Calendar/Drive/Tasks tools auto-appear
-   for agents.
+1. Google Cloud Console → enable Gmail/Calendar/Drive/Tasks APIs + OAuth consent
+   screen (External + add yourself as test user) → create an OAuth client of type
+   **Web application** → add `https://<your-geny-domain>/api/google/callback` to its
+   Authorized redirect URIs → copy client_id + client_secret.
+2. Geny → Settings → **Google** → paste id+secret → Save → **Connect** → a popup opens
+   Google's consent → approve. Done → Gmail/Calendar/Drive/Tasks tools auto-appear.
 
 ## Phase 2 — MCP Connector Registry ✅ DONE (deploying)
 Config-gated connectors to the MCP ecosystem (no executor change — uses existing
