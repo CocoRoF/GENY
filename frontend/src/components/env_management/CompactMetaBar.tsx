@@ -344,16 +344,16 @@ export default function CompactMetaBar({
         onClick={() => setLeaveOpen(false)}
       >
         <div
-          className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-full max-w-[400px] max-h-[85vh] flex flex-col shadow-[var(--shadow-lg)]"
+          className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-xl w-full max-w-[400px] max-h-[85vh] flex flex-col shadow-xl"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex justify-between items-center py-4 px-6 border-b border-[var(--border-color)]">
-            <h3 className="text-[1rem] font-semibold text-[var(--text-primary)]">
+          <div className="flex justify-between items-center py-4 px-6 border-b border-[hsl(var(--border))]">
+            <h3 className="text-[1rem] font-semibold text-[hsl(var(--foreground))]">
               {t('envManagement.saveBeforeLeaveTitle')}
             </h3>
             <button
-              className="flex items-center justify-center w-8 h-8 rounded-[var(--border-radius)] bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+              className="flex items-center justify-center w-8 h-8 rounded-md bg-transparent border-none text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))] cursor-pointer transition-colors"
               onClick={() => setLeaveOpen(false)}
             >
               <X size={16} />
@@ -364,7 +364,7 @@ export default function CompactMetaBar({
           <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
             {!draft || draft.metadata.name.trim() === '' ? (
               <div className="flex flex-col gap-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
                   {t('envManagement.envNameLabel')}
                 </label>
                 <Input
@@ -374,33 +374,33 @@ export default function CompactMetaBar({
                   className="h-8 text-[0.8125rem]"
                   autoFocus
                 />
-                <p className="text-[0.75rem] text-[var(--text-muted)]">
+                <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))]">
                   {t('envManagement.presetNamePrompt')}
                 </p>
               </div>
             ) : (
-              <div className="text-[0.8125rem] text-[var(--text-secondary)]">
+              <div className="text-[0.8125rem] text-[hsl(var(--muted-foreground))]">
                 {t('envManagement.saveBeforeLeaveDirty')}
               </div>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex justify-end items-center gap-3 py-4 px-6 border-t border-[var(--border-color)]">
+          <div className="flex justify-end items-center gap-2 py-4 px-6 border-t border-[hsl(var(--border))]">
             <button
-              className="py-2 px-4 bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border border-[var(--border-color)]"
+              className="inline-flex items-center h-8 px-3 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] cursor-pointer transition-colors"
               onClick={() => setLeaveOpen(false)}
             >
               {t('common.cancel')}
             </button>
             <button
-              className="py-2 px-4 bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border border-[var(--border-color)]"
+              className="inline-flex items-center h-8 px-3 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] cursor-pointer transition-colors"
               onClick={handleDontSave}
             >
               {t('envManagement.dontSave')}
             </button>
             <button
-              className="py-2 px-4 bg-[var(--primary-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center h-8 px-3.5 rounded-md bg-violet-500 hover:bg-violet-600 text-white text-[0.8125rem] font-medium cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleSaveAndLeave}
               disabled={!draft || draft.metadata.name.trim() === ''}
             >

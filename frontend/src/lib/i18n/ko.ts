@@ -1014,6 +1014,8 @@ const ko: Translations = {
       clone: '복제',
       delete: '삭제',
       deleteConfirm: '삭제할까요?',
+      deleteConfirmPrompt: '"{name}" 환경을 삭제할까요?',
+      presetBadge: '프리셋',
       deleteAriaLabel: '{name} 환경 삭제',
       editAriaLabel: '{name} 환경 편집',
     },

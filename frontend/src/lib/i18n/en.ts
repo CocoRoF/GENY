@@ -1020,6 +1020,8 @@ const en = {
       clone: 'Clone',
       delete: 'Delete',
       deleteConfirm: 'Delete?',
+      deleteConfirmPrompt: 'Delete environment "{name}"?',
+      presetBadge: 'Preset',
       deleteAriaLabel: 'Delete {name}',
       editAriaLabel: 'Edit {name}',
     },

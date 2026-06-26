@@ -12,5 +12,9 @@
 import SandboxToolPacksManager from '@/components/sandbox_tool_packs/SandboxToolPacksManager';
 
 export default function SandboxToolPacksPage() {
-  return <SandboxToolPacksManager />;
+  return (
+    <div className="h-screen">
+      <SandboxToolPacksManager />
+    </div>
+  );
 }

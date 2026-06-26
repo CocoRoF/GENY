@@ -6,15 +6,24 @@
  * A reusable library of structured persona definitions (MBTI/Enneagram/archetype
  * + OCEAN + expressive-style sliders + Korean register + emotion defaults +
  * identity). The builder compiles live to the persona prompt the backend will
- * inject when an environment attaches the preset
- * (host_selections.extras.persona_preset_id, set via the env editor's Persona
- * panel). `embedded` renders it inside the environment-management shell.
+ * inject when an environment attaches the preset.
+ *
+ * The LIST view uses the shared host-registry chrome (RegistryPageShell /
+ * RegistryGrid / RegistryCard) so it reads identically to the MCP / Skills /
+ * Tool-Packs tabs; the builder is the per-entity edit screen.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, ArrowLeft, Trash2, Save, Sparkles, Loader2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Save, Wand2, Drama, Trash2, Pencil } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
+import RegistryPageShell from '@/components/env_management/registry/RegistryPageShell';
+import RegistryGrid from '@/components/env_management/registry/RegistryGrid';
+import RegistryCard, {
+  type RegistryCardBadge,
+} from '@/components/env_management/registry/RegistryCard';
+import RegistryActionButton from '@/components/env_management/registry/RegistryActionButton';
+import RegistryEmptyState from '@/components/env_management/registry/RegistryEmptyState';
 import {
   personaPresetsApi,
   type PersonaPresetSummary,
@@ -39,27 +48,29 @@ const EMPTY: PersonaPresetDefinition = {
 const clone = (d: PersonaPresetDefinition): PersonaPresetDefinition =>
   JSON.parse(JSON.stringify(d));
 
-export default function PersonaPresetsManager({ embedded = false }: { embedded?: boolean }) {
+export default function PersonaPresetsManager() {
   const { t } = useI18n();
   const [presets, setPresets] = useState<PersonaPresetSummary[]>([]);
   const [frameworks, setFrameworks] = useState<PersonaFrameworks | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PersonaPresetDefinition>(clone(EMPTY));
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const p = await personaPresetsApi.list();
       setPresets(p.presets);
       if (!frameworks) setFrameworks(await personaPresetsApi.frameworks());
     } catch (e) {
-      toast.error(t('personaPresets.failed', { error: e instanceof Error ? e.message : String(e) }));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [t, frameworks]);
+  }, [frameworks]);
 
   useEffect(() => {
     void load();
@@ -110,101 +121,68 @@ export default function PersonaPresetsManager({ embedded = false }: { embedded?:
     }
   };
 
-  const wrap = embedded
-    ? 'flex-1 min-h-0 overflow-y-auto px-1 py-1'
-    : 'min-h-screen bg-[hsl(var(--background))] px-4 md:px-8 py-6';
-
   if (mode === 'edit' && frameworks) {
     return (
-      <div className={wrap}>
-        <Editor
-          draft={draft}
-          setDraft={setDraft}
-          frameworks={frameworks}
-          editing={!!editingId}
-          onBack={() => setMode('list')}
-          onSave={save}
-        />
-      </div>
+      <Editor
+        draft={draft}
+        setDraft={setDraft}
+        frameworks={frameworks}
+        editing={!!editingId}
+        onBack={() => setMode('list')}
+        onSave={save}
+      />
     );
   }
 
   return (
-    <div className={wrap}>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-[0.95rem] font-semibold text-[hsl(var(--foreground))] flex items-center gap-2">
-            <Sparkles size={16} className="text-violet-500" />
-            {t('personaPresets.title')}
-          </h2>
-          <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] mt-0.5">
-            {t('personaPresets.subtitle')}
-          </p>
-        </div>
-        <button
-          onClick={openNew}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-[0.8125rem] font-medium transition-colors"
-        >
-          <Plus size={15} /> {t('personaPresets.new')}
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center gap-2 text-[0.8125rem] text-[hsl(var(--muted-foreground))] py-10 justify-center">
-          <Loader2 size={15} className="animate-spin" /> {t('personaPresets.loading')}
-        </div>
-      ) : presets.length === 0 ? (
-        <div className="text-center py-12 border border-dashed border-[hsl(var(--border))] rounded-lg">
-          <p className="text-[0.85rem] font-medium text-[hsl(var(--foreground))]">{t('personaPresets.empty.title')}</p>
-          <p className="text-[0.75rem] text-[hsl(var(--muted-foreground))] mt-1">{t('personaPresets.empty.desc')}</p>
-        </div>
-      ) : (
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {presets.map((p) => (
-            <div
-              key={p.id}
-              className="group rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3.5 hover:border-violet-400/50 transition-colors cursor-pointer flex flex-col"
-              onClick={() => openEdit(p.id)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="text-[0.85rem] font-semibold text-[hsl(var(--foreground))] leading-snug">{p.name}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); void remove(p); }}
-                  className="opacity-0 group-hover:opacity-100 text-[hsl(var(--muted-foreground))] hover:text-rose-500 transition-all shrink-0"
-                  title={t('personaPresets.delete')}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              {p.description && (
-                <p className="text-[0.72rem] text-[hsl(var(--muted-foreground))] mt-1 line-clamp-2">{p.description}</p>
-              )}
-              <div className="flex flex-wrap gap-1 mt-2.5">
-                {p.mbti && <Chip>{p.mbti}</Chip>}
-                {p.enneagram && <Chip>E{p.enneagram}</Chip>}
-                {p.archetype && <Chip>{p.archetype}</Chip>}
-                {p.is_template && <Chip muted>{t('personaPresets.template')}</Chip>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Chip({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
-  return (
-    <span
-      className={
-        'text-[0.65rem] px-1.5 py-0.5 rounded ' +
-        (muted
-          ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
-          : 'bg-violet-500/10 text-violet-600 dark:text-violet-300')
-      }
+    <RegistryPageShell
+      title={t('personaPresets.title')}
+      subtitle={t('personaPresets.subtitle')}
+      icon={Drama}
+      countLabel={presets.length ? `${presets.length}개` : undefined}
+      addLabel={t('personaPresets.new')}
+      onAdd={openNew}
+      onRefresh={() => void load()}
+      loading={loading}
+      error={error}
+      onDismissError={() => setError(null)}
     >
-      {children}
-    </span>
+      {presets.length === 0 && !loading ? (
+        <RegistryEmptyState
+          icon={Drama}
+          title={t('personaPresets.empty.title')}
+          hint={t('personaPresets.empty.desc')}
+          addLabel={t('personaPresets.new')}
+          onAdd={openNew}
+        />
+      ) : (
+        <RegistryGrid>
+          {presets.map((p) => {
+            const badges: RegistryCardBadge[] = [];
+            if (p.mbti) badges.push({ label: p.mbti, tone: 'info' });
+            if (p.enneagram) badges.push({ label: `E${p.enneagram}`, tone: 'neutral' });
+            if (p.archetype) badges.push({ label: p.archetype, tone: 'neutral' });
+            if (p.is_template) badges.push({ label: t('personaPresets.template'), tone: 'neutral' });
+            return (
+              <RegistryCard
+                key={p.id}
+                icon={Drama}
+                title={p.name}
+                description={p.description}
+                badges={badges}
+                onClick={() => void openEdit(p.id)}
+                actions={
+                  <>
+                    <RegistryActionButton icon={Pencil} title={t('personaPresets.update')} variant="primary" onClick={() => void openEdit(p.id)} />
+                    <RegistryActionButton icon={Trash2} title={t('personaPresets.delete')} variant="danger" onClick={() => void remove(p)} />
+                  </>
+                }
+              />
+            );
+          })}
+        </RegistryGrid>
+      )}
+    </RegistryPageShell>
   );
 }
 
@@ -260,101 +238,104 @@ function Editor({
     setDraft({ ...draft, identity: { ...draft.identity, ...p } });
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between sticky top-0 z-10 bg-[hsl(var(--background))] py-1">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-[0.8125rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
+    <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
+      {/* sticky chrome — mirrors RegistryPageShell's hero rhythm */}
+      <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0">
+        <button onClick={onBack} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[0.8125rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors">
           <ArrowLeft size={15} /> {t('personaPresets.back')}
         </button>
-        <button onClick={onSave} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-[0.8125rem] font-medium">
+        <button onClick={onSave} className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-violet-500 hover:bg-violet-600 text-white text-[0.8125rem] font-medium transition-colors shadow-sm">
           <Save size={15} /> {editing ? t('personaPresets.update') : t('personaPresets.create')}
         </button>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* ── left: the builder form ── */}
-        <div className="flex flex-col gap-5">
-          <Section title={t('personaPresets.sections.basic')}>
-            <Text label={t('personaPresets.f.name')} value={draft.name} onChange={(v) => patch({ name: v })} placeholder="예: 밝은 비서" />
-            <Text label={t('personaPresets.f.description')} value={draft.description} onChange={(v) => patch({ description: v })} />
-          </Section>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-[1200px] mx-auto px-6 py-6 grid lg:grid-cols-2 gap-5">
+          {/* ── left: the builder form ── */}
+          <div className="flex flex-col gap-5">
+            <Section title={t('personaPresets.sections.basic')}>
+              <Text label={t('personaPresets.f.name')} value={draft.name} onChange={(v) => patch({ name: v })} placeholder="예: 밝은 비서" />
+              <Text label={t('personaPresets.f.description')} value={draft.description} onChange={(v) => patch({ description: v })} />
+            </Section>
 
-          <Section title={t('personaPresets.sections.framework')}>
-            <div className="grid grid-cols-3 gap-2">
-              <Select label="MBTI" value={draft.mbti} onChange={(v) => patch({ mbti: v })}
-                options={[{ value: '', label: '—' }, ...frameworks.mbti.map((m) => ({ value: m.code, label: `${m.code} ${m.label_ko}` }))]} />
-              <Select label="Enneagram" value={draft.enneagram} onChange={(v) => patch({ enneagram: v })}
-                options={[{ value: '', label: '—' }, ...frameworks.enneagram.map((m) => ({ value: m.code, label: `${m.code} ${m.label_ko}` }))]} />
-              <Select label={t('personaPresets.f.archetype')} value={draft.archetype} onChange={(v) => patch({ archetype: v })}
-                options={[{ value: '', label: '—' }, ...frameworks.archetypes.map((m) => ({ value: m.code, label: m.label_ko }))]} />
-            </div>
-          </Section>
+            <Section title={t('personaPresets.sections.framework')}>
+              <div className="grid grid-cols-3 gap-2">
+                <Select label="MBTI" value={draft.mbti} onChange={(v) => patch({ mbti: v })}
+                  options={[{ value: '', label: '—' }, ...frameworks.mbti.map((m) => ({ value: m.code, label: `${m.code} ${m.label_ko}` }))]} />
+                <Select label="Enneagram" value={draft.enneagram} onChange={(v) => patch({ enneagram: v })}
+                  options={[{ value: '', label: '—' }, ...frameworks.enneagram.map((m) => ({ value: m.code, label: `${m.code} ${m.label_ko}` }))]} />
+                <Select label={t('personaPresets.f.archetype')} value={draft.archetype} onChange={(v) => patch({ archetype: v })}
+                  options={[{ value: '', label: '—' }, ...frameworks.archetypes.map((m) => ({ value: m.code, label: m.label_ko }))]} />
+              </div>
+            </Section>
 
-          <Section title={t('personaPresets.sections.ocean')}>
-            {frameworks.ocean_axes.map((a) => (
-              <Slider key={a.key} label={a.label_ko} low={a.low} high={a.high}
-                value={(draft.ocean as unknown as Record<string, number>)[a.key] ?? 50}
-                onChange={(v) => patchOcean(a.key as keyof PersonaPresetDefinition['ocean'], v)} />
-            ))}
-          </Section>
+            <Section title={t('personaPresets.sections.ocean')}>
+              {frameworks.ocean_axes.map((a) => (
+                <Slider key={a.key} label={a.label_ko} low={a.low} high={a.high}
+                  value={(draft.ocean as unknown as Record<string, number>)[a.key] ?? 50}
+                  onChange={(v) => patchOcean(a.key as keyof PersonaPresetDefinition['ocean'], v)} />
+              ))}
+            </Section>
 
-          <Section title={t('personaPresets.sections.style')}>
-            {frameworks.style_axes.map((a) => (
-              <Slider key={a.key} label={a.label_ko} low={a.low} high={a.high}
-                value={(draft.style as unknown as Record<string, number>)[a.key] ?? 50}
-                onChange={(v) => patchStyle(a.key as keyof PersonaPresetDefinition['style'], v)} />
-            ))}
-          </Section>
+            <Section title={t('personaPresets.sections.style')}>
+              {frameworks.style_axes.map((a) => (
+                <Slider key={a.key} label={a.label_ko} low={a.low} high={a.high}
+                  value={(draft.style as unknown as Record<string, number>)[a.key] ?? 50}
+                  onChange={(v) => patchStyle(a.key as keyof PersonaPresetDefinition['style'], v)} />
+              ))}
+            </Section>
 
-          <Section title={t('personaPresets.sections.speech')}>
-            <Select label={t('personaPresets.f.honorific')} value={draft.speech.honorific} onChange={(v) => patchSpeech({ honorific: v })}
-              options={frameworks.honorifics.map((h) => ({ value: h.code, label: h.label_ko }))} />
-            <Text label={t('personaPresets.f.selfReference')} value={draft.speech.self_reference} onChange={(v) => patchSpeech({ self_reference: v })} placeholder="예: 나, 저, 이름" />
-            <CommaList label={t('personaPresets.f.catchphrases')} value={draft.speech.catchphrases} onChange={(v) => patchSpeech({ catchphrases: v })} />
-            <CommaList label={t('personaPresets.f.verbalTics')} value={draft.speech.verbal_tics} onChange={(v) => patchSpeech({ verbal_tics: v })} />
-          </Section>
+            <Section title={t('personaPresets.sections.speech')}>
+              <Select label={t('personaPresets.f.honorific')} value={draft.speech.honorific} onChange={(v) => patchSpeech({ honorific: v })}
+                options={frameworks.honorifics.map((h) => ({ value: h.code, label: h.label_ko }))} />
+              <Text label={t('personaPresets.f.selfReference')} value={draft.speech.self_reference} onChange={(v) => patchSpeech({ self_reference: v })} placeholder="예: 나, 저, 이름" />
+              <CommaList label={t('personaPresets.f.catchphrases')} value={draft.speech.catchphrases} onChange={(v) => patchSpeech({ catchphrases: v })} />
+              <CommaList label={t('personaPresets.f.verbalTics')} value={draft.speech.verbal_tics} onChange={(v) => patchSpeech({ verbal_tics: v })} />
+            </Section>
 
-          <Section title={t('personaPresets.sections.emotion')}>
-            <Select label={t('personaPresets.f.defaultMood')} value={draft.emotion.default_mood} onChange={(v) => patchEmotion({ default_mood: v })}
-              options={frameworks.emotion_tags.map((tag) => ({ value: tag, label: tag }))} />
-            <Slider label={t('personaPresets.f.expressiveness')} low={t('personaPresets.low')} high={t('personaPresets.high')}
-              value={draft.emotion.expressiveness} onChange={(v) => patchEmotion({ expressiveness: v })} />
-            <TagPicker label={t('personaPresets.f.preferredTags')} all={frameworks.emotion_tags}
-              value={draft.emotion.preferred_tags} onChange={(v) => patchEmotion({ preferred_tags: v })} />
-          </Section>
+            <Section title={t('personaPresets.sections.emotion')}>
+              <Select label={t('personaPresets.f.defaultMood')} value={draft.emotion.default_mood} onChange={(v) => patchEmotion({ default_mood: v })}
+                options={frameworks.emotion_tags.map((tag) => ({ value: tag, label: tag }))} />
+              <Slider label={t('personaPresets.f.expressiveness')} low={t('personaPresets.low')} high={t('personaPresets.high')}
+                value={draft.emotion.expressiveness} onChange={(v) => patchEmotion({ expressiveness: v })} />
+              <TagPicker label={t('personaPresets.f.preferredTags')} all={frameworks.emotion_tags}
+                value={draft.emotion.preferred_tags} onChange={(v) => patchEmotion({ preferred_tags: v })} />
+            </Section>
 
-          <Section title={t('personaPresets.sections.identity')}>
-            <div className="grid grid-cols-2 gap-2">
-              <Text label={t('personaPresets.f.displayName')} value={draft.identity.display_name} onChange={(v) => patchIdentity({ display_name: v })} />
-              <Text label={t('personaPresets.f.ageVibe')} value={draft.identity.age_vibe} onChange={(v) => patchIdentity({ age_vibe: v })} placeholder="예: 또래 친구" />
-            </div>
-            <Text label={t('personaPresets.f.role')} value={draft.identity.role} onChange={(v) => patchIdentity({ role: v })} placeholder="예: 다정한 AI 친구" />
-            <CommaList label={t('personaPresets.f.interests')} value={draft.identity.interests} onChange={(v) => patchIdentity({ interests: v })} />
-            <Area label={t('personaPresets.f.backstory')} value={draft.identity.backstory} onChange={(v) => patchIdentity({ backstory: v })} rows={3} />
-          </Section>
-        </div>
-
-        {/* ── right: live preview + override ── */}
-        <div className="flex flex-col gap-3 lg:sticky lg:top-12 lg:self-start">
-          <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 p-3.5">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[0.78rem] font-semibold text-[hsl(var(--foreground))] flex items-center gap-1.5">
-                <Wand2 size={14} className="text-violet-500" /> {t('personaPresets.preview')}
-              </span>
-              <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))] font-mono">
-                {compiling ? '…' : `${preview.length} chars`}
-              </span>
-            </div>
-            <pre className="whitespace-pre-wrap text-[0.72rem] leading-relaxed text-[hsl(var(--foreground))] font-mono max-h-[40vh] overflow-y-auto">
-              {preview || t('personaPresets.previewEmpty')}
-            </pre>
+            <Section title={t('personaPresets.sections.identity')}>
+              <div className="grid grid-cols-2 gap-2">
+                <Text label={t('personaPresets.f.displayName')} value={draft.identity.display_name} onChange={(v) => patchIdentity({ display_name: v })} />
+                <Text label={t('personaPresets.f.ageVibe')} value={draft.identity.age_vibe} onChange={(v) => patchIdentity({ age_vibe: v })} placeholder="예: 또래 친구" />
+              </div>
+              <Text label={t('personaPresets.f.role')} value={draft.identity.role} onChange={(v) => patchIdentity({ role: v })} placeholder="예: 다정한 AI 친구" />
+              <CommaList label={t('personaPresets.f.interests')} value={draft.identity.interests} onChange={(v) => patchIdentity({ interests: v })} />
+              <Area label={t('personaPresets.f.backstory')} value={draft.identity.backstory} onChange={(v) => patchIdentity({ backstory: v })} rows={3} />
+            </Section>
           </div>
-          <Area
-            label={t('personaPresets.f.override')}
-            hint={t('personaPresets.overrideHint')}
-            value={draft.prompt_override}
-            onChange={(v) => patch({ prompt_override: v })}
-            rows={4}
-          />
+
+          {/* ── right: live preview + override ── */}
+          <div className="flex flex-col gap-3 lg:sticky lg:top-0 lg:self-start">
+            <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[0.78rem] font-semibold text-[hsl(var(--foreground))] flex items-center gap-1.5">
+                  <Wand2 size={14} className="text-[hsl(var(--primary))]" /> {t('personaPresets.preview')}
+                </span>
+                <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))] font-mono">
+                  {compiling ? '…' : `${preview.length} chars`}
+                </span>
+              </div>
+              <pre className="whitespace-pre-wrap text-[0.72rem] leading-relaxed text-[hsl(var(--foreground))] font-mono max-h-[40vh] overflow-y-auto">
+                {preview || t('personaPresets.previewEmpty')}
+              </pre>
+            </div>
+            <Area
+              label={t('personaPresets.f.override')}
+              hint={t('personaPresets.overrideHint')}
+              value={draft.prompt_override}
+              onChange={(v) => patch({ prompt_override: v })}
+              rows={4}
+            />
+          </div>
         </div>
       </div>
     </div>

@@ -207,13 +207,13 @@ export default function EnvManagementShell({
 
       {activeTab === 'sandbox_packs' && (
         <RegistryTabSlot>
-          <SandboxToolPacksManager embedded />
+          <SandboxToolPacksManager />
         </RegistryTabSlot>
       )}
 
       {activeTab === 'persona' && (
         <RegistryTabSlot>
-          <PersonaPresetsManager embedded />
+          <PersonaPresetsManager />
         </RegistryTabSlot>
       )}
 

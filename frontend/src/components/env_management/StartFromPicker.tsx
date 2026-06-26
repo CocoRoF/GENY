@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Boxes, Copy, Pencil, Plus, Sparkles, Star, Trash2, X } from 'lucide-react';
+import { BookOpen, Boxes, Copy, Plus, Sparkles, Star, Trash2, X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -22,6 +22,11 @@ import type { EnvironmentSummary } from '@/types/environment';
 import { ActionButton } from '@/components/layout';
 import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import { presetGuide } from '@/lib/presetGuides';
+import RegistryGrid from '@/components/env_management/registry/RegistryGrid';
+import RegistryCard, {
+  type RegistryCardBadge,
+} from '@/components/env_management/registry/RegistryCard';
+import RegistryActionButton from '@/components/env_management/registry/RegistryActionButton';
 
 export interface StartFromPickerProps {
   /** When true, skip the leading "빈 환경으로 시작" row — the
@@ -122,8 +127,8 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
     <div className="flex flex-col gap-4">
       {/* ── Blank ── (suppressed when the parent surface owns the primary CTA) */}
       {!omitBlankRow && (
-        <div className="flex items-center gap-3 p-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-          <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-500/15 to-purple-500/15 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-3 p-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+          <div className="w-10 h-10 rounded-lg bg-[hsl(var(--primary)/0.1)] flex items-center justify-center shrink-0">
             <Plus className="w-5 h-5 text-[hsl(var(--primary))]" />
           </div>
           <div className="flex-1 min-w-0">
@@ -153,7 +158,7 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
             <Star className="w-3 h-3" />
             {t('envManagement.startFrom.presetsTitle')}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+          <RegistryGrid>
             {presetEnvs.map((env) => (
               <PresetCard
                 key={env.id}
@@ -161,10 +166,9 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
                 onPick={() => handleFromExisting(env.id)}
                 onShowGuide={() => setGuideEnv(env)}
                 disabled={seeding}
-                accent="violet"
               />
             ))}
-          </div>
+          </RegistryGrid>
         </div>
       )}
 
@@ -192,7 +196,7 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+          <RegistryGrid>
             {visibleNonPresets.map((env) => (
               <UserEnvCard
                 key={env.id}
@@ -204,7 +208,7 @@ export default function StartFromPicker({ omitBlankRow = false }: StartFromPicke
                 deleting={deletingId === env.id}
               />
             ))}
-          </div>
+          </RegistryGrid>
         </div>
       )}
 
@@ -276,67 +280,32 @@ function PresetCard({
   onPick,
   onShowGuide,
   disabled,
-  accent,
 }: {
   env: EnvironmentSummary;
   onPick: () => void;
   onShowGuide: () => void;
   disabled: boolean;
-  accent: 'violet' | 'blue';
 }) {
   const { t } = useI18n();
-  const accentClass =
-    accent === 'violet'
-      ? 'border-violet-500/30 hover:border-violet-500'
-      : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]';
-  // A ``div role=button`` (not a ``<button>``) so the footer's "설명보기"
-  // button can nest without invalid button-in-button markup. Body
-  // click/Enter/Space ≙ pick this preset; the guide button stops
-  // propagation. ``h-full`` keeps every card in a row the same height.
+  const badges: RegistryCardBadge[] = [
+    { label: t('envManagement.startFrom.presetBadge'), tone: 'info', icon: Star },
+  ];
   return (
-    <div
-      role="button"
-      tabIndex={disabled ? -1 : 0}
+    <RegistryCard
+      icon={Sparkles}
+      title={env.name}
+      description={env.description || t('envManagement.startFrom.noDescription')}
+      badges={badges}
       onClick={() => { if (!disabled) onPick(); }}
-      onKeyDown={(e) => {
-        if (disabled) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onPick();
-        }
-      }}
-      aria-disabled={disabled}
-      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
-      } ${accentClass}`}
-    >
-      <div className="flex items-center gap-1.5">
-        <Sparkles
-          className={`w-3.5 h-3.5 shrink-0 ${
-            accent === 'violet' ? 'text-violet-500' : 'text-[hsl(var(--primary))]'
-          }`}
+      actions={
+        <RegistryActionButton
+          icon={BookOpen}
+          title={t('envManagement.startFrom.viewGuide')}
+          onClick={onShowGuide}
+          alwaysVisible
         />
-        <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] truncate">
-          {env.name}
-        </span>
-      </div>
-      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed min-h-[2.3rem]">
-        {env.description || t('envManagement.startFrom.noDescription')}
-      </p>
-      <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-[hsl(var(--border))]">
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onShowGuide(); }}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
-        >
-          <BookOpen className="w-3 h-3" />
-          {t('envManagement.startFrom.viewGuide')}
-        </button>
-        <span className="ml-auto text-[0.625rem] text-[hsl(var(--primary))] opacity-0 group-hover:opacity-100 transition-opacity">
-          {t('envManagement.startFrom.useThis')} →
-        </span>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -374,108 +343,39 @@ function UserEnvCard({
   deleting: boolean;
 }) {
   const { t } = useI18n();
-  // Inline 2-click confirm — first click arms, second click deletes. Avoids a
-  // jarring native confirm() while keeping a destructive action behind a guard.
-  const [confirming, setConfirming] = useState(false);
-  // Layout invariants (Phase H polish):
-  //   - ``h-full``    Every card stretches to the row's tallest card
-  //                   so a 1-line and a 2-line description don't end
-  //                   up at different heights side-by-side.
-  //   - description ``line-clamp-2 min-h-[2.3rem]`` reserves space
-  //                   for exactly two lines; a 1-line description
-  //                   still occupies the 2-line slot.
-  //   - action row ``mt-auto`` pins the Edit / Clone buttons to the
-  //                   bottom of the card regardless of description
-  //                   length.
+  // Card body click ≙ Edit (the obvious / most common action). Clone + Delete
+  // live in the action cluster. Delete is guarded by a native confirm — uniform
+  // with the other registry tabs (persona / tool-packs).
+  const badges: RegistryCardBadge[] = (env.tags || [])
+    .slice(0, 3)
+    .map((tag) => ({ label: tag, tone: 'neutral' as const }));
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <RegistryCard
+      icon={Sparkles}
+      title={env.name}
+      description={env.description || t('envManagement.startFrom.noDescription')}
+      badges={badges}
       onClick={() => { if (!disabled) onEdit(); }}
-      onKeyDown={(e) => {
-        if (disabled) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onEdit();
-        }
-      }}
-      className={`group h-full flex flex-col gap-1 p-3 rounded-md border bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] transition-colors text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] ${
-        disabled
-          ? 'opacity-50 cursor-not-allowed'
-          : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
-      }`}
-      aria-disabled={disabled}
-      aria-label={t('envManagement.startFrom.editAriaLabel', { name: env.name })}
-    >
-      <div className="flex items-center gap-1.5">
-        <Sparkles className="w-3.5 h-3.5 shrink-0 text-[hsl(var(--primary))]" />
-        <span className="text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] truncate flex-1">
-          {env.name}
-        </span>
-      </div>
-      <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] line-clamp-2 leading-relaxed min-h-[2.3rem]">
-        {env.description || t('envManagement.startFrom.noDescription')}
-      </p>
-      {env.tags && env.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {env.tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--muted-foreground))]"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-      {/* Action row — both buttons stop click propagation so they
-          don't double-fire the card body's Edit handler. ``mt-auto``
-          pins the row to the card's bottom edge so 1-line and 2-line
-          descriptions present identically. */}
-      <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-[hsl(var(--border))]">
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); if (!disabled) onEdit(); }}
-          disabled={disabled}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary)/0.1)] transition-colors disabled:opacity-50"
-        >
-          <Pencil className="w-3 h-3" />
-          {t('envManagement.startFrom.edit')}
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); if (!disabled) onClone(); }}
-          disabled={disabled}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-50"
-        >
-          <Copy className="w-3 h-3" />
-          {t('envManagement.startFrom.clone')}
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (disabled) return;
-            if (confirming) onDelete();
-            else setConfirming(true);
-          }}
-          onMouseLeave={() => setConfirming(false)}
-          disabled={disabled}
-          aria-label={t('envManagement.startFrom.deleteAriaLabel', { name: env.name })}
-          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium ml-auto transition-colors disabled:opacity-50 ${
-            confirming
-              ? 'text-red-50 bg-red-600 hover:bg-red-700'
-              : 'text-red-600 dark:text-red-400 hover:bg-red-500/10'
-          }`}
-        >
-          <Trash2 className="w-3 h-3" />
-          {deleting
-            ? '…'
-            : confirming
-              ? t('envManagement.startFrom.deleteConfirm')
-              : t('envManagement.startFrom.delete')}
-        </button>
-      </div>
-    </div>
+      actions={
+        <>
+          <RegistryActionButton
+            icon={Copy}
+            title={t('envManagement.startFrom.clone')}
+            onClick={() => { if (!disabled) onClone(); }}
+            disabled={disabled}
+          />
+          <RegistryActionButton
+            icon={Trash2}
+            title={t('envManagement.startFrom.delete')}
+            variant="danger"
+            disabled={disabled || deleting}
+            onClick={() => {
+              if (disabled) return;
+              if (window.confirm(t('envManagement.startFrom.deleteConfirmPrompt', { name: env.name }))) onDelete();
+            }}
+          />
+        </>
+      }
+    />
   );
 }
