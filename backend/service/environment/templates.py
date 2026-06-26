@@ -398,6 +398,7 @@ def create_vtuber_env(
     )
     _declare_owned_subagent(manifest)
     _declare_gapt_subworker(manifest)
+    _declare_persona_preset(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -432,6 +433,24 @@ def _declare_owned_subagent(manifest: "EnvironmentManifest") -> None:
         extras = manifest.host_selections.extras
         if extras.get("owned_subagent") is None:
             extras["owned_subagent"] = {"enabled": True}
+    except Exception:  # noqa: BLE001 — never fail template build on this
+        pass
+
+
+def _declare_persona_preset(manifest: "EnvironmentManifest") -> None:
+    """Attach the default VTuber persona preset to this env.
+
+    Stored at ``host_selections.extras['persona_preset_id']``; at session build
+    the session manager compiles the preset and prepends it to the system prompt
+    (see ``AgentSessionManager._compile_env_persona``). Every VTuber env preset
+    ships with the INTJ/반말 default so a fresh VTuber has a consistent character;
+    the user can swap or clear it in the env editor's Persona panel."""
+    try:
+        from service.persona_presets.templates import VTUBER_DEFAULT_PERSONA_ID
+
+        extras = manifest.host_selections.extras
+        if extras.get("persona_preset_id") is None:
+            extras["persona_preset_id"] = VTUBER_DEFAULT_PERSONA_ID
     except Exception:  # noqa: BLE001 — never fail template build on this
         pass
 
@@ -550,6 +569,7 @@ def create_claude_code_vtuber_env(
     )
     _declare_owned_subagent(manifest)
     _declare_gapt_subworker(manifest)
+    _declare_persona_preset(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -585,6 +605,7 @@ def _backend_env(
     if vtuber:
         _declare_owned_subagent(manifest)
         _declare_gapt_subworker(manifest)
+        _declare_persona_preset(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
