@@ -1,10 +1,10 @@
 """Google Workspace configuration.
 
 Holds the user's Google OAuth client (client_id / client_secret — from their Google
-Cloud "Desktop app / TV & Limited Input" OAuth client) plus the obtained
-``refresh_token``. Connection is done via the OAuth 2.0 **Device Flow** so it works
-on any deployment (no public https redirect URI needed) — see
-``service.google.oauth``.
+Cloud **"Web application"** OAuth client) plus the obtained ``refresh_token``.
+Connection uses the OAuth 2.0 **Authorization Code flow** with a redirect URI on the
+deployment's public domain — required because Google's Device Flow does NOT support
+Workspace scopes (Gmail/Calendar/Drive/Tasks). See ``service.google.oauth``.
 
 Hidden from the generic settings auto-form (``is_user_visible() == False``); a
 dedicated "Google" card + ``controller/google_controller.py`` manage the client
@@ -16,7 +16,7 @@ connected.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import List
 
 from service.config.base import BaseConfig, ConfigField, FieldType, register_config
 
@@ -28,8 +28,12 @@ class GoogleConfig(BaseConfig):
 
     client_id: str = ""
     client_secret: str = ""
-    # Obtained via the device-flow connect; not user-typed.
+    # Obtained via the authorization-code connect; not user-typed.
     refresh_token: str = ""
+    # Transient per-connect state (CSRF) + the redirect URI used to start the
+    # flow — the token exchange must echo the exact same redirect_uri.
+    oauth_state: str = ""
+    oauth_redirect_uri: str = ""
 
     @classmethod
     def get_config_name(cls) -> str:
@@ -54,7 +58,7 @@ class GoogleConfig(BaseConfig):
     @classmethod
     def is_user_visible(cls) -> bool:
         # Managed by the dedicated Google card + OAuth controller, not the
-        # generic auto-form (the refresh_token is set by the device flow).
+        # generic auto-form (the refresh_token is set by the OAuth flow).
         return False
 
     @classmethod
@@ -64,7 +68,7 @@ class GoogleConfig(BaseConfig):
                 name="client_id",
                 field_type=FieldType.PASSWORD,
                 label="OAuth Client ID",
-                description="Google Cloud OAuth client id (Desktop app / TV & Limited Input)",
+                description="Google Cloud OAuth client id (Web application)",
                 group="google",
                 secure=True,
             ),
@@ -80,7 +84,7 @@ class GoogleConfig(BaseConfig):
                 name="refresh_token",
                 field_type=FieldType.PASSWORD,
                 label="Refresh Token",
-                description="Set automatically after connecting via the device flow",
+                description="Set automatically after connecting via the OAuth flow",
                 group="google",
                 secure=True,
             ),

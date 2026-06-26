@@ -4,18 +4,21 @@
  * GoogleSettingsPanel — connect a Google Workspace account from the Geny UI.
  *
  * Rendered as the "Google" virtual Settings category. The operator stores a
- * "Desktop / TV & Limited Input devices" OAuth client (id + secret), then runs
- * the OAuth Device Flow entirely in-browser: Connect → show a short user_code +
- * verification_url → poll until the backend reports the token exchange landed.
- * Once connected, the Gmail / Calendar / Drive / Tasks tools become available
- * to agents automatically. Mirrors GaptSettingsPanel's layout + design tokens.
+ * "Web application" OAuth client (id + secret), registers the page-origin
+ * redirect URI shown below in the client's "Authorized redirect URIs", then
+ * runs the OAuth authorization-code flow in a popup: Connect → fetch the
+ * consent URL → open it in a popup window → the backend's public
+ * /api/google/callback page posts a `google-oauth` message back here on
+ * completion. Once connected, the Gmail / Calendar / Drive / Tasks tools
+ * become available to agents automatically. Mirrors GaptSettingsPanel's
+ * layout + design tokens.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { googleApi, type GoogleConnectResponse } from '@/lib/api';
+import { googleApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { RefreshCw, CheckCircle2, XCircle, ExternalLink, Mail } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, ExternalLink, Mail, Copy, Check } from 'lucide-react';
 
 const inputCls =
   'w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]';
@@ -24,6 +27,11 @@ const btnCls =
   'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
 const primaryBtnCls =
   'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
+
+/** Path the backend exposes as the public OAuth callback page. */
+const CALLBACK_PATH = '/api/google/callback';
+/** Clear `connecting` if no postMessage lands within this window (ms). */
+const CONNECT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export default function GoogleSettingsPanel() {
   const { t } = useI18n();
@@ -38,24 +46,24 @@ export default function GoogleSettingsPanel() {
   const [clientSecret, setClientSecret] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Device flow.
-  const [device, setDevice] = useState<GoogleConnectResponse | null>(null);
+  // Auth-code popup flow.
   const [connecting, setConnecting] = useState(false);
-  const [polling, setPolling] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Poll timers — cleared on cancel / unmount / terminal state.
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Page-origin redirect URI — read from window only after mount to avoid
+  // SSR/hydration mismatch (this is a 'use client' component but it still
+  // renders once on the server with no `window`).
+  const [redirectUri, setRedirectUri] = useState('');
 
-  const clearTimers = useCallback(() => {
-    if (pollTimer.current) {
-      clearInterval(pollTimer.current);
-      pollTimer.current = null;
-    }
-    if (expiryTimer.current) {
-      clearTimeout(expiryTimer.current);
-      expiryTimer.current = null;
+  // Fallback timer that clears `connecting` if the popup is closed / no
+  // postMessage ever arrives.
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearConnectTimer = useCallback(() => {
+    if (connectTimer.current) {
+      clearTimeout(connectTimer.current);
+      connectTimer.current = null;
     }
   }, []);
 
@@ -76,14 +84,32 @@ export default function GoogleSettingsPanel() {
     void loadStatus();
   }, [loadStatus]);
 
-  // Tear down timers on unmount.
-  useEffect(() => () => clearTimers(), [clearTimers]);
+  // Compute the redirect URI client-side after mount.
+  useEffect(() => {
+    setRedirectUri(window.location.origin + CALLBACK_PATH);
+  }, []);
 
-  const stopPolling = useCallback(() => {
-    clearTimers();
-    setPolling(false);
-    setDevice(null);
-  }, [clearTimers]);
+  // Listen for the popup's completion message (posted by the backend
+  // /api/google/callback page via window.opener.postMessage).
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { type?: string; ok?: boolean; error?: string } | null;
+      if (!data || data.type !== 'google-oauth') return;
+      clearConnectTimer();
+      setConnecting(false);
+      if (data.ok) {
+        toast.success(t('googleSettings.connectedToast'));
+        void loadStatus();
+      } else {
+        toast.error(data.error || t('googleSettings.errorToast'));
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [clearConnectTimer, loadStatus, t]);
+
+  // Tear down the fallback timer on unmount.
+  useEffect(() => () => clearConnectTimer(), [clearConnectTimer]);
 
   const onSaveClient = async () => {
     if (!clientId.trim() || !clientSecret.trim()) return;
@@ -100,54 +126,36 @@ export default function GoogleSettingsPanel() {
     }
   };
 
-  const startPolling = useCallback(
-    (dev: GoogleConnectResponse) => {
-      clearTimers();
-      setPolling(true);
-      const intervalMs = Math.max(1, dev.interval || 5) * 1000;
-      pollTimer.current = setInterval(async () => {
-        try {
-          const res = await googleApi.poll(dev.device_code);
-          if (res.status === 'connected') {
-            stopPolling();
-            setConnected(true);
-            toast.success(t('googleSettings.connectedToast'));
-            void loadStatus();
-          } else if (res.status === 'error') {
-            stopPolling();
-            toast.error(res.error || t('googleSettings.errorToast'));
-          }
-          // status === 'pending' → keep polling.
-        } catch (e: any) {
-          stopPolling();
-          toast.error(e?.message || t('googleSettings.errorToast'));
-        }
-      }, intervalMs);
-
-      const expiresMs = Math.max(1, dev.expires_in || 600) * 1000;
-      expiryTimer.current = setTimeout(() => {
-        stopPolling();
-        toast.error(t('googleSettings.timeout'));
-      }, expiresMs);
-    },
-    [clearTimers, stopPolling, loadStatus, t],
-  );
-
-  const onConnect = async () => {
-    setConnecting(true);
+  const onCopyRedirect = async () => {
+    const uri = redirectUri || window.location.origin + CALLBACK_PATH;
     try {
-      const dev = await googleApi.connect();
-      setDevice(dev);
-      startPolling(dev);
-    } catch (e: any) {
-      toast.error(e?.message || t('googleSettings.connectError'));
-    } finally {
-      setConnecting(false);
+      await navigator.clipboard.writeText(uri);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error(t('googleSettings.copyError'));
     }
   };
 
-  const onCancel = () => {
-    stopPolling();
+  const onConnect = async () => {
+    const uri = redirectUri || window.location.origin + CALLBACK_PATH;
+    setConnecting(true);
+    try {
+      const res = await googleApi.authUrl(uri);
+      const popup = window.open(res.auth_url, 'google-oauth', 'width=520,height=640');
+      if (!popup) {
+        setConnecting(false);
+        toast.error(t('googleSettings.popupBlocked'));
+        return;
+      }
+      // Fallback: if no postMessage lands (popup closed manually), stop the
+      // spinner after a generous window.
+      clearConnectTimer();
+      connectTimer.current = setTimeout(() => setConnecting(false), CONNECT_TIMEOUT_MS);
+    } catch (e: any) {
+      setConnecting(false);
+      toast.error(e?.message || t('googleSettings.connectError'));
+    }
   };
 
   const onDisconnect = async () => {
@@ -264,7 +272,7 @@ export default function GoogleSettingsPanel() {
         </div>
       </section>
 
-      {/* Connect / device flow */}
+      {/* Connect / authorization-code popup flow */}
       <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
         <div className="flex items-center gap-2 mb-3">
           <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('googleSettings.connectSection')}</h3>
@@ -279,48 +287,47 @@ export default function GoogleSettingsPanel() {
               <XCircle className="w-3.5 h-3.5" /> {disconnecting ? t('googleSettings.disconnecting') : t('googleSettings.disconnect')}
             </button>
           </div>
-        ) : polling && device ? (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-[var(--text-secondary)]">{t('googleSettings.deviceInstructions')}</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <code className="text-2xl font-mono font-semibold tracking-[0.3em] text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-md px-4 py-2 select-all">
-                {device.user_code}
-              </code>
-              <a
-                href={device.verification_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={primaryBtnCls}
-              >
-                <ExternalLink className="w-3.5 h-3.5" /> {t('googleSettings.openVerification')}
-              </a>
-            </div>
-            <p className="text-xs text-[var(--text-muted)] break-all">
-              {t('googleSettings.verificationUrlLabel')}{' '}
-              <a
-                href={device.verification_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--primary-color)] hover:underline"
-              >
-                {device.verification_url}
-              </a>
-            </p>
-            <div className="flex items-center gap-2 pt-1">
-              <span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t('googleSettings.waiting')}
-              </span>
-              <button onClick={onCancel} className={`${btnCls} ml-auto`}>
-                {t('googleSettings.cancel')}
-              </button>
-            </div>
-          </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <button onClick={onConnect} className={primaryBtnCls} disabled={connecting || !hasClient}>
-              {connecting ? t('googleSettings.connecting') : t('googleSettings.connect')}
-            </button>
-            {!hasClient && <p className="text-xs text-[var(--text-muted)]">{t('googleSettings.connectNeedsClient')}</p>}
+          <div className="flex flex-col gap-3">
+            {/* Redirect URI — MUST be registered in the OAuth client's
+                "Authorized redirect URIs". Shown prominently with copy. */}
+            <div>
+              <label className={labelCls}>{t('googleSettings.redirectUriLabel')}</label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 truncate text-xs font-mono text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-md px-3 py-2 select-all">
+                  {redirectUri || '…'}
+                </code>
+                <button
+                  type="button"
+                  onClick={onCopyRedirect}
+                  className={btnCls}
+                  disabled={!redirectUri}
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? t('googleSettings.copied') : t('googleSettings.copy')}
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-[var(--text-muted)]">{t('googleSettings.redirectUriNote')}</p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button onClick={onConnect} className={primaryBtnCls} disabled={connecting || !hasClient}>
+                {connecting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t('googleSettings.connecting')}
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink className="w-3.5 h-3.5" /> {t('googleSettings.connect')}
+                  </>
+                )}
+              </button>
+              {!hasClient ? (
+                <p className="text-xs text-[var(--text-muted)]">{t('googleSettings.connectNeedsClient')}</p>
+              ) : (
+                <p className="text-xs text-[var(--text-muted)]">{t('googleSettings.connectHelper')}</p>
+              )}
+            </div>
           </div>
         )}
       </section>

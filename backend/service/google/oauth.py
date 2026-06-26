@@ -1,25 +1,31 @@
-"""Google OAuth 2.0 Device Flow + token runtime.
+"""Google OAuth 2.0 Authorization Code Flow + token runtime.
 
-Device flow (RFC 8628) is used so connecting works on ANY deployment — no public
-https redirect URI required. UX: the frontend calls ``start_device_flow`` → shows
-the user a short code + a URL → the user approves on google.com → the frontend
-polls ``poll_once`` until connected. The ``refresh_token`` is then stored in
-:class:`GoogleConfig`; :func:`google_tool_extras` mints a fresh access token per
-session for the executor's ``google_*`` tools.
+The authorization-code flow (with ``access_type=offline`` + ``prompt=consent`` to
+get a refresh token) is used because Google's **Device Flow does NOT support
+Workspace scopes** (Gmail/Calendar/Drive/Tasks → ``invalid_scope``). This needs a
+public https redirect URI — fine now that the deployment has a public domain.
+
+UX: the frontend calls ``build_auth_url`` (passing its own ``window.location.origin
++ /api/google/callback`` as the redirect URI) → opens the returned Google URL in a
+popup → the user approves → Google redirects to ``/api/google/callback`` →
+``exchange_code`` swaps the code for tokens and stores the ``refresh_token`` in
+:class:`GoogleConfig`. :func:`google_tool_extras` then mints a fresh access token
+per session for the executor's ``google_*`` tools.
 
 Sync ``httpx`` calls (short, admin-initiated). No google-api SDK dependency.
 """
 
 from __future__ import annotations
 
+import secrets
 from logging import getLogger
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 logger = getLogger(__name__)
 
-_DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
+_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 
 # Scopes covering the native google_* tools (Gmail / Calendar / Drive / Tasks) +
 # identity. Broad but matched to the tool surface; the user consents once.
@@ -60,42 +66,53 @@ def is_connected() -> bool:
         return False
 
 
-def start_device_flow() -> Dict[str, Any]:
-    """Begin the device flow. Returns user_code / verification_url / device_code /
-    interval / expires_in. Raises ValueError if the OAuth client isn't set."""
-    import httpx
-
+def build_auth_url(redirect_uri: str) -> Dict[str, Any]:
+    """Build the Google consent URL for the authorization-code flow. Stores a
+    fresh CSRF ``state`` + the ``redirect_uri`` (the token exchange must echo the
+    exact same redirect_uri). Raises ValueError if the OAuth client isn't set."""
     cfg = _cfg()
     if not cfg.has_client():
         raise ValueError("Google OAuth client_id/client_secret not set")
-    with httpx.Client(timeout=20) as c:
-        r = c.post(_DEVICE_CODE_URL, data={"client_id": cfg.client_id, "scope": SCOPES})
-        r.raise_for_status()
-        d = r.json()
-    return {
-        "device_code": d["device_code"],
-        "user_code": d["user_code"],
-        "verification_url": d.get("verification_url") or d.get("verification_uri"),
-        "interval": d.get("interval", 5),
-        "expires_in": d.get("expires_in", 1800),
+    if not redirect_uri:
+        raise ValueError("redirect_uri required")
+    state = secrets.token_urlsafe(24)
+    _save({"oauth_state": state, "oauth_redirect_uri": redirect_uri})
+    params = {
+        "client_id": cfg.client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": SCOPES,
+        "access_type": "offline",   # → refresh_token
+        "prompt": "consent",        # force a refresh_token even on re-consent
+        "include_granted_scopes": "true",
+        "state": state,
     }
+    return {"auth_url": f"{_AUTH_URL}?{urlencode(params)}", "redirect_uri": redirect_uri}
 
 
-def poll_once(device_code: str) -> Dict[str, Any]:
-    """Poll the token endpoint once. Returns {status: connected|pending|error}.
-    On 'connected' the refresh_token is saved to GoogleConfig."""
+def exchange_code(code: str, state: str) -> Dict[str, Any]:
+    """Exchange an authorization code for tokens. Verifies the CSRF state, uses
+    the stored redirect_uri, and saves the refresh_token. Returns
+    {status: connected|error}. Clears the transient state regardless."""
     import httpx
 
     cfg = _cfg()
     if not cfg.has_client():
         return {"status": "error", "error": "client_not_set"}
-    with httpx.Client(timeout=20) as c:
-        r = c.post(_TOKEN_URL, data={
-            "client_id": cfg.client_id,
-            "client_secret": cfg.client_secret,
-            "device_code": device_code,
-            "grant_type": _DEVICE_GRANT,
-        })
+    if not state or state != (cfg.oauth_state or ""):
+        return {"status": "error", "error": "state_mismatch"}
+    redirect_uri = cfg.oauth_redirect_uri or ""
+    try:
+        with httpx.Client(timeout=20) as c:
+            r = c.post(_TOKEN_URL, data={
+                "client_id": cfg.client_id,
+                "client_secret": cfg.client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            })
+    finally:
+        _save({"oauth_state": ""})  # single-use
     if r.status_code == 200:
         tok = r.json()
         rt = tok.get("refresh_token")
@@ -103,15 +120,15 @@ def poll_once(device_code: str) -> Dict[str, Any]:
             _save({"refresh_token": rt})
             logger.info("Google connected — refresh_token stored")
             return {"status": "connected"}
+        # No refresh_token: usually a prior consent without prompt=consent.
         return {"status": "error", "error": "no_refresh_token"}
-    # Non-200: pending / slow_down / denied / expired
     err = ""
     try:
-        err = r.json().get("error", "")
+        body = r.json()
+        err = body.get("error_description") or body.get("error", "")
     except Exception:  # noqa: BLE001
         err = f"http_{r.status_code}"
-    if err in ("authorization_pending", "slow_down"):
-        return {"status": "pending"}
+    logger.warning("Google code exchange failed: %s %s", r.status_code, err)
     return {"status": "error", "error": err or "unknown"}
 
 
@@ -159,5 +176,5 @@ def google_tool_extras() -> Optional[Dict[str, Any]]:
 
 def disconnect() -> None:
     """Clear the stored refresh token (keeps the client_id/secret)."""
-    _save({"refresh_token": ""})
+    _save({"refresh_token": "", "oauth_state": "", "oauth_redirect_uri": ""})
     logger.info("Google disconnected — refresh_token cleared")

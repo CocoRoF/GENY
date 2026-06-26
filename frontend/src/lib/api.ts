@@ -1675,12 +1675,14 @@ export const avatarApi = {
 
 // ==================== Google Workspace API ====================
 //
-// Connect a Google account entirely from the UI via the OAuth Device Flow.
-// The operator first stores a "Desktop / TV & Limited Input devices" OAuth
-// client (id + secret), then runs the device-code dance: connect() returns a
-// short user_code + verification_url, the UI polls poll() until the backend
-// reports the token exchange landed. Once connected, the Gmail / Calendar /
-// Drive / Tasks tools become available to agents automatically.
+// Connect a Google account entirely from the UI via the OAuth authorization-code
+// flow in a popup. The operator first stores a "Web application" OAuth client
+// (id + secret), then clicks Connect: the UI fetches authUrl() (passing the
+// page-origin redirect_uri the operator registered in Google Cloud), opens the
+// returned consent URL in a popup, and the backend's public /api/google/callback
+// page posts a `google-oauth` message back to window.opener on completion. Once
+// connected, the Gmail / Calendar / Drive / Tasks tools become available to
+// agents automatically.
 
 export interface GoogleStatus {
   /** An OAuth client (id + secret) has been stored. */
@@ -1694,21 +1696,11 @@ export interface GoogleSetClientResponse {
   has_client: boolean;
 }
 
-export interface GoogleConnectResponse {
-  device_code: string;
-  user_code: string;
-  verification_url: string;
-  /** Seconds between poll attempts. */
-  interval: number;
-  /** Seconds until the device_code expires. */
-  expires_in: number;
-}
-
-export type GooglePollStatus = 'pending' | 'connected' | 'error';
-
-export interface GooglePollResponse {
-  status: GooglePollStatus;
-  error?: string;
+export interface GoogleAuthUrlResponse {
+  /** The Google OAuth consent URL to open in the popup. */
+  auth_url: string;
+  /** Echo of the redirect_uri the URL was built for. */
+  redirect_uri: string;
 }
 
 export const googleApi = {
@@ -1720,15 +1712,17 @@ export const googleApi = {
       method: 'PUT',
       body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
     }),
-  /** POST /api/google/connect — begin the device flow (412 if no client set). */
-  connect: () =>
-    apiCall<GoogleConnectResponse>('/api/google/connect', { method: 'POST' }),
-  /** POST /api/google/poll — poll for the device-flow token exchange. */
-  poll: (deviceCode: string) =>
-    apiCall<GooglePollResponse>('/api/google/poll', {
-      method: 'POST',
-      body: JSON.stringify({ device_code: deviceCode }),
-    }),
+  /**
+   * GET /api/google/auth-url — build the OAuth consent URL for the given
+   * redirect_uri (the page-origin /api/google/callback the operator
+   * registered in Google Cloud). 412 if no client is stored. The returned
+   * auth_url is opened in a popup; the backend callback posts a
+   * `google-oauth` message back to window.opener on completion.
+   */
+  authUrl: (redirectUri: string) =>
+    apiCall<GoogleAuthUrlResponse>(
+      `/api/google/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`,
+    ),
   /** POST /api/google/disconnect — drop the connected account. */
   disconnect: () =>
     apiCall<{ ok: boolean }>('/api/google/disconnect', { method: 'POST' }),
