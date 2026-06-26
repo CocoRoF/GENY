@@ -123,8 +123,11 @@ async def update_preset(
         existing = store.get(preset_id)
     except PersonaPresetNotFound:
         raise HTTPException(404, detail={"code": "persona_preset.not_found", "reason": preset_id})
-    # Editing a built-in template forks it into a user preset (keep id stable).
-    defn.is_template = False if existing.is_template else defn.is_template
+    # Built-in presets are READ-ONLY — clone to customize (preset model). The
+    # template stays put and is re-synced on boot.
+    if existing.is_template:
+        raise HTTPException(403, detail={"code": "persona_preset.read_only", "reason": preset_id})
+    defn.is_template = False
     try:
         saved = store.replace(preset_id, defn.normalized())
     except PersonaPresetNameTaken:
@@ -136,8 +139,13 @@ async def update_preset(
 
 @router.delete("/{preset_id}")
 async def delete_preset(preset_id: str, _auth: dict = Depends(require_auth)) -> Dict[str, Any]:
+    store = get_persona_preset_store()
     try:
-        get_persona_preset_store().delete(preset_id)
+        existing = store.get(preset_id)
     except PersonaPresetNotFound:
         raise HTTPException(404, detail={"code": "persona_preset.not_found", "reason": preset_id})
+    # Built-in presets cannot be deleted (read-only). Only user copies.
+    if existing.is_template:
+        raise HTTPException(403, detail={"code": "persona_preset.read_only", "reason": preset_id})
+    store.delete(preset_id)
     return {"ok": True, "id": preset_id}

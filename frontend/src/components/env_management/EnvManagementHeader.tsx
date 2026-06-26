@@ -116,7 +116,7 @@ const TABS: TabDef[] = [
   {
     id: 'persona',
     icon: Drama,
-    fallbackLabel: '페르소나 프리셋',
+    fallbackLabel: '페르소나',
     fallbackHint: 'MBTI·성격 슬라이더로 캐릭터 성격 만들기 — 환경에 적용',
     key: 'persona',
   },

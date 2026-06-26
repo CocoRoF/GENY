@@ -387,7 +387,7 @@ export function PersonaPresetPicker() {
   return (
     <div className="flex flex-col gap-2">
       <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
-        페르소나 프리셋
+        페르소나
       </label>
       <select
         value={selected}
@@ -406,7 +406,7 @@ export function PersonaPresetPicker() {
         <p className="text-[0.7rem] text-rose-600 dark:text-rose-400 leading-relaxed">{errorText}</p>
       ) : (
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
-          이 환경의 세션에 적용할 페르소나(성격)를 선택합니다. 프리셋은 「페르소나 프리셋」 탭에서 만들 수 있어요.
+          이 환경의 세션에 적용할 페르소나(성격)를 선택합니다. 페르소나는 「페르소나」 탭에서 만들 수 있어요.
         </p>
       )}
     </div>
