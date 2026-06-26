@@ -44,6 +44,7 @@ from typing import (
     FrozenSet,
     List,
     Optional,
+    Tuple,
     Union,
     get_type_hints,
 )
@@ -287,6 +288,12 @@ class BaseTool(_GenyToolExecuteMixin, Tool):
     # Subclasses opt in by setting this; :meth:`capabilities` forwards it to
     # Stage 10, else falls back to the fail-closed default.
     CAPABILITIES: Optional[Any] = None
+    # Progressive disclosure: config-tokens this tool needs to be usable. When
+    # any token is unsatisfied for an environment, the tool is hidden from the
+    # agent (never registered, never sent to the engine). Empty = always
+    # available. Tokens: "config:<name>" / "setting:<key>" / "feature:<flag>"
+    # (see service.executor.tool_config_gate).
+    REQUIRED_CONFIG: ClassVar[Tuple[str, ...]] = ()
     # Per-tool override for the host-injected parameter set. Defaults to
     # the module-level `INJECTED_PARAM_NAMES`. A tool that genuinely wants
     # the LLM to pick a parameter named "session_id" (rare) can clear it.

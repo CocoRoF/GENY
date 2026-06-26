@@ -402,6 +402,23 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return []
 
+    def _env_tool_settings(self, env_id: Optional[str]) -> dict:
+        """The env's per-tool settings map, or ``{}``.
+
+        Stored at ``host_selections.extras.tool_settings`` (key → field values).
+        Used to compute which config-gated tools are satisfied for this env."""
+        if not env_id or self._environment_service is None:
+            return {}
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return {}
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            val = extras.get("tool_settings")
+            return val if isinstance(val, dict) else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def _env_persona_preset_id(self, env_id: Optional[str]) -> Optional[str]:
         """The env's attached Persona Preset id, or ``None``.
 
@@ -945,8 +962,16 @@ class AgentSessionManager:
         adhoc_providers: list = []
         if self._tool_loader is not None:
             from service.executor.geny_tool_provider import GenyToolProvider
+            from service.executor.tool_config_gate import compute_satisfied_config
 
-            adhoc_providers.append(GenyToolProvider(self._tool_loader))
+            # Progressive disclosure: tools whose required config (global config /
+            # per-env tool-settings / feature flags) isn't satisfied are hidden —
+            # GenyToolProvider returns None for them so they never register and
+            # never reach the executor's Agent engine.
+            satisfied_config = compute_satisfied_config(self._env_tool_settings(env_id))
+            adhoc_providers.append(
+                GenyToolProvider(self._tool_loader, satisfied_config=satisfied_config)
+            )
 
         # Capability bridge (inverse MCP): advertise connector capability tools.
         # Inert unless a manifest's tools.external selects one (e.g. connector_ping).

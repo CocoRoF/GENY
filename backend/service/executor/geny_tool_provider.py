@@ -51,40 +51,75 @@ class GenyToolProvider:
     adapter is needed. The legacy ``_GenyToolAdapter`` is gone.
     """
 
-    def __init__(self, tool_loader: Any) -> None:
+    def __init__(
+        self,
+        tool_loader: Any,
+        satisfied_config: Optional[set] = None,
+    ) -> None:
         """Wrap *tool_loader*.
 
         Args:
             tool_loader: An already-loaded
                 :class:`~service.tool_loader.ToolLoader` (has
                 :meth:`get_tool` + :meth:`get_all_names` methods).
+            satisfied_config: The env's satisfied config-token set (see
+                :mod:`service.executor.tool_config_gate`). When provided, a tool
+                whose ``REQUIRED_CONFIG`` tokens are not all satisfied is NOT
+                supplied — it never registers and never reaches the engine
+                (progressive disclosure). ``None`` disables gating (back-compat).
         """
         self._loader = tool_loader
         self._cache: Dict[str, Any] = {}
+        self._satisfied = satisfied_config
+
+    def _available(self, tool: Any) -> bool:
+        from service.executor.tool_config_gate import tool_is_available
+
+        return tool_is_available(tool, self._satisfied)
 
     def list_names(self) -> List[str]:
-        """Names the underlying loader can supply (built-in + custom)."""
+        """Names the loader can supply (built-in + custom), minus any tool gated
+        out by unmet required config."""
         get_all = getattr(self._loader, "get_all_names", None)
         if get_all is not None:
-            return list(get_all())
-        # Fallback for older ToolLoader shapes — keeps Phase C rollout
-        # robust against dev-branch drift.
-        all_tools = getattr(self._loader, "get_all_tools", lambda: {})()
-        return list(all_tools.keys())
+            names = list(get_all())
+        else:
+            # Fallback for older ToolLoader shapes — keeps rollout robust.
+            all_tools = getattr(self._loader, "get_all_tools", lambda: {})()
+            names = list(all_tools.keys())
+        if self._satisfied is None:
+            return names
+        out: List[str] = []
+        for n in names:
+            t = self._loader.get_tool(n)
+            if t is not None and self._available(t):
+                out.append(n)
+        return out
 
     def get(self, name: str) -> Optional[Any]:
-        """Return the executor :class:`Tool` for *name*, or ``None`` if the
-        loader does not supply it.
+        """Return the executor :class:`Tool` for *name*, or ``None`` if the loader
+        doesn't supply it OR its required config is unsatisfied (gated).
 
-        Geny tools are already ``Tool`` instances (BaseTool / ToolWrapper),
-        so this just forwards the loader's tool — no adaptation. Cached per
-        name to keep repeated lookups cheap.
+        Returning ``None`` for a gated tool makes geny-executor skip it during
+        ``_register_external_tools`` — so an unconfigured tool is never registered
+        and never advertised to the model. Geny tools are already ``Tool``
+        instances, so this forwards the loader's tool directly. Only satisfied
+        tools are cached.
         """
         if name in self._cache:
             return self._cache[name]
 
         base = self._loader.get_tool(name)
         if base is None:
+            return None
+
+        if not self._available(base):
+            from service.executor.tool_config_gate import tool_required_config
+
+            logger.info(
+                "🚫 tool gated (unconfigured): %s needs %s — hidden from the agent",
+                name, tool_required_config(base),
+            )
             return None
 
         self._cache[name] = base

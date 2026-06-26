@@ -1026,3 +1026,10 @@ TOOLS = [
     OpsidianReadTool(),
     OpsidianSearchTool(),
 ]
+
+# Progressive disclosure: these tools are useless unless LTM curated-knowledge is
+# enabled, so hide them entirely when it isn't (instead of returning a "not
+# enabled" error at call time). The gate token is satisfied by
+# tool_config_gate.compute_satisfied_config when LTMConfig.curated_knowledge_enabled.
+for _t in TOOLS:
+    _t.REQUIRED_CONFIG = ("feature:curated_knowledge",)
