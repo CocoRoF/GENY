@@ -239,7 +239,11 @@ def _register_connector_configs() -> None:
             "get_config_name": classmethod(lambda cls, _id=c.id: f"connector_{_id}"),
             "get_display_name": classmethod(lambda cls, _n=c.name: _n),
             "get_description": classmethod(lambda cls, _d=c.description: _d),
-            "get_category": classmethod(lambda cls: "connectors"),
+            # Connectors are executor tool settings → filed under the "tools"
+            # config category (same storage as other Tool settings). Kept
+            # is_user_visible=False so they don't clutter the Tool auto-form;
+            # they're managed via the dedicated Connectors card instead.
+            "get_category": classmethod(lambda cls: "tools"),
             "get_icon": classmethod(lambda cls, _i=c.icon: _i),
             "is_user_visible": classmethod(lambda cls: False),
             "get_fields_metadata": classmethod(_fields_meta),

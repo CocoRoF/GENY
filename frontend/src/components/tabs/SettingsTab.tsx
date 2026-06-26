@@ -248,52 +248,7 @@ export default function SettingsTab() {
               <span className="flex-1">{t('settings.llmBackends.navLabel')}</span>
               <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">{llmBackendCount}</span>
             </button>
-            {/* Virtual 'GAPT' category — proxies a connected GAPT instance's own
-                 settings (Cloudflare etc.). Shown ONLY when GAPT is running, so it
-                 vanishes on a GAPT-less deployment. Mirrors the LLM Backends pattern. */}
-            {gaptRunning && (
-              <button
-                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'gapt' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                onClick={() => setSelectedCategory('gapt')}
-              >
-                <span className="flex-1">GAPT</span>
-                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
-              </button>
-            )}
-            {/* Virtual 'Google' category — connect a Google Workspace account
-                 via the OAuth Device Flow entirely from the UI. Always shown
-                 (first-party Geny integration, not gated on an external
-                 service). Mirrors the GAPT category pattern. */}
-            <button
-              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'google' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-              onClick={() => setSelectedCategory('google')}
-            >
-              <span className="flex-1">{t('googleSettings.navLabel')}</span>
-              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
-            </button>
-            {/* Virtual 'Connectors' category — enable + configure MCP ecosystem
-                 connectors (GitHub, Notion, Composio, Slack, Postgres, Brave,
-                 custom HTTP) from the UI. Always shown (first-party Geny
-                 surface). Mirrors the Google category pattern. */}
-            <button
-              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'connectors' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-              onClick={() => setSelectedCategory('connectors')}
-            >
-              <Boxes className="w-4 h-4 shrink-0" />
-              <span className="flex-1">{t('connectors.navLabel')}</span>
-              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
-            </button>
-            {/* Virtual 'Avatar' category — manages a connected geny-avatar's
-                 settings (image-gen keys). Shown only when avatar is running. */}
-            {avatarRunning && (
-              <button
-                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'avatar' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                onClick={() => setSelectedCategory('avatar')}
-              >
-                <span className="flex-1">Avatar</span>
-                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
-              </button>
-            )}
+            {/* ── Geny's own settings (top) ── */}
             {categories.map(cat => {
               const count = configs.filter(c => c.schema?.category === cat.name).length;
               return (
@@ -306,6 +261,48 @@ export default function SettingsTab() {
                 </button>
               );
             })}
+
+            {/* ── External integrations (below the divider) — connect to
+                 services outside Geny: GAPT / Google / MCP connectors / Avatar.
+                 Visually separated from Geny's own settings above. ── */}
+            <div className="shrink-0 md:mt-3 md:pt-3 md:border-t border-[var(--border-color)] mx-2 md:mx-1 self-center md:self-stretch border-l md:border-l-0 pl-2 md:pl-0">
+              <span className="hidden md:block px-2 mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                {t('settings.externalGroup')}
+              </span>
+            </div>
+            {gaptRunning && (
+              <button
+                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'gapt' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                onClick={() => setSelectedCategory('gapt')}
+              >
+                <span className="flex-1">GAPT</span>
+                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+              </button>
+            )}
+            <button
+              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'google' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              onClick={() => setSelectedCategory('google')}
+            >
+              <span className="flex-1">{t('googleSettings.navLabel')}</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+            </button>
+            <button
+              className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'connectors' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              onClick={() => setSelectedCategory('connectors')}
+            >
+              <Boxes className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{t('connectors.navLabel')}</span>
+              <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+            </button>
+            {avatarRunning && (
+              <button
+                className={`whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 py-2 md:py-2.5 px-3 rounded-[var(--border-radius)] text-[0.8125rem] md:text-[0.875rem] font-medium text-left md:mb-1 transition-colors shrink-0 ${selectedCategory === 'avatar' ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                onClick={() => setSelectedCategory('avatar')}
+              >
+                <span className="flex-1">Avatar</span>
+                <span className="text-[0.6875rem] md:text-[0.75rem] text-[var(--text-muted)] bg-[var(--bg-tertiary)] py-[2px] px-2 rounded-[10px]">●</span>
+              </button>
+            )}
           </div>
         </div>
 

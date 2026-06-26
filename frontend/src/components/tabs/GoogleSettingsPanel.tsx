@@ -31,6 +31,7 @@ export default function GoogleSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [hasClient, setHasClient] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(true);
 
   // Client (write-only) inputs.
   const [clientId, setClientId] = useState('');
@@ -184,6 +185,34 @@ export default function GoogleSettingsPanel() {
       </div>
 
       <p className="text-sm text-[var(--text-secondary)]">{t('googleSettings.subtitle')}</p>
+
+      {/* Setup guide — precise one-time steps to create the OAuth client.
+          Open by default until a client is stored; collapsible afterwards. */}
+      <details
+        open={guideOpen}
+        onToggle={(e) => setGuideOpen((e.currentTarget as HTMLDetailsElement).open)}
+        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4"
+      >
+        <summary className="text-sm font-semibold text-[var(--text-primary)] cursor-pointer select-none">
+          {t('googleSettings.guideTitle')}
+        </summary>
+        <ol className="mt-3 flex flex-col gap-2 text-xs text-[var(--text-secondary)] list-decimal pl-5 leading-relaxed">
+          <li>{t('googleSettings.guideStep1')}</li>
+          <li>{t('googleSettings.guideStep2')}</li>
+          <li>{t('googleSettings.guideStep3')}</li>
+          <li className="text-[var(--text-primary)] font-medium">{t('googleSettings.guideStep4')}</li>
+          <li>{t('googleSettings.guideStep5')}</li>
+          <li>{t('googleSettings.guideStep6')}</li>
+        </ol>
+        <a
+          href="https://console.cloud.google.com/apis/credentials"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${primaryBtnCls} mt-3`}
+        >
+          <ExternalLink className="w-3.5 h-3.5" /> {t('googleSettings.guideOpenConsole')}
+        </a>
+      </details>
 
       {/* OAuth client */}
       <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
