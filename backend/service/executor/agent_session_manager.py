@@ -1099,12 +1099,23 @@ class AgentSessionManager:
             lifecycle_tools = []
         _extra_tools = list(dict.fromkeys([*lifecycle_tools, *pack_tool_names]))
 
+        # MCP connectors (config-gated): inject configured connectors' MCP servers
+        # so the executor connects them + their tools appear. Only enabled +
+        # fully-configured connectors are returned (the gate is omission).
+        try:
+            from service.mcp_connectors import configured_mcp_servers
+
+            _extra_mcp = configured_mcp_servers()
+        except Exception:  # noqa: BLE001 — never block session build on this
+            _extra_mcp = []
+
         prebuilt_pipeline = await self._environment_service.instantiate_pipeline(
             env_id,
             credentials=credentials,
             subagent_registry=subagent_registry,
             adhoc_providers=adhoc_providers,
             extra_external_tools=_extra_tools,
+            extra_mcp_servers=_extra_mcp,
             satisfied_config=satisfied_config,
         )
         logger.info(

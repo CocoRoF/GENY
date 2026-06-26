@@ -745,6 +745,7 @@ class EnvironmentService:
         strict: bool = True,
         adhoc_providers: Sequence[Any] = (),
         extra_external_tools: Sequence[str] = (),
+        extra_mcp_servers: Sequence[Any] = (),
         satisfied_config: Optional[Any] = None,
     ) -> Pipeline:
         """Load the manifest and build a Pipeline via the library helper.
@@ -785,6 +786,18 @@ class EnvironmentService:
             existing = list(getattr(manifest.tools, "external", None) or [])
             merged = existing + [t for t in extra_external_tools if t not in existing]
             manifest.tools.external = merged
+        # MCP connectors (config-gated): append configured connectors' MCP server
+        # dicts to mcp_servers so the executor connects them + their tools appear.
+        # Gate is omission — only configured connectors are passed in (see
+        # service.mcp_connectors). Dedup by name; env-defined servers win.
+        if extra_mcp_servers:
+            existing_srv = list(getattr(manifest.tools, "mcp_servers", None) or [])
+            have = {s.get("name") for s in existing_srv if isinstance(s, dict)}
+            for srv in extra_mcp_servers:
+                if isinstance(srv, dict) and srv.get("name") and srv["name"] not in have:
+                    existing_srv.append(srv)
+                    have.add(srv["name"])
+            manifest.tools.mcp_servers = existing_srv
         # Route providers to the correct executor channel by capability:
         #   * get-style (``get`` + ``list_names``) → ``adhoc_providers`` —
         #     resolve manifest.tools.external by name (GenyToolProvider, …).

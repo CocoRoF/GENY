@@ -47,6 +47,7 @@ from controller.custom_tools_controller import router as custom_tools_router  # 
 from controller.sandbox_tool_packs_controller import router as sandbox_tool_packs_router  # Sandbox Tool Packs
 from controller.persona_presets_controller import router as persona_presets_router  # Persona Presets
 from controller.google_controller import router as google_router  # Google Workspace OAuth
+from controller.connectors_controller import router as connectors_router  # MCP connectors
 from controller.sandbox_observability_controller import router as sandbox_observability_router  # Sandbox Logs
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
@@ -223,6 +224,16 @@ async def lifespan(app: FastAPI):
         logger.info("   - Auth service: disabled (no database)")
 
     config_manager = get_config_manager()
+
+    # Register MCP connector configs (one hidden BaseConfig per connector, built
+    # from the catalog) so they persist + appear in compute_satisfied_config + the
+    # /api/config endpoints. Must run before set_database so the tables include them.
+    try:
+        from service.mcp_connectors import ensure_registered as _register_connectors
+        _register_connectors()
+        logger.info("   - MCP connectors: catalog registered")
+    except Exception as _e:  # noqa: BLE001
+        logger.warning(f"   - MCP connectors registration skipped: {_e}")
 
     # Connect database to config manager if available
     if app_db is not None:
@@ -899,6 +910,7 @@ app.include_router(custom_tools_router)  # Custom tools CRUD (Phase B — DB-bac
 app.include_router(sandbox_tool_packs_router)  # Sandbox Tool Packs (env+tools+skills bundles)
 app.include_router(persona_presets_router)  # Persona Presets (reusable persona definitions)
 app.include_router(google_router)  # Google Workspace (OAuth device flow + native tools)
+app.include_router(connectors_router)  # MCP connectors (ecosystem registry)
 app.include_router(sandbox_observability_router)  # Sandbox Logs (snapshot activity/diff viewer)
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)
