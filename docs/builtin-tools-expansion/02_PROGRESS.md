@@ -48,9 +48,20 @@ appends them to `manifest.tools.mcp_servers` (gate = omission). API
 **The `custom_http` connector = connect ANY remote MCP server from the UI** (the
 universal escape hatch). Adding more connectors = one catalog entry.
 
-## Remaining (now trivial — catalog entries or native tools)
-- Phase 3 (communication/data): Slack/Postgres/Brave already in the catalog; email
-  (SMTP) = a small native tool or MCP; generic HTTP = custom_http connector / WebFetch.
-- Phase 4 (VTuber): OBS / Twitch / YouTube-Live / Chzzk — most have MCP servers →
-  add to the catalog (HTTP ones work immediately; stdio need node). Screen-observe is
-  native (already has the screen-observation trigger system).
+## Phase 3 — communication / data ✅ DONE (deploying)
+- Native tools (Geny BaseTool, gated via Phase 0, no executor release): **email_send**
+  (SMTP stdlib, gated `config:email`; EmailConfig auto-form in Settings→Tool) +
+  **http_request** (generic authenticated REST GET/POST/PUT/PATCH/DELETE, ungated).
+- Catalog accuracy (most official npx reference servers archived in 2025): notion →
+  token-based npx `@notionhq/notion-mcp-server` (hosted = OAuth); brave →
+  `@brave/brave-search-mcp-server`; added **filesystem** (maintained npx). Now 8
+  connectors. Slack/Postgres = best-effort archived npx.
+
+## Phase 4 — VTuber real-time (OBS / Twitch / YouTube / Chzzk / screen)
+- **Reachable today via the `custom_http` connector** for any MCP server they expose.
+- Native real-time integrations (OBS websocket control, Twitch/YouTube/Chzzk live-chat
+  ingestion, screen capture) need the user's platform accounts/creds and a running
+  target to test — they are platform-credential follow-ups; the framework + custom_http
+  cover the connect path. (Screen-observation trigger system already exists.)
+- To add a specific one natively: same pattern as Google (executor/Geny native tool +
+  config + gate) or a catalog connector if an MCP server exists.
