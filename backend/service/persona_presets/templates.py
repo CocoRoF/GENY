@@ -113,11 +113,16 @@ _RETIRED_PERSONA_IDS = (
 
 
 def install_persona_templates(store: PersonaPresetStore) -> int:
-    """Seed built-in presets. New ids are inserted; an existing one still flagged
-    ``is_template=True`` is re-synced to the shipped definition so updates
-    propagate on deploy; retired ids that are still untouched templates are
-    deleted. Presets the user has edited (forked to ``is_template=False``, same
-    id) are never touched. Returns the count newly inserted."""
+    """Seed built-in presets and keep them canonical.
+
+    Built-in ids are READ-ONLY (the API forbids editing/deleting a template, and
+    customizing clones to a NEW id), so a built-in id never holds user data — we
+    therefore ALWAYS re-sync each built-in to its shipped definition on boot
+    (is_template=True). This self-heals any drift (e.g. a row whose is_template
+    flipped, or a malformed/unreadable row) so the defaults — including the
+    VTuber default every VTuber env references — can't silently go missing or
+    become deletable. Retired ids are pruned (only if still untouched templates,
+    to preserve any legacy user fork). Returns the count newly inserted."""
     for rid in _RETIRED_PERSONA_IDS:
         try:
             if store.exists(rid) and store.get(rid).is_template:
@@ -129,13 +134,19 @@ def install_persona_templates(store: PersonaPresetStore) -> int:
     for factory in _FACTORIES:
         preset = factory()
         try:
-            if not store.exists(preset.id):
+            if store.exists(preset.id):
+                store.replace(preset.id, preset)  # always re-sync to canonical
+            else:
                 store.save(preset)
                 installed += 1
-            elif store.get(preset.id).is_template:
-                store.replace(preset.id, preset)
-        except Exception:  # noqa: BLE001 — one bad seed must not block boot
-            continue
+        except Exception:  # noqa: BLE001
+            # exists-but-unreadable (malformed) or other drift → hard reset the row
+            try:
+                store.force_delete(preset.id)
+                store.save(preset)
+                installed += 1
+            except Exception:  # noqa: BLE001 — one bad seed must not block boot
+                continue
     return installed
 
 

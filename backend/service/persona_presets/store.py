@@ -134,6 +134,14 @@ class PersonaPresetStore:
         )
         logger.info("PersonaPresetStore: deleted preset_id=%s", preset_id)
 
+    def force_delete(self, preset_id: str) -> None:
+        """Delete by id WITHOUT the get() guard — for the boot installer to clear a
+        malformed/unreadable row before re-seeding. Never raises NotFound."""
+        db = self._require_db()
+        db.db_manager.execute_update_delete(
+            "DELETE FROM persona_presets WHERE preset_id = %s", (preset_id,)
+        )
+
 
 _store: Optional[PersonaPresetStore] = None
 
