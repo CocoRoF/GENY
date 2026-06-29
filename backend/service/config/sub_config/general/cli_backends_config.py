@@ -97,7 +97,11 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
     allow_tools_csv: str = ""              # comma-separated --allowedTools
     disallow_tools_csv: str = ""           # comma-separated --disallowedTools
     extra_args_csv: str = ""               # extra argv flags
-    timeout_s: float = 300.0
+    # Per-CLI-call wall-clock budget. The Claude Code CLI runs a FULL agentic
+    # tool-loop per invocation (sub-agent tasks routinely run many minutes), so
+    # 300s was far too tight — it killed long sub-agent work mid-run with
+    # "stream readline timeout". Default to 1h; tunable up to 4h.
+    timeout_s: float = 3600.0
 
     _ENV_MAP = {
         "enabled": "CLAUDE_CODE_ENABLED",
@@ -273,10 +277,12 @@ class CLIBackendClaudeCodeConfig(BaseConfig):
                 name="timeout_s",
                 field_type=FieldType.NUMBER,
                 label="Timeout (seconds)",
-                description="Per-call wall-clock timeout. Default 300s.",
-                default=300.0,
+                description="Per-call wall-clock timeout covering the CLI's full "
+                "agentic tool-loop (incl. sub-agent / sub-worker delegation, which "
+                "can run many minutes). Default 3600s (1h); raise for very long tasks.",
+                default=3600.0,
                 min_value=10.0,
-                max_value=3600.0,
+                max_value=14400.0,
                 group="claude_code",
             ),
         ]

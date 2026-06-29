@@ -297,7 +297,9 @@ class CredentialBundleBuilder:
             "allow_tools": allow_tools,
             "disallow_tools": disallow_tools,
             "extra_args": _split_csv(claude_cli.extra_args_csv),
-            "timeout_s": float(claude_cli.timeout_s) if claude_cli.timeout_s else 300.0,
+            # Default 1h (not 300s): the CLI runs a full agentic tool-loop per
+            # call, and sub-agent / sub-worker tasks routinely exceed 5 minutes.
+            "timeout_s": float(claude_cli.timeout_s) if claude_cli.timeout_s else 3600.0,
         }
         if claude_cli.max_budget_usd and claude_cli.max_budget_usd > 0:
             extras["max_budget_usd"] = float(claude_cli.max_budget_usd)
