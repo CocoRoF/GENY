@@ -1587,6 +1587,39 @@ export const cronApi = {
   status: () => apiCall<CronStatusResponse>('/api/cron/status'),
 };
 
+// ==================== Hooks (user automation) API ====================
+// Agent-created automations. Created via the HookCreate tool in chat (no create
+// endpoint here); this client just lists / pauses / deletes them.
+
+export interface HookRecord {
+  name: string;
+  kind: string; // "schedule" | "event"
+  cron_expr: string;
+  status: string; // "enabled" | "disabled"
+  description?: string | null;
+  action_prompt?: string | null;
+  session_id?: string | null;
+  last_fired_at?: string | null;
+  next_fire_at?: string | null;
+}
+
+export const hooksApi = {
+  list: (sessionId?: string) =>
+    apiCall<HookRecord[]>(
+      `/api/automations${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`,
+    ),
+  setStatus: (name: string, status: 'enabled' | 'disabled') =>
+    apiCall<HookRecord>(`/api/automations/${encodeURIComponent(name)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  delete: (name: string) =>
+    apiCall<{ deleted: string; ok: boolean }>(
+      `/api/automations/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
+    ),
+};
+
 // ==================== Command API ====================
 
 import type { PromptListResponse, SessionLogsResponse } from '@/types';

@@ -112,7 +112,15 @@ const en = {
     vtuber: 'VTuber',
     playground2d: 'Playground 2D',
     tasks: 'Tasks',
-    cron: 'Cron',
+  },
+
+  hooksAutomation: {
+    empty: 'No hooks yet.',
+    emptyHint: 'Create one conversationally in chat.\ne.g. "every morning at 9am, find ~~ and tell me" · "tell me when ~~ emails me"',
+    pause: 'Pause',
+    resume: 'Resume',
+    deleted: 'Deleted',
+    confirmDelete: 'Delete hook "{name}"?',
   },
 
   // ─── Sidebar ───

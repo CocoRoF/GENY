@@ -263,7 +263,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       toolSets: 'mcp', // ToolSets tab dissolved; closest replacement is MCP
       toolCatalog: 'mcp',
       permissions: 'permissions',
-      hooks: 'hooks',
+      // NOTE: `hooks` is NOT redirected — it is now the top-level user-automation
+      // ("Hooks") session tab. The env-management lifecycle-hooks editor moved
+      // under /environments and is reached via its own Link, not this id.
       skills: 'skills',
       mcpServers: 'mcp',
     };

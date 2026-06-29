@@ -29,7 +29,7 @@ from fastapi.templating import Jinja2Templates
 from controller.command_controller import router as command_router, get_prompts_list
 from controller.agent_controller import router as agent_router, agent_manager
 from controller.agent_tasks_controller import router as agent_tasks_router
-from controller.cron_controller import router as cron_router
+from controller.hook_automation_controller import router as hooks_router
 from controller.slash_commands_controller import router as slash_router
 from controller.config_controller import router as config_router
 from controller.tool_settings_controller import router as tool_settings_router
@@ -52,7 +52,7 @@ from controller.sandbox_observability_controller import router as sandbox_observ
 from controller.skills_controller import router as skills_router
 from controller.admin_controller import router as admin_router
 from controller.permission_controller import router as permission_router  # PR-E.2.1
-from controller.hook_controller import router as hook_router  # PR-E.3.1
+from controller.hook_controller import router as hook_router  # PR-E.3.1 (env lifecycle hooks — removal pending)
 from controller.agent_workspace_controller import router as agent_workspace_router  # PR-E.4.3
 from controller.framework_settings_controller import router as framework_settings_router  # PR-F.1.x
 from controller.subagent_type_controller import router as subagent_type_router  # PR-F.3.1
@@ -892,7 +892,7 @@ app.include_router(auth_router)  # Auth (must be first — no auth guard on itse
 app.include_router(command_router)
 app.include_router(agent_router)  # geny-executor agent sessions
 app.include_router(agent_tasks_router)  # background tasks REST (PR-A.5.4)
-app.include_router(cron_router)  # cron REST (PR-A.8.3)
+app.include_router(hooks_router)  # Hooks (user automation) REST — agent-created
 app.include_router(slash_router)  # slash commands REST (PR-A.6.2)
 app.include_router(config_router)  # Configuration management
 app.include_router(tool_settings_router)  # Per-environment tool settings schemas
@@ -915,7 +915,7 @@ app.include_router(sandbox_observability_router)  # Sandbox Logs (snapshot activ
 app.include_router(skills_router)  # Skills (SKILL.md registry) API
 app.include_router(admin_router)  # Admin viewers — permissions/hooks (G13)
 app.include_router(permission_router)  # Permission rules CRUD (PR-E.2.1)
-app.include_router(hook_router)  # Hook entries CRUD (PR-E.3.1)
+app.include_router(hook_router)  # Hook entries CRUD (PR-E.3.1) — env lifecycle hooks, removal pending
 app.include_router(agent_workspace_router)  # Per-agent workspace stack (PR-E.4.3)
 app.include_router(framework_settings_router)  # Framework settings sections (PR-F.1.x)
 app.include_router(subagent_type_router)  # Subagent types viewer (PR-F.3.1)

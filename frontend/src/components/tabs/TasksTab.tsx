@@ -17,14 +17,13 @@ import Selector, { type SelectorItem } from '@/components/ui/Selector';
 import {
   backgroundTaskApi,
   BackgroundTaskRecord,
-  cronApi,
   commandApi,
   subagentTypeApi,
   SubagentTypeRow,
   adminTelemetryApi,
 } from '@/lib/api';
 import type { LogEntry } from '@/types';
-import { RefreshCw, Square, Eye, Plus, Clock, ListChecks, ChevronLeft, FileText, Activity } from 'lucide-react';
+import { RefreshCw, Square, Eye, Plus, ListChecks, ChevronLeft, FileText, Activity } from 'lucide-react';
 import {
   TabShell,
   EditorModal,
@@ -190,32 +189,6 @@ export function TasksTab() {
     }
   };
 
-  // PR-F.3.3 — schedule a row as a recurring cron job. Convention:
-  // jobs land with name `task-<task_id_prefix>` so the operator can
-  // see the link in CronTab.
-  const handleSchedule = async (row: BackgroundTaskRecord) => {
-    if (!sessionId) return;
-    const cronExpr = window.prompt(
-      'Cron expression (e.g. "*/30 * * * *" for every 30 minutes):',
-      '0 * * * *',
-    );
-    if (!cronExpr) return;
-    try {
-      await cronApi.create({
-        name: `task-${row.task_id.slice(0, 12)}`,
-        cron_expr: cronExpr,
-        target_kind: row.kind,
-        payload: { ...row.payload, scheduled_from_task: row.task_id },
-        description: `Cloned from background task ${row.task_id}`,
-      });
-      toast.success(`Scheduled as task-${row.task_id.slice(0, 12)}`, {
-        description: 'View it in the Cron tab.',
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
   if (!sessionId) {
     return (
       <TabShell title="Background Tasks" icon={ListChecks}>
@@ -330,18 +303,6 @@ export function TasksTab() {
                         <RowAction icon={Eye} onClick={() => setDetailRow(row)} title="View output + tool trail">
                           Output
                         </RowAction>
-                        {/* Schedule turns a re-runnable task into a cron. A
-                            sub-agent task is a one-shot mirror (runs in the
-                            SubAgentManager, not the task runner) → hide it. */}
-                        {row.kind !== 'subagent' && (
-                          <RowAction
-                            icon={Clock}
-                            onClick={() => handleSchedule(row)}
-                            title="Schedule a recurring cron job with the same payload"
-                          >
-                            Schedule
-                          </RowAction>
-                        )}
                         <RowAction
                           icon={Square}
                           danger

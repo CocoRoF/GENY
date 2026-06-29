@@ -55,7 +55,7 @@ const SESSION_TAB_DEFS = [
   { id: 'command', accent: true },
   { id: 'vtuber', accent: true },
   { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
-  { id: 'cron' },      // PR-D.3.1 — CronRunner viewer (runtime state, stays separate)
+  { id: 'hooks' },     // user automations — agent-created (HookCreate); replaces the old Cron tab
   { id: 'storage' },
   {
     id: 'memory',

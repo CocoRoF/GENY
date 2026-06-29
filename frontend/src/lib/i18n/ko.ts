@@ -112,7 +112,16 @@ const ko: Translations = {
     vtuber: 'VTuber',
     playground2d: '플레이그라운드 2D',
     tasks: '작업',
-    cron: '스케줄',
+  },
+
+  // ─── Hooks (자동화) 탭 ───
+  hooksAutomation: {
+    empty: '아직 등록된 훅이 없어요.',
+    emptyHint: "채팅에서 자연어로 만들 수 있어요.\n예) \"매일 아침 9시에 ~~ 찾아서 알려줘\" · \"메일에서 ~~ 오면 알려줘\"",
+    pause: '일시중지',
+    resume: '재개',
+    deleted: '삭제됨',
+    confirmDelete: '훅 "{name}" 을(를) 삭제할까요?',
   },
 
   // ─── Sidebar ───
