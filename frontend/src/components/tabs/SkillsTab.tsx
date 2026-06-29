@@ -276,7 +276,9 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
     <button
       type="button"
       onClick={onToggleEnabled}
-      title={`user_skills_enabled: ${userSkillsEnabled ? 'true' : 'false'} — 클릭하여 토글`}
+      title={t('skillsTab.toggleHint', {
+        value: userSkillsEnabled ? 'true' : 'false',
+      })}
       className={`inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.6875rem] font-medium border transition-colors ${
         userSkillsEnabled
           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15'
@@ -366,15 +368,11 @@ export function SkillsTab(_props: SkillsTabProps = {}) {
           )}
           {grouped.sample.length > 0 && (
             <RegistrySection
-              label={
-                t('envManagement.registry.skills.sectionSample', {}) ||
-                'CUSTOM 샘플'
-              }
+              label={t('envManagement.registry.skills.sectionSample')}
               count={grouped.sample.length}
-              description={
-                t('envManagement.registry.skills.sectionSampleHint', {}) ||
-                'Geny가 제공하는 학습용 템플릿 — Copy 버튼으로 내 skills 로 가져가서 편집하세요'
-              }
+              description={t(
+                'envManagement.registry.skills.sectionSampleHint',
+              )}
             >
               {grouped.sample.map((s, i) => (
                 <SkillCard

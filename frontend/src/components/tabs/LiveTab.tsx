@@ -109,10 +109,10 @@ export default function LiveTab() {
             type="button"
             onClick={() => setBakedImportsOpen(true)}
             className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[0.6875rem] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] cursor-pointer transition-colors"
-            title="Avatar Editor 에서 보낸 baked puppet 가져오기"
+            title={t('vtuber.importBakedTitle')}
           >
             <Inbox size={11} />
-            가져오기
+            {t('vtuber.importBaked')}
           </button>
         </div>
 

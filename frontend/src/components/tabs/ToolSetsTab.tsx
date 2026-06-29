@@ -4,7 +4,7 @@
  * ToolSetsTab — unified preset manager (Tool Sets + Tool Catalog merged).
  *
  * Single screen, two panes:
- *   left  — preset list (templates + user presets) + "📖 카탈로그" entry
+ *   left  — preset list (templates + user presets) + "Catalog" entry
  *   right — selected preset's editor, or read-only catalog browser
  *
  * The framework tool catalog is no longer a separate tab; it's a sidebar

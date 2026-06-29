@@ -4,7 +4,7 @@
  * TriggersTab — list + editor for VTuber trigger presets.
  *
  * Mirrors the registry-tab pattern (MCP / Skills / Hooks): a hero
- * shell with cards for each saved preset, an "+ 새 드래프트" button
+ * shell with cards for each saved preset, an "+ New draft" button
  * that creates a default-seeded preset and opens the editor, and a
  * sibling editor view that owns the timing / phases / categories /
  * prompts UI.
@@ -33,6 +33,7 @@ import {
   RegistrySection,
 } from '@/components/env_management/registry';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
+import { useI18n } from '@/lib/i18n';
 import type {
   TriggerPresetDetail,
   TriggerPresetSummary,
@@ -46,6 +47,7 @@ type EditorMode =
   | { kind: 'edit'; presetId: string };
 
 export function TriggersTab() {
+  const { t } = useI18n();
   const [presets, setPresets] = useState<TriggerPresetSummary[]>([]);
   const [defaultPresetId, setDefaultPresetId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,8 +75,8 @@ export function TriggersTab() {
 
   useEffect(() => {
     void refresh();
-    // Cache the bundled defaults once — reused as a seed for "+ 새 드래프트"
-    // and as the body of the synthetic "기본값" preview card.
+    // Cache the bundled defaults once — reused as a seed for "+ New draft"
+    // and as the body of the synthetic "default" preview card.
     triggerPresetApi
       .defaults()
       .then(setDefaultsTemplate)
@@ -110,7 +112,7 @@ export function TriggersTab() {
     async (summary: TriggerPresetSummary) => {
       setError(null);
       try {
-        const newName = `${summary.name} (복사본)`;
+        const newName = `${summary.name} (${t('triggersTab.duplicateSuffix')})`;
         await triggerPresetApi.duplicate(summary.id, newName);
         await refresh();
       } catch (err) {
@@ -138,8 +140,7 @@ export function TriggersTab() {
   const onReset = useCallback(
     async (summary: TriggerPresetSummary) => {
       const ok = window.confirm(
-        `"${summary.name}" 의 모든 설정을 기본값으로 되돌릴까요?\n` +
-          '타이밍 / 페이즈 / 카테고리 / 프롬프트가 모두 초기화됩니다.',
+        t('triggersTab.resetConfirm', { name: summary.name }),
       );
       if (!ok) return;
       setError(null);
@@ -170,13 +171,15 @@ export function TriggersTab() {
             )
             .join('\n');
           const ok = window.confirm(
-            `이 프리셋은 현재 ${used.active_count}개의 세션이 사용 중입니다:\n${sessionList}\n\n` +
-              '삭제하면 해당 세션들은 자동으로 기본 트리거 동작으로 되돌아갑니다. 계속할까요?',
+            t('triggersTab.deleteInUseConfirm', {
+              count: used.active_count,
+              sessions: sessionList,
+            }),
           );
           if (!ok) return;
         } else {
           const ok = window.confirm(
-            `"${summary.name}" 프리셋을 삭제할까요?`,
+            t('triggersTab.deleteConfirm', { name: summary.name }),
           );
           if (!ok) return;
         }
@@ -192,10 +195,10 @@ export function TriggersTab() {
   // ── Sectioning ──────────────────────────────────────────────────
   // Three groups, mirroring the env-management view (built-in presets
   // vs "start from an existing env"):
-  //   bundled  — the in-code default preset Geny ships ("기본 프리셋").
-  //   featured — `preset`-tagged shareable presets ("공유 프리셋").
-  //   mine     — everything the operator authored ("내 프리셋").
-  // The bundled default must NOT sit under "내 프리셋" — it isn't the
+  //   bundled  — the in-code default preset Geny ships ("Default presets").
+  //   featured — `preset`-tagged shareable presets ("Shared presets").
+  //   mine     — everything the operator authored ("My presets").
+  // The bundled default must NOT sit under "My presets" — it isn't the
   // operator's, it's Geny's built-in.
 
   const sections = useMemo(() => {
@@ -235,20 +238,12 @@ export function TriggersTab() {
 
   return (
     <RegistryPageShell
-      title="트리거 프리셋"
+      title={t('triggersTab.title')}
       icon={Zap}
-      countLabel={`${presets.length}개 프리셋`}
-      subtitle={
-        <>
-          VTuber 자가 발화(생각 트리거)의 타이밍, 페이즈, 카테고리, 프롬프트를
-          묶은 프리셋입니다. VTuber 세션을 만들 때 선택해 부착하면 라이브 반영
-          되며, 부착하지 않은 세션은 기본값으로 동작합니다.
-        </>
-      }
-      bannerNote={
-        '프리셋은 호스트 공용 — 한 번 만들면 모든 VTuber 세션에서 선택할 수 있어요. 미부착 세션은 내장 기본 트리거로 동작합니다.'
-      }
-      addLabel="새 드래프트"
+      countLabel={t('triggersTab.countLabel', { count: presets.length })}
+      subtitle={<>{t('triggersTab.subtitle')}</>}
+      bannerNote={t('triggersTab.bannerNote')}
+      addLabel={t('triggersTab.addLabel')}
       onAdd={openCreate}
       onRefresh={() => void refresh()}
       loading={loading}
@@ -258,20 +253,18 @@ export function TriggersTab() {
       {presets.length === 0 ? (
         <RegistryEmptyState
           icon={Zap}
-          title="아직 만든 프리셋이 없어요"
-          hint={
-            '＋ 새 드래프트를 누르면 현재 기본 동작과 동일한 프리셋이 만들어져요. 거기서부터 페이즈와 확률을 조절해 보세요.'
-          }
-          addLabel="새 드래프트"
+          title={t('triggersTab.emptyTitle')}
+          hint={t('triggersTab.emptyHint')}
+          addLabel={t('triggersTab.addLabel')}
           onAdd={openCreate}
         />
       ) : (
         <>
           {sections.bundled.length > 0 && (
             <RegistrySection
-              label="기본 프리셋"
+              label={t('triggersTab.sectionBundledLabel')}
               count={sections.bundled.length}
-              description="Geny 내장 프리셋 — 미부착 세션의 기본 동작. 직접 수정하거나 '새 드래프트'로 복제해 쓰세요."
+              description={t('triggersTab.sectionBundledDesc')}
             >
               {sections.bundled.map((p) => (
                 <PresetCard
@@ -290,9 +283,9 @@ export function TriggersTab() {
 
           {sections.featured.length > 0 && (
             <RegistrySection
-              label="공유 프리셋"
+              label={t('triggersTab.sectionFeaturedLabel')}
               count={sections.featured.length}
-              description="`preset` 태그가 붙은 추천/공유용 프리셋"
+              description={t('triggersTab.sectionFeaturedDesc')}
             >
               {sections.featured.map((p) => (
                 <PresetCard
@@ -311,7 +304,7 @@ export function TriggersTab() {
 
           {sections.mine.length > 0 && (
             <RegistrySection
-              label="내 프리셋"
+              label={t('triggersTab.sectionMineLabel')}
               count={sections.mine.length}
             >
               {sections.mine.map((p) => (
@@ -354,6 +347,7 @@ function PresetCard({
   onReset,
   onDelete,
 }: PresetCardProps) {
+  const { t } = useI18n();
   const updated = summary.updated_at
     ? new Date(summary.updated_at).toLocaleString()
     : '';
@@ -370,18 +364,22 @@ function PresetCard({
         ...(isDefault
           ? [
               {
-                label: '기본값',
+                label: t('triggersTab.badgeDefault'),
                 tone: 'good' as const,
                 icon: Star,
               },
             ]
           : []),
         {
-          label: `${summary.category_count} 상황`,
+          label: t('triggersTab.badgeCategories', {
+            count: summary.category_count,
+          }),
           tone: 'info' as const,
         },
         {
-          label: `${summary.prompt_count} 프롬프트`,
+          label: t('triggersTab.badgePrompts', {
+            count: summary.prompt_count,
+          }),
           tone: 'neutral' as const,
         },
         ...(summary.enabled
@@ -396,35 +394,35 @@ function PresetCard({
       meta={updated}
       actions={
         <>
-          {/* The default preset already wears the "기본값" badge — only
+          {/* The default preset already wears the "Default" badge — only
               non-default presets get the "set as default" affordance. */}
           {!isDefault && (
             <RegistryActionButton
               icon={Star}
               onClick={onSetDefault}
-              title="기본값으로 설정"
+              title={t('triggersTab.actionSetDefault')}
             />
           )}
           <RegistryActionButton
             icon={Edit3}
             onClick={onEdit}
-            title="편집"
+            title={t('triggersTab.actionEdit')}
             variant="primary"
           />
           <RegistryActionButton
             icon={Copy}
             onClick={onDuplicate}
-            title="복제"
+            title={t('triggersTab.actionDuplicate')}
           />
           <RegistryActionButton
             icon={RotateCcw}
             onClick={onReset}
-            title="기본값으로 초기화"
+            title={t('triggersTab.actionReset')}
           />
           <RegistryActionButton
             icon={Trash2}
             onClick={onDelete}
-            title="삭제"
+            title={t('triggersTab.actionDelete')}
             variant="danger"
           />
         </>

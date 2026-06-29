@@ -60,7 +60,7 @@ import { useEnvDefaults } from '@/components/env_management/useEnvDefaults';
 
 export function CustomToolsTab() {
   const { t } = useI18n();
-  // C6 — ★ "기본값" toggle wiring (env-defaults custom_tools category).
+  // C6 — ★ "default" toggle wiring (env-defaults custom_tools category).
   const loadEnvDefaultsOnce = useEnvDefaults((s) => s.loadOnce);
   useEffect(() => {
     loadEnvDefaultsOnce();
@@ -161,8 +161,7 @@ export function CustomToolsTab() {
   };
 
   const isEmpty = !loading && tools.length === 0;
-  const addLabel =
-    t('envManagement.registry.customTools.addLabel', {}) || '새 커스텀 도구';
+  const addLabel = t('envManagement.registry.customTools.addLabel');
 
   if (editorOpen) {
     return (
@@ -182,20 +181,12 @@ export function CustomToolsTab() {
   return (
     <RegistryPageShell
       icon={Wrench}
-      title={t('envManagement.registry.customTools.title', {}) || '커스텀 도구'}
-      subtitle={
-        t('envManagement.registry.customTools.subtitle', {}) ||
-        'HTTP API · MCP 프록시 · 내장 별칭의 세 가지 백엔드로 도구 등록'
-      }
-      countLabel={
-        t('envManagement.registry.customTools.countLabel', {
-          n: String(tools.length),
-        }) || `${tools.length}개 도구`
-      }
-      bannerNote={
-        t('envManagement.registry.customTools.bannerNote', {}) ||
-        '커스텀 도구는 환경별로 노출됩니다 — 환경 편집기 Stage 10 의 도구 목록(tools.external)에 추가한 환경에서만 동작합니다. ★ 로 표시하면 새 환경 생성 시 자동으로 포함됩니다.'
-      }
+      title={t('envManagement.registry.customTools.title')}
+      subtitle={t('envManagement.registry.customTools.subtitle')}
+      countLabel={t('envManagement.registry.customTools.countLabel', {
+        n: String(tools.length),
+      })}
+      bannerNote={t('envManagement.registry.customTools.bannerNote')}
       addLabel={addLabel}
       onAdd={openCreate}
       onRefresh={refresh}
@@ -206,10 +197,7 @@ export function CustomToolsTab() {
       {isEmpty ? (
         <RegistryEmptyState
           icon={Wrench}
-          title={
-            t('envManagement.registry.customTools.emptyTitle', {}) ||
-            '아직 등록된 커스텀 도구가 없습니다'
-          }
+          title={t('envManagement.registry.customTools.emptyTitle')}
           hint={t('envManagement.registry.emptyHint', { addLabel })}
           addLabel={addLabel}
           onAdd={openCreate}
@@ -218,15 +206,11 @@ export function CustomToolsTab() {
         <>
           {samples.length > 0 && (
             <RegistrySection
-              label={
-                t('envManagement.registry.customTools.samplesTitle', {}) ||
-                'Bundled 샘플'
-              }
+              label={t('envManagement.registry.customTools.samplesTitle')}
               count={samples.length}
-              description={
-                t('envManagement.registry.customTools.samplesSubtitle', {}) ||
-                'Geny 가 제공하는 예시 도구 — 복제 후 편집해서 자신만의 도구 작성에 참고'
-              }
+              description={t(
+                'envManagement.registry.customTools.samplesSubtitle',
+              )}
               inline
             >
               <RegistryGrid>
@@ -245,15 +229,11 @@ export function CustomToolsTab() {
           )}
           {userTools.length > 0 && (
             <RegistrySection
-              label={
-                t('envManagement.registry.customTools.userTitle', {}) ||
-                'User 도구'
-              }
+              label={t('envManagement.registry.customTools.userTitle')}
               count={userTools.length}
-              description={
-                t('envManagement.registry.customTools.userSubtitle', {}) ||
-                '사용자가 등록한 도구'
-              }
+              description={t(
+                'envManagement.registry.customTools.userSubtitle',
+              )}
               inline
             >
               <RegistryGrid>
@@ -343,10 +323,7 @@ function CustomToolCard({
           <RegistryActionButton
             icon={Copy}
             onClick={onDuplicate}
-            title={
-              t('envManagement.registry.customTools.duplicateTip', {}) ||
-              '도구 복제 (User 영역에 사본 생성)'
-            }
+            title={t('envManagement.registry.customTools.duplicateTip')}
             variant="default"
           />
           <RegistryActionButton
@@ -354,10 +331,8 @@ function CustomToolCard({
             onClick={onToggle}
             title={
               summary.enabled
-                ? t('envManagement.registry.customTools.disableTip', {}) ||
-                  '도구 비활성화'
-                : t('envManagement.registry.customTools.enableTip', {}) ||
-                  '도구 활성화'
+                ? t('envManagement.registry.customTools.disableTip')
+                : t('envManagement.registry.customTools.enableTip')
             }
             variant={summary.enabled ? 'default' : 'primary'}
           />

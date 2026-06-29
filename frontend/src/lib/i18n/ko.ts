@@ -701,6 +701,97 @@ const ko: Translations = {
     pinned: '고정: {version}',
   },
 
+  // ─── Triggers Tab ───
+  triggersTab: {
+    title: '트리거 프리셋',
+    countLabel: '{count}개 프리셋',
+    subtitle:
+      'VTuber 자가 발화(생각 트리거)의 타이밍, 페이즈, 카테고리, 프롬프트를 묶은 프리셋입니다. VTuber 세션을 만들 때 선택해 부착하면 라이브 반영 되며, 부착하지 않은 세션은 기본값으로 동작합니다.',
+    bannerNote:
+      '프리셋은 호스트 공용 — 한 번 만들면 모든 VTuber 세션에서 선택할 수 있어요. 미부착 세션은 내장 기본 트리거로 동작합니다.',
+    addLabel: '새 드래프트',
+    emptyTitle: '아직 만든 프리셋이 없어요',
+    emptyHint:
+      '＋ 새 드래프트를 누르면 현재 기본 동작과 동일한 프리셋이 만들어져요. 거기서부터 페이즈와 확률을 조절해 보세요.',
+
+    sectionBundledLabel: '기본 프리셋',
+    sectionBundledDesc:
+      "Geny 내장 프리셋 — 미부착 세션의 기본 동작. 직접 수정하거나 '새 드래프트'로 복제해 쓰세요.",
+    sectionFeaturedLabel: '공유 프리셋',
+    sectionFeaturedDesc: '`preset` 태그가 붙은 추천/공유용 프리셋',
+    sectionMineLabel: '내 프리셋',
+
+    duplicateSuffix: '복사본',
+    resetConfirm:
+      '"{name}" 의 모든 설정을 기본값으로 되돌릴까요?\n타이밍 / 페이즈 / 카테고리 / 프롬프트가 모두 초기화됩니다.',
+    deleteInUseConfirm:
+      '이 프리셋은 현재 {count}개의 세션이 사용 중입니다:\n{sessions}\n\n삭제하면 해당 세션들은 자동으로 기본 트리거 동작으로 되돌아갑니다. 계속할까요?',
+    deleteConfirm: '"{name}" 프리셋을 삭제할까요?',
+
+    badgeDefault: '기본값',
+    badgeCategories: '{count} 상황',
+    badgePrompts: '{count} 프롬프트',
+
+    actionSetDefault: '기본값으로 설정',
+    actionEdit: '편집',
+    actionDuplicate: '복제',
+    actionReset: '기본값으로 초기화',
+    actionDelete: '삭제',
+  },
+
+  permissionsTab: {
+    runnerHintAdvisory:
+      '느슨함 — 사용자가 고른 executor 모드(default / plan / bypass …)가 그대로 적용. 권한 룰은 평소대로 평가됩니다.',
+    runnerHintEnforce:
+      '엄격함 — bypass / auto / dontAsk / acceptEdits 같은 권한 무력화 모드를 default로 강제 다운그레이드. 룰이 절대 우회되지 않게 합니다.',
+    execHintDefault: '기본 — 룰이 결정. 매칭 룰이 없으면 도구 자체의 check_permissions 폴백.',
+    execHintPlan: '계획 모드 — 파괴적 도구는 명시적 ALLOW 룰이 없으면 자동 ASK.',
+    execHintAuto: '자동 — 룰이 없는 호출도 모두 허용 (CI 등 비대화형). DENY 룰은 여전히 차단.',
+    execHintBypass: '우회 — 모든 권한 게이트 무시 (DENY까지). 개발 전용.',
+    execHintAcceptEdits: 'Edit-친화 — 편집 도구의 ASK 룰을 자동 ALLOW로 승격.',
+    execHintDontAsk: '묻지 않음 — 모든 ASK 룰을 자동 ALLOW로 승격. DENY는 그대로.',
+    modeLabelTip:
+      'Geny 러너 모드 — advisory(기본)는 열려 있고 enforce는 권한 무력화 모드를 차단합니다.',
+    execLabelTip:
+      'Executor 모드 — 매트릭스가 ALLOW/DENY/ASK를 결정할 때 쓰는 PermissionMode 값.',
+    downgradeBadgeTip:
+      'enforce 모드에서 권한 무력화 executor 모드는 세션 시작 시 default로 다운그레이드됩니다.',
+  },
+
+  // ─── Skills Tab ───
+  skillsTab: {
+    toggleHint: 'user_skills_enabled: {value} — 클릭하여 토글',
+  },
+
+  // ─── Hooks Tab ───
+  hooksTab: {
+    firesTrackingRecommended: 'fires-tracking · 권장',
+    auditLogEmptyWarning:
+      'Empty = no audit log. 운영 환경에선 비워두지 마세요 — 발화가 추적되지 않습니다.',
+  },
+
+  // ─── Settings Tab ───
+  settingsTab: {
+    setupGuide: '설정 방법',
+  },
+
+  // ─── Tasks Tab ───
+  tasksTab: {
+    stopTitle: '작업 중지',
+    stopConfirmLabel: '중지',
+    stopCancelLabel: '취소',
+    stopQuestion: '({kind}) 작업을 중지할까요?',
+    stopSubagentNote: ' 실행 중인 서브에이전트가 취소됩니다.',
+    outputLoadError: '출력을 불러오지 못했습니다: {error}',
+    back: '뒤로',
+    refresh: '새로고침',
+    sectionOutput: '결과 (Output)',
+    loading: '불러오는 중…',
+    noOutput: '아직 출력이 없습니다. (실행 중이거나 결과가 기록되지 않은 작업)',
+    sectionToolTrail: '도구 로그 (Tool trail)',
+    noToolTrail: '이 작업의 도구 로그가 없습니다.',
+  },
+
   // ─── Connectors (MCP 생태계) ───
   connectors: {
     navLabel: '커넥터',
@@ -923,6 +1014,8 @@ const ko: Translations = {
     unboundBody: '레거시 세션은 워크플로우 "{workflow}" 기반으로 동작합니다. 환경을 연결하면 Stage 단위 가시성을 얻을 수 있습니다.',
     goToEnvironments: '환경 탭 열기',
     openInEnvironments: '환경에서 열기',
+    defaultManifest: '기본 매니페스트',
+    current: ' (현재)',
     changeEnv: {
       button: 'Env 변경',
       title: '환경 변경',
@@ -3254,6 +3347,8 @@ const ko: Translations = {
     none: '없음',
     noModels: '등록된 모델이 없습니다',
     selectModelPreview: '미리보기할 모델을 선택하세요',
+    importBaked: '가져오기',
+    importBakedTitle: 'Avatar Editor 에서 보낸 baked puppet 가져오기',
   },
 
   // ─── VTuber Chat Panel ───

@@ -707,6 +707,97 @@ const en = {
     pinned: 'pinned: {version}',
   },
 
+  // ─── Triggers Tab ───
+  triggersTab: {
+    title: 'Trigger Presets',
+    countLabel: '{count} presets',
+    subtitle:
+      "Presets bundle the timing, phases, categories, and prompts for the VTuber's self-talk (thought triggers). Pick one when creating a VTuber session to attach it live; sessions without one run on the defaults.",
+    bannerNote:
+      'Presets are host-wide — create one and every VTuber session can select it. Unattached sessions run on the built-in default triggers.',
+    addLabel: 'New draft',
+    emptyTitle: "You haven't created any presets yet",
+    emptyHint:
+      'Press + New draft to create a preset identical to the current default behavior. From there, tune the phases and probabilities.',
+
+    sectionBundledLabel: 'Default presets',
+    sectionBundledDesc:
+      "Geny's built-in preset — the default behavior for unattached sessions. Edit it directly or duplicate it with 'New draft'.",
+    sectionFeaturedLabel: 'Shared presets',
+    sectionFeaturedDesc: 'Recommended/shareable presets tagged with `preset`',
+    sectionMineLabel: 'My presets',
+
+    duplicateSuffix: 'copy',
+    resetConfirm:
+      'Reset all settings of "{name}" to defaults?\nTiming / phases / categories / prompts will all be reset.',
+    deleteInUseConfirm:
+      'This preset is currently used by {count} session(s):\n{sessions}\n\nDeleting it will automatically revert those sessions to the default trigger behavior. Continue?',
+    deleteConfirm: 'Delete the "{name}" preset?',
+
+    badgeDefault: 'Default',
+    badgeCategories: '{count} situations',
+    badgePrompts: '{count} prompts',
+
+    actionSetDefault: 'Set as default',
+    actionEdit: 'Edit',
+    actionDuplicate: 'Duplicate',
+    actionReset: 'Reset to defaults',
+    actionDelete: 'Delete',
+  },
+
+  permissionsTab: {
+    runnerHintAdvisory:
+      'Loose — the executor mode you chose (default / plan / bypass …) applies as-is. Permission rules are evaluated as usual.',
+    runnerHintEnforce:
+      'Strict — permission-defeating modes like bypass / auto / dontAsk / acceptEdits are force-downgraded to default. Ensures rules are never bypassed.',
+    execHintDefault: 'Default — rules decide. With no matching rule, the tool falls back to its own check_permissions.',
+    execHintPlan: 'Plan mode — destructive tools auto-ASK unless there is an explicit ALLOW rule.',
+    execHintAuto: 'Auto — even rule-less calls are all allowed (CI and other non-interactive use). DENY rules still block.',
+    execHintBypass: 'Bypass — ignore every permission gate (including DENY). Development only.',
+    execHintAcceptEdits: 'Edit-friendly — promote ASK rules on editing tools to automatic ALLOW.',
+    execHintDontAsk: "Don't ask — promote every ASK rule to automatic ALLOW. DENY stays as-is.",
+    modeLabelTip:
+      'Geny runner mode — advisory (default) is open while enforce blocks permission-defeating modes.',
+    execLabelTip:
+      'Executor mode — the PermissionMode value the matrix uses to decide ALLOW/DENY/ASK.',
+    downgradeBadgeTip:
+      'In enforce mode, permission-defeating executor modes are downgraded to default at session start.',
+  },
+
+  // ─── Skills Tab ───
+  skillsTab: {
+    toggleHint: 'user_skills_enabled: {value} — click to toggle',
+  },
+
+  // ─── Hooks Tab ───
+  hooksTab: {
+    firesTrackingRecommended: 'fires-tracking · recommended',
+    auditLogEmptyWarning:
+      "Empty = no audit log. Don't leave it blank in production — fires won't be tracked.",
+  },
+
+  // ─── Settings Tab ───
+  settingsTab: {
+    setupGuide: 'Setup guide',
+  },
+
+  // ─── Tasks Tab ───
+  tasksTab: {
+    stopTitle: 'Stop task',
+    stopConfirmLabel: 'Stop',
+    stopCancelLabel: 'Cancel',
+    stopQuestion: 'Stop the ({kind}) task?',
+    stopSubagentNote: ' The running sub-agent will be cancelled.',
+    outputLoadError: 'Failed to load output: {error}',
+    back: 'Back',
+    refresh: 'Refresh',
+    sectionOutput: 'Result (Output)',
+    loading: 'Loading…',
+    noOutput: 'No output yet. (Task is running or did not record a result.)',
+    sectionToolTrail: 'Tool log (Tool trail)',
+    noToolTrail: 'This task has no tool log.',
+  },
+
   // ─── Connectors (MCP ecosystem) ───
   connectors: {
     navLabel: 'Connectors',
@@ -929,6 +1020,8 @@ const en = {
     unboundBody: 'Legacy sessions run against workflow "{workflow}". Attach an environment to get per-stage visibility.',
     goToEnvironments: 'Open Environments',
     openInEnvironments: 'Open in Environments',
+    defaultManifest: 'Default manifest',
+    current: ' (current)',
     changeEnv: {
       button: 'Change env',
       title: 'Change environment',
@@ -3211,6 +3304,8 @@ const en = {
     none: 'None',
     noModels: 'No models registered',
     selectModelPreview: 'Select a model to preview',
+    importBaked: 'Import',
+    importBakedTitle: 'Import a baked puppet sent from the Avatar Editor',
   },
 
   // ─── VTuber Chat Panel ───

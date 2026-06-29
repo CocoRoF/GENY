@@ -213,7 +213,7 @@ export default function SessionEnvironmentTab() {
         </span>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {/* Env 변경 — rebind THIS session (VTuber or Sub-Agent, per the
+          {/* Change env — rebind THIS session (VTuber or Sub-Agent, per the
               toggle in the root tab) to a different environment. Shown even
               when unbound so a legacy session can be bound. */}
           <button
@@ -409,7 +409,7 @@ function EnvChangeModal({
               { id: '', label: t('sessionEnvironmentTab.changeEnv.placeholder') },
               ...environments.map((env) => ({
                 id: env.id,
-                label: `${env.name}${env.id === currentEnvId ? ' (현재)' : ''}`,
+                label: `${env.name}${env.id === currentEnvId ? t('sessionEnvironmentTab.current') : ''}`,
               })),
             ]}
           />

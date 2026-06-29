@@ -285,7 +285,7 @@ export function HooksTab(_props: HooksTabProps = {}) {
           Audit log
         </h3>
         <span className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
-          fires-tracking · 권장
+          {t('hooksTab.firesTrackingRecommended')}
         </span>
       </div>
       <div className="flex gap-1.5 items-center">
@@ -306,8 +306,7 @@ export function HooksTab(_props: HooksTabProps = {}) {
         </ActionButton>
       </div>
       <div className="text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
-        Empty = no audit log. 운영 환경에선 비워두지 마세요 — 발화가 추적되지
-        않습니다.
+        {t('hooksTab.auditLogEmptyWarning')}
       </div>
     </section>
   );

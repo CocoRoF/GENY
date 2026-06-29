@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
 import { useAppStore } from '@/store/useAppStore';
 import Selector, { type SelectorItem } from '@/components/ui/Selector';
 import {
@@ -67,6 +68,7 @@ function formatDuration(start: string | null, end: string | null): string {
 }
 
 export function TasksTab() {
+  const { t } = useI18n();
   const sessionId = useAppStore((s) => s.selectedSessionId) || '';
   const [rows, setRows] = useState<BackgroundTaskRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -433,16 +435,16 @@ export function TasksTab() {
           if (stopRow) await handleStop(stopRow.task_id);
           setStopRow(null);
         }}
-        title="작업 중지"
+        title={t('tasksTab.stopTitle')}
         danger
-        confirmLabel="중지"
-        cancelLabel="취소"
+        confirmLabel={t('tasksTab.stopConfirmLabel')}
+        cancelLabel={t('tasksTab.stopCancelLabel')}
         message={
           stopRow ? (
             <span>
-              <span className="font-mono text-xs">{stopRow.task_id.slice(0, 12)}…</span> (
-              {stopRow.kind}) 작업을 중지할까요?
-              {stopRow.kind === 'subagent' && ' 실행 중인 서브에이전트가 취소됩니다.'}
+              <span className="font-mono text-xs">{stopRow.task_id.slice(0, 12)}…</span>{' '}
+              {t('tasksTab.stopQuestion', { kind: stopRow.kind })}
+              {stopRow.kind === 'subagent' && t('tasksTab.stopSubagentNote')}
             </span>
           ) : null
         }
@@ -488,7 +490,7 @@ function RowAction({
 /**
  * TaskDetailView — inline detail page for one task (rendered IN the tasks tab,
  * not a modal). Shows the rendered Output (markdown) + the granular tool trail
- * (ExecutionTimeline, the same view as the 세션 로그 tab). Back returns to the list.
+ * (ExecutionTimeline, the same view as the session log tab). Back returns to the list.
  *
  * The tool trail is fetched for the sub-agent's own log when available
  * (payload.sub_agent_id), falling back to the owning session's log — so a
@@ -503,6 +505,7 @@ function TaskDetailView({
   sessionId: string;
   onBack: () => void;
 }) {
+  const { t } = useI18n();
   const [output, setOutput] = useState('');
   const [outLoading, setOutLoading] = useState(true);
   const [entries, setEntries] = useState<LogEntry[]>([]);
@@ -521,7 +524,7 @@ function TaskDetailView({
     try {
       setOutput(await backgroundTaskApi.output(sessionId, task.task_id));
     } catch (e) {
-      setOutput(`출력을 불러오지 못했습니다: ${e instanceof Error ? e.message : e}`);
+      setOutput(t('tasksTab.outputLoadError', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setOutLoading(false);
     }
@@ -548,7 +551,7 @@ function TaskDetailView({
     } finally {
       setLogLoading(false);
     }
-  }, [sessionId, task.task_id, subAgentId, ownerId]);
+  }, [sessionId, task.task_id, subAgentId, ownerId, t]);
 
   useEffect(() => {
     void load();
@@ -563,7 +566,7 @@ function TaskDetailView({
           onClick={onBack}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> 뒤로
+          <ChevronLeft className="w-3.5 h-3.5" /> {t('tasksTab.back')}
         </button>
         <div className="min-w-0 flex items-center gap-2">
           <span className="text-[var(--text-primary)] font-medium">{task.kind}</span>
@@ -578,7 +581,7 @@ function TaskDetailView({
           onClick={() => void load()}
           className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
-          <RefreshCw className={`w-3 h-3 ${outLoading || logLoading ? 'animate-spin' : ''}`} /> 새로고침
+          <RefreshCw className={`w-3 h-3 ${outLoading || logLoading ? 'animate-spin' : ''}`} /> {t('tasksTab.refresh')}
         </button>
       </div>
 
@@ -592,17 +595,17 @@ function TaskDetailView({
         {/* Output (rendered markdown) */}
         <section className="border-b border-[var(--border-color)]">
           <div className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-            <FileText className="w-3.5 h-3.5" /> 결과 (Output)
+            <FileText className="w-3.5 h-3.5" /> {t('tasksTab.sectionOutput')}
           </div>
           {outLoading ? (
-            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">불러오는 중…</div>
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">{t('tasksTab.loading')}</div>
           ) : output.trim() ? (
             <div className="text-[var(--text-primary)]">
               <MarkdownRenderer content={output} />
             </div>
           ) : (
             <div className="px-4 py-6 text-sm text-[var(--text-muted)]">
-              아직 출력이 없습니다. (실행 중이거나 결과가 기록되지 않은 작업)
+              {t('tasksTab.noOutput')}
             </div>
           )}
         </section>
@@ -610,7 +613,7 @@ function TaskDetailView({
         {/* Granular tool trail */}
         <section>
           <div className="flex items-center gap-1.5 px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-            <Activity className="w-3.5 h-3.5" /> 도구 로그 (Tool trail)
+            <Activity className="w-3.5 h-3.5" /> {t('tasksTab.sectionToolTrail')}
             {logSource && (
               <span className="font-mono normal-case font-normal text-[0.65rem] text-[var(--text-muted)]">
                 · {logSource.slice(0, 14)}
@@ -618,7 +621,7 @@ function TaskDetailView({
             )}
           </div>
           {logLoading ? (
-            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">불러오는 중…</div>
+            <div className="px-4 py-6 text-sm text-[var(--text-muted)] animate-pulse">{t('tasksTab.loading')}</div>
           ) : entries.length ? (
             <div className="px-2 pb-4">
               <ExecutionTimeline
@@ -632,7 +635,7 @@ function TaskDetailView({
             </div>
           ) : (
             <div className="px-4 py-6 text-sm text-[var(--text-muted)]">
-              이 작업의 도구 로그가 없습니다.
+              {t('tasksTab.noToolTrail')}
             </div>
           )}
         </section>

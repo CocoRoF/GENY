@@ -1,16 +1,18 @@
 """
 Blog Agent Configuration.
 
-외부 블로그 (https://hrletsgo.me) 의 AI Agent 위임 통합 설정.
+Integration settings for delegating to an external blog's AI Agent
+(https://hrletsgo.me).
 
-Settings UI 의 General 카테고리에 'Blog Agent' 카드로 노출되며,
-운영자가 .env 없이도 8개 필드를 동적으로 편집할 수 있다.
-.env 의 BLOG_AGENT_* 키는 부팅 시점의 default seed 로만 동작 —
-이후엔 ConfigManager 가 우선.
+Surfaces as the 'Blog Agent' card in the General category of the Settings UI,
+letting an operator edit all 8 fields dynamically without touching .env.
+The .env BLOG_AGENT_* keys act only as the boot-time default seed —
+after that, ConfigManager takes precedence.
 
-블로그 측 지원 모델은 blog frontend 의 ``AVAILABLE_MODELS``
-(:file:`hr_blog2.0/frontend/src/src/components/agent/AgentSettingsModal.tsx`)
-와 1:1 동기화. blog 가 새 모델을 추가하면 이 리스트도 갱신해야 한다.
+The blog's supported models stay in 1:1 sync with the blog frontend's
+``AVAILABLE_MODELS``
+(:file:`hr_blog2.0/frontend/src/src/components/agent/AgentSettingsModal.tsx`).
+When the blog adds a new model, this list must be updated too.
 """
 
 from __future__ import annotations
@@ -22,46 +24,47 @@ from service.config.base import BaseConfig, ConfigField, FieldType, register_con
 from service.config.sub_config.general.env_utils import env_sync, read_env_defaults
 
 
-# ─── 블로그 측 지원 모델 — frontend AVAILABLE_MODELS 와 동기화 ─────
+# ─── Blog-side supported models — kept in sync with frontend AVAILABLE_MODELS ─────
 #
-# blog 의 외부 API 는 model 값을 자유 문자열로 받지만, 실제로 검증된
-# 옵션은 frontend AgentSettingsModal 의 AVAILABLE_MODELS (3종):
+# The blog's external API accepts the model value as a free-form string, but the
+# actually validated options are the frontend AgentSettingsModal's AVAILABLE_MODELS
+# (3 of them):
 #
-#   - claude-opus-4-7              최고 추론력
-#   - claude-sonnet-4-6            균형 (권장 default)
-#   - claude-haiku-4-5-20251001    빠르고 저렴
+#   - claude-opus-4-7              strongest reasoning
+#   - claude-sonnet-4-6            balanced (recommended default)
+#   - claude-haiku-4-5-20251001    fast and cheap
 #
-# blog 가 새 모델을 추가하면 이 리스트도 갱신.
+# When the blog adds a new model, update this list too.
 BLOG_AGENT_MODEL_OPTIONS: List[Dict[str, str]] = [
-    {"value": "claude-opus-4-7", "label": "Claude Opus 4.7 (최고 추론력)"},
-    {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (균형 · 권장)"},
-    {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (빠르고 저렴)"},
-    {"value": "gpt-5.5", "label": "OpenAI GPT-5.5 (다른 문체)"},
-    {"value": "gpt-5.4", "label": "OpenAI GPT-5.4 (균형)"},
-    {"value": "gpt-5.4-mini", "label": "OpenAI GPT-5.4 mini (저렴)"},
+    {"value": "claude-opus-4-7", "label": "Claude Opus 4.7 (strongest reasoning)"},
+    {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (balanced · recommended)"},
+    {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (fast and cheap)"},
+    {"value": "gpt-5.5", "label": "OpenAI GPT-5.5 (different writing style)"},
+    {"value": "gpt-5.4", "label": "OpenAI GPT-5.4 (balanced)"},
+    {"value": "gpt-5.4-mini", "label": "OpenAI GPT-5.4 mini (cheap)"},
 ]
 
 
-# ─── 블로그 측 prompt voice mode ───────────────────────
-# blog backend 의 ``PROMPT_MODES`` (system_prompt.py) 와 1:1 동기화.
-# 새 mode 가 blog 에 추가되면 이 리스트도 갱신.
+# ─── Blog-side prompt voice mode ───────────────────────
+# Kept in 1:1 sync with the blog backend's ``PROMPT_MODES`` (system_prompt.py).
+# When a new mode is added to the blog, update this list too.
 BLOG_AGENT_PROMPT_MODE_OPTIONS: List[Dict[str, str]] = [
-    {"value": "persona", "label": "Persona (25세 카주얼 블로거 · default)"},
-    {"value": "research", "label": "Research (진지 정보·사실 서술)"},
-    {"value": "explorer", "label": "Explorer (탐색 도우미 · read 도구 우선)"},
+    {"value": "persona", "label": "Persona (25-year-old casual blogger · default)"},
+    {"value": "research", "label": "Research (serious, fact-based reporting)"},
+    {"value": "explorer", "label": "Explorer (exploration helper · prefers read tools)"},
 ]
 
 
 @register_config
 @dataclass
 class BlogAgentConfig(BaseConfig):
-    """블로그 AI Agent 위임 설정."""
+    """Blog AI Agent delegation settings."""
 
     base_url: str = "https://hrletsgo.me"
     api_key: str = ""
     default_model: str = "claude-sonnet-4-6"
-    # 블로그 system_prompt voice mode — 새 세션 / 미지정 호출에 적용.
-    # delegate 도구 호출자가 prompt_mode 인자를 명시하면 그 값이 우선.
+    # Blog system_prompt voice mode — applied to new sessions / unspecified calls.
+    # If the delegate tool caller specifies the prompt_mode argument, that value wins.
     default_prompt_mode: str = "persona"
     default_timeout_s: float = 600.0
     pump_idle_grace_s: float = 30.0
@@ -97,9 +100,9 @@ class BlogAgentConfig(BaseConfig):
     @classmethod
     def get_description(cls) -> str:
         return (
-            "외부 블로그 AI Agent (예: hrletsgo.me) 에 글쓰기 / 편집 작업을 "
-            "위임하는 통합 설정. API 키는 admin 비밀번호와 동일한 무게로 "
-            "다룰 것."
+            "Integration settings for delegating writing / editing tasks to an "
+            "external blog AI Agent (e.g. hrletsgo.me). Treat the API key with the "
+            "same care as the admin password."
         )
 
     @classmethod
@@ -177,12 +180,12 @@ class BlogAgentConfig(BaseConfig):
     @classmethod
     def get_fields_metadata(cls) -> List[ConfigField]:
         return [
-            # ── 연결 ──────────────────────────────────────
+            # ── Connection ──────────────────────────────────────
             ConfigField(
                 name="base_url",
                 field_type=FieldType.URL,
                 label="Base URL",
-                description="블로그 외부 API base URL (도메인까지만, path 없음)",
+                description="Blog external API base URL (domain only, no path)",
                 placeholder="https://hrletsgo.me",
                 group="connection",
                 apply_change=env_sync("BLOG_AGENT_BASE_URL"),
@@ -192,8 +195,9 @@ class BlogAgentConfig(BaseConfig):
                 field_type=FieldType.PASSWORD,
                 label="API Key",
                 description=(
-                    "블로그 외부 API Bearer 토큰. 블로그 admin → Settings "
-                    "→ External API 에서 발급. admin 비밀번호와 동일한 무게."
+                    "Blog external API Bearer token. Issued from the blog "
+                    "admin → Settings → External API. Treat it with the same "
+                    "care as the admin password."
                 ),
                 placeholder="32-hex-chars",
                 group="connection",
@@ -203,22 +207,22 @@ class BlogAgentConfig(BaseConfig):
             ConfigField(
                 name="enabled",
                 field_type=FieldType.BOOLEAN,
-                label="활성화",
+                label="Enabled",
                 description=(
-                    "OFF 일 때는 모든 blog_agent_* 도구가 즉시 명시적 에러를 "
-                    "반환 — 키나 URL 이 비어 있어도 안전."
+                    "When OFF, every blog_agent_* tool returns an explicit error "
+                    "immediately — safe even if the key or URL is empty."
                 ),
                 group="connection",
                 apply_change=env_sync("BLOG_AGENT_ENABLED"),
             ),
-            # ── 동작 ──────────────────────────────────────
+            # ── Behavior ──────────────────────────────────────
             ConfigField(
                 name="default_model",
                 field_type=FieldType.SELECT,
-                label="기본 모델",
+                label="Default Model",
                 description=(
-                    "위임 시 블로그 SDK 가 사용할 Claude 모델. blog frontend "
-                    "AVAILABLE_MODELS 와 동기화된 옵션."
+                    "Claude model the blog SDK uses when delegating. Options kept "
+                    "in sync with the blog frontend's AVAILABLE_MODELS."
                 ),
                 options=BLOG_AGENT_MODEL_OPTIONS,
                 group="behavior",
@@ -227,11 +231,12 @@ class BlogAgentConfig(BaseConfig):
             ConfigField(
                 name="default_prompt_mode",
                 field_type=FieldType.SELECT,
-                label="기본 Voice",
+                label="Default Voice",
                 description=(
-                    "위임 시 블로그 system_prompt 의 voice mode. delegate 도구 "
-                    "호출자가 prompt_mode 인자를 명시하지 않으면 이 값이 적용. "
-                    "persona = 25세 카주얼 블로거, research = 진지 정보 톤."
+                    "Voice mode of the blog system_prompt when delegating. Applied "
+                    "when the delegate tool caller does not specify the prompt_mode "
+                    "argument. persona = 25-year-old casual blogger, "
+                    "research = serious informational tone."
                 ),
                 options=BLOG_AGENT_PROMPT_MODE_OPTIONS,
                 group="behavior",
@@ -240,10 +245,10 @@ class BlogAgentConfig(BaseConfig):
             ConfigField(
                 name="default_timeout_s",
                 field_type=FieldType.NUMBER,
-                label="Stream 타임아웃 (초)",
+                label="Stream Timeout (seconds)",
                 description=(
-                    "한 위임 turn 의 최대 SSE 수신 시간. 본문 자율 작성처럼 "
-                    "긴 turn 도 커버하도록 600 초 default."
+                    "Maximum SSE receive time for one delegation turn. Defaults to "
+                    "600 seconds to cover long turns such as autonomous body writing."
                 ),
                 group="behavior",
                 min_value=30.0,
@@ -253,10 +258,10 @@ class BlogAgentConfig(BaseConfig):
             ConfigField(
                 name="pump_idle_grace_s",
                 field_type=FieldType.NUMBER,
-                label="Idle 허용 시간 (초)",
+                label="Idle Grace Time (seconds)",
                 description=(
-                    "SSE frame 이 N초 이상 안 오면 'last_event_age_s' 가 "
-                    "올라가 status 도구가 사용자에게 'stuck' 신호를 줌."
+                    "If no SSE frame arrives for N seconds, 'last_event_age_s' "
+                    "rises and the status tool signals 'stuck' to the user."
                 ),
                 group="behavior",
                 min_value=5.0,
@@ -266,26 +271,27 @@ class BlogAgentConfig(BaseConfig):
             ConfigField(
                 name="max_concurrent_per_session",
                 field_type=FieldType.NUMBER,
-                label="세션당 동시 위임 상한",
+                label="Max Concurrent Delegations Per Session",
                 description=(
-                    "한 Geny 세션이 동시에 진행할 수 있는 위임 task 수. "
-                    "초과 시 도구가 명시적 에러로 거부."
+                    "Number of delegation tasks one Geny session can run "
+                    "concurrently. Beyond that, the tool rejects with an explicit error."
                 ),
                 group="behavior",
                 min_value=1,
                 max_value=10,
                 apply_change=env_sync("BLOG_AGENT_MAX_CONCURRENT_PER_SESSION"),
             ),
-            # ── 접근 제어 ─────────────────────────────────
+            # ── Access control ─────────────────────────────────
             ConfigField(
                 name="enabled_for_subworkers",
                 field_type=FieldType.BOOLEAN,
-                label="Sub-Worker 에 노출",
+                label="Expose to Sub-Worker",
                 description=(
-                    "기본 OFF — VTuber 만 위임 도구를 본다. ON 으로 바꾸면 "
-                    "Worker env template 의 deny 세트가 비워져 Sub-Worker / "
-                    "Developer / Researcher / Planner 도 도구를 받음 "
-                    "(템플릿 재생성 필요 — Geny 재기동 시 자동 적용)."
+                    "Default OFF — only the VTuber sees the delegation tools. "
+                    "Turning it ON clears the deny set in the Worker env template so "
+                    "Sub-Worker / Developer / Researcher / Planner also receive the "
+                    "tools (template regeneration required — applied automatically "
+                    "on Geny restart)."
                 ),
                 group="access",
                 apply_change=env_sync("BLOG_AGENT_ENABLED_FOR_SUBWORKERS"),

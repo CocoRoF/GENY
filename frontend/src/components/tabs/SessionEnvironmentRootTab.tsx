@@ -119,7 +119,7 @@ export default function SessionEnvironmentRootTab() {
               {envId}
             </code>
           ) : (
-            <span className="text-[var(--warning-color)]">기본 매니페스트</span>
+            <span className="text-[var(--warning-color)]">{t('sessionEnvironmentTab.defaultManifest')}</span>
           )}
         </div>
         {ownsSubAgent && (
