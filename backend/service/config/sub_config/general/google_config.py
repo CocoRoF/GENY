@@ -88,6 +88,29 @@ class GoogleConfig(BaseConfig):
                 group="google",
                 secure=True,
             ),
+            # Transient flow state. MUST be declared here (not just as dataclass
+            # fields) — BaseConfig.from_dict() filters out any field not in the
+            # metadata, so undeclared fields are silently dropped on load (which
+            # caused the OAuth callback's state_mismatch). Hidden anyway: the
+            # whole config has is_user_visible() == False.
+            ConfigField(
+                name="oauth_state",
+                field_type=FieldType.STRING,
+                label="OAuth State",
+                description="Transient CSRF state for the in-progress OAuth flow.",
+                group="google",
+                required=False,
+                secure=True,
+            ),
+            ConfigField(
+                name="oauth_redirect_uri",
+                field_type=FieldType.STRING,
+                label="OAuth Redirect URI",
+                description="Redirect URI used to start the in-progress OAuth flow.",
+                group="google",
+                required=False,
+                secure=False,
+            ),
         ]
 
     # Convenience accessors -------------------------------------------------
