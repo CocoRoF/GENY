@@ -576,7 +576,7 @@ export default function CommandTab() {
         />
       )}
       {/* ── Header ── */}
-      <div className="shrink-0 px-3 md:px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+      <div className="shrink-0 px-3 md:px-4 py-2.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--primary-color)] to-[#6366f1] flex items-center justify-center shadow-sm shrink-0">
