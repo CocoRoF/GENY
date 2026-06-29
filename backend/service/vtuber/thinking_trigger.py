@@ -683,54 +683,13 @@ class ThinkingTriggerService:
         )
 
     def _save_to_chat_room(self, session_id: str, result) -> None:
-        try:
-            from service.utils.text_sanitizer import sanitize_for_display
-            cleaned = sanitize_for_display(result.output) if result.success else ""
-            if not cleaned:
-                return
+        # Delegates to the shared, session-agnostic delivery primitive (which
+        # also backs Hook fires). VTuber sessions already carry a
+        # ``_chat_room_id`` so behaviour is unchanged; the shared helper just
+        # additionally resolves-or-creates a room for sessions without one.
+        from service.hooks_runtime.delivery import post_autonomous_message
 
-            from service.executor import get_agent_session_manager
-            agent = get_agent_session_manager().get_agent(session_id)
-            if not agent:
-                logger.warning("[ThinkingTrigger] No agent found for %s, skipping chat save", session_id)
-                return
-
-            chat_room_id = getattr(agent, '_chat_room_id', None)
-            if not chat_room_id:
-                logger.warning("[ThinkingTrigger] No chat_room_id on agent %s, skipping chat save", session_id)
-                return
-
-            from service.chat.conversation_store import get_chat_store
-            store = get_chat_store()
-
-            session_name = getattr(agent, '_session_name', None) or session_id
-            role_val = getattr(agent, '_role', None)
-            role = role_val.value if hasattr(role_val, 'value') else str(role_val or 'vtuber')
-
-            msg = store.add_message(chat_room_id, {
-                "type": "agent",
-                "content": cleaned,
-                "session_id": session_id,
-                "session_name": session_name,
-                "role": role,
-                "duration_ms": result.duration_ms,
-                "cost_usd": result.cost_usd,
-                "source": "thinking_trigger",
-            })
-
-            logger.info(
-                "[ThinkingTrigger] Saved response to chat room %s (msg_id=%s, len=%d)",
-                chat_room_id, msg.get("id", "?"), len(cleaned),
-            )
-
-            try:
-                from controller.chat_controller import _notify_room
-                _notify_room(chat_room_id)
-            except Exception:
-                logger.warning("[ThinkingTrigger] _notify_room failed for %s", chat_room_id, exc_info=True)
-
-        except Exception:
-            logger.warning("[ThinkingTrigger] Failed to save trigger response to chat room", exc_info=True)
+        post_autonomous_message(session_id, result, source="thinking_trigger")
 
     # ── Prompt selection (two-stage roulette) ───────────────
 
