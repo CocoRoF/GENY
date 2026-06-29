@@ -116,7 +116,7 @@ export default function Header() {
         {/* ── Wiki Button — hidden on mobile ── */}
         <Link
           href="/wiki"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          className="hidden sm:flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
           title={t('header.wiki')}
         >
           <BookOpen size={14} />
@@ -125,7 +125,7 @@ export default function Header() {
         {/* ── Voice Studio Button — hidden on mobile ── */}
         <Link
           href="/voice-studio"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          className="hidden sm:flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
           title={t('header.voiceStudio')}
         >
           <Sliders size={14} />
@@ -139,7 +139,7 @@ export default function Header() {
           href="/avatar-editor/"
           target="_blank"
           rel="noopener noreferrer"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          className="hidden sm:flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
           title="Avatar Editor — Spine/Cubism puppet 편집"
         >
           <Palette size={14} />
@@ -148,7 +148,7 @@ export default function Header() {
         {/* ── Environment Management Page — hidden on mobile ── */}
         <Link
           href="/environments"
-          className="hidden sm:flex items-center justify-center w-8 h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+          className="hidden sm:flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
           title={t('header.envManagement')}
         >
           <Layers size={14} />
@@ -166,7 +166,7 @@ export default function Header() {
           <button
             type="button"
             onClick={openGapt}
-            className="hidden sm:flex items-center justify-center gap-1 h-8 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
+            className="hidden sm:flex items-center justify-center gap-1 h-7 md:h-8 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
             title={t('header.gapt')}
           >
             <Container size={14} />
@@ -175,10 +175,10 @@ export default function Header() {
         )}
 
         {/* ── Language Toggle ── */}
-        <div className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
+        <div className="inline-flex items-stretch h-7 md:h-8 gap-0.5 p-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)]">
           <button
             onClick={() => switchLocale('en')}
-            className={`px-2 py-1 text-[0.6875rem] font-medium rounded transition-all duration-150 border-none cursor-pointer ${
+            className={`px-2 inline-flex items-center text-[0.6875rem] font-medium rounded transition-all duration-150 border-none cursor-pointer ${
               locale === 'en'
                 ? 'bg-[var(--primary-color)] text-white shadow-sm'
                 : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -188,7 +188,7 @@ export default function Header() {
           </button>
           <button
             onClick={() => switchLocale('ko')}
-            className={`px-2 py-1 text-[0.6875rem] font-medium rounded transition-all duration-150 border-none cursor-pointer ${
+            className={`px-2 inline-flex items-center text-[0.6875rem] font-medium rounded transition-all duration-150 border-none cursor-pointer ${
               locale === 'ko'
                 ? 'bg-[var(--primary-color)] text-white shadow-sm'
                 : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -202,7 +202,7 @@ export default function Header() {
         {isAuthenticated && (
           <Link
             href="/opsidian"
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
+            className="hidden sm:flex items-center gap-1.5 h-7 md:h-8 px-2.5 text-[0.6875rem] font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150 no-underline"
             title={t('header.memory')}
           >
             <Brain size={13} />
@@ -215,7 +215,7 @@ export default function Header() {
           isAuthenticated ? (
             <button
               onClick={() => logout()}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
+              className="hidden sm:flex items-center gap-1.5 h-7 md:h-8 px-2.5 text-[0.6875rem] font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-150"
               title={t('header.logout')}
             >
               <LogOut size={13} />
@@ -226,7 +226,7 @@ export default function Header() {
               variant="gradient"
               size="sm"
               onClick={() => setShowLogin(true)}
-              className="hidden sm:inline-flex px-2.5 text-[0.6875rem]"
+              className="hidden sm:inline-flex items-center h-7 md:h-8 px-2.5 text-[0.6875rem]"
               title={t('header.login')}
             >
               <LogIn size={13} />
@@ -236,7 +236,7 @@ export default function Header() {
         )}
 
         {/* ── Session Status ── */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-tertiary)] rounded-full text-[0.75rem] md:text-[0.8125rem]">
+        <div className="flex items-center gap-2 h-7 md:h-8 px-3 bg-[var(--bg-tertiary)] rounded-full text-[0.75rem] md:text-[0.8125rem]">
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
               isHealthy

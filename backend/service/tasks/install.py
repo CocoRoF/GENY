@@ -33,7 +33,14 @@ logger = logging.getLogger(__name__)
 
 
 def _build_registry(app_state=None):
-    backend = os.getenv("GENY_TASK_BACKEND", "memory").lower()
+    # Default to the DURABLE Postgres backend whenever a DB pool exists — so
+    # Background Tasks (incl. VTuber/sub-agent mirror tasks) survive backend +
+    # session restarts, mirroring SessionStore's DB-primary persistence. Falls
+    # back to in-memory only when no DB is wired. ``GENY_TASK_BACKEND`` still
+    # forces a specific backend (memory|file|postgres) when set.
+    backend = os.getenv("GENY_TASK_BACKEND", "").lower()
+    if not backend:
+        backend = "postgres" if getattr(app_state, "app_db", None) is not None else "memory"
     if backend == "postgres":
         # PR-D.1.1 — multi-host durable backend. Reuses Geny's existing
         # DatabaseManager pool, no new dependency.

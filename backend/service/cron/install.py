@@ -69,7 +69,12 @@ class _RecordingCronRunner(CronRunner):
 
 
 def _build_store(app_state=None):
-    backend = os.getenv("GENY_CRON_BACKEND", "memory").lower()
+    # Default to durable Postgres when a DB pool exists (same rationale as the
+    # task registry) so cron jobs survive restarts; in-memory only without a DB.
+    # ``GENY_CRON_BACKEND`` still forces a backend (memory|file|postgres).
+    backend = os.getenv("GENY_CRON_BACKEND", "").lower()
+    if not backend:
+        backend = "postgres" if getattr(app_state, "app_db", None) is not None else "memory"
     if backend == "postgres":
         # PR-D.1.2 — multi-host shared cron registry.
         db_manager = getattr(app_state, "app_db", None) if app_state else None
