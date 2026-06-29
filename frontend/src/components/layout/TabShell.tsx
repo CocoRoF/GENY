@@ -64,7 +64,7 @@ export function TabShell({
   return (
     <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       {/* ── Header ── */}
-      <header className="px-4 py-3 border-b border-[hsl(var(--border))] flex items-start justify-between gap-3 shrink-0 bg-[hsl(var(--card))]">
+      <header className="px-4 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between gap-3 shrink-0 bg-[hsl(var(--card))]">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold tracking-tight flex items-center gap-1.5 truncate">
             {Icon && (

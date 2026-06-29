@@ -16,7 +16,7 @@ import { RefreshCw, Image as ImageIcon, CheckCircle2, XCircle } from 'lucide-rea
 type AnyObj = Record<string, any>;
 
 const btnCls =
-  'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
 
 export default function AvatarSettingsPanel() {
   const [loading, setLoading] = useState(true);

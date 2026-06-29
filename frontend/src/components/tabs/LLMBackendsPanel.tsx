@@ -204,7 +204,7 @@ function ClaudeCodeVersionCard() {
   const upToDate = st && st.current && st.latest && st.current === st.latest;
 
   const btnCls =
-    'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border ' +
+    'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 px-2.5 py-1.5 rounded-md border ' +
     'border-[var(--border-color)] text-[0.8rem] text-[var(--text-secondary)] ' +
     'hover:bg-[var(--bg-hover)] disabled:opacity-50';
 
