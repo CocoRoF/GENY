@@ -47,10 +47,16 @@ const GLOBAL_TAB_IDS = ['main', 'settings'] as const;
 //     separate in-Geny memory tab any more — keeping it as a
 //     shortcut preserves the user's muscle memory while routing
 //     them straight to the canonical UI. Cycle 20260503_3.
+// command / vtuber are the SAME slot — the session's primary surface, styled
+// identically (accent). A general agent shows only `command`; a VTuber agent
+// shows only `vtuber`. The rest follow in a fixed order:
+// Tasks · Cron · Storage · Memory · Logs · Environment.
 const SESSION_TAB_DEFS = [
   { id: 'command', accent: true },
-  { id: 'vtuber' },
-  { id: 'sessionEnvironment' },
+  { id: 'vtuber', accent: true },
+  { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
+  { id: 'cron' },      // PR-D.3.1 — CronRunner viewer (runtime state, stays separate)
+  { id: 'storage' },
   {
     id: 'memory',
     external: (sessionId: string | null) =>
@@ -58,10 +64,8 @@ const SESSION_TAB_DEFS = [
         ? `/opsidian?sessionId=${encodeURIComponent(sessionId)}`
         : '/opsidian',
   },
-  { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
-  { id: 'cron' },      // PR-D.3.1 — CronRunner viewer (runtime state, stays separate)
-  { id: 'storage' },
   { id: 'logs' },
+  { id: 'sessionEnvironment' },  // "Environment" — per-session env view (last)
 ] as const;
 
 type SessionTabDef = (typeof SESSION_TAB_DEFS)[number];
@@ -255,13 +259,24 @@ export default function TabNavigation() {
     || selectedSessionId?.substring(0, 10)
     || '';
 
-  // The VTuber tab is the avatar/persona/chat surface — meaningful ONLY for a
-  // vtuber-role session. Hide it for every other role so non-vtuber sessions
-  // don't show an empty tab. All other session tabs are always visible.
+  // command vs vtuber = the SAME primary slot, split by agent type. A VTuber
+  // agent gets only the VTuber tab; every other agent gets only Command. The
+  // rest of the session tabs are always visible.
+  const isVtuber = selectedSession?.role === 'vtuber';
   const visibleGlobalTabs = GLOBAL_TAB_IDS;
-  const visibleSessionTabs = SESSION_TAB_DEFS.filter(
-    (tab) => tab.id !== 'vtuber' || selectedSession?.role === 'vtuber',
-  );
+  const visibleSessionTabs = SESSION_TAB_DEFS.filter((tab) => {
+    if (tab.id === 'command') return !isVtuber;
+    if (tab.id === 'vtuber') return isVtuber;
+    return true;
+  });
+
+  // Keep activeTab off the hidden primary slot: a VTuber session must never
+  // sit on `command` (hidden) and vice-versa — redirect to the visible one.
+  useEffect(() => {
+    if (!hasSession) return;
+    if (isVtuber && activeTab === 'command') setActiveTab('vtuber');
+    else if (!isVtuber && activeTab === 'vtuber') setActiveTab('command');
+  }, [hasSession, isVtuber, activeTab, setActiveTab]);
 
   // Click handler for session tabs. Tabs with an ``external`` marker
   // open the resolved URL in a new browser tab and *do not* toggle
