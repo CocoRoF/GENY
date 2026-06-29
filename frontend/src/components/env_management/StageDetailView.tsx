@@ -69,7 +69,11 @@ const HEADER_PALETTE = {
 
 const CURATED_EDITORS: Record<
   number,
-  React.ComponentType<{ order: number; entry: import('@/types/environment').StageManifestEntry }>
+  React.ComponentType<{
+    order: number;
+    entry: import('@/types/environment').StageManifestEntry;
+    viewMode?: StageViewMode;
+  }>
 > = {
   1: Stage01InputEditor,
   2: Stage02ContextEditor,
@@ -210,7 +214,7 @@ export default function StageDetailView({ order }: StageDetailViewProps) {
             renders StageGenericEditor (raw access to every editable
             field, with N/A badges for fields the executor ignores). */}
         {viewMode === 'basic' ? (
-          <Editor order={order} entry={entry} />
+          <Editor order={order} entry={entry} viewMode={viewMode} />
         ) : (
           <StageGenericEditor order={order} entry={entry} />
         )}

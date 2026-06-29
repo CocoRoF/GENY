@@ -2038,9 +2038,11 @@ const ko: Translations = {
         },
       },
       composableHint: 'Composable 모드는 settings 의 persona 섹션에서 블록을 읽습니다 — 여기보다 전역에서 설정하세요.',
+      composableDevNote: 'Composable 빌더는 전역 persona 블록도 함께 읽습니다. 아래 시스템 프롬프트는 이 환경의 세션에 그대로 적용됩니다.',
       systemPromptTitle: '시스템 프롬프트',
       systemPromptPlaceholder: '당신은 도움이 되는 어시스턴트입니다. 적절할 때 사용 가능한 도구를 사용하세요. 사용자가 자세히 요청하지 않는 한 간결하게 답하세요.',
       systemPromptHint: '이 텍스트는 모든 LLM 호출에서 system 메시지로 전달됩니다. 길게 쓰면 컨텍스트 창을 잡아먹으므로 핵심만.',
+      systemPromptBasicHint: '이 환경의 에이전트가 사용하는 시스템 프롬프트입니다. 편집하면 이 환경의 세션에 적용됩니다.',
       charCount: '{n}자',
       startersTitle: '빠른 추가',
       starters: {

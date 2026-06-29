@@ -62,13 +62,10 @@ _VTUBER_CHARACTERS_DIR = _Path(__file__).resolve().parent.parent.parent / "promp
 # ``append_context`` is idempotent on identical text, so re-registering
 # this string for an already-paired VTuber is a no-op.
 _VTUBER_SUB_WORKER_NOTICE_DEFAULT = (
-    "\n\n## Execution layer (internal — never mention to the user)\n"
-    "Your invisible execution layer is live. Follow your Identity & Delegation "
-    "rules: hand heavy / tool-heavy work off SILENTLY (no target id, no new "
-    "session) and NEVER announce it. Its reply arrives as a `[SUB_WORKER_RESULT]` "
-    "trigger — parse it per `## Triggers`. Never name the worker / sub-agent / "
-    "tools to the user, and never relay its raw or non-Korean working text; speak "
-    "the result as yourself, in Korean — as if you did it."
+    "\n\n## Execution layer\n"
+    "Your sub-worker delegate is live. Hand heavy / tool-heavy work to it (no target "
+    "id, no new session); its result returns as a `[SUB_WORKER_RESULT]` trigger. "
+    "Summarize results in your own words and reply in Korean — don't paste raw output."
 )
 
 
@@ -433,6 +430,27 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return None
 
+    def _env_role_prompt(self, env_id: Optional[str]) -> Optional[str]:
+        """The env's stored System-stage prompt (env = single source), or None.
+
+        Seeded from ``prompts/{role}.md`` at env install and editable in the env's
+        Stage-3 (System) editor. When present it overrides the on-disk role file at
+        session build; absent → the file is the fallback."""
+        if not env_id or self._environment_service is None:
+            return None
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return None
+            for e in manifest.stage_entries():
+                if getattr(e, "order", None) == 3:
+                    cfg = getattr(e, "config", None) or {}
+                    val = cfg.get("prompt")  # StaticPromptBuilder key (Stage-3 editor binds here)
+                    return (str(val).strip() or None) if val else None
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     def _compile_env_persona(self, env_id: Optional[str]) -> Optional[str]:
         """Resolve + compile the env's attached persona preset, or ``None``.
 
@@ -552,6 +570,7 @@ class AgentSessionManager:
         in_gapt_workspace: bool = False,
         gapt_workspace_id: Optional[str] = None,
         gapt_cli_on_host: bool = False,
+        role_protocol_override: Optional[str] = None,
     ) -> str:
         """Build the system prompt using the modular prompt builder.
 
@@ -632,6 +651,7 @@ class AgentSessionManager:
             in_gapt_workspace=in_gapt_workspace,
             gapt_workspace_id=gapt_workspace_id,
             gapt_cli_on_host=gapt_cli_on_host,
+            role_protocol_override=role_protocol_override,
         )
 
         # Memory v2 PR 11 — memory_context append removed (see comment
@@ -835,6 +855,9 @@ class AgentSessionManager:
             in_gapt_workspace=gapt_sandbox is not None,
             gapt_workspace_id=(getattr(gapt_sandbox, "workspace_id", None) if gapt_sandbox else None),
             gapt_cli_on_host=False,
+            # env = single source: the env's stored Stage-3 prompt overrides the
+            # on-disk prompts/{role}.md (which becomes just the seed/fallback).
+            role_protocol_override=self._env_role_prompt(env_id),
         )
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 

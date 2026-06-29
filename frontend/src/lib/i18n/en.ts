@@ -1995,9 +1995,11 @@ const en = {
         },
       },
       composableHint: 'Composable mode reads its blocks from your settings under persona — configure them globally rather than here.',
+      composableDevNote: 'The composable builder also reads global persona blocks. The system prompt below still applies to sessions on this environment.',
       systemPromptTitle: 'System prompt',
       systemPromptPlaceholder: 'You are a helpful assistant. Use the available tools when relevant. Be concise unless the user asks for detail.',
       systemPromptHint: 'This text is sent as the system message on every LLM call. Keep it focused — long prompts eat the context window.',
+      systemPromptBasicHint: "The system prompt this environment's agent uses. Edits apply to sessions on this environment.",
       charCount: '{n} chars',
       startersTitle: 'Quick inserts',
       starters: {

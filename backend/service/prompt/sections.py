@@ -570,6 +570,7 @@ def build_agent_prompt(
     in_gapt_workspace: bool = False,
     gapt_workspace_id: Optional[str] = None,
     gapt_cli_on_host: bool = False,
+    role_protocol_override: Optional[str] = None,
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
@@ -658,10 +659,12 @@ def build_agent_prompt(
     # VTuber Agent block in agent_session_manager). VTuber's role file
     # carries the persona contract.
     builder.add_section(SectionLibrary.role_protocol(role))
-    loader = PromptTemplateLoader()
-    md_template = loader.load_role_template(role)
-    if md_template:
-        builder.override_section("role_protocol", md_template)
+    # env = single source: a per-environment stored system prompt (seeded from
+    # prompts/{role}.md, editable in the env's Stage-3 editor) wins over the
+    # on-disk file. The file is only the seed / fallback for envs without one.
+    role_md = role_protocol_override or PromptTemplateLoader().load_role_template(role)
+    if role_md:
+        builder.override_section("role_protocol", role_md)
 
     # §3 Workspace
     if working_dir:

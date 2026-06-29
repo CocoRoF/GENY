@@ -732,6 +732,35 @@ def install_environment_templates(
         ),
     ]
     for manifest in seeds:
+        _seed_system_prompt(manifest)
         env_id = manifest.metadata.id
         service._write_manifest(env_id, manifest)
     return len(seeds)
+
+
+def _seed_system_prompt(manifest: "EnvironmentManifest") -> None:
+    """env = single source: seed the System stage (order 3) ``config.system_prompt``
+    with the role's default prompt text from ``prompts/{role}.md`` so every preset
+    env ships a non-empty, editable system prompt (shown in the Stage-3 editor and
+    used at session build). VTuber envs get ``vtuber.md``; others ``worker.md``.
+    Best-effort; never fails template build."""
+    try:
+        from service.prompt.template_loader import PromptTemplateLoader
+
+        extras = getattr(manifest.host_selections, "extras", None) or {}
+        owned = extras.get("owned_subagent") or {}
+        is_vtuber = bool(
+            extras.get("persona_preset_id")
+            or (isinstance(owned, dict) and owned.get("enabled"))
+        )
+        text = PromptTemplateLoader().load_role_template("vtuber" if is_vtuber else "worker")
+        if not text:
+            return
+        entries = manifest.stage_entries()
+        for e in entries:
+            if getattr(e, "order", None) == 3:
+                # ``prompt`` = the StaticPromptBuilder key the Stage-3 editor binds to.
+                e.config = {**(getattr(e, "config", None) or {}), "prompt": text}
+        manifest.set_stage_entries(entries)
+    except Exception:  # noqa: BLE001 — never fail template build on seeding
+        pass
