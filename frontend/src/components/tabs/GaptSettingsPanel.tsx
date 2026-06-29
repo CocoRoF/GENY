@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { gaptSettingsApi } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { RefreshCw, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, Cloud } from 'lucide-react';
 
 type AnyObj = Record<string, any>;
@@ -44,6 +45,7 @@ const primaryBtnCls =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
 
 export default function GaptSettingsPanel() {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -95,11 +97,11 @@ export default function GaptSettingsPanel() {
       if (snap?.mode) setTunnelMode(snap.mode);
       else if (d?.tunnel_mode) setTunnelMode(d.tunnel_mode);
     } catch (e: any) {
-      flash('err', e?.message || 'GAPT 설정을 불러오지 못했습니다');
+      flash('err', e?.message || t('gaptSettings.loadError'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadAll();
@@ -113,9 +115,9 @@ export default function GaptSettingsPanel() {
       setZones(res.zones || []);
       setTunnelsByAccount(res.tunnels_by_account || {});
       const warnings: string[] = res.warnings || [];
-      flash('ok', warnings.length ? `검증됨 (경고 ${warnings.length}): ${warnings[0]}` : '토큰 검증 성공 — 계정/존/터널을 선택하세요');
+      flash('ok', warnings.length ? t('gaptSettings.verifyWarning', { count: warnings.length, warning: warnings[0] }) : t('gaptSettings.verifySuccess'));
     } catch (e: any) {
-      flash('err', e?.message || '토큰 검증 실패');
+      flash('err', e?.message || t('gaptSettings.verifyFailed'));
     } finally {
       setVerifying(false);
     }
@@ -136,10 +138,10 @@ export default function GaptSettingsPanel() {
       if (token) body.api_token = token;
       await gaptSettingsApi.putCloudflare(body);
       setToken('');
-      flash('ok', 'Cloudflare 설정 저장됨');
+      flash('ok', t('gaptSettings.cloudflareSaved'));
       await loadAll();
     } catch (e: any) {
-      flash('err', e?.message || '저장 실패');
+      flash('err', e?.message || t('gaptSettings.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -148,19 +150,19 @@ export default function GaptSettingsPanel() {
   const onEnsureWildcard = async () => {
     try {
       await gaptSettingsApi.ensureWildcard({});
-      flash('ok', '와일드카드 인그레스 적용됨');
+      flash('ok', t('gaptSettings.wildcardApplied'));
       await loadAll();
     } catch (e: any) {
-      flash('err', e?.message || '와일드카드 적용 실패');
+      flash('err', e?.message || t('gaptSettings.wildcardFailed'));
     }
   };
 
   const onEnableTls = async () => {
     try {
       await gaptSettingsApi.enableTotalTls({});
-      flash('ok', 'Total TLS 활성화 요청됨');
+      flash('ok', t('gaptSettings.totalTlsRequested'));
     } catch (e: any) {
-      flash('err', e?.message || 'Total TLS 활성화 실패');
+      flash('err', e?.message || t('gaptSettings.totalTlsFailed'));
     }
   };
 
@@ -171,9 +173,9 @@ export default function GaptSettingsPanel() {
       {/* Header */}
       <div className="flex items-center gap-2">
         <Cloud className="w-5 h-5 text-[var(--primary-color)] shrink-0" />
-        <h2 className="text-base font-semibold text-[var(--text-primary)] min-w-0 truncate">GAPT — Cloudflare &amp; 라우팅</h2>
+        <h2 className="text-base font-semibold text-[var(--text-primary)] min-w-0 truncate">{t('gaptSettings.title')}</h2>
         <button onClick={() => void loadAll()} className={`${btnCls} ml-auto`} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {t('gaptSettings.refresh')}
         </button>
       </div>
 
@@ -187,7 +189,7 @@ export default function GaptSettingsPanel() {
       <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
         <div className="flex items-center gap-2 mb-3">
           <ShieldCheck className="w-4 h-4 text-[var(--text-muted)]" />
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">라우팅 준비 상태</h3>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('gaptSettings.readinessTitle')}</h3>
           {tunnelMode && (
             <span className="ml-auto text-xs px-2 py-0.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)]">
               tunnel: {tunnelMode}
@@ -196,15 +198,15 @@ export default function GaptSettingsPanel() {
         </div>
         {diag ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            <Light ok={diag.provider_configured} label="Provider 구성됨" />
-            <Light ok={diag.dns_resolves} label="DNS 해석" />
-            <Light ok={diag.caddy_admin_reachable} label="Caddy admin 도달" />
-            <Light ok={diag.caddy_has_wildcard_server} label="Caddy 와일드카드 서버" />
-            <Light ok={diag.tunnel_has_wildcard} label="터널 와일드카드 인그레스" />
-            <Light ok={diag.e2e_reachable} label="E2E 도달" />
+            <Light ok={diag.provider_configured} label={t('gaptSettings.providerConfigured')} />
+            <Light ok={diag.dns_resolves} label={t('gaptSettings.dnsResolves')} />
+            <Light ok={diag.caddy_admin_reachable} label={t('gaptSettings.caddyAdminReachable')} />
+            <Light ok={diag.caddy_has_wildcard_server} label={t('gaptSettings.caddyWildcardServer')} />
+            <Light ok={diag.tunnel_has_wildcard} label={t('gaptSettings.tunnelWildcardIngress')} />
+            <Light ok={diag.e2e_reachable} label={t('gaptSettings.e2eReachable')} />
           </div>
         ) : (
-          <p className="text-sm text-[var(--text-muted)]">{loading ? '불러오는 중…' : '진단 정보 없음'}</p>
+          <p className="text-sm text-[var(--text-muted)]">{loading ? t('gaptSettings.loading') : t('gaptSettings.noDiagnostics')}</p>
         )}
         {Array.isArray(diag?.next_steps) && diag!.next_steps.length > 0 && (
           <ul className="mt-3 list-disc pl-5 text-xs text-[var(--text-secondary)] space-y-1">
@@ -216,38 +218,38 @@ export default function GaptSettingsPanel() {
       {/* Cloudflare config */}
       <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
         <div className="flex items-center gap-2 mb-3">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Cloudflare 설정</h3>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('gaptSettings.cloudflareSection')}</h3>
           <span className={`text-xs px-2 py-0.5 rounded-md border ${configured ? 'border-emerald-500/30 text-emerald-300' : 'border-[var(--border-color)] text-[var(--text-muted)]'}`}>
-            {configured ? '구성됨' : '미구성'}
+            {configured ? t('gaptSettings.configured') : t('gaptSettings.notConfigured')}
           </span>
           {verifiedAt && <span className="ml-auto text-xs text-[var(--text-muted)]">verified: {new Date(verifiedAt).toLocaleString()}</span>}
         </div>
 
         <div className="flex flex-col gap-3">
           <div>
-            <label className={labelCls}>API 토큰 {configured && <span className="text-[var(--text-muted)]">(비워두면 기존 유지)</span>}</label>
+            <label className={labelCls}>{t('gaptSettings.apiToken')} {configured && <span className="text-[var(--text-muted)]">{t('gaptSettings.keepExistingHint')}</span>}</label>
             <div className="flex items-stretch gap-2">
               <input
                 type="password"
                 className={`${inputCls} flex-1 min-w-0`}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder={configured ? '●●●●●●●● (설정됨)' : 'Cloudflare API 토큰'}
+                placeholder={configured ? t('gaptSettings.tokenPlaceholderSet') : t('gaptSettings.tokenPlaceholder')}
                 autoComplete="off"
               />
               <button onClick={onVerify} className={btnCls} disabled={verifying}>
-                <RefreshCw className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : ''}`} /> 검증
+                <RefreshCw className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : ''}`} /> {t('gaptSettings.verify')}
               </button>
             </div>
-            <p className="text-xs text-[var(--text-muted)] mt-1">검증하면 계정/존/터널 목록을 불러와 아래 드롭다운을 채웁니다.</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">{t('gaptSettings.verifyHelp')}</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
-              <label className={labelCls}>Account</label>
+              <label className={labelCls}>{t('gaptSettings.account')}</label>
               {accounts.length ? (
                 <select className={inputCls} value={accountId} onChange={(e) => { setAccountId(e.target.value); setTunnelId(''); }}>
-                  <option value="">선택…</option>
+                  <option value="">{t('gaptSettings.selectPlaceholder')}</option>
                   {accounts.map((a, i) => {
                     const id = pick(a, 'id', 'account_id'); const name = pick(a, 'name') || id;
                     return <option key={id || i} value={id}>{name}</option>;
@@ -258,10 +260,10 @@ export default function GaptSettingsPanel() {
               )}
             </div>
             <div>
-              <label className={labelCls}>Zone</label>
+              <label className={labelCls}>{t('gaptSettings.zone')}</label>
               {zones.length ? (
                 <select className={inputCls} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
-                  <option value="">선택…</option>
+                  <option value="">{t('gaptSettings.selectPlaceholder')}</option>
                   {zones.map((z, i) => {
                     const id = pick(z, 'id', 'zone_id'); const name = pick(z, 'name') || id;
                     return <option key={id || i} value={id}>{name}</option>;
@@ -272,10 +274,10 @@ export default function GaptSettingsPanel() {
               )}
             </div>
             <div>
-              <label className={labelCls}>Tunnel</label>
+              <label className={labelCls}>{t('gaptSettings.tunnel')}</label>
               {tunnelOptions.length ? (
                 <select className={inputCls} value={tunnelId} onChange={(e) => setTunnelId(e.target.value)}>
-                  <option value="">선택…</option>
+                  <option value="">{t('gaptSettings.selectPlaceholder')}</option>
                   {tunnelOptions.map((tn, i) => {
                     const id = pick(tn, 'id', 'tunnel_id'); const name = pick(tn, 'name') || id;
                     return <option key={id || i} value={id}>{name}</option>;
@@ -286,21 +288,21 @@ export default function GaptSettingsPanel() {
               )}
             </div>
             <div>
-              <label className={labelCls}>Preview domain</label>
+              <label className={labelCls}>{t('gaptSettings.previewDomain')}</label>
               <input className={inputCls} value={previewDomain} onChange={(e) => setPreviewDomain(e.target.value)} placeholder="gapt.example.com" />
             </div>
             <div className="sm:col-span-2 lg:col-span-3">
-              <label className={labelCls}>Upstream</label>
+              <label className={labelCls}>{t('gaptSettings.upstream')}</label>
               <input className={inputCls} value={upstream} onChange={(e) => setUpstream(e.target.value)} placeholder="http://localhost:38080" />
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button onClick={onSave} className={primaryBtnCls} disabled={saving}>
-              {saving ? '저장 중…' : '저장'}
+              {saving ? t('gaptSettings.saving') : t('gaptSettings.save')}
             </button>
-            <button onClick={onEnsureWildcard} className={btnCls}>와일드카드 인그레스 적용</button>
-            <button onClick={onEnableTls} className={btnCls}>Total TLS 활성화</button>
+            <button onClick={onEnsureWildcard} className={btnCls}>{t('gaptSettings.applyWildcard')}</button>
+            <button onClick={onEnableTls} className={btnCls}>{t('gaptSettings.enableTotalTls')}</button>
           </div>
         </div>
       </section>

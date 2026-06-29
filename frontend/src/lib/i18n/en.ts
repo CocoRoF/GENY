@@ -597,6 +597,116 @@ const en = {
     toolsNote: 'Once connected, the Gmail, Calendar, Drive and Tasks tools become available to agents automatically.',
   },
 
+  // ─── GAPT — Cloudflare & routing panel ───
+  gaptSettings: {
+    title: 'GAPT — Cloudflare & routing',
+    refresh: 'Refresh',
+    loadError: 'Failed to load GAPT settings',
+
+    readinessTitle: 'Routing readiness',
+    providerConfigured: 'Provider configured',
+    dnsResolves: 'DNS resolves',
+    caddyAdminReachable: 'Caddy admin reachable',
+    caddyWildcardServer: 'Caddy wildcard server',
+    tunnelWildcardIngress: 'Tunnel wildcard ingress',
+    e2eReachable: 'E2E reachable',
+    loading: 'Loading…',
+    noDiagnostics: 'No diagnostics',
+
+    cloudflareSection: 'Cloudflare settings',
+    configured: 'Configured',
+    notConfigured: 'Not configured',
+
+    apiToken: 'API token',
+    keepExistingHint: '(leave blank to keep existing)',
+    tokenPlaceholderSet: '●●●●●●●● (set)',
+    tokenPlaceholder: 'Cloudflare API token',
+    verify: 'Verify',
+    verifyHelp: 'Verifying loads your accounts/zones/tunnels and populates the dropdowns below.',
+
+    account: 'Account',
+    zone: 'Zone',
+    tunnel: 'Tunnel',
+    previewDomain: 'Preview domain',
+    upstream: 'Upstream',
+    selectPlaceholder: 'Select…',
+
+    save: 'Save',
+    saving: 'Saving…',
+    applyWildcard: 'Apply wildcard ingress',
+    enableTotalTls: 'Enable Total TLS',
+
+    verifySuccess: 'Token verified — select an account/zone/tunnel',
+    verifyWarning: 'Verified ({count} warnings): {warning}',
+    verifyFailed: 'Token verification failed',
+    cloudflareSaved: 'Cloudflare settings saved',
+    saveFailed: 'Save failed',
+    wildcardApplied: 'Wildcard ingress applied',
+    wildcardFailed: 'Failed to apply wildcard',
+    totalTlsRequested: 'Total TLS enable requested',
+    totalTlsFailed: 'Failed to enable Total TLS',
+  },
+
+  // ─── Avatar — image generation keys panel ───
+  avatarSettings: {
+    title: 'Avatar — Image generation keys',
+    syncFromGeny: 'Sync from Geny keys',
+    refresh: 'Refresh',
+
+    connection: 'Connection',
+    connected: 'Connected',
+    configuredUnresponsive: 'Configured (unresponsive)',
+    notConfigured: 'Not configured',
+
+    descIntro: 'Image generation keys (OpenAI/Gemini/fal/Replicate) are owned by Geny. Set OpenAI/Gemini under the ',
+    descLlmBackend: 'LLM backend',
+    descMid: ' and fal/Replicate under ',
+    descImageGenKeys: 'General → Image Generation Keys',
+    descOutro: ', and they propagate to the avatar automatically.',
+
+    keyStatus: 'Avatar key status',
+    loading: 'Loading…',
+    colProvider: 'Provider',
+    colStatus: 'Status',
+    colPreview: 'Preview',
+    set: 'Set',
+    none: 'None',
+    keysUnavailable: 'Could not retrieve key information.',
+    notConnected: 'Avatar is not connected.',
+
+    loadError: 'Failed to load avatar status',
+    syncResult: 'Avatar sync: {keys}',
+    syncDone: 'Sync complete',
+    syncFailed: 'Sync failed',
+  },
+
+  // ─── LLM Backends panel body ───
+  llmBackendsPanel: {
+    syncKeys: 'Sync keys',
+    syncKeysTitle: "Re-push Geny's provider keys to GAPT/avatar",
+    syncNoKeys: 'No keys to sync',
+    syncFailed: 'Sync failed: {error}',
+
+    versionTitle: 'Claude Code CLI version',
+    notInstalled: 'not installed',
+    latest: 'Up to date',
+    updateAvailable: 'Update available',
+    check: 'Check',
+
+    refresh: 'Refresh',
+    updateToLatest: 'Update to latest',
+    rollback: 'Rollback',
+    rollbackTo: 'Rollback (v{version})',
+    rollbackTitle: 'Roll back to v{version}',
+    rollbackUnavailable: 'No previous version to roll back to',
+
+    upToDate: 'You are on the latest version.',
+    newVersionAvailable: 'A newer version v{version} is available.',
+    latestUnknown: 'Could not determine the latest version.',
+    cliNotInstalled: 'Claude Code CLI is not installed.',
+    pinned: 'pinned: {version}',
+  },
+
   // ─── Connectors (MCP ecosystem) ───
   connectors: {
     navLabel: 'Connectors',

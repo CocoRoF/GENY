@@ -591,6 +591,116 @@ const ko: Translations = {
     toolsNote: '연결되면 Gmail · 캘린더 · 드라이브 · Tasks 도구가 에이전트에게 자동으로 제공됩니다.',
   },
 
+  // ─── GAPT — Cloudflare & 라우팅 패널 ───
+  gaptSettings: {
+    title: 'GAPT — Cloudflare & 라우팅',
+    refresh: '새로고침',
+    loadError: 'GAPT 설정을 불러오지 못했습니다',
+
+    readinessTitle: '라우팅 준비 상태',
+    providerConfigured: 'Provider 구성됨',
+    dnsResolves: 'DNS 해석',
+    caddyAdminReachable: 'Caddy admin 도달',
+    caddyWildcardServer: 'Caddy 와일드카드 서버',
+    tunnelWildcardIngress: '터널 와일드카드 인그레스',
+    e2eReachable: 'E2E 도달',
+    loading: '불러오는 중…',
+    noDiagnostics: '진단 정보 없음',
+
+    cloudflareSection: 'Cloudflare 설정',
+    configured: '구성됨',
+    notConfigured: '미구성',
+
+    apiToken: 'API 토큰',
+    keepExistingHint: '(비워두면 기존 유지)',
+    tokenPlaceholderSet: '●●●●●●●● (설정됨)',
+    tokenPlaceholder: 'Cloudflare API 토큰',
+    verify: '검증',
+    verifyHelp: '검증하면 계정/존/터널 목록을 불러와 아래 드롭다운을 채웁니다.',
+
+    account: 'Account',
+    zone: 'Zone',
+    tunnel: 'Tunnel',
+    previewDomain: 'Preview domain',
+    upstream: 'Upstream',
+    selectPlaceholder: '선택…',
+
+    save: '저장',
+    saving: '저장 중…',
+    applyWildcard: '와일드카드 인그레스 적용',
+    enableTotalTls: 'Total TLS 활성화',
+
+    verifySuccess: '토큰 검증 성공 — 계정/존/터널을 선택하세요',
+    verifyWarning: '검증됨 (경고 {count}): {warning}',
+    verifyFailed: '토큰 검증 실패',
+    cloudflareSaved: 'Cloudflare 설정 저장됨',
+    saveFailed: '저장 실패',
+    wildcardApplied: '와일드카드 인그레스 적용됨',
+    wildcardFailed: '와일드카드 적용 실패',
+    totalTlsRequested: 'Total TLS 활성화 요청됨',
+    totalTlsFailed: 'Total TLS 활성화 실패',
+  },
+
+  // ─── Avatar — 이미지 생성 키 패널 ───
+  avatarSettings: {
+    title: 'Avatar — 이미지 생성 키',
+    syncFromGeny: 'Geny 키로 동기화',
+    refresh: '새로고침',
+
+    connection: '연결',
+    connected: '연결됨',
+    configuredUnresponsive: '구성됨(미응답)',
+    notConfigured: '미구성',
+
+    descIntro: '이미지 생성 키(OpenAI/Gemini/fal/Replicate)는 Geny가 소유합니다. OpenAI/Gemini는 ',
+    descLlmBackend: 'LLM 백엔드',
+    descMid: ', fal/Replicate는 ',
+    descImageGenKeys: 'General → Image Generation Keys',
+    descOutro: '에서 설정하면 avatar로 자동 전파됩니다.',
+
+    keyStatus: 'avatar 키 상태',
+    loading: '불러오는 중…',
+    colProvider: 'Provider',
+    colStatus: '상태',
+    colPreview: '미리보기',
+    set: '설정됨',
+    none: '없음',
+    keysUnavailable: '키 정보를 가져오지 못했습니다.',
+    notConnected: 'avatar가 연결되지 않았습니다.',
+
+    loadError: 'avatar 상태를 불러오지 못했습니다',
+    syncResult: 'avatar 동기화: {keys}',
+    syncDone: '동기화 완료',
+    syncFailed: '동기화 실패',
+  },
+
+  // ─── LLM Backends 패널 본문 ───
+  llmBackendsPanel: {
+    syncKeys: '키 동기화',
+    syncKeysTitle: 'Geny의 프로바이더 키를 GAPT/avatar에 다시 전파',
+    syncNoKeys: '동기화할 키가 없습니다',
+    syncFailed: '동기화 실패: {error}',
+
+    versionTitle: 'Claude Code CLI 버전',
+    notInstalled: '미설치',
+    latest: '최신',
+    updateAvailable: '업데이트 가능',
+    check: '확인',
+
+    refresh: '새로고침',
+    updateToLatest: '최신으로 업데이트',
+    rollback: '롤백',
+    rollbackTo: '롤백 (v{version})',
+    rollbackTitle: 'v{version} 으로 롤백',
+    rollbackUnavailable: '롤백할 이전 버전이 없습니다',
+
+    upToDate: '최신 버전을 사용 중입니다.',
+    newVersionAvailable: '최신 버전 v{version} 사용 가능합니다.',
+    latestUnknown: '최신 버전 정보를 확인할 수 없습니다.',
+    cliNotInstalled: 'Claude Code CLI가 설치되어 있지 않습니다.',
+    pinned: '고정: {version}',
+  },
+
   // ─── Connectors (MCP 생태계) ───
   connectors: {
     navLabel: '커넥터',

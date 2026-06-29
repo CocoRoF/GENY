@@ -170,6 +170,7 @@ export default function LLMBackendsPanel() {
 
 // ── Claude Code CLI version manager (keep-latest + rollback) ─────────
 function ClaudeCodeVersionCard() {
+  const { t } = useI18n();
   const [st, setSt] = useState<ClaudeCodeVersionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'' | 'update' | 'rollback'>('');
@@ -211,13 +212,13 @@ function ClaudeCodeVersionCard() {
   return (
     <SettingsCard
       icon={<Terminal className="w-[18px] h-[18px]" />}
-      title="Claude Code CLI 버전"
-      meta={st?.current ? <span className="font-mono">v{st.current}</span> : '미설치'}
+      title={t('llmBackendsPanel.versionTitle')}
+      meta={st?.current ? <span className="font-mono">v{st.current}</span> : t('llmBackendsPanel.notInstalled')}
       status={
         st
           ? {
               tone: upToDate ? 'good' : st.update_available ? 'warn' : 'neutral',
-              label: loading ? '…' : upToDate ? '최신' : st.update_available ? '업데이트 가능' : '확인',
+              label: loading ? '…' : upToDate ? t('llmBackendsPanel.latest') : st.update_available ? t('llmBackendsPanel.updateAvailable') : t('llmBackendsPanel.check'),
             }
           : undefined
       }
@@ -225,7 +226,7 @@ function ClaudeCodeVersionCard() {
         <>
           <button type="button" className={btnCls} onClick={refresh} disabled={loading || !!busy}>
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            새로고침
+            {t('llmBackendsPanel.refresh')}
           </button>
           <button
             type="button"
@@ -234,17 +235,17 @@ function ClaudeCodeVersionCard() {
             disabled={!!busy || loading || !!upToDate}
           >
             {busy === 'update' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
-            최신으로 업데이트
+            {t('llmBackendsPanel.updateToLatest')}
           </button>
           <button
             type="button"
             className={btnCls}
             onClick={doRollback}
             disabled={!!busy || loading || !st?.can_rollback}
-            title={st?.previous ? `v${st.previous} 으로 롤백` : '롤백할 이전 버전이 없습니다'}
+            title={st?.previous ? t('llmBackendsPanel.rollbackTitle', { version: st.previous }) : t('llmBackendsPanel.rollbackUnavailable')}
           >
             {busy === 'rollback' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-            롤백{st?.previous ? ` (v${st.previous})` : ''}
+            {st?.previous ? t('llmBackendsPanel.rollbackTo', { version: st.previous }) : t('llmBackendsPanel.rollback')}
           </button>
           {err && (
             <span className="basis-full text-[0.72rem] text-[var(--danger-color)] bg-[var(--bg-tertiary)] rounded-md px-2 py-1.5 break-all">
@@ -256,13 +257,13 @@ function ClaudeCodeVersionCard() {
     >
       {st?.current
         ? upToDate
-          ? '최신 버전을 사용 중입니다.'
+          ? t('llmBackendsPanel.upToDate')
           : st.latest
-            ? <>최신 버전 <span className="font-medium text-[var(--text-primary)]">v{st.latest}</span> 사용 가능합니다.</>
-            : '최신 버전 정보를 확인할 수 없습니다.'
-        : 'Claude Code CLI가 설치되어 있지 않습니다.'}
+            ? t('llmBackendsPanel.newVersionAvailable', { version: st.latest })
+            : t('llmBackendsPanel.latestUnknown')
+        : t('llmBackendsPanel.cliNotInstalled')}
       {st?.pinned && (
-        <span className="text-[var(--text-tertiary)]"> · 고정: {st.pinned === 'latest' ? '최신' : `v${st.pinned}`}</span>
+        <span className="text-[var(--text-tertiary)]"> · {t('llmBackendsPanel.pinned', { version: st.pinned === 'latest' ? t('llmBackendsPanel.latest') : `v${st.pinned}` })}</span>
       )}
     </SettingsCard>
   );
@@ -286,14 +287,14 @@ function LLMBackendsPanelInner() {
           parts.push(`${k.replace(/_API_KEY|_API_TOKEN|_KEY/g, '')}: ${Object.entries(v).map(([t, s]) => `${t}=${s}`).join(', ')}`);
         }
       }
-      setSyncMsg(parts.length ? parts.join(' · ') : '동기화할 키가 없습니다');
+      setSyncMsg(parts.length ? parts.join(' · ') : t('llmBackendsPanel.syncNoKeys'));
     } catch (e: any) {
-      setSyncMsg(`동기화 실패: ${e?.message || e}`);
+      setSyncMsg(t('llmBackendsPanel.syncFailed', { error: e?.message || e }));
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMsg(null), 8000);
     }
-  }, []);
+  }, [t]);
   const [recheckLoading, setRecheckLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openProvider, setOpenProvider] = useState<string | null>(null);
@@ -362,10 +363,10 @@ function LLMBackendsPanelInner() {
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
             onClick={handleSyncKeys}
             disabled={syncing}
-            title="Geny의 프로바이더 키를 GAPT/avatar에 다시 전파"
+            title={t('llmBackendsPanel.syncKeysTitle')}
           >
             {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            키 동기화
+            {t('llmBackendsPanel.syncKeys')}
           </button>
           <button
             type="button"
