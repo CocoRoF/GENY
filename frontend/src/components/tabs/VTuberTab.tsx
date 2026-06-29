@@ -157,7 +157,7 @@ export default function VTuberTab() {
           <button
             type="button"
             onClick={() => setBakedImportsOpen(true)}
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[0.6875rem] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] cursor-pointer transition-colors"
+            className="inline-flex items-center gap-1 h-7 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 text-[0.6875rem] text-[var(--text-muted)] hover:border-[var(--primary-color)] hover:text-[var(--primary-color)] cursor-pointer transition-colors"
             title={t('vtuber.importBakedTitle')}
           >
             <Inbox size={11} />

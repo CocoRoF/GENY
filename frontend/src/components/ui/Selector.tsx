@@ -170,8 +170,10 @@ export default function Selector<T extends string = string>({
           isField
             ? cn(
                 'bg-[var(--bg-primary)] text-[var(--text-primary)] border-[var(--border-color)] hover:border-[var(--border-subtle)]',
+                // sm == shadcn Button `sm` (h-7) so toolbar selectors line up
+                // exactly with ActionButton; md (forms) stays roomier.
                 size === 'sm'
-                  ? 'h-8 px-2.5 text-[0.75rem]'
+                  ? 'h-7 px-2.5 text-[0.75rem]'
                   : 'h-9 px-3 text-[0.875rem]',
               )
             : cn(

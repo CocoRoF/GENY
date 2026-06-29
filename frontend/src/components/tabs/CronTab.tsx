@@ -186,6 +186,7 @@ export function CronTab() {
             <StatusBadge
               tone={status.running ? 'success' : 'danger'}
               uppercase
+              className="h-7"
               title={`cycle ${status.cycle_seconds ?? '?'}s · ${status.jobs_enabled}/${status.jobs_total} enabled`}
             >
               {status.running ? 'live' : 'down'} · {status.jobs_enabled}/{status.jobs_total}
