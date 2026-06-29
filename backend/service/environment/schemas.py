@@ -278,6 +278,9 @@ class EnvironmentSummaryResponse(BaseModel):
     # users clone them to start a new env. Server-side this is also a
     # convenient hook for future delete-protection.
     built_in: bool = False
+    # "vtuber" (persona env) or "agent" (worker/dev env). Lets the session-
+    # create dialog derive the role from the chosen environment alone.
+    kind: str = "agent"
 
 
 class AffectedSessionsSummary(BaseModel):

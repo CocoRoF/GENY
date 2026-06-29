@@ -165,6 +165,10 @@ export interface EnvironmentSummary {
    *  The Environment editor uses this to gate the Edit affordance —
    *  built-ins are clone-only, users can only edit their own envs. */
   built_in?: boolean;
+  /** Backend-set authoritative env classification. ``"vtuber"`` marks
+   *  a persona env (drives role/workflow + the avatar/TTS quick-assign);
+   *  ``"agent"`` is a standard task env. */
+  kind?: 'vtuber' | 'agent';
 }
 
 // D.3 (cycle 20260426_1) — populated by manifest-write endpoints to

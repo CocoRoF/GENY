@@ -2867,6 +2867,7 @@ const en = {
     environmentLoading: 'Loading environments…',
     environmentLegacy: 'Uses the role-based preset pipeline (legacy path).',
     environmentSelected: 'Uses the selected environment manifest.',
+    environmentRequiredHelp: 'The selected environment defines the role, prompt, tools, model, and execution settings. Edit the environment to change them.',
     memoryOverride: 'Memory provider (advanced)',
     memoryOverrideHelp: 'Per-session MemoryProvider override. Takes precedence over the process-wide MEMORY_PROVIDER env var. Leave as "Default" to inherit the server default.',
     memoryShow: 'Show',

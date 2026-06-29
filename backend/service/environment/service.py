@@ -383,6 +383,22 @@ class EnvironmentService:
         # check so future template additions / renames are a
         # one-place change.
         built_in = env_id.startswith("template-")
+        # ``kind`` — whether this env is a VTuber persona env or a plain
+        # agent/worker env. Session creation uses it to derive the role from
+        # the chosen environment (so the create dialog only needs the env).
+        # VTuber signal = persona preset attached OR a bound owned sub-agent
+        # (the two capabilities every VTuber env declares), with base_preset /
+        # id as fallbacks.
+        extras = {}
+        if isinstance(manifest_dict, dict):
+            extras = (manifest_dict.get("host_selections", {}) or {}).get("extras", {}) or {}
+        owned = extras.get("owned_subagent") or {}
+        is_vtuber = bool(
+            extras.get("persona_preset_id")
+            or (isinstance(owned, dict) and owned.get("enabled"))
+            or "vtuber" in (base_preset or "").lower()
+            or "vtuber" in str(env_id).lower()
+        )
         return {
             "id": env_id,
             "name": data.get("name", ""),
@@ -395,6 +411,7 @@ class EnvironmentService:
             "model": model,
             "base_preset": base_preset,
             "built_in": built_in,
+            "kind": "vtuber" if is_vtuber else "agent",
         }
 
     def update(self, env_id: str, changes: Dict[str, Any]) -> Optional[Dict[str, Any]]:

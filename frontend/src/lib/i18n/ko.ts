@@ -2910,6 +2910,7 @@ const ko: Translations = {
     environmentLoading: '환경 불러오는 중…',
     environmentLegacy: 'role 기반 preset 파이프라인 (레거시 경로) 을 사용합니다.',
     environmentSelected: '선택된 environment manifest 를 사용합니다.',
+    environmentRequiredHelp: '선택한 환경이 역할·프롬프트·도구·모델·실행 설정을 모두 정의합니다. 변경하려면 환경을 편집하세요.',
     memoryOverride: '메모리 프로바이더 (고급)',
     memoryOverrideHelp: '세션 단위 MemoryProvider 오버라이드. 서버의 MEMORY_PROVIDER 환경변수보다 우선합니다. "Default" 로 두면 서버 기본값을 상속합니다.',
     memoryShow: '펼치기',
