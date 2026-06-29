@@ -157,6 +157,10 @@ _PLATFORM_TOOL_SOURCES = frozenset({
     "geny_tools",
     "memory_tools",
     "knowledge_tools",
+    # User-facing automations ("Hooks"): HookCreate/List/Delete/Toggle. Always
+    # on so any session (Command or VTuber) can set up "tell me when…" /
+    # "every morning…" automations from natural language.
+    "hook_tools",
     # Cycle 20260430_2 Stage B/C — progressive memory inspection tools
     # (memory_status / memory_with / memory_event / memory_artifact /
     # memory_distill). Live alongside the existing memory_* family;
