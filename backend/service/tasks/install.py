@@ -87,11 +87,18 @@ def _orchestrator_factory(app_state):
 
 def install_task_runtime(app_state) -> Dict[str, Any]:
     registry = _build_registry(app_state)
+    # ``agent_hook`` backs the user-facing Hooks feature: a fired Hook runs its
+    # action prompt as a trigger turn in the owning chat session and delivers
+    # the result back to that chat. Lives in Geny (not executor) because session
+    # binding + chat delivery are Geny concepts.
+    from service.hooks_runtime.executor import AgentHookExecutor
+
     runner = BackgroundTaskRunner(
         registry,
         executors={
             "local_bash": LocalBashExecutor(),
             "local_agent": LocalAgentExecutor(_orchestrator_factory(app_state)),
+            "agent_hook": AgentHookExecutor(app_state),
         },
         max_concurrent=int(os.getenv("GENY_TASK_MAX_CONCURRENT", "8")),
     )
