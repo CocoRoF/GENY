@@ -39,9 +39,9 @@ const inputCls =
   'w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]';
 const labelCls = 'block text-xs font-medium text-[var(--text-muted)] mb-1';
 const btnCls =
-  'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
 const primaryBtnCls =
-  'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
 
 export default function GaptSettingsPanel() {
   const [loading, setLoading] = useState(true);
@@ -170,8 +170,8 @@ export default function GaptSettingsPanel() {
     <div className="flex flex-col gap-5 w-full">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Cloud className="w-5 h-5 text-[var(--primary-color)]" />
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">GAPT — Cloudflare & 라우팅</h2>
+        <Cloud className="w-5 h-5 text-[var(--primary-color)] shrink-0" />
+        <h2 className="text-base font-semibold text-[var(--text-primary)] min-w-0 truncate">GAPT — Cloudflare &amp; 라우팅</h2>
         <button onClick={() => void loadAll()} className={`${btnCls} ml-auto`} disabled={loading}>
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> 새로고침
         </button>
@@ -226,10 +226,10 @@ export default function GaptSettingsPanel() {
         <div className="flex flex-col gap-3">
           <div>
             <label className={labelCls}>API 토큰 {configured && <span className="text-[var(--text-muted)]">(비워두면 기존 유지)</span>}</label>
-            <div className="flex gap-2">
+            <div className="flex items-stretch gap-2">
               <input
                 type="password"
-                className={inputCls}
+                className={`${inputCls} flex-1 min-w-0`}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder={configured ? '●●●●●●●● (설정됨)' : 'Cloudflare API 토큰'}
