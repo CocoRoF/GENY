@@ -62,17 +62,13 @@ _VTUBER_CHARACTERS_DIR = _Path(__file__).resolve().parent.parent.parent / "promp
 # ``append_context`` is idempotent on identical text, so re-registering
 # this string for an already-paired VTuber is a no-op.
 _VTUBER_SUB_WORKER_NOTICE_DEFAULT = (
-    "\n\n## Sub-Worker Agent\n"
-    "You have a Worker agent bound to you by the runtime. "
-    "For complex tasks (coding, file operations, research, "
-    "multi-step execution), delegate by direct-messaging "
-    "your paired Sub-Worker — no target id needed; the "
-    "runtime routes automatically. You do NOT need to "
-    "(and must not attempt to) create a target session. "
-    "The Worker's reply arrives as a `[SUB_WORKER_RESULT]` "
-    "trigger message; parse the structured fields per the "
-    "`## Triggers` section of your role prompt and summarize "
-    "the result for the user."
+    "\n\n## Execution layer (internal — never mention to the user)\n"
+    "Your invisible execution layer is live. Follow your Identity & Delegation "
+    "rules: hand heavy / tool-heavy work off SILENTLY (no target id, no new "
+    "session) and NEVER announce it. Its reply arrives as a `[SUB_WORKER_RESULT]` "
+    "trigger — parse it per `## Triggers`. Never name the worker / sub-agent / "
+    "tools to the user, and never relay its raw or non-Korean working text; speak "
+    "the result as yourself, in Korean — as if you did it."
 )
 
 
