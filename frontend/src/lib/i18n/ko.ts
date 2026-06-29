@@ -558,6 +558,7 @@ const ko: Translations = {
     clientSection: 'OAuth 클라이언트',
     clientSet: '설정됨',
     clientUnset: '미설정',
+    currentClientId: '현재 저장된 클라이언트 ID',
     clientHelper: '위 안내에 따라 만든 "웹 애플리케이션" 유형 OAuth 클라이언트의 ID와 시크릿을 붙여넣으세요.',
     clientId: '클라이언트 ID',
     clientSecret: '클라이언트 시크릿',

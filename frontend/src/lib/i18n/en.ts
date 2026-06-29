@@ -564,6 +564,7 @@ const en = {
     clientSection: 'OAuth client',
     clientSet: 'Set',
     clientUnset: 'Not set',
+    currentClientId: 'Currently saved client ID',
     clientHelper: 'Paste the client ID and secret of the "Web application" OAuth client you created via the steps above.',
     clientId: 'Client ID',
     clientSecret: 'Client secret',

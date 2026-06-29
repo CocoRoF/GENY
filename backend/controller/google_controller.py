@@ -39,9 +39,21 @@ class ClientRequest(BaseModel):
 
 @router.get("/status")
 async def status(_auth: dict = Depends(require_auth)) -> Dict[str, Any]:
+    # client_id is NOT a secret (it's in every auth request, visible to the
+    # browser) — return it so the UI can show exactly which client is stored.
+    # client_secret is never returned.
+    client_id = ""
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.general.google_config import GoogleConfig
+
+        client_id = get_config_manager().load_config(GoogleConfig).client_id or ""
+    except Exception:  # noqa: BLE001
+        client_id = ""
     return {
         "has_client": google_oauth.has_client(),
         "connected": google_oauth.is_connected(),
+        "client_id": client_id,
     }
 
 

@@ -39,6 +39,7 @@ export default function GoogleSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [hasClient, setHasClient] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [savedClientId, setSavedClientId] = useState('');
   const [guideOpen, setGuideOpen] = useState(true);
 
   // Client (write-only) inputs.
@@ -73,6 +74,7 @@ export default function GoogleSettingsPanel() {
       const s = await googleApi.status();
       setHasClient(!!s.has_client);
       setConnected(!!s.connected);
+      setSavedClientId(s.client_id || '');
     } catch (e: any) {
       toast.error(e?.message || t('googleSettings.loadError'));
     } finally {
@@ -117,8 +119,12 @@ export default function GoogleSettingsPanel() {
     try {
       const res = await googleApi.setClient(clientId.trim(), clientSecret.trim());
       setHasClient(!!res.has_client);
+      // Clear BOTH inputs so the saved state is shown consistently (the saved
+      // client_id is surfaced read-only below via loadStatus).
+      setClientId('');
       setClientSecret('');
       toast.success(t('googleSettings.clientSaved'));
+      await loadStatus();
     } catch (e: any) {
       toast.error(e?.message || t('googleSettings.saveError'));
     } finally {
@@ -236,6 +242,15 @@ export default function GoogleSettingsPanel() {
         </div>
 
         <p className="text-xs text-[var(--text-muted)] mb-3">{t('googleSettings.clientHelper')}</p>
+
+        {savedClientId && (
+          <div className="mb-3 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[0.6875rem] text-emerald-300 mb-0.5">
+              <CheckCircle2 className="w-3 h-3" /> {t('googleSettings.currentClientId')}
+            </div>
+            <code className="text-xs text-[var(--text-primary)] break-all select-all">{savedClientId}</code>
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           <div>

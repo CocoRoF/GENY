@@ -1689,6 +1689,8 @@ export interface GoogleStatus {
   has_client: boolean;
   /** A Google account is connected (tokens present). */
   connected: boolean;
+  /** The stored client_id (not a secret) — shown so the operator can verify it. */
+  client_id?: string;
 }
 
 export interface GoogleSetClientResponse {
