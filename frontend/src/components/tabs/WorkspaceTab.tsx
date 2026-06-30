@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { agentWorkspaceApi, AgentWorkspaceResponse } from '@/lib/api';
-import { Folder, Trash2, RefreshCw, Layers } from 'lucide-react';
+import { Folder, Trash2, RefreshCw } from 'lucide-react';
 import { TabShell, EmptyState, ActionButton } from '@/components/common/layout';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
@@ -88,12 +88,6 @@ export default function WorkspaceTab() {
     <TabShell
       title="Workspace"
       icon={Folder}
-      subtitle={
-        <>
-          depth <Layers size={10} className="inline" /> {snap.depth} ·{' '}
-          <span className="font-mono">{snap.current?.cwd ?? '—'}</span>
-        </>
-      }
       actions={
         <>
           <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
