@@ -635,6 +635,11 @@ export default function Live2DCanvas({
       if (!entry || !pixiAppRef.current) return;
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
+        // Keep the backing-store density matched to the monitor under the window:
+        // moving to a different-scale monitor changes devicePixelRatio, and a stale
+        // renderer.resolution renders the avatar at the wrong density (distorted).
+        const dpr = window.devicePixelRatio || 1;
+        try { if (pixiAppRef.current.renderer.resolution !== dpr) pixiAppRef.current.renderer.resolution = dpr; } catch { /* ignore */ }
         pixiAppRef.current.renderer.resize(width, height);
         if (modelRef.current) {
           const m = modelRef.current;
@@ -651,6 +656,49 @@ export default function Live2DCanvas({
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.kScale, model?.initialXshift, model?.initialYshift]);
+
+  // ── devicePixelRatio watcher (multi-monitor / OS scale change) ──
+  // The ResizeObserver only fires when the CSS size changes; moving the window
+  // to a monitor with a DIFFERENT scale factor often keeps the CSS size constant
+  // (per-monitor DPI) yet changes devicePixelRatio. Without re-applying it the
+  // WebGL backing store is the wrong density and the avatar renders blurry /
+  // distorted. matchMedia('(resolution: Ndppx)') fires exactly on that change;
+  // re-arm it for each new DPR value.
+  useEffect(() => {
+    let mql: MediaQueryList | null = null;
+    const sync = () => {
+      const app = pixiAppRef.current;
+      const container = containerRef.current;
+      if (app && container) {
+        const dpr = window.devicePixelRatio || 1;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w > 0 && h > 0) {
+          try {
+            if (app.renderer.resolution !== dpr) app.renderer.resolution = dpr;
+            app.renderer.resize(w, h);
+            const m = modelRef.current;
+            if (m) {
+              const naturalW = m.width / (m.scale.x || 1);
+              const naturalH = m.height / (m.scale.y || 1);
+              baseScaleRef.current = Math.min(w / naturalW, h / naturalH) * (model?.kScale || 0.85);
+              applyTransformRef.current();
+            }
+          } catch { /* renderer torn down */ }
+        }
+      }
+      register(); // re-arm for the next DPR value
+    };
+    const register = () => {
+      try {
+        mql = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+        mql.addEventListener('change', sync, { once: true });
+      } catch { /* matchMedia/resolution query unsupported */ }
+    };
+    register();
+    return () => { try { mql?.removeEventListener('change', sync); } catch { /* ignore */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model?.kScale]);
 
   // ── Focus tracking (eye follow mouse) ─────────────────────
   useEffect(() => {

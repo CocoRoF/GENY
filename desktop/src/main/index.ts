@@ -110,8 +110,10 @@ function createOverlay(): void {
   const primary = screen.getPrimaryDisplay()
   const wa = primary.workArea
   const cfg = loadConfig()
-  const width = cfg.overlay?.width ?? 420
-  const height = cfg.overlay?.height ?? Math.round(wa.height * 0.45)
+  // Clamp the restored size to the work area — self-heals a size that drifted
+  // huge from an earlier multi-DPI move bug (so it can't relaunch oversized).
+  const width = Math.min(cfg.overlay?.width ?? 420, wa.width)
+  const height = Math.min(cfg.overlay?.height ?? Math.round(wa.height * 0.45), wa.height)
 
   overlay = new BrowserWindow({
     width,
@@ -756,11 +758,16 @@ function registerIpc(): void {
     overlay?.setIgnoreMouseEvents(ignore, { forward: true })
   })
 
-  // Move the overlay by a delta (dock-handle drag).
+  // Move the overlay by a delta (dock-handle drag). Use setPosition — NOT
+  // setBounds — so we only change x/y and never re-send width/height. On
+  // Windows multi-DPI, round-tripping the size through getBounds()/setBounds()
+  // while dragging across (or along) monitors with different scale factors
+  // drifts the size via DIP↔physical rounding, so the window (and the avatar
+  // fit to it) slowly GROWS with every move. setPosition leaves the size alone.
   ipcMain.on('overlay:move-by', (_e, dx: number, dy: number) => {
     if (!overlay) return
-    const b = overlay.getBounds()
-    overlay.setBounds({ ...b, x: b.x + dx, y: b.y + dy })
+    const [x, y] = overlay.getPosition()
+    overlay.setPosition(Math.round(x + dx), Math.round(y + dy))
   })
 
   ipcMain.on('control:toggle', () => {
