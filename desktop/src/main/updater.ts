@@ -50,7 +50,9 @@ export function initAutoUpdate(enabledGetter: () => boolean): void {
       message: `Geny ${info.version} 가 다운로드됐어요.`,
       detail: '지금 재시작하면 새 버전으로 설치됩니다.',
     })
-    if (response === 0) autoUpdater.quitAndInstall()
+    // isForceRunAfter=true → guarantee the app relaunches after install, so the
+    // user doesn't have to start it manually post-update.
+    if (response === 0) autoUpdater.quitAndInstall(false, true)
   })
 
   autoUpdater.on('error', (err) => console.error('[updater]', err?.message ?? err))
