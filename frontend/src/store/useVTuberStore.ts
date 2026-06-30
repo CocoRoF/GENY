@@ -186,6 +186,13 @@ interface VTuberState {
   ttsSpeaking: Record<string, boolean>;
   ttsVolume: number;
 
+  // Per-session live subtitle (the avatar overlay's bottom dialogue box). Mirrors
+  // what the VTuber is saying: `streaming` true while the response streams in,
+  // false once the turn's final message lands / the broadcast is done. The
+  // overlay shows it and dismisses ~3s after it settles (and, with TTS, after the
+  // voice finishes).
+  subtitle: Record<string, { text: string; streaming: boolean }>;
+
   // STT (V2 voice-notes follow-up) — when on, the user's mic is
   // streamed via the VAD recorder into the inbox as audio captures
   // + auto-spotlighted so the VTuber sees [USER_SHARED] triggers
@@ -231,6 +238,12 @@ interface VTuberState {
   speakResponse: (sessionId: string, text: string, emotion: string) => Promise<void>;
   stopSpeaking: (sessionId: string) => void;
 
+  // Subtitle actions
+  /** Set the live subtitle text + whether it's still streaming. */
+  setSubtitle: (sessionId: string, text: string, streaming: boolean) => void;
+  /** Mark the subtitle as no longer streaming (turn done) without changing text. */
+  settleSubtitle: (sessionId: string) => void;
+
   // STT actions
   toggleSTT: () => void;
   setSTTEnabled: (enabled: boolean) => void;
@@ -266,6 +279,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   _modelsStreamSub: null,
   _assignmentStreamSub: null,
   ttsSpeaking: {},
+  subtitle: {},
   // Persisted per-machine settings hydrated from localStorage: ON/OFF toggles
   // (ttsEnabled default ON; sttEnabled / screenObservationEnabled default OFF)
   // AND the tuning knobs (TTS volume, STT thresholds, screen interval/source).
@@ -675,6 +689,16 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     }));
     get().addLog(sessionId, 'info', 'TTS', 'Playback stopped (queue cleared)');
   },
+
+  // ── Subtitle (avatar overlay bottom dialogue box) ─────────────────
+  setSubtitle: (sessionId, text, streaming) =>
+    set((s) => ({ subtitle: { ...s.subtitle, [sessionId]: { text, streaming } } })),
+  settleSubtitle: (sessionId) =>
+    set((s) =>
+      s.subtitle[sessionId] && s.subtitle[sessionId].streaming
+        ? { subtitle: { ...s.subtitle, [sessionId]: { ...s.subtitle[sessionId], streaming: false } } }
+        : s,
+    ),
 
   // ── Live chat-stream pre-emit TTS ─────────────────────────────────
   //

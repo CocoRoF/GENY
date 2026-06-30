@@ -19,6 +19,8 @@ export interface OverlayTuning {
   sttAutoGain?: boolean
   screenIntervalMs?: number
   screenSourceId?: string | null
+  /** Show the bottom dialogue-box subtitle on the avatar overlay (default true). */
+  subtitlesEnabled?: boolean
 }
 
 export interface ConnectorConfig {

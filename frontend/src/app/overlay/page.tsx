@@ -35,6 +35,8 @@ const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
   { ssr: false },
 );
+// Visual-novel-style dialogue box pinned to the bottom of the avatar area.
+const AvatarSubtitle = dynamic(() => import('@/components/live2d/AvatarSubtitle'), { ssr: false });
 
 export default function OverlayPage() {
   const [resolved, setResolved] = useState<{ sid: string; rid: string | null } | null>(null);
@@ -45,6 +47,9 @@ export default function OverlayPage() {
   // Push-to-talk (global hotkey toggles this). Tap on → mic listens; tapping
   // again (or the same hotkey) toggles off. On the down-edge we also barge in.
   const [pttActive, setPttActive] = useState(false);
+  // Bottom dialogue-box subtitle (default ON; toggled in the connector settings,
+  // arrives via overlayTuning.subtitlesEnabled).
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
 
   const fetchModels = useVTuberStore((s) => s.fetchModels);
   const fetchAssignment = useVTuberStore((s) => s.fetchAssignment);
@@ -150,7 +155,11 @@ export default function OverlayPage() {
       ttsVolume?: number; sttSensitivity?: number; sttSilenceMs?: number;
       sttEchoCancellation?: boolean; sttNoiseSuppression?: boolean; sttAutoGain?: boolean;
       screenIntervalMs?: number; screenSourceId?: string | null;
+      subtitlesEnabled?: boolean;
     }) => {
+      // Subtitle toggle is independent of the other (TTS/STT/screen) drivers and
+      // defaults ON, so read it even when `t` is absent.
+      setSubtitlesEnabled(t?.subtitlesEnabled !== false);
       if (!t) return;
       const st = useVTuberStore.getState();
       if (typeof t.ttsVolume === 'number') st.setTTSVolume(t.ttsVolume);
@@ -229,6 +238,7 @@ export default function OverlayPage() {
           className="w-full h-full"
           viewStorageKey={`geny_overlay_view_${resolved.sid}`}
         />
+        {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} />}
       </div>
 
       {/* The bar is the MOVE handle: drag its background → move the whole window.

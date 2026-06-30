@@ -13,6 +13,7 @@ const TUNING_DEFAULTS = {
   sttAutoGain: true,
   screenIntervalMs: 180_000,
   screenSourceId: null as string | null,
+  subtitlesEnabled: true,
 }
 const INTERVAL_OPTIONS = [
   { ms: 60_000, label: '1분' },
@@ -419,6 +420,19 @@ export function ControlApp() {
                 onChange={(v) => patchTuning({ ttsVolume: v })}
               />
               <p className="gy-hint" style={{ margin: 0 }}>아바타 창의 음성 출력 볼륨입니다.</p>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.chat} 대사창 (자막)</div>
+              <ToggleLine
+                label="아바타 하단에 대사 표시"
+                checked={tget('subtitlesEnabled')}
+                onChange={(c) => patchTuning({ subtitlesEnabled: c })}
+              />
+              <p className="gy-hint" style={{ margin: '9px 0 0' }}>
+                에이전트가 말하면 아바타 하단에 대사창으로 표시됩니다(머리 위 말풍선 아님). 길어지면 위에서부터
+                잘리고, 응답이 끝난 뒤 약 3초 후 사라집니다 — 음성(TTS)이 켜져 있으면 음성이 끝난 뒤 사라집니다.
+              </p>
             </section>
 
             <section className="gy-card">
