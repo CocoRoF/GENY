@@ -91,6 +91,11 @@ export interface EntityCardProps {
   onClick?: () => void;
   ariaLabel?: string;
   variant?: 'default' | 'muted' | 'elevated';
+  /**
+   * 'stack' (default) — vertical: header row (title+status) then body/meta/footer.
+   * 'split' — two columns: LEFT = icon + title/desc/meta, RIGHT = status + actions.
+   */
+  layout?: 'stack' | 'split';
   active?: boolean;
   disabled?: boolean;
   className?: string;
@@ -122,6 +127,7 @@ export function EntityCard({
   onClick,
   ariaLabel,
   variant = 'default',
+  layout = 'stack',
   active = false,
   disabled = false,
   className = '',
@@ -144,6 +150,166 @@ export function EntityCard({
     className,
   );
 
+  // Shared sub-renders (used by both layouts).
+  const statusNode = status ? (
+    status.as === 'badge' ? (
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold border',
+          BADGE_TONE[status.tone],
+        )}
+      >
+        {status.label}
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 text-[0.7rem] font-medium text-[var(--text-secondary)]">
+        <span className={cn('w-1.5 h-1.5 rounded-full', DOT_TONE[status.tone])} />
+        {status.label}
+      </span>
+    )
+  ) : null;
+
+  const toggleNode = toggle ? (
+    <Switch
+      checked={toggle.checked}
+      onCheckedChange={toggle.onChange}
+      disabled={toggle.disabled}
+      aria-label={toggle.label}
+      onClick={(e) => e.stopPropagation()}
+    />
+  ) : null;
+
+  const expanderNode = expandable ? (
+    <div className={layout === 'split' ? '' : indent}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded((v) => {
+            onExpandChange?.(!v);
+            return !v;
+          });
+        }}
+        className="inline-flex items-center gap-1 text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+      >
+        <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', expanded ? 'rotate-0' : '-rotate-90')} />
+        {expandLabel}
+      </button>
+      {expanded && renderExpanded && <div className="mt-3">{renderExpanded()}</div>}
+    </div>
+  ) : null;
+
+  const titleRow = (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span
+        className={cn(
+          'font-semibold text-[0.875rem] leading-tight truncate text-[hsl(var(--foreground))]',
+          titleMono && 'font-mono',
+        )}
+      >
+        {title}
+      </span>
+      {meta && (
+        <span className="text-[0.7rem] text-[var(--text-tertiary)] inline-flex items-center gap-1.5">{meta}</span>
+      )}
+    </div>
+  );
+
+  const subtitleNode = subtitle ? (
+    <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))] truncate font-mono mt-0.5">{subtitle}</div>
+  ) : null;
+
+  const bodyNode =
+    children != null && children !== false ? (
+      <div className={cn('text-[0.8125rem] text-[hsl(var(--muted-foreground))] leading-relaxed break-words', bodyClamp && 'line-clamp-2')}>
+        {children}
+      </div>
+    ) : null;
+
+  const metaItemsNode =
+    metaItems && metaItems.length > 0 ? (
+      <div className="flex items-center gap-2 flex-wrap text-[0.6875rem] text-[hsl(var(--muted-foreground))]">
+        {metaItems.map((m, i) => {
+          const MIcon = m.icon;
+          return (
+            <span
+              key={i}
+              className={cn(
+                'inline-flex items-center gap-1',
+                m.mono && 'font-mono',
+                m.chip && 'px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--foreground))] border border-[hsl(var(--border))]',
+              )}
+            >
+              {MIcon && <MIcon className="w-3 h-3 opacity-70" />}
+              {m.label}
+            </span>
+          );
+        })}
+      </div>
+    ) : null;
+
+  const iconNode = icon ? (
+    <span
+      className={cn(
+        'inline-flex items-center justify-center w-8 h-8 rounded-lg shrink-0 [&>svg]:w-4 [&>svg]:h-4',
+        iconTone === 'primary'
+          ? 'bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))]'
+          : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
+      )}
+    >
+      {icon}
+    </span>
+  ) : null;
+
+  // ── SPLIT layout: LEFT (icon + title/desc/meta) | RIGHT (status + actions) ──
+  if (layout === 'split') {
+    return (
+      <div
+        role={interactive ? 'button' : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        onClick={interactive ? onClick : undefined}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onClick?.();
+                }
+              }
+            : undefined
+        }
+        aria-label={ariaLabel}
+        aria-disabled={disabled || undefined}
+        className={surface}
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            {iconNode}
+            <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+              {titleRow}
+              {subtitleNode}
+              {bodyNode}
+              {metaItemsNode}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            {(statusNode || star || headerActions || toggleNode) && (
+              <div className="flex items-center gap-1.5">
+                {statusNode}
+                {star}
+                {headerActions}
+                {toggleNode}
+              </div>
+            )}
+            {footerActions && <div className="flex items-center gap-1">{footerActions}</div>}
+          </div>
+        </div>
+        {expanderNode}
+      </div>
+    );
+  }
+
+  // ── STACK layout (default) ──
   // Use div+role (not <button>) so nested action buttons / toggles inside the
   // card stay valid HTML (a <button> can't contain a <button>).
   return (

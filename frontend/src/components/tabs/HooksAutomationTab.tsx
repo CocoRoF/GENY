@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
 import { hooksApi, HookRecord } from '@/lib/api';
-import { RefreshCw, Trash2, Power, Zap, Clock, Mail, History } from 'lucide-react';
+import { RefreshCw, Trash2, Power, Zap, Clock, Mail, History, Repeat } from 'lucide-react';
 import { TabShell, ActionButton, EntityCard, EmptyState } from '@/components/common/layout';
 import { useI18n } from '@/lib/i18n';
 
@@ -31,6 +31,30 @@ function rel(iso?: string | null): string {
   } catch {
     return iso;
   }
+}
+
+/** Render a 5-field cron expression as a plain-language schedule. Falls back to
+ * the raw expression for patterns it doesn't recognise. */
+function cronToHuman(expr: string): string {
+  const p = (expr || '').trim().split(/\s+/);
+  if (p.length !== 5) return expr;
+  const [min, hour, dom, mon, dow] = p;
+  const star = (s: string) => s === '*';
+  const num = (s: string) => /^\d+$/.test(s);
+  const at = (h: string, m: string) => `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+  if (star(min) && star(hour) && star(dom) && star(mon) && star(dow)) return 'Every minute';
+  const everyMin = min.match(/^\*\/(\d+)$/);
+  if (everyMin && star(hour) && star(dom) && star(mon) && star(dow)) return `Every ${everyMin[1]} minutes`;
+  const everyHour = hour.match(/^\*\/(\d+)$/);
+  if (num(min) && everyHour && star(dom) && star(mon) && star(dow)) return `Every ${everyHour[1]} hours`;
+  if (num(min) && star(hour) && star(dom) && star(mon) && star(dow))
+    return min === '0' ? 'Every hour' : `Hourly at :${min.padStart(2, '0')}`;
+  if (num(min) && num(hour) && star(dom) && star(mon) && num(dow)) {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return `Every ${days[parseInt(dow, 10) % 7]} at ${at(hour, min)}`;
+  }
+  if (num(min) && num(hour) && star(dom) && star(mon) && star(dow)) return `Daily at ${at(hour, min)}`;
+  return expr;
 }
 
 export function HooksAutomationTab() {
@@ -103,13 +127,14 @@ export function HooksAutomationTab() {
           rows.map((h) => (
             <EntityCard
               key={h.name}
+              layout="split"
               icon={h.kind === 'event' ? <Mail /> : <Clock />}
               iconTone="neutral"
               title={h.description || h.name}
               meta={h.kind}
               status={{ tone: h.status === 'enabled' ? 'good' : 'neutral', label: h.status, as: 'dot' }}
               metaItems={[
-                { label: h.cron_expr, mono: true, chip: true },
+                { icon: Repeat, label: cronToHuman(h.cron_expr) },
                 ...(h.next_fire_at ? [{ icon: Clock, label: `next ${rel(h.next_fire_at)}` }] : []),
                 ...(h.last_fired_at ? [{ icon: History, label: `last ${rel(h.last_fired_at)}` }] : []),
               ]}
