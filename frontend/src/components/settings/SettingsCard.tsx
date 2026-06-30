@@ -8,7 +8,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { EntityCard, type EntityTone } from '@/components/layout/EntityCard';
+import { EntityCard, type EntityTone } from '@/components/common/layout/EntityCard';
 
 export type CardStatusTone = 'good' | 'warn' | 'bad' | 'neutral';
 

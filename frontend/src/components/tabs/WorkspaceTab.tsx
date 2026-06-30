@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react';
 import { agentWorkspaceApi, AgentWorkspaceResponse } from '@/lib/api';
 import { Folder, Trash2, RefreshCw, Layers } from 'lucide-react';
-import { TabShell, EmptyState, ActionButton } from '@/components/layout';
+import { TabShell, EmptyState, ActionButton } from '@/components/common/layout';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function WorkspaceTab() {

@@ -25,7 +25,7 @@ import {
   SubTabNav,
   type SubTabDef,
   EmptyState,
-} from '@/components/layout';
+} from '@/components/common/layout';
 import { Folder, Layers, Wrench, FolderOpen, Bot, User } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';

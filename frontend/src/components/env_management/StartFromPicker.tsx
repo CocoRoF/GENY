@@ -19,7 +19,7 @@ import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import type { EnvironmentSummary } from '@/types/environment';
-import { ActionButton } from '@/components/layout';
+import { ActionButton } from '@/components/common/layout';
 import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import { presetGuide } from '@/lib/presetGuides';
 import RegistryGrid from '@/components/env_management/registry/RegistryGrid';

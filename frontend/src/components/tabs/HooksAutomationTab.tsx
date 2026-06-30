@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
 import { hooksApi, HookRecord } from '@/lib/api';
 import { RefreshCw, Trash2, Power, Zap, Clock, Mail } from 'lucide-react';
-import { TabShell, ActionButton, StatusBadge, DataTable, EmptyState } from '@/components/layout';
+import { TabShell, ActionButton, StatusBadge, DataTable, EmptyState } from '@/components/common/layout';
 import { useI18n } from '@/lib/i18n';
 
 const POLL_MS = 30_000;

@@ -10,7 +10,7 @@
 
 import { createElement, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { EntityCard, type EntityBadge } from '@/components/layout/EntityCard';
+import { EntityCard, type EntityBadge } from '@/components/common/layout/EntityCard';
 
 export interface RegistryCardBadge {
   label: ReactNode;

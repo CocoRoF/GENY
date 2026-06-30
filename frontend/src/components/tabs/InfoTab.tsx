@@ -10,7 +10,7 @@ import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, 
 import type { SessionInfo } from '@/types';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
-import { TabShell, EmptyState } from '@/components/layout';
+import { TabShell, EmptyState } from '@/components/common/layout';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {

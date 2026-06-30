@@ -39,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ActionButton } from '@/components/layout';
+import { ActionButton } from '@/components/common/layout';
 import { ModelPicker } from './ModelPicker';
 
 const THINKING_TYPE_VALUES = ['enabled', 'disabled', 'adaptive'] as const;

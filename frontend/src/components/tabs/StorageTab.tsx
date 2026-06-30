@@ -8,7 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { ChevronDown, ChevronRight, FolderOpen, Download, RefreshCw, FileJson, FileText, FileCode, Globe, Palette, ScrollText, Settings, File, HardDrive } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
-import { TabShell, ActionButton, EmptyState } from '@/components/layout';
+import { TabShell, ActionButton, EmptyState } from '@/components/common/layout';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));

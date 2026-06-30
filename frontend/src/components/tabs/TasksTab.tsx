@@ -33,7 +33,7 @@ import {
   ActionButton,
   DataTable,
   type BadgeTone,
-} from '@/components/layout';
+} from '@/components/common/layout';
 import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import ExecutionTimeline from '@/components/execution/ExecutionTimeline';
 import { Input } from '@/components/ui/input';

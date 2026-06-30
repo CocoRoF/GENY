@@ -16,7 +16,7 @@ import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 import Selector from '@/components/ui/Selector';
-import { TabShell, ActionButton } from '@/components/layout';
+import { TabShell, ActionButton } from '@/components/common/layout';
 import { Settings as SettingsIcon, Download, Upload, RefreshCw, Boxes } from 'lucide-react';
 import { useI18n, type Locale } from '@/lib/i18n';
 import type { ConfigItem, ConfigCategory, ConfigField, ConfigSchema, ConfigI18nLocale } from '@/types';

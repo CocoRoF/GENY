@@ -19,7 +19,7 @@ import TokenMeter from '@/components/dashboard/TokenMeter';
 import MutationLog from '@/components/dashboard/MutationLog';
 import StageStrategyHeatmap from '@/components/dashboard/StageStrategyHeatmap';
 import { LayoutDashboard } from 'lucide-react';
-import { TabShell, EmptyState } from '@/components/layout';
+import { TabShell, EmptyState } from '@/components/common/layout';
 
 export default function DashboardTab() {
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);

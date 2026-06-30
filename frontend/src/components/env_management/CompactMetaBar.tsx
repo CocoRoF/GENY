@@ -40,7 +40,7 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { ActionButton } from '@/components/layout';
+import { ActionButton } from '@/components/common/layout';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import { environmentApi } from '@/lib/environmentApi';
 import type { EnvironmentSessionSummary } from '@/types/environment';

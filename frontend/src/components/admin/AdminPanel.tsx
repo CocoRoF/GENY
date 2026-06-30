@@ -26,7 +26,7 @@ import {
   SendMessageChannelRow,
 } from '@/lib/api';
 import { Shield, Plug, Sparkles, AlertCircle, RefreshCw, FileText, Activity, Lock, Users, Server, BarChart3, Cog, GitMerge, Bell, MessageSquare } from 'lucide-react';
-import { TabShell, ActionButton } from '@/components/layout';
+import { TabShell, ActionButton } from '@/components/common/layout';
 import { IntegrationHealthCard } from '@/components/admin/IntegrationHealthCard';
 
 interface PermissionRow {

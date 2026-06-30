@@ -21,7 +21,7 @@ import {
   type IntegrationHealthResponse,
   type RingFill,
 } from '@/lib/api';
-import { StatusBadge, type BadgeTone } from '@/components/layout';
+import { StatusBadge, type BadgeTone } from '@/components/common/layout';
 
 /** Map a binary "is wired" check to a tone + label. */
 function boolBadge(ok: boolean, label: string): { tone: BadgeTone; text: string } {

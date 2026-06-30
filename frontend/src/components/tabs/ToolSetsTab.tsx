@@ -40,7 +40,7 @@ import {
   StatusBadge,
   SearchInput,
   DetailDrawer,
-} from '@/components/layout';
+} from '@/components/common/layout';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
