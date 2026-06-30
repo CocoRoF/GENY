@@ -70,19 +70,19 @@ export const PROVIDERS: ProviderInfo[] = [
     freeForm: false,
     kind: 'cli',
     installHelp:
-      'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM Backends.',
+      'Install Claude Code (docs.anthropic.com/claude/code) and run `claude auth login`, or paste ANTHROPIC_API_KEY through Settings → LLM.',
   },
   // Local OpenAI-compatible backends. ``freeForm`` because the served
-  // model id is endpoint-specific; the LLM Backends panel's local card
+  // model id is endpoint-specific; the LLM panel's local card
   // discovers the actual ids (Ollama /api/tags, others /v1/models) so the
-  // user can copy one in. Configure the endpoint in Settings → LLM Backends.
+  // user can copy one in. Configure the endpoint in Settings → LLM.
   {
     id: 'ollama',
     label: 'Ollama (local)',
     freeForm: true,
     kind: 'api',
     installHelp:
-      'Install Ollama (ollama.com), run a model (e.g. `ollama run qwen2.5-coder`), then set the endpoint in Settings → LLM Backends → Ollama.',
+      'Install Ollama (ollama.com), run a model (e.g. `ollama run qwen2.5-coder`), then set the endpoint in Settings → LLM → Ollama.',
   },
   {
     id: 'lmstudio',
@@ -90,7 +90,7 @@ export const PROVIDERS: ProviderInfo[] = [
     freeForm: true,
     kind: 'api',
     installHelp:
-      'Start LM Studio\'s local server, then set the endpoint in Settings → LLM Backends → LM Studio.',
+      'Start LM Studio\'s local server, then set the endpoint in Settings → LLM → LM Studio.',
   },
   {
     id: 'custom',
@@ -98,7 +98,7 @@ export const PROVIDERS: ProviderInfo[] = [
     freeForm: true,
     kind: 'api',
     installHelp:
-      'Any OpenAI-compatible server (llama.cpp, LiteLLM, …). Set the base URL in Settings → LLM Backends → Custom.',
+      'Any OpenAI-compatible server (llama.cpp, LiteLLM, …). Set the base URL in Settings → LLM → Custom.',
   },
 ];
 

@@ -62,7 +62,7 @@ const en = {
       keyRequired: 'Enter an API key.',
       save: 'Save & use',
       skip: 'Set up later (go to dashboard)',
-      note: 'You can change the backend any time in Settings → LLM Backends.',
+      note: 'You can change the backend any time in Settings → LLM.',
     },
     createAccount: 'Create Account',
     creatingAccount: 'Creating...',
@@ -291,8 +291,8 @@ const en = {
   // ``.`` → ``_``. Full taxonomy: ``geny-executor/docs/error_codes.md``.
   executor: {
     // exec.api.* — vendor API surface
-    exec_api_auth_invalid_key: 'The API key is missing or invalid. Open Settings → LLM Backends and paste a valid key.',
-    exec_api_auth_expired: 'The API credential has expired. Re-issue or refresh it in Settings → LLM Backends.',
+    exec_api_auth_invalid_key: 'The API key is missing or invalid. Open Settings → LLM and paste a valid key.',
+    exec_api_auth_expired: 'The API credential has expired. Re-issue or refresh it in Settings → LLM.',
     exec_api_rate_limited: 'The vendor is rate-limiting your account. The executor will retry shortly.',
     exec_api_timeout: 'The request timed out. The executor will retry.',
     exec_api_network: 'A network error blocked the request. The executor will retry.',
@@ -301,13 +301,13 @@ const en = {
     exec_api_server_error: 'The vendor returned a server error (5xx). The executor will retry.',
     exec_api_terminal: 'The vendor declared the request unprocessable (often policy / content block). Don\'t retry.',
     exec_api_unknown: 'An unclassified API error occurred. See logs for the original message.',
-    exec_api_no_client: 'No LLM client is wired into the pipeline. Configure the provider in Settings → LLM Backends.',
+    exec_api_no_client: 'No LLM client is wired into the pipeline. Configure the provider in Settings → LLM.',
     exec_api_stream_incomplete: 'The provider stream ended without a final response. Usually a vendor / network issue — retry.',
     exec_api_retry_exhausted: 'Hit the retry limit after a recoverable error. See logs for the original failure.',
 
     // exec.cli.* — CLI-driven backends (claude_code_cli)
-    exec_cli_binary_not_found: 'The CLI binary (e.g. `claude`) is not on PATH. Install the CLI or set the binary path in Settings → LLM Backends.',
-    exec_cli_auth_failed: 'Claude Code CLI is not authenticated. Open Settings → LLM Backends → Claude Code (CLI) and sign in (or paste an `ANTHROPIC_API_KEY`).',
+    exec_cli_binary_not_found: 'The CLI binary (e.g. `claude`) is not on PATH. Install the CLI or set the binary path in Settings → LLM.',
+    exec_cli_auth_failed: 'Claude Code CLI is not authenticated. Open Settings → LLM → Claude Code (CLI) and sign in (or paste an `ANTHROPIC_API_KEY`).',
     exec_cli_timeout: 'The CLI did not return within the configured timeout. Retry, and consider raising the timeout for long tasks.',
     exec_cli_protocol_error: 'The CLI emitted malformed stream output. The executor will retry; report if it persists.',
     exec_cli_permission_denied: 'The CLI\'s permission system blocked the call. Adjust the `permissions.allow` list in the spawned settings.',
@@ -396,7 +396,7 @@ const en = {
     hide: 'Hide',
     show: 'Show',
 
-    // ─── LLM Backends panel + per-provider modals ────────────────
+    // ─── LLM panel + per-provider modals ────────────────
     llmBackends: {
       navLabel: 'LLM',
       title: 'LLM',
@@ -688,7 +688,7 @@ const en = {
     syncFailed: 'Sync failed',
   },
 
-  // ─── LLM Backends panel body ───
+  // ─── LLM panel body ───
   llmBackendsPanel: {
     syncKeys: 'Sync keys',
     syncKeysTitle: "Re-push Geny's provider keys to GAPT/avatar",
@@ -1908,10 +1908,10 @@ const en = {
       providerLabel: 'Provider',
       providerHint: 'Anthropic is the default. Switching providers updates the s06_api stage so the executor calls the right backend; the model field below filters to that provider\'s catalog.',
       providerHealthLoading: 'Checking provider status…',
-      providerUnavailableTip: '{provider} is not configured in LLM Backends yet — click that card to paste a credential or finish the login flow.',
+      providerUnavailableTip: '{provider} is not configured in LLM yet — click that card to paste a credential or finish the login flow.',
       providerUnavailableBadge: 'Not configured',
-      providerCurrentUnavailable: 'The currently selected provider ({provider}) is not configured in LLM Backends. Sessions will fail with a missing-credentials error. Open settings to fix it or pick a different provider.',
-      providerOpenSettings: 'Open LLM Backends settings',
+      providerCurrentUnavailable: 'The currently selected provider ({provider}) is not configured in LLM. Sessions will fail with a missing-credentials error. Open settings to fix it or pick a different provider.',
+      providerOpenSettings: 'Open LLM settings',
       providerHealthError: 'Failed to fetch provider status: {error}',
       modelLabel: 'Model',
       modelPlaceholder: 'Select a model…',

@@ -43,7 +43,7 @@ const BACKEND_EN: Record<Backend, string> = {
     'Calls Anthropic **Claude** directly with an **API key** (`ANTHROPIC_API_KEY`), billed per token. Use when you want keys without the CLI subscription.',
   openai: 'Uses **OpenAI** (GPT) models. Needs `OPENAI_API_KEY`.',
   local:
-    'Uses a local **Ollama** model — no cloud key, private/offline. Set the base URL + model under Settings → LLM Backends.',
+    'Uses a local **Ollama** model — no cloud key, private/offline. Set the base URL + model under Settings → LLM.',
   default:
     'Follows your **active login** automatically (Claude Code if logged in, otherwise your configured key backend). The role-default "just works" choice.',
 };

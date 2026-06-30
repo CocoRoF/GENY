@@ -62,7 +62,7 @@ const ko: Translations = {
       keyRequired: 'API 키를 입력하세요.',
       save: '저장 & 사용',
       skip: '나중에 설정 (대시보드로)',
-      note: '여기서 정한 백엔드는 나중에 설정 → LLM 백엔드에서 언제든 바꿀 수 있어요.',
+      note: '여기서 정한 백엔드는 나중에 설정 → LLM에서 언제든 바꿀 수 있어요.',
     },
     createAccount: '계정 생성',
     creatingAccount: '생성 중...',
@@ -292,8 +292,8 @@ const ko: Translations = {
   // 합니다. 전체 분류: ``geny-executor/docs/error_codes.md``.
   executor: {
     // exec.api.* — 벤더 API 표면
-    exec_api_auth_invalid_key: 'API 키가 없거나 잘못됐어요. 설정 → LLM 백엔드에서 유효한 키를 붙여넣어 주세요.',
-    exec_api_auth_expired: 'API 자격증명이 만료됐어요. 설정 → LLM 백엔드에서 갱신해 주세요.',
+    exec_api_auth_invalid_key: 'API 키가 없거나 잘못됐어요. 설정 → LLM에서 유효한 키를 붙여넣어 주세요.',
+    exec_api_auth_expired: 'API 자격증명이 만료됐어요. 설정 → LLM에서 갱신해 주세요.',
     exec_api_rate_limited: '벤더가 요청 빈도를 제한하고 있어요. 잠시 후 자동 재시도합니다.',
     exec_api_timeout: '요청이 시간 초과됐어요. 자동 재시도합니다.',
     exec_api_network: '네트워크 오류로 요청이 막혔어요. 자동 재시도합니다.',
@@ -302,13 +302,13 @@ const ko: Translations = {
     exec_api_server_error: '벤더가 서버 에러(5xx)를 반환했어요. 자동 재시도합니다.',
     exec_api_terminal: '벤더가 처리 불가능하다고 선언했어요(주로 정책/콘텐츠 차단). 재시도하지 않습니다.',
     exec_api_unknown: '분류되지 않은 API 에러입니다. 원본 메시지는 로그를 확인해 주세요.',
-    exec_api_no_client: '파이프라인에 LLM 클라이언트가 연결되지 않았어요. 설정 → LLM 백엔드에서 provider 를 구성해 주세요.',
+    exec_api_no_client: '파이프라인에 LLM 클라이언트가 연결되지 않았어요. 설정 → LLM에서 provider 를 구성해 주세요.',
     exec_api_stream_incomplete: '응답 스트림이 최종 응답 없이 종료됐어요. 보통 벤더/네트워크 문제 — 재시도해 주세요.',
     exec_api_retry_exhausted: '복구 가능한 에러였지만 재시도 한도를 초과했어요. 원인은 로그를 확인해 주세요.',
 
     // exec.cli.* — CLI 기반 backend (claude_code_cli)
-    exec_cli_binary_not_found: 'CLI 바이너리(예: `claude`)가 PATH 에 없어요. CLI 를 설치하거나 설정 → LLM 백엔드에서 바이너리 경로를 지정해 주세요.',
-    exec_cli_auth_failed: 'Claude Code CLI 인증이 만료됐어요. 설정 → LLM 백엔드 → Claude Code (CLI) 카드의 ‘다시 로그인’을 누르거나 `ANTHROPIC_API_KEY` 를 붙여넣어 주세요.',
+    exec_cli_binary_not_found: 'CLI 바이너리(예: `claude`)가 PATH 에 없어요. CLI 를 설치하거나 설정 → LLM에서 바이너리 경로를 지정해 주세요.',
+    exec_cli_auth_failed: 'Claude Code CLI 인증이 만료됐어요. 설정 → LLM → Claude Code (CLI) 카드의 ‘다시 로그인’을 누르거나 `ANTHROPIC_API_KEY` 를 붙여넣어 주세요.',
     exec_cli_timeout: 'CLI 가 설정된 시간 내에 응답하지 않았어요. 재시도하시거나 긴 작업이라면 timeout 값을 늘려주세요.',
     exec_cli_protocol_error: 'CLI 가 잘못된 stream 출력을 내보냈어요. 자동 재시도합니다. 계속되면 제보해 주세요.',
     exec_cli_permission_denied: 'CLI 의 권한 시스템이 호출을 차단했어요. spawned settings 의 `permissions.allow` 목록을 조정해 주세요.',
@@ -397,7 +397,7 @@ const ko: Translations = {
     hide: '숨기기',
     show: '표시',
 
-    // ─── LLM Backends 패널 + 프로바이더 모달 ────────────────────
+    // ─── LLM 패널 + 프로바이더 모달 ────────────────────
     llmBackends: {
       navLabel: 'LLM',
       title: 'LLM',
@@ -662,7 +662,7 @@ const ko: Translations = {
     notConfigured: '미구성',
 
     descIntro: '이미지 생성 키(OpenAI/Gemini/fal/Replicate)는 Geny가 소유합니다. OpenAI/Gemini는 ',
-    descLlmBackend: 'LLM 백엔드',
+    descLlmBackend: 'LLM',
     descMid: ', fal/Replicate는 ',
     descImageGenKeys: 'General → Image Generation Keys',
     descOutro: '에서 설정하면 avatar로 자동 전파됩니다.',
@@ -683,7 +683,7 @@ const ko: Translations = {
     syncFailed: '동기화 실패',
   },
 
-  // ─── LLM Backends 패널 본문 ───
+  // ─── LLM 패널 본문 ───
   llmBackendsPanel: {
     syncKeys: '키 동기화',
     syncKeysTitle: 'Geny의 프로바이더 키를 GAPT/avatar에 다시 전파',
@@ -1952,10 +1952,10 @@ const ko: Translations = {
       providerLabel: '프로바이더',
       providerHint: 'Anthropic이 기본값입니다. 프로바이더를 바꾸면 s06_api 단계가 함께 갱신되어 실행기가 올바른 백엔드를 호출하고, 아래 모델 필드는 해당 프로바이더의 카탈로그로 좁혀집니다.',
       providerHealthLoading: '프로바이더 상태 확인 중…',
-      providerUnavailableTip: '{provider}는 아직 LLM Backends에서 설정되지 않았습니다 — 카드를 클릭해 자격증명을 입력하거나 로그인을 완료하세요.',
+      providerUnavailableTip: '{provider}는 아직 LLM에서 설정되지 않았습니다 — 카드를 클릭해 자격증명을 입력하거나 로그인을 완료하세요.',
       providerUnavailableBadge: '미설정',
-      providerCurrentUnavailable: '현재 선택된 프로바이더 ({provider})가 LLM Backends에서 설정되지 않았습니다. 세션을 만들면 자격증명 누락으로 실패합니다. 설정으로 이동해 처리하거나 다른 프로바이더를 선택하세요.',
-      providerOpenSettings: 'LLM Backends 설정 열기',
+      providerCurrentUnavailable: '현재 선택된 프로바이더 ({provider})가 LLM에서 설정되지 않았습니다. 세션을 만들면 자격증명 누락으로 실패합니다. 설정으로 이동해 처리하거나 다른 프로바이더를 선택하세요.',
+      providerOpenSettings: 'LLM 설정 열기',
       providerHealthError: '프로바이더 상태를 불러오지 못했습니다: {error}',
       modelLabel: '모델',
       modelPlaceholder: '모델을 선택하세요…',
