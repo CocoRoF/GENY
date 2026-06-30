@@ -23,14 +23,24 @@ export interface SubTabNavProps {
   tabs: SubTabDef[];
   active: string;
   onSelect: (id: string) => void;
+  /** Optional content pinned to the LEFT of the tabs (e.g. an entity name),
+   *  separated by a divider. Lets a single bar carry an identity + the tabs. */
+  leading?: ReactNode;
+  /** Optional content pinned to the RIGHT (e.g. a mode toggle). */
+  trailing?: ReactNode;
 }
 
-export function SubTabNav({ tabs, active, onSelect }: SubTabNavProps) {
+export function SubTabNav({ tabs, active, onSelect, leading, trailing }: SubTabNavProps) {
   return (
     <nav
       className="flex items-center gap-0.5 px-2 md:px-3 h-9 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0 overflow-x-auto scrollbar-hide"
       role="tablist"
     >
+      {leading != null && (
+        <div className="flex items-center min-w-0 shrink-0 pr-2 mr-1 border-r border-[hsl(var(--border))]">
+          {leading}
+        </div>
+      )}
       {tabs.map(({ id, label, icon: Icon, count }) => {
         const isActive = active === id;
         return (
@@ -68,6 +78,9 @@ export function SubTabNav({ tabs, active, onSelect }: SubTabNavProps) {
           </button>
         );
       })}
+      {trailing != null && (
+        <div className="flex items-center ml-auto pl-2 shrink-0">{trailing}</div>
+      )}
     </nav>
   );
 }

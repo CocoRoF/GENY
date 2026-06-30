@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import {
   ChevronDown, ChevronRight, Wrench, Check, Server, Search, Boxes,
 } from 'lucide-react';
+import { SectionIcons } from '@/components/common/icons';
 import type { ToolInfo } from '@/types';
 import MCPAdminPanel from '@/components/mcp/MCPAdminPanel';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
@@ -98,12 +99,10 @@ export default function SessionToolsTab() {
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
       {/* Header bar */}
-      <div className="shrink-0 hidden md:flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#f59e0b] to-[#f97316] flex items-center justify-center shadow-sm shrink-0">
-            <Wrench size={13} className="text-white" />
-          </div>
-          <h3 className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">
+      <div className="shrink-0 hidden md:flex items-center justify-between px-4 py-2.5 min-h-[49px] border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <div className="flex items-center gap-1.5">
+          <SectionIcons.tools size={14} strokeWidth={2.25} className="text-[hsl(var(--primary))] shrink-0" />
+          <h3 className="text-sm font-semibold tracking-tight text-[var(--text-primary)]">
             {t('sessionTools.title')}
           </h3>
 

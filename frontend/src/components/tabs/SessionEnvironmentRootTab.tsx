@@ -26,7 +26,8 @@ import {
   type SubTabDef,
   EmptyState,
 } from '@/components/common/layout';
-import { Folder, Layers, Wrench, FolderOpen, Bot, User } from 'lucide-react';
+import { Folder, Bot, User } from 'lucide-react';
+import { SectionIcons } from '@/components/common/icons';
 import { useI18n } from '@/lib/i18n';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
 import SubAgentPanel from '@/components/session-env/SubAgentPanel';
@@ -39,9 +40,9 @@ const SessionToolsTab = dynamic(() => import('@/components/tabs/SessionToolsTab'
 const WorkspaceTab = dynamic(() => import('@/components/tabs/WorkspaceTab'));
 
 const SUB_TABS: SubTabDef[] = [
-  { id: 'manifest', label: 'Manifest', icon: Layers },
-  { id: 'tools', label: 'Tools', icon: Wrench },
-  { id: 'workspace', label: 'Workspace', icon: FolderOpen },
+  { id: 'manifest', label: 'Manifest', icon: SectionIcons.manifest },
+  { id: 'tools', label: 'Tools', icon: SectionIcons.tools },
+  { id: 'workspace', label: 'Workspace', icon: SectionIcons.workspace },
 ];
 
 const SUB_TAB_COMPONENT: Record<string, React.ComponentType> = {
@@ -77,7 +78,6 @@ export default function SessionEnvironmentRootTab() {
   const effectiveSessionId = sessionId ?? null;
   const sessionLabel =
     session?.session_name || effectiveSessionId?.slice(0, 12) || '';
-  const envId = session?.env_id ?? null;
 
   // Hard guard: never render session-scoped sub-tabs without a session.
   if (!sessionId || !session) {
@@ -102,58 +102,57 @@ export default function SessionEnvironmentRootTab() {
   }
 
   const Active = SUB_TAB_COMPONENT[subTab] ?? SessionEnvironmentTab;
+  const showSubAgent = agentTarget === 'sub' && ownsSubAgent;
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Compact one-line scope bar — session · env, with the agent
-          toggle (VTuber/Sub-Agent) right-aligned when paired. No icon,
-          no read-only banner (env changes now apply live). */}
-      <div className="shrink-0 flex items-center justify-between gap-3 px-4 h-10 border-b border-[var(--border-color)]">
-        <div className="flex items-center gap-1.5 min-w-0 text-[0.75rem]">
-          <span className="font-semibold text-[var(--text-primary)] truncate">
+      {/* Single-line bar: agent name (identity) + the sub-tabs, same family as
+          every other tab strip (SubTabNav). The Agent/Sub-Agent toggle, when
+          this session owns a companion, is pinned right. Tabs hide on the
+          Sub-Agent side (its panel is a single read-only view). */}
+      <SubTabNav
+        tabs={showSubAgent ? [] : SUB_TABS}
+        active={subTab}
+        onSelect={setSubTab}
+        leading={
+          <span
+            className="text-xs font-semibold text-[hsl(var(--foreground))] truncate max-w-[180px]"
+            title={sessionLabel}
+          >
             {sessionLabel}
           </span>
-          <span className="text-[var(--text-muted)]">·</span>
-          {envId ? (
-            <code className="font-mono text-[var(--primary-color)] truncate">
-              {envId}
-            </code>
-          ) : (
-            <span className="text-[var(--warning-color)]">{t('sessionEnvironmentTab.defaultManifest')}</span>
-          )}
-        </div>
-        {ownsSubAgent && (
-          <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden shrink-0">
-            <AgentToggleButton
-              active={agentTarget === 'agent'}
-              icon={User}
-              label={t('sessionEnvironmentTab.agentToggle.agent')}
-              onClick={() => setAgentTarget('agent')}
-            />
-            <AgentToggleButton
-              active={agentTarget === 'sub'}
-              icon={Bot}
-              label={t('sessionEnvironmentTab.agentToggle.subAgent')}
-              onClick={() => setAgentTarget('sub')}
-            />
-          </div>
-        )}
-      </div>
-      {agentTarget === 'sub' && ownsSubAgent ? (
+        }
+        trailing={
+          ownsSubAgent ? (
+            <div className="inline-flex rounded-md border border-[var(--border-color)] overflow-hidden shrink-0">
+              <AgentToggleButton
+                active={agentTarget === 'agent'}
+                icon={User}
+                label={t('sessionEnvironmentTab.agentToggle.agent')}
+                onClick={() => setAgentTarget('agent')}
+              />
+              <AgentToggleButton
+                active={agentTarget === 'sub'}
+                icon={Bot}
+                label={t('sessionEnvironmentTab.agentToggle.subAgent')}
+                onClick={() => setAgentTarget('sub')}
+              />
+            </div>
+          ) : undefined
+        }
+      />
+      {showSubAgent ? (
         // The owned companion is not a session — show its read-only panel
         // instead of the env/tools/workspace sub-tabs.
         <div className="flex-1 min-h-0 overflow-hidden">
           <SubAgentPanel ownerId={sessionId} />
         </div>
       ) : (
-        <>
-          <SubTabNav tabs={SUB_TABS} active={subTab} onSelect={setSubTab} />
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <SessionEnvTargetContext.Provider value={effectiveSessionId}>
-              <Active />
-            </SessionEnvTargetContext.Provider>
-          </div>
-        </>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <SessionEnvTargetContext.Provider value={effectiveSessionId}>
+            <Active />
+          </SessionEnvTargetContext.Provider>
+        </div>
       )}
     </div>
   );

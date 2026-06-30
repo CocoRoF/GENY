@@ -24,6 +24,8 @@ import {
 import type { LogEntry } from '@/types';
 import LogEntryCard from '@/components/execution/LogEntryCard';
 import StepDetailPanel from '@/components/execution/StepDetailPanel';
+import { TabShell, ActionButton } from '@/components/common/layout';
+import { SectionIcons } from '@/components/common/icons';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
   return twMerge(classes.filter(Boolean).join(' '));
@@ -195,16 +197,14 @@ export default function LogsTab() {
   const pageEnd = Math.min(currentPage * PAGE_SIZE, totalEntries);
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
-      {/* ── Header bar ── */}
-      <div className="shrink-0 flex flex-row items-center justify-between px-3 md:px-4 py-2 gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-        <div className="hidden md:flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#8b5cf6] to-[#6366f1] flex items-center justify-center shadow-sm shrink-0">
-            <ScrollText size={13} className="text-white" />
-          </div>
-          <h3 className="text-[0.8125rem] font-semibold text-[var(--text-primary)]">{t('logsTab.title')}</h3>
-        </div>
-        <div className="flex items-center gap-2">
+    <TabShell
+      title={t('logsTab.title')}
+      icon={SectionIcons.logs}
+      loading={loading}
+      bodyPadding="none"
+      bodyScroll="none"
+      actions={
+        <>
           {/* Filter selector */}
           <Selector
             variant="field"
@@ -224,16 +224,14 @@ export default function LogsTab() {
             ]}
           />
 
-          <button
-            className={cn(
-              "h-7 px-2.5 rounded-md bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[0.6875rem] font-medium cursor-pointer transition-all border border-[var(--border-color)] inline-flex items-center gap-1.5",
-              loading && "opacity-60 pointer-events-none",
-            )}
+          <ActionButton
+            icon={RefreshCw}
+            spinIcon={loading}
             onClick={() => fetchLogs(currentPage)}
             disabled={loading}
           >
-            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> {t('common.refresh')}
-          </button>
+            {t('common.refresh')}
+          </ActionButton>
 
           {/* Close detail panel button */}
           {selectedEntry && (
@@ -245,9 +243,10 @@ export default function LogsTab() {
               <PanelRightClose size={13} />
             </button>
           )}
-        </div>
-      </div>
-
+        </>
+      }
+    >
+      <div className="flex flex-col h-full min-h-0">
       {/* ── Context band: env / role / session_type for the target session ── */}
       {contextSession && (
         <div className="shrink-0 flex flex-wrap items-center gap-1.5 px-3 md:px-4 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
@@ -439,6 +438,7 @@ export default function LogsTab() {
           )
         )}
       </div>
-    </div>
+      </div>
+    </TabShell>
   );
 }

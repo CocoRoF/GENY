@@ -197,7 +197,7 @@ export default function SessionEnvironmentTab() {
       {/* ── Slim toolbar — actions only. Identity (session · env) lives
             in the scope bar above; activeRatio is shown as a chip here. ── */}
       <div
-        className="px-4 py-2 flex items-center justify-between shrink-0 gap-2 flex-wrap"
+        className="px-4 py-2.5 min-h-[49px] flex items-center justify-between shrink-0 gap-2 flex-wrap"
         style={{ borderBottom: '1px solid var(--pipe-border)' }}
       >
         <span
