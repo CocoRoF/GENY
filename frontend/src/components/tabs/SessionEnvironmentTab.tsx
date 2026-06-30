@@ -221,7 +221,7 @@ export default function SessionEnvironmentTab() {
               if (environments.length === 0) void loadEnvironments();
               setEnvPickerOpen(true);
             }}
-            className="flex items-center gap-1.5 py-1 px-3 rounded-md cursor-pointer text-[10px] font-semibold transition-colors hover:brightness-125"
+            className="flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer text-[10px] font-semibold transition-colors hover:brightness-125"
             style={{
               background: 'var(--pipe-bg-tertiary)',
               color: 'var(--pipe-text-secondary)',
@@ -267,7 +267,7 @@ export default function SessionEnvironmentTab() {
               </button>
               <button
                 onClick={openEnvInDrawer}
-                className="flex items-center gap-1.5 py-1 px-3 rounded-md cursor-pointer text-[10px] font-semibold transition-colors hover:brightness-125"
+                className="flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer text-[10px] font-semibold transition-colors hover:brightness-125"
                 style={{
                   background: 'var(--pipe-accent)',
                   color: '#ffffff',
