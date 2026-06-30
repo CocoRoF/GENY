@@ -42,7 +42,28 @@ import {
 import { computeForceLayout } from './graphLayout';
 import { computeHighlightSet, isEdgeHighlighted } from './graphHighlight';
 import GraphControls from './GraphControls';
-import { GitGraph } from 'lucide-react';
+import {
+  GitGraph,
+  Calendar,
+  Hash,
+  FolderKanban,
+  Lightbulb,
+  BookOpen,
+  Home,
+  FileText,
+  type LucideIcon,
+} from 'lucide-react';
+
+// Per-category glyph rendered inside each node ring (mirrors CATEGORY_COLORS).
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  daily: Calendar,
+  topics: Hash,
+  projects: FolderKanban,
+  insights: Lightbulb,
+  reference: BookOpen,
+  root: Home,
+};
+const DEFAULT_NODE_ICON: LucideIcon = FileText;
 
 // ── 커스텀 노드 레이블 (원 아래 텍스트) ─────────────────
 function NodeLabel({ label, size }: { label: string; size: number }) {
@@ -242,6 +263,8 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
       }
 
       const isSelected = gn.id === selectedNodeId;
+      const ringW = Math.max(2, Math.round(size * 0.11));
+      const NodeIcon = CATEGORY_ICONS[gn.category] ?? DEFAULT_NODE_ICON;
 
       return {
         id: gn.id,
@@ -249,18 +272,54 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
         data: {
           label: (
             <div style={{ position: 'relative', width: size, height: size }}>
+              {/* Outline ring + theme-surface interior (white in light mode,
+                  dark surface in dark mode) + category glyph. */}
               <div
                 style={{
                   width: size,
                   height: size,
                   borderRadius: '50%',
-                  background: color,
+                  background: 'var(--obs-bg-panel)',
+                  border: `${ringW}px solid ${color}`,
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   boxShadow: isSelected
-                    ? `0 0 0 3px #fff, 0 0 ${size}px ${color}80`
-                    : `0 0 ${size / 3}px ${color}40`,
-                  transition: 'box-shadow 200ms ease, opacity 200ms ease',
+                    ? `0 0 0 3px ${color}, 0 0 ${Math.round(size * 0.9)}px ${color}66`
+                    : `0 1px 4px rgba(0,0,0,0.18), 0 0 ${Math.round(size * 0.35)}px ${color}1f`,
+                  transition: 'box-shadow 200ms ease, opacity 200ms ease, border-color 200ms ease',
                 }}
-              />
+              >
+                <NodeIcon
+                  size={Math.max(10, Math.round(size * 0.46))}
+                  color={color}
+                  strokeWidth={2.25}
+                />
+              </div>
+              {connCount >= 3 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: -3,
+                    right: -3,
+                    minWidth: 15,
+                    height: 15,
+                    padding: '0 3px',
+                    borderRadius: 8,
+                    background: color,
+                    color: '#fff',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    lineHeight: '15px',
+                    textAlign: 'center',
+                    border: '2px solid var(--obs-bg-panel)',
+                    boxSizing: 'content-box',
+                  }}
+                >
+                  {connCount}
+                </div>
+              )}
               <NodeLabel label={gn.label} size={size} />
             </div>
           ),
