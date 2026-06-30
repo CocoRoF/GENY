@@ -306,6 +306,14 @@ export default function VTuberChatPanel({
                 useCreatureStateStore.getState().fetch(sessionId);
               }
 
+              // Avatar overlay subtitle — the VTuber's OWN final dialogue closes
+              // the streaming subtitle (text settled, streaming=false). Keyed on
+              // session match so sub-agent messages don't hijack the box.
+              if (displayMsg.role === 'assistant' && msg.session_id === sessionId) {
+                const [, subFinal] = parseEmotion(displayMsg.content);
+                if (subFinal.trim()) useVTuberStore.getState().setSubtitle(sessionId, subFinal, false);
+              }
+
               // Auto TTS for assistant messages
               if (displayMsg.role === 'assistant') {
                 // TTS-fix (2026-04-26): suppress auto-TTS for messages
@@ -373,6 +381,14 @@ export default function VTuberChatPanel({
                     },
                   }));
 
+                  // Avatar overlay subtitle — mirror THIS session's live response
+                  // (independent of TTS, so the dialogue box shows even with voice
+                  // off). [emotion] prefix stripped.
+                  if (agent.session_id === sessionId) {
+                    const [, subClean] = parseEmotion(agent.streaming_text);
+                    store.setSubtitle(sessionId, subClean, true);
+                  }
+
                   // Live chat-stream pre-emit: 완성된 문장이 있으면 즉시 TTS.
                   // streaming_text 가 비어있거나 한 글자여도 extractor 가
                   // 내부적으로 no-op 처리하므로 안전하다. parseEmotion 으로
@@ -397,6 +413,9 @@ export default function VTuberChatPanel({
             } else if (eventType === 'broadcast_done') {
               setAgentProgress(null);
               setBroadcastActive(false);
+              // Safety net: ensure the subtitle settles even if the final message
+              // arrived without a matching session_id — the box can then dismiss.
+              useVTuberStore.getState().settleSubtitle(sessionId);
             }
           },
           () => lastMsgIdRef.current,
