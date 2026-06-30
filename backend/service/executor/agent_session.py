@@ -2774,6 +2774,21 @@ class AgentSession:
                 ),
                 vault_descriptions=dict(_CATEGORY_DESCRIPTIONS),
             )
+            # Graph-aware retrieval (geny-executor >= 2.39.0): append
+            # graph-connected notes (Personalized PageRank over the knowledge
+            # graph) to the direct hits. Additive — never reorders/evicts a
+            # direct hit — so it's safe to default on; config-overridable via
+            # the memory tuning block. Guarded by a field check so an older
+            # executor (without these MemoryHooks fields) can't break init.
+            try:
+                from dataclasses import fields as _dc_fields
+                _hook_fields = {f.name for f in _dc_fields(MemoryHooks)}
+            except Exception:  # noqa: BLE001
+                _hook_fields = set()
+            if "graph_aware" in _hook_fields:
+                hooks_kwargs["graph_aware"] = bool(_tuning.get("graph_aware", True))
+                hooks_kwargs["graph_top_k"] = int(_tuning.get("graph_top_k", 5))
+                hooks_kwargs["graph_alpha"] = float(_tuning.get("graph_alpha", 0.5))
             if "category_boosts" in _tuning and isinstance(
                 _tuning["category_boosts"], dict
             ):
