@@ -21,6 +21,7 @@ export interface CuratedKnowledgeState {
     total_chars: number;
     categories: Record<string, number>;
     total_tags: number;
+    total_links: number;
     vector_enabled: boolean;
   } | null;
   loading: boolean;

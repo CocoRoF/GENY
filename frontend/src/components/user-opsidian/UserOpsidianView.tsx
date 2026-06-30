@@ -150,6 +150,7 @@ export default function UserOpsidianView() {
         total_chars: indexRes.stats.long_term_chars ?? 0,
         categories: indexRes.stats.categories ?? {},
         total_tags: indexRes.stats.total_tags ?? 0,
+        total_links: indexRes.stats.total_links ?? 0,
       });
       setFiles(indexRes.index.files);
       setGraphData(graphRes.nodes, graphRes.edges);

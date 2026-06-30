@@ -178,13 +178,26 @@ async def get_memory_tags(request: Request, session_id: str = Path(...)):
 
 @router.get("/{session_id}/memory/graph")
 async def get_memory_graph(request: Request, session_id: str = Path(...)):
-    """Wikilink graph snapshot (nodes + directed edges)."""
+    """Knowledge graph snapshot (rich nodes + typed edges).
+
+    Uses the shared ``build_graph_from_index`` projector — the SAME builder the
+    user/curated Opsidian graphs use — so every surface renders identically and
+    returns the rich ``MemoryGraphResponse`` shape the UI expects (the old thin
+    ``nodes:[filename]`` shape mismatched ``MemoryGraphNode[]``). Edges: wikilink
+    + de-clumped IDF-tag now; any executor-derived semantic edges (Phase 2) flow
+    through automatically once the snapshot carries an ``edges`` list.
+    """
+    from service.memory.note_utils import build_graph_from_index
     provider = _get_provider(session_id)
-    graph = await provider.index().graph()
-    return {
-        "nodes": [n.ref.filename for n in (graph.nodes or [])],
-        "edges": [{"source": s, "target": t} for s, t in (graph.edges or [])],
-    }
+    try:
+        snapshot = await provider.index().snapshot()
+    except Exception:  # noqa: BLE001
+        snapshot = {}
+    snapshot = snapshot or {}
+    idx: Dict[str, Any] = {"files": snapshot.get("files", {}) or {}}
+    if snapshot.get("edges"):
+        idx["edges"] = snapshot["edges"]
+    return build_graph_from_index(idx)
 
 
 @router.get("/{session_id}/memory/summary")

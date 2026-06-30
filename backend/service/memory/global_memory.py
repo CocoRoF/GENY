@@ -21,6 +21,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from service.memory.note_utils import compute_total_links
+
 logger = getLogger(__name__)
 
 
@@ -237,6 +239,7 @@ class GlobalMemoryManager:
             "total_chars": idx.get("total_chars", 0),
             "categories": categories,
             "total_tags": len(idx.get("tag_map", {})),
+            "total_links": compute_total_links(idx),
         }
 
     def get_stats(self) -> Dict[str, Any]:

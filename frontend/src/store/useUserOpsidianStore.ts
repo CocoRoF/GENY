@@ -17,7 +17,7 @@ export interface UserOpsidianState {
 
   // Memory Index
   memoryIndex: MemoryIndex | null;
-  stats: { total_files: number; total_chars: number; categories: Record<string, number>; total_tags: number } | null;
+  stats: { total_files: number; total_chars: number; categories: Record<string, number>; total_tags: number; total_links: number } | null;
   loading: boolean;
 
   // Files

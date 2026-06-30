@@ -62,7 +62,11 @@ export default function StatusBar({ onRefresh }: { onRefresh: () => void }) {
     : isUserMode
       ? (userStore.stats?.total_tags ?? 0)
       : (opsidian.memoryStats?.total_tags ?? 0);
-  const totalLinks = (isUserMode || isCuratorMode) ? 0 : (opsidian.memoryStats?.total_links ?? 0);
+  const totalLinks = isCuratorMode
+    ? (curatedStore.stats?.total_links ?? 0)
+    : isUserMode
+      ? (userStore.stats?.total_links ?? 0)
+      : (opsidian.memoryStats?.total_links ?? 0);
   const loading = isCuratorMode
     ? curatedStore.loading
     : isUserMode ? userStore.loading : opsidian.loading;

@@ -21,10 +21,11 @@ Public surface:
 
 from __future__ import annotations
 
+import math
 import re
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = getLogger(__name__)
 
@@ -361,6 +362,145 @@ def write_dms_shard(memory_dir: Path | str) -> None:
         raise
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Graph projection — single source of truth for every Opsidian surface
+# (user / curated / global / session). Builds nodes + edges from an index
+# snapshot. Edge derivation lives here so all managers stay identical and
+# so the de-clumping policy (IDF tag weights + meta-tag denylist + df
+# cutoff + per-node fanout cap) is defined once.
+#
+# Edge sources, in priority order:
+#   1. idx["edges"]  — if the executor already derived a unified edge list
+#      (semantic-kNN + IDF-tag + wikilink), render it verbatim. (Phase 2+)
+#   2. else fall back to deriving wikilink + IDF-tag edges from the
+#      per-note links_to/tags in the snapshot. (Phase 1)
+# ─────────────────────────────────────────────────────────────────────
+
+# Meta tags that appear on (nearly) every archived note — connecting all
+# notes that share one produces a useless hairball, so they never form
+# tag edges. Compared case-insensitively, leading '#' stripped.
+META_TAG_DENYLIST = {
+    "conversation", "user_chat", "assistant_chat", "agent_dm", "dm", "dms",
+    "compaction", "system-artifact", "system", "auto", "automated",
+    "log", "logs", "chat", "session", "archive", "execution", "execution-summary",
+    "insight", "insights", "memory", "note", "daily", "digest",
+}
+
+# A tag on more than max(ABS_FLOOR, RATIO*N) notes is treated as too common
+# to be discriminative and skipped. The absolute floor keeps SMALL vaults
+# from over-pruning (e.g. a "neowiz" tag on 3 of 5 notes is a real cluster,
+# not noise — a bare ratio would drop it). A tag on *every* note is always
+# dropped (universal == meaningless).
+TAG_DF_RATIO_MAX = 0.33
+TAG_DF_ABS_FLOOR = 12
+# Cap how many tag edges a single note may contribute — prevents a few
+# popular tags from dominating the force layout (clumping into balls).
+TAG_FANOUT_MAX = 6
+
+
+def compute_total_links(idx: Optional[Dict[str, Any]]) -> int:
+    """Count resolved wikilinks (outgoing links whose target exists)."""
+    if not idx:
+        return 0
+    files_map = idx.get("files", {}) or {}
+    total = 0
+    for info in files_map.values():
+        for tgt in (info.get("links_to") or []):
+            if tgt in files_map:
+                total += 1
+    return total
+
+
+def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Project an index snapshot into a {nodes, edges} graph for the UI.
+
+    De-clumped: tag edges are IDF-weighted, drop meta/over-common tags,
+    and respect a per-node fanout cap so the force layout shows topical
+    clusters rather than one dense hairball.
+    """
+    if not idx:
+        return {"nodes": [], "edges": []}
+
+    files_map = idx.get("files", {}) or {}
+    n = max(1, len(files_map))
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+    edge_set: set = set()
+    tag_to_files: Dict[str, List[str]] = {}
+
+    def _add_edge(a: str, b: str, etype: str, weight: float, label: Optional[str] = None) -> bool:
+        if a == b:
+            return False
+        if (a, b) in edge_set or (b, a) in edge_set:
+            return False
+        edge_set.add((a, b))
+        edge = {"source": a, "target": b, "type": etype, "weight": weight}
+        if label is not None:
+            edge["label"] = label
+        edges.append(edge)
+        return True
+
+    for fn, info in files_map.items():
+        links_to = info.get("links_to") or []
+        linked_from = info.get("linked_from") or []
+        tags = info.get("tags") or []
+        nodes.append({
+            "id": fn,
+            "label": info.get("title", fn),
+            "category": info.get("category", "root"),
+            "importance": info.get("importance", "medium"),
+            "tags": tags,
+            "connectionCount": len(links_to) + len(linked_from),
+            "summary": info.get("summary", "") or "",
+            "charCount": info.get("char_count", 0),
+        })
+        for target in links_to:
+            if target in files_map:
+                _add_edge(fn, target, "wikilink", 1.0)
+        for tag in tags:
+            tag_to_files.setdefault(tag, []).append(fn)
+
+    # If the executor already shipped a unified edge list, prefer it
+    # (Phase 2+ semantic-kNN / IDF-tag edges) and skip heuristic tag edges.
+    pre_edges = idx.get("edges")
+    if pre_edges:
+        for e in pre_edges:
+            src, tgt = e.get("source"), e.get("target")
+            if src in files_map and tgt in files_map:
+                _add_edge(src, tgt, e.get("type", "semantic"),
+                          float(e.get("weight", 0.5)), e.get("label"))
+        return {"nodes": nodes, "edges": edges}
+
+    # Phase 1 fallback: IDF-weighted, de-clumped tag edges.
+    node_tag_degree: Dict[str, int] = {}
+    df_max = max(TAG_DF_ABS_FLOOR, int(TAG_DF_RATIO_MAX * n))
+    for tag, fns in tag_to_files.items():
+        df = len(fns)
+        # need ≥2 notes; drop universal tags (on every note) and over-common ones
+        if df < 2 or df >= n or df > df_max:
+            continue
+        if tag.lower().lstrip("#") in META_TAG_DENYLIST:
+            continue
+        weight = round(0.5 * math.log((1 + n) / (1 + df)), 3)
+        if weight <= 0:
+            continue
+        for i in range(len(fns)):
+            a = fns[i]
+            if node_tag_degree.get(a, 0) >= TAG_FANOUT_MAX:
+                continue
+            for j in range(i + 1, len(fns)):
+                b = fns[j]
+                if node_tag_degree.get(b, 0) >= TAG_FANOUT_MAX:
+                    continue
+                if _add_edge(a, b, "tag", weight, tag):
+                    node_tag_degree[a] = node_tag_degree.get(a, 0) + 1
+                    node_tag_degree[b] = node_tag_degree.get(b, 0) + 1
+                    if node_tag_degree[a] >= TAG_FANOUT_MAX:
+                        break
+
+    return {"nodes": nodes, "edges": edges}
+
+
 __all__ = [
     "VALID_CATEGORIES",
     "PINNED_CATEGORY",
@@ -370,4 +510,7 @@ __all__ = [
     "scan_dms_directory",
     "write_dms_shard",
     "aget_index_snapshot_with_dms",
+    "build_graph_from_index",
+    "compute_total_links",
+    "META_TAG_DENYLIST",
 ]

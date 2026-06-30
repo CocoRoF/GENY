@@ -28,6 +28,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from service.memory.note_utils import build_graph_from_index, compute_total_links
+
 logger = getLogger(__name__)
 
 
@@ -278,6 +280,7 @@ class UserOpsidianManager:
             "total_chars": idx.get("total_chars", 0),
             "categories": categories,
             "total_tags": len(idx.get("tag_map", {})),
+            "total_links": compute_total_links(idx),
         }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -287,70 +290,11 @@ class UserOpsidianManager:
     async def aget_graph(self) -> Dict[str, Any]:
         """Get graph data for visualization (async)."""
         idx = await self.aget_index()
-        return self._build_graph(idx)
+        return build_graph_from_index(idx)
 
     def get_graph(self) -> Dict[str, Any]:
         from service.memory.sync_async_bridge import run_coro_sync
         return run_coro_sync(self.aget_graph())
-
-    @staticmethod
-    def _build_graph(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        if idx is None:
-            return {"nodes": [], "edges": []}
-        nodes = []
-        edges = []
-        edge_set: set = set()
-        tag_to_files: Dict[str, List[str]] = {}
-        files_map = idx.get("files", {})
-
-        for fn, info in files_map.items():
-            links_to = info.get("links_to", [])
-            linked_from = info.get("linked_from", [])
-            tags = info.get("tags", [])
-
-            nodes.append({
-                "id": fn,
-                "label": info.get("title", fn),
-                "category": info.get("category", "root"),
-                "importance": info.get("importance", "medium"),
-                "tags": tags,
-                "connectionCount": len(links_to) + len(linked_from),
-                "summary": info.get("summary", ""),
-                "charCount": info.get("char_count", 0),
-            })
-
-            for target in links_to:
-                if target in files_map:
-                    key = (fn, target)
-                    if key not in edge_set:
-                        edge_set.add(key)
-                        edges.append({
-                            "source": fn,
-                            "target": target,
-                            "type": "wikilink",
-                            "weight": 1.0,
-                        })
-
-            for tag in tags:
-                tag_to_files.setdefault(tag, []).append(fn)
-
-        for tag, fns in tag_to_files.items():
-            if len(fns) < 2:
-                continue
-            for i in range(len(fns)):
-                for j in range(i + 1, len(fns)):
-                    a, b = fns[i], fns[j]
-                    if (a, b) not in edge_set and (b, a) not in edge_set:
-                        edge_set.add((a, b))
-                        edges.append({
-                            "source": a,
-                            "target": b,
-                            "type": "tag",
-                            "weight": 0.5,
-                            "label": tag,
-                        })
-
-        return {"nodes": nodes, "edges": edges}
 
     # ── Write Operations (async-native) ──────────────────────────────
 

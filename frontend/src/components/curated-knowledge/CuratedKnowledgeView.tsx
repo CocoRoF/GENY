@@ -133,6 +133,7 @@ export default function CuratedKnowledgeView() {
         total_chars: indexRes.stats.long_term_chars ?? 0,
         categories: indexRes.stats.categories ?? {},
         total_tags: indexRes.stats.total_tags ?? 0,
+        total_links: indexRes.stats.total_links ?? 0,
         vector_enabled: false,
       });
       setFiles(indexRes.index.files);
