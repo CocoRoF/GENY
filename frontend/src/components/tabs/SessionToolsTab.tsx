@@ -146,11 +146,6 @@ export default function SessionToolsTab() {
             : t('sessionTools.defaultPreset')}
         </div>
       )}
-      {boundPreset?.description && (
-        <div className="shrink-0 px-4 py-2 bg-[var(--bg-tertiary)] border-b border-[var(--border-color)] text-[0.75rem] text-[var(--text-muted)]">
-          {boundPreset.description}
-        </div>
-      )}
 
       {/* Search */}
       <div className="shrink-0 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
