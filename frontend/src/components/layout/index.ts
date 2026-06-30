@@ -25,6 +25,20 @@ export {
   type ConfirmModalProps,
 } from './Modal';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
+export {
+  EntityCard,
+  EntityCardGrid,
+  type EntityCardProps,
+  type EntityBadge,
+  type EntityTone,
+} from './EntityCard';
+export {
+  DataTable,
+  RowActions,
+  type DataTableProps,
+  type DataColumn,
+  type DataRowAction,
+} from './DataTable';
 export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './StatusBadge';
 export { ActionButton, type ActionButtonProps } from './ActionButton';
 export { SubTabNav, type SubTabNavProps, type SubTabDef } from './SubTabNav';
