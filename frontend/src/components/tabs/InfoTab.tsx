@@ -6,11 +6,11 @@ import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { agentApi } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
-import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info } from 'lucide-react';
+import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info, Power } from 'lucide-react';
 import type { SessionInfo } from '@/types';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
-import { TabShell, EmptyState } from '@/components/common/layout';
+import { TabShell, EmptyState, ActionButton } from '@/components/common/layout';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
@@ -94,6 +94,26 @@ export default function InfoTab() {
   }, [selectedSessionId, setCreatureSnapshot]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  // Wake Up — lazily re-hydrate a dormant session (idle after a backend
+  // restart) BEFORE chatting. Chatting also wakes a session, but that path
+  // races the first turn (broken message order / stale game params); an
+  // explicit resume restores the pipeline + persisted creature/emotion state
+  // cleanly, then refreshes this view.
+  const [waking, setWaking] = useState(false);
+  const handleWakeUp = useCallback(async () => {
+    if (!selectedSessionId) return;
+    setWaking(true);
+    setError('');
+    try {
+      await agentApi.resume(selectedSessionId);
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setWaking(false);
+    }
+  }, [selectedSessionId, fetchDetail]);
 
   // Fetch thinking trigger status for VTuber sessions
   useEffect(() => {
@@ -203,10 +223,22 @@ export default function InfoTab() {
       title={data.session_name || t('info.sessionDetails')}
       icon={Info}
       actions={
-        <span className="text-[11px] font-semibold py-[3px] px-2.5 rounded-[12px] uppercase tracking-[0.5px]"
-              style={getStatusBadgeStyle()}>
-          {isDeleted ? t('info.deleted') : (data.status || t('info.unknown'))}
-        </span>
+        <div className="flex items-center gap-2">
+          {!isDeleted && (data.status === 'stopped' || data.status === 'idle' || !data.status) && (
+            <ActionButton
+              icon={Power}
+              spinIcon={waking}
+              onClick={handleWakeUp}
+              disabled={waking}
+            >
+              {waking ? (t('info.wakingUp') ?? 'Waking…') : (t('info.wakeUp') ?? 'Wake Up')}
+            </ActionButton>
+          )}
+          <span className="text-[11px] font-semibold py-[3px] px-2.5 rounded-[12px] uppercase tracking-[0.5px]"
+                style={getStatusBadgeStyle()}>
+            {isDeleted ? t('info.deleted') : (data.status || t('info.unknown'))}
+          </span>
+        </div>
       }
     >
     <div className="p-3 md:p-5 overflow-y-auto h-full">

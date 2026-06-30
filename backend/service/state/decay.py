@@ -66,6 +66,12 @@ class DecayRule:
     clamp_min: float = 0.0
     clamp_max: float = 100.0
     regress_to: Optional[float] = None
+    # Soft floor applied ONLY when the value was already positive before this
+    # tick (i.e. the relationship has begun). Lets a stat decay but never fall
+    # back to the "brand-new / never-happened" zero once it has started — e.g.
+    # bond.familiarity stays ≥ 0.01 after the first interaction, while a
+    # never-met creature legitimately stays at exactly 0.
+    floor_if_positive: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not self.path:
@@ -101,7 +107,10 @@ DEFAULT_DECAY = DecayPolicy(rules=(
     DecayRule("vitals.energy", -1.5),       # fatigue accumulates
     DecayRule("vitals.cleanliness", -1.0),
     DecayRule("vitals.stress", +0.5),
-    DecayRule("bond.familiarity", -0.1),    # very slow forgetting
+    # Very slow forgetting, but once you've met (familiarity > 0) it never
+    # decays back to a "never-met" 0 — floors at 0.01 so an established
+    # relationship is never mistaken for a first encounter after idle time.
+    DecayRule("bond.familiarity", -0.1, floor_if_positive=0.01),
 
     # Plan/Phase03 §3.1 — mood natural drift. Each basic emotion is
     # pulled back to 0 (neutral) so a transient spike doesn't stay
@@ -212,6 +221,16 @@ def apply_decay(
                 drifted = rule.clamp_min
             elif drifted > rule.clamp_max:
                 drifted = rule.clamp_max
+            # Soft floor: once a stat has started (was > 0), never let decay
+            # pull it all the way back to the "never-happened" zero. A creature
+            # that has never interacted (current == 0) is left untouched here,
+            # so a genuine first encounter still reads exactly 0.
+            if (
+                rule.floor_if_positive is not None
+                and current > 0.0
+                and drifted < rule.floor_if_positive
+            ):
+                drifted = rule.floor_if_positive
             _write_path(new_state, rule.path, drifted)
     new_state.last_tick_at = now
 
