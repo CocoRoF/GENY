@@ -31,6 +31,7 @@ import {
   EmptyState,
   StatusBadge,
   ActionButton,
+  DataTable,
   type BadgeTone,
 } from '@/components/layout';
 import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
@@ -254,73 +255,52 @@ export function TasksTab() {
         />
       ) : (
       <div className="h-full min-h-0 overflow-y-auto p-4">
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={ListChecks}
-          title="No tasks"
-          description="Tools that submit background work (TaskCreate / Cron-fired jobs) will appear here."
+      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
+        <DataTable
+          rows={rows}
+          keyOf={(r) => r.task_id}
+          empty={
+            <EmptyState
+              icon={ListChecks}
+              title="No tasks"
+              description="Tools that submit background work (TaskCreate / Cron-fired jobs) will appear here."
+            />
+          }
+          columns={[
+            { key: 'id', header: 'Task ID', mono: true, width: 'minmax(7rem,1.3fr)', render: (r) => `${r.task_id.slice(0, 12)}…` },
+            { key: 'kind', header: 'Kind', width: 'minmax(0,1fr)', render: (r) => r.kind },
+            {
+              key: 'status',
+              header: 'Status',
+              width: 'minmax(0,1.5fr)',
+              render: (r) => (
+                <span className="inline-flex items-center gap-2 min-w-0">
+                  <StatusBadge tone={STATUS_TONE[r.status]}>{r.status}</StatusBadge>
+                  {r.error && (
+                    <span className="text-xs text-rose-400 truncate">{r.error}</span>
+                  )}
+                </span>
+              ),
+            },
+            { key: 'dur', header: 'Duration', mono: true, width: 'minmax(4.5rem,0.8fr)', render: (r) => formatDuration(r.started_at, r.completed_at) },
+          ]}
+          rowActions={(row) => {
+            const isTerminal =
+              row.status === 'done' || row.status === 'failed' || row.status === 'cancelled';
+            return [
+              { icon: Eye, label: 'Output', onClick: () => setDetailRow(row), title: 'View output + tool trail' },
+              {
+                icon: Square,
+                label: 'Stop',
+                danger: true,
+                disabled: isTerminal,
+                onClick: () => setStopRow(row),
+                title: isTerminal ? 'Already finished' : 'Stop this task',
+              },
+            ];
+          }}
         />
-      ) : (
-        <div className="overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)]">
-          <table className="min-w-full text-sm border-collapse">
-            <thead className="sticky top-0 z-10 bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
-              <tr className="border-b border-[var(--border-color)]">
-                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Task ID</th>
-                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Kind</th>
-                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Status</th>
-                <th className="text-left font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Duration</th>
-                <th className="text-right font-medium px-3 py-2.5 text-xs uppercase tracking-wide">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const isTerminal =
-                  row.status === 'done' ||
-                  row.status === 'failed' ||
-                  row.status === 'cancelled';
-                return (
-                  <tr
-                    key={row.task_id}
-                    className="border-t border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
-                  >
-                    <td className="px-3 py-2 font-mono text-xs text-[var(--text-secondary)]">
-                      {row.task_id.slice(0, 12)}…
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-primary)]">{row.kind}</td>
-                    <td className="px-3 py-2">
-                      <StatusBadge tone={STATUS_TONE[row.status]}>{row.status}</StatusBadge>
-                      {row.error && (
-                        <span className="ml-2 text-xs text-rose-400 truncate inline-block max-w-xs align-middle">
-                          {row.error}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs text-[var(--text-muted)]">
-                      {formatDuration(row.started_at, row.completed_at)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center justify-end gap-1">
-                        <RowAction icon={Eye} onClick={() => setDetailRow(row)} title="View output + tool trail">
-                          Output
-                        </RowAction>
-                        <RowAction
-                          icon={Square}
-                          danger
-                          disabled={isTerminal}
-                          onClick={() => setStopRow(row)}
-                          title={isTerminal ? 'Already finished' : 'Stop this task'}
-                        >
-                          Stop
-                        </RowAction>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </div>
       </div>
       )}
 
@@ -412,40 +392,6 @@ export function TasksTab() {
         }
       />
     </TabShell>
-  );
-}
-
-/** Compact, design-system row action (icon + label) used in the tasks table. */
-function RowAction({
-  icon: Icon,
-  children,
-  onClick,
-  disabled,
-  danger,
-  title,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        danger
-          ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10 disabled:hover:bg-transparent'
-          : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-      }`}
-    >
-      <Icon className="w-3 h-3" />
-      {children}
-    </button>
   );
 }
 
