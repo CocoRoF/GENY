@@ -135,14 +135,25 @@ export function EntityCard({
     className,
   );
 
-  const Tag = interactive ? 'button' : 'div';
-
+  // Use div+role (not <button>) so nested action buttons / toggles inside the
+  // card stay valid HTML (a <button> can't contain a <button>).
   return (
-    <Tag
-      type={interactive ? 'button' : undefined}
+    <div
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
       onClick={interactive ? onClick : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
       aria-label={ariaLabel}
-      disabled={interactive && Tag === 'button' ? disabled : undefined}
+      aria-disabled={disabled || undefined}
       className={surface}
     >
       {/* ── Header ── */}
@@ -279,7 +290,7 @@ export function EntityCard({
           {expanded && renderExpanded && <div className="mt-3">{renderExpanded()}</div>}
         </div>
       )}
-    </Tag>
+    </div>
   );
 }
 
