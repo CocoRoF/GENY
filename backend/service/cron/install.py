@@ -21,7 +21,6 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from zoneinfo import ZoneInfo
 
 from geny_executor.cron import (
     CronRunner,
@@ -31,12 +30,6 @@ from geny_executor.cron import (
 from geny_executor.cron.types import CronJob
 
 logger = logging.getLogger(__name__)
-
-# Cron expressions are evaluated in the operator's local timezone (the same tz
-# database_manager sets on the DB session), so "0 9 * * *" means 9am LOCAL and a
-# locally-stored created_at isn't stripped-then-mislabeled UTC — which pushed
-# next_fire off by the UTC offset (≈9h for KST) and stalled the first fire.
-_LOCAL_TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Seoul"))
 
 
 class _RecordingCronRunner(CronRunner):
@@ -76,23 +69,27 @@ class _RecordingCronRunner(CronRunner):
 
     def _compute_next_fire(self, job: CronJob, now: datetime) -> Optional[datetime]:
         """Timezone-correct next-fire: evaluate the cron expression in the
-        operator's local wall-clock, then return a UTC instant for the base
-        runner's comparison against ``now`` (UTC).
+        operator's *configured* timezone (``TimezoneConfig`` → ``GENY_TIMEZONE``),
+        then return a UTC instant for the base runner's comparison against ``now``.
 
         The executor base strips the tz off ``created_at``/``last_fired_at`` and
         re-labels the result UTC; with a non-UTC DB session that corrupts the
-        instant (KST 18:54 → "18:54 UTC", ~9h in the future), so a freshly
-        created hook wouldn't fire for hours. Normalizing through ``_LOCAL_TZ``
-        fixes both the skew and the meaning of clock-time schedules.
+        instant (e.g. KST 18:54 → "18:54 UTC", ~9h in the future), so a freshly
+        created hook wouldn't fire for hours. Evaluating in the configured tz
+        fixes both the skew and the meaning of clock-time schedules ("0 9 * * *"
+        = 9am in the configured timezone). Read per-call so a live timezone
+        change applies without a restart.
         """
         from croniter import croniter  # type: ignore[import-not-found]
+        from service.utils.utils import _configured_tz
 
+        tz = _configured_tz()
         base = job.last_fired_at or job.created_at or now
         if base.tzinfo is None:
             base = base.replace(tzinfo=timezone.utc)
-        base_local = base.astimezone(_LOCAL_TZ)
+        base_local = base.astimezone(tz)
         nxt_local = croniter(job.cron_expr, base_local.replace(tzinfo=None)).get_next(datetime)
-        return nxt_local.replace(tzinfo=_LOCAL_TZ).astimezone(timezone.utc)
+        return nxt_local.replace(tzinfo=tz).astimezone(timezone.utc)
 
 
 def _build_store(app_state=None):

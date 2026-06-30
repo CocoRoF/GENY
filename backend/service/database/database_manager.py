@@ -17,13 +17,19 @@ import time
 import functools
 from typing import Optional, Dict, Any, Callable, TypeVar, List
 from contextlib import contextmanager
-from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("database-manager")
 
 T = TypeVar('T')
 
-TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Asia/Seoul'))
+
+def _configured_tz_name() -> str:
+    """Configured timezone IANA name (single source of truth): the live
+    ``TimezoneConfig`` setting synced to ``GENY_TIMEZONE``, falling back to the
+    legacy ``TIMEZONE`` env then ``Asia/Seoul``. Read at connection time so a
+    config change applies to new connections without a restart. Kept dependency-
+    free (env read only) since this module backs the config store itself."""
+    return os.environ.get("GENY_TIMEZONE") or os.environ.get("TIMEZONE") or "Asia/Seoul"
 
 # Retry configuration
 DEFAULT_MAX_RETRIES = int(os.getenv('DB_MAX_RETRIES', '3'))
@@ -155,7 +161,7 @@ class DatabaseManager:
         """Connection initialization callback."""
         import psycopg
         try:
-            timezone_str = str(TIMEZONE)
+            timezone_str = _configured_tz_name()
             conn.execute(f"SET timezone = '{timezone_str}'")
             if conn.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
                 conn.commit()

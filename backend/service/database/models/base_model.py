@@ -16,8 +16,17 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("database-base-model")
 
-# Get timezone from environment variable
-TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Asia/Seoul'))
+def _configured_tz() -> ZoneInfo:
+    """Configured timezone (single source of truth): the live ``TimezoneConfig``
+    setting synced to ``GENY_TIMEZONE``, falling back to the legacy ``TIMEZONE``
+    env then ``Asia/Seoul`` (the config default). Read at call time so a config
+    change applies without a restart; dependency-free (env read) since the model
+    base is foundational."""
+    name = os.environ.get("GENY_TIMEZONE") or os.environ.get("TIMEZONE") or "Asia/Seoul"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("Asia/Seoul")
 
 
 class BaseModel(ABC):
@@ -64,7 +73,7 @@ class BaseModel(ABC):
     @classmethod
     def now(cls) -> datetime:
         """Return current time in the configured timezone."""
-        return datetime.now(TIMEZONE)
+        return datetime.now(_configured_tz())
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert object to dictionary."""
@@ -81,7 +90,7 @@ class BaseModel(ABC):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
         """Create object from dictionary."""
-        tz = TIMEZONE
+        tz = _configured_tz()
 
         for field in ("created_at", "updated_at"):
             if field in data and isinstance(data[field], str):
@@ -149,10 +158,11 @@ class BaseModel(ABC):
         schema = instance.get_schema()
 
         if db_type == "postgresql":
+            _tz_name = _configured_tz().key
             base_columns = {
                 'id': 'SERIAL PRIMARY KEY',
-                'created_at': f"TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE '{TIMEZONE.key}')",
-                'updated_at': f"TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE '{TIMEZONE.key}')"
+                'created_at': f"TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE '{_tz_name}')",
+                'updated_at': f"TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE '{_tz_name}')"
             }
         else:
             base_columns = {

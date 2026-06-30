@@ -4,23 +4,34 @@ Common utility functions.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# ── Legacy alias — kept for callers that import ``KST`` directly. ───
-# It now resolves to the *configured* timezone at call time via the
-# property-like helpers below.
-KST = timezone(timedelta(hours=9))
+# NOTE: there is intentionally no fixed ``KST`` constant — use the configured
+# helpers below (``configured_timezone`` / ``now_kst``) so all time operations
+# follow the TimezoneConfig setting rather than a hardcoded +9 offset.
 
 
 def _configured_tz() -> ZoneInfo:
-    """Return a ``ZoneInfo`` for the GENY_TIMEZONE env var (default Asia/Seoul)."""
-    name = os.environ.get("GENY_TIMEZONE", "Asia/Seoul")
+    """``ZoneInfo`` for the configured timezone — the single source of truth.
+
+    The IANA name comes from :class:`TimezoneConfig` (the user-editable setting),
+    synced live to ``GENY_TIMEZONE`` via its ``env_sync`` apply_change callback.
+    Falls back to the legacy ``TIMEZONE`` env (compose default) then ``Asia/Seoul``
+    (the config's own default). Read at call time so a live timezone change takes
+    effect without a restart.
+    """
+    name = os.environ.get("GENY_TIMEZONE") or os.environ.get("TIMEZONE") or "Asia/Seoul"
     try:
         return ZoneInfo(name)
-    except (KeyError, Exception):
+    except Exception:
         return ZoneInfo("Asia/Seoul")
+
+
+def configured_timezone() -> ZoneInfo:
+    """Canonical public accessor for the configured timezone (see ``_configured_tz``)."""
+    return _configured_tz()
 
 
 def _configured_tz_abbr() -> str:
