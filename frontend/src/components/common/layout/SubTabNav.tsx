@@ -28,12 +28,18 @@ export interface SubTabNavProps {
   leading?: ReactNode;
   /** Optional content pinned to the RIGHT (e.g. a mode toggle). */
   trailing?: ReactNode;
+  /** Extra classes for the <nav> — e.g. `h-[49px]` to match a header band.
+   *  Merged last (twMerge) so it can override the default h-9 / padding. */
+  className?: string;
 }
 
-export function SubTabNav({ tabs, active, onSelect, leading, trailing }: SubTabNavProps) {
+export function SubTabNav({ tabs, active, onSelect, leading, trailing, className }: SubTabNavProps) {
   return (
     <nav
-      className="flex items-center gap-0.5 px-2 md:px-3 h-9 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0 overflow-x-auto scrollbar-hide"
+      className={cn(
+        'flex items-center gap-0.5 px-2 md:px-3 h-9 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0 overflow-x-auto scrollbar-hide',
+        className,
+      )}
       role="tablist"
     >
       {leading != null && (

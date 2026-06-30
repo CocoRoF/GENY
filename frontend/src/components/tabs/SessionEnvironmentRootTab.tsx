@@ -111,6 +111,7 @@ export default function SessionEnvironmentRootTab() {
           this session owns a companion, is pinned right. Tabs hide on the
           Sub-Agent side (its panel is a single read-only view). */}
       <SubTabNav
+        className="h-[49px]"
         tabs={showSubAgent ? [] : SUB_TABS}
         active={subTab}
         onSelect={setSubTab}
