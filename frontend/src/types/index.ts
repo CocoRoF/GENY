@@ -746,7 +746,7 @@ export interface MemoryGraphNode {
 export interface MemoryGraphEdge {
   source: string;
   target: string;
-  type?: 'wikilink' | 'tag' | 'backlink';
+  type?: 'wikilink' | 'tag' | 'backlink' | 'semantic';
   weight?: number;
   label?: string;
 }

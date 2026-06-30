@@ -32,7 +32,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from service.memory.note_utils import build_graph_from_index, compute_total_links
+from service.memory.note_utils import build_graph_from_index, compute_total_links, fetch_provider_edges
 
 logger = getLogger(__name__)
 
@@ -344,6 +344,10 @@ class CuratedKnowledgeManager:
 
     async def aget_graph(self) -> Dict[str, Any]:
         idx = await self.aget_index()
+        if idx is not None:
+            edges = await fetch_provider_edges(self._provider)
+            if edges is not None:
+                idx = {**idx, "edges": edges}
         return build_graph_from_index(idx)
 
     def get_graph(self) -> Dict[str, Any]:

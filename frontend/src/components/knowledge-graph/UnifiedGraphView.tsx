@@ -159,7 +159,7 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
     importance: new Set(['critical', 'high', 'medium', 'low']),
     searchQuery: '',
     showOrphans: true,
-    edgeTypes: new Set<EdgeType>(['wikilink', 'tag', 'backlink']),
+    edgeTypes: new Set<EdgeType>(['wikilink', 'tag', 'backlink', 'semantic']),
     selectedNodeId: null,
     highlightDepth: 2,
   }));

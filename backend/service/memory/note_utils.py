@@ -411,6 +411,26 @@ def compute_total_links(idx: Optional[Dict[str, Any]]) -> int:
     return total
 
 
+async def fetch_provider_edges(provider) -> Optional[List[Dict[str, Any]]]:
+    """Return the executor-derived rich edge list (wikilink + IDF-tag + lexical
+    semantic-kNN) when the provider's index exposes ``graph_edges()``
+    (geny-executor >= 2.38.0), else ``None`` so the caller falls back to the
+    Phase-1 heuristic edges built inside :func:`build_graph_from_index`.
+
+    Feature-detected via ``getattr`` (the method is intentionally NOT on the
+    ``@runtime_checkable`` IndexHandle Protocol), so an older executor degrades
+    gracefully instead of raising.
+    """
+    try:
+        index = provider.index()
+        fn = getattr(index, "graph_edges", None)
+        if fn is None:
+            return None
+        return await fn()
+    except Exception:  # noqa: BLE001 — never let edge enrichment break the graph
+        return None
+
+
 def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Project an index snapshot into a {nodes, edges} graph for the UI.
 
@@ -512,5 +532,6 @@ __all__ = [
     "aget_index_snapshot_with_dms",
     "build_graph_from_index",
     "compute_total_links",
+    "fetch_provider_edges",
     "META_TAG_DENYLIST",
 ]

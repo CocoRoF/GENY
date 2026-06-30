@@ -34,6 +34,8 @@ export const EDGE_STYLES: Record<EdgeType, { color: string; width: number; dash?
   wikilink: { color: '#58a6ff', width: 2 },
   backlink: { color: '#8b949e', width: 1.5 },
   tag: { color: '#d29922', width: 1, dash: '4 2' },
+  // soft, derived similarity link (lexical/semantic k-NN) — subtle violet, dotted
+  semantic: { color: '#a371f7', width: 1, dash: '2 3' },
 };
 
 export const DEFAULT_EDGE_STYLE = EDGE_STYLES.wikilink;

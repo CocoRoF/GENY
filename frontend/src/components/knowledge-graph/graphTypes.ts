@@ -9,7 +9,7 @@
 import type { MemoryGraphNode, MemoryGraphEdge } from '@/types';
 
 // ── Edge 타입 ───────────────────────────────────────────
-export type EdgeType = 'wikilink' | 'tag' | 'backlink';
+export type EdgeType = 'wikilink' | 'tag' | 'backlink' | 'semantic';
 
 // ── 확장 노드 (기존 필드 + optional 확장) ────────────────
 export interface KnowledgeGraphNode extends MemoryGraphNode {

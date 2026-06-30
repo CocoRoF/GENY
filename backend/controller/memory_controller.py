@@ -187,7 +187,7 @@ async def get_memory_graph(request: Request, session_id: str = Path(...)):
     + de-clumped IDF-tag now; any executor-derived semantic edges (Phase 2) flow
     through automatically once the snapshot carries an ``edges`` list.
     """
-    from service.memory.note_utils import build_graph_from_index
+    from service.memory.note_utils import build_graph_from_index, fetch_provider_edges
     provider = _get_provider(session_id)
     try:
         snapshot = await provider.index().snapshot()
@@ -195,7 +195,10 @@ async def get_memory_graph(request: Request, session_id: str = Path(...)):
         snapshot = {}
     snapshot = snapshot or {}
     idx: Dict[str, Any] = {"files": snapshot.get("files", {}) or {}}
-    if snapshot.get("edges"):
+    edges = await fetch_provider_edges(provider)
+    if edges is not None:
+        idx["edges"] = edges
+    elif snapshot.get("edges"):
         idx["edges"] = snapshot["edges"]
     return build_graph_from_index(idx)
 

@@ -63,7 +63,7 @@ export default function GraphControls({ filter, onFilterChange, availableCategor
   }, [filter, onFilterChange]);
 
   const importanceLevels = ['critical', 'high', 'medium', 'low'];
-  const edgeTypes: EdgeType[] = ['wikilink', 'tag'];
+  const edgeTypes: EdgeType[] = ['wikilink', 'tag', 'semantic'];
 
   return (
     <div
