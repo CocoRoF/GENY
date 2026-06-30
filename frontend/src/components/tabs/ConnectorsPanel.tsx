@@ -15,11 +15,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { connectorsApi, type Connector, type ConnectorField } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { EntityCard } from '@/components/common/layout';
+import { EntityCard, EditorModal, ActionButton } from '@/components/common/layout';
+import { Switch } from '@/components/ui/switch';
 import {
   RefreshCw,
-  CheckCircle2,
-  Circle,
   ExternalLink,
   Boxes,
   Github,
@@ -38,9 +37,6 @@ const inputCls =
 const labelCls = 'block text-xs font-medium text-[var(--text-muted)] mb-1';
 const btnCls =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
-const primaryBtnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
-
 /** Map the backend's icon hint to a lucide glyph; generic fallback otherwise. */
 const ICONS: Record<string, LucideIcon> = {
   github: Github,
@@ -119,13 +115,13 @@ export default function ConnectorsPanel() {
 
 function ConnectorCard({ connector, onChanged }: { connector: Connector; onChanged: () => void | Promise<void> }) {
   const { t } = useI18n();
-  const Icon = iconFor(connector);
 
   const [enabled, setEnabled] = useState(connector.enabled);
   const [values, setValues] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false); // values prefilled?
   const [loadingValues, setLoadingValues] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const active = enabled && connector.configured;
 
@@ -163,6 +159,7 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
       }
       await connectorsApi.update(connector.id, { enabled, values: out });
       toast.success(t('connectors.saved'));
+      setModalOpen(false);
       await onChanged();
     } catch (e: any) {
       toast.error(e?.message || t('connectors.saveFailed'));
@@ -171,53 +168,48 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
     }
   };
 
-  // Toggle enable inline (without opening configure) — persists immediately,
-  // but only resends fields the user actually edited (none, here).
-  const onToggleEnabled = async (next: boolean) => {
-    setEnabled(next);
-    setSaving(true);
-    try {
-      await connectorsApi.update(connector.id, { enabled: next, values: {} });
-      toast.success(t('connectors.saved'));
-      await onChanged();
-    } catch (e: any) {
-      setEnabled(!next); // revert optimistic flip
-      toast.error(e?.message || t('connectors.saveFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const statusLabel = active
+    ? t('connectors.active')
+    : !connector.configured
+      ? t('connectors.notConfigured')
+      : t('connectors.inactive');
 
   return (
-    <EntityCard
-      icon={<Icon className="text-[var(--text-secondary)]" />}
-      iconTone="neutral"
-      title={connector.name}
-      badges={[
-        { label: connector.transport === 'stdio' ? 'stdio' : 'HTTP', tone: 'neutral' },
-        {
-          label: active
-            ? t('connectors.active')
-            : !connector.configured
-              ? t('connectors.notConfigured')
-              : t('connectors.inactive'),
-          tone: active ? 'good' : 'neutral',
-          icon: active ? CheckCircle2 : Circle,
-        },
-      ]}
-      toggle={{
-        checked: enabled,
-        onChange: (v) => void onToggleEnabled(v),
-        disabled: saving,
-        label: t('connectors.enable'),
-      }}
-      expandable
-      expandLabel={t('connectors.configure')}
-      onExpandChange={(o) => {
-        if (o) void ensureValues();
-      }}
-      renderExpanded={() => (
+    <>
+      <EntityCard
+        layout="split"
+        title={connector.name}
+        badges={[{ label: connector.transport === 'stdio' ? 'stdio' : 'HTTP', tone: 'neutral' }]}
+        status={{ tone: active ? 'good' : 'neutral', label: statusLabel, as: 'dot' }}
+        onClick={() => {
+          setModalOpen(true);
+          void ensureValues();
+        }}
+        ariaLabel={connector.name}
+      >
+        {connector.description}
+      </EntityCard>
+
+      <EditorModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={connector.name}
+        saving={saving}
+        footer={
+          <ActionButton variant="primary" onClick={onSave} disabled={saving || loadingValues}>
+            {saving ? t('connectors.saving') : t('connectors.save')}
+          </ActionButton>
+        }
+      >
         <div className="flex flex-col gap-3">
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between gap-3 pb-1">
+            <span className="text-[0.8125rem] font-medium text-[var(--text-secondary)]">
+              {t('connectors.enable')}
+            </span>
+            <Switch checked={enabled} onCheckedChange={setEnabled} disabled={saving} aria-label={t('connectors.enable')} />
+          </div>
+
           {loadingValues ? (
             <p className="text-sm text-[var(--text-muted)]">{t('connectors.loading')}</p>
           ) : connector.fields.length === 0 ? (
@@ -243,28 +235,22 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
               </div>
             ))
           )}
-          <div className="flex items-center gap-2 pt-1">
-            <button onClick={onSave} className={primaryBtnCls} disabled={saving || loadingValues}>
-              {saving ? t('connectors.saving') : t('connectors.save')}
-            </button>
-          </div>
+
+          {connector.docs_url && (
+            <a
+              href={connector.docs_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--primary-color)] hover:underline"
+            >
+              <ExternalLink className="w-3 h-3" /> {t('connectors.docs')}
+            </a>
+          )}
+          {connector.transport === 'stdio' && (
+            <p className="text-xs text-[var(--text-muted)]">{t('connectors.stdioNote')}</p>
+          )}
         </div>
-      )}
-    >
-      <p>{connector.description}</p>
-      {connector.docs_url && (
-        <a
-          href={connector.docs_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-[var(--primary-color)] hover:underline mt-1"
-        >
-          <ExternalLink className="w-3 h-3" /> {t('connectors.docs')}
-        </a>
-      )}
-      {connector.transport === 'stdio' && (
-        <p className="text-xs text-[var(--text-muted)] mt-2">{t('connectors.stdioNote')}</p>
-      )}
-    </EntityCard>
+      </EditorModal>
+    </>
   );
 }

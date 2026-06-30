@@ -37,6 +37,7 @@ export function SettingsCard({
 }: SettingsCardProps) {
   return (
     <EntityCard
+      layout="split"
       icon={icon}
       iconTone="neutral"
       title={title}

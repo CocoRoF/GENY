@@ -290,6 +290,30 @@ export function EntityCard({
               {subtitleNode}
               {bodyNode}
               {metaItemsNode}
+              {badges && badges.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {badges.map((b, i) => {
+                    const BIcon = b.icon;
+                    return (
+                      <span
+                        key={i}
+                        className={cn(
+                          'inline-flex items-center gap-1 text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold border',
+                          BADGE_TONE[b.tone ?? 'neutral'],
+                        )}
+                      >
+                        {BIcon && <BIcon className="w-2.5 h-2.5" />}
+                        {b.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {footer != null && footer !== false && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.72rem] text-[var(--text-tertiary)]">
+                  {footer}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 shrink-0">

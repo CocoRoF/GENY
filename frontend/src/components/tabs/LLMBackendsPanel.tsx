@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Loader2, RefreshCw, Terminal, Key,
+  Loader2, RefreshCw,
   ExternalLink, ArrowUpCircle, RotateCcw,
 } from 'lucide-react';
 
@@ -98,11 +98,6 @@ function ProviderCard({
     <SettingsCard
       onClick={() => onOpenSettings(provider.provider)}
       ariaLabel={t('settings.llmBackends.cardAriaLabel', { label: provider.label })}
-      icon={
-        isCli
-          ? <Terminal className="w-[18px] h-[18px]" />
-          : <Key className="w-[18px] h-[18px]" />
-      }
       title={provider.label}
       meta={
         <>
@@ -211,7 +206,6 @@ function ClaudeCodeVersionCard() {
 
   return (
     <SettingsCard
-      icon={<Terminal className="w-[18px] h-[18px]" />}
       title={t('llmBackendsPanel.versionTitle')}
       meta={st?.current ? <span className="font-mono">v{st.current}</span> : t('llmBackendsPanel.notInstalled')}
       status={
