@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
 import { hooksApi, HookRecord } from '@/lib/api';
 import { RefreshCw, Trash2, Power, Zap, Clock, Mail } from 'lucide-react';
-import { TabShell, ActionButton, StatusBadge } from '@/components/layout';
+import { TabShell, ActionButton, StatusBadge, DataTable, EmptyState } from '@/components/layout';
 import { useI18n } from '@/lib/i18n';
 
 const POLL_MS = 30_000;
@@ -92,45 +92,67 @@ export function HooksAutomationTab() {
         </ActionButton>
       }
     >
-      {rows.length === 0 ? (
-        <div className="p-10 text-center text-[var(--text-muted)] text-sm">
-          <p>{t('hooksAutomation.empty')}</p>
-          <p className="mt-2 text-[0.8125rem] opacity-80 whitespace-pre-line">{t('hooksAutomation.emptyHint')}</p>
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--border-color)]">
-          {rows.map((h) => (
-            <div key={h.name} className="px-4 py-3 flex items-start gap-3">
-              <div className="mt-0.5 text-[var(--text-muted)] shrink-0">
-                {h.kind === 'event' ? <Mail size={15} /> : <Clock size={15} />}
+      <DataTable
+        rows={rows}
+        keyOf={(h) => h.name}
+        loading={loading}
+        expandable
+        empty={
+          <EmptyState
+            icon={Zap}
+            title={t('hooksAutomation.empty')}
+            description={t('hooksAutomation.emptyHint')}
+          />
+        }
+        renderRow={(h) => (
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 text-[var(--text-muted)] shrink-0">
+              {h.kind === 'event' ? <Mail size={15} /> : <Clock size={15} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-sm truncate text-[hsl(var(--foreground))]">
+                  {h.description || h.name}
+                </span>
+                <StatusBadge tone={h.status === 'enabled' ? 'success' : 'neutral'}>{h.status}</StatusBadge>
+                <StatusBadge tone="info">{h.kind}</StatusBadge>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm truncate">{h.description || h.name}</span>
-                  <StatusBadge tone={h.status === 'enabled' ? 'success' : 'neutral'}>{h.status}</StatusBadge>
-                  <StatusBadge tone="info">{h.kind}</StatusBadge>
-                </div>
-                {h.action_prompt && (
-                  <p className="text-[0.8125rem] text-[var(--text-secondary)] mt-1 line-clamp-2">{h.action_prompt}</p>
-                )}
-                <div className="text-[0.6875rem] text-[var(--text-muted)] mt-1 flex gap-3 flex-wrap font-mono">
-                  <span>{h.cron_expr}</span>
-                  {h.next_fire_at && <span>next {rel(h.next_fire_at)}</span>}
-                  {h.last_fired_at && <span>last {rel(h.last_fired_at)}</span>}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <ActionButton icon={Power} onClick={() => toggle(h)}>
-                  {h.status === 'enabled' ? t('hooksAutomation.pause') : t('hooksAutomation.resume')}
-                </ActionButton>
-                <ActionButton variant="danger" icon={Trash2} onClick={() => del(h)}>
-                  {t('common.delete')}
-                </ActionButton>
+              {h.action_prompt && (
+                <p className="text-[0.8125rem] text-[var(--text-secondary)] mt-1 line-clamp-1">{h.action_prompt}</p>
+              )}
+              <div className="text-[0.6875rem] text-[var(--text-muted)] mt-1 flex gap-3 flex-wrap font-mono">
+                <span>{h.cron_expr}</span>
+                {h.next_fire_at && <span>next {rel(h.next_fire_at)}</span>}
+                {h.last_fired_at && <span>last {rel(h.last_fired_at)}</span>}
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+        renderExpanded={(h) => (
+          <div className="text-[0.8125rem] text-[var(--text-secondary)] space-y-2">
+            {h.action_prompt && (
+              <div>
+                <div className="text-[0.6875rem] uppercase tracking-wider text-[var(--text-muted)] mb-1">Action</div>
+                <p className="whitespace-pre-wrap break-words">{h.action_prompt}</p>
+              </div>
+            )}
+            <div className="flex gap-4 flex-wrap text-[0.6875rem] font-mono text-[var(--text-muted)]">
+              <span>cron: {h.cron_expr}</span>
+              <span>kind: {h.kind}</span>
+              {h.next_fire_at && <span>next: {rel(h.next_fire_at)}</span>}
+              {h.last_fired_at && <span>last: {rel(h.last_fired_at)}</span>}
+            </div>
+          </div>
+        )}
+        rowActions={(h) => [
+          {
+            icon: Power,
+            label: h.status === 'enabled' ? t('hooksAutomation.pause') : t('hooksAutomation.resume'),
+            onClick: () => toggle(h),
+          },
+          { icon: Trash2, label: t('common.delete'), danger: true, onClick: () => del(h) },
+        ]}
+      />
     </TabShell>
   );
 }
