@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -154,6 +154,7 @@ function createOverlay(): void {
 
   // Content depends on login state: the remote transparent /overlay avatar page
   // once a token exists, otherwise a local "log in first" placeholder.
+  attachContentResilience(overlay, () => void applyOverlayContent())
   applyOverlayContent()
 
   overlay.on('moved', persistOverlayBounds)
@@ -188,6 +189,7 @@ function createControl(): void {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+  attachContentResilience(control, () => void applyControlContent())
   applyControlContent()
   control.on('close', (e) => {
     // Hide instead of destroy so the single renderer process persists.
@@ -208,7 +210,9 @@ async function applyControlContent(): Promise<void> {
     const base = serverUrl.replace(/\/+$/, '')
     const sessQ = overlaySession ? `&session=${encodeURIComponent(overlaySession)}` : ''
     const themeQ = `&theme=${encodeURIComponent(theme || 'system')}`
-    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}${themeQ}`)
+    // Swallow the rejection — a failed load is recovered by the did-fail-load
+    // resilience handler (attachContentResilience), which retries with backoff.
+    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}${themeQ}`).catch(() => undefined)
   }
   // No token → the panel stays hidden; the Settings window handles login.
 }
@@ -229,6 +233,7 @@ function createSettings(): void {
       nodeIntegration: false,
     },
   })
+  attachContentResilience(settings, () => settings && loadRoute(settings, 'settings'))
   loadRoute(settings, 'settings')
   settings.on('close', (e) => {
     if (!appQuitting) {
@@ -292,6 +297,7 @@ function createQuickChat(): void {
   if (process.platform === 'darwin') {
     quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
+  attachContentResilience(quickchat, () => quickchat && loadRoute(quickchat, 'quickchat'))
   loadRoute(quickchat, 'quickchat')
   // Dismiss on focus loss (click elsewhere) — Spotlight behaviour. But ignore the
   // spurious blur a focused full-screen game fires right after we show (we may
@@ -474,6 +480,43 @@ function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings'
   })
 }
 
+// ── Self-healing window content ─────────────────────────────────────────────
+// A window must NEVER be left dead requiring a manual app restart. This recovers
+// a window's content from the two ways it can break without us noticing:
+//   • did-fail-load — the server/page was unreachable (server restart, network
+//     blip, sleep/wake, the brief window right after an auto-update relaunch).
+//     Retry `reload` with capped exponential backoff until it loads (a transient
+//     outage self-heals the moment the server returns — no restart needed).
+//   • render-process-gone — the renderer crashed / was OOM-killed. Rebuild it.
+// `reload` rebuilds the RIGHT content (applyOverlayContent / applyControlContent
+// re-evaluate login state; loadRoute reloads a local route).
+function attachContentResilience(win: BrowserWindow, reload: () => void): void {
+  const wc = win.webContents
+  let retries = 0
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  const clearRetry = () => {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  }
+  wc.on('did-finish-load', () => { retries = 0; clearRetry() })
+  wc.on('did-fail-load', (_e, errorCode, errorDesc, _url, isMainFrame) => {
+    if (!isMainFrame) return        // ignore subresource failures
+    if (errorCode === -3) return    // ERR_ABORTED — a superseding navigation, not a failure
+    clearRetry()
+    const delay = Math.min(2000 * Math.pow(1.6, retries), 20000) // 2s → cap 20s
+    retries = Math.min(retries + 1, 10)
+    console.warn(`[connector] content load failed (${errorCode} ${errorDesc}); retry in ${Math.round(delay)}ms`)
+    retryTimer = setTimeout(() => { if (!win.isDestroyed()) reload() }, delay)
+  })
+  wc.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit') return
+    console.warn(`[connector] renderer gone (${details.reason}); reloading`)
+    clearRetry()
+    retries = 0
+    if (!win.isDestroyed()) reload()
+  })
+  wc.on('destroyed', clearRetry)
+}
+
 // Read the account JWT the control window stored in the OS keychain.
 async function getStoredToken(): Promise<string | null> {
   try {
@@ -547,12 +590,16 @@ async function applyOverlayContent(): Promise<void> {
     const base = serverUrl.replace(/\/+$/, '')
     const sess = loadConfig().overlaySession
     const sessQ = sess ? `&session=${encodeURIComponent(sess)}` : ''
-    await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
-    overlay.webContents.insertCSS('html,body{background:transparent !important;}')
     // Locked by default: the avatar is click-through (clicks reach the desktop),
     // and only the /overlay control bar re-enables input on hover via
     // windowControl.setClickThrough. The page owns -webkit-app-region (drag).
     overlay.setIgnoreMouseEvents(true, { forward: true })
+    try {
+      await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
+      overlay.webContents.insertCSS('html,body{background:transparent !important;}')
+    } catch {
+      // Load failed (server/network) — attachContentResilience retries with backoff.
+    }
   } else {
     // Logged-out placeholder needs its dock handle clickable.
     overlay.setIgnoreMouseEvents(false)
@@ -1041,6 +1088,19 @@ app.whenReady().then(() => {
 
   // Register the global hotkeys (push-to-talk + quick-chat).
   registerHotkeys()
+
+  // After the machine wakes from sleep, the loaded pages' WS / network state can
+  // be stale (the avatar freezes, chat stops) and previously needed an app
+  // restart. Reload the remote pages so they reconnect cleanly. Debounced — some
+  // platforms fire resume more than once.
+  let resumeTimer: ReturnType<typeof setTimeout> | null = null
+  powerMonitor.on('resume', () => {
+    if (resumeTimer) clearTimeout(resumeTimer)
+    resumeTimer = setTimeout(() => {
+      void applyOverlayContent()
+      void applyControlContent()
+    }, 1500)
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()
