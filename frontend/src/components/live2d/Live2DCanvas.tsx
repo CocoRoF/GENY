@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import {
@@ -82,6 +82,10 @@ export default function Live2DCanvas({
   // userPanRef is an additive pixel offset from the resting (initialXshift/Yshift) center.
   // dragRef tracks an in-flight pointer drag — `moved` is read by onClick to suppress
   // tap interactions when the pointer was actually dragging the view.
+  // Resolution the renderer is built at. Bumped by the DPR watcher when the
+  // window moves to a different-scale monitor → re-runs the init effect to
+  // recreate the renderer at the new density (reliable, unlike mutating it live).
+  const [renderDpr, setRenderDpr] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1));
   const baseScaleRef = useRef(1);
   const userZoomRef = useRef(1);
   const userPanRef = useRef({ x: 0, y: 0 });
@@ -200,7 +204,7 @@ export default function Live2DCanvas({
         backgroundColor: background,
         antialias: true,
         autoDensity: true,
-        resolution: window.devicePixelRatio || 1,
+        resolution: renderDpr,
       });
 
       if (isStale()) {
@@ -536,7 +540,7 @@ export default function Live2DCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model?.name, model?.url]);
+  }, [model?.name, model?.url, renderDpr]);
 
   // ── Apply avatar state changes (expression + motion) ──────
   useEffect(() => {
@@ -635,11 +639,9 @@ export default function Live2DCanvas({
       if (!entry || !pixiAppRef.current) return;
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
-        // Keep the backing-store density matched to the monitor under the window:
-        // moving to a different-scale monitor changes devicePixelRatio, and a stale
-        // renderer.resolution renders the avatar at the wrong density (distorted).
-        const dpr = window.devicePixelRatio || 1;
-        try { if (pixiAppRef.current.renderer.resolution !== dpr) pixiAppRef.current.renderer.resolution = dpr; } catch { /* ignore */ }
+        // NOTE: do NOT mutate renderer.resolution here — changing it on a live
+        // pixi-v7 renderer can leave the avatar invisible. DPR changes are handled
+        // by recreating the renderer (see the devicePixelRatio watcher below).
         pixiAppRef.current.renderer.resize(width, height);
         if (modelRef.current) {
           const m = modelRef.current;
@@ -658,47 +660,34 @@ export default function Live2DCanvas({
   }, [model?.kScale, model?.initialXshift, model?.initialYshift]);
 
   // ── devicePixelRatio watcher (multi-monitor / OS scale change) ──
-  // The ResizeObserver only fires when the CSS size changes; moving the window
-  // to a monitor with a DIFFERENT scale factor often keeps the CSS size constant
-  // (per-monitor DPI) yet changes devicePixelRatio. Without re-applying it the
-  // WebGL backing store is the wrong density and the avatar renders blurry /
-  // distorted. matchMedia('(resolution: Ndppx)') fires exactly on that change;
-  // re-arm it for each new DPR value.
+  // Moving the window to a monitor with a different scale factor changes
+  // devicePixelRatio (often WITHOUT a CSS-size change, so the ResizeObserver
+  // misses it). We must NOT mutate renderer.resolution on the live renderer —
+  // that's what left the avatar invisible on a 150% display. Instead bump
+  // `renderDpr`, which re-runs the init effect and RECREATES the renderer at the
+  // new resolution — the exact code path that renders correctly on first load.
+  // matchMedia('(resolution: Ndppx)') fires precisely on a DPR change; debounce so
+  // dragging across DPI boundaries recreates once after it settles, not per tick.
   useEffect(() => {
     let mql: MediaQueryList | null = null;
-    const sync = () => {
-      const app = pixiAppRef.current;
-      const container = containerRef.current;
-      if (app && container) {
-        const dpr = window.devicePixelRatio || 1;
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        if (w > 0 && h > 0) {
-          try {
-            if (app.renderer.resolution !== dpr) app.renderer.resolution = dpr;
-            app.renderer.resize(w, h);
-            const m = modelRef.current;
-            if (m) {
-              const naturalW = m.width / (m.scale.x || 1);
-              const naturalH = m.height / (m.scale.y || 1);
-              baseScaleRef.current = Math.min(w / naturalW, h / naturalH) * (model?.kScale || 0.85);
-              applyTransformRef.current();
-            }
-          } catch { /* renderer torn down */ }
-        }
-      }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onChange = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setRenderDpr(window.devicePixelRatio || 1), 350);
       register(); // re-arm for the next DPR value
     };
     const register = () => {
       try {
         mql = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
-        mql.addEventListener('change', sync, { once: true });
+        mql.addEventListener('change', onChange, { once: true });
       } catch { /* matchMedia/resolution query unsupported */ }
     };
     register();
-    return () => { try { mql?.removeEventListener('change', sync); } catch { /* ignore */ } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model?.kScale]);
+    return () => {
+      if (timer) clearTimeout(timer);
+      try { mql?.removeEventListener('change', onChange); } catch { /* ignore */ }
+    };
+  }, []);
 
   // ── Focus tracking (eye follow mouse) ─────────────────────
   useEffect(() => {
