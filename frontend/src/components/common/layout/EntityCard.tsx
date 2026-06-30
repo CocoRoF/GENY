@@ -81,6 +81,8 @@ export interface EntityCardProps {
   expandable?: boolean;
   defaultExpanded?: boolean;
   expandLabel?: string;
+  /** Fires when the Configure expander toggles (e.g. to lazy-load detail). */
+  onExpandChange?: (expanded: boolean) => void;
   renderExpanded?: () => ReactNode;
   onClick?: () => void;
   ariaLabel?: string;
@@ -109,6 +111,7 @@ export function EntityCard({
   expandable = false,
   defaultExpanded = false,
   expandLabel = 'Configure',
+  onExpandChange,
   renderExpanded,
   onClick,
   ariaLabel,
@@ -280,7 +283,10 @@ export function EntityCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setExpanded((v) => !v);
+              setExpanded((v) => {
+                onExpandChange?.(!v);
+                return !v;
+              });
             }}
             className="inline-flex items-center gap-1 text-[0.75rem] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
           >

@@ -15,12 +15,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { connectorsApi, type Connector, type ConnectorField } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
+import { EntityCard } from '@/components/common/layout';
 import {
   RefreshCw,
   CheckCircle2,
   Circle,
-  ChevronDown,
-  ChevronRight,
   ExternalLink,
   Boxes,
   Github,
@@ -123,7 +122,6 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
   const Icon = iconFor(connector);
 
   const [enabled, setEnabled] = useState(connector.enabled);
-  const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false); // values prefilled?
   const [loadingValues, setLoadingValues] = useState(false);
@@ -146,12 +144,6 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
       setLoadingValues(false);
     }
   }, [connector.id, loaded, loadingValues, t]);
-
-  const toggleOpen = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) void ensureValues();
-  };
 
   const setField = (name: string, v: string) => {
     setValues((prev) => ({ ...prev, [name]: v }));
@@ -197,79 +189,35 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
   };
 
   return (
-    <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
-      <div className="flex items-start gap-3">
-        <Icon className="w-5 h-5 mt-0.5 shrink-0 text-[var(--text-secondary)]" />
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">{connector.name}</h3>
-            {/* Transport badge */}
-            <span className="text-[0.6875rem] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-muted)] uppercase tracking-wide">
-              {connector.transport === 'stdio' ? 'stdio' : 'HTTP'}
-            </span>
-            {/* Status badge */}
-            <span
-              className={`inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-md border ${
-                active
-                  ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
-                  : 'border-[var(--border-color)] text-[var(--text-muted)]'
-              }`}
-            >
-              {active ? <CheckCircle2 className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
-              {active
-                ? t('connectors.active')
-                : !connector.configured
-                  ? t('connectors.notConfigured')
-                  : t('connectors.inactive')}
-            </span>
-          </div>
-          <p className="text-xs text-[var(--text-muted)] mt-1">{connector.description}</p>
-          {connector.docs_url && (
-            <a
-              href={connector.docs_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-[var(--primary-color)] hover:underline mt-1"
-            >
-              <ExternalLink className="w-3 h-3" /> {t('connectors.docs')}
-            </a>
-          )}
-        </div>
-
-        {/* Enable toggle */}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label={t('connectors.enable')}
-          onClick={() => void onToggleEnabled(!enabled)}
-          disabled={saving}
-          className={`relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer items-center rounded-full border-none transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)] focus-visible:ring-offset-2 disabled:opacity-50 ${
-            enabled ? 'bg-[var(--primary-color)]' : 'bg-[var(--border-color)]'
-          }`}
-        >
-          <span
-            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
-              enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-            }`}
-          />
-        </button>
-      </div>
-
-      {/* stdio note */}
-      {connector.transport === 'stdio' && (
-        <p className="text-xs text-[var(--text-muted)] mt-3">{t('connectors.stdioNote')}</p>
-      )}
-
-      {/* Configure toggle */}
-      <button onClick={toggleOpen} className={`${btnCls} mt-3`}>
-        {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        {t('connectors.configure')}
-      </button>
-
-      {/* Configure area */}
-      {open && (
-        <div className="mt-3 flex flex-col gap-3 border-t border-[var(--border-color)] pt-3">
+    <EntityCard
+      icon={<Icon className="text-[var(--text-secondary)]" />}
+      iconTone="neutral"
+      title={connector.name}
+      badges={[
+        { label: connector.transport === 'stdio' ? 'stdio' : 'HTTP', tone: 'neutral' },
+        {
+          label: active
+            ? t('connectors.active')
+            : !connector.configured
+              ? t('connectors.notConfigured')
+              : t('connectors.inactive'),
+          tone: active ? 'good' : 'neutral',
+          icon: active ? CheckCircle2 : Circle,
+        },
+      ]}
+      toggle={{
+        checked: enabled,
+        onChange: (v) => void onToggleEnabled(v),
+        disabled: saving,
+        label: t('connectors.enable'),
+      }}
+      expandable
+      expandLabel={t('connectors.configure')}
+      onExpandChange={(o) => {
+        if (o) void ensureValues();
+      }}
+      renderExpanded={() => (
+        <div className="flex flex-col gap-3">
           {loadingValues ? (
             <p className="text-sm text-[var(--text-muted)]">{t('connectors.loading')}</p>
           ) : connector.fields.length === 0 ? (
@@ -302,6 +250,21 @@ function ConnectorCard({ connector, onChanged }: { connector: Connector; onChang
           </div>
         </div>
       )}
-    </section>
+    >
+      <p>{connector.description}</p>
+      {connector.docs_url && (
+        <a
+          href={connector.docs_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-[var(--primary-color)] hover:underline mt-1"
+        >
+          <ExternalLink className="w-3 h-3" /> {t('connectors.docs')}
+        </a>
+      )}
+      {connector.transport === 'stdio' && (
+        <p className="text-xs text-[var(--text-muted)] mt-2">{t('connectors.stdioNote')}</p>
+      )}
+    </EntityCard>
   );
 }
