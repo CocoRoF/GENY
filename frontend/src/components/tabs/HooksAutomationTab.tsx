@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
 import { hooksApi, HookRecord } from '@/lib/api';
-import { RefreshCw, Trash2, Power, Zap, Clock, Mail } from 'lucide-react';
+import { RefreshCw, Trash2, Power, Zap, Clock, Mail, History } from 'lucide-react';
 import { TabShell, ActionButton, EntityCard, EmptyState } from '@/components/common/layout';
 import { useI18n } from '@/lib/i18n';
 
@@ -108,7 +108,12 @@ export function HooksAutomationTab() {
               title={h.description || h.name}
               meta={h.kind}
               status={{ tone: h.status === 'enabled' ? 'good' : 'neutral', label: h.status, as: 'dot' }}
-              footer={
+              metaItems={[
+                { label: h.cron_expr, mono: true, chip: true },
+                ...(h.next_fire_at ? [{ icon: Clock, label: `next ${rel(h.next_fire_at)}` }] : []),
+                ...(h.last_fired_at ? [{ icon: History, label: `last ${rel(h.last_fired_at)}` }] : []),
+              ]}
+              footerActions={
                 <>
                   <ActionButton icon={Power} onClick={() => toggle(h)}>
                     {h.status === 'enabled' ? t('hooksAutomation.pause') : t('hooksAutomation.resume')}
@@ -120,11 +125,6 @@ export function HooksAutomationTab() {
               }
             >
               {h.action_prompt && <span className="line-clamp-2">{h.action_prompt}</span>}
-              <div className="text-[0.6875rem] text-[var(--text-muted)] mt-1.5 flex gap-3 flex-wrap font-mono">
-                <span>{h.cron_expr}</span>
-                {h.next_fire_at && <span>next {rel(h.next_fire_at)}</span>}
-                {h.last_fired_at && <span>last {rel(h.last_fired_at)}</span>}
-              </div>
             </EntityCard>
           ))
         )}

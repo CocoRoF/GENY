@@ -77,6 +77,10 @@ export interface EntityCardProps {
   footer?: ReactNode;
   /** Right-aligned footer meta text. */
   footerMeta?: ReactNode;
+  /** Refined meta chips (cron expr, next/last fire, …) rendered below the body. */
+  metaItems?: Array<{ icon?: LucideIcon; label: ReactNode; mono?: boolean; chip?: boolean }>;
+  /** Action buttons pinned to the bottom-RIGHT of the card. */
+  footerActions?: ReactNode;
   /** Optional "> Configure" expander. */
   expandable?: boolean;
   defaultExpanded?: boolean;
@@ -108,6 +112,8 @@ export function EntityCard({
   headerActions,
   footer,
   footerMeta,
+  metaItems,
+  footerActions,
   expandable = false,
   defaultExpanded = false,
   expandLabel = 'Configure',
@@ -243,6 +249,29 @@ export function EntityCard({
         </div>
       )}
 
+      {/* ── Refined meta chips (cron / next / last …) ── */}
+      {metaItems && metaItems.length > 0 && (
+        <div className={cn('flex items-center gap-2 flex-wrap text-[0.6875rem] text-[hsl(var(--muted-foreground))]', indent)}>
+          {metaItems.map((m, i) => {
+            const MIcon = m.icon;
+            return (
+              <span
+                key={i}
+                className={cn(
+                  'inline-flex items-center gap-1',
+                  m.mono && 'font-mono',
+                  m.chip &&
+                    'px-1.5 py-0.5 rounded bg-[hsl(var(--muted))] text-[hsl(var(--foreground))] border border-[hsl(var(--border))]',
+                )}
+              >
+                {MIcon && <MIcon className="w-3 h-3 opacity-70" />}
+                {m.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Badges + footer meta ── */}
       {(badges?.length || footerMeta) && (
         <div className={cn('flex items-center justify-between gap-2 flex-wrap mt-auto', indent)}>
@@ -271,9 +300,12 @@ export function EntityCard({
         </div>
       )}
 
-      {/* ── Footer actions ── */}
-      {footer != null && footer !== false && (
-        <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1.5', indent)}>{footer}</div>
+      {/* ── Footer: left info/actions + right-pinned actions ── */}
+      {((footer != null && footer !== false) || footerActions) && (
+        <div className={cn('flex items-center justify-between gap-2 flex-wrap', indent)}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">{footer}</div>
+          {footerActions && <div className="flex items-center gap-1 ml-auto">{footerActions}</div>}
+        </div>
       )}
 
       {/* ── Configure expander ── */}
