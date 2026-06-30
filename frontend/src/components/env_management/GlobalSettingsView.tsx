@@ -29,7 +29,6 @@ import {
   Cpu,
   ExternalLink,
   Layers,
-  Plug,
   Settings2,
   Shield,
   Sparkles,
@@ -53,7 +52,6 @@ import {
 } from '@/lib/modelCatalog';
 import SectionHelpButton from './section_help/SectionHelpButton';
 import {
-  HookEnvPicker,
   PermissionEnvPicker,
   SkillEnvPicker,
   TriggerEnvPicker,
@@ -74,7 +72,6 @@ const S06_API_ORDER = 6;
 type Panel =
   | 'model'
   | 'pipeline'
-  | 'hooks'
   | 'permissions'
   | 'skills'
   | 'triggers'
@@ -87,7 +84,6 @@ type Panel =
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
   pipeline: 'globals.pipeline',
-  hooks: 'globals.hooks',
   permissions: 'globals.permissions',
   skills: 'globals.skills',
   triggers: 'globals.triggers',
@@ -137,7 +133,6 @@ export default function GlobalSettingsView() {
   // Pre-1.3.3 manifests have no host_selections object; treat that
   // as wildcard so the badge doesn't read "0" for a section that
   // historically applied in full.
-  const hookSelection = draft.host_selections?.hooks ?? ['*'];
   const skillSelection = draft.host_selections?.skills ?? ['*'];
   const permSelection = draft.host_selections?.permissions ?? ['*'];
   // Trigger mapping is a single optional id (not a list) — show ★ when
@@ -242,13 +237,6 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('pipeline')}
             />
             <SubTabButton
-              icon={Plug}
-              label={t('envManagement.globals.navHooks')}
-              active={panel === 'hooks'}
-              onClick={() => setPanel('hooks')}
-              badge={selectionBadge(hookSelection)}
-            />
-            <SubTabButton
               icon={Shield}
               label={t('envManagement.globals.navPermissions')}
               active={panel === 'permissions'}
@@ -332,16 +320,6 @@ export default function GlobalSettingsView() {
               />
             )}
 
-            {panel === 'hooks' && (
-              <div className="flex flex-col gap-4">
-                <PanelHeader
-                  title={t('envManagement.globals.hooks.title')}
-                  description={t('envManagement.globals.hooks.description')}
-                />
-                <HookEnvPicker />
-                <RegistryEditorLink tab="hooks" />
-              </div>
-            )}
 
             {panel === 'permissions' && (
               <div className="flex flex-col gap-4">
@@ -517,13 +495,9 @@ function PanelHeader({
 function RegistryEditorLink({
   tab,
 }: {
-  tab: 'hooks' | 'skills' | 'permissions' | 'mcp';
+  tab: 'skills' | 'permissions' | 'mcp';
 }) {
   const labels: Record<typeof tab, { name: string; hint: string }> = {
-    hooks: {
-      name: '훅 등록소',
-      hint: '훅 항목을 추가/수정하려면 호스트 등록소로 이동',
-    },
     skills: {
       name: '스킬 등록소',
       hint: '스킬을 추가/수정하려면 호스트 등록소로 이동',

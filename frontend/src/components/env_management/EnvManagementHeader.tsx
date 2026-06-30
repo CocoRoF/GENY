@@ -36,7 +36,6 @@ import {
   Drama,
   Layers,
   Network,
-  Plug,
   Shield,
   Sparkles,
   Wrench,
@@ -53,7 +52,6 @@ export type EnvManagementTab =
   | 'custom_tools'
   | 'sandbox_packs'
   | 'persona'
-  | 'hooks'
   | 'permissions'
   | 'triggers';
 
@@ -64,7 +62,6 @@ const TAB_ORDER: EnvManagementTab[] = [
   'custom_tools',
   'sandbox_packs',
   'persona',
-  'hooks',
   'permissions',
   'triggers',
 ];
@@ -119,13 +116,6 @@ const TABS: TabDef[] = [
     fallbackLabel: '페르소나',
     fallbackHint: 'MBTI·성격 슬라이더로 캐릭터 성격 만들기 — 환경에 적용',
     key: 'persona',
-  },
-  {
-    id: 'hooks',
-    icon: Plug,
-    fallbackLabel: 'HOOK',
-    fallbackHint: '호스트에 등록된 훅',
-    key: 'hooks',
   },
   {
     id: 'permissions',

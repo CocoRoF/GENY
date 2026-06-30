@@ -963,47 +963,10 @@ export interface HookFiresResponse {
   truncated: boolean;
 }
 
-export const hookApi = {
-  // Editable file content (user-scope settings.json only).
-  listEditable: () => apiCall<HookEntriesResponse>('/api/hooks/entries'),
-
-  append: (entry: HookEntryPayload) =>
-    apiCall<HookEntriesResponse>('/api/hooks/entries', {
-      method: 'POST',
-      body: JSON.stringify(entry),
-    }),
-
-  replace: (event: string, idx: number, entry: HookEntryPayload) =>
-    apiCall<HookEntriesResponse>(`/api/hooks/entries/${event}/${idx}`, {
-      method: 'PUT',
-      body: JSON.stringify(entry),
-    }),
-
-  remove: (event: string, idx: number) =>
-    apiCall<HookEntriesResponse>(`/api/hooks/entries/${event}/${idx}`, {
-      method: 'DELETE',
-    }),
-
-  setEnabled: (enabled: boolean) =>
-    apiCall<HookEntriesResponse>('/api/hooks/enabled', {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled }),
-    }),
-
-  // H.1 (cycle 20260426_2) — set / clear the audit_log_path top-level.
-  setAuditLog: (audit_log_path: string | null) =>
-    apiCall<HookEntriesResponse>('/api/hooks/audit-log', {
-      method: 'PATCH',
-      body: JSON.stringify({ audit_log_path }),
-    }),
-
-  // Cascade-merged inspection (config_path + env_opt_in gate).
-  inspect: () => apiCall<HookListResponse>('/api/hooks/list'),
-
-  // Recent fire ring (PR-E.3.2 — JSONL tail).
-  recentFires: (limit = 100) =>
-    apiCall<HookFiresResponse>(`/api/admin/hook-fires?limit=${limit}`),
-};
+// NOTE: the env-management lifecycle-hooks EDITOR (hookApi CRUD over
+// /api/hooks/entries) was removed — user hooks are now agent-created automations
+// (see hooksApi → /api/automations). The executor lifecycle-hook primitive +
+// its read-only admin diagnostics (agentApi.hooksList, recent-tool-events) stay.
 
 export const permissionApi = {
   // Editable file content (user-scope settings.json only).

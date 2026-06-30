@@ -46,7 +46,6 @@ import {
   parseTab,
   type EnvManagementTab,
 } from './EnvManagementHeader';
-import { HooksTab } from '@/components/tabs/HooksTab';
 import { SkillsTab } from '@/components/tabs/SkillsTab';
 import { PermissionsTab } from '@/components/tabs/PermissionsTab';
 import { McpServersTab } from '@/components/tabs/McpServersTab';
@@ -217,11 +216,6 @@ export default function EnvManagementShell({
         </RegistryTabSlot>
       )}
 
-      {activeTab === 'hooks' && (
-        <RegistryTabSlot>
-          <HooksTab />
-        </RegistryTabSlot>
-      )}
 
       {activeTab === 'permissions' && (
         <RegistryTabSlot>
