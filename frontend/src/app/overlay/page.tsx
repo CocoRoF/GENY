@@ -50,6 +50,8 @@ export default function OverlayPage() {
   // Bottom dialogue-box subtitle (default ON; toggled in the connector settings,
   // arrives via overlayTuning.subtitlesEnabled).
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  // Subtitle typewriter pace: ms per character (default 100 = one char / 0.1s).
+  const [subtitleCharMs, setSubtitleCharMs] = useState(100);
 
   const fetchModels = useVTuberStore((s) => s.fetchModels);
   const fetchAssignment = useVTuberStore((s) => s.fetchAssignment);
@@ -171,11 +173,12 @@ export default function OverlayPage() {
       ttsVolume?: number; sttSensitivity?: number; sttSilenceMs?: number;
       sttEchoCancellation?: boolean; sttNoiseSuppression?: boolean; sttAutoGain?: boolean;
       screenIntervalMs?: number; screenSourceId?: string | null;
-      subtitlesEnabled?: boolean;
+      subtitlesEnabled?: boolean; subtitleCharMs?: number;
     }) => {
-      // Subtitle toggle is independent of the other (TTS/STT/screen) drivers and
-      // defaults ON, so read it even when `t` is absent.
+      // Subtitle toggle + pace are independent of the other drivers and have
+      // defaults, so read them even when `t` is absent.
       setSubtitlesEnabled(t?.subtitlesEnabled !== false);
+      setSubtitleCharMs(typeof t?.subtitleCharMs === 'number' ? t.subtitleCharMs : 100);
       if (!t) return;
       const st = useVTuberStore.getState();
       if (typeof t.ttsVolume === 'number') st.setTTSVolume(t.ttsVolume);
@@ -254,7 +257,7 @@ export default function OverlayPage() {
           className="w-full h-full"
           viewStorageKey={`geny_overlay_view_${resolved.sid}`}
         />
-        {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} />}
+        {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} charMs={subtitleCharMs} />}
       </div>
 
       {/* Unlocked → show a resize frame (outline + edge/corner handles) so the

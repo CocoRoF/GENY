@@ -6,12 +6,11 @@
  * useVTuberStore.subtitle by VTuberChatPanel) rather than a head speech-bubble.
  *
  * Behaviour (per the connector spec):
- *   • TYPEWRITER reveal from the front. Screen-capture / auto-conversation
- *     triggers make the VTuber auto-speak, and those responses arrive ALL AT ONCE
- *     (not streamed) — which looked ugly popping in whole. So we always reveal the
- *     target text character-by-character. The speed adapts: fast enough to keep up
- *     with a real live stream, and caps an all-at-once message at ~MAX_REVEAL_SEC
- *     so it reads as if it were streamed. A new turn restarts the reveal.
+ *   • TYPEWRITER reveal from the front, at a FIXED, user-set pace (default one
+ *     char every 100ms). Screen-capture / auto-conversation triggers make the
+ *     VTuber auto-speak and those responses arrive ALL AT ONCE (not streamed) —
+ *     which looked ugly popping in whole; a steady char-by-char reveal makes them
+ *     read as if streamed. A new turn restarts the reveal from 0.
  *   • Long text is clipped from the TOP (newest lines stay visible at the bottom).
  *   • Dismissal: ~3s after it SETTLES. Settled = the reveal finished AND streaming
  *     finished AND, when TTS is on, the voice has stopped.
@@ -22,10 +21,9 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useVTuberStore } from '@/store/useVTuberStore';
 
 const DISMISS_MS = 3000;
-const BASE_CPS = 42;          // baseline reveal speed (chars/sec)
-const MAX_REVEAL_SEC = 2.6;   // cap: an all-at-once message never takes longer than this
+const DEFAULT_CHAR_MS = 100; // one character every 100ms
 
-export default function AvatarSubtitle({ sessionId }: { sessionId: string }) {
+export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: { sessionId: string; charMs?: number }) {
   const sub = useVTuberStore((s) => s.subtitle[sessionId]);
   const speaking = useVTuberStore((s) => s.ttsSpeaking[sessionId] ?? false);
   const ttsEnabled = useVTuberStore((s) => s.ttsEnabled);
@@ -39,6 +37,8 @@ export default function AvatarSubtitle({ sessionId }: { sessionId: string }) {
   // Refs the rAF loop reads without re-subscribing every frame.
   const fullRef = useRef(full);
   fullRef.current = full;
+  const charMsRef = useRef(charMs);
+  charMsRef.current = charMs;
   const shownRef = useRef(0);
   const prevRef = useRef('');
 
@@ -65,7 +65,8 @@ export default function AvatarSubtitle({ sessionId }: { sessionId: string }) {
       let s = shownRef.current;
       if (s > target.length) s = 0; // defensive: target shrank
       if (s < target.length) {
-        const cps = Math.max(BASE_CPS, target.length / MAX_REVEAL_SEC);
+        // Fixed pace: one char per charMs (user-set; default 100ms → 10 chars/sec).
+        const cps = 1000 / Math.max(20, charMsRef.current);
         s = Math.min(target.length, s + cps * dt);
         if (Math.floor(s) !== Math.floor(shownRef.current)) setShown(Math.floor(s));
       }

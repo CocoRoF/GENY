@@ -21,6 +21,8 @@ export interface OverlayTuning {
   screenSourceId?: string | null
   /** Show the bottom dialogue-box subtitle on the avatar overlay (default true). */
   subtitlesEnabled?: boolean
+  /** Subtitle typewriter pace — ms per character (default 100 = 0.1s/char). */
+  subtitleCharMs?: number
 }
 
 export interface ConnectorConfig {

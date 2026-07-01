@@ -14,6 +14,7 @@ const TUNING_DEFAULTS = {
   screenIntervalMs: 180_000,
   screenSourceId: null as string | null,
   subtitlesEnabled: true,
+  subtitleCharMs: 100,
 }
 const INTERVAL_OPTIONS = [
   { ms: 60_000, label: '1분' },
@@ -430,9 +431,18 @@ export function ControlApp() {
                 checked={tget('subtitlesEnabled')}
                 onChange={(c) => patchTuning({ subtitlesEnabled: c })}
               />
-              <p className="gy-hint" style={{ margin: '9px 0 0' }}>
-                에이전트가 말하면 아바타 하단에 대사창으로 표시됩니다(머리 위 말풍선 아님). 길어지면 위에서부터
-                잘리고, 응답이 끝난 뒤 약 3초 후 사라집니다 — 음성(TTS)이 켜져 있으면 음성이 끝난 뒤 사라집니다.
+              <div style={{ height: 12 }} />
+              <TuneSlider
+                label="글자 출력 속도"
+                min={30} max={300} step={10}
+                value={tget('subtitleCharMs')}
+                display={`${(tget('subtitleCharMs') / 1000).toFixed(2)}초/글자`}
+                onChange={(v) => patchTuning({ subtitleCharMs: v })}
+              />
+              <p className="gy-hint" style={{ margin: '4px 0 0' }}>
+                대사가 한 글자씩 흘러나오는 속도입니다(기본 0.10초/글자 — 왼쪽=빠름, 오른쪽=느림). 화면 캡처·자동
+                대화 트리거로 한 번에 온 발화도 이 속도로 앞에서부터 타이핑됩니다. 길어지면 위에서부터 잘리고, 다
+                흐른 뒤 약 3초 후 사라집니다(음성 켜져 있으면 음성이 끝난 뒤).
               </p>
             </section>
 
