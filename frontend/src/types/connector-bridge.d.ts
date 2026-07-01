@@ -73,6 +73,11 @@ declare global {
         key(keys: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
         click(x: number, y: number, button?: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
       }
+      /** Local MCP proxy (Phase 3) — present only in the desktop connector. */
+      mcp?: {
+        advertise(): Promise<Array<{ name: string; connected: boolean; error?: string; tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>>
+        callTool(server: string, tool: string, args: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>
+      }
     }
   }
 }

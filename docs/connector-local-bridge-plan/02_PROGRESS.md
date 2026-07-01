@@ -8,9 +8,9 @@
 | 0 | 계획 문서 | ✅ 완료 |
 | 1 | Computer Use 활성화 UX(능력별 동의) + 서버 게이트 | ✅ 코드 완료 (배포/검증 중) |
 | 2 | Computer Use 하드닝 — 진짜 스크린샷-좌표 `computer` 도구 | ◻ 대기 |
-| 3 | Local MCP — 접속기측(MCPManager·설정·광고·mcp_call) | ◻ 대기 |
-| 4a | Local MCP — 서버측 MVP(local_mcp_list/call, feature 게이트) | ◻ 대기 |
-| 4b | Local MCP — lmcp__ 1급 도구 승격(D2 검증 후) | ◻ 대기 |
+| 3 | Local MCP — 접속기측(MCPManager·설정·광고·mcp_call) | ✅ 코드 완료 (배포/검증 중) |
+| 4a | Local MCP — 서버측 MVP(local_mcp_list/call) | ✅ 코드 완료 (배포/검증 중) |
+| 4b | Local MCP — lmcp__ 1급 도구 승격(D2 검증 후) | ⏭ 보류(MVP 디스패처로 충분) |
 | 5 | 폴리시·관측·문서 | ◻ 대기 |
 
 ## Phase 1.5 — sub-agent 위임 경로 (라이브 테스트 반영)
@@ -39,6 +39,21 @@
 - **프롬프트**: vtuber.md에 "## Controlling the User's Computer" — 데스크톱 조작은 `desktop_*`(실기기)로
   직접, `Bash`(서버 샌드박스) 금지, 오프라인이면 접속기 연결 안내.
 - **주의**: 빌드 시점 union이라 **세션 재시작** 필요.
+
+## Phase 3+4 — Local MCP 프록시 (connector v0.12.0)
+접속기가 로컬 MCP 서버를 호스팅 → 서버 에이전트가 접속기 통로로 사용. **MVP=제네릭 디스패처**(D2).
+- **접속기 main**: `mcp-manager.ts`(@modelcontextprotocol/sdk 1.29 lazy-import, stdio+http, connect/list/call/test,
+  reconnect·timeout). config `mcpServers[]`, IPC(`mcp:list-servers/advertise/call-tool/test-server/add/remove`),
+  whenReady configure + will-quit closeAll. vite external + SDK 설치.
+- **preload**: `window.connector.mcp.*`(listServers/advertise/callTool/testServer/add/removeServer).
+- **브리지**(ConnectorBridgeClient): CAPABILITIES에 `mcp_list`,`mcp_call` 추가 + handleCall 케이스. 카탈로그는
+  hello가 아니라 **live**(mcp_list 시 advertise) — hello 비대·기동 지연 회피.
+- **ControlApp**: **"MCP" 탭** 신설(서버 추가/삭제/테스트, stdio·http).
+- **서버**: connector_bridge에 `local_mcp_list`/`local_mcp_call` 툴(mcp_list/mcp_call capability). VTuber 세션은
+  connector 도구 전체(desktop_* + local_mcp_*)를 자동 union → companion/sub-worker도 상속 + 프리픽스 라우팅.
+- 검증: desktop typecheck+build, frontend tsc 통과. 서버 도구목록/왕복은 배포 후 검증.
+- **아키텍처**: 로컬 MCP 설정은 접속기에만 저장, 서버엔 도구목록만 live 전달(프라이버시). 서버 in-proc MCP와
+  구분(그건 서버측/원격, 이건 로컬 전용).
 
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.

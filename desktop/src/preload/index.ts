@@ -37,12 +37,35 @@ export interface ComputerUseConfig {
   consentMode?: ConsentMode
 }
 
+/** A local MCP server the connector hosts + proxies to the Geny agent. */
+export interface MCPServerConfig {
+  name: string
+  transport: 'stdio' | 'http'
+  command?: string
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  enabled?: boolean
+}
+export interface MCPToolSchema {
+  name: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+}
+export interface MCPServerAdvert {
+  name: string
+  connected: boolean
+  error?: string
+  tools: MCPToolSchema[]
+}
+
 export interface ConnectorConfig {
   serverUrl: string
   theme?: 'system' | 'dark' | 'light'
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
   overlayTuning?: OverlayTuning
   computerUse?: ComputerUseConfig
+  mcpServers?: MCPServerConfig[]
 }
 
 export interface ConnectorBridge {
@@ -157,6 +180,22 @@ export interface ConnectorBridge {
     key(keys: string): Promise<ActuationResult>
     click(x: number, y: number, button?: string): Promise<ActuationResult>
   }
+
+  /** Local MCP proxy (Phase 3) — hosts MCP clients to the user's local servers. */
+  mcp: {
+    /** Configured servers (from config; no connection). */
+    listServers(): Promise<MCPServerConfig[]>
+    /** Connect all enabled servers + return their tool catalogs. */
+    advertise(): Promise<MCPServerAdvert[]>
+    /** Call a tool on a server. Returns the raw MCP CallToolResult (or error). */
+    callTool(server: string, tool: string, args: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>
+    /** One-shot connect → list tools → disconnect (settings "테스트"). */
+    testServer(cfg: MCPServerConfig): Promise<{ ok: boolean; tools?: MCPToolSchema[]; error?: string }>
+    /** Add/replace a server (persisted). Returns the new list. */
+    addServer(cfg: MCPServerConfig): Promise<MCPServerConfig[]>
+    /** Remove a server by name (persisted). Returns the new list. */
+    removeServer(name: string): Promise<MCPServerConfig[]>
+  }
 }
 
 export interface ActuationResult {
@@ -222,6 +261,14 @@ const api: ConnectorBridge = {
     type: (text) => ipcRenderer.invoke('actuate:type', text),
     key: (keys) => ipcRenderer.invoke('actuate:key', keys),
     click: (x, y, button) => ipcRenderer.invoke('actuate:click', x, y, button),
+  },
+  mcp: {
+    listServers: () => ipcRenderer.invoke('mcp:list-servers'),
+    advertise: () => ipcRenderer.invoke('mcp:advertise'),
+    callTool: (server, tool, args) => ipcRenderer.invoke('mcp:call-tool', server, tool, args),
+    testServer: (cfg) => ipcRenderer.invoke('mcp:test-server', cfg),
+    addServer: (cfg) => ipcRenderer.invoke('mcp:add-server', cfg),
+    removeServer: (name) => ipcRenderer.invoke('mcp:remove-server', name),
   },
   hotkeys: {
     getPushToTalk: () => ipcRenderer.invoke('hotkey:get-ptt'),

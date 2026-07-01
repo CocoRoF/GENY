@@ -245,6 +245,44 @@ def _build_tools() -> Dict[str, ConnectorCapabilityTool]:
             reason="agent clicks on the user's machine",
             timeout=15.0,
         ),
+        # ── Local MCP proxy (Phase 4): the connector hosts MCP clients to the
+        #    user's LOCAL MCP servers; these two tools discover + call them. ──
+        "local_mcp_list": ConnectorCapabilityTool(
+            name="local_mcp_list",
+            description=(
+                "List the user's LOCAL MCP servers and their tools (hosted by the desktop connector). "
+                "Call this first to discover what local MCP tools are available, then use local_mcp_call. "
+                "Returns [{name, connected, error?, tools:[{name, description, inputSchema}]}]."
+            ),
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            capability="mcp_list",
+            read_only=True,
+            reason="agent lists local MCP tools",
+            timeout=30.0,
+        ),
+        "local_mcp_call": ConnectorCapabilityTool(
+            name="local_mcp_call",
+            description=(
+                "Call a tool on one of the user's LOCAL MCP servers (via the desktop connector). "
+                "Use local_mcp_list first to find the server name, tool name, and its input schema. "
+                "`args` is the tool's arguments object."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "MCP server name from local_mcp_list."},
+                    "tool": {"type": "string", "description": "Tool name on that server."},
+                    "args": {"type": "object", "description": "Arguments object for the tool.", "default": {}},
+                },
+                "required": ["server", "tool"],
+                "additionalProperties": False,
+            },
+            capability="mcp_call",
+            read_only=False,
+            destructive=True,
+            reason="agent calls a local MCP tool",
+            timeout=120.0,
+        ),
     }
     return tools
 

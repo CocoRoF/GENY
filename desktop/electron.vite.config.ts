@@ -13,9 +13,10 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        // Native addons (keytar, nut.js) + electron-updater stay external so they
-        // resolve from node_modules at runtime (packaged by electron-builder).
-        external: ['keytar', 'electron-updater', '@nut-tree-fork/nut-js'],
+        // Native addons (keytar, nut.js) + electron-updater + the MCP SDK stay
+        // external so they resolve from node_modules at runtime (packaged by
+        // electron-builder). The MCP SDK is ESM + spawns stdio children.
+        external: ['keytar', 'electron-updater', '@nut-tree-fork/nut-js', '@modelcontextprotocol/sdk'],
       },
     },
   },

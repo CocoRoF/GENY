@@ -18,7 +18,12 @@ import { useEffect } from 'react';
 import { openConnectorBridgeWs } from '@/lib/api';
 import { grabCurrentScreenRaw } from '@/lib/screenFrameAccess';
 
-const CAPABILITIES = ['ping', 'window_list', 'screen_capture', 'open_app', 'clipboard_write', 'type', 'key', 'click'];
+const CAPABILITIES = [
+  'ping', 'window_list', 'screen_capture', 'open_app', 'clipboard_write', 'type', 'key', 'click',
+  // Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
+  // local servers; the agent lists + calls them through these two capabilities.
+  'mcp_list', 'mcp_call',
+];
 
 // Capture spec — match the screen-observation cap (16:9, ≤1600×900, JPEG).
 const CAP_W = 1600;
@@ -136,6 +141,18 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
             break;
           case 'click':
             payload = await conn.actuate.click(a.x, a.y, a.button);
+            break;
+          case 'mcp_list':
+            // Connect all enabled local MCP servers + return their tool catalogs.
+            payload = conn.mcp
+              ? { ok: true, result: await conn.mcp.advertise() }
+              : { ok: false, error: 'MCP not supported by this connector' };
+            break;
+          case 'mcp_call':
+            // Proxy a tool call to a local MCP server (a.server, a.tool, a.args).
+            payload = conn.mcp
+              ? await conn.mcp.callTool(a.server, a.tool, a.args)
+              : { ok: false, error: 'MCP not supported by this connector' };
             break;
           default:
             payload = { ok: false, error: `unknown capability: ${tool}` };
