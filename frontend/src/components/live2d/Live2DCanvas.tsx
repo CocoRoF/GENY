@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import {
@@ -82,10 +82,6 @@ export default function Live2DCanvas({
   // userPanRef is an additive pixel offset from the resting (initialXshift/Yshift) center.
   // dragRef tracks an in-flight pointer drag — `moved` is read by onClick to suppress
   // tap interactions when the pointer was actually dragging the view.
-  // Resolution the renderer is built at. Bumped by the DPR watcher when the
-  // window moves to a different-scale monitor → re-runs the init effect to
-  // recreate the renderer at the new density (reliable, unlike mutating it live).
-  const [renderDpr, setRenderDpr] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1));
   const baseScaleRef = useRef(1);
   const userZoomRef = useRef(1);
   const userPanRef = useRef({ x: 0, y: 0 });
@@ -204,7 +200,13 @@ export default function Live2DCanvas({
         backgroundColor: background,
         antialias: true,
         autoDensity: true,
-        resolution: renderDpr,
+        // FIXED high backing density (never changed at runtime). Rendering at ≥2x
+        // and letting the browser scale the canvas keeps the avatar crisp on
+        // 100%–200% monitors AND — critically — means a multi-monitor DPI change
+        // (150%↔100%) NEVER touches the renderer, so it can't break / blank the
+        // avatar the way changing resolution live did. Only the CSS size (via the
+        // ResizeObserver) tracks the window; the density stays put.
+        resolution: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
       });
 
       if (isStale()) {
@@ -540,7 +542,7 @@ export default function Live2DCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model?.name, model?.url, renderDpr]);
+  }, [model?.name, model?.url]);
 
   // ── Apply avatar state changes (expression + motion) ──────
   useEffect(() => {
@@ -659,35 +661,11 @@ export default function Live2DCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.kScale, model?.initialXshift, model?.initialYshift]);
 
-  // ── devicePixelRatio watcher (multi-monitor / OS scale change) ──
-  // Moving the window to a monitor with a different scale factor changes
-  // devicePixelRatio (often WITHOUT a CSS-size change, so the ResizeObserver
-  // misses it). We must NOT mutate renderer.resolution on the live renderer —
-  // that's what left the avatar invisible on a 150% display. Instead bump
-  // `renderDpr`, which re-runs the init effect and RECREATES the renderer at the
-  // new resolution — the exact code path that renders correctly on first load.
-  // matchMedia('(resolution: Ndppx)') fires precisely on a DPR change; debounce so
-  // dragging across DPI boundaries recreates once after it settles, not per tick.
-  useEffect(() => {
-    let mql: MediaQueryList | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const onChange = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setRenderDpr(window.devicePixelRatio || 1), 350);
-      register(); // re-arm for the next DPR value
-    };
-    const register = () => {
-      try {
-        mql = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
-        mql.addEventListener('change', onChange, { once: true });
-      } catch { /* matchMedia/resolution query unsupported */ }
-    };
-    register();
-    return () => {
-      if (timer) clearTimeout(timer);
-      try { mql?.removeEventListener('change', onChange); } catch { /* ignore */ }
-    };
-  }, []);
+  // NOTE: no devicePixelRatio watcher / resolution change on purpose — the
+  // renderer is built once at a fixed ≥2 density (see the Application options),
+  // so a multi-monitor DPI change only needs a CSS resize (handled by the
+  // ResizeObserver above), never a renderer rebuild. This is what makes the
+  // avatar survive a 150%↔100% move instead of blanking.
 
   // ── Focus tracking (eye follow mouse) ─────────────────────
   useEffect(() => {

@@ -137,6 +137,22 @@ export default function OverlayPage() {
     return () => unsubscribeAvatar(resolved.sid);
   }, [resolved, assignedModel, subscribeAvatar, unsubscribeAvatar]);
 
+  // Position/view reset (settings → 위치 초기화): main moved the window back to
+  // default; here we clear the saved pan/zoom and reload so the avatar returns to
+  // its default framing (a fresh Live2D init with no restored view).
+  useEffect(() => {
+    const off = window.connector?.windowControl.onResetView?.(() => {
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('geny_overlay_view_')) localStorage.removeItem(k);
+        }
+      } catch { /* ignore */ }
+      window.location.reload();
+    });
+    return () => off?.();
+  }, []);
+
   // Apply the lock state to the OS window. Locked → click-through (the avatar
   // ignores the mouse; only the control bar, via hover below, re-enables input).
   // Unlocked → the whole window captures input so it can be dragged to reposition.

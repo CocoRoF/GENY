@@ -46,6 +46,8 @@ declare global {
         moveBy(dx: number, dy: number): void
         restart(): void
         openExternal(url: string): void
+        resetPositions?(): void
+        onResetView?(cb: () => void): () => void
       }
       hotkeys?: {
         getPushToTalk(): Promise<string | null>
