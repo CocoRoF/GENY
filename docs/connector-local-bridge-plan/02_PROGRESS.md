@@ -11,7 +11,7 @@
 | 3 | Local MCP — 접속기측(MCPManager·설정·광고·mcp_call) | ✅ 코드 완료 (배포/검증 중) |
 | 4a | Local MCP — 서버측 MVP(local_mcp_list/call) | ✅ 코드 완료 (배포/검증 중) |
 | 4b | Local MCP — lmcp__ 1급 도구 승격(D2 검증 후) | ⏭ 보류(MVP 디스패처로 충분) |
-| 5 | 폴리시·관측·문서 | ◻ 대기 |
+| 5 | 폴리시·관측·문서 | ✅ 사용 가이드(03) 작성. 활동로그는 옵션 후속 |
 
 ## Phase 1.5 — sub-agent 위임 경로 (라이브 테스트 반영)
 사용자 실기기 테스트: VTuber가 데스크톱 작업을 **owned companion(pair)** 에게 위임하는데, companion이
