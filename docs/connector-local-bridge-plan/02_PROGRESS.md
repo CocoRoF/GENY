@@ -27,6 +27,19 @@
   `{parent}-{type}-{uuid}` 모두 부모 세션 connector로 라우팅. 라우팅 로직 단위검증 통과.
 - **주의**: opt-in 후 **세션 재시작** 해야 메인+companion이 도구를 받음(빌드 시점 union).
 
+## Phase 1.6 — enablement 아키텍처 재정립 (라이브 테스트 2차)
+사용자 실기기: 새 세션에도 desktop 도구가 안 붙고, 여전히 sub-agent가 샌드박스 `Bash`로 시도. 원인 규명:
+- **핵심**: env `b4280bb1a792`(엘렌)의 `computer_use_enabled = None` — 별도 "로컬 제어" 패널 플래그가
+  저장 안 됨(사용자는 Stage10 도구편집기에서 켰는데 desktop 도구는 그 카탈로그에 없음 → "안 보임").
+- **결정적 검증**: 플래그를 넣어(=extra_external_tools) 실제 파이프라인을 빌드하니 8개 도구 전부 resolve
+  (`tool_registry.list_names` 확인). 즉 **메커니즘은 정상**, enablement/discoverability만 문제.
+- **아키텍처 재정립(사용자 피드백 반영)**: 숨은 per-env 플래그는 잘못된 모델. 접속기는 **conduit**이므로
+  **VTuber 세션은 desktop 도구를 항상 보유**(gate = `role==VTUBER OR extras.computer_use_enabled`).
+  실제 실행은 접속기 로컬 동의(제어 탭) + fail-closed가 게이트. 별도 플래그 없이 "접속기 켜면 동작".
+- **프롬프트**: vtuber.md에 "## Controlling the User's Computer" — 데스크톱 조작은 `desktop_*`(실기기)로
+  직접, `Bash`(서버 샌드박스) 금지, 오프라인이면 접속기 연결 안내.
+- **주의**: 빌드 시점 union이라 **세션 재시작** 필요.
+
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.
 - 2026-07-01: **Phase 1 코드 완료** (connector v0.11.8 + 프론트/백엔드).

@@ -1022,21 +1022,27 @@ class AgentSessionManager:
         connector_provider = ConnectorToolProvider()
         adhoc_providers.append(connector_provider)
 
-        # Local Computer Use (server-side policy gate): when the env opted in,
-        # these connector capability tool names get unioned into tools.external
-        # so the session — AND its delegated sub-agents (companion / sub-worker)
-        # — expose them. Local per-capability consent + fail-closed are enforced
-        # by the connector itself (connector_bridge.py). Computed here (before the
-        # sub-agent registry + companion spawn) so every delegate carries them.
+        # Local Computer Use — the connector capability tool names, unioned into
+        # tools.external so the session AND its delegated sub-agents (companion /
+        # sub-worker) expose them. The connector is a conduit bound to a VTuber's
+        # overlay session, so VTuber sessions ALWAYS carry these tools; a non-
+        # VTuber env can still opt in explicitly (extras.computer_use_enabled).
+        # This is NOT the security gate — real execution is gated locally by the
+        # connector (per-capability consent) and fails closed when no desktop is
+        # attached (connector_bridge.py). Computed here (before the sub-agent
+        # registry + companion spawn) so every delegate carries them.
+        _computer_use_on = (
+            request.role == SessionRole.VTUBER
+            or self._env_computer_use_enabled(env_id)
+        )
         computer_use_tools: list = (
-            connector_provider.list_names()
-            if self._env_computer_use_enabled(env_id)
-            else []
+            connector_provider.list_names() if _computer_use_on else []
         )
         if computer_use_tools:
             logger.info(
-                "  computer_use: %d connector capability tool(s) exposed",
+                "  computer_use: %d connector capability tool(s) exposed (role=%s)",
                 len(computer_use_tools),
+                request.role.value if request.role else "worker",
             )
 
         # G7.3 + G14: skill registry. Always build (bundled skills load
