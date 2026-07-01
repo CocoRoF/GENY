@@ -58,6 +58,9 @@ export interface ConnectorBridge {
     setClickThrough(ignore: boolean): void
     /** Move the overlay by a pixel delta (dock-handle drag). */
     moveBy(dx: number, dy: number): void
+    /** Resize the overlay from an edge/corner handle by a pixel delta (unlocked).
+     *  `edge` is a combo of n/s/e/w (e.g. 'se', 'n'). */
+    resizeOverlayBy(edge: string, dx: number, dy: number): void
     /** Show/hide the control (chat/settings) window. */
     toggleControl(): void
     /** Always show + focus the control window (chat/settings); never hides. */
@@ -174,6 +177,7 @@ const api: ConnectorBridge = {
   windowControl: {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
+    resizeOverlayBy: (edge, dx, dy) => ipcRenderer.send('overlay:resize-by', edge, dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
     openControl: () => ipcRenderer.send('control:open'),
     refresh: () => ipcRenderer.send('app:refresh'),

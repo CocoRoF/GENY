@@ -69,6 +69,11 @@ interface ConnectorConfig {
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
   overlay?: WinBounds & { displayId?: number }
+  /** Avatar overlay geometry remembered PER MONITOR (key = display signature).
+   *  Each monitor keeps its own position + size, so moving the avatar between a
+   *  150% and a 100% screen restores that screen's chosen size instead of the
+   *  DPI-rescaled one. */
+  overlayByDisplay?: Record<string, WinBounds>
   /** Remembered window geometry (position + size) — restored across restarts,
    *  multi-monitor aware (see restoreWinBounds). */
   control?: WinBounds
@@ -153,6 +158,75 @@ function attachBoundsPersistence(win: BrowserWindow, key: 'overlay' | 'control' 
   win.on('closed', () => { if (timer) clearTimeout(timer) })
 }
 
+// ── avatar overlay geometry, remembered PER MONITOR ─────────────────────────
+// Each display keeps its own overlay position + size, keyed by a stable-ish
+// display signature. This is what stops the width/height getting distorted by a
+// DPI rescale: when the overlay settles on another monitor we re-apply THAT
+// monitor's remembered size instead of trusting the WM_DPICHANGED rect.
+type Display = ReturnType<typeof screen.getPrimaryDisplay>
+function displayKey(d: Display): string {
+  return `${d.bounds.x},${d.bounds.y}:${d.size.width}x${d.size.height}@${d.scaleFactor}`
+}
+function overlayCurrentDisplay(): Display | null {
+  if (!overlay || overlay.isDestroyed()) return null
+  return screen.getDisplayMatching(overlay.getBounds())
+}
+let lastOverlayDisplayKey = ''
+let overlayGeomTimer: ReturnType<typeof setTimeout> | null = null
+function saveOverlayGeometry(): void {
+  if (overlayGeomTimer) clearTimeout(overlayGeomTimer)
+  const run = () => {
+    if (!overlay || overlay.isDestroyed() || overlay.isMinimized()) return
+    const wait = dpiSettleUntil - Date.now()
+    if (wait > 0) { overlayGeomTimer = setTimeout(run, wait + 100); return }
+    const d = overlayCurrentDisplay(); if (!d) return
+    const b = overlay.getBounds()
+    const bounds: WinBounds = { x: b.x, y: b.y, width: b.width, height: b.height }
+    const cfg = loadConfig()
+    saveConfig({ overlayByDisplay: { ...(cfg.overlayByDisplay || {}), [displayKey(d)]: bounds }, overlay: bounds })
+  }
+  overlayGeomTimer = setTimeout(run, 450)
+}
+// On launch: apply the geometry remembered for whichever display the overlay is on.
+function restoreOverlayGeometry(): void {
+  if (!overlay || overlay.isDestroyed()) return
+  const d = overlayCurrentDisplay(); if (!d) return
+  lastOverlayDisplayKey = displayKey(d)
+  const saved = loadConfig().overlayByDisplay?.[displayKey(d)] ?? loadConfig().overlay
+  if (saved) overlay.setBounds(restoreWinBounds(saved, saved))
+}
+// After a move settles on a DIFFERENT monitor, snap to that monitor's remembered
+// SIZE (keeping the dropped position). Fixes the DPI-move size distortion.
+function applyOverlaySizeOnCross(): void {
+  if (!overlay || overlay.isDestroyed()) return
+  const d = overlayCurrentDisplay(); if (!d) return
+  const key = displayKey(d)
+  if (key === lastOverlayDisplayKey) return
+  lastOverlayDisplayKey = key
+  const saved = loadConfig().overlayByDisplay?.[key]
+  if (!saved) { saveOverlayGeometry(); return } // first time on this monitor → remember it
+  const wa = d.workArea
+  const width = Math.min(saved.width, wa.width)
+  const height = Math.min(saved.height, wa.height)
+  const b = overlay.getBounds()
+  const x = Math.round(Math.min(Math.max(b.x, wa.x), wa.x + wa.width - width))
+  const y = Math.round(Math.min(Math.max(b.y, wa.y), wa.y + wa.height - height))
+  overlay.setBounds({ x, y, width, height })
+}
+// 'moved' fires during a drag + on the DPI cross; debounce, wait out the DPI
+// rescale, THEN reconcile size-on-cross and persist.
+let overlayMovedTimer: ReturnType<typeof setTimeout> | null = null
+function onOverlayMoved(): void {
+  if (overlayMovedTimer) clearTimeout(overlayMovedTimer)
+  const run = () => {
+    const wait = dpiSettleUntil - Date.now()
+    if (wait > 0) { overlayMovedTimer = setTimeout(run, wait + 100); return }
+    applyOverlaySizeOnCross()
+    saveOverlayGeometry()
+  }
+  overlayMovedTimer = setTimeout(run, 350)
+}
+
 // Any overlap with a work area = still (at least partly) visible.
 function isVisibleOnSomeDisplay(b: WinBounds): boolean {
   return screen.getAllDisplays().some((d) => {
@@ -179,7 +253,8 @@ function ensureWindowsOnScreen(): void {
 // the remembered geometry, and reset the avatar's in-canvas pan/zoom. The escape
 // hatch when a multi-monitor / DPI mess leaves things off-screen or broken.
 function resetWindowPositions(): void {
-  saveConfig({ overlay: undefined, control: undefined, settings: undefined, quickChatBar: undefined } as Partial<ConnectorConfig>)
+  saveConfig({ overlay: undefined, overlayByDisplay: undefined, control: undefined, settings: undefined, quickChatBar: undefined } as Partial<ConnectorConfig>)
+  lastOverlayDisplayKey = ''
   const wa = screen.getPrimaryDisplay().workArea
   const centered = (w: number, h: number) => ({
     x: Math.round(wa.x + (wa.width - w) / 2),
@@ -252,7 +327,11 @@ function createOverlay(): void {
   // Content depends on login state: the remote transparent /overlay avatar page
   // once a token exists, otherwise a local "log in first" placeholder.
   attachContentResilience(overlay, () => void applyOverlayContent())
-  attachBoundsPersistence(overlay, 'overlay')
+  // Per-monitor geometry: restore this display's remembered bounds, and on every
+  // move/resize reconcile size-on-cross + persist per display.
+  restoreOverlayGeometry()
+  overlay.on('moved', onOverlayMoved)
+  overlay.on('resized', saveOverlayGeometry)
   applyOverlayContent()
 
   overlay.on('closed', () => {
@@ -922,6 +1001,22 @@ function registerIpc(): void {
     if (!overlay) return
     const [x, y] = overlay.getPosition()
     overlay.setPosition(Math.round(x + dx), Math.round(y + dy))
+  })
+
+  // Resize the overlay from an edge/corner handle (unlocked). `edge` is any of
+  // n/s/e/w combined (e.g. 'se','n'); dx/dy are pointer deltas. West/north edges
+  // move the origin while resizing. Clamped to a sane minimum. The 'resized'
+  // event persists the new size for the current monitor.
+  ipcMain.on('overlay:resize-by', (_e, edge: string, dx: number, dy: number) => {
+    if (!overlay) return
+    const MIN = 160
+    const b = overlay.getBounds()
+    let { x, y, width, height } = b
+    if (edge.includes('e')) width = Math.max(MIN, width + Math.round(dx))
+    if (edge.includes('s')) height = Math.max(MIN, height + Math.round(dy))
+    if (edge.includes('w')) { const nw = Math.max(MIN, width - Math.round(dx)); x += width - nw; width = nw }
+    if (edge.includes('n')) { const nh = Math.max(MIN, height - Math.round(dy)); y += height - nh; height = nh }
+    overlay.setBounds({ x, y, width, height })
   })
 
   ipcMain.on('control:toggle', () => {
