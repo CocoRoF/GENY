@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import genyIcon from './assets/geny_character.png'
-import type { OverlayTuning } from '../../preload/index'
+import type { OverlayTuning, ComputerUseConfig, ConsentMode } from '../../preload/index'
 
 // Defaults mirror the web store (useVTuberStore) so the sliders show sensible
 // positions before the user has changed anything.
@@ -32,7 +32,7 @@ type CaptureSource = { id: string; name: string; display_id: string }
 const TOKEN_KEY = 'geny_auth_token'
 
 type StatusKind = 'idle' | 'working' | 'ok' | 'err'
-type Tab = 'account' | 'voice' | 'app'
+type Tab = 'account' | 'voice' | 'control' | 'app'
 
 // ── inline icons — sized by CSS (.control-root svg{16px}); ALWAYS pass viewBox ──
 const Svg = (props: { children: ReactNode }) => (
@@ -158,12 +158,16 @@ export function ControlApp() {
   // config + pushed live to the overlay's drivers via the config:changed event.
   const [tuning, setTuning] = useState<OverlayTuning>({})
   const [sources, setSources] = useState<CaptureSource[]>([])
+  // Local Computer Use consent (local bridge Phase 1) — persisted top-level in
+  // the connector config, enforced natively in main (runActuation/capture gate).
+  const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
 
   useEffect(() => {
     window.connector?.serverConfig.get().then((c) => {
       setServerUrl(c.serverUrl)
       setThemeState(c.theme ?? 'system')
       setTuning(c.overlayTuning ?? {})
+      setComputerUse(c.computerUse ?? {})
     })
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
@@ -190,6 +194,19 @@ export function ControlApp() {
   }
   const tget = <K extends keyof typeof TUNING_DEFAULTS>(k: K): (typeof TUNING_DEFAULTS)[K] =>
     (tuning[k] ?? TUNING_DEFAULTS[k]) as (typeof TUNING_DEFAULTS)[K]
+
+  // Local Computer Use: merge + persist the whole object (main shallow-merges).
+  const patchComputerUse = (p: Partial<ComputerUseConfig>) => {
+    setComputerUse((prev) => {
+      const next = { ...prev, ...p }
+      window.connector?.serverConfig.set({ computerUse: next })
+      return next
+    })
+  }
+  const cuOn = computerUse.enabled === true
+  // Effective per-capability state for the UI — mirrors main's computerUseGate
+  // (a capability is on only when the master is on and it isn't explicitly off).
+  const cuCap = (k: 'screen' | 'input' | 'apps' | 'clipboard') => cuOn && computerUse[k] !== false
 
   // Track the OS theme so 'system' resolves live.
   useEffect(() => {
@@ -323,6 +340,9 @@ export function ControlApp() {
           </button>
           <button className={`gy-tab ${tab === 'voice' ? 'is-active' : ''}`} onClick={() => setTab('voice')}>
             {I.mic} 음성
+          </button>
+          <button className={`gy-tab ${tab === 'control' ? 'is-active' : ''}`} onClick={() => setTab('control')}>
+            {I.monitor} 제어
           </button>
           <button className={`gy-tab ${tab === 'app' ? 'is-active' : ''}`} onClick={() => setTab('app')}>
             {I.sliders} 앱
@@ -462,6 +482,73 @@ export function ControlApp() {
               <ToggleLine label="에코 제거" checked={tget('sttEchoCancellation')} onChange={(c) => patchTuning({ sttEchoCancellation: c })} />
               <ToggleLine label="노이즈 억제" checked={tget('sttNoiseSuppression')} onChange={(c) => patchTuning({ sttNoiseSuppression: c })} />
               <ToggleLine label="자동 게인" checked={tget('sttAutoGain')} onChange={(c) => patchTuning({ sttAutoGain: c })} />
+            </section>
+          </>
+        )}
+
+        {/* ─────────────── 제어 (로컬 컴퓨터 제어) ─────────────── */}
+        {tab === 'control' && (
+          <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.monitor} 로컬 컴퓨터 제어</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>
+                이 접속기가 프록시가 되어, 서버에 떠 있는 Geny 에이전트가 내 컴퓨터를 보고 조작할 수
+                있게 합니다. 실행은 항상 이 컴퓨터에서 아래 동의에 따라 이뤄집니다(서버는 중계만 함). 접속기가
+                꺼지면 안전하게 차단됩니다. 에이전트가 실제로 쓰려면 해당 환경에서도 이 기능을 켜야 합니다.
+              </p>
+              <ToggleLine
+                label="로컬 컴퓨터 제어 허용 (마스터)"
+                checked={cuOn}
+                onChange={(c) => patchComputerUse({ enabled: c })}
+              />
+              {cuOn && (
+                <>
+                  <div style={{ height: 6 }} />
+                  <ToggleLine
+                    label="화면 보기 (캡처·창 목록, 읽기 전용)"
+                    checked={cuCap('screen')}
+                    onChange={(c) => patchComputerUse({ screen: c })}
+                  />
+                  <ToggleLine
+                    label="입력 조작 (타이핑·키·클릭)"
+                    checked={cuCap('input')}
+                    onChange={(c) => patchComputerUse({ input: c })}
+                  />
+                  <ToggleLine
+                    label="앱·URL 열기"
+                    checked={cuCap('apps')}
+                    onChange={(c) => patchComputerUse({ apps: c })}
+                  />
+                  <ToggleLine
+                    label="클립보드 쓰기"
+                    checked={cuCap('clipboard')}
+                    onChange={(c) => patchComputerUse({ clipboard: c })}
+                  />
+                  <div style={{ height: 12 }} />
+                  <div className="gy-hint" style={{ margin: '0 0 6px' }}>조작 동의 방식</div>
+                  <div className="gy-tabs" role="tablist" style={{ margin: 0 }}>
+                    {([
+                      ['ask', '항상 확인'],
+                      ['session', '이 세션 동안 허용'],
+                      ['auto', '자동 허용'],
+                    ] as [ConsentMode, string][]).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className={`gy-tab ${(computerUse.consentMode ?? 'ask') === mode ? 'is-active' : ''}`}
+                        onClick={() => patchComputerUse({ consentMode: mode })}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="gy-hint" style={{ margin: '8px 0 0' }}>
+                    화면 보기는 읽기 전용이라 확인 없이 즉시 동작합니다. 타이핑·클릭·앱 열기·클립보드는 위
+                    설정을 따릅니다. <b>항상 확인</b>이 가장 안전하며, 확인 창에서 “이 세션 동안 허용”을
+                    누르면 그 동작은 접속기를 끌 때까지 다시 묻지 않습니다. <b>자동 허용</b>은 매우 위험하니
+                    신뢰하는 작업에만 쓰세요.
+                  </p>
+                </>
+              )}
             </section>
           </>
         )}

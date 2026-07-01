@@ -37,7 +37,9 @@ import {
   Workflow,
   SlidersHorizontal,
   Boxes,
+  MonitorCog,
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
@@ -79,7 +81,8 @@ type Panel =
   | 'subworker'
   | 'tool_settings'
   | 'sandbox_tool_packs'
-  | 'persona';
+  | 'persona'
+  | 'computer_use';
 
 const PANEL_HELP_ID: Record<Panel, string> = {
   model: 'globals.model',
@@ -92,6 +95,7 @@ const PANEL_HELP_ID: Record<Panel, string> = {
   tool_settings: 'globals.toolSettings',
   sandbox_tool_packs: 'globals.sandboxToolPacks',
   persona: 'globals.persona',
+  computer_use: 'globals.computerUse',
 };
 
 const HEADER_PALETTE = {
@@ -115,6 +119,9 @@ export default function GlobalSettingsView() {
   const patchModel = useEnvironmentDraftStore((s) => s.patchModel);
   const patchPipeline = useEnvironmentDraftStore((s) => s.patchPipeline);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
+  const setComputerUseEnabled = useEnvironmentDraftStore(
+    (s) => s.setComputerUseEnabled,
+  );
 
   const [panel, setPanel] = useState<Panel>('model');
 
@@ -165,6 +172,10 @@ export default function GlobalSettingsView() {
   const personaSelected =
     typeof draft.host_selections?.extras?.persona_preset_id === 'string' &&
     draft.host_selections.extras.persona_preset_id.length > 0;
+
+  // ★ on the Local Control nav row when this env opted into Computer Use.
+  const computerUseEnabled =
+    !!draft.host_selections?.extras?.computer_use_enabled;
 
   // ── Provider state ──
   const apiStage = draft.stages.find((s) => s.order === S06_API_ORDER);
@@ -292,6 +303,13 @@ export default function GlobalSettingsView() {
               onClick={() => setPanel('persona')}
               badge={personaSelected ? '★' : undefined}
             />
+            <SubTabButton
+              icon={MonitorCog}
+              label="로컬 제어"
+              active={panel === 'computer_use'}
+              onClick={() => setPanel('computer_use')}
+              badge={computerUseEnabled ? '★' : undefined}
+            />
           </nav>
 
           <div className="relative flex-1 min-w-0 p-4 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
@@ -404,6 +422,32 @@ export default function GlobalSettingsView() {
                   description={t('envManagement.globals.persona.description')}
                 />
                 <PersonaPresetPicker />
+              </div>
+            )}
+
+            {panel === 'computer_use' && (
+              <div className="flex flex-col gap-4">
+                <PanelHeader
+                  title="로컬 컴퓨터 제어 (Computer Use)"
+                  description="이 환경의 에이전트가 사용자의 데스크톱 접속기를 통해 로컬 컴퓨터를 보고 조작할 수 있게 합니다(화면 보기·타이핑·클릭·앱 열기 등). 켜면 접속기 capability 도구가 세션에 노출됩니다."
+                />
+                <label className="flex items-start gap-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+                  <Switch
+                    checked={computerUseEnabled}
+                    onCheckedChange={(v) => setComputerUseEnabled(!!v)}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">
+                      로컬 컴퓨터 제어 허용
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      이것은 <b>서버측 정책 게이트</b>입니다. 실제 실행과 능력별
+                      동의(항상 확인 등)는 사용자의 데스크톱 접속기에서 별도로
+                      켜고 제어합니다(설정 → 제어). 두 곳이 모두 켜져 있어야 하며,
+                      접속기가 연결돼 있지 않으면 도구는 안전하게 실패합니다.
+                    </p>
+                  </div>
+                </label>
               </div>
             )}
           </div>

@@ -379,6 +379,11 @@ export interface EnvironmentDraftState {
    *  ``host_selections.extras.persona_preset_id``. Passing ``null`` / empty
    *  deletes the key so the env carries no persona overlay. */
   setPersonaPresetId: (presetId: string | null) => void;
+  /** Toggle Local Computer Use for this env, stored at
+   *  ``host_selections.extras.computer_use_enabled``. When true the connector
+   *  capability tools are unioned into the session's toolset (execution + local
+   *  consent still gated by the desktop connector). ``false`` drops the key. */
+  setComputerUseEnabled: (enabled: boolean) => void;
   /**
    * Declare (or clear) the persistent **sub-agent** an agent on this env
    * OWNS — written to `host_selections.extras.owned_subagent` as
@@ -699,6 +704,32 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       }
       // Keep `extras` only when it still has entries, so a cleared
       // mapping doesn't leave a dangling empty object in the manifest.
+      next.host_selections =
+        Object.keys(extras).length > 0
+          ? { ...current, extras }
+          : { ...current, extras: undefined };
+      set({
+        draft: next,
+        hostSelectionsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setComputerUseEnabled: (enabled) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const current = next.host_selections ?? {
+        hooks: ['*'],
+        skills: ['*'],
+        permissions: ['*'],
+      };
+      const extras = { ...(current.extras ?? {}) };
+      if (enabled) {
+        extras.computer_use_enabled = true;
+      } else {
+        delete extras.computer_use_enabled;
+      }
       next.host_selections =
         Object.keys(extras).length > 0
           ? { ...current, extras }

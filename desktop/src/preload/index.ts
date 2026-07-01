@@ -25,11 +25,24 @@ export interface OverlayTuning {
   subtitleCharMs?: number
 }
 
+/** Consent posture for an actuation capability group. */
+export type ConsentMode = 'ask' | 'session' | 'auto'
+/** Local Computer Use — per-capability consent (local bridge). */
+export interface ComputerUseConfig {
+  enabled?: boolean
+  screen?: boolean
+  input?: boolean
+  apps?: boolean
+  clipboard?: boolean
+  consentMode?: ConsentMode
+}
+
 export interface ConnectorConfig {
   serverUrl: string
   theme?: 'system' | 'dark' | 'light'
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
   overlayTuning?: OverlayTuning
+  computerUse?: ComputerUseConfig
 }
 
 export interface ConnectorBridge {

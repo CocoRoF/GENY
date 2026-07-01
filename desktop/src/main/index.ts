@@ -62,10 +62,16 @@ interface ConnectorConfig {
   /** Last position of the draggable quick-chat bar (remembered between summons).
    *  Absent → it opens centered near the top of the active display. */
   quickChatBar?: { x: number; y: number }
-  /** Allow the agent to capture the screen (Phase 4). Default true. */
+  /** Allow the agent to capture the screen (Phase 4). Default true.
+   *  Legacy — superseded by computerUse.screen when computerUse is present. */
   captureArmed?: boolean
-  /** Allow the agent to actuate the desktop — type/click/open (Phase 6). Default false. */
+  /** Allow the agent to actuate the desktop — type/click/open (Phase 6). Default false.
+   *  Legacy — superseded by computerUse.{input,apps,clipboard} when present. */
   automationEnabled?: boolean
+  /** Local Computer Use — per-capability consent (local bridge Phase 1). When
+   *  present it supersedes the legacy captureArmed/automationEnabled toggles;
+   *  when absent those remain the fallback so existing installs keep working. */
+  computerUse?: ComputerUseConfig
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
   overlay?: WinBounds & { displayId?: number }
@@ -83,6 +89,25 @@ interface ConnectorConfig {
   overlayTuning?: OverlayTuning
 }
 interface WinBounds { x: number; y: number; width: number; height: number }
+/** Consent posture for an actuation capability group. */
+type ConsentMode = 'ask' | 'session' | 'auto'
+/** Per-capability local-control consent. Read-only "screen" needs no prompt;
+ *  the actuation groups (input/apps/clipboard) obey consentMode. */
+interface ComputerUseConfig {
+  /** Master — all local control is off unless this is true. Default false. */
+  enabled?: boolean
+  /** Read-only: screen capture + window list. Default true (when enabled). */
+  screen?: boolean
+  /** Input synthesis: type / key / click (+ future scroll/drag). Default true. */
+  input?: boolean
+  /** Open an app / URL / path. Default true. */
+  apps?: boolean
+  /** Write the clipboard. Default true. */
+  clipboard?: boolean
+  /** Consent for the actuation groups: ask every time / allow for this run /
+   *  auto (no prompt). Default 'ask'. */
+  consentMode?: ConsentMode
+}
 export interface OverlayTuning {
   ttsVolume?: number
   sttSensitivity?: number
@@ -825,16 +850,10 @@ function createTray(): void {
       },
       { type: 'separator' },
       {
-        label: '화면 캡처 허용 (에이전트가 화면 보기)',
+        label: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)',
         type: 'checkbox',
-        checked: loadConfig().captureArmed !== false,
-        click: (item) => saveConfig({ captureArmed: item.checked }),
-      },
-      {
-        label: '데스크톱 제어 허용 (자동화 — 타이핑/클릭/앱 열기)',
-        type: 'checkbox',
-        checked: loadConfig().automationEnabled === true,
-        click: (item) => saveConfig({ automationEnabled: item.checked }),
+        checked: loadConfig().computerUse?.enabled === true,
+        click: (item) => patchComputerUse({ enabled: item.checked }),
       },
       { type: 'separator' },
       {
@@ -928,22 +947,64 @@ function registerHotkeys(): { ptt: boolean; quickChat: boolean } {
   return result
 }
 
-// ── Phase 6 actuation gate: master switch (default OFF) + native confirm ─────
-type ActuationResult = { ok: boolean; result?: string; denied?: boolean; error?: string }
-async function runActuation(label: string, detail: string, fn: () => Promise<string>): Promise<ActuationResult> {
-  if (loadConfig().automationEnabled !== true) {
-    return { ok: false, denied: true, error: '자동화가 꺼져 있습니다 (트레이 → 데스크톱 제어 허용)' }
+// ── Local Computer Use gate: per-capability consent (local bridge Phase 1) ───
+// Effective gate = master AND the capability toggle. When `computerUse` is
+// absent we fall back to the legacy captureArmed/automationEnabled toggles so
+// existing installs behave exactly as before.
+type ActuationCap = 'input' | 'apps' | 'clipboard'
+interface ComputerUseGate { screen: boolean; input: boolean; apps: boolean; clipboard: boolean; mode: ConsentMode }
+function computerUseGate(): ComputerUseGate {
+  const c = loadConfig()
+  const cu = c.computerUse
+  if (!cu) {
+    // Legacy fallback: screen defaults ON, actuation defaults OFF, always ASK.
+    const act = c.automationEnabled === true
+    return { screen: c.captureArmed !== false, input: act, apps: act, clipboard: act, mode: 'ask' }
   }
-  const { response } = await dialog.showMessageBox({
-    type: 'warning',
-    buttons: ['허용', '거부'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Geny 데스크톱 제어',
-    message: `Geny 가 실행하려고 합니다: ${label}`,
-    detail,
-  })
-  if (response !== 0) return { ok: false, denied: true, error: '사용자가 거부함' }
+  const on = cu.enabled === true
+  return {
+    screen: on && cu.screen !== false,
+    input: on && cu.input !== false,
+    apps: on && cu.apps !== false,
+    clipboard: on && cu.clipboard !== false,
+    mode: cu.consentMode ?? 'ask',
+  }
+}
+function patchComputerUse(patch: Partial<ComputerUseConfig>): void {
+  const cur = loadConfig().computerUse ?? {}
+  saveConfig({ computerUse: { ...cur, ...patch } })
+}
+
+// "이 세션 동안 허용" — per-capability session grants, cleared on app restart.
+const sessionAllow = new Set<ActuationCap>()
+
+type ActuationResult = { ok: boolean; result?: string; denied?: boolean; error?: string }
+async function runActuation(
+  cap: ActuationCap,
+  label: string,
+  detail: string,
+  fn: () => Promise<string>,
+): Promise<ActuationResult> {
+  const gate = computerUseGate()
+  const allowed = cap === 'apps' ? gate.apps : cap === 'clipboard' ? gate.clipboard : gate.input
+  if (!allowed) {
+    return { ok: false, denied: true, error: '이 동작이 꺼져 있습니다 (설정 → 로컬 컴퓨터 제어)' }
+  }
+  // Consent: auto or an active session-grant → run without a prompt; otherwise
+  // ask, offering a "이 세션 동안 허용" that promotes to a session-grant.
+  if (gate.mode !== 'auto' && !sessionAllow.has(cap)) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['허용', '이 세션 동안 허용', '거부'],
+      defaultId: 2,
+      cancelId: 2,
+      title: 'Geny 데스크톱 제어',
+      message: `Geny 가 실행하려고 합니다: ${label}`,
+      detail,
+    })
+    if (response === 2) return { ok: false, denied: true, error: '사용자가 거부함' }
+    if (response === 1) sessionAllow.add(cap) // grant for the rest of this run
+  }
   try {
     return { ok: true, result: await fn() }
   } catch (e) {
@@ -1108,7 +1169,7 @@ function registerIpc(): void {
 
   // ── Phase 4: desktop awareness (read-only capture) ──
   ipcMain.handle('capture:list-sources', async () => {
-    if (loadConfig().captureArmed === false) return [] // user paused capture
+    if (!computerUseGate().screen) return [] // screen capture disabled
     const sources = await desktopCapturer.getSources({
       types: ['screen', 'window'],
       thumbnailSize: { width: 1, height: 1 },
@@ -1119,27 +1180,27 @@ function registerIpc(): void {
   // ── Phase 6: guarded actuation. Master switch (default OFF) + native confirm
   //    are the load-bearing local gate, independent of the server's decision. ──
   ipcMain.handle('actuate:open-app', (_e, target: string) =>
-    runActuation('앱/링크 열기', `대상: ${target}`, async () => {
+    runActuation('apps', '앱/링크 열기', `대상: ${target}`, async () => {
       if (/^https?:\/\//i.test(target)) await shell.openExternal(target)
       else await shell.openPath(target)
       return `opened ${target}`
     }),
   )
   ipcMain.handle('actuate:clipboard-write', (_e, text: string) =>
-    runActuation('클립보드 쓰기', text.slice(0, 80), async () => {
+    runActuation('clipboard', '클립보드 쓰기', text.slice(0, 80), async () => {
       clipboard.writeText(text)
       return 'clipboard written'
     }),
   )
   ipcMain.handle('actuate:type', (_e, text: string) =>
-    runActuation('타이핑', text.slice(0, 80), async () => {
+    runActuation('input', '타이핑', text.slice(0, 80), async () => {
       const nut = await loadNut()
       await nut.keyboard.type(text)
       return `typed ${text.length} chars`
     }),
   )
   ipcMain.handle('actuate:key', (_e, keys: string) =>
-    runActuation('키 입력', keys, async () => {
+    runActuation('input', '키 입력', keys, async () => {
       const nut = await loadNut()
       const parts = keys.toLowerCase().split('+').map((p) => p.trim())
       const mapped = parts.map((p) => nut.keyMap[p]).filter((k: unknown) => k !== undefined)
@@ -1150,7 +1211,7 @@ function registerIpc(): void {
     }),
   )
   ipcMain.handle('actuate:click', (_e, x: number, y: number, button?: string) =>
-    runActuation('마우스 클릭', `(${x}, ${y}) ${button ?? 'left'}`, async () => {
+    runActuation('input', '마우스 클릭', `(${x}, ${y}) ${button ?? 'left'}`, async () => {
       const nut = await loadNut()
       await nut.mouse.setPosition(new nut.Point(x, y))
       await nut.mouse.click(nut.Button[(button ?? 'left').toUpperCase() as 'LEFT' | 'RIGHT' | 'MIDDLE'])
