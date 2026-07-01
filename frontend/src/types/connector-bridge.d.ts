@@ -44,6 +44,7 @@ declare global {
         openControl(): void
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
+        resizeOverlayBy?(edge: string, dx: number, dy: number): void
         restart(): void
         openExternal(url: string): void
         resetPositions?(): void

@@ -16,7 +16,7 @@
  *   room    — chat room_id for TTS (default: the session's chat_room_id).
  */
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
 import { agentApi, chatApi } from '@/lib/api';
@@ -257,6 +257,11 @@ export default function OverlayPage() {
         {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} />}
       </div>
 
+      {/* Unlocked → show a resize frame (outline + edge/corner handles) so the
+          user can adjust the avatar window's width/height. Drag a handle to
+          resize; the new size is saved per monitor. */}
+      {!locked && <ResizeFrame />}
+
       {/* The bar is the MOVE handle: drag its background → move the whole window.
           Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
@@ -301,6 +306,51 @@ export default function OverlayPage() {
         {/* Inverse-MCP capability bridge (desktop only; no-op in a browser). */}
         <ConnectorBridgeClient sessionId={resolved.sid} />
       </div>
+    </div>
+  );
+}
+
+// ── resize frame (unlocked) ──────────────────────────────────────────────────
+// A dashed outline + 8 edge/corner handles overlaid on the whole window. Dragging
+// a handle sends a pixel delta to main, which resizes the overlay from that edge;
+// main persists the new size PER MONITOR. Only the handles capture the pointer —
+// the rest is click-through so the avatar's pan/zoom still works in the middle.
+const RESIZE_HANDLES: { edge: string; style: CSSProperties; cursor: string }[] = [
+  { edge: 'n', style: { top: 0, left: 16, right: 16, height: 9 }, cursor: 'ns-resize' },
+  { edge: 's', style: { bottom: 0, left: 16, right: 16, height: 9 }, cursor: 'ns-resize' },
+  { edge: 'w', style: { left: 0, top: 16, bottom: 16, width: 9 }, cursor: 'ew-resize' },
+  { edge: 'e', style: { right: 0, top: 16, bottom: 16, width: 9 }, cursor: 'ew-resize' },
+  { edge: 'nw', style: { top: 0, left: 0, width: 18, height: 18 }, cursor: 'nwse-resize' },
+  { edge: 'ne', style: { top: 0, right: 0, width: 18, height: 18 }, cursor: 'nesw-resize' },
+  { edge: 'sw', style: { bottom: 0, left: 0, width: 18, height: 18 }, cursor: 'nesw-resize' },
+  { edge: 'se', style: { bottom: 0, right: 0, width: 18, height: 18 }, cursor: 'nwse-resize' },
+];
+function ResizeFrame() {
+  const start = (edge: string) => (e: ReactPointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    try { el.setPointerCapture(e.pointerId); } catch { /* optional */ }
+    const onMove = (ev: PointerEvent) =>
+      window.connector?.windowControl.resizeOverlayBy?.(edge, ev.movementX, ev.movementY);
+    const onUp = (ev: PointerEvent) => {
+      try { el.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+  return (
+    <div style={RESIZE_FRAME}>
+      <div style={RESIZE_LABEL}>크기 조절</div>
+      {RESIZE_HANDLES.map((h) => (
+        <div
+          key={h.edge}
+          onPointerDown={start(h.edge)}
+          style={{ position: 'absolute', pointerEvents: 'auto', cursor: h.cursor, ...h.style }}
+        />
+      ))}
     </div>
   );
 }
@@ -369,6 +419,29 @@ function Loading({ label, error }: { label: string; error?: boolean }) {
 }
 // ── styles ───────────────────────────────────────────────────────────────────
 const ROOT: CSSProperties = { width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' };
+
+const RESIZE_FRAME: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  pointerEvents: 'none',
+  zIndex: 40,
+  border: '1.5px dashed rgba(150,140,235,0.85)',
+  boxShadow: 'inset 0 0 0 1px rgba(150,140,235,0.22)',
+  borderRadius: 6,
+};
+const RESIZE_LABEL: CSSProperties = {
+  position: 'absolute',
+  top: 4,
+  left: 0,
+  right: 0,
+  textAlign: 'center',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  color: 'rgba(180,172,240,0.9)',
+  textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+  pointerEvents: 'none',
+};
 
 const BAR: CSSProperties = {
   display: 'flex',
