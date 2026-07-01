@@ -50,6 +50,7 @@ def _build_sub_manifest(
     provider: str,
     model: Optional[str],
     allowed_tools: tuple[str, ...],
+    extra_external_tools: tuple[str, ...] = (),
 ) -> Any:
     """Build a slim 21-stage manifest tuned for a sub-agent.
 
@@ -75,6 +76,15 @@ def _build_sub_manifest(
     # CUSTOM tools — previously only built_in was set, so custom tools were
     # silently dropped (no provider matched them).
     _wildcard = allowed_tools == ("*",)
+    # extra_external_tools (e.g. connector Computer Use tools) are ALWAYS named
+    # in external — even under a wildcard, where `external` is otherwise [] —
+    # because they resolve only from an adhoc provider (ConnectorToolProvider),
+    # so they must be explicitly listed to activate.
+    _extra_ext = list(dict.fromkeys(extra_external_tools or ()))
+    _external = (
+        list(_extra_ext) if _wildcard
+        else list(dict.fromkeys([*allowed_tools, *_extra_ext]))
+    )
     m = EnvironmentManifest(
         metadata=EnvironmentMetadata(id="subagent-runtime", name="subagent"),
         model={"model": model} if model else {},
@@ -82,7 +92,7 @@ def _build_sub_manifest(
         stages=[],
         tools=ToolsSnapshot(
             built_in=["*"] if _wildcard else list(allowed_tools),
-            external=[] if _wildcard else list(allowed_tools),
+            external=_external,
         ),
     )
     m.set_stage_entries([
@@ -110,7 +120,7 @@ def _build_sub_manifest(
     return m
 
 
-def make_subagent_factory(adhoc_providers: Any = ()):
+def make_subagent_factory(adhoc_providers: Any = (), *, extra_external_tools: Any = ()):
     """Build an async :data:`PipelineFactory` that provisions a sub-worker
     WITH the given adhoc providers passed through to its sub-pipeline.
 
@@ -127,6 +137,7 @@ def make_subagent_factory(adhoc_providers: Any = ()):
     bundle preference); a loud :class:`ConfigError` when nothing resolves.
     """
     _providers = tuple(adhoc_providers or ())
+    _extra_external_tools = tuple(extra_external_tools or ())
 
     async def _factory(ctx: Any) -> Any:
         from geny_executor.llm_client.credentials import ConfigError
@@ -153,6 +164,7 @@ def make_subagent_factory(adhoc_providers: Any = ()):
             provider=provider,
             model=model_override,
             allowed_tools=allowed_tools,
+            extra_external_tools=_extra_external_tools,
         )
         try:
             sub_pipeline = await Pipeline.from_manifest_async(

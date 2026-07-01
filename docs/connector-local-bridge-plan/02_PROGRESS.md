@@ -13,6 +13,20 @@
 | 4b | Local MCP — lmcp__ 1급 도구 승격(D2 검증 후) | ◻ 대기 |
 | 5 | 폴리시·관측·문서 | ◻ 대기 |
 
+## Phase 1.5 — sub-agent 위임 경로 (라이브 테스트 반영)
+사용자 실기기 테스트: VTuber가 데스크톱 작업을 **owned companion(pair)** 에게 위임하는데, companion이
+`desktop_*` 도구가 없어 샌드박스 `Bash`로 시도→실패. 3원인 규명 후 **Geny-only** 수정(executor 무변경):
+- **원인①** opt-in은 세션 빌드 시점에 union → 기존 세션엔 없음(재시작 필요).
+- **원인②** sub-agent 매니페스트의 `tools.external`이 connector 도구를 포함 안 함(sub-worker=allowed_tools만,
+  companion=부모 env clone이라 런타임 union 우회).
+- **원인③** sub-agent는 파생 session_id로 실행 → `capability_call`이 connector 못 찾음("offline").
+- **수정**: connector 도구명을 두 sub-agent 팩토리(sub-worker `factories._build_sub_manifest`, companion
+  `sub_agent_bridge._make_parent_env_companion_factory`) 매니페스트 external에 union
+  (`SubagentRegistryBuilder(extra_external_tools=)` / `spawn_owned_subagent(extra_external_tools=)` 배선).
+  `ConnectorRegistry.get()`에 **최장 프리픽스 폴백** 추가 → companion `{parent}-subagent` / sub-worker
+  `{parent}-{type}-{uuid}` 모두 부모 세션 connector로 라우팅. 라우팅 로직 단위검증 통과.
+- **주의**: opt-in 후 **세션 재시작** 해야 메인+companion이 도구를 받음(빌드 시점 union).
+
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.
 - 2026-07-01: **Phase 1 코드 완료** (connector v0.11.8 + 프론트/백엔드).

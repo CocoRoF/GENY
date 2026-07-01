@@ -49,6 +49,7 @@ class SubagentRegistryBuilder:
         *,
         env_overrides: Optional[List[Any]] = None,
         adhoc_providers: Any = (),
+        extra_external_tools: Any = (),
     ) -> None:
         self._extra = list(extra or [])
         self._env_overrides = [
@@ -61,6 +62,11 @@ class SubagentRegistryBuilder:
         # tools + skills, not just framework built-ins. Built once per session
         # by the session manager and shared with the parent pipeline.
         self._adhoc_providers = tuple(adhoc_providers or ())
+        # Tool names unioned into EVERY sub-worker's manifest.tools.external on
+        # top of its own allowed_tools — e.g. the connector Computer Use tools,
+        # so a VTuber can delegate a desktop task to a sub-worker (which then
+        # routes its capability_call to the parent session's connector).
+        self._extra_external_tools = tuple(extra_external_tools or ())
 
     def build(self) -> Optional[Any]:
         """Return a fresh registry, or ``None`` when geny-executor is
@@ -86,7 +92,10 @@ class SubagentRegistryBuilder:
             try:
                 from service.agent_types.factories import make_subagent_factory
 
-                sub_factory = make_subagent_factory(self._adhoc_providers)
+                sub_factory = make_subagent_factory(
+                    self._adhoc_providers,
+                    extra_external_tools=self._extra_external_tools,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("subagent factory build skipped: %s", exc)
 
