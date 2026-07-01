@@ -35,6 +35,7 @@ def _make_parent_env_companion_factory(
     env_service: Any,
     parent_env_id: str,
     adhoc_providers: Any = (),
+    extra_external_tools: Any = (),
 ):
     """Build a PipelineFactory that clones the PARENT agent's environment.
 
@@ -58,6 +59,17 @@ def _make_parent_env_companion_factory(
             raise RuntimeError(f"parent env not found for companion: {parent_env_id}")
         # Clone so we never mutate the cached parent manifest.
         manifest = EnvironmentManifest.from_dict(base.to_dict())
+        # Union extra external tools (e.g. connector Computer Use tools) into the
+        # clone's tools.external — the companion clones the parent ENV manifest,
+        # which does NOT carry the runtime `extra_external_tools` union that
+        # instantiate_pipeline applies to the main session, so we add them here.
+        _extra_ext = list(dict.fromkeys(extra_external_tools or ()))
+        if _extra_ext:
+            try:
+                cur = list(getattr(manifest.tools, "external", None) or [])
+                manifest.tools.external = list(dict.fromkeys([*cur, *_extra_ext]))
+            except Exception:  # noqa: BLE001 — never fail the companion on this
+                logger.warning("companion: extra_external_tools union failed", exc_info=True)
         entries = manifest.stage_entries()
         for e in entries:
             if e.order in _MEMORY_STAGE_ORDERS:
@@ -118,6 +130,7 @@ async def spawn_owned_subagent(
     credentials: Any = None,
     parent_provider: Optional[str] = None,
     adhoc_providers: Any = (),
+    extra_external_tools: Any = (),
 ) -> Optional[str]:
     """Spawn the persistent sub-agent an env-declaring agent owns.
 
@@ -133,7 +146,7 @@ async def spawn_owned_subagent(
     sub_agent_id = owned_subagent_id(owner_session_id)
     try:
         factory = _make_parent_env_companion_factory(
-            env_service, parent_env_id, adhoc_providers,
+            env_service, parent_env_id, adhoc_providers, extra_external_tools,
         )
         await manager.spawn(
             "owned",

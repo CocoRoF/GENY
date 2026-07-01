@@ -1022,6 +1022,23 @@ class AgentSessionManager:
         connector_provider = ConnectorToolProvider()
         adhoc_providers.append(connector_provider)
 
+        # Local Computer Use (server-side policy gate): when the env opted in,
+        # these connector capability tool names get unioned into tools.external
+        # so the session — AND its delegated sub-agents (companion / sub-worker)
+        # — expose them. Local per-capability consent + fail-closed are enforced
+        # by the connector itself (connector_bridge.py). Computed here (before the
+        # sub-agent registry + companion spawn) so every delegate carries them.
+        computer_use_tools: list = (
+            connector_provider.list_names()
+            if self._env_computer_use_enabled(env_id)
+            else []
+        )
+        if computer_use_tools:
+            logger.info(
+                "  computer_use: %d connector capability tool(s) exposed",
+                len(computer_use_tools),
+            )
+
         # G7.3 + G14: skill registry. Always build (bundled skills load
         # without opt-in); only register the SkillToolProvider when at
         # least one skill resolved. Hold the registry on the manager so
@@ -1120,6 +1137,7 @@ class AgentSessionManager:
         subagent_registry = SubagentRegistryBuilder(
             env_overrides=self._env_subworker_types(env_id),
             adhoc_providers=adhoc_providers,
+            extra_external_tools=computer_use_tools,
         ).build()
 
         # Sandbox-tool lifecycle toolset — guarantee EVERY env (incl. lean VTuber
@@ -1137,16 +1155,7 @@ class AgentSessionManager:
                 lifecycle_tools = ["gapt_run_command", "list_tool_packs", "use_tool_pack"]
         except Exception:  # noqa: BLE001
             lifecycle_tools = []
-        # Local Computer Use: when the env opted in (server-side policy gate),
-        # union the connector capability tool names into tools.external so the
-        # session exposes them. Local per-capability consent + fail-closed behave
-        # are enforced by the connector itself (see connector_bridge.py).
-        computer_use_tools: list = []
-        if self._env_computer_use_enabled(env_id):
-            computer_use_tools = connector_provider.list_names()
-            logger.info(
-                "  computer_use: %d connector capability tool(s) exposed", len(computer_use_tools)
-            )
+        # computer_use_tools was computed above (before the sub-agent registry).
         _extra_tools = list(
             dict.fromkeys([*lifecycle_tools, *pack_tool_names, *computer_use_tools])
         )
@@ -1433,6 +1442,7 @@ class AgentSessionManager:
                     system_prompt=(_owned.get("system_prompt") or None),
                     credentials=credentials, parent_provider=primary_provider,
                     adhoc_providers=adhoc_providers,
+                    extra_external_tools=computer_use_tools,
                 )
                 agent._executor_sub_agent_id = sa_id
                 self._store.update(session_id, {"executor_sub_agent_id": sa_id})

@@ -80,7 +80,22 @@ class ConnectorRegistry:
             self._conns.pop(session_id, None)
 
     def get(self, session_id: str) -> Optional[ConnectorConnection]:
-        return self._conns.get(session_id)
+        # Exact match: the session the desktop connector attached to.
+        conn = self._conns.get(session_id)
+        if conn is not None:
+            return conn
+        # Delegated sub-agents run under a DERIVED id that keeps the parent
+        # session as a prefix — the owned companion is "{parent}-subagent" and a
+        # one-shot sub-worker is "{parent}-{type}-{uuid}". The desktop is the
+        # user's, attached to the PARENT overlay session, so route the sub-agent's
+        # capability call to the parent's connector. Longest matching prefix wins
+        # (handles nested delegation). O(n) over the few live connectors.
+        best: Optional[ConnectorConnection] = None
+        best_len = -1
+        for sid, c in self._conns.items():
+            if session_id.startswith(sid + "-") and len(sid) > best_len:
+                best, best_len = c, len(sid)
+        return best
 
     def has(self, session_id: str) -> bool:
         return session_id in self._conns
