@@ -395,6 +395,26 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return []
 
+    def _env_computer_use_enabled(self, env_id: Optional[str]) -> bool:
+        """Whether this env opted into Local Computer Use (the connector
+        capability tools). Stored at ``host_selections.extras.computer_use_enabled``.
+
+        This is the SERVER-side policy gate: when true, the connector capability
+        tool names are unioned into ``tools.external`` so the session exposes
+        them. The LOCAL execution gate (per-capability consent) is enforced
+        independently by the connector; the tools fail-closed ("connector
+        offline") when no desktop is attached. Both gates must pass."""
+        if not env_id or self._environment_service is None:
+            return False
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return False
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            return bool(extras.get("computer_use_enabled"))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _env_tool_settings(self, env_id: Optional[str]) -> dict:
         """The env's per-tool settings map, or ``{}``.
 
@@ -999,7 +1019,8 @@ class AgentSessionManager:
         # Inert unless a manifest's tools.external selects one (e.g. connector_ping).
         from service.executor.connector_bridge import ConnectorToolProvider
 
-        adhoc_providers.append(ConnectorToolProvider())
+        connector_provider = ConnectorToolProvider()
+        adhoc_providers.append(connector_provider)
 
         # G7.3 + G14: skill registry. Always build (bundled skills load
         # without opt-in); only register the SkillToolProvider when at
@@ -1116,7 +1137,19 @@ class AgentSessionManager:
                 lifecycle_tools = ["gapt_run_command", "list_tool_packs", "use_tool_pack"]
         except Exception:  # noqa: BLE001
             lifecycle_tools = []
-        _extra_tools = list(dict.fromkeys([*lifecycle_tools, *pack_tool_names]))
+        # Local Computer Use: when the env opted in (server-side policy gate),
+        # union the connector capability tool names into tools.external so the
+        # session exposes them. Local per-capability consent + fail-closed behave
+        # are enforced by the connector itself (see connector_bridge.py).
+        computer_use_tools: list = []
+        if self._env_computer_use_enabled(env_id):
+            computer_use_tools = connector_provider.list_names()
+            logger.info(
+                "  computer_use: %d connector capability tool(s) exposed", len(computer_use_tools)
+            )
+        _extra_tools = list(
+            dict.fromkeys([*lifecycle_tools, *pack_tool_names, *computer_use_tools])
+        )
 
         # MCP connectors (config-gated): inject configured connectors' MCP servers
         # so the executor connects them + their tools appear. Only enabled +
