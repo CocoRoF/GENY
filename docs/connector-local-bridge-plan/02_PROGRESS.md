@@ -7,7 +7,7 @@
 |---|---|---|
 | 0 | 계획 문서 | ✅ 완료 |
 | 1 | Computer Use 활성화 UX(능력별 동의) + 서버 게이트 | ✅ 코드 완료 (배포/검증 중) |
-| 2 | Computer Use 하드닝 — 진짜 스크린샷-좌표 `computer` 도구 | ◻ 대기 |
+| 2 | Computer Use 하드닝 — 진짜 스크린샷-비전 + 스크롤 | ✅ 코드 완료 (배포/검증 중) |
 | 3 | Local MCP — 접속기측(MCPManager·설정·광고·mcp_call) | ✅ 코드 완료 (배포/검증 중) |
 | 4a | Local MCP — 서버측 MVP(local_mcp_list/call) | ✅ 코드 완료 (배포/검증 중) |
 | 4b | Local MCP — lmcp__ 1급 도구 승격(D2 검증 후) | ⏭ 보류(MVP 디스패처로 충분) |
@@ -54,6 +54,19 @@
 - 검증: desktop typecheck+build, frontend tsc 통과. 서버 도구목록/왕복은 배포 후 검증.
 - **아키텍처**: 로컬 MCP 설정은 접속기에만 저장, 서버엔 도구목록만 live 전달(프라이버시). 서버 in-proc MCP와
   구분(그건 서버측/원격, 이건 로컬 전용).
+
+## Phase 2 — 진짜 비전 컴퓨터 제어 (connector v0.12.1)
+모델이 화면을 **직접 보고** 좌표로 클릭. 조사로 확인: claude_code_cli는 MCP 이미지 콘텐츠를 모델
+비전에 전달함(claude-code-guide). 단 Geny의 mcp__geny__ 브리지가 text-only라 그걸 바꿈.
+- **서버**: `mcp_bridge_controller._to_mcp_content` — ToolResult.content가 image 블록 리스트면 MCP
+  image part로 통과(그 외엔 기존 text). `desktop_screenshot`(full_res 캡처→이미지 반환, 캡셔닝 아님) +
+  `desktop_scroll` 툴. vtuber.md에 "스크린샷 보고→그 이미지 픽셀좌표로 클릭" 루프 지침.
+- **접속기**: grabFrame `fullRes`(다운스케일 스킵, 네이티브 해상도 → 이미지px=화면px) + width/height 반환,
+  captureScreen full_res는 항상 프레시 캡처, `scroll` capability(nut.js mouse.scroll) + preload/IPC.
+- **좌표 모델**: full_res 캡처라 이미지 픽셀=화면 물리 픽셀=nut.js 클릭좌표(주 모니터 100% 기준 1:1).
+  멀티모니터/DPI스케일은 후속 정밀화 대상.
+- **주의**: desktop_screenshot 이미지 반환은 claude_code_cli 최적(브리지 경유). 직결 anthropic-api는
+  desktop_glance(캡션) 권장.
 
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.

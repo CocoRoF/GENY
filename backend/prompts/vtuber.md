@@ -23,9 +23,14 @@ its raw output.
 
 ## Controlling the User's Computer
 When the user asks you to act ON THEIR computer — open an app/URL, type, press keys,
-click, or look at what's on their screen — use the `desktop_*` tools (desktop_open_app,
-desktop_type, desktop_key, desktop_click, desktop_glance, desktop_window_list). These
-run on the user's REAL machine through the desktop connector bound to this session.
+click, scroll, or look at what's on their screen — use the `desktop_*` tools
+(desktop_open_app, desktop_type, desktop_key, desktop_click, desktop_scroll,
+desktop_screenshot, desktop_glance, desktop_window_list). These run on the user's REAL
+machine through the desktop connector bound to this session.
+- To click something, FIRST call `desktop_screenshot` to SEE the screen, then call
+  `desktop_click` with the pixel coordinates AS SEEN IN THAT IMAGE (top-left is 0,0).
+  Take a fresh screenshot after actions that change the screen. `desktop_glance` is a
+  lighter text-only description when you don't need to click.
 - Do this YOURSELF — don't hand desktop control to the sub-worker; the connector is
   tied to your session.
 - NEVER use `Bash`/shell to control the desktop: that runs in a server-side sandbox,

@@ -125,6 +125,53 @@ class DesktopGlanceTool(ConnectorCapabilityTool):
         return ToolResult(content=f"[desktop glance — {label}] (no caption available; vision {source})")
 
 
+class DesktopScreenshotTool(ConnectorCapabilityTool):
+    """Capture the user's screen and return the IMAGE for the model to SEE
+    (vision) — unlike desktop_glance which returns a text caption. The connector
+    captures at native resolution (``full_res``) so the image's pixel coordinates
+    match the screen, letting desktop_click target what the model sees.
+
+    Requires a vision-capable path: on claude_code_cli the mcp__geny__ bridge
+    forwards the image content part to the model. Returns image content blocks
+    (see mcp_bridge_controller._to_mcp_content)."""
+
+    async def execute(self, input: Dict[str, Any], context: ToolContext) -> ToolResult:
+        reg = get_connector_registry()
+        conn = reg.get(context.session_id)
+        if conn is None:
+            return ToolResult(content="connector offline — no desktop session is connected", is_error=True)
+        if "screen_capture" not in conn.accepted_capabilities:
+            return ToolResult(content="screen capture is not available on this connector", is_error=True)
+        args: Dict[str, Any] = {"full_res": True}
+        if input.get("source_id"):
+            args["source_id"] = input["source_id"]
+        try:
+            payload = await conn.capability_call("screen_capture", args, "agent screenshot", timeout=30.0)
+        except Exception as exc:
+            return ToolResult(content=f"connector transport error: {exc}", is_error=True)
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            msg = (payload or {}).get("error") or ("denied by the user" if (payload or {}).get("denied") else "capture failed")
+            return ToolResult(content=str(msg), is_error=True)
+        result = payload.get("result") or {}
+        b64 = result.get("image_b64")
+        if not b64:
+            return ToolResult(content="connector returned no image", is_error=True)
+        mime = result.get("mime", "image/jpeg")
+        w, h = result.get("width"), result.get("height")
+        label = result.get("source_name") or "screen"
+        data = b64.split(",", 1)[-1] if isinstance(b64, str) and b64.startswith("data:") else b64
+        dims = f"{w}×{h}" if w and h else "the shown size"
+        note = (
+            f"[screenshot — {label}, {dims} px] This is the user's primary screen right now. "
+            "To click something, call desktop_click with the pixel coordinates AS SEEN IN THIS IMAGE "
+            "(top-left is 0,0)."
+        )
+        return ToolResult(content=[
+            {"type": "text", "text": note},
+            {"type": "image", "data": data, "mime_type": mime},
+        ])
+
+
 def _build_tools() -> Dict[str, ConnectorCapabilityTool]:
     """The capability tools advertised to sessions. ``manifest.tools.external``
     selects which a given session actually exposes."""
@@ -164,6 +211,23 @@ def _build_tools() -> Dict[str, ConnectorCapabilityTool]:
             read_only=True,
             reason="agent enumerates windows",
             timeout=10.0,
+        ),
+        "desktop_screenshot": DesktopScreenshotTool(
+            name="desktop_screenshot",
+            description=(
+                "Take a screenshot of the user's screen and SEE it (the image is returned to you). "
+                "Use this to look at the screen before clicking — read what's shown and pick pixel "
+                "coordinates for desktop_click. Prefer this over desktop_glance when you need to act."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"source_id": {"type": "string", "description": "Optional capture source id; defaults to the primary screen."}},
+                "additionalProperties": False,
+            },
+            capability="screen_capture",
+            read_only=True,
+            reason="agent screenshot",
+            timeout=30.0,
         ),
         # ── Phase 6: guarded actuation (destructive → ASK/HITL + connector master switch) ──
         "desktop_open_app": ConnectorCapabilityTool(
@@ -244,6 +308,21 @@ def _build_tools() -> Dict[str, ConnectorCapabilityTool]:
             destructive=True,
             reason="agent clicks on the user's machine",
             timeout=15.0,
+        ),
+        "desktop_scroll": ConnectorCapabilityTool(
+            name="desktop_scroll",
+            description="Scroll the mouse wheel at the current cursor position. Positive `amount` scrolls DOWN, negative UP (in wheel steps).",
+            input_schema={
+                "type": "object",
+                "properties": {"amount": {"type": "integer", "description": "wheel steps; positive = down, negative = up"}},
+                "required": ["amount"],
+                "additionalProperties": False,
+            },
+            capability="scroll",
+            read_only=False,
+            destructive=True,
+            reason="agent scrolls the user's screen",
+            timeout=10.0,
         ),
         # ── Local MCP proxy (Phase 4): the connector hosts MCP clients to the
         #    user's LOCAL MCP servers; these two tools discover + call them. ──

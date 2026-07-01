@@ -72,6 +72,7 @@ declare global {
         type(text: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
         key(keys: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
         click(x: number, y: number, button?: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
+        scroll(amount: number): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
       }
       /** Local MCP proxy (Phase 3) — present only in the desktop connector. */
       mcp?: {

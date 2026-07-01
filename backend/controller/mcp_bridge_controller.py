@@ -289,8 +289,35 @@ async def _execute_tool(
     else:
         ctx = ToolContext(session_id=session_id)
     result = await tool.execute(call_input, ctx)
+    return {"content": _to_mcp_content(result.content), "isError": bool(result.is_error)}
 
-    content = result.content
+
+def _to_mcp_content(content: Any) -> list:
+    """Serialize a ToolResult's content into MCP content parts.
+
+    A tool that wants the model to SEE an image (e.g. desktop_screenshot for
+    computer use) returns ``content`` as a list of blocks, each a dict with
+    ``type`` in {"text", "image"} — an image block carries ``data`` (base64) and
+    ``mime_type``. Those pass through as MCP image parts (Claude Code forwards
+    image parts to the model's vision). Everything else becomes a single text
+    part exactly as before (backward compatible)."""
+    if (
+        isinstance(content, list)
+        and content
+        and all(isinstance(b, dict) and b.get("type") in ("text", "image") for b in content)
+    ):
+        parts: list = []
+        for b in content:
+            if b.get("type") == "image":
+                data = b.get("data") or ""
+                if isinstance(data, str) and data.startswith("data:"):
+                    data = data.split(",", 1)[-1]  # tolerate a data: URL prefix
+                parts.append(
+                    {"type": "image", "data": data, "mimeType": b.get("mime_type") or b.get("mimeType") or "image/png"}
+                )
+            else:
+                parts.append({"type": "text", "text": str(b.get("text", ""))})
+        return parts
     if isinstance(content, str):
         text = content
     else:
@@ -298,7 +325,7 @@ async def _execute_tool(
             text = json.dumps(content, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             text = str(content)
-    return {"content": [{"type": "text", "text": text}], "isError": bool(result.is_error)}
+    return [{"type": "text", "text": text}]
 
 
 # ─── RPC dispatcher ─────────────────────────────────────────────
