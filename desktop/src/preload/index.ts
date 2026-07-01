@@ -74,6 +74,11 @@ export interface ConnectorBridge {
     openExternal(url: string): void
     /** Reload only the chat/control panel (e.g. after a theme change). */
     reloadPanel(): void
+    /** Reset every window's position/size + the avatar view to defaults. */
+    resetPositions(): void
+    /** Overlay page only: fired when the user resets positions — clear the saved
+     *  pan/zoom + reload so the avatar returns to its default framing. */
+    onResetView(cb: () => void): () => void
   }
 
   /** Global hotkeys (push-to-talk + quick-chat). */
@@ -177,6 +182,12 @@ const api: ConnectorBridge = {
     restart: () => ipcRenderer.send('app:restart'),
     openExternal: (url) => ipcRenderer.send('app:open-external', url),
     reloadPanel: () => ipcRenderer.send('app:reload-control'),
+    resetPositions: () => ipcRenderer.send('windows:reset-positions'),
+    onResetView: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('overlay:reset-view', h)
+      return () => ipcRenderer.removeListener('overlay:reset-view', h)
+    },
   },
   updater: {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),

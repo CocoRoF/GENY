@@ -148,6 +148,7 @@ export function ControlApp() {
   const [pttMsg, setPttMsg] = useState('')
   const [quickChatHotkey, setQuickChatHotkey] = useState('CommandOrControl+Shift+Enter')
   const [quickChatMsg, setQuickChatMsg] = useState('')
+  const [resetDone, setResetDone] = useState(false)
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState('')
   const [theme, setThemeState] = useState<ThemeMode>('system')
@@ -537,6 +538,27 @@ export function ControlApp() {
               <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => window.connector?.updater.check()}>
                 {I.refresh} 지금 업데이트 확인
               </button>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.monitor} 창 · 아바타 위치</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>
+                아바타·채팅·설정 창의 위치/크기와 아바타 확대·이동을 기본값으로 되돌립니다.
+                멀티모니터나 배율(100%/150%) 변경으로 창이 화면 밖으로 나가거나 깨졌을 때 사용하세요.
+              </p>
+              <button
+                className="gy-btn gy-btn--ghost gy-btn--block gy-btn--sm"
+                onClick={() => {
+                  window.connector?.windowControl.resetPositions?.()
+                  setResetDone(true)
+                  setTimeout(() => setResetDone(false), 2200)
+                }}
+              >
+                {I.refresh} 창 · 아바타 위치 초기화
+              </button>
+              {resetDone && (
+                <p className="gy-hint" style={{ margin: '8px 0 0' }}>✓ 기본 위치로 되돌렸습니다</p>
+              )}
             </section>
 
             <section className="gy-card">

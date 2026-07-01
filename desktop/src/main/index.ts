@@ -126,17 +126,27 @@ function restoreWinBounds(saved: WinBounds | undefined, defaults: WinBounds): Wi
   return { x, y, width, height }
 }
 
+// While a monitor DPI change is settling, Windows RESCALES the window (WM_DPICHANGED)
+// and getBounds() reports transient/rescaled values — persisting those is exactly
+// how the position ends up "wrong" after a 150%↔100% move. Suppress saves until
+// this timestamp (set on display-metrics-changed) so we only persist SETTLED bounds.
+let dpiSettleUntil = 0
+
 // Persist a window's geometry on move/resize (debounced). Skips minimized /
-// maximized / fullscreen states — those aren't the geometry we want to restore.
+// maximized / fullscreen states, and waits out an in-flight DPI transition so the
+// SETTLED bounds are saved, not the mid-rescale ones.
 function attachBoundsPersistence(win: BrowserWindow, key: 'overlay' | 'control' | 'settings'): void {
   let timer: ReturnType<typeof setTimeout> | null = null
+  const run = () => {
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return
+    const wait = dpiSettleUntil - Date.now()
+    if (wait > 0) { timer = setTimeout(run, wait + 100); return } // let the DPI rescale finish first
+    const b = win.getBounds()
+    saveConfig({ [key]: { x: b.x, y: b.y, width: b.width, height: b.height } } as Partial<ConnectorConfig>)
+  }
   const save = () => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return
-      const b = win.getBounds()
-      saveConfig({ [key]: { x: b.x, y: b.y, width: b.width, height: b.height } } as Partial<ConnectorConfig>)
-    }, 400)
+    timer = setTimeout(run, 450)
   }
   win.on('moved', save)
   win.on('resized', save)
@@ -163,6 +173,30 @@ function ensureWindowsOnScreen(): void {
     if (isVisibleOnSomeDisplay(b)) continue
     win.setBounds(restoreWinBounds(b, b))
   }
+}
+
+// Reset every window to its default position/size on the primary display, clear
+// the remembered geometry, and reset the avatar's in-canvas pan/zoom. The escape
+// hatch when a multi-monitor / DPI mess leaves things off-screen or broken.
+function resetWindowPositions(): void {
+  saveConfig({ overlay: undefined, control: undefined, settings: undefined, quickChatBar: undefined } as Partial<ConnectorConfig>)
+  const wa = screen.getPrimaryDisplay().workArea
+  const centered = (w: number, h: number) => ({
+    x: Math.round(wa.x + (wa.width - w) / 2),
+    y: Math.round(wa.y + (wa.height - h) / 2),
+    width: w,
+    height: h,
+  })
+  if (overlay && !overlay.isDestroyed()) {
+    const w = 420
+    const h = Math.round(wa.height * 0.45)
+    overlay.setBounds({ x: wa.x + wa.width - w - 24, y: wa.y + wa.height - h, width: w, height: h })
+    overlay.show()
+    overlay.webContents.send('overlay:reset-view') // reset avatar pan/zoom (localStorage view)
+  }
+  if (control && !control.isDestroyed()) control.setBounds(centered(640, 760))
+  if (settings && !settings.isDestroyed()) settings.setBounds(centered(640, 720))
+  // quick-chat re-centers on its next summon now that quickChatBar is cleared.
 }
 
 // ── overlay window: the floating avatar ─────────────────────────────────────
@@ -910,6 +944,9 @@ function registerIpc(): void {
   // Open the settings window (from the panel's gear button or app menu).
   ipcMain.on('settings:open', () => showSettings())
 
+  // Reset all window positions/sizes + the avatar view (settings → 위치 초기화).
+  ipcMain.on('windows:reset-positions', () => resetWindowPositions())
+
   // App version (settings window "앱" tab).
   ipcMain.handle('app:version', () => app.getVersion())
 
@@ -1179,8 +1216,11 @@ app.whenReady().then(() => {
   // (so windows are never lost on the disconnected monitor). Debounced.
   let displayTimer: ReturnType<typeof setTimeout> | null = null
   const onDisplayChange = () => {
+    // Mark a DPI-settle window so bounds saves hold off on transient rescale
+    // values (see attachBoundsPersistence), then rescue off-screen windows.
+    dpiSettleUntil = Date.now() + 1800
     if (displayTimer) clearTimeout(displayTimer)
-    displayTimer = setTimeout(ensureWindowsOnScreen, 600)
+    displayTimer = setTimeout(ensureWindowsOnScreen, 900)
   }
   screen.on('display-removed', onDisplayChange)
   screen.on('display-added', onDisplayChange)
