@@ -19,7 +19,7 @@ import { openConnectorBridgeWs } from '@/lib/api';
 import { grabCurrentScreenRaw } from '@/lib/screenFrameAccess';
 
 const CAPABILITIES = [
-  'ping', 'window_list', 'screen_capture', 'open_app', 'clipboard_write', 'type', 'key', 'click',
+  'ping', 'window_list', 'screen_capture', 'open_app', 'clipboard_write', 'type', 'key', 'click', 'scroll',
   // Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
   // local servers; the agent lists + calls them through these two capabilities.
   'mcp_list', 'mcp_call',
@@ -33,7 +33,10 @@ const CAP_QUALITY = 0.85;
 // Capture a single frame of a desktop source via Electron's desktop getUserMedia.
 // Used (a) by the desktop_glance agent tool and (b) as the fallback when no live
 // screen-observation stream is open. Opens a one-shot stream, grabs, releases.
-async function grabFrame(sourceId?: string): Promise<{ image_b64: string; mime: string; source_name: string }> {
+async function grabFrame(
+  sourceId?: string,
+  fullRes?: boolean,
+): Promise<{ image_b64: string; mime: string; source_name: string; width: number; height: number }> {
   const conn = window.connector!;
   const sources = await conn.capture.listSources();
   const src =
@@ -41,12 +44,17 @@ async function grabFrame(sourceId?: string): Promise<{ image_b64: string; mime: 
     sources.find((s) => s.id.startsWith('screen:')) ||
     sources[0];
   if (!src) throw new Error('no capture source available (capture may be paused)');
+  // full_res (desktop_screenshot for computer use): capture at native resolution
+  // so the image's pixel coords match the screen (desktop_click targets them).
+  // Otherwise cap at 1080p + downscale to the observation size (glance/caption).
+  const maxW = fullRes ? 3840 : 1920;
+  const maxH = fullRes ? 2160 : 1080;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     // Electron desktop-capture constraint (legacy mandatory form).
     video: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: 1920, maxHeight: 1080 },
+      mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: maxW, maxHeight: maxH },
     } as unknown as MediaTrackConstraints,
   });
   try {
@@ -56,12 +64,18 @@ async function grabFrame(sourceId?: string): Promise<{ image_b64: string; mime: 
     await new Promise((r) => setTimeout(r, 180)); // let a frame paint
     const vw = video.videoWidth || 1280;
     const vh = video.videoHeight || 720;
-    const scale = Math.min(CAP_W / vw, CAP_H / vh, 1);
+    const scale = fullRes ? 1 : Math.min(CAP_W / vw, CAP_H / vh, 1);
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(vw * scale);
     canvas.height = Math.round(vh * scale);
     canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return { image_b64: canvas.toDataURL('image/jpeg', CAP_QUALITY), mime: 'image/jpeg', source_name: src.name };
+    return {
+      image_b64: canvas.toDataURL('image/jpeg', CAP_QUALITY),
+      mime: 'image/jpeg',
+      source_name: src.name,
+      width: canvas.width,
+      height: canvas.height,
+    };
   } finally {
     stream.getTracks().forEach((t) => t.stop());
   }
@@ -79,7 +93,8 @@ async function grabFrame(sourceId?: string): Promise<{ image_b64: string; mime: 
 async function captureScreen(
   sourceId?: string,
   liveOnly?: boolean,
-): Promise<{ image_b64: string; mime: string; source_name: string }> {
+  fullRes?: boolean,
+): Promise<{ image_b64: string; mime: string; source_name: string; width?: number; height?: number }> {
   // liveOnly is the privacy gate: take the current frame from the open
   // observation stream, and REFUSE if it's gone — never open a fresh stream,
   // regardless of any source_id. Checked first so a source_id can't bypass it.
@@ -88,6 +103,10 @@ async function captureScreen(
     if (live) return { image_b64: live.data, mime: live.mime_type, source_name: 'screen (live)' };
     throw new Error('screen observation is not active');
   }
+  // full_res (computer-use screenshot) always takes a FRESH native-resolution
+  // frame — the live observation stream is downscaled, which would break the
+  // image↔screen coordinate mapping desktop_click relies on.
+  if (fullRes) return grabFrame(sourceId, true);
   if (!sourceId) {
     const live = await grabCurrentScreenRaw();
     if (live) return { image_b64: live.data, mime: live.mime_type, source_name: 'screen (live)' };
@@ -125,7 +144,7 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
             payload = { ok: true, result: await conn.capture.listSources() };
             break;
           case 'screen_capture':
-            payload = { ok: true, result: await captureScreen(a.source_id, a.live_only) };
+            payload = { ok: true, result: await captureScreen(a.source_id, a.live_only, a.full_res) };
             break;
           case 'open_app':
             payload = await conn.actuate.openApp(a.target);
@@ -141,6 +160,9 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
             break;
           case 'click':
             payload = await conn.actuate.click(a.x, a.y, a.button);
+            break;
+          case 'scroll':
+            payload = await conn.actuate.scroll(a.amount);
             break;
           case 'mcp_list':
             // Connect all enabled local MCP servers + return their tool catalogs.

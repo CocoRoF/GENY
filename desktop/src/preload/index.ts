@@ -179,6 +179,8 @@ export interface ConnectorBridge {
     type(text: string): Promise<ActuationResult>
     key(keys: string): Promise<ActuationResult>
     click(x: number, y: number, button?: string): Promise<ActuationResult>
+    /** Scroll the wheel: positive = down, negative = up (wheel steps). */
+    scroll(amount: number): Promise<ActuationResult>
   }
 
   /** Local MCP proxy (Phase 3) — hosts MCP clients to the user's local servers. */
@@ -261,6 +263,7 @@ const api: ConnectorBridge = {
     type: (text) => ipcRenderer.invoke('actuate:type', text),
     key: (keys) => ipcRenderer.invoke('actuate:key', keys),
     click: (x, y, button) => ipcRenderer.invoke('actuate:click', x, y, button),
+    scroll: (amount) => ipcRenderer.invoke('actuate:scroll', amount),
   },
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:list-servers'),

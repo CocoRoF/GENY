@@ -1227,6 +1227,14 @@ function registerIpc(): void {
       return `clicked (${x},${y})`
     }),
   )
+  ipcMain.handle('actuate:scroll', (_e, amount: number) =>
+    runActuation('input', '스크롤', `${amount > 0 ? '아래' : '위'} ${Math.abs(amount)}`, async () => {
+      const nut = await loadNut()
+      if (amount >= 0) await nut.mouse.scrollDown(amount)
+      else await nut.mouse.scrollUp(-amount)
+      return `scrolled ${amount}`
+    }),
+  )
 
   // ── Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
   //    local MCP servers; the renderer bridge + server reach them via these. ──
