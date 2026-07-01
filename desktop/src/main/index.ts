@@ -68,11 +68,16 @@ interface ConnectorConfig {
   automationEnabled?: boolean
   /** Which session the floating overlay renders (chosen in the control panel). */
   overlaySession?: string
-  overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
+  overlay?: WinBounds & { displayId?: number }
+  /** Remembered window geometry (position + size) — restored across restarts,
+   *  multi-monitor aware (see restoreWinBounds). */
+  control?: WinBounds
+  settings?: WinBounds
   /** Avatar capability tuning (set in the 음성/앱 settings tabs, applied live to
    *  the overlay's TTS/STT/screen drivers via the config:changed broadcast). */
   overlayTuning?: OverlayTuning
 }
+interface WinBounds { x: number; y: number; width: number; height: number }
 export interface OverlayTuning {
   ttsVolume?: number
   sttSensitivity?: number
@@ -105,22 +110,80 @@ function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
   return next
 }
 
+// ── window geometry persistence (multi-monitor aware) ───────────────────────
+// Resolve saved bounds onto a CONNECTED display. getDisplayMatching returns the
+// display the saved rect overlaps most (else the nearest), so a window saved on a
+// secondary monitor restores THERE — not snapped back to the primary — and a
+// window whose monitor was unplugged lands visibly on the nearest one instead of
+// off-screen. The rect is clamped to fit that display's work area.
+function restoreWinBounds(saved: WinBounds | undefined, defaults: WinBounds): WinBounds {
+  if (!saved || ![saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) return defaults
+  const wa = screen.getDisplayMatching(saved).workArea
+  const width = Math.max(200, Math.min(Math.round(saved.width), wa.width))
+  const height = Math.max(150, Math.min(Math.round(saved.height), wa.height))
+  const x = Math.round(Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - width))
+  const y = Math.round(Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - height))
+  return { x, y, width, height }
+}
+
+// Persist a window's geometry on move/resize (debounced). Skips minimized /
+// maximized / fullscreen states — those aren't the geometry we want to restore.
+function attachBoundsPersistence(win: BrowserWindow, key: 'overlay' | 'control' | 'settings'): void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const save = () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return
+      const b = win.getBounds()
+      saveConfig({ [key]: { x: b.x, y: b.y, width: b.width, height: b.height } } as Partial<ConnectorConfig>)
+    }, 400)
+  }
+  win.on('moved', save)
+  win.on('resized', save)
+  win.on('closed', () => { if (timer) clearTimeout(timer) })
+}
+
+// Any overlap with a work area = still (at least partly) visible.
+function isVisibleOnSomeDisplay(b: WinBounds): boolean {
+  return screen.getAllDisplays().some((d) => {
+    const wa = d.workArea
+    const ix = Math.min(b.x + b.width, wa.x + wa.width) - Math.max(b.x, wa.x)
+    const iy = Math.min(b.y + b.height, wa.y + wa.height) - Math.max(b.y, wa.y)
+    return ix > 0 && iy > 0
+  })
+}
+
+// When a monitor is unplugged / rearranged, a window that was on it can end up
+// entirely off-screen (invisible, "lost"). Pull only those windows back onto the
+// nearest display — leave still-visible windows exactly where the user put them.
+function ensureWindowsOnScreen(): void {
+  for (const win of [overlay, control, settings, quickchat]) {
+    if (!win || win.isDestroyed()) continue
+    const b = win.getBounds()
+    if (isVisibleOnSomeDisplay(b)) continue
+    win.setBounds(restoreWinBounds(b, b))
+  }
+}
+
 // ── overlay window: the floating avatar ─────────────────────────────────────
 function createOverlay(): void {
-  const primary = screen.getPrimaryDisplay()
-  const wa = primary.workArea
-  const cfg = loadConfig()
-  // Clamp the restored size to the work area — self-heals a size that drifted
-  // huge from an earlier multi-DPI move bug (so it can't relaunch oversized).
-  const width = Math.min(cfg.overlay?.width ?? 420, wa.width)
-  const height = Math.min(cfg.overlay?.height ?? Math.round(wa.height * 0.45), wa.height)
+  const wa = screen.getPrimaryDisplay().workArea
+  const defW = 420
+  const defH = Math.round(wa.height * 0.45)
+  // Restore the remembered geometry onto whichever monitor it was on (multi-
+  // monitor aware); default to the bottom-right of the primary work area.
+  const b = restoreWinBounds(loadConfig().overlay, {
+    width: defW,
+    height: defH,
+    x: wa.x + wa.width - defW - 24,
+    y: wa.y + wa.height - defH,
+  })
 
   overlay = new BrowserWindow({
-    width,
-    height,
-    // Anchor at the bottom of the work area by default (feet at the taskbar edge).
-    x: cfg.overlay?.x ?? wa.x + wa.width - width - 24,
-    y: cfg.overlay?.y ?? wa.y + wa.height - height,
+    width: b.width,
+    height: b.height,
+    x: b.x,
+    y: b.y,
     transparent: true,
     frame: false,
     resizable: true,
@@ -155,26 +218,27 @@ function createOverlay(): void {
   // Content depends on login state: the remote transparent /overlay avatar page
   // once a token exists, otherwise a local "log in first" placeholder.
   attachContentResilience(overlay, () => void applyOverlayContent())
+  attachBoundsPersistence(overlay, 'overlay')
   applyOverlayContent()
 
-  overlay.on('moved', persistOverlayBounds)
-  overlay.on('resized', persistOverlayBounds)
   overlay.on('closed', () => {
     overlay = null
   })
 }
 
-function persistOverlayBounds(): void {
-  if (!overlay) return
-  const b = overlay.getBounds()
-  saveConfig({ overlay: { x: b.x, y: b.y, width: b.width, height: b.height } })
-}
-
 // ── control window: chat / settings / login (hidden until toggled) ──────────
 function createControl(): void {
+  const wa = screen.getPrimaryDisplay().workArea
+  const b = restoreWinBounds(loadConfig().control, {
+    width: 640, height: 760,
+    x: Math.round(wa.x + (wa.width - 640) / 2),
+    y: Math.round(wa.y + (wa.height - 760) / 2),
+  })
   control = new BrowserWindow({
-    width: 640,
-    height: 760,
+    width: b.width,
+    height: b.height,
+    x: b.x,
+    y: b.y,
     minWidth: 460,
     minHeight: 560,
     show: false,
@@ -190,6 +254,7 @@ function createControl(): void {
     return { action: 'deny' }
   })
   attachContentResilience(control, () => void applyControlContent())
+  attachBoundsPersistence(control, 'control')
   applyControlContent()
   control.on('close', (e) => {
     // Hide instead of destroy so the single renderer process persists.
@@ -220,9 +285,17 @@ async function applyControlContent(): Promise<void> {
 // ── settings window: server URL / account / auto-update (local, always open) ─
 let settings: BrowserWindow | null = null
 function createSettings(): void {
+  const wa = screen.getPrimaryDisplay().workArea
+  const b = restoreWinBounds(loadConfig().settings, {
+    width: 640, height: 720,
+    x: Math.round(wa.x + (wa.width - 640) / 2),
+    y: Math.round(wa.y + (wa.height - 720) / 2),
+  })
   settings = new BrowserWindow({
-    width: 640,
-    height: 720,
+    width: b.width,
+    height: b.height,
+    x: b.x,
+    y: b.y,
     minWidth: 560,
     minHeight: 600,
     show: false,
@@ -234,6 +307,7 @@ function createSettings(): void {
     },
   })
   attachContentResilience(settings, () => settings && loadRoute(settings, 'settings'))
+  attachBoundsPersistence(settings, 'settings')
   loadRoute(settings, 'settings')
   settings.on('close', (e) => {
     if (!appQuitting) {
@@ -363,12 +437,11 @@ function positionQuickChat(): void {
   suppressQuickChatPosSave = true
   const saved = loadConfig().quickChatBar
   if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-    const disp = screen.getDisplayNearestPoint({ x: saved.x, y: saved.y })
-    const wa = disp.workArea
-    // Keep the whole bar on-screen (guard against a closed/moved monitor).
-    const x = Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - QUICKCHAT_W)
-    const y = Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - QUICKCHAT_H)
-    quickchat.setBounds({ x: Math.round(x), y: Math.round(y), width: QUICKCHAT_W, height: QUICKCHAT_H })
+    // Multi-monitor aware: restore onto whichever display the bar was on, clamped
+    // to fit (guards a closed/moved monitor). Size is fixed (QUICKCHAT_W/H).
+    const rect = { x: saved.x, y: saved.y, width: QUICKCHAT_W, height: QUICKCHAT_H }
+    const b = restoreWinBounds(rect, rect)
+    quickchat.setBounds({ x: b.x, y: b.y, width: QUICKCHAT_W, height: QUICKCHAT_H })
   } else {
     const pt = screen.getCursorScreenPoint()
     const wa = screen.getDisplayNearestPoint(pt).workArea
@@ -1101,6 +1174,17 @@ app.whenReady().then(() => {
       void applyControlContent()
     }, 1500)
   })
+
+  // Monitor plug/unplug/rearrange → rescue any window that ended up off-screen
+  // (so windows are never lost on the disconnected monitor). Debounced.
+  let displayTimer: ReturnType<typeof setTimeout> | null = null
+  const onDisplayChange = () => {
+    if (displayTimer) clearTimeout(displayTimer)
+    displayTimer = setTimeout(ensureWindowsOnScreen, 600)
+  }
+  screen.on('display-removed', onDisplayChange)
+  screen.on('display-added', onDisplayChange)
+  screen.on('display-metrics-changed', onDisplayChange)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay()
