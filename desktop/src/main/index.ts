@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut,
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
+import { getMcpManager, type MCPServerConfig } from './mcp-manager'
 
 // Tray icon (32px), embedded so it works regardless of packaging layout.
 // Generated from img/Geny_Charactor_small.png (the Geny mascot).
@@ -87,6 +88,9 @@ interface ConnectorConfig {
   /** Avatar capability tuning (set in the 음성/앱 settings tabs, applied live to
    *  the overlay's TTS/STT/screen drivers via the config:changed broadcast). */
   overlayTuning?: OverlayTuning
+  /** Local MCP servers the connector hosts + proxies to the Geny agent
+   *  (local bridge Phase 3). Configured in settings → MCP. */
+  mcpServers?: MCPServerConfig[]
 }
 interface WinBounds { x: number; y: number; width: number; height: number }
 /** Consent posture for an actuation capability group. */
@@ -139,6 +143,10 @@ function loadConfig(): ConnectorConfig {
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
   const next = { ...loadConfig(), ...patch }
   writeFileSync(configPath(), JSON.stringify(next, null, 2))
+  // Reconcile the live MCP client set when the server list changed.
+  if ('mcpServers' in patch) {
+    try { getMcpManager().configure(next.mcpServers) } catch { /* SDK missing */ }
+  }
   return next
 }
 
@@ -826,6 +834,7 @@ app.on('before-quit', () => {
 })
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  try { void getMcpManager().closeAll() } catch { /* ignore */ }
   if (authRefreshTimer) clearInterval(authRefreshTimer)
 })
 
@@ -1219,6 +1228,26 @@ function registerIpc(): void {
     }),
   )
 
+  // ── Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
+  //    local MCP servers; the renderer bridge + server reach them via these. ──
+  ipcMain.handle('mcp:list-servers', () => loadConfig().mcpServers ?? [])
+  ipcMain.handle('mcp:advertise', async () => {
+    try { return await getMcpManager().advertise() } catch (e) { return [{ name: '', connected: false, error: String((e as Error).message), tools: [] }] }
+  })
+  ipcMain.handle('mcp:call-tool', async (_e, server: string, tool: string, args: unknown) => {
+    try { return { ok: true, result: await getMcpManager().callTool(server, tool, args) } }
+    catch (e) { return { ok: false, error: String((e as Error).message) } }
+  })
+  ipcMain.handle('mcp:test-server', async (_e, cfg: MCPServerConfig) => getMcpManager().test(cfg))
+  ipcMain.handle('mcp:add-server', (_e, cfg: MCPServerConfig) => {
+    const list = (loadConfig().mcpServers ?? []).filter((s) => s.name !== cfg.name)
+    return (saveConfig({ mcpServers: [...list, cfg] }).mcpServers) ?? []
+  })
+  ipcMain.handle('mcp:remove-server', (_e, name: string) => {
+    const list = (loadConfig().mcpServers ?? []).filter((s) => s.name !== name)
+    return (saveConfig({ mcpServers: list }).mcpServers) ?? []
+  })
+
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
     saveConfig({ overlaySession: sessionId })
@@ -1326,6 +1355,8 @@ app.whenReady().then(() => {
   })
 
   registerIpc()
+  // Load the user's local MCP servers into the manager (lazy-connects on use).
+  try { getMcpManager().configure(loadConfig().mcpServers) } catch { /* SDK missing */ }
   buildAppMenu()
   createOverlay()
   createControl()

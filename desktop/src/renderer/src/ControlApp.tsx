@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import genyIcon from './assets/geny_character.png'
-import type { OverlayTuning, ComputerUseConfig, ConsentMode } from '../../preload/index'
+import type { OverlayTuning, ComputerUseConfig, ConsentMode, MCPServerConfig } from '../../preload/index'
 
 // Defaults mirror the web store (useVTuberStore) so the sliders show sensible
 // positions before the user has changed anything.
@@ -32,7 +32,7 @@ type CaptureSource = { id: string; name: string; display_id: string }
 const TOKEN_KEY = 'geny_auth_token'
 
 type StatusKind = 'idle' | 'working' | 'ok' | 'err'
-type Tab = 'account' | 'voice' | 'control' | 'app'
+type Tab = 'account' | 'voice' | 'control' | 'mcp' | 'app'
 
 // ── inline icons — sized by CSS (.control-root svg{16px}); ALWAYS pass viewBox ──
 const Svg = (props: { children: ReactNode }) => (
@@ -52,6 +52,7 @@ const I = {
   sun: <Svg><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
   moon: <Svg><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></Svg>,
   monitor: <Svg><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></Svg>,
+  plug: <Svg><path d="M12 22v-5M9 8V2M15 8V2M6 8h12v4a6 6 0 0 1-12 0z" /></Svg>,
   chat: <Svg><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></Svg>,
 }
 
@@ -208,6 +209,34 @@ export function ControlApp() {
   // (a capability is on only when the master is on and it isn't explicitly off).
   const cuCap = (k: 'screen' | 'input' | 'apps' | 'clipboard') => cuOn && computerUse[k] !== false
 
+  // ── Local MCP servers (Phase 3) ──
+  const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([])
+  const [mcpForm, setMcpForm] = useState<MCPServerConfig>({ name: '', transport: 'stdio', command: '' })
+  const [mcpTest, setMcpTest] = useState<Record<string, string>>({})
+  useEffect(() => {
+    window.connector?.mcp?.listServers?.().then(setMcpServers).catch(() => setMcpServers([]))
+  }, [])
+  const addMcpServer = async () => {
+    const name = mcpForm.name.trim()
+    if (!name) return
+    const cfg: MCPServerConfig = { ...mcpForm, name, enabled: true }
+    const list = (await window.connector?.mcp?.addServer(cfg)) ?? []
+    setMcpServers(list)
+    setMcpForm({ name: '', transport: 'stdio', command: '' })
+  }
+  const removeMcpServer = async (name: string) => {
+    const list = (await window.connector?.mcp?.removeServer(name)) ?? []
+    setMcpServers(list)
+  }
+  const testMcpServer = async (cfg: MCPServerConfig) => {
+    setMcpTest((p) => ({ ...p, [cfg.name]: '테스트 중…' }))
+    const r = await window.connector?.mcp?.testServer(cfg)
+    setMcpTest((p) => ({
+      ...p,
+      [cfg.name]: r?.ok ? `연결됨 · 도구 ${r.tools?.length ?? 0}개` : `실패: ${r?.error ?? '알 수 없음'}`,
+    }))
+  }
+
   // Track the OS theme so 'system' resolves live.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -343,6 +372,9 @@ export function ControlApp() {
           </button>
           <button className={`gy-tab ${tab === 'control' ? 'is-active' : ''}`} onClick={() => setTab('control')}>
             {I.monitor} 제어
+          </button>
+          <button className={`gy-tab ${tab === 'mcp' ? 'is-active' : ''}`} onClick={() => setTab('mcp')}>
+            {I.plug} MCP
           </button>
           <button className={`gy-tab ${tab === 'app' ? 'is-active' : ''}`} onClick={() => setTab('app')}>
             {I.sliders} 앱
@@ -549,6 +581,77 @@ export function ControlApp() {
                   </p>
                 </>
               )}
+            </section>
+          </>
+        )}
+
+        {/* ─────────────── MCP (로컬 MCP 서버) ─────────────── */}
+        {tab === 'mcp' && (
+          <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.plug} 로컬 MCP 서버</div>
+              <p className="gy-hint" style={{ margin: '0 0 12px' }}>
+                내 컴퓨터에서 도는 MCP 서버를 등록하면, 이 접속기가 통로가 되어 서버의 Geny 에이전트가 그
+                도구를 사용할 수 있습니다(로컬 파일·앱·DB 등). 등록한 서버는 이 컴퓨터에만 저장되고, 서버에는
+                도구 목록만 전달됩니다.
+              </p>
+
+              {mcpServers.length === 0 && (
+                <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>등록된 MCP 서버가 없습니다.</p>
+              )}
+              {mcpServers.map((s) => (
+                <div key={s.name} className="gy-card" style={{ marginBottom: 8, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{s.name} <span className="gy-hint">· {s.transport}</span></div>
+                      <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.transport === 'stdio' ? s.command : s.url}
+                      </div>
+                      {mcpTest[s.name] && <div className="gy-hint" style={{ marginTop: 4 }}>{mcpTest[s.name]}</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => testMcpServer(s)}>테스트</button>
+                      <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={() => removeMcpServer(s.name)}>삭제</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.plug} 서버 추가</div>
+              <input
+                className="gy-input" placeholder="이름 (예: filesystem)" value={mcpForm.name}
+                onChange={(e) => setMcpForm((p) => ({ ...p, name: e.target.value }))}
+              />
+              <div style={{ height: 8 }} />
+              <div className="gy-tabs" role="tablist" style={{ margin: 0 }}>
+                {(['stdio', 'http'] as const).map((tr) => (
+                  <button key={tr} className={`gy-tab ${mcpForm.transport === tr ? 'is-active' : ''}`}
+                    onClick={() => setMcpForm((p) => ({ ...p, transport: tr }))}>{tr}</button>
+                ))}
+              </div>
+              <div style={{ height: 8 }} />
+              {mcpForm.transport === 'stdio' ? (
+                <input
+                  className="gy-input" placeholder="명령 (예: npx -y @modelcontextprotocol/server-filesystem /path)"
+                  value={mcpForm.command ?? ''}
+                  onChange={(e) => setMcpForm((p) => ({ ...p, command: e.target.value }))}
+                />
+              ) : (
+                <input
+                  className="gy-input" placeholder="URL (예: http://localhost:3000/mcp)"
+                  value={mcpForm.url ?? ''}
+                  onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
+                />
+              )}
+              <div style={{ height: 10 }} />
+              <button className="gy-btn gy-btn--primary" onClick={addMcpServer} disabled={!mcpForm.name.trim()}>추가</button>
+              <p className="gy-hint" style={{ margin: '10px 0 0' }}>
+                stdio는 로컬에서 명령으로 실행되는 MCP 서버, http는 이미 떠 있는 MCP 엔드포인트입니다. 추가 후
+                “테스트”로 연결과 도구 목록을 확인하세요. 에이전트는 <code>local_mcp_list</code>로 도구를 찾고
+                <code>local_mcp_call</code>로 호출합니다.
+              </p>
             </section>
           </>
         )}
