@@ -39,7 +39,14 @@ async function grabFrame(
 ): Promise<{ image_b64: string; mime: string; source_name: string; width: number; height: number }> {
   const conn = window.connector!;
   const sources = await conn.capture.listSources();
+  // full_res (computer use): capture the PRIMARY display, whose pixel space maps
+  // to nut.js mouse coords. Otherwise honor the requested source / first screen.
+  let primaryId: string | undefined;
+  if (fullRes) {
+    primaryId = await conn.capture.primaryDisplayId?.().catch(() => undefined);
+  }
   const src =
+    (fullRes && primaryId && sources.find((s) => s.display_id === primaryId)) ||
     (sourceId && sources.find((s) => s.id === sourceId)) ||
     sources.find((s) => s.id.startsWith('screen:')) ||
     sources[0];
@@ -69,6 +76,9 @@ async function grabFrame(
     canvas.width = Math.round(vw * scale);
     canvas.height = Math.round(vh * scale);
     canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Tell main the screenshot's pixel size so it can map the model's image-space
+    // click coordinates back to nut.js screen coordinates.
+    if (fullRes) conn.capture.noteCaptureDims?.(canvas.width, canvas.height);
     return {
       image_b64: canvas.toDataURL('image/jpeg', CAP_QUALITY),
       mime: 'image/jpeg',

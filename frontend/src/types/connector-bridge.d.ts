@@ -65,6 +65,8 @@ declare global {
       }
       capture: {
         listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>
+        primaryDisplayId?(): Promise<string>
+        noteCaptureDims?(w: number, h: number): void
       }
       actuate: {
         openApp(target: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>

@@ -68,6 +68,19 @@
 - **주의**: desktop_screenshot 이미지 반환은 claude_code_cli 최적(브리지 경유). 직결 anthropic-api는
   desktop_glance(캡션) 권장.
 
+## Phase 6 — 좌표 정밀화 + 멀티백엔드 이미지 (connector v0.12.2)
+2-agent 심층조사(nut.js 좌표계 + executor tool-result 이미지).
+**Task1 좌표**: nut.js 마우스=**물리픽셀·주모니터 원점**(screen.width/height=하드웨어 해상도). 현 단일모니터
+full_res는 이미 1:1(검증). 깨지는 케이스=①캡처소스가 주모니터 아님 ②이미지가 물리대비 capping. 수정:
+- desktop_screenshot이 **주 디스플레이 명시 캡처**(`capture.primaryDisplayId`로 소스 선택).
+- desktop_click을 **이미지→화면 비율변환**(`mapImageToScreen`=x·nut.screen.width/lastImgW). 어떤 DPI·스케일도
+  주모니터는 정확. 렌더러가 full_res 캡처 후 dims를 main에 note. 멀티모니터 secondary=nut.js 한계(best-effort).
+**Task2a 멀티백엔드(CLI+Anthropic)**: desktop_screenshot이 **canonical 이미지블록**
+`{type:image, source:{type:base64,media_type,data}}` 반환 — executor 메시지 이미지와 동일 shape라 **Anthropic
+API 네이티브 통과**(executor 무변경), CLI는 Geny 브리지 `_to_mcp_content`가 canonical→MCP image로. 두 shape 다 수용.
+**Task2b(대기)**: Gemini(functionResponse.inlineData)/OpenAI·vllm(tool role text-only→후속 user 메시지) 는
+executor translator(`_canonical.py`) 일반화 필요 = executor 릴리스 사이클. 다음 단계.
+
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.
 - 2026-07-01: **Phase 1 코드 완료** (connector v0.11.8 + 프론트/백엔드).
