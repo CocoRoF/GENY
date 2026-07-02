@@ -3222,6 +3222,26 @@ class AgentSession:
             # text-only fast path so we don't perturb existing
             # contracts when no attachments are sent.
             if attachments:
+                # workspace-canvas P2: persist this turn's uploads into the
+                # session files-workspace (workspace/uploads/) so they outlive
+                # the global upload store and stay tool-reachable in later
+                # turns, and REQUIRE the agent to process them this turn
+                # (uploaded-file must-use contract). Images stay vision blocks;
+                # the note only demands tool-processing for non-image files.
+                staged = self._stage_attachments_to_workspace(attachments)
+                non_image = [s for s in staged if not s["mime"].startswith("image/")]
+                if non_image:
+                    lines = "\n".join(
+                        f"- {s['name']} ({s['mime']}, {s['size']} bytes): {s['abs_path']}"
+                        for s in non_image
+                    )
+                    input_text = (input_text or "") + (
+                        "\n\n[attached files — saved to your session workspace]\n"
+                        f"{lines}\n"
+                        "You MUST open and process these file(s) in THIS turn using your "
+                        "tools (e.g. Read with the absolute path above). The files remain "
+                        "at the same paths for later turns."
+                    )
                 pipeline_input: Any = {
                     "text": input_text,
                     "attachments": list(attachments),
@@ -3233,6 +3253,72 @@ class AgentSession:
         finally:
             reset_mutation_buffer(token)
             reset_creature_role(role_token)
+
+    def _stage_attachments_to_workspace(
+        self, attachments: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Copy this turn's uploaded attachments into the session
+        files-workspace (``<storage>/workspace/uploads/``).
+
+        Part of the workspace-canvas P2 contract: the global upload store
+        (``/static/uploads``, content-addressed, not volume-backed) is not the
+        agent's space — the session keeps its own copy so the file stays
+        tool-reachable (Read/Glob) in this and later turns. Returns
+        ``[{name, mime, size, abs_path, rel_path}]`` for the staged files.
+        Best-effort per file; never raises.
+        """
+        staged: List[Dict[str, Any]] = []
+        if not self.storage_path:
+            return staged
+        try:
+            import base64
+            import shutil
+            from pathlib import Path as FilePath
+            from urllib.parse import unquote, urlparse
+
+            from service.executor.user_file_channel import _safe_filename
+
+            uploads_dir = FilePath(self.storage_path) / "workspace" / "uploads"
+            for att in attachments or []:
+                try:
+                    if not isinstance(att, dict):
+                        continue
+                    # Ambient screen frames are context, not user content.
+                    if att.get("source") == "screen_observation":
+                        continue
+                    name = _safe_filename(att.get("name") or "attachment")
+                    url = att.get("url") or ""
+                    src: Optional[FilePath] = None
+                    if url.startswith("file://"):
+                        src = FilePath(unquote(urlparse(url).path))
+                    dest = uploads_dir / name
+                    if src is not None and src.is_file():
+                        if not (dest.exists() and dest.stat().st_size == src.stat().st_size):
+                            uploads_dir.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src, dest)
+                    elif att.get("data"):
+                        raw = base64.b64decode(att["data"], validate=False)
+                        if not (dest.exists() and dest.stat().st_size == len(raw)):
+                            uploads_dir.mkdir(parents=True, exist_ok=True)
+                            dest.write_bytes(raw)
+                    else:
+                        continue
+                    staged.append({
+                        "name": name,
+                        "mime": att.get("mime_type") or "application/octet-stream",
+                        "size": dest.stat().st_size,
+                        "abs_path": str(dest),
+                        "rel_path": f"workspace/uploads/{name}",
+                    })
+                except Exception:  # noqa: BLE001 — one bad attachment ≠ broken turn
+                    logger.warning(
+                        "[%s] failed to stage attachment %r",
+                        self._session_id, att.get("name") if isinstance(att, dict) else att,
+                        exc_info=True,
+                    )
+        except Exception:  # noqa: BLE001
+            logger.warning("[%s] attachment staging unavailable", self._session_id, exc_info=True)
+        return staged
 
     async def _persist_state_safely(
         self, registry: Any, state: Any,
