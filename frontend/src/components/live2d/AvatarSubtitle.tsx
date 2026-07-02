@@ -53,8 +53,12 @@ export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: 
     prevRef.current = full;
   }, [full]);
 
-  // Persistent typewriter loop — advances `shown` toward the full length.
+  // Typewriter loop — advances `shown` toward the full length, then IDLES.
+  // Re-armed whenever `full` changes; it stops scheduling frames once the text is
+  // fully revealed (or when there's none), so it doesn't burn CPU at rest — a
+  // persistent every-frame rAF on an always-on-top overlay is pure waste.
   useEffect(() => {
+    if (!full) return;
     let raf = 0;
     let last = 0;
     const tick = (ts: number) => {
@@ -69,13 +73,15 @@ export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: 
         const cps = 1000 / Math.max(20, charMsRef.current);
         s = Math.min(target.length, s + cps * dt);
         if (Math.floor(s) !== Math.floor(shownRef.current)) setShown(Math.floor(s));
+        shownRef.current = s;
+        raf = requestAnimationFrame(tick); // keep going only while revealing
+      } else {
+        shownRef.current = s; // fully revealed → idle until `full` changes
       }
-      shownRef.current = s;
-      raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [full]);
 
   const revealed = full.slice(0, shown);
   const revealDone = shown >= full.length;
