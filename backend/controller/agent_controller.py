@@ -1082,6 +1082,26 @@ async def stop_execution(
 # ============================================================================
 
 
+def _resolve_storage_path(session_id: str) -> str:
+    """Session storage root for live OR dormant sessions.
+
+    Storage endpoints must keep working after a backend restart (lazy
+    restore leaves sessions dormant until touched) — the files are on
+    disk regardless of liveness, so fall back to the session store
+    record when no live agent exists. 404 only for unknown/deleted ids.
+    """
+    agent = agent_manager.get_agent(session_id)
+    storage_path = getattr(agent, "storage_path", None) if agent else None
+    if not storage_path:
+        record = get_session_store().get(session_id)
+        if not record or record.get("is_deleted"):
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        storage_path = record.get("storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=400, detail="Session storage_path not available")
+    return storage_path
+
+
 @router.get("/{session_id}/storage")
 async def list_storage_files(
     session_id: str = Path(..., description="Session ID"),
@@ -1089,17 +1109,11 @@ async def list_storage_files(
     auth: dict = Depends(require_auth),
 ):
     """
-    List session storage files.
+    List session storage files. Works for dormant sessions too.
     """
     from service.utils import file_storage as storage_utils
 
-    agent = agent_manager.get_agent(session_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
-
-    storage_path = agent.storage_path
-    if not storage_path:
-        raise HTTPException(status_code=400, detail="AgentSession storage_path not available")
+    storage_path = _resolve_storage_path(session_id)
 
     files_data = storage_utils.list_storage_files(
         storage_path, subpath=path, session_id=session_id
@@ -1133,16 +1147,7 @@ async def download_storage_file_raw(
 
     from starlette.responses import FileResponse
 
-    agent = agent_manager.get_agent(session_id)
-    storage_path: Optional[str] = getattr(agent, "storage_path", None) if agent else None
-    if not storage_path:
-        record = get_session_store().get(session_id)
-        if not record or record.get("is_deleted"):
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        storage_path = record.get("storage_path")
-    if not storage_path:
-        raise HTTPException(status_code=400, detail="Session storage_path not available")
-
+    storage_path = _resolve_storage_path(session_id)
     root = _FilePath(storage_path).resolve()
     target = (root / file_path).resolve()
     try:
@@ -1164,17 +1169,11 @@ async def read_storage_file(
     auth: dict = Depends(require_auth),
 ):
     """
-    Read storage file content.
+    Read storage file content. Works for dormant sessions too.
     """
     from service.utils import file_storage as storage_utils
 
-    agent = agent_manager.get_agent(session_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
-
-    storage_path = agent.storage_path
-    if not storage_path:
-        raise HTTPException(status_code=400, detail="AgentSession storage_path not available")
+    storage_path = _resolve_storage_path(session_id)
 
     file_content = storage_utils.read_storage_file(
         storage_path, file_path, encoding=encoding, session_id=session_id
