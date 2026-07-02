@@ -62,6 +62,8 @@ export interface MCPServerAdvert {
 export interface ConnectorConfig {
   serverUrl: string
   theme?: 'system' | 'dark' | 'light'
+  /** UI language for the settings window. Unset → resolved from the OS locale. */
+  lang?: 'ko' | 'en'
   overlay?: { x: number; y: number; width: number; height: number; displayId?: number }
   overlayTuning?: OverlayTuning
   computerUse?: ComputerUseConfig
@@ -75,6 +77,10 @@ export interface ConnectorBridge {
 
   /** Connector app version (package.json), for the settings window. */
   appVersion(): Promise<string>
+
+  /** OS-derived default UI language ('ko' if the OS locale starts with "ko",
+   *  else 'en'). The settings window uses this when config.lang is unset. */
+  appDefaultLang(): Promise<'ko' | 'en'>
 
   serverConfig: {
     get(): Promise<ConnectorConfig>
@@ -222,6 +228,7 @@ const api: ConnectorBridge = {
     : _wk === 'quickchat' ? 'quickchat'
     : 'overlay',
   appVersion: () => ipcRenderer.invoke('app:version'),
+  appDefaultLang: () => ipcRenderer.invoke('i18n:default-lang'),
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch),

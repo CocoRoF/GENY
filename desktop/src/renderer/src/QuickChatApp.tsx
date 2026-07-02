@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { makeT, type Lang } from './i18n'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quick-chat bar — the floating, Spotlight-style input summoned by the global
@@ -28,17 +29,22 @@ export function QuickChatApp() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState('')
   const [dark, setDark] = useState(true)
+  const [lang, setLang] = useState<Lang>('ko')
+  const t = makeT(lang)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const sentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Resolve the bar's theme from the connector config (falls back to OS).
+  // Resolve the bar's theme + language from the connector config (theme falls
+  // back to OS; language falls back to the OS-derived default from main).
   const resolveTheme = useCallback(() => {
     const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches
     window.connector?.serverConfig
       .get()
-      .then((c) => {
-        const t = c.theme ?? 'system'
-        setDark(t === 'system' ? sysDark : t === 'dark')
+      .then(async (c) => {
+        const mode = c.theme ?? 'system'
+        setDark(mode === 'system' ? sysDark : mode === 'dark')
+        const osLang = (await window.connector?.appDefaultLang?.().catch(() => 'ko' as Lang)) ?? 'ko'
+        setLang(c.lang ?? osLang)
       })
       .catch(() => setDark(sysDark))
   }, [])
@@ -99,10 +105,10 @@ export function QuickChatApp() {
       sentTimer.current = setTimeout(() => setPhase('idle'), 1400)
     } else {
       setPhase('error')
-      setError(r?.error || '전송 실패')
+      setError(r?.error || t('qc.sendFailed'))
       setTimeout(focusInput, 0)
     }
-  }, [text, phase, focusInput])
+  }, [text, phase, focusInput, t])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -131,13 +137,13 @@ export function QuickChatApp() {
             className="qc-input"
             value={text}
             rows={1}
-            placeholder="현재 VTuber에게 보낼 메시지…"
+            placeholder={t('qc.placeholder')}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             spellCheck={false}
             autoFocus
           />
-          <button className="qc-send" onClick={() => void submit()} disabled={!canSend} aria-label="전송">
+          <button className="qc-send" onClick={() => void submit()} disabled={!canSend} aria-label={t('qc.sendAria')}>
             {sendIcon}
           </button>
         </div>
@@ -145,12 +151,12 @@ export function QuickChatApp() {
           {phase === 'error' ? (
             <span className="qc-hint qc-err">⚠ {error}</span>
           ) : phase === 'sent' ? (
-            <span className="qc-hint qc-ok">✓ 전송됨 — VTuber가 답합니다</span>
+            <span className="qc-hint qc-ok">{t('qc.sent')}</span>
           ) : phase === 'sending' ? (
-            <span className="qc-hint">전송 중…</span>
+            <span className="qc-hint">{t('qc.sending')}</span>
           ) : (
             <span className="qc-hint">
-              <kbd>Enter</kbd> 전송 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 줄바꿈 · <kbd>Esc</kbd> 닫기
+              <kbd>Enter</kbd> {t('qc.footSend')} · <kbd>Shift</kbd>+<kbd>Enter</kbd> {t('qc.footNewline')} · <kbd>Esc</kbd> {t('qc.footClose')}
             </span>
           )}
         </div>

@@ -53,6 +53,9 @@ interface ConnectorConfig {
   serverUrl: string
   /** UI theme for the settings + chat windows. 'system' follows the OS. */
   theme?: 'system' | 'dark' | 'light'
+  /** UI language for the settings window + native chrome (tray/menu/dialogs).
+   *  Unset → resolved from the OS locale (see resolvedLang). */
+  lang?: 'ko' | 'en'
   /** Auto-update toggle (default true). When false, updates only notify. */
   autoUpdate?: boolean
   /** Global push-to-talk accelerator (Electron format). */
@@ -141,13 +144,95 @@ function loadConfig(): ConnectorConfig {
   }
 }
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
+  const prevLang = loadConfig().lang
   const next = { ...loadConfig(), ...patch }
   writeFileSync(configPath(), JSON.stringify(next, null, 2))
   // Reconcile the live MCP client set when the server list changed.
   if ('mcpServers' in patch) {
     try { getMcpManager().configure(next.mcpServers) } catch { /* SDK missing */ }
   }
+  // Re-localize the native chrome (tray + app menu) when the language changed —
+  // the renderer persists lang via config:set, so this catches it there too.
+  if ('lang' in patch && next.lang !== prevLang) {
+    try { rebuildTrayMenu() } catch { /* tray not yet created */ }
+    try { buildAppMenu() } catch { /* menu not yet built */ }
+  }
   return next
+}
+
+// ── native-chrome i18n (tray / app menu / actuation dialogs) ────────────────
+// The renderer settings UI has its own catalog (renderer/src/i18n.ts); this is
+// the small ko/en map for the strings shown by the OS chrome. resolvedLang()
+// reads config.lang, falling back to the OS locale (ko if it starts with "ko").
+type Lang = 'ko' | 'en'
+function osDefaultLang(): Lang {
+  return app.getLocale().toLowerCase().startsWith('ko') ? 'ko' : 'en'
+}
+function resolvedLang(): Lang {
+  return loadConfig().lang ?? osDefaultLang()
+}
+const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
+  // tray menu
+  'tray.openControl': { ko: '제어판 / 채팅 열기', en: 'Open control panel / chat' },
+  'tray.quickChat': { ko: '빠른 채팅 (VTuber에게 보내기)', en: 'Quick chat (send to VTuber)' },
+  'tray.openSettings': { ko: '설정 열기', en: 'Open settings' },
+  'tray.hideAvatar': { ko: '아바타 숨기기', en: 'Hide avatar' },
+  'tray.showAvatar': { ko: '아바타 보이기', en: 'Show avatar' },
+  'tray.allowComputerUse': { ko: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)', en: 'Allow Local Computer Use (screen · input — details in settings)' },
+  'tray.autoUpdate': { ko: '자동 업데이트', en: 'Auto-update' },
+  'tray.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
+  'tray.version': { ko: '버전 v{version}', en: 'Version v{version}' },
+  'tray.logout': { ko: '로그아웃', en: 'Sign out' },
+  'tray.restart': { ko: '재시작', en: 'Restart' },
+  'tray.quit': { ko: '종료', en: 'Quit' },
+  // app menu
+  'menu.settings': { ko: '설정', en: 'Settings' },
+  'menu.control': { ko: '제어판 / 채팅', en: 'Control panel / chat' },
+  'menu.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
+  'menu.restart': { ko: '재시작', en: 'Restart' },
+  'menu.logout': { ko: '로그아웃', en: 'Sign out' },
+  'menu.quit': { ko: '종료', en: 'Quit' },
+  'menu.edit': { ko: '편집', en: 'Edit' },
+  'menu.undo': { ko: '실행 취소', en: 'Undo' },
+  'menu.redo': { ko: '다시 실행', en: 'Redo' },
+  'menu.cut': { ko: '잘라내기', en: 'Cut' },
+  'menu.copy': { ko: '복사', en: 'Copy' },
+  'menu.paste': { ko: '붙여넣기', en: 'Paste' },
+  'menu.selectAll': { ko: '전체 선택', en: 'Select All' },
+  'menu.view': { ko: '보기', en: 'View' },
+  'menu.reload': { ko: '새로고침', en: 'Reload' },
+  'menu.devTools': { ko: '개발자 도구', en: 'Developer Tools' },
+  'menu.resetZoom': { ko: '기본 배율', en: 'Actual Size' },
+  'menu.zoomIn': { ko: '확대', en: 'Zoom In' },
+  'menu.zoomOut': { ko: '축소', en: 'Zoom Out' },
+  // actuation dialog
+  'act.allow': { ko: '허용', en: 'Allow' },
+  'act.allowSession': { ko: '이 세션 동안 허용', en: 'Allow for this session' },
+  'act.deny': { ko: '거부', en: 'Deny' },
+  'act.dialogTitle': { ko: 'Geny 데스크톱 제어', en: 'Geny Desktop Control' },
+  'act.dialogMessage': { ko: 'Geny 가 실행하려고 합니다: {label}', en: 'Geny wants to perform: {label}' },
+  'act.capOpenApp': { ko: '앱/링크 열기', en: 'Open app/link' },
+  'act.capType': { ko: '타이핑', en: 'Type' },
+  'act.capKey': { ko: '키 입력', en: 'Press keys' },
+  'act.capClick': { ko: '마우스 클릭', en: 'Mouse click' },
+  'act.capScroll': { ko: '스크롤', en: 'Scroll' },
+  'act.capClipboard': { ko: '클립보드 쓰기', en: 'Write clipboard' },
+  'act.detailTarget': { ko: '대상: {target}', en: 'Target: {target}' },
+  'act.scrollDown': { ko: '아래', en: 'down' },
+  'act.scrollUp': { ko: '위', en: 'up' },
+  'act.deniedByUser': { ko: '사용자가 거부함', en: 'Denied by the user' },
+  'act.capDisabled': { ko: '이 동작이 꺼져 있습니다 (설정 → 로컬 컴퓨터 제어)', en: 'This action is disabled (Settings → Local Computer Use)' },
+  // quick-chat delivery errors
+  'qc.emptyMessage': { ko: '빈 메시지', en: 'Empty message' },
+  'qc.loginRequired': { ko: '로그인이 필요합니다', en: 'Sign-in required' },
+  // window titles
+  'window.settingsTitle': { ko: 'Geny 설정', en: 'Geny Settings' },
+}
+function nt(key: string, vars?: Record<string, string | number>): string {
+  const entry = NATIVE_MESSAGES[key]
+  let s = entry ? entry[resolvedLang()] : key
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
+  return s
 }
 
 // ── window geometry persistence (multi-monitor aware) ───────────────────────
@@ -447,7 +532,7 @@ function createSettings(): void {
     minWidth: 560,
     minHeight: 600,
     show: false,
-    title: 'Geny 설정',
+    title: nt('window.settingsTitle'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -655,9 +740,9 @@ async function toggleQuickChat(): Promise<void> {
 // panel not ready, so the bar can surface a hint).
 async function deliverQuickChat(text: string): Promise<{ ok: boolean; error?: string }> {
   const body = (text ?? '').trim()
-  if (!body) return { ok: false, error: '빈 메시지' }
+  if (!body) return { ok: false, error: nt('qc.emptyMessage') }
   const token = await getStoredToken()
-  if (!token || !loadConfig().serverUrl) return { ok: false, error: '로그인이 필요합니다' }
+  if (!token || !loadConfig().serverUrl) return { ok: false, error: nt('qc.loginRequired') }
   if (!control) createControl()
   // Make sure the /connector chat page is loaded (it mounts the listener that
   // relays the message into the chat). Normally it's already up from startup.
@@ -840,63 +925,66 @@ app.on('will-quit', () => {
 
 // ── system tray: the always-available way to open settings / quit ───────────
 let tray: Tray | null = null
+// (Re)build the tray context menu. Hoisted so a language change (saveConfig) or
+// a state change (avatar hide/show) can re-localize / refresh it in place.
+function rebuildTrayMenu(): void {
+  if (!tray) return
+  const menu = Menu.buildFromTemplate([
+    { label: nt('tray.openControl'), click: () => showControl() },
+    { label: nt('tray.quickChat'), click: () => void toggleQuickChat() },
+    { label: nt('tray.openSettings'), click: () => showSettings() },
+    {
+      label: overlay?.isVisible() ? nt('tray.hideAvatar') : nt('tray.showAvatar'),
+      click: () => {
+        if (!overlay) return
+        overlay.isVisible() ? overlay.hide() : overlay.show()
+        rebuildTrayMenu()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: nt('tray.allowComputerUse'),
+      type: 'checkbox',
+      checked: loadConfig().computerUse?.enabled === true,
+      click: (item) => patchComputerUse({ enabled: item.checked }),
+    },
+    { type: 'separator' },
+    {
+      label: nt('tray.autoUpdate'),
+      type: 'checkbox',
+      checked: loadConfig().autoUpdate !== false,
+      click: (item) => {
+        saveConfig({ autoUpdate: item.checked })
+        if (item.checked) triggerBackgroundCheck()
+      },
+    },
+    { label: nt('tray.checkUpdate'), click: () => void checkForUpdatesManually() },
+    { label: nt('tray.version', { version: app.getVersion() }), enabled: false },
+    { type: 'separator' },
+    { label: nt('tray.logout'), click: () => void logout() },
+    {
+      label: nt('tray.restart'),
+      click: () => {
+        appQuitting = true
+        app.relaunch()
+        app.quit()
+      },
+    },
+    {
+      label: nt('tray.quit'),
+      click: () => {
+        appQuitting = true
+        app.quit()
+      },
+    },
+  ])
+  tray.setContextMenu(menu)
+}
 function createTray(): void {
   const icon = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_B64}`)
   tray = new Tray(icon)
   tray.setToolTip('Geny')
-  const rebuildMenu = () => {
-    const menu = Menu.buildFromTemplate([
-      { label: '제어판 / 채팅 열기', click: () => showControl() },
-      { label: '빠른 채팅 (VTuber에게 보내기)', click: () => void toggleQuickChat() },
-      { label: '설정 열기', click: () => showSettings() },
-      {
-        label: overlay?.isVisible() ? '아바타 숨기기' : '아바타 보이기',
-        click: () => {
-          if (!overlay) return
-          overlay.isVisible() ? overlay.hide() : overlay.show()
-          rebuildMenu()
-        },
-      },
-      { type: 'separator' },
-      {
-        label: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)',
-        type: 'checkbox',
-        checked: loadConfig().computerUse?.enabled === true,
-        click: (item) => patchComputerUse({ enabled: item.checked }),
-      },
-      { type: 'separator' },
-      {
-        label: '자동 업데이트',
-        type: 'checkbox',
-        checked: loadConfig().autoUpdate !== false,
-        click: (item) => {
-          saveConfig({ autoUpdate: item.checked })
-          if (item.checked) triggerBackgroundCheck()
-        },
-      },
-      { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
-      { label: `버전 v${app.getVersion()}`, enabled: false },
-      { type: 'separator' },
-      { label: '로그아웃', click: () => void logout() },
-      {
-        label: '재시작',
-        click: () => {
-          appQuitting = true
-          app.relaunch()
-          app.quit()
-        },
-      },
-      {
-        label: '종료',
-        click: () => {
-          appQuitting = true
-          app.quit()
-        },
-      },
-    ])
-    tray?.setContextMenu(menu)
-  }
-  rebuildMenu()
+  rebuildTrayMenu()
   // Left-click the tray toggles the control window (Windows/Linux convention).
   tray.on('click', () => showControl())
 }
@@ -997,21 +1085,21 @@ async function runActuation(
   const gate = computerUseGate()
   const allowed = cap === 'apps' ? gate.apps : cap === 'clipboard' ? gate.clipboard : gate.input
   if (!allowed) {
-    return { ok: false, denied: true, error: '이 동작이 꺼져 있습니다 (설정 → 로컬 컴퓨터 제어)' }
+    return { ok: false, denied: true, error: nt('act.capDisabled') }
   }
   // Consent: auto or an active session-grant → run without a prompt; otherwise
   // ask, offering a "이 세션 동안 허용" that promotes to a session-grant.
   if (gate.mode !== 'auto' && !sessionAllow.has(cap)) {
     const { response } = await dialog.showMessageBox({
       type: 'warning',
-      buttons: ['허용', '이 세션 동안 허용', '거부'],
+      buttons: [nt('act.allow'), nt('act.allowSession'), nt('act.deny')],
       defaultId: 2,
       cancelId: 2,
-      title: 'Geny 데스크톱 제어',
-      message: `Geny 가 실행하려고 합니다: ${label}`,
+      title: nt('act.dialogTitle'),
+      message: nt('act.dialogMessage', { label }),
       detail,
     })
-    if (response === 2) return { ok: false, denied: true, error: '사용자가 거부함' }
+    if (response === 2) return { ok: false, denied: true, error: nt('act.deniedByUser') }
     if (response === 1) sessionAllow.add(cap) // grant for the rest of this run
   }
   try {
@@ -1139,6 +1227,10 @@ function registerIpc(): void {
   // App version (settings window "앱" tab).
   ipcMain.handle('app:version', () => app.getVersion())
 
+  // OS-derived default UI language — the settings window uses this when the
+  // config has no explicit `lang` yet.
+  ipcMain.handle('i18n:default-lang', () => osDefaultLang())
+
   // Open a URL in the user's default browser (e.g. "Geny 서버 열기").
   ipcMain.on('app:open-external', (_e, url: string) => {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
@@ -1211,27 +1303,27 @@ function registerIpc(): void {
   // ── Phase 6: guarded actuation. Master switch (default OFF) + native confirm
   //    are the load-bearing local gate, independent of the server's decision. ──
   ipcMain.handle('actuate:open-app', (_e, target: string) =>
-    runActuation('apps', '앱/링크 열기', `대상: ${target}`, async () => {
+    runActuation('apps', nt('act.capOpenApp'), nt('act.detailTarget', { target }), async () => {
       if (/^https?:\/\//i.test(target)) await shell.openExternal(target)
       else await shell.openPath(target)
       return `opened ${target}`
     }),
   )
   ipcMain.handle('actuate:clipboard-write', (_e, text: string) =>
-    runActuation('clipboard', '클립보드 쓰기', text.slice(0, 80), async () => {
+    runActuation('clipboard', nt('act.capClipboard'), text.slice(0, 80), async () => {
       clipboard.writeText(text)
       return 'clipboard written'
     }),
   )
   ipcMain.handle('actuate:type', (_e, text: string) =>
-    runActuation('input', '타이핑', text.slice(0, 80), async () => {
+    runActuation('input', nt('act.capType'), text.slice(0, 80), async () => {
       const nut = await loadNut()
       await nut.keyboard.type(text)
       return `typed ${text.length} chars`
     }),
   )
   ipcMain.handle('actuate:key', (_e, keys: string) =>
-    runActuation('input', '키 입력', keys, async () => {
+    runActuation('input', nt('act.capKey'), keys, async () => {
       const nut = await loadNut()
       const parts = keys.toLowerCase().split('+').map((p) => p.trim())
       const mapped = parts.map((p) => nut.keyMap[p]).filter((k: unknown) => k !== undefined)
@@ -1242,7 +1334,7 @@ function registerIpc(): void {
     }),
   )
   ipcMain.handle('actuate:click', (_e, x: number, y: number, button?: string) =>
-    runActuation('input', '마우스 클릭', `(${x}, ${y})${lastCaptureDims ? ' [image px]' : ''} ${button ?? 'left'}`, async () => {
+    runActuation('input', nt('act.capClick'), `(${x}, ${y})${lastCaptureDims ? ' [image px]' : ''} ${button ?? 'left'}`, async () => {
       const nut = await loadNut()
       const p = await mapImageToScreen(nut, x, y)
       await nut.mouse.setPosition(new nut.Point(p.x, p.y))
@@ -1257,7 +1349,7 @@ function registerIpc(): void {
     if (w > 0 && h > 0) lastCaptureDims = { w, h }
   })
   ipcMain.handle('actuate:scroll', (_e, amount: number) =>
-    runActuation('input', '스크롤', `${amount > 0 ? '아래' : '위'} ${Math.abs(amount)}`, async () => {
+    runActuation('input', nt('act.capScroll'), `${amount > 0 ? nt('act.scrollDown') : nt('act.scrollUp')} ${Math.abs(amount)}`, async () => {
       const nut = await loadNut()
       if (amount >= 0) await nut.mouse.scrollDown(amount)
       else await nut.mouse.scrollUp(-amount)
@@ -1336,36 +1428,36 @@ function buildAppMenu(): void {
     {
       label: 'Geny',
       submenu: [
-        { label: '설정', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
-        { label: '제어판 / 채팅', click: () => showControl() },
-        { label: '업데이트 확인', click: () => void checkForUpdatesManually() },
+        { label: nt('menu.settings'), accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
+        { label: nt('menu.control'), click: () => showControl() },
+        { label: nt('menu.checkUpdate'), click: () => void checkForUpdatesManually() },
         { type: 'separator' },
-        { label: '재시작', click: () => { appQuitting = true; app.relaunch(); app.quit() } },
-        { label: '로그아웃', click: () => void logout() },
-        { role: 'quit', label: '종료' },
+        { label: nt('menu.restart'), click: () => { appQuitting = true; app.relaunch(); app.quit() } },
+        { label: nt('menu.logout'), click: () => void logout() },
+        { role: 'quit', label: nt('menu.quit') },
       ],
     },
     {
-      label: '편집',
+      label: nt('menu.edit'),
       submenu: [
-        { role: 'undo', label: '실행 취소' },
-        { role: 'redo', label: '다시 실행' },
+        { role: 'undo', label: nt('menu.undo') },
+        { role: 'redo', label: nt('menu.redo') },
         { type: 'separator' },
-        { role: 'cut', label: '잘라내기' },
-        { role: 'copy', label: '복사' },
-        { role: 'paste', label: '붙여넣기' },
-        { role: 'selectAll', label: '전체 선택' },
+        { role: 'cut', label: nt('menu.cut') },
+        { role: 'copy', label: nt('menu.copy') },
+        { role: 'paste', label: nt('menu.paste') },
+        { role: 'selectAll', label: nt('menu.selectAll') },
       ],
     },
     {
-      label: '보기',
+      label: nt('menu.view'),
       submenu: [
-        { role: 'reload', label: '새로고침' },
-        { role: 'toggleDevTools', label: '개발자 도구' },
+        { role: 'reload', label: nt('menu.reload') },
+        { role: 'toggleDevTools', label: nt('menu.devTools') },
         { type: 'separator' },
-        { role: 'resetZoom', label: '기본 배율' },
-        { role: 'zoomIn', label: '확대' },
-        { role: 'zoomOut', label: '축소' },
+        { role: 'resetZoom', label: nt('menu.resetZoom') },
+        { role: 'zoomIn', label: nt('menu.zoomIn') },
+        { role: 'zoomOut', label: nt('menu.zoomOut') },
       ],
     },
   ])
@@ -1420,7 +1512,7 @@ app.whenReady().then(() => {
 
   // GitHub Releases auto-update. Default ON; the toggle is read fresh on every
   // check, so changes take effect immediately.
-  initAutoUpdate(() => loadConfig().autoUpdate !== false)
+  initAutoUpdate(() => loadConfig().autoUpdate !== false, () => resolvedLang())
 
   // Register the global hotkeys (push-to-talk + quick-chat).
   registerHotkeys()

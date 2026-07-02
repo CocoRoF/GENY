@@ -42,6 +42,13 @@ win:
   # (built→spaces, latest.yml→hyphens, GitHub asset→dots), so electron-updater
   # 404s on download. A hyphenated name is identical everywhere.
   artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  # Localize the installer's (minimal, one-click) UI — NSIS auto-selects by the
+  # OS language among these; English + Korean both shipped.
+  installerLanguages:
+    - en_US
+    - ko_KR
+  unicode: true
 mac:
   target:
     - dmg

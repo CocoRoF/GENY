@@ -1,6 +1,35 @@
 import { useEffect, useState, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import genyIcon from './assets/geny_character.png'
 import type { OverlayTuning, ComputerUseConfig, ConsentMode, MCPServerConfig } from '../../preload/index'
+import { makeT, type Lang } from './i18n'
+
+// Sentinels marking spans that should render as <b> inside an interpolated i18n
+// string (the consent-mode hint bolds the "always ask" / "auto-allow" labels).
+// The i18n value carries plain text; we wrap the interpolated label vars in
+// these private-use markers, then boldTokens() splits + wraps them in <b>.
+const BOLD0 = '\uE000'
+const BOLD1 = '\uE001'
+// Sentinels for inline <code> spans (the MCP hint marks the two tool names).
+const CODE0 = '\uE002'
+const CODE1 = '\uE003'
+// Split `s` on the BOLD/CODE sentinel pairs, wrapping the enclosed text in the
+// matching element. Both marker kinds are handled in one pass.
+function markTokens(s: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = new RegExp(`${BOLD0}([^${BOLD1}]*)${BOLD1}|${CODE0}([^${CODE1}]*)${CODE1}`, 'g')
+  let last = 0
+  let key = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index))
+    if (m[1] !== undefined) out.push(<b key={key++}>{m[1]}</b>)
+    else out.push(<code key={key++}>{m[2]}</code>)
+    last = m.index + m[0].length
+  }
+  if (last < s.length) out.push(s.slice(last))
+  return out
+}
+const boldTokens = markTokens
 
 // Defaults mirror the web store (useVTuberStore) so the sliders show sensible
 // positions before the user has changed anything.
@@ -17,10 +46,10 @@ const TUNING_DEFAULTS = {
   subtitleCharMs: 100,
 }
 const INTERVAL_OPTIONS = [
-  { ms: 60_000, label: '1분' },
-  { ms: 180_000, label: '3분' },
-  { ms: 300_000, label: '5분' },
-  { ms: 600_000, label: '10분' },
+  { ms: 60_000, key: 'app.interval1m' },
+  { ms: 180_000, key: 'app.interval3m' },
+  { ms: 300_000, key: 'app.interval5m' },
+  { ms: 600_000, key: 'app.interval10m' },
 ]
 type CaptureSource = { id: string; name: string; display_id: string }
 
@@ -102,7 +131,7 @@ function prettyAccel(acc: string): string {
     .replace(/Shift/g, mac ? '⇧' : 'Shift')
     .split('+').join(' + ')
 }
-function HotkeyCapture({ value, onCapture }: { value: string; onCapture: (acc: string) => void }) {
+function HotkeyCapture({ value, onCapture, t }: { value: string; onCapture: (acc: string) => void; t: (key: string, vars?: Record<string, string | number>) => string }) {
   const [recording, setRecording] = useState(false)
   const start = () => {
     if (recording) return
@@ -132,15 +161,19 @@ function HotkeyCapture({ value, onCapture }: { value: string; onCapture: (acc: s
       onKeyDown={onKeyDown}
       onBlur={stop}
     >
-      {recording ? '키 조합을 누르세요…  (Esc 취소)' : (prettyAccel(value) || '클릭한 뒤 키 조합을 누르세요')}
+      {recording ? t('hotkey.recording') : (prettyAccel(value) || t('hotkey.idle'))}
     </button>
   )
 }
 
 export function ControlApp() {
+  const [lang, setLang] = useState<Lang>('ko')
+  const t = makeT(lang)
   const [tab, setTab] = useState<Tab>('account')
   const [serverUrl, setServerUrl] = useState('')
-  const [status, setStatus] = useState('연결 상태를 확인하세요')
+  // Empty until the first status check; rendered fallback shows the "check
+  // connection" prompt in the active language (see the status pill below).
+  const [status, setStatus] = useState('')
   const [statusKind, setStatusKind] = useState<StatusKind>('idle')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -164,11 +197,14 @@ export function ControlApp() {
   const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
 
   useEffect(() => {
-    window.connector?.serverConfig.get().then((c) => {
+    window.connector?.serverConfig.get().then(async (c) => {
       setServerUrl(c.serverUrl)
       setThemeState(c.theme ?? 'system')
       setTuning(c.overlayTuning ?? {})
       setComputerUse(c.computerUse ?? {})
+      // Language: the saved choice, else the OS default (fetched from main).
+      const osLang = (await window.connector?.appDefaultLang?.().catch(() => 'ko' as Lang)) ?? 'ko'
+      setLang(c.lang ?? osLang)
     })
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
@@ -229,11 +265,13 @@ export function ControlApp() {
     setMcpServers(list)
   }
   const testMcpServer = async (cfg: MCPServerConfig) => {
-    setMcpTest((p) => ({ ...p, [cfg.name]: '테스트 중…' }))
+    setMcpTest((p) => ({ ...p, [cfg.name]: t('mcp.testing') }))
     const r = await window.connector?.mcp?.testServer(cfg)
     setMcpTest((p) => ({
       ...p,
-      [cfg.name]: r?.ok ? `연결됨 · 도구 ${r.tools?.length ?? 0}개` : `실패: ${r?.error ?? '알 수 없음'}`,
+      [cfg.name]: r?.ok
+        ? t('mcp.testOk', { count: r.tools?.length ?? 0 })
+        : t('mcp.testFail', { error: r?.error ?? t('mcp.testFailUnknown') }),
     }))
   }
 
@@ -248,11 +286,17 @@ export function ControlApp() {
 
   const resolvedDark = theme === 'system' ? sysDark : theme === 'dark'
 
-  const changeTheme = (t: ThemeMode) => {
-    setThemeState(t)
-    window.connector?.serverConfig.set({ theme: t })
+  const changeTheme = (mode: ThemeMode) => {
+    setThemeState(mode)
+    window.connector?.serverConfig.set({ theme: mode })
     // Reload the chat panel so the remote /connector page picks up ?theme.
     window.connector?.windowControl.reloadPanel()
+  }
+
+  const changeLang = (v: Lang) => {
+    setLang(v)
+    // Persisting lang triggers main to re-localize the tray + app menu.
+    window.connector?.serverConfig.set({ lang: v })
   }
 
   const stat = (msg: string, kind: StatusKind) => {
@@ -268,18 +312,18 @@ export function ControlApp() {
   const savePtt = async (acc: string) => {
     setPttHotkey(acc)
     const ok = await window.connector?.hotkeys.setPushToTalk(acc)
-    setPttMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
+    setPttMsg(ok ? t('hotkey.registered') : t('hotkey.conflict'))
   }
 
   const saveQuickChat = async (acc: string) => {
     setQuickChatHotkey(acc)
     const ok = await window.connector?.hotkeys.setQuickChat?.(acc)
-    setQuickChatMsg(ok ? '✓ 단축키가 등록되었습니다' : '✗ 다른 앱과 충돌 — 다른 조합을 시도하세요')
+    setQuickChatMsg(ok ? t('hotkey.registered') : t('hotkey.conflict'))
   }
 
   const checkStatus = async () => {
     setBusy(true)
-    stat('서버에 연결하는 중…', 'working')
+    stat(t('status.connecting'), 'working')
     // Strip trailing slash(es): the server (Caddy) doesn't collapse `//`, so a
     // serverUrl like "https://host/" would build "//api/auth/..." → HTTP 404.
     const base = serverUrl.trim().replace(/\/+$/, '')
@@ -298,9 +342,9 @@ export function ControlApp() {
       } else {
         setHasToken(j.is_authenticated)
       }
-      stat(j.is_authenticated ? '연결됨 · 로그인 상태' : j.has_users ? '연결됨 · 로그인 필요' : '연결됨 · 초기 설정 필요', 'ok')
+      stat(j.is_authenticated ? t('status.connectedAuthed') : j.has_users ? t('status.connectedLoginNeeded') : t('status.connectedSetupNeeded'), 'ok')
     } catch (e) {
-      stat(`연결 실패 — ${(e as Error).message}`, 'err')
+      stat(t('status.connectFailed', { msg: (e as Error).message }), 'err')
     } finally {
       setBusy(false)
     }
@@ -308,7 +352,7 @@ export function ControlApp() {
 
   const login = async () => {
     setBusy(true)
-    stat('로그인하는 중…', 'working')
+    stat(t('status.loggingIn'), 'working')
     // Normalize the same way as checkStatus — a trailing slash → "//api/..." 404.
     const base = serverUrl.trim().replace(/\/+$/, '')
     try {
@@ -318,17 +362,17 @@ export function ControlApp() {
         body: JSON.stringify({ username, password }),
       })
       if (!r.ok) {
-        stat(`로그인 실패 — HTTP ${r.status}`, 'err')
+        stat(t('status.loginFailedHttp', { code: r.status }), 'err')
         return
       }
       const j = await r.json()
       await window.connector?.secureStore.set(TOKEN_KEY, j.access_token)
       setHasToken(true)
       setPassword('')
-      stat(`${j.username} 님으로 로그인됨 — 아바타를 불러옵니다`, 'ok')
+      stat(t('status.loginOk', { username: j.username }), 'ok')
       window.connector?.windowControl.refresh()
     } catch (e) {
-      stat(`오류 — ${(e as Error).message}`, 'err')
+      stat(t('status.loginError', { msg: (e as Error).message }), 'err')
     } finally {
       setBusy(false)
     }
@@ -337,7 +381,7 @@ export function ControlApp() {
   const logout = async () => {
     await window.connector?.secureStore.delete(TOKEN_KEY)
     setHasToken(false)
-    stat('로그아웃되었습니다', 'idle')
+    stat(t('status.loggedOut'), 'idle')
     window.connector?.windowControl.refresh()
   }
 
@@ -359,25 +403,25 @@ export function ControlApp() {
           <img className="gy-logo" src={genyIcon} alt="Geny" draggable={false} />
           <div>
             <h1>Geny</h1>
-            <div className="gy-sub">VTuber 데스크톱 접속기</div>
+            <div className="gy-sub">{t('app.subtitle')}</div>
           </div>
         </header>
 
         <nav className="gy-tabs" role="tablist">
           <button className={`gy-tab ${tab === 'account' ? 'is-active' : ''}`} onClick={() => setTab('account')}>
-            {I.user} 계정
+            {I.user} {t('tab.account')}
           </button>
           <button className={`gy-tab ${tab === 'voice' ? 'is-active' : ''}`} onClick={() => setTab('voice')}>
-            {I.mic} 음성
+            {I.mic} {t('tab.voice')}
           </button>
           <button className={`gy-tab ${tab === 'control' ? 'is-active' : ''}`} onClick={() => setTab('control')}>
-            {I.monitor} 제어
+            {I.monitor} {t('tab.control')}
           </button>
           <button className={`gy-tab ${tab === 'mcp' ? 'is-active' : ''}`} onClick={() => setTab('mcp')}>
-            {I.plug} MCP
+            {I.plug} {t('tab.mcp')}
           </button>
           <button className={`gy-tab ${tab === 'app' ? 'is-active' : ''}`} onClick={() => setTab('app')}>
-            {I.sliders} 앱
+            {I.sliders} {t('tab.app')}
           </button>
         </nav>
 
@@ -385,8 +429,8 @@ export function ControlApp() {
         {tab === 'account' && (
           <>
             <section className="gy-card">
-              <div className="gy-card-h">{I.link} 서버 연결</div>
-              <label className="gy-field-label" htmlFor="gy-url">서버 주소</label>
+              <div className="gy-card-h">{I.link} {t('account.serverCard')}</div>
+              <label className="gy-field-label" htmlFor="gy-url">{t('account.serverUrlLabel')}</label>
               <input
                 id="gy-url"
                 className="gy-input"
@@ -399,10 +443,10 @@ export function ControlApp() {
               <div className="gy-row">
                 <span className={`gy-pill grow ${pillCls}`}>
                   <span className="gy-dot" />
-                  <span className="gy-msg">{status}</span>
+                  <span className="gy-msg">{status || t('status.initial')}</span>
                 </span>
                 <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={checkStatus} disabled={busy}>
-                  {I.refresh} 연결 확인
+                  {I.refresh} {t('account.checkConnection')}
                 </button>
               </div>
               {serverUrl.trim() && (
@@ -412,28 +456,28 @@ export function ControlApp() {
                     className="gy-btn gy-btn--ghost gy-btn--block gy-btn--sm"
                     onClick={() => window.connector?.windowControl.openExternal(serverUrl.trim())}
                   >
-                    {I.external} 브라우저에서 Geny 서버 열기
+                    {I.external} {t('account.openInBrowser')}
                   </button>
                 </>
               )}
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.user} 계정</div>
+              <div className="gy-card-h">{I.user} {t('account.accountCard')}</div>
               {hasToken ? (
                 <div className="gy-row">
                   <span className="gy-pill grow is-ok">
                     <span className="gy-dot" />
-                    <span className="gy-msg">로그인됨 · 토큰이 키체인에 안전하게 저장됨</span>
+                    <span className="gy-msg">{t('account.loggedIn')}</span>
                   </span>
-                  <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={logout}>로그아웃</button>
+                  <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={logout}>{t('account.logout')}</button>
                 </div>
               ) : (
                 <>
-                  <label className="gy-field-label" htmlFor="gy-id">아이디</label>
+                  <label className="gy-field-label" htmlFor="gy-id">{t('account.idLabel')}</label>
                   <input id="gy-id" className="gy-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" autoComplete="username" />
                   <div className="gy-spacer" />
-                  <label className="gy-field-label" htmlFor="gy-pw">비밀번호</label>
+                  <label className="gy-field-label" htmlFor="gy-pw">{t('account.passwordLabel')}</label>
                   <input
                     id="gy-pw"
                     className="gy-input"
@@ -445,7 +489,7 @@ export function ControlApp() {
                   />
                   <div className="gy-spacer" />
                   <button className="gy-btn gy-btn--primary gy-btn--block" onClick={login} disabled={busy || !username || !password || !serverUrl.trim()}>
-                    {host ? `${host} 에 로그인` : '로그인'}
+                    {host ? t('account.loginToHost', { host }) : t('account.login')}
                   </button>
                 </>
               )}
@@ -457,63 +501,60 @@ export function ControlApp() {
         {tab === 'voice' && (
           <>
             <section className="gy-card">
-              <div className="gy-card-h">{I.mic} 푸시투토크 단축키</div>
+              <div className="gy-card-h">{I.mic} {t('voice.pttCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
-                탭하면 마이크가 켜지고, 다시 탭하면 꺼지거나 아바타의 말을 끊습니다.
-                아래를 클릭한 뒤 원하는 키 조합을 누르세요.
+                {t('voice.pttHint')}
               </p>
-              <HotkeyCapture value={pttHotkey} onCapture={savePtt} />
+              <HotkeyCapture value={pttHotkey} onCapture={savePtt} t={t} />
               {pttMsg && <span className="gy-hint" style={{ margin: '8px 0 0', display: 'block' }}>{pttMsg}</span>}
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.mic} TTS · 음성 출력</div>
+              <div className="gy-card-h">{I.mic} {t('voice.ttsCard')}</div>
               <TuneSlider
-                label="볼륨" min={0} max={1} step={0.05}
+                label={t('voice.volume')} min={0} max={1} step={0.05}
                 value={tget('ttsVolume')} display={`${Math.round(tget('ttsVolume') * 100)}%`}
                 onChange={(v) => patchTuning({ ttsVolume: v })}
               />
-              <p className="gy-hint" style={{ margin: 0 }}>아바타 창의 음성 출력 볼륨입니다.</p>
+              <p className="gy-hint" style={{ margin: 0 }}>{t('voice.volumeHint')}</p>
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.chat} 대사창 (자막)</div>
+              <div className="gy-card-h">{I.chat} {t('voice.subtitlesCard')}</div>
               <ToggleLine
-                label="아바타 하단에 대사 표시"
+                label={t('voice.subtitlesToggle')}
                 checked={tget('subtitlesEnabled')}
                 onChange={(c) => patchTuning({ subtitlesEnabled: c })}
               />
               <div style={{ height: 12 }} />
               <TuneSlider
-                label="글자 출력 속도"
+                label={t('voice.subtitleSpeed')}
                 min={30} max={300} step={10}
                 value={tget('subtitleCharMs')}
-                display={`${(tget('subtitleCharMs') / 1000).toFixed(2)}초/글자`}
+                display={t('voice.subtitleSpeedDisplay', { sec: (tget('subtitleCharMs') / 1000).toFixed(2) })}
                 onChange={(v) => patchTuning({ subtitleCharMs: v })}
               />
               <p className="gy-hint" style={{ margin: '4px 0 0' }}>
-                대사가 한 글자씩 흘러나오는 속도입니다(기본 0.10초/글자 — 왼쪽=빠름, 오른쪽=느림). 화면 캡처·자동
-                대화 트리거로 한 번에 온 발화도 이 속도로 앞에서부터 타이핑됩니다. 길어지면 위에서부터 잘리고, 다
-                흐른 뒤 약 3초 후 사라집니다(음성 켜져 있으면 음성이 끝난 뒤).
+                {t('voice.subtitleHint')}
               </p>
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.mic} STT · 음성 입력</div>
+              <div className="gy-card-h">{I.mic} {t('voice.sttCard')}</div>
               <TuneSlider
-                label="민감도 (낮을수록 더 민감)" min={0.01} max={0.1} step={0.005}
+                label={t('voice.sttSensitivity')} min={0.01} max={0.1} step={0.005}
                 value={tget('sttSensitivity')} display={tget('sttSensitivity').toFixed(3)}
                 onChange={(v) => patchTuning({ sttSensitivity: v })}
               />
               <TuneSlider
-                label="발화 종료 대기" min={400} max={3000} step={100}
+                label={t('voice.sttSilence')} min={400} max={3000} step={100}
                 value={tget('sttSilenceMs')} display={`${(tget('sttSilenceMs') / 1000).toFixed(1)}s`}
                 onChange={(v) => patchTuning({ sttSilenceMs: v })}
               />
-              <div className="gy-field-label" style={{ marginTop: 4 }}>사운드 보정</div>
-              <ToggleLine label="에코 제거" checked={tget('sttEchoCancellation')} onChange={(c) => patchTuning({ sttEchoCancellation: c })} />
-              <ToggleLine label="노이즈 억제" checked={tget('sttNoiseSuppression')} onChange={(c) => patchTuning({ sttNoiseSuppression: c })} />
-              <ToggleLine label="자동 게인" checked={tget('sttAutoGain')} onChange={(c) => patchTuning({ sttAutoGain: c })} />
+              <div className="gy-field-label" style={{ marginTop: 4 }}>{t('voice.soundCorrection')}</div>
+              <ToggleLine label={t('voice.echoCancellation')} checked={tget('sttEchoCancellation')} onChange={(c) => patchTuning({ sttEchoCancellation: c })} />
+              <ToggleLine label={t('voice.noiseSuppression')} checked={tget('sttNoiseSuppression')} onChange={(c) => patchTuning({ sttNoiseSuppression: c })} />
+              <ToggleLine label={t('voice.autoGain')} checked={tget('sttAutoGain')} onChange={(c) => patchTuning({ sttAutoGain: c })} />
             </section>
           </>
         )}
@@ -522,14 +563,12 @@ export function ControlApp() {
         {tab === 'control' && (
           <>
             <section className="gy-card">
-              <div className="gy-card-h">{I.monitor} 로컬 컴퓨터 제어</div>
+              <div className="gy-card-h">{I.monitor} {t('control.card')}</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
-                이 접속기가 프록시가 되어, 서버에 떠 있는 Geny 에이전트가 내 컴퓨터를 보고 조작할 수
-                있게 합니다. 실행은 항상 이 컴퓨터에서 아래 동의에 따라 이뤄집니다(서버는 중계만 함). 접속기가
-                꺼지면 안전하게 차단됩니다. 에이전트가 실제로 쓰려면 해당 환경에서도 이 기능을 켜야 합니다.
+                {t('control.hint')}
               </p>
               <ToggleLine
-                label="로컬 컴퓨터 제어 허용 (마스터)"
+                label={t('control.masterToggle')}
                 checked={cuOn}
                 onChange={(c) => patchComputerUse({ enabled: c })}
               />
@@ -537,32 +576,32 @@ export function ControlApp() {
                 <>
                   <div style={{ height: 6 }} />
                   <ToggleLine
-                    label="화면 보기 (캡처·창 목록, 읽기 전용)"
+                    label={t('control.capScreen')}
                     checked={cuCap('screen')}
                     onChange={(c) => patchComputerUse({ screen: c })}
                   />
                   <ToggleLine
-                    label="입력 조작 (타이핑·키·클릭)"
+                    label={t('control.capInput')}
                     checked={cuCap('input')}
                     onChange={(c) => patchComputerUse({ input: c })}
                   />
                   <ToggleLine
-                    label="앱·URL 열기"
+                    label={t('control.capApps')}
                     checked={cuCap('apps')}
                     onChange={(c) => patchComputerUse({ apps: c })}
                   />
                   <ToggleLine
-                    label="클립보드 쓰기"
+                    label={t('control.capClipboard')}
                     checked={cuCap('clipboard')}
                     onChange={(c) => patchComputerUse({ clipboard: c })}
                   />
                   <div style={{ height: 12 }} />
-                  <div className="gy-hint" style={{ margin: '0 0 6px' }}>조작 동의 방식</div>
+                  <div className="gy-hint" style={{ margin: '0 0 6px' }}>{t('control.consentTitle')}</div>
                   <div className="gy-tabs" role="tablist" style={{ margin: 0 }}>
                     {([
-                      ['ask', '항상 확인'],
-                      ['session', '이 세션 동안 허용'],
-                      ['auto', '자동 허용'],
+                      ['ask', t('control.consentAsk')],
+                      ['session', t('control.consentSession')],
+                      ['auto', t('control.consentAuto')],
                     ] as [ConsentMode, string][]).map(([mode, label]) => (
                       <button
                         key={mode}
@@ -574,10 +613,10 @@ export function ControlApp() {
                     ))}
                   </div>
                   <p className="gy-hint" style={{ margin: '8px 0 0' }}>
-                    화면 보기는 읽기 전용이라 확인 없이 즉시 동작합니다. 타이핑·클릭·앱 열기·클립보드는 위
-                    설정을 따릅니다. <b>항상 확인</b>이 가장 안전하며, 확인 창에서 “이 세션 동안 허용”을
-                    누르면 그 동작은 접속기를 끌 때까지 다시 묻지 않습니다. <b>자동 허용</b>은 매우 위험하니
-                    신뢰하는 작업에만 쓰세요.
+                    {boldTokens(t('control.consentHint', {
+                      ask: BOLD0 + t('control.consentHint.ask') + BOLD1,
+                      auto: BOLD0 + t('control.consentHint.auto') + BOLD1,
+                    }))}
                   </p>
                 </>
               )}
@@ -589,15 +628,13 @@ export function ControlApp() {
         {tab === 'mcp' && (
           <>
             <section className="gy-card">
-              <div className="gy-card-h">{I.plug} 로컬 MCP 서버</div>
+              <div className="gy-card-h">{I.plug} {t('mcp.serversCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 12px' }}>
-                내 컴퓨터에서 도는 MCP 서버를 등록하면, 이 접속기가 통로가 되어 서버의 Geny 에이전트가 그
-                도구를 사용할 수 있습니다(로컬 파일·앱·DB 등). 등록한 서버는 이 컴퓨터에만 저장되고, 서버에는
-                도구 목록만 전달됩니다.
+                {t('mcp.serversHint')}
               </p>
 
               {mcpServers.length === 0 && (
-                <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>등록된 MCP 서버가 없습니다.</p>
+                <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('mcp.empty')}</p>
               )}
               {mcpServers.map((s) => (
                 <div key={s.name} className="gy-card" style={{ marginBottom: 8, padding: '10px 12px' }}>
@@ -610,8 +647,8 @@ export function ControlApp() {
                       {mcpTest[s.name] && <div className="gy-hint" style={{ marginTop: 4 }}>{mcpTest[s.name]}</div>}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => testMcpServer(s)}>테스트</button>
-                      <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={() => removeMcpServer(s.name)}>삭제</button>
+                      <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => testMcpServer(s)}>{t('mcp.test')}</button>
+                      <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={() => removeMcpServer(s.name)}>{t('mcp.remove')}</button>
                     </div>
                   </div>
                 </div>
@@ -619,9 +656,9 @@ export function ControlApp() {
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.plug} 서버 추가</div>
+              <div className="gy-card-h">{I.plug} {t('mcp.addCard')}</div>
               <input
-                className="gy-input" placeholder="이름 (예: filesystem)" value={mcpForm.name}
+                className="gy-input" placeholder={t('mcp.namePlaceholder')} value={mcpForm.name}
                 onChange={(e) => setMcpForm((p) => ({ ...p, name: e.target.value }))}
               />
               <div style={{ height: 8 }} />
@@ -634,23 +671,24 @@ export function ControlApp() {
               <div style={{ height: 8 }} />
               {mcpForm.transport === 'stdio' ? (
                 <input
-                  className="gy-input" placeholder="명령 (예: npx -y @modelcontextprotocol/server-filesystem /path)"
+                  className="gy-input" placeholder={t('mcp.commandPlaceholder')}
                   value={mcpForm.command ?? ''}
                   onChange={(e) => setMcpForm((p) => ({ ...p, command: e.target.value }))}
                 />
               ) : (
                 <input
-                  className="gy-input" placeholder="URL (예: http://localhost:3000/mcp)"
+                  className="gy-input" placeholder={t('mcp.urlPlaceholder')}
                   value={mcpForm.url ?? ''}
                   onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
                 />
               )}
               <div style={{ height: 10 }} />
-              <button className="gy-btn gy-btn--primary" onClick={addMcpServer} disabled={!mcpForm.name.trim()}>추가</button>
+              <button className="gy-btn gy-btn--primary" onClick={addMcpServer} disabled={!mcpForm.name.trim()}>{t('mcp.add')}</button>
               <p className="gy-hint" style={{ margin: '10px 0 0' }}>
-                stdio는 로컬에서 명령으로 실행되는 MCP 서버, http는 이미 떠 있는 MCP 엔드포인트입니다. 추가 후
-                “테스트”로 연결과 도구 목록을 확인하세요. 에이전트는 <code>local_mcp_list</code>로 도구를 찾고
-                <code>local_mcp_call</code>로 호출합니다.
+                {markTokens(t('mcp.addHint', {
+                  list: `${CODE0}local_mcp_list${CODE1}`,
+                  call: `${CODE0}local_mcp_call${CODE1}`,
+                }))}
               </p>
             </section>
           </>
@@ -660,36 +698,35 @@ export function ControlApp() {
         {tab === 'app' && (
           <>
             <section className="gy-card">
-              <div className="gy-card-h">{I.chat} 빠른 채팅 단축키</div>
+              <div className="gy-card-h">{I.chat} {t('app.quickChatCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
-                어디서든 이 단축키를 누르면 입력창이 떠오르고, 메시지를 입력해 현재 VTuber에게 바로 보냅니다.
-                아래를 클릭한 뒤 원하는 키 조합을 누르세요. 자주 안 쓰는 조합을 권장합니다(기본: Cmd/Ctrl+Shift+Enter).
+                {t('app.quickChatHint')}
               </p>
-              <HotkeyCapture value={quickChatHotkey} onCapture={saveQuickChat} />
+              <HotkeyCapture value={quickChatHotkey} onCapture={saveQuickChat} t={t} />
               {quickChatMsg && <span className="gy-hint" style={{ margin: '8px 0 0', display: 'block' }}>{quickChatMsg}</span>}
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.monitor} 화면 캡처 관찰</div>
-              <label className="gy-field-label" htmlFor="gy-cap-int">캡처 주기</label>
+              <div className="gy-card-h">{I.monitor} {t('app.captureCard')}</div>
+              <label className="gy-field-label" htmlFor="gy-cap-int">{t('app.captureInterval')}</label>
               <select
                 id="gy-cap-int" className="gy-input" style={{ appearance: 'auto' }}
                 value={String(tget('screenIntervalMs'))}
                 onChange={(e) => patchTuning({ screenIntervalMs: Number(e.target.value) })}
               >
                 {INTERVAL_OPTIONS.map((o) => (
-                  <option key={o.ms} value={String(o.ms)}>{o.label}</option>
+                  <option key={o.ms} value={String(o.ms)}>{t(o.key)}</option>
                 ))}
               </select>
               <div className="gy-spacer" />
-              <label className="gy-field-label" htmlFor="gy-cap-src">볼 화면/창</label>
+              <label className="gy-field-label" htmlFor="gy-cap-src">{t('app.captureSource')}</label>
               {sources.length > 0 ? (
                 <select
                   id="gy-cap-src" className="gy-input" style={{ appearance: 'auto' }}
                   value={tget('screenSourceId') ?? ''}
                   onChange={(e) => patchTuning({ screenSourceId: e.target.value || null })}
                 >
-                  <option value="">자동 (첫 번째 화면)</option>
+                  <option value="">{t('app.captureAuto')}</option>
                   {sources.map((s) => (
                     <option key={s.id} value={s.id}>
                       {(s.id.startsWith('screen:') ? '🖥 ' : '🪟 ') + (s.name || s.id)}
@@ -697,33 +734,48 @@ export function ControlApp() {
                   ))}
                 </select>
               ) : (
-                <p className="gy-hint" style={{ margin: 0 }}>화면 목록을 불러오는 중…</p>
+                <p className="gy-hint" style={{ margin: 0 }}>{t('app.captureLoading')}</p>
               )}
-              <p className="gy-hint">캡처는 16:9 · 약 1600×900으로 축소되어 업로드됩니다.</p>
+              <p className="gy-hint">{t('app.captureHint')}</p>
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.sliders} 화면 테마</div>
+              <div className="gy-card-h">{I.sliders} {t('app.themeCard')}</div>
               <nav className="gy-tabs" style={{ margin: 0 }} role="tablist">
                 <button className={`gy-tab ${theme === 'system' ? 'is-active' : ''}`} onClick={() => changeTheme('system')}>
-                  {I.monitor} 시스템
+                  {I.monitor} {t('app.themeSystem')}
                 </button>
                 <button className={`gy-tab ${theme === 'dark' ? 'is-active' : ''}`} onClick={() => changeTheme('dark')}>
-                  {I.moon} 다크
+                  {I.moon} {t('app.themeDark')}
                 </button>
                 <button className={`gy-tab ${theme === 'light' ? 'is-active' : ''}`} onClick={() => changeTheme('light')}>
-                  {I.sun} 라이트
+                  {I.sun} {t('app.themeLight')}
                 </button>
               </nav>
               <p className="gy-hint" style={{ margin: '11px 0 0' }}>
-                설정·채팅 창에 함께 적용됩니다. ‘시스템’은 OS 설정을 따릅니다.
+                {t('app.themeHint')}
               </p>
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.download} 자동 업데이트</div>
+              <div className="gy-card-h">{I.link} {t('app.langCard')}</div>
+              <nav className="gy-tabs" style={{ margin: 0 }} role="tablist">
+                <button className={`gy-tab ${lang === 'ko' ? 'is-active' : ''}`} onClick={() => changeLang('ko')}>
+                  {t('app.langKo')}
+                </button>
+                <button className={`gy-tab ${lang === 'en' ? 'is-active' : ''}`} onClick={() => changeLang('en')}>
+                  {t('app.langEn')}
+                </button>
+              </nav>
+              <p className="gy-hint" style={{ margin: '11px 0 0' }}>
+                {t('app.langHint')}
+              </p>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.download} {t('app.updateCard')}</div>
               <div className="gy-toggle-line">
-                <span className="label">자동 업데이트</span>
+                <span className="label">{t('app.updateToggle')}</span>
                 <label className="gy-switch">
                   <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAutoUpdate(e.target.checked)} />
                   <span className="track" />
@@ -731,20 +783,17 @@ export function ControlApp() {
                 </label>
               </div>
               <p className="gy-hint">
-                {autoUpdate
-                  ? '새 버전을 자동으로 내려받아 재시작 시 설치합니다.'
-                  : '자동 설치는 끄고, 새 버전이 있으면 알림만 띄웁니다.'}
+                {autoUpdate ? t('app.updateHintOn') : t('app.updateHintOff')}
               </p>
               <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => window.connector?.updater.check()}>
-                {I.refresh} 지금 업데이트 확인
+                {I.refresh} {t('app.updateCheckNow')}
               </button>
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.monitor} 창 · 아바타 위치</div>
+              <div className="gy-card-h">{I.monitor} {t('app.positionsCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>
-                아바타·채팅·설정 창의 위치/크기와 아바타 확대·이동을 기본값으로 되돌립니다.
-                멀티모니터나 배율(100%/150%) 변경으로 창이 화면 밖으로 나가거나 깨졌을 때 사용하세요.
+                {t('app.positionsHint')}
               </p>
               <button
                 className="gy-btn gy-btn--ghost gy-btn--block gy-btn--sm"
@@ -754,26 +803,26 @@ export function ControlApp() {
                   setTimeout(() => setResetDone(false), 2200)
                 }}
               >
-                {I.refresh} 창 · 아바타 위치 초기화
+                {I.refresh} {t('app.positionsReset')}
               </button>
               {resetDone && (
-                <p className="gy-hint" style={{ margin: '8px 0 0' }}>✓ 기본 위치로 되돌렸습니다</p>
+                <p className="gy-hint" style={{ margin: '8px 0 0' }}>{t('app.positionsResetDone')}</p>
               )}
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.sliders} 정보</div>
+              <div className="gy-card-h">{I.sliders} {t('app.aboutCard')}</div>
               <div className="gy-kv">
-                <span className="k">버전</span>
+                <span className="k">{t('app.version')}</span>
                 <span className="v">{version ? `v${version}` : '—'}</span>
               </div>
               <div className="gy-kv">
-                <span className="k">서버</span>
+                <span className="k">{t('app.server')}</span>
                 <span className="v">{host || '—'}</span>
               </div>
               <div className="gy-spacer" />
               <button className="gy-btn gy-btn--ghost gy-btn--block" onClick={() => window.connector?.windowControl.restart()}>
-                {I.power} 접속기 재시작
+                {I.power} {t('app.restart')}
               </button>
             </section>
           </>
