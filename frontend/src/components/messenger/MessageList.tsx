@@ -33,9 +33,10 @@ function buildFlatList(messages: ChatRoomMessage[]): ListItem[] {
   return items;
 }
 
-// ── Attachment rendering (shared between user + agent bubbles) ──
+// ── Attachment rendering (shared between user + agent bubbles; also
+//    reused by ChatTab for room-chat messages) ──
 
-function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
+export function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
   if (!attachments.length) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5">

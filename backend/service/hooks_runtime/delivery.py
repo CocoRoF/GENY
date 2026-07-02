@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -101,19 +101,22 @@ def post_autonomous_message(session_id: str, result: Any, *, source: str = "hook
         role_val = getattr(agent, "_role", None)
         role = role_val.value if hasattr(role_val, "value") else str(role_val or "agent")
 
-        msg = store.add_message(
-            room_id,
-            {
-                "type": "agent",
-                "content": cleaned,
-                "session_id": session_id,
-                "session_name": session_name,
-                "role": role,
-                "duration_ms": getattr(result, "duration_ms", None),
-                "cost_usd": getattr(result, "cost_usd", None),
-                "source": source,
-            },
-        )
+        msg_payload: Dict[str, Any] = {
+            "type": "agent",
+            "content": cleaned,
+            "session_id": session_id,
+            "session_name": session_name,
+            "role": role,
+            "duration_ms": getattr(result, "duration_ms", None),
+            "cost_usd": getattr(result, "cost_usd", None),
+            "source": source,
+        }
+        # Files delivered via SendUserFile during this autonomous turn
+        # (workspace-canvas P1) — same attachments contract as chat turns.
+        _atts = getattr(result, "attachments", None)
+        if _atts:
+            msg_payload["attachments"] = list(_atts)
+        msg = store.add_message(room_id, msg_payload)
         logger.info(
             "[autonomous-delivery] %s → room %s (msg_id=%s, len=%d)",
             source, room_id, msg.get("id", "?"), len(cleaned),

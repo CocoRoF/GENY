@@ -566,6 +566,10 @@ class AgentSession:
         # first chat broadcast already sees the boot-time events on the
         # frontend's VTuber LOGS panel.
         self._pending_memory_events: List[Dict[str, Any]] = []
+        # SendUserFile delivery channel (workspace-canvas P1). Built with the
+        # tool extras at pipeline construction; None until then (or when the
+        # session has no storage_path).
+        self._user_file_channel = None
         # Per-session cursor for the chat broadcast handler: tracks how
         # many `MEMORY` log entries have already been forwarded to the
         # frontend. The legacy `file_changes` pipe uses
@@ -1476,6 +1480,23 @@ class AgentSession:
                 )
         # Logger absent — keep the event in memory for replay.
         self._pending_memory_events.append(kwargs)
+
+    def consume_user_file_attachments(self) -> List[Dict[str, Any]]:
+        """Drain the ChatAttachment dicts staged by SendUserFile this turn.
+
+        Mirrors :meth:`consume_memory_events`: the execution layer calls this
+        once per turn and forwards the result on
+        ``ExecutionResult.attachments`` → chat message ``attachments``.
+        Empty list when no channel is wired or nothing was sent.
+        """
+        channel = getattr(self, "_user_file_channel", None)
+        if channel is None:
+            return []
+        try:
+            return channel.drain()
+        except Exception:  # noqa: BLE001 — delivery must never break a turn
+            logger.warning("[%s] user_file_channel drain failed", self._session_id, exc_info=True)
+            return []
 
     def consume_memory_events(self) -> List[Dict[str, Any]]:
         """Drain every memory event recorded since the last consume.
@@ -2631,6 +2652,22 @@ class AgentSession:
 
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
+
+        # SendUserFile delivery channel (workspace-canvas P1) — lets the agent
+        # return files to the user as chat attachments. Files are materialised
+        # under this session's storage (workspace/out/) and drained per turn by
+        # consume_user_file_attachments(). Without this the executor's built-in
+        # SendUserFile tool errors with NO_CHANNEL.
+        if self.storage_path:
+            try:
+                from service.executor.user_file_channel import SessionUserFileChannel
+
+                self._user_file_channel = SessionUserFileChannel(
+                    self._session_id, self.storage_path
+                )
+                _tool_extras["user_file_channel"] = self._user_file_channel
+            except Exception:  # noqa: BLE001 — never block session build on this
+                self._user_file_channel = None
 
         # Audit 2026-06-18 (GAP A/B) — wire the host's task / cron /
         # sub-agent runtime (boot-set on app.state) into ToolContext.extras

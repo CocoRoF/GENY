@@ -11,6 +11,7 @@ import {
   Plus, ArrowLeft, Trash2, Hash, Clock,
 } from 'lucide-react';
 import type { ChatRoom, ChatRoomMessage, BroadcastStatus, AgentProgressState } from '@/types';
+import { AttachmentList } from '@/components/messenger/MessageList';
 
 // ==================== Helpers ====================
 
@@ -550,6 +551,9 @@ export default function ChatTab() {
                   <div className="px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--primary-color)] text-white text-[0.8125rem] leading-relaxed whitespace-pre-wrap shadow-[0_2px_8px_rgba(59,130,246,0.2)]">
                     {msg.content}
                   </div>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <AttachmentList attachments={msg.attachments} />
+                  )}
                 </div>
                 <div className="w-8 h-8 rounded-full bg-[var(--primary-color)] flex items-center justify-center shrink-0 mt-5">
                   <User size={14} className="text-white" />
@@ -591,6 +595,10 @@ export default function ChatTab() {
                   <div className="px-4 py-2.5 rounded-2xl rounded-tl-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
                     {msg.content}
                   </div>
+                  {/* Files the agent delivered via SendUserFile (workspace-canvas P1) */}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <AttachmentList attachments={msg.attachments} />
+                  )}
                 </div>
               </div>
             );

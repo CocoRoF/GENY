@@ -1113,6 +1113,49 @@ async def list_storage_files(
     )
 
 
+@router.get("/{session_id}/storage-raw/{file_path:path}")
+async def download_storage_file_raw(
+    session_id: str = Path(..., description="Session ID"),
+    file_path: str = Path(..., description="File path relative to session storage"),
+    auth: dict = Depends(require_auth),
+):
+    """Serve a session-storage file as raw bytes (binary download / inline view).
+
+    The chat attachment renderer points ``<img src>`` / ``<a href>`` here for
+    files the agent delivered via SendUserFile (workspace-canvas P1) — auth
+    rides on the ``geny_auth_token`` cookie same-origin. Unlike the JSON
+    ``/storage/{path}`` reader this streams bytes with the real content type.
+    Works for dormant sessions too (storage_path from the session store), so
+    links keep working after a backend restart.
+    """
+    import mimetypes as _mimetypes
+    from pathlib import Path as _FilePath
+
+    from starlette.responses import FileResponse
+
+    agent = agent_manager.get_agent(session_id)
+    storage_path: Optional[str] = getattr(agent, "storage_path", None) if agent else None
+    if not storage_path:
+        record = get_session_store().get(session_id)
+        if not record or record.get("is_deleted"):
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        storage_path = record.get("storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=400, detail="Session storage_path not available")
+
+    root = _FilePath(storage_path).resolve()
+    target = (root / file_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path escapes session storage")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+    media_type = _mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type, filename=target.name)
+
+
 @router.get("/{session_id}/storage/{file_path:path}")
 async def read_storage_file(
     session_id: str = Path(..., description="Session ID"),

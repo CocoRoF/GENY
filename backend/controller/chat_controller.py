@@ -886,7 +886,11 @@ async def _run_broadcast(
             )
 
             cleaned_output = sanitize_for_display(result.output) if result.success else ""
-            if cleaned_output:
+            # Files delivered via SendUserFile this turn (workspace-canvas P1).
+            # A file-only turn (no final text) must still produce a message —
+            # mirrors how user messages may be attachment-only.
+            result_attachments = list(getattr(result, "attachments", None) or [])
+            if cleaned_output or result_attachments:
                 msg_data: Dict[str, Any] = {
                     "type": "agent",
                     "content": cleaned_output,
@@ -896,6 +900,8 @@ async def _run_broadcast(
                     "duration_ms": result.duration_ms,
                     "cost_usd": result.cost_usd,
                 }
+                if result_attachments:
+                    msg_data["attachments"] = result_attachments
                 # Attach file changes from this execution's log entries
                 if session_logger:
                     fc = session_logger.extract_file_changes_from_cache(pre_exec_cursor)

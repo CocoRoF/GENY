@@ -76,6 +76,12 @@ class ExecutionResult:
     duration_ms: int = 0
     cost_usd: Optional[float] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    # Files the agent delivered to the user this turn via the SendUserFile
+    # tool (workspace-canvas P1). ChatAttachment-shaped dicts (kind/name/
+    # mime_type/size/url) — message writers copy this onto the chat
+    # message's ``attachments`` field so the existing AttachmentList
+    # renderer shows them inline.
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
     # Structured executor error identifier (since executor 2.1.0).
     # ``"exec.cli.auth_failed"`` etc. — populated only when the
     # surfaced exception was a ``GenyExecutorError`` subclass. ``None``
@@ -941,6 +947,15 @@ async def _execute_core(
             except Exception:
                 logger.debug("Cost persistence failed for %s", session_id, exc_info=True)
 
+        # Files staged by SendUserFile during this turn → chat attachments.
+        result_attachments: List[Dict[str, Any]] = []
+        try:
+            drain = getattr(agent, "consume_user_file_attachments", None)
+            if callable(drain):
+                result_attachments = drain() or []
+        except Exception:  # noqa: BLE001 — delivery must never fail the turn
+            logger.debug("user-file drain failed for %s", session_id, exc_info=True)
+
         result = ExecutionResult(
             success=True,
             session_id=session_id,
@@ -948,6 +963,7 @@ async def _execute_core(
             duration_ms=duration_ms,
             cost_usd=result_cost,
             tool_calls=result_tool_calls,
+            attachments=result_attachments,
         )
         holder["result"] = result.to_dict()
         return result
@@ -1402,7 +1418,7 @@ def _save_subworker_reply_to_chat_room(
         role_val = getattr(agent, '_role', None)
         role = role_val.value if hasattr(role_val, 'value') else str(role_val or 'vtuber')
 
-        msg = store.add_message(chat_room_id, {
+        _reply_msg: Dict[str, Any] = {
             "type": "agent",
             "content": cleaned,
             "session_id": vtuber_session_id,
@@ -1411,7 +1427,12 @@ def _save_subworker_reply_to_chat_room(
             "duration_ms": result.duration_ms,
             "cost_usd": result.cost_usd,
             "source": "sub_worker_reply",
-        })
+        }
+        # Files the sub-worker delivered via SendUserFile (workspace-canvas P1)
+        # ride along to the VTuber's chat room as attachments.
+        if getattr(result, "attachments", None):
+            _reply_msg["attachments"] = list(result.attachments)
+        msg = store.add_message(chat_room_id, _reply_msg)
 
         logger.info(
             "[SubWorkerReply] Posted VTuber response to chat room %s "
@@ -1470,7 +1491,7 @@ def _save_drain_to_chat_room(
         role_val = getattr(agent, '_role', None)
         role = role_val.value if hasattr(role_val, 'value') else str(role_val or 'worker')
 
-        store.add_message(chat_room_id, {
+        _drain_msg: Dict[str, Any] = {
             "type": "agent",
             "content": cleaned,
             "session_id": session_id,
@@ -1482,7 +1503,10 @@ def _save_drain_to_chat_room(
             # decide auto-TTS. Background drains stay suppressed; an owned
             # sub-agent completion (source="subagent_result") is TTS-eligible.
             "source": source,
-        })
+        }
+        if getattr(result, "attachments", None):
+            _drain_msg["attachments"] = list(result.attachments)
+        store.add_message(chat_room_id, _drain_msg)
 
         # Notify SSE listeners
         try:

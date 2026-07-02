@@ -723,8 +723,9 @@ export default function VTuberChatPanel({
                 ) : (
                   <ChatMarkdown content={text} className="text-[0.875rem]" />
                 )}
-                {/* User attachments (images / files) — rendered as a small grid. */}
-                {isUser && msg.attachments && msg.attachments.length > 0 && (
+                {/* Attachments (images / files) — user uploads AND files the
+                    agent delivered via SendUserFile (workspace-canvas P1). */}
+                {msg.attachments && msg.attachments.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {msg.attachments.map((att, i) => (
                       att.kind === 'image' && att.url ? (
