@@ -1082,7 +1082,7 @@ async def stop_execution(
 # ============================================================================
 
 
-def _resolve_storage_path(session_id: str) -> str:
+def _storage_root_live_or_dormant(session_id: str) -> str:
     """Session storage root for live OR dormant sessions.
 
     Storage endpoints must keep working after a backend restart (lazy
@@ -1113,7 +1113,7 @@ async def list_storage_files(
     """
     from service.utils import file_storage as storage_utils
 
-    storage_path = _resolve_storage_path(session_id)
+    storage_path = _storage_root_live_or_dormant(session_id)
 
     files_data = storage_utils.list_storage_files(
         storage_path, subpath=path, session_id=session_id
@@ -1147,7 +1147,7 @@ async def download_storage_file_raw(
 
     from starlette.responses import FileResponse
 
-    storage_path = _resolve_storage_path(session_id)
+    storage_path = _storage_root_live_or_dormant(session_id)
     root = _FilePath(storage_path).resolve()
     target = (root / file_path).resolve()
     try:
@@ -1173,7 +1173,7 @@ async def read_storage_file(
     """
     from service.utils import file_storage as storage_utils
 
-    storage_path = _resolve_storage_path(session_id)
+    storage_path = _storage_root_live_or_dormant(session_id)
 
     file_content = storage_utils.read_storage_file(
         storage_path, file_path, encoding=encoding, session_id=session_id
