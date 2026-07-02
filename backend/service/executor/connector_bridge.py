@@ -166,9 +166,14 @@ class DesktopScreenshotTool(ConnectorCapabilityTool):
             "To click something, call desktop_click with the pixel coordinates AS SEEN IN THIS IMAGE "
             "(top-left is 0,0)."
         )
+        # Canonical content blocks: a text note + a canonical image block
+        # ({type:image, source:{type:base64, media_type, data}}). This is the
+        # SAME shape the executor uses for message images, so it renders natively
+        # on the Anthropic API, and Geny's mcp bridge (_to_mcp_content) maps it to
+        # an MCP image part for claude_code_cli. See docs/connector-local-bridge-plan.
         return ToolResult(content=[
             {"type": "text", "text": note},
-            {"type": "image", "data": data, "mime_type": mime},
+            {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}},
         ])
 
 

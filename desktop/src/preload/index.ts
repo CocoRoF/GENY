@@ -169,6 +169,12 @@ export interface ConnectorBridge {
   /** Phase 4 — desktop awareness (read-only). */
   capture: {
     listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>
+    /** The primary display's id (string) — so desktop_screenshot captures the
+     *  PRIMARY, whose pixel space matches nut.js mouse coordinates. */
+    primaryDisplayId(): Promise<string>
+    /** Report the last full-res screenshot's pixel size so main can map the
+     *  model's image-space click coords back to screen coords. */
+    noteCaptureDims(w: number, h: number): void
   }
 
   /** Phase 6 — guarded actuation. Each call is gated by the master switch + a
@@ -256,6 +262,8 @@ const api: ConnectorBridge = {
   },
   capture: {
     listSources: () => ipcRenderer.invoke('capture:list-sources'),
+    primaryDisplayId: () => ipcRenderer.invoke('capture:primary-display-id'),
+    noteCaptureDims: (w, h) => ipcRenderer.send('capture:note-dims', w, h),
   },
   actuate: {
     openApp: (target) => ipcRenderer.invoke('actuate:open-app', target),

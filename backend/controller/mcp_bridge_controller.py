@@ -309,12 +309,14 @@ def _to_mcp_content(content: Any) -> list:
         parts: list = []
         for b in content:
             if b.get("type") == "image":
-                data = b.get("data") or ""
+                # Accept the canonical block ({source:{type:base64,media_type,data}})
+                # OR a flat block ({data, mime_type}); emit the MCP image shape.
+                src = b.get("source") if isinstance(b.get("source"), dict) else {}
+                data = src.get("data") or b.get("data") or ""
+                mime = src.get("media_type") or b.get("mime_type") or b.get("mimeType") or "image/png"
                 if isinstance(data, str) and data.startswith("data:"):
                     data = data.split(",", 1)[-1]  # tolerate a data: URL prefix
-                parts.append(
-                    {"type": "image", "data": data, "mimeType": b.get("mime_type") or b.get("mimeType") or "image/png"}
-                )
+                parts.append({"type": "image", "data": data, "mimeType": mime})
             else:
                 parts.append({"type": "text", "text": str(b.get("text", ""))})
         return parts

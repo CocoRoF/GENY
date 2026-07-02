@@ -1043,8 +1043,30 @@ async function loadNut(): Promise<any> {
     '0': K.Num0, '1': K.Num1, '2': K.Num2, '3': K.Num3, '4': K.Num4,
     '5': K.Num5, '6': K.Num6, '7': K.Num7, '8': K.Num8, '9': K.Num9,
   }
-  _nut = { keyboard: m.keyboard, mouse: m.mouse, Button: m.Button, Point: m.Point, Key: K, keyMap }
+  _nut = { keyboard: m.keyboard, mouse: m.mouse, screen: m.screen, Button: m.Button, Point: m.Point, Key: K, keyMap }
   return _nut
+}
+
+// ── Computer-use coordinate mapping ─────────────────────────────────────────
+// The model clicks in the SCREENSHOT's pixel space. desktop_screenshot captures
+// the PRIMARY display; nut.js mouse/screen operate in the primary's PHYSICAL
+// pixels. So we scale image coords → nut coords by the ratio nut.screen / image,
+// which is correct at ANY DPI and regardless of how the capture was scaled or
+// capped (both spaces cover the same primary screen). Multi-monitor secondary
+// displays are out of nut.js's (primary-only) mouse space — best-effort only.
+let lastCaptureDims: { w: number; h: number } | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function mapImageToScreen(nut: any, x: number, y: number): Promise<{ x: number; y: number }> {
+  const dims = lastCaptureDims
+  if (!dims || !dims.w || !dims.h) return { x, y } // no screenshot reference → assume 1:1
+  try {
+    const sw = await nut.screen.width()
+    const sh = await nut.screen.height()
+    if (!sw || !sh) return { x, y }
+    return { x: Math.round((x * sw) / dims.w), y: Math.round((y * sh) / dims.h) }
+  } catch {
+    return { x, y }
+  }
 }
 
 // ── IPC: the connectorBridge surface (preload calls these) ──────────────────
@@ -1220,13 +1242,20 @@ function registerIpc(): void {
     }),
   )
   ipcMain.handle('actuate:click', (_e, x: number, y: number, button?: string) =>
-    runActuation('input', '마우스 클릭', `(${x}, ${y}) ${button ?? 'left'}`, async () => {
+    runActuation('input', '마우스 클릭', `(${x}, ${y})${lastCaptureDims ? ' [image px]' : ''} ${button ?? 'left'}`, async () => {
       const nut = await loadNut()
-      await nut.mouse.setPosition(new nut.Point(x, y))
+      const p = await mapImageToScreen(nut, x, y)
+      await nut.mouse.setPosition(new nut.Point(p.x, p.y))
       await nut.mouse.click(nut.Button[(button ?? 'left').toUpperCase() as 'LEFT' | 'RIGHT' | 'MIDDLE'])
-      return `clicked (${x},${y})`
+      return `clicked image(${x},${y}) → screen(${p.x},${p.y})`
     }),
   )
+  // desktop_screenshot geometry: the primary display id (so the renderer captures
+  // the PRIMARY), and the last screenshot's pixel size (so clicks map back).
+  ipcMain.handle('capture:primary-display-id', () => String(screen.getPrimaryDisplay().id))
+  ipcMain.on('capture:note-dims', (_e, w: number, h: number) => {
+    if (w > 0 && h > 0) lastCaptureDims = { w, h }
+  })
   ipcMain.handle('actuate:scroll', (_e, amount: number) =>
     runActuation('input', '스크롤', `${amount > 0 ? '아래' : '위'} ${Math.abs(amount)}`, async () => {
       const nut = await loadNut()
