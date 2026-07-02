@@ -132,7 +132,7 @@ export interface Live2DEnhancedConfig {
   expressionEnabled: boolean;
   beatSyncEnabled: boolean;
   shadowEnabled: boolean;
-  maxFps: number;               // 0 = unlimited
+  maxFps: number;               // 0 = unlimited (uses the display refresh, ~60)
   renderScale: number;          // HiDPI scale (default: 2)
   beatSyncStyle: BeatSyncStyleName;
   beatSyncAutoStyleShift: boolean;
@@ -146,7 +146,7 @@ export const DEFAULT_ENHANCED_CONFIG: Live2DEnhancedConfig = {
   expressionEnabled: true,
   beatSyncEnabled: true,
   shadowEnabled: true,
-  maxFps: 0,
+  maxFps: 30,
   renderScale: 2,
   beatSyncStyle: 'punchy-v',
   beatSyncAutoStyleShift: true,

@@ -382,6 +382,7 @@ export function useVoiceActivityRecorder(
       setPhase('listening');
 
       const buffer = new Uint8Array(analyserRef.current!.fftSize);
+      let lastLevel = -1;
       const loop = () => {
         const analyser = analyserRef.current;
         if (!analyser) return;
@@ -393,7 +394,13 @@ export function useVoiceActivityRecorder(
           sumSquares += v * v;
         }
         const rms = Math.sqrt(sumSquares / buffer.length);
-        setLevel(rms);
+        // Only push a level update when it moved meaningfully — the VAD state
+        // machine below still sees `rms` every frame, but pushing setLevel on
+        // every frame re-renders the meter 60×/s for no visible benefit.
+        if (Math.abs(rms - lastLevel) > 0.02) {
+          setLevel(rms);
+          lastLevel = rms;
+        }
 
         const now = performance.now();
         const isMuted = muteRef.current;

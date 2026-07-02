@@ -200,13 +200,14 @@ export default function Live2DCanvas({
         backgroundColor: background,
         antialias: true,
         autoDensity: true,
-        // FIXED high backing density (never changed at runtime). Rendering at ≥2x
-        // and letting the browser scale the canvas keeps the avatar crisp on
-        // 100%–200% monitors AND — critically — means a multi-monitor DPI change
-        // (150%↔100%) NEVER touches the renderer, so it can't break / blank the
-        // avatar the way changing resolution live did. Only the CSS size (via the
-        // ResizeObserver) tracks the window; the density stays put.
-        resolution: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+        // FIXED backing density (captured at init, never changed at runtime) —
+        // a multi-monitor DPI change (150%↔100%) must NEVER touch the renderer or
+        // it blanks the avatar the way live resolution changes did. We use the
+        // NATIVE devicePixelRatio (capped at 2) rather than forcing ≥2×: forcing
+        // 2× on a 100% (dpr=1) screen quadruples the backing-store pixels and
+        // re-rasterizes them every frame — the dominant idle-CPU cost on
+        // integrated GPUs. Native dpr is already crisp; the cap bounds 4K/HiDPI.
+        resolution: Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
       });
 
       if (isStale()) {

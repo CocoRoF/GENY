@@ -640,17 +640,21 @@ export class AudioManager {
     if (!this.analyser) return;
     const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
 
-    const track = () => {
-      this.analyser!.getByteFrequencyData(dataArray);
-
-      // RMS 계산
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += (dataArray[i] / 255) ** 2;
+    // Throttle to ~30 Hz: lip-sync is imperceptible above that, and each frame
+    // does a GPU→CPU getByteFrequencyData read + RMS scan, so halving the rate
+    // (from the 60 Hz rAF cadence) roughly halves this loop's CPU during TTS.
+    let lastTs = 0;
+    const track = (ts: number) => {
+      if (ts - lastTs >= 33) {
+        lastTs = ts;
+        this.analyser!.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += (dataArray[i] / 255) ** 2;
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        this.onAmplitudeChange?.(rms);
       }
-      const rms = Math.sqrt(sum / dataArray.length);
-
-      this.onAmplitudeChange?.(rms);
       this.animFrameId = requestAnimationFrame(track);
     };
 
