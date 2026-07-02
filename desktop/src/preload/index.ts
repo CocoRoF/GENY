@@ -172,6 +172,12 @@ export interface ConnectorBridge {
     check(): void
   }
 
+  /** Launch-on-login (start when the user signs into the OS). */
+  autostart: {
+    get(): Promise<boolean>
+    set(enabled: boolean): Promise<boolean>
+  }
+
   /** Phase 4 — desktop awareness (read-only). */
   capture: {
     listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>
@@ -266,6 +272,10 @@ const api: ConnectorBridge = {
     getEnabled: () => ipcRenderer.invoke('updater:get-enabled'),
     setEnabled: (enabled) => ipcRenderer.invoke('updater:set-enabled', enabled),
     check: () => ipcRenderer.send('updater:check'),
+  },
+  autostart: {
+    get: () => ipcRenderer.invoke('autostart:get'),
+    set: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
   },
   capture: {
     listSources: () => ipcRenderer.invoke('capture:list-sources'),

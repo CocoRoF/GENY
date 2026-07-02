@@ -177,6 +177,11 @@ export const messages: Record<string, Entry> = {
   'app.updateHintOff': { ko: '자동 설치는 끄고, 새 버전이 있으면 알림만 띄웁니다.', en: 'Auto-install is off; only notifies when a new version is available.' },
   'app.updateCheckNow': { ko: '지금 업데이트 확인', en: 'Check for updates now' },
 
+  // ── app tab: launch on system startup ──
+  'app.autostartCard': { ko: '시작 프로그램', en: 'Startup' },
+  'app.autostartToggle': { ko: '시스템 시작 시 자동 실행', en: 'Launch on system startup' },
+  'app.autostartHint': { ko: '컴퓨터에 로그인하면 Geny 접속기가 자동으로 실행됩니다.', en: 'Geny connector launches automatically when you log in to your computer.' },
+
   // ── app tab: window/avatar positions ──
   'app.positionsCard': { ko: '창 · 아바타 위치', en: 'Window · Avatar positions' },
   'app.positionsHint': {
