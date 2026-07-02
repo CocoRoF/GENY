@@ -94,15 +94,26 @@ def _ensure_draft(root: Path, src: Path) -> Path:
 # ── conversion / preview (LibreOffice + poppler) ────────────────────
 
 
+def _find_soffice() -> Optional[str]:
+    """PATH first, then the Debian slim install location (with
+    --no-install-recommends the /usr/bin/soffice symlink is absent)."""
+    found = shutil.which("soffice")
+    if found:
+        return found
+    fallback = "/usr/lib/libreoffice/program/soffice"
+    return fallback if Path(fallback).exists() else None
+
+
 def _soffice(args: List[str], cwd: Path) -> None:
-    if shutil.which("soffice") is None:
+    binary = _find_soffice()
+    if binary is None:
         raise ToolError(
             "LibreOffice (soffice) is not installed in this backend — document "
             "conversion/preview is unavailable. See README (recommended dependency)."
         )
     with _SOFFICE_LOCK:
         proc = subprocess.run(
-            ["soffice", "--headless", "--norestore", *args],
+            [binary, "--headless", "--norestore", *args],
             cwd=str(cwd), capture_output=True, timeout=_SOFFICE_TIMEOUT,
         )
     if proc.returncode != 0:
