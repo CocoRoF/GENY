@@ -2655,7 +2655,7 @@ class AgentSession:
 
         # SendUserFile delivery channel (workspace-canvas P1) — lets the agent
         # return files to the user as chat attachments. Files are materialised
-        # under this session's storage (workspace/out/) and drained per turn by
+        # under this session's storage (workspace/outputs/) and drained per turn by
         # consume_user_file_attachments(). Without this the executor's built-in
         # SendUserFile tool errors with NO_CHANNEL.
         if self.storage_path:

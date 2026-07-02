@@ -56,7 +56,7 @@
 /data/geny_agent_sessions/<sid>/workspace/
     uploads/    ← 유저가 올린 파일의 세션 사본 (턴 시점에 복사)
     drafts/     ← 작업중 사본(workspace-in-memory): drafts/<job>/ {원본사본, 편집본, preview/, manifest.json}
-    out/        ← 완성·반환된 산출물
+    outputs/    ← 완성·반환된 산출물
 ```
 - 기존 Storage 탭/API(`/api/agents/{id}/storage`)가 그대로 브라우징·다운로드 제공. path guard로 이 루트에 한정.
 - **이름 충돌 처리**: executor의 `WorkspaceStack`(cwd 스택)과 구분해 코드에서는 `files workspace`/`session_workspace`로 명명. Environment>Workspace 탭은 그대로.
@@ -71,7 +71,7 @@
   - `python-pptx + openpyxl + python-docx + Pillow` ≈ 50MB (requirements 추가)
   - `libreoffice --headless` + `poppler-utils(pdftoppm)` ≈ 400~600MB — **프리뷰 렌더(pptx/docx→pdf→png)의 유일한 현실적 로컬 경로**. 백엔드 이미지 1회 비용. (거부 시: 프리뷰 없는 편집만 먼저 — 결정 필요 §6-Q1)
 - **도구 세트(1차)**: `doc_convert`(pptx/docx/xlsx→pdf/png/텍스트 추출), `pptx_edit`(텍스트 치환/슬라이드 텍스트박스/노트), `xlsx_edit`(셀/행 조작), `docx_edit`(문단/치환). 모두 draft 사본에만 작동. 범용 탈출구는 기존 python/sandbox 도구.
-- **draft 규약**: 편집 요청 → `drafts/<job>/`에 사본 생성 → 편집 → `preview/`에 png 재생성 → 사용자 확인 → `out/`으로 확정(+반환). `manifest.json`(원본, 상태 editing/done, 갱신시각)이 Canvas 탭의 데이터 소스.
+- **draft 규약**: 편집 요청 → `drafts/<job>/`에 사본 생성 → 편집 → `preview/`에 png 재생성 → 사용자 확인 → `outputs/`로 확정(+반환). (※ 디렉토리명은 `out`이 아닌 `outputs` — `out/`은 Storage 목록의 기본 ignore 패턴(빌드 산출물 관례)이라 숨겨짐.)
 
 ### D4. 파일 반환 = 기존 `SendUserFile`/`UserFileChannel` 계약을 Geny가 구현 (executor 무변경)
 - Geny가 `UserFileChannel` 구현: 파일을 sha256으로 `/static/uploads`에 복사(기존 dedup 재사용) → `ChatAttachment` dict 생성 → 턴별 pending 버퍼에 적재.
@@ -133,5 +133,5 @@ Geny: 브로드캐스트 시 `workspace/uploads/` 복사 + `workspace_path` 필�
 
 ## 6. 결정 사항 (2026-07-02 사용자 확정)
 - **Q1. LibreOffice 승인** — 백엔드 이미지에 설치(권장 docker-compose 실행 시 기본 포함). README에 LibreOffice가 문서 프리뷰의 권장 의존성임을 명확히 표기.
-- **Q2. 반환 파일 = 세션 storage** — 세션이 만든 산출물이므로 `storage_path/workspace/out/`에 저장, 다운로드 URL은 세션 storage 엔드포인트 경유(세션 삭제 시 함께 소멸 — 의도된 수명).
+- **Q2. 반환 파일 = 세션 storage** — 세션이 만든 산출물이므로 `storage_path/workspace/outputs/`에 저장, 다운로드 URL은 세션 storage 엔드포인트 경유(세션 삭제 시 함께 소멸 — 의도된 수명).
 - **Q3. Canvas 탭 항상 표시** — 워크스페이스 브라우저 겸용.

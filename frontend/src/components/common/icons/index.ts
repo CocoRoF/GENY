@@ -24,6 +24,7 @@ import {
   FolderOpen,
   Bot,
   User,
+  Palette,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -43,6 +44,7 @@ export const SectionIcons = {
   workspace: FolderOpen,
   agent: User,
   subAgent: Bot,
+  canvas: Palette,
 } as const satisfies Record<string, LucideIcon>;
 
 export type SectionIconKey = keyof typeof SectionIcons;

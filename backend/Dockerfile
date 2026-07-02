@@ -14,6 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && apt-get install -y nodejs && \
+    # Document toolchain (workspace-canvas P3): LibreOffice headless renders
+    # pptx/docx/xlsx → PDF for the editing tools' previews; poppler's pdftoppm
+    # rasterises PDF → PNG for the Canvas tab; Noto CJK keeps Korean documents
+    # from rendering as tofu. Recommended dependency — see README.
+    apt-get install -y --no-install-recommends \
+        libreoffice-impress libreoffice-writer libreoffice-calc \
+        poppler-utils fonts-noto-cjk && \
     # Cleanup
     apt-get clean && rm -rf /var/lib/apt/lists/*
 

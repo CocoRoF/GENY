@@ -1,0 +1,355 @@
+'use client';
+
+/**
+ * CanvasTab — the session files-workspace browser + live document preview.
+ *
+ * workspace-canvas P4 (docs/workspace-canvas-plan/01_PLAN.md). Shows the
+ * session's `workspace/` tree (uploads / drafts / outputs convention) on the
+ * left and a type-aware preview on the right:
+ *   - images        → inline <img> (storage-raw, cookie-auth'd)
+ *   - pdf           → <iframe>
+ *   - office drafts → the drafts/<job>/preview/page-N.png pager the editing
+ *                     tools (pptx_edit / docx_edit / doc_convert) regenerate
+ *   - text/code/md  → FileViewer (existing renderer)
+ * Work-in-progress drafts surface as a band up top. Polls every 5s so an
+ * in-flight edit's preview refreshes while the agent works.
+ */
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useAppStore } from '@/store/useAppStore';
+import { agentApi } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
+import {
+  RefreshCw, Download, FileText, Image as ImageIcon, Presentation,
+  FileSpreadsheet, File as FileIcon, ChevronLeft, ChevronRight, Palette,
+} from 'lucide-react';
+import { TabShell, ActionButton, EmptyState } from '@/components/common/layout';
+import { FileViewer } from '@/components/file-viewer';
+import type { StorageFile } from '@/types';
+
+const POLL_MS = 5_000;
+const TEXT_MAX_BYTES = 2 * 1024 * 1024;
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+const OFFICE_EXTS = new Set(['pptx', 'docx', 'xlsx', 'xlsm', 'ppt', 'doc', 'xls', 'odt', 'odp', 'ods']);
+const BINARY_EXTS = new Set(['zip', 'gz', 'tar', 'exe', 'bin', 'mp3', 'mp4', 'wav', 'ogg', 'woff', 'woff2']);
+
+function ext(path: string): string {
+  const i = path.lastIndexOf('.');
+  return i >= 0 ? path.slice(i + 1).toLowerCase() : '';
+}
+
+function fileIcon(path: string) {
+  const e = ext(path);
+  if (IMAGE_EXTS.has(e)) return ImageIcon;
+  if (e === 'pptx' || e === 'ppt' || e === 'odp') return Presentation;
+  if (e === 'xlsx' || e === 'xls' || e === 'csv' || e === 'ods') return FileSpreadsheet;
+  if (e === 'md' || e === 'txt' || e === 'docx' || e === 'doc') return FileText;
+  return FileIcon;
+}
+
+function fmtSize(n?: number | null): string {
+  if (n == null) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Slide/page pager over drafts/<job>/preview/page-N.png files. */
+function PreviewPager({ pages, rawUrl }: { pages: string[]; rawUrl: (p: string) => string }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { setIdx(0); }, [pages.length, pages[0]]);
+  if (!pages.length) return null;
+  const clamped = Math.min(idx, pages.length - 1);
+  return (
+    <div className="flex flex-col items-center gap-2 h-full min-h-0">
+      <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+        {/* cache-bust on mtime-ish key so a regenerated preview refreshes */}
+        <img
+          src={rawUrl(pages[clamped])}
+          alt={`page ${clamped + 1}`}
+          className="max-w-full max-h-full object-contain rounded-md border border-[var(--border-color)] shadow-sm bg-white"
+        />
+      </div>
+      <div className="flex items-center gap-2 shrink-0 pb-1">
+        <button
+          className="w-7 h-7 rounded-md border border-[var(--border-color)] flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+          disabled={clamped <= 0}
+          onClick={() => setIdx(clamped - 1)}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <span className="text-[0.6875rem] text-[var(--text-muted)] font-mono">
+          {clamped + 1} / {pages.length}
+        </span>
+        <button
+          className="w-7 h-7 rounded-md border border-[var(--border-color)] flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+          disabled={clamped >= pages.length - 1}
+          onClick={() => setIdx(clamped + 1)}
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function CanvasTab() {
+  const { selectedSessionId } = useAppStore();
+  const { t } = useI18n();
+  const [files, setFiles] = useState<StorageFile[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [loadingText, setLoadingText] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const rawUrl = useCallback(
+    (path: string) => `/api/agents/${selectedSessionId}/storage-raw/${path}`,
+    [selectedSessionId],
+  );
+
+  const refresh = useCallback(async () => {
+    if (!selectedSessionId) return;
+    try {
+      const res = await agentApi.listStorage(selectedSessionId);
+      setFiles((res.files || []).filter((f) => !f.is_directory && f.path.startsWith('workspace/')));
+    } catch { /* session may be dormant; keep last view */ }
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    setSelected(null);
+    setTextContent(null);
+    refresh();
+    const id = window.setInterval(refresh, POLL_MS);
+    return () => window.clearInterval(id);
+  }, [refresh]);
+
+  // ── derived: sections + drafts ──────────────────────────────────
+  const sections = useMemo(() => {
+    const by: Record<string, StorageFile[]> = { uploads: [], drafts: [], outputs: [], other: [] };
+    for (const f of files) {
+      const seg = f.path.split('/')[1] ?? '';
+      (by[seg] ?? by.other).push(f);
+    }
+    return by;
+  }, [files]);
+
+  // drafts/<job>/preview/page-N.png → pages per job dir
+  const previewsByDir = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const f of files) {
+      const m = f.path.match(/^(workspace\/drafts\/[^/]+)\/preview\/page-\d+\.png$/);
+      if (m) (map[m[1]] ??= []).push(f.path);
+    }
+    for (const k of Object.keys(map)) {
+      map[k].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }
+    return map;
+  }, [files]);
+
+  const draftJobs = useMemo(() => {
+    const jobs = new Map<string, { doc: StorageFile | null; pages: string[] }>();
+    for (const f of sections.drafts) {
+      const m = f.path.match(/^workspace\/drafts\/([^/]+)\/([^/]+)$/);
+      if (m && OFFICE_EXTS.has(ext(m[2]))) {
+        jobs.set(m[1], {
+          doc: f,
+          pages: previewsByDir[`workspace/drafts/${m[1]}`] ?? [],
+        });
+      }
+    }
+    return jobs;
+  }, [sections.drafts, previewsByDir]);
+
+  // ── selection → load text when previewable as text ──────────────
+  const selectedFile = useMemo(
+    () => files.find((f) => f.path === selected) ?? null,
+    [files, selected],
+  );
+  const selectedExt = selected ? ext(selected) : '';
+  const selectedKind: 'image' | 'pdf' | 'office' | 'text' | 'binary' = !selected
+    ? 'binary'
+    : IMAGE_EXTS.has(selectedExt)
+      ? 'image'
+      : selectedExt === 'pdf'
+        ? 'pdf'
+        : OFFICE_EXTS.has(selectedExt)
+          ? 'office'
+          : BINARY_EXTS.has(selectedExt) || (selectedFile?.size ?? 0) > TEXT_MAX_BYTES
+            ? 'binary'
+            : 'text';
+
+  useEffect(() => {
+    setTextContent(null);
+    if (!selected || !selectedSessionId || selectedKind !== 'text') return;
+    let cancelled = false;
+    setLoadingText(true);
+    agentApi
+      .getStorageFile(selectedSessionId, selected)
+      .then((res) => { if (!cancelled) setTextContent(res.content ?? ''); })
+      .catch(() => { if (!cancelled) setTextContent(null); })
+      .finally(() => { if (!cancelled) setLoadingText(false); });
+    return () => { cancelled = true; };
+  }, [selected, selectedSessionId, selectedKind]);
+
+  // office file selected → its draft preview pages (same dir), if any
+  const officePages = useMemo(() => {
+    if (!selected || selectedKind !== 'office') return [];
+    const dir = selected.slice(0, selected.lastIndexOf('/'));
+    return previewsByDir[dir] ?? [];
+  }, [selected, selectedKind, previewsByDir]);
+
+  if (!selectedSessionId) {
+    return (
+      <TabShell title={t('tabs.canvas')} icon={Palette}>
+        <EmptyState icon={Palette} title={t('canvasTab.selectSession')} />
+      </TabShell>
+    );
+  }
+
+  const SECTION_LABELS: Record<string, string> = {
+    uploads: t('canvasTab.uploads'),
+    drafts: t('canvasTab.drafts'),
+    outputs: t('canvasTab.outputs'),
+    other: t('canvasTab.other'),
+  };
+
+  return (
+    <TabShell
+      title={t('tabs.canvas')}
+      icon={Palette}
+      actions={
+        <ActionButton
+          icon={RefreshCw}
+          spinIcon={refreshing}
+          onClick={async () => { setRefreshing(true); await refresh(); setRefreshing(false); }}
+        >
+          {t('common.refresh')}
+        </ActionButton>
+      }
+    >
+      <div className="flex h-full min-h-0">
+        {/* ── left: workspace tree ── */}
+        <div className="w-72 shrink-0 border-r border-[var(--border-color)] overflow-y-auto p-3 flex flex-col gap-3">
+          {files.length === 0 && (
+            <p className="text-[0.75rem] text-[var(--text-muted)] px-1 py-2">
+              {t('canvasTab.empty')}
+            </p>
+          )}
+          {(['drafts', 'uploads', 'outputs', 'other'] as const).map((sec) => {
+            const list = sections[sec];
+            if (!list?.length) return null;
+            return (
+              <div key={sec}>
+                <div className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--text-muted)] px-1 mb-1">
+                  {SECTION_LABELS[sec]}
+                </div>
+                <div className="flex flex-col">
+                  {list
+                    .filter((f) => !/\/preview\/page-\d+\.png$/.test(f.path))
+                    .map((f) => {
+                      const Icon = fileIcon(f.path);
+                      const label = f.path.split('/').slice(2).join('/') || f.path.split('/').pop() || f.path;
+                      const active = selected === f.path;
+                      return (
+                        <button
+                          key={f.path}
+                          onClick={() => setSelected(f.path)}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left text-[0.75rem] transition-colors ${
+                            active
+                              ? 'bg-[hsl(var(--accent))] text-[var(--text-primary)]'
+                              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                          }`}
+                        >
+                          <Icon size={13} className="shrink-0 text-[var(--text-muted)]" />
+                          <span className="truncate flex-1">{label}</span>
+                          <span className="text-[0.625rem] text-[var(--text-muted)] shrink-0">
+                            {fmtSize(f.size)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── right: preview ── */}
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+          {/* working drafts band */}
+          {draftJobs.size > 0 && (
+            <div className="shrink-0 px-4 py-2 border-b border-[var(--border-color)] flex items-center gap-2 flex-wrap bg-[hsl(var(--card))]">
+              <span className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                {t('canvasTab.working')}
+              </span>
+              {[...draftJobs.entries()].map(([job, info]) => (
+                <button
+                  key={job}
+                  onClick={() => info.doc && setSelected(info.doc.path)}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border-color)] text-[0.6875rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                >
+                  <Presentation size={11} className="text-[hsl(var(--primary))]" />
+                  {job}
+                  {info.pages.length > 0 && (
+                    <span className="text-[var(--text-muted)]">({info.pages.length}p)</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex-1 min-h-0 p-4 overflow-auto">
+            {!selected ? (
+              <EmptyState icon={Palette} title={t('canvasTab.selectFile')} />
+            ) : selectedKind === 'image' ? (
+              <div className="h-full flex items-center justify-center">
+                <img
+                  src={rawUrl(selected)}
+                  alt={selected}
+                  className="max-w-full max-h-full object-contain rounded-md border border-[var(--border-color)]"
+                />
+              </div>
+            ) : selectedKind === 'pdf' ? (
+              <iframe src={rawUrl(selected)} title={selected} className="w-full h-full rounded-md border border-[var(--border-color)] bg-white" />
+            ) : selectedKind === 'office' ? (
+              officePages.length > 0 ? (
+                <PreviewPager pages={officePages} rawUrl={rawUrl} />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+                  <Presentation size={32} className="text-[var(--text-muted)] opacity-40" />
+                  <p className="text-[0.8125rem] text-[var(--text-muted)] max-w-[420px]">
+                    {t('canvasTab.noPreview')}
+                  </p>
+                  <a
+                    href={rawUrl(selected)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  >
+                    <Download size={12} /> {t('canvasTab.download')}
+                  </a>
+                </div>
+              )
+            ) : selectedKind === 'text' ? (
+              loadingText ? (
+                <p className="text-[0.75rem] text-[var(--text-muted)]">…</p>
+              ) : textContent != null ? (
+                <FileViewer content={textContent} fileName={selected.split('/').pop() || selected} />
+              ) : (
+                <p className="text-[0.75rem] text-[var(--text-muted)]">{t('canvasTab.loadFailed')}</p>
+              )
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-3">
+                <FileIcon size={32} className="text-[var(--text-muted)] opacity-40" />
+                <a
+                  href={rawUrl(selected)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                >
+                  <Download size={12} /> {t('canvasTab.download')}
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </TabShell>
+  );
+}

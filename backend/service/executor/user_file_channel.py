@@ -7,7 +7,7 @@ the tool was dead. This implementation makes agent-produced files land in the
 user's chat as attachments:
 
 1. The file is materialised under the session's own storage — agent artefacts
-   belong to the session (workspace/out/), not a global store — and exposed via
+   belong to the session (workspace/outputs/), not a global store — and exposed via
    the session storage raw endpoint
    (``GET /api/agents/{sid}/storage-raw/{relpath}``; cookie-auth'd, so the
    chat ``<img>``/``<a>`` tags work same-origin).
@@ -34,8 +34,8 @@ logger = getLogger(__name__)
 # session files-workspace convention (docs/workspace-canvas-plan/01_PLAN.md):
 #   workspace/uploads/  user-uploaded copies
 #   workspace/drafts/   in-progress working copies
-#   workspace/out/      finished, user-delivered artefacts
-OUT_SUBDIR = "workspace/out"
+#   workspace/outputs/      finished, user-delivered artefacts
+OUT_SUBDIR = "workspace/outputs"
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._\- ()\[\]가-힣]+")
 
@@ -67,7 +67,7 @@ class SessionUserFileChannel(UserFileChannel):
 
         # Materialise under session storage. Files already inside the session
         # storage are referenced in place; anything else (e.g. /tmp scratch)
-        # is copied into workspace/out/ so the download link stays valid for
+        # is copied into workspace/outputs/ so the download link stays valid for
         # the session's lifetime.
         try:
             rel = src.relative_to(self._storage_root)

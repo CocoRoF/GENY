@@ -25,6 +25,7 @@ const VTuberTab = dynamic(() => import('@/components/tabs/VTuberTab'), { ssr: fa
 const Playground2DTab = dynamic(() => import('@/components/tabs/Playground2DTab'), { ssr: false });
 const TasksTab = dynamic(() => import('@/components/tabs/TasksTab').then(m => m.TasksTab));
 const HooksAutomationTab = dynamic(() => import('@/components/tabs/HooksAutomationTab').then(m => m.HooksAutomationTab));
+const CanvasTab = dynamic(() => import('@/components/tabs/CanvasTab'));
 // Cycle 20260429 Phase 6 — main-app `library` tab and its sub-tabs
 // (hooks/skills/permissions/mcpServers/toolSets) are gone. They were
 // the prototype that conflated env CRUD with host registries; the
@@ -48,6 +49,7 @@ const TAB_MAP: Record<string, React.ComponentType> = {
   playground2d: Playground2DTab,
   tasks: TasksTab,
   hooks: HooksAutomationTab,
+  canvas: CanvasTab,
 };
 
 // Tabs that should stay mounted once activated (KeepAlive)

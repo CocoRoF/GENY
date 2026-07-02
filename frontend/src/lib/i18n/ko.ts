@@ -105,6 +105,7 @@ const ko: Translations = {
     dashboard: '대시보드',
     admin: '관리자',
     command: '명령',
+    canvas: '캔버스',
     storage: '스토리지',
     logs: '로그',
     chat: '채팅',
@@ -978,6 +979,21 @@ const ko: Translations = {
     contextRole: '역할',
     contextSessionType: '유형',
     contextLinked: '연결',
+  },
+
+  // ─── Canvas Tab (세션 파일 워크스페이스 + 문서 프리뷰) ───
+  canvasTab: {
+    selectSession: '워크스페이스를 열 세션을 선택하세요',
+    selectFile: '미리 볼 파일을 선택하세요',
+    empty: '워크스페이스가 비어 있어요. 사용자가 올린 파일과 에이전트가 작업 중인 문서가 여기에 표시됩니다.',
+    uploads: '업로드',
+    drafts: '작업 중',
+    outputs: '산출물',
+    other: '기타',
+    working: '작업 중',
+    noPreview: '이 문서의 프리뷰가 아직 없어요. 에이전트에게 프리뷰 생성(doc_convert → png)을 요청하거나 다운로드하세요.',
+    download: '다운로드',
+    loadFailed: '파일을 불러오지 못했습니다.',
   },
 
   // ─── Storage Tab ───

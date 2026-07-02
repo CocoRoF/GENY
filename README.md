@@ -351,6 +351,8 @@ Custom ports + data dirs documented in [`docs/architecture.md`](docs/architectur
 
 For non-Docker development see the expandable section in [`docs/architecture.md`](docs/architecture.md). Minimum requirements: Python 3.11+, Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`), and at least one provider's credentials.
 
+**Recommended: LibreOffice + poppler-utils (document editing / preview).** Agents can edit office files a user uploads (pptx / docx / xlsx) and show live previews in the session's Canvas tab. Rendering those previews needs LibreOffice headless and `pdftoppm`. The Docker images install these automatically (`libreoffice-impress libreoffice-writer libreoffice-calc poppler-utils fonts-noto-cjk` — Noto CJK keeps Korean documents from rendering as tofu); for bare-metal runs install the same packages, or document conversion/preview will report itself unavailable (text editing itself still works).
+
 ---
 
 ## Avatar Editor (geny-avatar)

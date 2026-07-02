@@ -56,6 +56,7 @@ const SESSION_TAB_DEFS = [
   { id: 'vtuber', accent: true },
   { id: 'tasks' },     // PR-D.3.1 — BackgroundTaskRunner viewer (runtime state, stays separate)
   { id: 'hooks' },     // user automations — agent-created (HookCreate); replaces the old Cron tab
+  { id: 'canvas' },    // session files-workspace browser + live document preview (workspace-canvas P4)
   { id: 'storage' },
   {
     id: 'memory',

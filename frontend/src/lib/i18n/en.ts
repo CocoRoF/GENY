@@ -105,6 +105,7 @@ const en = {
     dashboard: 'Dashboard',
     admin: 'Admin',
     command: 'Command',
+    canvas: 'Canvas',
     storage: 'Storage',
     logs: 'Logs',
     chat: 'Chat',
@@ -981,6 +982,21 @@ const en = {
     contextRole: 'Role',
     contextSessionType: 'Type',
     contextLinked: 'Linked',
+  },
+
+  // ─── Canvas Tab (session files-workspace + document preview) ───
+  canvasTab: {
+    selectSession: 'Select a session to open its workspace',
+    selectFile: 'Select a file to preview',
+    empty: 'The workspace is empty. Files the user uploads and documents the agent works on will appear here.',
+    uploads: 'Uploads',
+    drafts: 'Drafts',
+    outputs: 'Outputs',
+    other: 'Other',
+    working: 'In progress',
+    noPreview: 'No preview yet for this document. Ask the agent to generate one (doc_convert to png), or download it.',
+    download: 'Download',
+    loadFailed: 'Could not load the file.',
   },
 
   // ─── Storage Tab ───
