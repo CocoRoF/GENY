@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
 
@@ -58,6 +58,10 @@ interface ConnectorConfig {
   lang?: 'ko' | 'en'
   /** Auto-update toggle (default true). When false, updates only notify. */
   autoUpdate?: boolean
+  /** Launch the connector automatically when the user logs into the OS
+   *  (default false). Applied via app.setLoginItemSettings on win/mac and a
+   *  ~/.config/autostart .desktop file on Linux. */
+  autoLaunch?: boolean
   /** Global push-to-talk accelerator (Electron format). */
   pttHotkey?: string
   /** Global quick-chat accelerator (Electron format) — pops the floating input
@@ -156,8 +160,41 @@ function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
   if ('lang' in patch && next.lang !== prevLang) {
     try { rebuildTrayMenu() } catch { /* tray not yet created */ }
     try { buildAppMenu() } catch { /* menu not yet built */ }
+    // Native window title is set at creation time — refresh it live too.
+    try { settings?.setTitle(nt('window.settingsTitle')) } catch { /* not created */ }
   }
   return next
+}
+
+// ── launch-on-login (system startup) ────────────────────────────────────────
+// win/mac use the OS login-item API; Linux uses a ~/.config/autostart .desktop
+// file (setLoginItemSettings is a no-op on Linux). Best-effort — autostart
+// wiring must never crash the app.
+function autostartDesktopPath(): string {
+  return join(app.getPath('home'), '.config', 'autostart', 'geny-connector.desktop')
+}
+function applyAutoLaunch(enabled: boolean): void {
+  try {
+    if (process.platform === 'linux') {
+      const p = autostartDesktopPath()
+      if (enabled) {
+        mkdirSync(join(app.getPath('home'), '.config', 'autostart'), { recursive: true })
+        // AppImage relaunches via $APPIMAGE; packaged builds via the exe path.
+        const exec = process.env.APPIMAGE || process.execPath
+        writeFileSync(
+          p,
+          `[Desktop Entry]\nType=Application\nName=Geny\nExec="${exec}" --hidden\nX-GNOME-Autostart-enabled=true\nTerminal=false\nNoDisplay=false\n`,
+        )
+      } else if (existsSync(p)) {
+        unlinkSync(p)
+      }
+    } else {
+      // openAsHidden is honored on macOS; args flag the autostart launch.
+      app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: enabled, args: ['--hidden'] })
+    }
+  } catch (e) {
+    console.warn('autoLaunch apply failed:', (e as Error).message)
+  }
 }
 
 // ── native-chrome i18n (tray / app menu / actuation dialogs) ────────────────
@@ -1342,6 +1379,14 @@ function registerIpc(): void {
       return `clicked image(${x},${y}) → screen(${p.x},${p.y})`
     }),
   )
+  // Launch-on-login toggle.
+  ipcMain.handle('autostart:get', () => loadConfig().autoLaunch === true)
+  ipcMain.handle('autostart:set', (_e, enabled: boolean) => {
+    saveConfig({ autoLaunch: !!enabled })
+    applyAutoLaunch(!!enabled)
+    return !!enabled
+  })
+
   // desktop_screenshot geometry: the primary display id (so the renderer captures
   // the PRIMARY), and the last screenshot's pixel size (so clicks map back).
   ipcMain.handle('capture:primary-display-id', () => String(screen.getPrimaryDisplay().id))
@@ -1486,6 +1531,9 @@ app.whenReady().then(() => {
   registerIpc()
   // Load the user's local MCP servers into the manager (lazy-connects on use).
   try { getMcpManager().configure(loadConfig().mcpServers) } catch { /* SDK missing */ }
+  // Reconcile the OS login item with the saved preference (default off) — keeps
+  // the autostart entry in sync if the app moved or the setting changed offline.
+  applyAutoLaunch(loadConfig().autoLaunch === true)
   buildAppMenu()
   createOverlay()
   createControl()

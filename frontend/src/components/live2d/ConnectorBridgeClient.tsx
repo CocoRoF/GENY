@@ -51,11 +51,14 @@ async function grabFrame(
     sources.find((s) => s.id.startsWith('screen:')) ||
     sources[0];
   if (!src) throw new Error('no capture source available (capture may be paused)');
-  // full_res (desktop_screenshot for computer use): capture at native resolution
-  // so the image's pixel coords match the screen (desktop_click targets them).
-  // Otherwise cap at 1080p + downscale to the observation size (glance/caption).
-  const maxW = fullRes ? 3840 : 1920;
-  const maxH = fullRes ? 2160 : 1080;
+  // full_res (desktop_screenshot for computer use): cap at ~1080p. We do NOT need
+  // native resolution — desktop_click maps image→screen coords by the
+  // nut.screen/image ratio (main.mapImageToScreen), correct at any capture size.
+  // Capping keeps the base64 JSON frame well under the WS ~1MB limit (a 4K native
+  // JPEG could blow past it and drop the connection). Glance/observation use the
+  // smaller observation size.
+  const maxW = fullRes ? 1920 : 1920;
+  const maxH = fullRes ? 1080 : 1080;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     // Electron desktop-capture constraint (legacy mandatory form).

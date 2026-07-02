@@ -179,6 +179,7 @@ export function ControlApp() {
   const [password, setPassword] = useState('')
   const [hasToken, setHasToken] = useState(false)
   const [autoUpdate, setAutoUpdate] = useState(true)
+  const [autoStart, setAutoStart] = useState(false)
   const [pttHotkey, setPttHotkey] = useState('CommandOrControl+Shift+Space')
   const [pttMsg, setPttMsg] = useState('')
   const [quickChatHotkey, setQuickChatHotkey] = useState('CommandOrControl+Shift+Enter')
@@ -208,6 +209,7 @@ export function ControlApp() {
     })
     window.connector?.secureStore.get(TOKEN_KEY).then((t) => setHasToken(!!t))
     window.connector?.updater.getEnabled().then(setAutoUpdate)
+    window.connector?.autostart?.get().then(setAutoStart).catch(() => undefined)
     window.connector?.hotkeys.getPushToTalk().then((h) => h && setPttHotkey(h))
     window.connector?.hotkeys.getQuickChat?.().then((h) => h && setQuickChatHotkey(h))
     window.connector?.appVersion?.().then(setVersion).catch(() => undefined)
@@ -307,6 +309,11 @@ export function ControlApp() {
   const toggleAutoUpdate = async (next: boolean) => {
     setAutoUpdate(next)
     await window.connector?.updater.setEnabled(next)
+  }
+
+  const toggleAutoStart = async (next: boolean) => {
+    setAutoStart(next)
+    await window.connector?.autostart?.set(next)
   }
 
   const savePtt = async (acc: string) => {
@@ -788,6 +795,12 @@ export function ControlApp() {
               <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => window.connector?.updater.check()}>
                 {I.refresh} {t('app.updateCheckNow')}
               </button>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.power} {t('app.autostartCard')}</div>
+              <ToggleLine label={t('app.autostartToggle')} checked={autoStart} onChange={toggleAutoStart} />
+              <p className="gy-hint" style={{ margin: '8px 0 0' }}>{t('app.autostartHint')}</p>
             </section>
 
             <section className="gy-card">

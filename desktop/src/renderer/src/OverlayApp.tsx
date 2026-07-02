@@ -23,11 +23,18 @@ export function OverlayApp() {
   const dragging = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
+    let osLang: Lang = 'ko'
     window.connector?.serverConfig.get().then(async (c) => {
       setServerUrl(c.serverUrl)
-      const osLang = (await window.connector?.appDefaultLang?.().catch(() => 'ko' as Lang)) ?? 'ko'
+      osLang = (await window.connector?.appDefaultLang?.().catch(() => 'ko' as Lang)) ?? 'ko'
       setLang(c.lang ?? osLang)
     })
+    // Re-localize live when the language (or server URL) changes in settings.
+    const off = window.connector?.serverConfig.onChange?.((c) => {
+      setServerUrl(c.serverUrl)
+      setLang(c.lang ?? osLang)
+    })
+    return () => { off?.() }
   }, [])
 
   // Interactive-region hit testing: enable input over the handle, pass through

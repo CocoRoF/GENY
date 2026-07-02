@@ -187,12 +187,18 @@ export class MCPManager {
     await this.connect(name)
     const st = this.states.get(name)
     if (!st?.client) throw new Error(`MCP server ${name} not connected`)
-    const res = await withTimeout(
-      st.client.callTool({ name: tool, arguments: args || {} }),
-      120000,
-      `callTool ${name}.${tool}`,
-    )
-    return res
+    try {
+      return await withTimeout(
+        st.client.callTool({ name: tool, arguments: args || {} }),
+        120000,
+        `callTool ${name}.${tool}`,
+      )
+    } catch (e) {
+      // The server may have died mid-call; drop the (possibly dead) client so
+      // the NEXT call reconnects fresh instead of hanging on a stale transport.
+      await this.disconnect(name)
+      throw e
+    }
   }
 
   /** One-shot connect → list → disconnect, for the settings "테스트" button. */
