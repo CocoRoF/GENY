@@ -98,16 +98,16 @@ jobs:
           files: artifacts/**/*
           fail_on_unmatched_files: true
           body: |
-            **Geny VTuber 데스크탑 접속기** — installers (macOS ad-hoc signed; Windows unsigned).
+            **Geny VTuber desktop connector** — installers (macOS ad-hoc signed; Windows unsigned).
 
-            | OS | 파일 | 설치 |
+            | OS | File | Install |
             |---|---|---|
-            | Windows | `Geny-Setup-*.exe` | 실행 → SmartScreen 뜨면 **자세히 → 실행** |
-            | macOS | `Geny-*.dmg` | 열어서 `Geny.app`을 **응용 프로그램**으로 드래그 → 첫 실행 시 **우클릭 → 열기** (또는 설정 → 개인정보 보호 및 보안 → **그래도 열기**) |
-            | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` 후 실행 / deb: `sudo dpkg -i` |
+            | Windows | `Geny-Setup-*.exe` | Run it → if SmartScreen appears, **More info → Run anyway** |
+            | macOS | `Geny-*.dmg` | Open it, drag `Geny.app` to **Applications** → on first launch **right-click → Open** (or System Settings → Privacy & Security → **Open Anyway**) |
+            | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` then run / deb: `sudo dpkg -i` |
 
-            > **macOS에서 "손상되었습니다 / 휴지통으로 이동" 이 뜨면** (예전 빌드를 받았거나 우클릭→열기가 안 될 때):
-            > 터미널에서 `xattr -dr com.apple.quarantine "/Applications/Geny.app"` 실행 후 다시 열기. (서명과 무관하게 항상 동작합니다.)
+            > **If macOS says "damaged / move to Trash"** (from an older build, or when right-click → Open won't work):
+            > run `xattr -dr com.apple.quarantine "/Applications/Geny.app"` in Terminal, then open it again. (Works regardless of signing.)
 
-            실행 후: **서버 주소** + **admin 아이디/비밀번호** 입력 → 바로 사용.
-            기본 서버는 `https://geny-x.hrletsgo.me` 로 채워져 있습니다.
+            On first launch, enter your **Geny server URL** + your **account (admin id / password)** to connect.
+            The connector ships with no default server — point it at your own Geny deployment.

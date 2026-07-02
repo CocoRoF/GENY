@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { makeT, type Lang } from './i18n'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Overlay (Phase 0 parity shell).
@@ -16,11 +17,17 @@ import { useEffect, useRef, useState } from 'react'
 
 export function OverlayApp() {
   const [serverUrl, setServerUrl] = useState<string>('')
+  const [lang, setLang] = useState<Lang>('ko')
+  const t = makeT(lang)
   const handleRef = useRef<HTMLButtonElement | null>(null)
   const dragging = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
-    window.connector?.serverConfig.get().then((c) => setServerUrl(c.serverUrl))
+    window.connector?.serverConfig.get().then(async (c) => {
+      setServerUrl(c.serverUrl)
+      const osLang = (await window.connector?.appDefaultLang?.().catch(() => 'ko' as Lang)) ?? 'ko'
+      setLang(c.lang ?? osLang)
+    })
   }, [])
 
   // Interactive-region hit testing: enable input over the handle, pass through
@@ -57,7 +64,7 @@ export function OverlayApp() {
         <div className="parity-card">
           <div className="parity-title">Geny</div>
           <div className="parity-sub">{serverUrl || '…'}</div>
-          <div className="parity-hint">로그인하면 여기에 아바타가 떠요 — 트레이 아이콘 → 설정/채팅 열기</div>
+          <div className="parity-hint">{t('overlay.loginHint')}</div>
         </div>
       </div>
 
@@ -69,7 +76,7 @@ export function OverlayApp() {
         onMouseLeave={leaveInteractive}
         onMouseDown={onHandleDown}
         onDoubleClick={() => window.connector?.windowControl.openSettings()}
-        title="드래그: 이동 · 더블클릭: 설정 열기"
+        title={t('overlay.handleTitle')}
       >
         <span className="dock-dot" />
       </button>
