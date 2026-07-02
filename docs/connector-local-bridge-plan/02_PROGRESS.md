@@ -78,8 +78,10 @@ full_res는 이미 1:1(검증). 깨지는 케이스=①캡처소스가 주모니
 **Task2a 멀티백엔드(CLI+Anthropic)**: desktop_screenshot이 **canonical 이미지블록**
 `{type:image, source:{type:base64,media_type,data}}` 반환 — executor 메시지 이미지와 동일 shape라 **Anthropic
 API 네이티브 통과**(executor 무변경), CLI는 Geny 브리지 `_to_mcp_content`가 canonical→MCP image로. 두 shape 다 수용.
-**Task2b(대기)**: Gemini(functionResponse.inlineData)/OpenAI·vllm(tool role text-only→후속 user 메시지) 는
-executor translator(`_canonical.py`) 일반화 필요 = executor 릴리스 사이클. 다음 단계.
+**Task2b(완료)**: **geny-executor 2.40.0** — `_canonical.py`가 tool_result의 이미지 블록을 백엔드별 네이티브로
+렌더: OpenAI/vllm=tool 메시지(텍스트)+직후 follow-up user 메시지(image_url), Gemini=functionResponse.result+
+inlineData part, Anthropic=불변(tool_result 안 유지). additive+guarded(문자열 결과 무변경). 4개 translator
+경로 단위검증 통과. Geny 핀 >=2.40.0 배포. PyPI 게이트=CHANGELOG 필수(2.40.0 항목 추가).
 
 ## 로그
 - 2026-07-01: 3-레포 아키텍처 조사 완료(inverse-MCP 브리지 ~80% 기존 확인). 계획서 작성, 결정 확정.
