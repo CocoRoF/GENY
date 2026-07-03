@@ -214,6 +214,33 @@ class SectionLibrary:
             modes={PromptMode.FULL, PromptMode.MINIMAL},
         )
 
+    @staticmethod
+    def files_workspace(storage_path: str) -> PromptSection:
+        """Short manifest of the session's FILES WORKSPACE (host storage).
+
+        Deliberately terse (workspace-canvas plan): the prompt states only the
+        non-discoverable facts — where the space is, what it is FOR, and that
+        it is not an execution environment. Concrete contents are fetched on
+        demand via the WorkspaceInfo tool; the sandbox counterpart (when
+        bound) is described by the GAPT section with the SandboxPut/
+        SandboxFetch bridge.
+        """
+        content = (
+            f"Files workspace (host storage, not an execution environment): "
+            f"{storage_path}/workspace — uploads/ (files the user sent), "
+            f"drafts/ (in-progress document edits), outputs/ (artifacts "
+            f"delivered to the user). This space serves the built-in file & "
+            f"document tools; never install software or run services against "
+            f"it. Inspect contents on demand with WorkspaceInfo."
+        )
+        return PromptSection(
+            name="files_workspace",
+            content=content,
+            priority=41,
+            condition=lambda: bool(storage_path),
+            modes={PromptMode.FULL, PromptMode.MINIMAL},
+        )
+
     # ========================================================================
     # §7 DateTime — Current time
     # ========================================================================
@@ -571,6 +598,7 @@ def build_agent_prompt(
     gapt_workspace_id: Optional[str] = None,
     gapt_cli_on_host: bool = False,
     role_protocol_override: Optional[str] = None,
+    storage_path: Optional[str] = None,
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
@@ -670,6 +698,12 @@ def build_agent_prompt(
     if working_dir:
         builder.add_section(SectionLibrary.workspace(working_dir))
 
+    # §3.5 Files workspace — short manifest of the session's host-side file
+    # space (uploads/drafts/outputs). Details via WorkspaceInfo (progressive
+    # disclosure); the sandbox counterpart is covered by the GAPT section.
+    if storage_path:
+        builder.add_section(SectionLibrary.files_workspace(storage_path))
+
     # §4 DateTime (FULL only)
     if mode == PromptMode.FULL:
         builder.add_section(SectionLibrary.datetime_info())
@@ -730,7 +764,12 @@ def build_agent_prompt(
             "---\n"
             + wid_line
             + where_line
-            + "For work that must persist across sessions or be deployed, a separate, "
+            + "The sandbox is your FREE environment — install packages, run "
+            "services, build whatever you need; it is isolated from the host. "
+            "It is separate from your files workspace: bridge files between the "
+            "two with SandboxPut / SandboxFetch (SandboxInfo shows sandbox "
+            "state).\n"
+            "For work that must persist across sessions or be deployed, a separate, "
             "fully-isolated GAPT project space is available via your project tools."
         )
         parts.append(gapt_section)

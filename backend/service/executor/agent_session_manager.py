@@ -653,6 +653,17 @@ class AgentSessionManager:
         # Determine prompt mode
         mode = PromptMode.FULL
 
+        # Files workspace manifest — same derivation AgentSession uses for its
+        # storage_path (DEFAULT_STORAGE_ROOT / session_id), so the short prompt
+        # manifest always names the real host path.
+        _storage_path: Optional[str] = None
+        if session_id:
+            from pathlib import Path as _P
+
+            from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+            _storage_path = str(_P(DEFAULT_STORAGE_ROOT) / session_id)
+
         # Build prompt — when bound to a GAPT workspace the agent's cwd is the
         # container's /workspace, so describe that (not the host path). The
         # binding itself happens in the async create path before this is called.
@@ -672,6 +683,7 @@ class AgentSessionManager:
             gapt_workspace_id=gapt_workspace_id,
             gapt_cli_on_host=gapt_cli_on_host,
             role_protocol_override=role_protocol_override,
+            storage_path=_storage_path,
         )
 
         # Memory v2 PR 11 — memory_context append removed (see comment
