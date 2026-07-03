@@ -60,6 +60,7 @@ function emptyTools(): ToolsSnapshot {
     mcp_servers: [],
     external: [],
     scope: {},
+    core_overrides: {},
   };
 }
 
@@ -364,6 +365,13 @@ export interface EnvironmentDraftState {
   patchModel: (patch: Record<string, unknown>) => void;
   patchPipeline: (patch: Record<string, unknown>) => void;
   patchTools: (patch: Partial<ToolsSnapshot>) => void;
+  /** Set (or clear) a per-tool core override at
+   *  ``tools.core_overrides[name]`` (geny-executor 2.42 core/deferred
+   *  exposure). ``true`` forces the tool core (schema in every LLM
+   *  request), ``false`` forces it deferred (ToolSearch discovery),
+   *  ``null`` deletes the key so the executor default applies again
+   *  (built_in → core, external/MCP → deferred). */
+  setToolCore: (name: string, core: boolean | null) => void;
   /** Patch the env-level subset selection of host-registered hooks /
    *  skills / permissions. Each field accepts the wildcard sentinel
    *  ``['*']`` (= "use everything the host has, including future
@@ -658,6 +666,26 @@ export const useEnvironmentDraftStore = create<EnvironmentDraftState>(
       if (!draft) return;
       const next = cloneManifest(draft);
       next.tools = { ...(next.tools ?? emptyTools()), ...patch };
+      set({
+        draft: next,
+        toolsDirty: true,
+        validationErrors: runValidation(next),
+      });
+    },
+
+    setToolCore: (name, core) => {
+      const { draft } = get();
+      if (!draft) return;
+      const next = cloneManifest(draft);
+      const tools = { ...(next.tools ?? emptyTools()) };
+      const overrides = { ...(tools.core_overrides ?? {}) };
+      if (core === null) {
+        delete overrides[name];
+      } else {
+        overrides[name] = core;
+      }
+      tools.core_overrides = overrides;
+      next.tools = tools;
       set({
         draft: next,
         toolsDirty: true,

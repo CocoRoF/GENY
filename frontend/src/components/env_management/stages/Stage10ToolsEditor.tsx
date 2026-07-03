@@ -28,6 +28,8 @@
  *   Geny Built-in     → manifest.tools.external[]    (source_kind ∈ {geny_builtin, geny_custom_file})
  *   Custom Tools      → manifest.tools.external[]    (source_kind = custom_db — DB python_inline)
  *   MCP Servers       → manifest.tools.mcp_servers[] (full snapshot copy)
+ *   Core 토글          → manifest.tools.core_overrides{} (geny-executor 2.42 —
+ *                        core = 매 요청 스키마 제공 / deferred = ToolSearch 발견)
  *
  * The stage-active toggle (`이 단계 실행`) and stage-local
  * ``tool_binding`` (allowed / blocked) are stage-specific concerns
@@ -46,12 +48,14 @@ import {
   Network,
   Sparkles,
   Wrench,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { useEnvironmentDraftStore } from '@/store/useEnvironmentDraftStore';
 import {
   externalToolCatalogApi,
+  frameworkToolApi,
   type ExternalToolEntry,
 } from '@/lib/api';
 import type {
@@ -145,14 +149,28 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
   const draft = useEnvironmentDraftStore((s) => s.draft);
   const patchStage = useEnvironmentDraftStore((s) => s.patchStage);
   const patchTools = useEnvironmentDraftStore((s) => s.patchTools);
+  const setToolCore = useEnvironmentDraftStore((s) => s.setToolCore);
 
   const [category, setCategory] = useState<CategoryId>('executor');
   const [bindingOpen, setBindingOpen] = useState(false);
+  const [coreOpen, setCoreOpen] = useState(false);
 
-  const builtInList = (draft?.tools?.built_in ?? []) as string[];
-  const externalList = (draft?.tools?.external ?? []) as string[];
-  const mcpServers = (draft?.tools?.mcp_servers ?? []) as Array<
-    Record<string, unknown>
+  const draftTools = draft?.tools;
+  const builtInList = useMemo(
+    () => (draftTools?.built_in ?? []) as string[],
+    [draftTools?.built_in],
+  );
+  const externalList = useMemo(
+    () => (draftTools?.external ?? []) as string[],
+    [draftTools?.external],
+  );
+  const mcpServers = useMemo(
+    () => (draftTools?.mcp_servers ?? []) as Array<Record<string, unknown>>,
+    [draftTools?.mcp_servers],
+  );
+  const coreOverrides = (draftTools?.core_overrides ?? {}) as Record<
+    string,
+    boolean
   >;
 
   // Catalog lookup for the sidebar badges. The picker pane fetches
@@ -168,6 +186,26 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
         if (!cancelled) setCatalog(r.tools);
       } catch {
         // Catalog miss → badges fall back to total selection count.
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Framework catalog names — the Core-exposure section needs to
+  // enumerate the executor built-ins even when the manifest uses the
+  // ``["*"]`` wildcard. Fetched once per Stage 10 entry.
+  const [frameworkNames, setFrameworkNames] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const r = await frameworkToolApi.list();
+        if (!cancelled) setFrameworkNames(r.tools.map((tl) => tl.name));
+      } catch {
+        // Catalog miss → wildcard mode lists nothing until reload.
       }
     };
     run();
@@ -274,6 +312,136 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
     t(`envManagement.stage10.cat.${cat.i18nKey}.hint`, {}) || cat.fallbackHint;
 
   const activeCat = CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0];
+
+  // ── Core exposure (geny-executor 2.42 core/deferred) ──
+  //
+  // Effective rule mirrors the executor's `_resolve_core_flag`:
+  // exact override wins, otherwise the source default (built_in →
+  // core, external / MCP → deferred). MCP servers toggle via the
+  // `mcp__<server>__*` wildcard key because individual MCP tool names
+  // are only known after discovery.
+  const coreRows = useMemo(() => {
+    const executorNames = wildcardBuiltIn ? frameworkNames : builtInList;
+    const executor = executorNames.map((name) => ({
+      key: name,
+      label: name,
+      defaultCore: true,
+      locked: name === 'ToolSearch', // executor forces ToolSearch core
+    }));
+    const external = externalList.map((name) => ({
+      key: name,
+      label: name,
+      defaultCore: false,
+      locked: false,
+    }));
+    const mcp = mcpServers
+      .map((s) => String((s as { name?: unknown }).name ?? ''))
+      .filter((n) => n.length > 0)
+      .map((server) => ({
+        key: `mcp__${server}__*`,
+        label: server,
+        defaultCore: false,
+        locked: false,
+      }));
+    return { executor, external, mcp };
+  }, [wildcardBuiltIn, frameworkNames, builtInList, externalList, mcpServers]);
+
+  const coreOverrideCount = Object.keys(coreOverrides).length;
+
+  const toggleCore = (key: string, defaultCore: boolean) => {
+    const effective = coreOverrides[key] ?? defaultCore;
+    const nextVal = !effective;
+    // Flipping back to the source default deletes the override so the
+    // manifest only records deliberate deviations.
+    setToolCore(key, nextVal === defaultCore ? null : nextVal);
+  };
+
+  const coreRow = (row: {
+    key: string;
+    label: string;
+    defaultCore: boolean;
+    locked: boolean;
+  }) => {
+    const overridden = row.key in coreOverrides;
+    const effective = coreOverrides[row.key] ?? row.defaultCore;
+    return (
+      <div
+        key={row.key}
+        className="flex items-center justify-between gap-2 px-2 py-1 rounded hover:bg-[hsl(var(--accent))]"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="truncate text-[0.75rem] text-[hsl(var(--foreground))]">
+            {row.label}
+          </span>
+          {overridden && !row.locked && (
+            <button
+              type="button"
+              onClick={() => setToolCore(row.key, null)}
+              title={
+                t('envManagement.stage10.core.resetOverride', {}) ||
+                '기본값으로 되돌리기'
+              }
+              className="text-[0.625rem] px-1 rounded bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            >
+              {t('envManagement.stage10.core.overriddenBadge', {}) || '변경됨 ⨯'}
+            </button>
+          )}
+        </span>
+        <button
+          type="button"
+          disabled={row.locked}
+          onClick={() => toggleCore(row.key, row.defaultCore)}
+          title={
+            row.locked
+              ? t('envManagement.stage10.core.lockedHint', {}) ||
+                'ToolSearch 는 발견 경로라서 항상 Core 입니다'
+              : effective
+                ? t('envManagement.stage10.core.coreHint', {}) ||
+                  'Core — 매 요청마다 LLM 에 스키마 제공. 클릭하면 ToolSearch 발견 방식으로 전환'
+                : t('envManagement.stage10.core.deferredHint', {}) ||
+                  'ToolSearch — 평소엔 숨기고 검색으로 발견/활성화. 클릭하면 Core 로 전환'
+          }
+          className={[
+            'shrink-0 px-2 py-0.5 rounded-full border text-[0.65rem] font-medium transition-colors',
+            row.locked ? 'opacity-60 cursor-not-allowed' : '',
+            effective
+              ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
+              : 'border-[hsl(var(--border))] bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+          ].join(' ')}
+        >
+          {effective
+            ? t('envManagement.stage10.core.coreLabel', {}) || 'Core'
+            : 'ToolSearch'}
+        </button>
+      </div>
+    );
+  };
+
+  const coreGroup = (
+    title: string,
+    hint: string,
+    rows: Array<{
+      key: string;
+      label: string;
+      defaultCore: boolean;
+      locked: boolean;
+    }>,
+  ) =>
+    rows.length > 0 && (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-baseline gap-2 px-2">
+          <h5 className="text-[0.7rem] font-semibold text-[hsl(var(--foreground))]">
+            {title}
+          </h5>
+          <span className="text-[0.65rem] text-[hsl(var(--muted-foreground))]">
+            {hint}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+          {rows.map(coreRow)}
+        </div>
+      </div>
+    );
 
   return (
     <div className="flex flex-col gap-4">
@@ -419,6 +587,68 @@ export default function Stage10ToolsEditor({ order, entry }: Props) {
             )}
           </div>
         </div>
+      </section>
+
+      {/* ── Core exposure (geny-executor 2.42 core/deferred) ── */}
+      <section className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+        <button
+          type="button"
+          onClick={() => setCoreOpen((v) => !v)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-[0.8125rem] font-semibold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors text-left"
+        >
+          {coreOpen ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          )}
+          <Zap className="w-3.5 h-3.5 text-[hsl(var(--primary))]" />
+          {t('envManagement.stage10.core.title', {}) || '핵심 툴(Core) 노출'}
+          <span className="text-[0.6875rem] font-normal text-[hsl(var(--muted-foreground))]">
+            {coreOverrideCount > 0
+              ? (
+                  t('envManagement.stage10.core.overrideCount', {
+                    count: String(coreOverrideCount),
+                  }) || `${coreOverrideCount}개 변경`
+                )
+              : t('envManagement.stage10.core.allDefault', {}) || '기본값'}
+          </span>
+        </button>
+        {coreOpen && (
+          <div className="px-3 pb-3 border-t border-[hsl(var(--border))] pt-3 flex flex-col gap-4">
+            <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
+              {t('envManagement.stage10.core.sectionHint', {}) ||
+                'Core 툴은 매 요청마다 LLM 에 스키마가 제공됩니다. 나머지(ToolSearch)는 등록만 되고, 에이전트가 ToolSearch 로 검색하면 그때 활성화되어 다음 스텝부터 사용할 수 있습니다 — 토큰/컨텍스트 최적화용. 기본값: Executor Built-in → Core, Geny/Custom/MCP → ToolSearch.'}
+            </p>
+            {coreGroup(
+              t('envManagement.stage10.core.groupExecutor', {}) ||
+                'Executor Built-in',
+              t('envManagement.stage10.core.groupExecutorHint', {}) ||
+                '기본 Core',
+              coreRows.executor,
+            )}
+            {coreGroup(
+              t('envManagement.stage10.core.groupExternal', {}) ||
+                'Geny / Custom Tools',
+              t('envManagement.stage10.core.groupExternalHint', {}) ||
+                '기본 ToolSearch',
+              coreRows.external,
+            )}
+            {coreGroup(
+              t('envManagement.stage10.core.groupMcp', {}) || 'MCP Servers',
+              t('envManagement.stage10.core.groupMcpHint', {}) ||
+                '서버 단위 토글 (mcp__서버__* 프리픽스) — 기본 ToolSearch',
+              coreRows.mcp,
+            )}
+            {coreRows.executor.length === 0 &&
+              coreRows.external.length === 0 &&
+              coreRows.mcp.length === 0 && (
+                <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] italic">
+                  {t('envManagement.stage10.core.empty', {}) ||
+                    '위 도구 소스에서 먼저 도구를 선택하세요.'}
+                </p>
+              )}
+          </div>
+        )}
       </section>
 
       {/* ── Stage-specific binding (allowed / blocked) ── */}

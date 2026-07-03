@@ -72,6 +72,12 @@ export interface ToolsSnapshot {
   scope?: Record<string, unknown>;
   global_allowlist?: string[];
   global_blocklist?: string[];
+  // geny-executor 2.42 core/deferred exposure. Per-tool override of
+  // whether the tool is "core" (schema sent to the LLM every request)
+  // or deferred (registered, discovered at runtime via ToolSearch).
+  // Defaults when a name is absent: built_in → core, external/MCP →
+  // deferred. A trailing `*` key matches by prefix (`mcp__srv__*`).
+  core_overrides?: Record<string, boolean>;
 }
 
 /**
