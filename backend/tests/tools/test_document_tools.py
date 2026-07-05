@@ -2,9 +2,9 @@
 
 First dedicated coverage for the document tools (the pre-migration
 python-docx/openpyxl editors shipped with zero tests). Deterministic
-engine paths only — no LLM key, no LibreOffice (preview regen is
-best-effort and simply reports preview_error on machines without
-soffice, which these tests tolerate).
+engine paths only — no LLM key, and since the 2026-07 native-render
+migration no LibreOffice either: previews/PDF/PNG come from edit2docs
+render_doc and are asserted to actually exist.
 """
 
 from __future__ import annotations
@@ -79,6 +79,9 @@ class TestDocEdit:
         )
         assert out["ok"] is True
         assert out["applied"] == 1
+        # Native render (no LibreOffice): the preview pager files exist.
+        assert out.get("preview_pages") == ["workspace/drafts/sales/preview/page-1.png"]
+        assert (storage / out["preview_pages"][0]).is_file()
         # Drafts convention: edit landed on the copy, original untouched.
         assert out["draft"] == "workspace/drafts/sales/sales.xlsx"
         assert (storage / out["draft"]).is_file()

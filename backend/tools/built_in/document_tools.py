@@ -6,9 +6,11 @@ python-docx/openpyxl/python-pptx ad-hoc editors (``docx_edit`` /
 <https://pypi.org/project/edit2docs/>`_ engine — one address system
 shared by outline (``doc_analyze``) and edits (``doc_edit``), per-edit
 soft-fail statuses the agent can self-correct from, and full-document
-generation (``doc_generate``). ``doc_convert`` keeps its LibreOffice
-pipeline: edit2docs has no PDF/PNG export, and the CanvasTab preview
-pager depends on the ``preview/page-N.png`` convention.
+generation (``doc_generate``). PDF/PNG/preview now run on
+edit2docs' native pipeline (render_doc: per-page SVG → resvg → PyMuPDF,
+page-N.png naming preserved for the CanvasTab pager); LibreOffice +
+pdftoppm are only a fallback for legacy formats (odt/doc/ppt) and
+machines where the native render fails.
 
 The session-storage contract is unchanged: paths are relative to the
 session storage root (e.g. ``workspace/uploads/deck.pptx``), editing a
@@ -44,8 +46,9 @@ _MAX_PREVIEW_PAGES = 30
 
 # Formats the edit2docs engine can outline/edit.
 _EDITABLE_EXTS = (".docx", ".xlsx", ".pptx")
-# Formats that get a PNG preview after edits (xlsx previews poorly as pages).
-_PREVIEW_EXTS = (".docx", ".pptx")
+# Formats that get a PNG preview after edits — all three, now that the
+# native grid renderer covers xlsx (LibreOffice previews used to skip it).
+_PREVIEW_EXTS = (".docx", ".pptx", ".xlsx")
 
 
 # ── session storage helpers ─────────────────────────────────────────
@@ -158,14 +161,30 @@ def _pdf_to_pngs(pdf: Path, outdir: Path) -> List[Path]:
 
 
 def _regen_preview(root: Path, draft: Path) -> Dict[str, Any]:
-    """Best-effort preview regeneration for a draft; never raises."""
+    """Best-effort preview regeneration for a draft; never raises.
+
+    Native pipeline first (edit2docs render_doc → page-N.png, the same
+    naming pdftoppm produced, so CanvasTab pages unchanged) — no
+    LibreOffice, no global lock, per-session parallel. LibreOffice+
+    pdftoppm remain only as a fallback for machines that still have
+    them when the native render fails.
+    """
+    preview_dir = draft.parent / "preview"
     try:
-        preview_dir = draft.parent / "preview"
+        import edit2docs
+
+        result = edit2docs.render_doc(
+            str(draft), to="png", out_dir=str(preview_dir), dpi=96
+        )
+        return {"preview_pages": [_rel(root, Path(str(p))) for p in result.paths]}
+    except Exception as exc:  # noqa: BLE001
+        native_err = str(exc)[:200]
+    try:
         pdf = _to_pdf(draft, preview_dir)
         pages = _pdf_to_pngs(pdf, preview_dir)
         return {"preview_pages": [_rel(root, p) for p in pages]}
-    except Exception as exc:  # noqa: BLE001
-        return {"preview_error": str(exc)[:200]}
+    except Exception:  # noqa: BLE001
+        return {"preview_error": native_err}
 
 
 # ── edit2docs engine access ──────────────────────────────────────────
@@ -240,10 +259,30 @@ class DocConvertTool(_ThreadedTool):
         draft = _ensure_draft(root, src)
         outdir = draft.parent
 
+        native = draft.suffix.lower() in _EDITABLE_EXTS
         if to == "pdf":
-            pdf = _to_pdf(draft, outdir)
+            if native:
+                import edit2docs
+
+                result = edit2docs.render_doc(str(draft), to="pdf", out_dir=str(outdir))
+                return json.dumps(
+                    {"ok": True, "pdf": _rel(root, Path(str(result.paths[0])))},
+                    ensure_ascii=False,
+                )
+            pdf = _to_pdf(draft, outdir)  # legacy formats (odt/doc/ppt…) need soffice
             return json.dumps({"ok": True, "pdf": _rel(root, pdf)}, ensure_ascii=False)
         if to == "png":
+            if native:
+                import edit2docs
+
+                result = edit2docs.render_doc(
+                    str(draft), to="png", out_dir=str(outdir / "preview"), dpi=96
+                )
+                return json.dumps(
+                    {"ok": True,
+                     "pages": [_rel(root, Path(str(p))) for p in result.paths]},
+                    ensure_ascii=False,
+                )
             pdf = _to_pdf(draft, outdir / "preview")
             pages = _pdf_to_pngs(pdf, outdir / "preview")
             return json.dumps(
