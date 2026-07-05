@@ -33,7 +33,7 @@ class ToolInfo(BaseModel):
     name: str
     description: str = ""
     category: str = ""         # "built_in" or "custom"
-    group: Optional[str] = None  # source file stem (e.g. "browser_tools")
+    group: Optional[str] = None  # source file stem (e.g. "web_search_tools")
     parameters: Optional[Dict[str, Any]] = None
 
 
@@ -229,7 +229,7 @@ class ExternalToolEntry(BaseModel):
                                 memory_*, knowledge_*, geny_tools,
                                 memory_inspect_tools …
       * ``"geny_custom_file"``— ships in ``backend/tools/custom/`` —
-                                browser_*, web_search_*, web_fetch_*,
+                                web_search, news_search, whiteboard_*,
                                 etc. (pre-shipped by Geny but in the
                                 "custom" subdir for historical reasons).
       * ``"custom_db"``       — defined entirely in the web via

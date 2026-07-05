@@ -29,7 +29,6 @@ dependencies = [
     # Web search
     "ddgs==9.11.4",
     # Web fetch & browser automation
-    "playwright>=1.49.0",
     # WebSocket protocol
     "websockets>=13.0",
     # geny-executor 2.2.0 — the "Environment is the single source of
@@ -57,7 +56,9 @@ dependencies = [
     # discord / slack / ntfy) so Geny declares channels in config and the
     # executor builds them (no host transport code). Keep in sync with
     # requirements.txt.
-    "geny-executor>=2.42.0,<3.0.0",
+    "geny-executor>=2.43.0,<3.0.0",
+    "edit2docs>=0.4.0",
+    "an-web>=0.9.1",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
     # Auth

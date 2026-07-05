@@ -20,7 +20,6 @@ const SUB_FAMILY_PREFIXES: SubFamily[] = [
   { id: 'opsidian', prefix: 'opsidian_' },
   { id: 'session', prefix: 'session_' },
   { id: 'room', prefix: 'room_' },
-  { id: 'browser', prefix: 'browser_' },
   { id: 'web', prefix: 'web_' },
 ];
 

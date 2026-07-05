@@ -125,7 +125,7 @@ const CATEGORIES: CategoryDef[] = [
     i18nKey: 'custom_builtin',
     fallbackLabel: 'Custom Built-in',
     fallbackHint:
-      '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (browser, web_search, web_fetch)',
+      '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (web_search, news_search, whiteboard)',
   },
   {
     id: 'custom',

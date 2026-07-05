@@ -1,27 +1,36 @@
-"""Document editing tools — pptx / xlsx / docx edit + convert + preview.
+"""Document tools — edit2docs-powered analyze / edit / generate + convert.
 
-workspace-canvas P3 (docs/workspace-canvas-plan/01_PLAN.md). Operates on files
-inside the session's storage, with the files-workspace draft convention baked
-in: editing a file that is NOT already a draft first copies it to
-``workspace/drafts/<stem>/<name>`` and edits the copy — originals under
-``workspace/uploads/`` are never mutated. After each edit a preview
-(``workspace/drafts/<stem>/preview/page-N.png``) is regenerated best-effort via
-LibreOffice headless + pdftoppm (both ship in the backend image; see README).
-Deliver results to the user with SendUserFile.
+workspace-canvas P3, re-engined in the 2026-07 migration: the old
+python-docx/openpyxl/python-pptx ad-hoc editors (``docx_edit`` /
+``xlsx_edit`` / ``pptx_edit``) were replaced by the `edit2docs
+<https://pypi.org/project/edit2docs/>`_ engine — one address system
+shared by outline (``doc_analyze``) and edits (``doc_edit``), per-edit
+soft-fail statuses the agent can self-correct from, and full-document
+generation (``doc_generate``). ``doc_convert`` keeps its LibreOffice
+pipeline: edit2docs has no PDF/PNG export, and the CanvasTab preview
+pager depends on the ``preview/page-N.png`` convention.
 
-Path arguments are relative to the session storage root (e.g.
-``workspace/uploads/deck.pptx``) or absolute paths inside it.
+The session-storage contract is unchanged: paths are relative to the
+session storage root (e.g. ``workspace/uploads/deck.pptx``), editing a
+non-draft file first copies it to ``workspace/drafts/<stem>/<name>``
+(originals under ``workspace/uploads/`` are never mutated), previews
+regenerate best-effort after each edit, and results reach the user via
+SendUserFile.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import shutil
 import subprocess
 import threading
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from geny_executor.tools.base import ToolCapabilities
 
 from tools.base import BaseTool, ToolError
 
@@ -32,6 +41,11 @@ _SOFFICE_LOCK = threading.Lock()
 _SOFFICE_TIMEOUT = 120
 _PREVIEW_DPI = "96"
 _MAX_PREVIEW_PAGES = 30
+
+# Formats the edit2docs engine can outline/edit.
+_EDITABLE_EXTS = (".docx", ".xlsx", ".pptx")
+# Formats that get a PNG preview after edits (xlsx previews poorly as pages).
+_PREVIEW_EXTS = (".docx", ".pptx")
 
 
 # ── session storage helpers ─────────────────────────────────────────
@@ -154,21 +168,62 @@ def _regen_preview(root: Path, draft: Path) -> Dict[str, Any]:
         return {"preview_error": str(exc)[:200]}
 
 
+# ── edit2docs engine access ──────────────────────────────────────────
+
+
+def _engine():
+    try:
+        import edit2docs  # noqa: PLC0415
+    except ImportError:
+        raise ToolError(
+            "The edit2docs engine is not installed in this backend — "
+            "document analyze/edit/generate is unavailable."
+        )
+    return edit2docs
+
+
+def _anthropic_api_key() -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise ToolError(
+            "doc_generate needs an Anthropic API key (ANTHROPIC_API_KEY env "
+            "var on the backend). For key-free editing use doc_analyze + "
+            "doc_edit."
+        )
+    return key
+
+
+class _ThreadedTool(BaseTool):
+    """Runs the sync ``run()`` off the event loop.
+
+    The Geny dispatch awaits ``arun`` on the loop itself; document work
+    (zip parsing, LibreOffice subprocesses behind a lock) would block
+    every other session, so these tools hop to a worker thread.
+    """
+
+    async def arun(self, **kwargs) -> str:
+        return await asyncio.to_thread(self.run, **kwargs)
+
+
 # ── tools ────────────────────────────────────────────────────────────
 
 
-class DocConvertTool(BaseTool):
+class DocConvertTool(_ThreadedTool):
     """Convert an office document (pptx/docx/xlsx/…) to pdf, png previews, or text."""
 
     name = "doc_convert"
+    # LibreOffice headless shares one profile (module lock) — serialize.
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, idempotent=True, max_result_chars=20_000,
+    )
     description = (
-        "Convert a document in the session storage (pptx/docx/xlsx/odt/…) to another "
-        "format. to='pdf' produces a PDF next to a draft copy; to='png' renders "
-        "page/slide preview images; to='text' extracts plain text (read the result "
-        "with Read). Paths are relative to the session storage, e.g. "
+        "Convert a document in the session storage (pptx/docx/xlsx/odt/pdf/…) to "
+        "another format. to='pdf' produces a PDF next to a draft copy; to='png' "
+        "renders page/slide preview images; to='text' extracts markdown text via the "
+        "edit2docs converter (pdf/docx/pptx/xlsx/html/epub/ipynb …) into a .md file "
+        "(read it with Read). Paths are relative to the session storage, e.g. "
         "'workspace/uploads/deck.pptx'."
     )
-    CAPABILITIES_CONCURRENCY_SAFE = False
 
     def run(self, session_id: str, path: str, to: str = "pdf") -> str:
         """Convert a document.
@@ -194,9 +249,9 @@ class DocConvertTool(BaseTool):
             return json.dumps(
                 {"ok": True, "pages": [_rel(root, p) for p in pages]}, ensure_ascii=False
             )
-        if to in ("text", "txt"):
+        if to in ("text", "txt", "md", "markdown"):
             txt = self._extract_text(draft)
-            out = outdir / (draft.stem + ".txt")
+            out = outdir / (draft.stem + ".md")
             out.write_text(txt, encoding="utf-8")
             return json.dumps(
                 {"ok": True, "text_file": _rel(root, out), "chars": len(txt),
@@ -206,257 +261,237 @@ class DocConvertTool(BaseTool):
 
     @staticmethod
     def _extract_text(doc: Path) -> str:
-        suffix = doc.suffix.lower()
-        if suffix == ".pptx":
-            from pptx import Presentation
+        """Markdown extraction via edit2docs; LibreOffice fallback for the
+        formats it does not ingest (e.g. legacy .ppt)."""
+        try:
+            from edit2docs.tools.convert import ConvertRequest, convert_to_markdown
 
-            parts: List[str] = []
-            prs = Presentation(str(doc))
-            for i, slide in enumerate(prs.slides, 1):
-                parts.append(f"--- slide {i} ---")
-                for shape in slide.shapes:
-                    if getattr(shape, "has_text_frame", False):
-                        parts.append(shape.text_frame.text)
-            return "\n".join(parts)
-        if suffix == ".docx":
-            from docx import Document
-
-            return "\n".join(p.text for p in Document(str(doc)).paragraphs)
-        if suffix in (".xlsx", ".xlsm"):
-            from openpyxl import load_workbook
-
-            wb = load_workbook(str(doc), read_only=True, data_only=True)
-            parts = []
-            for ws in wb.worksheets:
-                parts.append(f"--- sheet {ws.title} ---")
-                for row in ws.iter_rows(values_only=True):
-                    parts.append("\t".join("" if v is None else str(v) for v in row))
-            return "\n".join(parts)
-        # Fall back to LibreOffice for other formats (odt, doc, ppt, …).
+            resp = convert_to_markdown(
+                ConvertRequest(content=doc.read_bytes(), original_filename=doc.name)
+            )
+            text = getattr(resp, "markdown", "") or ""
+            if text.strip():
+                return text
+            logger.info("edit2docs convert returned empty for %s — soffice fallback", doc.name)
+        except ToolError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — unsupported format / parse error
+            logger.info("edit2docs convert failed for %s (%s) — soffice fallback", doc.name, exc)
         outdir = doc.parent
         _soffice(["--convert-to", "txt:Text", "--outdir", str(outdir), str(doc)], cwd=outdir)
         out = outdir / (doc.stem + ".txt")
         return out.read_text(encoding="utf-8", errors="replace") if out.exists() else ""
 
 
-class PptxEditTool(BaseTool):
-    """Edit a PowerPoint (pptx): replace text, set slide text, add/delete slides."""
+class DocAnalyzeTool(_ThreadedTool):
+    """Outline a document — the address source for doc_edit."""
 
-    name = "pptx_edit"
+    name = "doc_analyze"
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=True, read_only=True, idempotent=True,
+        max_result_chars=60_000,
+    )
     description = (
-        "Edit a .pptx in the session storage. Edits a DRAFT copy under "
-        "workspace/drafts/ (originals stay untouched) and regenerates PNG previews. "
-        "operations is a JSON list; supported ops: "
-        '{"op":"replace_text","find":"…","replace":"…"} (all slides), '
-        '{"op":"set_slide_text","slide":1,"placeholder":0,"text":"…"} (1-based slide, '
-        "placeholder index), "
-        '{"op":"add_slide","title":"…","body":"…"}, '
-        '{"op":"delete_slide","slide":2}. '
-        "Returns the draft path + preview image paths. Send the finished file to the "
-        "user with SendUserFile."
+        "Analyze a .docx/.xlsx/.pptx in the session storage and return its "
+        "addressable outline as JSON: DOCX paragraphs ({para, style, text}) and "
+        "table cells ({table, row, col, text}); XLSX sheets with sample rows; PPTX "
+        "slides with text shapes ({shape_id, para, text}). Use these addresses in "
+        "doc_edit. Read-only — works on the draft copy if one exists, else the "
+        "original."
     )
 
-    def run(self, session_id: str, path: str, operations: List[Dict[str, Any]]) -> str:
-        """Apply edit operations to a pptx.
+    def run(self, session_id: str, path: str) -> str:
+        """Analyze a document's structure.
 
         Args:
-            path: Source .pptx path (relative to session storage).
-            operations: List of operation objects (see tool description).
+            path: Document path (relative to session storage), .docx/.xlsx/.pptx.
         """
-        from pptx import Presentation
-        from pptx.util import Inches
-
+        engine = _engine()
         root = _storage_root(session_id)
         src = _resolve(root, path)
         if not src.is_file():
             raise ToolError(f"File not found: {path}")
-        if src.suffix.lower() != ".pptx":
-            raise ToolError("pptx_edit only handles .pptx files (use doc_convert for others).")
+        if src.suffix.lower() not in _EDITABLE_EXTS:
+            raise ToolError(
+                f"doc_analyze handles {', '.join(_EDITABLE_EXTS)} (use doc_convert "
+                "to='text' for other formats)."
+            )
+        # Analyze the draft when it exists so addresses match what doc_edit
+        # will touch; a fresh copy is byte-identical to the original anyway.
+        drafts_root = root / "workspace" / "drafts"
+        candidate = drafts_root / src.stem / src.name
+        target = candidate if candidate.is_file() else src
+        info = engine.analyze_doc(str(target))
+        info["path"] = _rel(root, target)
+        return json.dumps(info, ensure_ascii=False, default=str)
+
+
+class DocEditTool(_ThreadedTool):
+    """Address-based document editing (edit2docs set_doc_text)."""
+
+    name = "doc_edit"
+    # Writes the draft + regenerates previews behind the soffice lock.
+    CAPABILITIES = ToolCapabilities(concurrency_safe=False, max_result_chars=30_000)
+    description = (
+        "Apply precise text edits to a .docx/.xlsx/.pptx in the session storage at "
+        "addresses from doc_analyze. Edits a DRAFT copy under workspace/drafts/ "
+        "(originals stay untouched) and regenerates PNG previews. edits is a JSON "
+        "list, format-dispatched by extension — DOCX: "
+        '{"action":"replace","para":3,"new_text":"…"} | {"action":"replace",'
+        '"table":0,"row":1,"col":2,"new_text":"…"} | {"action":"insert_after",'
+        '"para":3,"markdown":"…"} (para=-1 prepends) | {"action":"delete","para":3}. '
+        'XLSX: {"action":"set_cell","sheet":"Sheet1","cell":"B2","value":123} | '
+        '{"action":"append_rows","sheet":"…","rows":[[…]]} | {"action":"add_sheet",'
+        '"sheet":"…","headers":[…],"rows":[[…]]}. PPTX: {"slide":0,"shape_id":2,'
+        '"para":0,"new_text":"…"} (table cells add "row"/"col"). Optional '
+        '"old_text"/"old_value" guards reject stale edits. Each edit returns status '
+        "applied | stale | not_found | invalid with a reason — fix and resend only "
+        "the failed ones. Send the finished file to the user with SendUserFile."
+    )
+
+    def run(self, session_id: str, path: str, edits: List[Dict[str, Any]]) -> str:
+        """Apply address-based edits to a document.
+
+        Args:
+            path: Source document path (relative to session storage).
+            edits: List of edit objects (see tool description for shapes).
+        """
+        engine = _engine()
+        root = _storage_root(session_id)
+        src = _resolve(root, path)
+        if not src.is_file():
+            raise ToolError(f"File not found: {path}")
+        if src.suffix.lower() not in _EDITABLE_EXTS:
+            raise ToolError(f"doc_edit handles {', '.join(_EDITABLE_EXTS)} files.")
+        if not isinstance(edits, list) or not edits or not all(
+            isinstance(e, dict) for e in edits
+        ):
+            raise ToolError("edits must be a non-empty JSON list of objects.")
         draft = _ensure_draft(root, src)
-        prs = Presentation(str(draft))
-        applied: List[str] = []
-
-        for op in operations or []:
-            kind = (op.get("op") or "").strip()
-            if kind == "replace_text":
-                find, repl = str(op.get("find", "")), str(op.get("replace", ""))
-                if not find:
-                    raise ToolError("replace_text needs a non-empty 'find'.")
-                count = 0
-                for slide in prs.slides:
-                    for shape in slide.shapes:
-                        if not getattr(shape, "has_text_frame", False):
-                            continue
-                        for para in shape.text_frame.paragraphs:
-                            for run in para.runs:
-                                if find in run.text:
-                                    run.text = run.text.replace(find, repl)
-                                    count += 1
-                applied.append(f"replace_text '{find}'→'{repl}' ({count} runs)")
-            elif kind == "set_slide_text":
-                idx = int(op.get("slide", 1)) - 1
-                slides = list(prs.slides)
-                if not (0 <= idx < len(slides)):
-                    raise ToolError(f"slide {idx + 1} out of range (1..{len(slides)})")
-                ph_idx = int(op.get("placeholder", 0))
-                phs = [s for s in slides[idx].shapes if getattr(s, "has_text_frame", False)]
-                if not (0 <= ph_idx < len(phs)):
-                    raise ToolError(f"placeholder {ph_idx} out of range (0..{len(phs) - 1})")
-                phs[ph_idx].text_frame.text = str(op.get("text", ""))
-                applied.append(f"set_slide_text slide {idx + 1} ph {ph_idx}")
-            elif kind == "add_slide":
-                layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
-                slide = prs.slides.add_slide(layout)
-                if slide.shapes.title is not None:
-                    slide.shapes.title.text = str(op.get("title", ""))
-                body = str(op.get("body", ""))
-                if body:
-                    placed = False
-                    for shape in slide.placeholders:
-                        if shape != slide.shapes.title and getattr(shape, "has_text_frame", False):
-                            shape.text_frame.text = body
-                            placed = True
-                            break
-                    if not placed:
-                        box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(4))
-                        box.text_frame.text = body
-                applied.append("add_slide")
-            elif kind == "delete_slide":
-                idx = int(op.get("slide", 1)) - 1
-                xml_slides = prs.slides._sldIdLst  # noqa: SLF001 — no public delete API
-                ids = list(xml_slides)
-                if not (0 <= idx < len(ids)):
-                    raise ToolError(f"slide {idx + 1} out of range (1..{len(ids)})")
-                xml_slides.remove(ids[idx])
-                applied.append(f"delete_slide {idx + 1}")
-            else:
-                raise ToolError(f"Unknown op: {kind!r}")
-
-        prs.save(str(draft))
-        result: Dict[str, Any] = {
-            "ok": True, "draft": _rel(root, draft), "applied": applied,
-            "slides": len(list(prs.slides)),
+        result = engine.set_doc_text(str(draft), edits, output=str(draft))
+        results = list(getattr(result, "results", []) or [])
+        applied = int(getattr(result, "applied", 0) or 0)
+        failed = [r for r in results if r.get("status") != "applied"]
+        payload: Dict[str, Any] = {
+            "ok": not failed,
+            "draft": _rel(root, draft),
+            "applied": applied,
+            "failed": len(failed),
+            "results": results,
         }
-        result.update(_regen_preview(root, draft))
-        return json.dumps(result, ensure_ascii=False)
+        if applied and draft.suffix.lower() in _PREVIEW_EXTS:
+            payload.update(_regen_preview(root, draft))
+        return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-class XlsxEditTool(BaseTool):
-    """Edit an Excel workbook (xlsx): set cells, add sheets."""
+class DocGenerateTool(_ThreadedTool):
+    """Generate a new document from a natural-language intent (edit2docs)."""
 
-    name = "xlsx_edit"
+    name = "doc_generate"
+    CAPABILITIES = ToolCapabilities(
+        concurrency_safe=False, network_egress=True, max_result_chars=20_000,
+    )
     description = (
-        "Edit a .xlsx in the session storage. Edits a DRAFT copy under "
-        "workspace/drafts/ (originals stay untouched). operations is a JSON list; "
-        'supported ops: {"op":"set_cell","sheet":"Sheet1","cell":"B2","value":123}, '
-        '{"op":"add_sheet","name":"Data"}. value type is preserved '
-        "(number/string/bool). Returns the draft path."
+        "Generate a NEW .docx/.xlsx/.pptx document from a natural-language intent "
+        "(the output extension picks the engine). Optional sources (session-storage "
+        "paths or URLs — pdf/docx/xlsx/pptx/html/epub/ipynb …) ground the content. "
+        "The file lands under workspace/drafts/<stem>/ with PNG previews. PPTX "
+        "generation can take minutes. Requires ANTHROPIC_API_KEY on the backend."
     )
 
-    def run(self, session_id: str, path: str, operations: List[Dict[str, Any]]) -> str:
-        """Apply edit operations to an xlsx.
+    def run(
+        self,
+        session_id: str,
+        intent: str,
+        output: str,
+        sources: Optional[List[str]] = None,
+        lang: str = "ko-KR",
+    ) -> str:
+        """Generate a document.
 
         Args:
-            path: Source .xlsx path (relative to session storage).
-            operations: List of operation objects (see tool description).
+            intent: What to create, in natural language.
+            output: Output file name or path — must end in .docx/.xlsx/.pptx.
+            sources: Optional grounding sources (session-storage paths or URLs).
+            lang: Content language (default ko-KR).
         """
-        from openpyxl import load_workbook
-
-        root = _storage_root(session_id)
-        src = _resolve(root, path)
-        if not src.is_file():
-            raise ToolError(f"File not found: {path}")
-        if src.suffix.lower() not in (".xlsx", ".xlsm"):
-            raise ToolError("xlsx_edit only handles .xlsx/.xlsm files.")
-        draft = _ensure_draft(root, src)
-        wb = load_workbook(str(draft))
-        applied: List[str] = []
-
-        for op in operations or []:
-            kind = (op.get("op") or "").strip()
-            if kind == "set_cell":
-                sheet = op.get("sheet") or wb.sheetnames[0]
-                if sheet not in wb.sheetnames:
-                    raise ToolError(f"Sheet not found: {sheet} (have: {', '.join(wb.sheetnames)})")
-                cell = str(op.get("cell", "")).strip()
-                if not cell:
-                    raise ToolError("set_cell needs a 'cell' (e.g. 'B2').")
-                wb[sheet][cell] = op.get("value")
-                applied.append(f"set_cell {sheet}!{cell}")
-            elif kind == "add_sheet":
-                name = str(op.get("name", "")).strip() or f"Sheet{len(wb.sheetnames) + 1}"
-                wb.create_sheet(title=name)
-                applied.append(f"add_sheet {name}")
-            else:
-                raise ToolError(f"Unknown op: {kind!r}")
-
-        wb.save(str(draft))
-        return json.dumps(
-            {"ok": True, "draft": _rel(root, draft), "applied": applied,
-             "sheets": wb.sheetnames}, ensure_ascii=False
+        return _run_coro_blocking(
+            self._generate(session_id, intent, output, sources, lang)
         )
 
+    async def arun(self, **kwargs) -> str:
+        return await self._generate(
+            kwargs["session_id"],
+            kwargs.get("intent", ""),
+            kwargs.get("output", ""),
+            kwargs.get("sources"),
+            kwargs.get("lang", "ko-KR"),
+        )
 
-class DocxEditTool(BaseTool):
-    """Edit a Word document (docx): replace text, append paragraphs/headings."""
+    async def _generate(
+        self,
+        session_id: str,
+        intent: str,
+        output: str,
+        sources: Optional[List[str]],
+        lang: str,
+    ) -> str:
+        engine = _engine()
+        api_key = _anthropic_api_key()
+        root = await asyncio.to_thread(_storage_root, session_id)
+        if not (intent or "").strip():
+            raise ToolError("intent must not be empty.")
+        name = Path(output or "").name
+        if not name or Path(name).suffix.lower() not in _EDITABLE_EXTS:
+            raise ToolError(f"output must end in one of {', '.join(_EDITABLE_EXTS)}.")
+        # Generated documents follow the drafts convention so the CanvasTab
+        # pager + SendUserFile flows work exactly like edited documents.
+        out_dir = root / "workspace" / "drafts" / Path(name).stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / name
 
-    name = "docx_edit"
-    description = (
-        "Edit a .docx in the session storage. Edits a DRAFT copy under "
-        "workspace/drafts/ (originals stay untouched) and regenerates PNG previews. "
-        "operations is a JSON list; supported ops: "
-        '{"op":"replace_text","find":"…","replace":"…"}, '
-        '{"op":"append_paragraph","text":"…","heading":0} (heading 1-9 for a heading, '
-        "0/omitted for body text). Returns the draft path + preview image paths."
-    )
-
-    def run(self, session_id: str, path: str, operations: List[Dict[str, Any]]) -> str:
-        """Apply edit operations to a docx.
-
-        Args:
-            path: Source .docx path (relative to session storage).
-            operations: List of operation objects (see tool description).
-        """
-        from docx import Document
-
-        root = _storage_root(session_id)
-        src = _resolve(root, path)
-        if not src.is_file():
-            raise ToolError(f"File not found: {path}")
-        if src.suffix.lower() != ".docx":
-            raise ToolError("docx_edit only handles .docx files (use doc_convert for others).")
-        draft = _ensure_draft(root, src)
-        doc = Document(str(draft))
-        applied: List[str] = []
-
-        for op in operations or []:
-            kind = (op.get("op") or "").strip()
-            if kind == "replace_text":
-                find, repl = str(op.get("find", "")), str(op.get("replace", ""))
-                if not find:
-                    raise ToolError("replace_text needs a non-empty 'find'.")
-                count = 0
-                for para in doc.paragraphs:
-                    for run in para.runs:
-                        if find in run.text:
-                            run.text = run.text.replace(find, repl)
-                            count += 1
-                applied.append(f"replace_text '{find}'→'{repl}' ({count} runs)")
-            elif kind == "append_paragraph":
-                text = str(op.get("text", ""))
-                level = int(op.get("heading", 0) or 0)
-                if level > 0:
-                    doc.add_heading(text, level=min(level, 9))
-                else:
-                    doc.add_paragraph(text)
-                applied.append("append_paragraph")
+        resolved_sources: List[str] = []
+        for s in sources or []:
+            s = str(s)
+            if "://" in s:
+                resolved_sources.append(s)
             else:
-                raise ToolError(f"Unknown op: {kind!r}")
+                p = _resolve(root, s)
+                if not p.is_file():
+                    raise ToolError(f"Source file not found: {s}")
+                resolved_sources.append(str(p))
 
-        doc.save(str(draft))
-        result: Dict[str, Any] = {"ok": True, "draft": _rel(root, draft), "applied": applied}
-        result.update(_regen_preview(root, draft))
-        return json.dumps(result, ensure_ascii=False)
+        kwargs: Dict[str, Any] = {"api_key": api_key, "lang": lang}
+        if resolved_sources:
+            kwargs["sources"] = resolved_sources
+        model = os.environ.get("GENY_DOCS_MODEL")
+        if model:
+            kwargs["model"] = model
+        result = await engine.async_generate_doc(intent, output=str(out_path), **kwargs)
+
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "draft": _rel(root, Path(str(getattr(result, "path", out_path)))),
+            "page_count": getattr(result, "page_count", None),
+            "warnings": list(getattr(result, "warnings", []) or []),
+        }
+        if out_path.suffix.lower() in _PREVIEW_EXTS:
+            payload.update(await asyncio.to_thread(_regen_preview, root, out_path))
+        return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-TOOLS = [DocConvertTool(), PptxEditTool(), XlsxEditTool(), DocxEditTool()]
+def _run_coro_blocking(coro) -> str:
+    """asyncio.run that also works when a loop is already running
+    (falls back to a dedicated thread — same bridge the old
+    web_fetch_multiple used)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+TOOLS = [DocConvertTool(), DocAnalyzeTool(), DocEditTool(), DocGenerateTool()]

@@ -2396,7 +2396,7 @@ const ko: Translations = {
         },
         custom_builtin: {
           label: 'Custom Built-in',
-          hint: '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (browser / web_search / web_fetch)',
+          hint: '운영자가 repo 에 추가한 in-repo 도구 — tools/custom/*_tools.py (web_search / news_search / whiteboard)',
         },
         custom: {
           label: 'Custom Tools',

@@ -13,17 +13,17 @@ The two implementations exist because Geny has its own search-backend wiring (cu
 Filters host-specific. Some Geny deployments add region / language / safe-search controls; check your deployment.`,
   bestFor: [
     'Discovering URLs on the public web',
-    'Pre-flight before web_fetch',
+    'Pre-flight before WebFetch',
     'Quick "what does the internet say about X?" queries',
   ],
   avoidWhen: [
-    'You already know the URL — web_fetch directly',
+    'You already know the URL — WebFetch directly',
     'Searching internal repos / private content — backend only sees public web',
     'Looking for news specifically — news_search has time-weighted ranking',
   ],
   gotchas: [
     'Backend-defined result count. Don\'t depend on a specific N.',
-    'Snippets are short — full content needs web_fetch.',
+    'Snippets are short — full content needs WebFetch.',
     'Aggressive rate-limiting on the default backend. Production deployments swap in paid backends.',
     'Rankings drift between calls — searches aren\'t idempotent.',
   ],
@@ -33,10 +33,10 @@ Filters host-specific. Some Geny deployments add region / language / safe-search
       body: `{
   "query": "playwright python launch_persistent_context"
 }`,
-      note: 'Returns ranked results. Agent picks one and web_fetches.',
+      note: 'Returns ranked results. Agent picks one and WebFetch follow-ups.',
     },
   ],
-  relatedTools: ['web_fetch', 'web_fetch_multiple', 'news_search'],
+  relatedTools: ['WebFetch', 'news_search'],
   relatedStages: [],
   codeRef:
     'Geny / backend/tools/custom/web_search_tools.py:WebSearchTool',
@@ -50,17 +50,17 @@ const ko: ToolDetailContent = {
 필터 호스트 특정. 일부 Geny 배포는 region / language / safe-search 컨트롤 추가; 배포 확인.`,
   bestFor: [
     '공개 웹의 URL 발견',
-    'web_fetch 전 사전 확인',
+    'WebFetch 전 사전 확인',
     '빠른 "인터넷에서 X에 대해 뭐라 하나?" 쿼리',
   ],
   avoidWhen: [
-    'URL 이미 아는 경우 — web_fetch 직접',
+    'URL 이미 아는 경우 — WebFetch 직접',
     '내부 repo / private 콘텐츠 검색 — 백엔드는 공개 웹만 봄',
     '뉴스 특정 찾기 — news_search가 시간 가중 ranking',
   ],
   gotchas: [
     '백엔드 정의 결과 카운트. 특정 N 의존 금지.',
-    'Snippet 짧음 — 풀 콘텐츠는 web_fetch.',
+    'Snippet 짧음 — 풀 콘텐츠는 WebFetch.',
     '기본 백엔드의 공격적 rate-limiting. 운영 배포는 유료 백엔드로 swap.',
     '호출 간 랭킹 drift — 검색 idempotent 아님.',
   ],
@@ -70,10 +70,10 @@ const ko: ToolDetailContent = {
       body: `{
   "query": "playwright python launch_persistent_context"
 }`,
-      note: 'Ranked 결과 반환. 에이전트가 하나 골라 web_fetch.',
+      note: 'Ranked 결과 반환. 에이전트가 하나 골라 WebFetch.',
     },
   ],
-  relatedTools: ['web_fetch', 'web_fetch_multiple', 'news_search'],
+  relatedTools: ['WebFetch', 'news_search'],
   relatedStages: [],
   codeRef:
     'Geny / backend/tools/custom/web_search_tools.py:WebSearchTool',

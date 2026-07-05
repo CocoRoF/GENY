@@ -47,24 +47,18 @@ def _tool_classes():
 
     out.extend([FeedTool, GiftTool, PlayTool, TalkTool])
 
-    # Web tools (4)
-    from tools.custom.web_fetch_tools import WebFetchTool, WebFetchMultipleTool
+    # Web search tools (2) — web_fetch*/browser_* custom tools were
+    # replaced by the executor's an-web built-ins (2.43 migration).
     from tools.custom.web_search_tools import WebSearchTool, NewsSearchTool
 
-    out.extend([WebFetchTool, WebFetchMultipleTool, WebSearchTool, NewsSearchTool])
+    out.extend([WebSearchTool, NewsSearchTool])
 
-    # Browser tools (7)
-    from tools.custom.browser_tools import (
-        BrowserNavigateTool, BrowserClickTool, BrowserFillTool,
-        BrowserScreenshotTool, BrowserEvaluateTool, BrowserGetPageInfoTool,
-        BrowserCloseTool,
+    # Document tools (4) — edit2docs-backed (2.43 migration)
+    from tools.built_in.document_tools import (
+        DocAnalyzeTool, DocConvertTool, DocEditTool, DocGenerateTool,
     )
 
-    out.extend([
-        BrowserNavigateTool, BrowserClickTool, BrowserFillTool,
-        BrowserScreenshotTool, BrowserEvaluateTool, BrowserGetPageInfoTool,
-        BrowserCloseTool,
-    ])
+    out.extend([DocAnalyzeTool, DocConvertTool, DocEditTool, DocGenerateTool])
 
     # Memory tools (7)
     from tools.built_in.memory_tools import (
@@ -119,7 +113,7 @@ def test_tool_class_declares_capabilities(tool_cls) -> None:
 def test_total_tool_count_unchanged() -> None:
     """Sanity: if a tool moves out of the inventory, this test loudly fails
     so the author updates the matrix instead of silently shrinking coverage."""
-    assert len(_tool_classes()) == 40
+    assert len(_tool_classes()) == 35
 
 
 # ── capabilities() forwarding ────────────────────────────────────────

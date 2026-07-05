@@ -9,7 +9,7 @@
  *   - images        → inline <img> (storage-raw, cookie-auth'd)
  *   - pdf           → <iframe>
  *   - office drafts → the drafts/<job>/preview/page-N.png pager the editing
- *                     tools (pptx_edit / docx_edit / doc_convert) regenerate
+ *                     tools (doc_edit / doc_generate / doc_convert) regenerate
  *   - text/code/md  → FileViewer (existing renderer)
  * Work-in-progress drafts surface as a band up top. Polls every 5s so an
  * in-flight edit's preview refreshes while the agent works.

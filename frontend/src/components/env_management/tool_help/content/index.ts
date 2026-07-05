@@ -123,16 +123,14 @@ import { talkToolHelp } from './Talk';
 
 // ── Geny browser family ──
 import { browserNavigateToolHelp } from './BrowserNavigate';
-import { browserClickToolHelp } from './BrowserClick';
-import { browserFillToolHelp } from './BrowserFill';
-import { browserEvaluateToolHelp } from './BrowserEvaluate';
-import { browserScreenshotToolHelp } from './BrowserScreenshot';
-import { browserPageInfoToolHelp } from './BrowserPageInfo';
+import { browserSnapshotToolHelp } from './BrowserSnapshot';
+import { browserActToolHelp } from './BrowserAct';
+import { browserExtractToolHelp } from './BrowserExtract';
+import { browserEvalToolHelp } from './BrowserEval';
+import { browserBackToolHelp } from './BrowserBack';
 import { browserCloseToolHelp } from './BrowserClose';
 
 // ── Geny web family ──
-import { webFetchGenyToolHelp } from './WebFetchGeny';
-import { webFetchMultipleToolHelp } from './WebFetchMultiple';
 import { webSearchGenyToolHelp } from './WebSearchGeny';
 import { newsSearchToolHelp } from './NewsSearch';
 
@@ -225,15 +223,15 @@ registerToolDetail('gift', giftToolHelp);
 registerToolDetail('play', playToolHelp);
 registerToolDetail('talk', talkToolHelp);
 
-registerToolDetail('browser_navigate', browserNavigateToolHelp);
-registerToolDetail('browser_click', browserClickToolHelp);
-registerToolDetail('browser_fill', browserFillToolHelp);
-registerToolDetail('browser_evaluate', browserEvaluateToolHelp);
-registerToolDetail('browser_screenshot', browserScreenshotToolHelp);
-registerToolDetail('browser_page_info', browserPageInfoToolHelp);
-registerToolDetail('browser_close', browserCloseToolHelp);
+// Browser* — geny-executor an-web built-ins (replaced the Playwright
+// browser_* custom family in the 2.43 migration).
+registerToolDetail('BrowserNavigate', browserNavigateToolHelp);
+registerToolDetail('BrowserSnapshot', browserSnapshotToolHelp);
+registerToolDetail('BrowserAct', browserActToolHelp);
+registerToolDetail('BrowserExtract', browserExtractToolHelp);
+registerToolDetail('BrowserEval', browserEvalToolHelp);
+registerToolDetail('BrowserBack', browserBackToolHelp);
+registerToolDetail('BrowserClose', browserCloseToolHelp);
 
-registerToolDetail('web_fetch', webFetchGenyToolHelp);
-registerToolDetail('web_fetch_multiple', webFetchMultipleToolHelp);
 registerToolDetail('web_search', webSearchGenyToolHelp);
 registerToolDetail('news_search', newsSearchToolHelp);

@@ -16,7 +16,6 @@ psycopg-pool>=3.2.0
 # Web search
 ddgs==9.11.4
 # Web fetch & browser automation
-playwright>=1.49.0
 # geny-executor 2.2.0 — "Environment is the single source of truth"
 # release. Fixes the prod bug where manifest strategy_configs were
 # silently dropped (empty evaluation chain terminated the worker loop
@@ -37,19 +36,20 @@ playwright>=1.49.0
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor>=2.42.0,<3.0.0
+geny-executor>=2.43.0,<3.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)
 edge-tts>=6.1
-# Document editing tools (workspace-canvas P3) — pptx/xlsx/docx edit +
-# image handling. Rendering/preview additionally needs LibreOffice +
-# poppler-utils (installed in the Docker image; recommended for bare-metal
-# runs — see README).
-python-pptx>=0.6.23
-openpyxl>=3.1.0
-python-docx>=1.1.0
-Pillow>=10.0.0
+# Document tools (workspace-canvas P3, re-engined 2026-07) — the edit2docs
+# engine handles docx/xlsx/pptx analyze/edit/generate (it brings python-docx/
+# openpyxl/python-pptx/Pillow transitively). PDF/PNG conversion & previews
+# additionally need LibreOffice + poppler-utils (installed in the Docker
+# image; recommended for bare-metal runs — see README).
+edit2docs>=0.4.0
+# Web exploration — the an-web engine backs the executor's Browser* built-ins
+# and WebFetch render_js (embedded V8; no Chromium / playwright install).
+an-web>=0.9.1
 # Auth
 bcrypt>=4.0.0
 PyJWT>=2.8.0

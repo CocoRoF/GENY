@@ -23,7 +23,7 @@ Where web_search rankings drift on algorithm details, news_search rankings expli
   ],
   avoidWhen: [
     'You want enduring documentation — web_search ranks by relevance',
-    'You need full article content — news_search returns snippets; follow up with web_fetch',
+    'You need full article content — news_search returns snippets; follow up with WebFetch',
     'Internal news / private content — backend only sees public news',
   ],
   gotchas: [
@@ -38,10 +38,10 @@ Where web_search rankings drift on algorithm details, news_search rankings expli
       body: `{
   "query": "anthropic new model release"
 }`,
-      note: 'Returns articles weighted by recency. Pick the most relevant and web_fetch for full content.',
+      note: 'Returns articles weighted by recency. Pick the most relevant and WebFetch for full content.',
     },
   ],
-  relatedTools: ['web_search', 'web_fetch'],
+  relatedTools: ['web_search', 'WebFetch'],
   relatedStages: [],
   codeRef:
     'Geny / backend/tools/custom/web_search_tools.py:NewsSearchTool',
@@ -65,7 +65,7 @@ web_search 랭킹이 알고리즘 디테일로 drift하는 반면 news_search �
   ],
   avoidWhen: [
     '지속적 문서 원함 — web_search가 관련도로 랭킹',
-    '풀 article 콘텐츠 필요 — news_search는 snippet 반환; web_fetch로 follow-up',
+    '풀 article 콘텐츠 필요 — news_search는 snippet 반환; WebFetch로 follow-up',
     '내부 뉴스 / private 콘텐츠 — 백엔드는 공개 뉴스만 봄',
   ],
   gotchas: [
@@ -80,10 +80,10 @@ web_search 랭킹이 알고리즘 디테일로 drift하는 반면 news_search �
       body: `{
   "query": "anthropic new model release"
 }`,
-      note: 'Recency weight된 article 반환. 가장 관련 있는 것 골라 풀 콘텐츠는 web_fetch.',
+      note: 'Recency weight된 article 반환. 가장 관련 있는 것 골라 풀 콘텐츠는 WebFetch.',
     },
   ],
-  relatedTools: ['web_search', 'web_fetch'],
+  relatedTools: ['web_search', 'WebFetch'],
   relatedStages: [],
   codeRef:
     'Geny / backend/tools/custom/web_search_tools.py:NewsSearchTool',

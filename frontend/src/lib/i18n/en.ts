@@ -2352,7 +2352,7 @@ const en = {
         },
         custom_builtin: {
           label: 'Custom Built-in',
-          hint: 'Operator-added in-repo tools — tools/custom/*_tools.py (browser / web_search / web_fetch)',
+          hint: 'Operator-added in-repo tools — tools/custom/*_tools.py (web_search / news_search / whiteboard)',
         },
         custom: {
           label: 'Custom Tools',

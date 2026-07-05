@@ -79,13 +79,15 @@ LOCAL_VTUBER_ENV_ID = "template-local-vtuber-env"
 # from platform-layer builtins (which are identified via
 # :data:`_PLATFORM_TOOL_SOURCES` — the file stem under
 # ``backend/tools/built_in/*.py``) — this whitelist only controls
-# which *custom* (``tools/custom/``) tools make it through. Excludes
-# ``browser_*`` on purpose: the conversational persona shouldn't
-# spawn a playwright browser on casual questions. Matches
+# which *custom* (``tools/custom/``) tools make it through. The old
+# ``browser_*`` / ``web_fetch*`` custom tools were replaced by the
+# executor's an-web built-ins (Browser* / WebFetch) in the geny-executor
+# 2.43 migration; page fetching for the persona now comes from the
+# ``WebFetch`` built-in in its ``built_in`` list. Matches
 # ``backend/tool_presets/template-vtuber-tools.json``.
 _VTUBER_CUSTOM_TOOL_WHITELIST = frozenset(
     {
-        "web_search", "news_search", "web_fetch",
+        "web_search", "news_search",
         # Blog AI Agent delegation tools — the VTuber delegates to an
         # external blog AI. BLOG_AGENT_DELEGATION_PLAN.md § Phase 4.
         # Sub-Workers are blocked via _WORKER_CUSTOM_TOOL_DENY.
@@ -213,10 +215,15 @@ _LEGACY_PLATFORM_TOOL_PREFIXES = ("memory_", "knowledge_", "opsidian_")
 # - ``PushNotification``: persona pushes proactive notifications
 #   (emergent mood / event signalling) over the existing chat channel.
 #
-# Write / Edit / Bash / NotebookEdit / WebFetch / WebSearch / Agent /
+# - ``WebFetch``: read-only page fetching. Replaces the old custom
+#   ``web_fetch`` (removed in the an-web migration) so the persona
+#   keeps the page-reading ability it always had.
+#
+# Write / Edit / Bash / NotebookEdit / WebSearch / Browser* / Agent /
 # MCP / cron / task / messaging / dev / worktree / operator stay off
-# — those either touch files, the network, or external systems, and
-# the persona's design routes those through the Sub-Worker.
+# — those either touch files, drive interactive browser sessions, or
+# reach external systems, and the persona's design routes those
+# through the Sub-Worker.
 _WORKER_BUILT_IN_TOOL_NAMES: List[str] = ["*"]
 _VTUBER_BUILT_IN_TOOL_NAMES: List[str] = [
     # Read-only filesystem inspection
@@ -230,6 +237,8 @@ _VTUBER_BUILT_IN_TOOL_NAMES: List[str] = [
     # Direct user interaction
     "AskUserQuestion",
     "PushNotification",
+    # Read-only page fetching (successor of the custom web_fetch)
+    "WebFetch",
 ]
 
 
@@ -272,7 +281,7 @@ def _vtuber_tool_roster(
        name is not in :data:`_VTUBER_PLATFORM_DENY`, **or**
     2. Its name is in :data:`_VTUBER_CUSTOM_TOOL_WHITELIST`.
 
-    Anything else — notably ``browser_*`` — is excluded.
+    Anything else is excluded.
 
     *tool_loader* supplies the source-stem lookup
     (:meth:`ToolLoader.get_tool_source`). When omitted (test callers

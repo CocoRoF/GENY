@@ -229,7 +229,7 @@ class ToolLoader:
         return self.get_builtin_names() + self.get_custom_names()
 
     def get_tool_source(self, name: str) -> Optional[str]:
-        """Return the source file stem for a tool (e.g. 'browser_tools')."""
+        """Return the source file stem for a tool (e.g. 'web_search_tools')."""
         return self._tool_source.get(name)
 
     def get_tool_category(self, name: str) -> Optional[str]:
@@ -255,7 +255,7 @@ class ToolLoader:
         Built-in tools are ALWAYS included.
         Custom tools are included based on preset.custom_tools:
           - ["*"] → all custom tools
-          - ["web_search", "browser_navigate"] → only those
+          - ["web_search", "news_search"] → only those
           - [] → none
         """
         allowed = list(self.builtin_tools.keys())

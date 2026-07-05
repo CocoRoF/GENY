@@ -134,44 +134,9 @@ TOOL_DESCRIPTIONS_KO: dict[str, str] = {
         "대화 비트를 표시합니다. 메타 액션 전용 — 일반 대화에는 "
         "사용하지 마세요."
     ),
-    # ── Custom tools — Browser (browser_tools.py) ──
-    "browser_navigate": (
-        "실제 브라우저로 URL에 접속해 렌더링된 페이지 콘텐츠를 "
-        "반환합니다. JavaScript도 실행됩니다."
-    ),
-    "browser_click": (
-        "현재 브라우저 페이지의 요소를 CSS 셀렉터로 클릭합니다. "
-        "browser_navigate 후 상호작용에 사용."
-    ),
-    "browser_fill": (
-        "현재 페이지의 폼 필드(input, textarea)에 텍스트를 입력합니다. "
-        "CSS 셀렉터로 필드를 지정합니다."
-    ),
-    "browser_evaluate": (
-        "현재 브라우저 페이지에서 JavaScript를 실행하고 결과를 "
-        "반환합니다. 정밀한 데이터 추출에 활용."
-    ),
-    "browser_screenshot": (
-        "현재 브라우저 페이지의 스크린샷을 캡처합니다. PNG 형식으로 "
-        "반환됩니다."
-    ),
-    "browser_page_info": (
-        "현재 브라우저 페이지의 URL, 제목, 상호작용 가능한 요소 "
-        "(링크, 버튼 등) 목록을 가져옵니다."
-    ),
-    "browser_close": (
-        "브라우저를 닫고 모든 리소스를 해제합니다. 쿠키, 세션, 페이지 "
-        "상태가 모두 초기화됩니다."
-    ),
-    # ── Custom tools — Web fetch & search (web_fetch_tools.py / web_search_tools.py) ──
-    "web_fetch": (
-        "단일 URL에서 콘텐츠를 가져옵니다. JavaScript 렌더링 없이 "
-        "HTTP GET으로 빠르게 가져오는 모드 — 정적 콘텐츠에 적합."
-    ),
-    "web_fetch_multiple": (
-        "여러 URL에서 콘텐츠를 병렬로 가져옵니다. 대량 페치에 사용 — "
-        "rate limit과 timeout이 적용됩니다."
-    ),
+    # ── Custom tools — Web search (web_search_tools.py) ──
+    # (browser_* / web_fetch* 커스텀 도구는 geny-executor 2.43의
+    #  an-web 기반 Browser*/WebFetch 빌트인으로 대체되어 제거됨)
     "web_search": (
         "웹 검색을 실행합니다. 검색 엔진이 반환한 결과 목록(제목, URL, "
         "스니펫)을 반환합니다."

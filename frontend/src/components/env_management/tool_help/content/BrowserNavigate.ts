@@ -1,4 +1,4 @@
-/** Tool detail — browser_navigate (Geny / browser family). */
+/** Tool detail — BrowserNavigate (geny-executor / browser family, an-web engine). */
 
 import type {
   ToolDetailContent,
@@ -6,107 +6,85 @@ import type {
 } from '../types';
 
 const en: ToolDetailContent = {
-  body: `browser_navigate launches (or reuses) a real Playwright-managed browser, navigates to a URL, and returns the rendered page content — fully JS-executed, post-hydration. The first call in a session boots the browser; subsequent calls reuse it, so navigation between pages is fast.
+  body: `BrowserNavigate opens a URL in this session's browser tab using the an-web engine — a pip-installable headless engine (httpx + embedded V8) that executes the page's JavaScript without any Chromium download. It returns a semantic snapshot of the rendered page: roles, names, and [ref=nN] handles for every interactive element, instead of raw HTML or pixels.
 
-Different from WebFetch: WebFetch is server-side HTTP, can\'t run JavaScript, returns the raw HTTP response stripped of scripts. browser_navigate runs a headless Chrome that hydrates SPAs, executes inline scripts, fires events. Use it for any modern web app or async-loaded content.
+The tab persists per agent session: cookies, localStorage, and history survive between calls, so login flows work (navigate → BrowserAct type/click → navigate to a protected page).
 
-Returns:
-  - rendered HTML / text content of the page
-  - the final URL after redirects
-  - basic interactive-element catalogue (links, buttons, form fields) — useful precursor to browser_click / browser_fill
+Different from WebFetch: WebFetch is a one-shot stateless fetch (optionally JS-rendered with render_js:true). BrowserNavigate maintains an interactive session you can act on with BrowserAct and read again with BrowserSnapshot.
 
-Persistent browser session: cookies, localStorage, and login state survive between calls. The agent can browser_navigate to a login page, browser_fill credentials, browser_click submit, then browser_navigate to a protected page — the session carries the auth state.
-
-Headless by default. Some host configs allow head-on for debugging; production defaults to headless to save resources.`,
+For script-heavy sites that take long to settle, pass timeout (e.g. 3) to cap the settle budget and accept a partial render.`,
   bestFor: [
-    'JS-rendered SPAs that WebFetch can\'t see',
-    'Multi-step browse flows where session state matters (login → action)',
-    'Pre-flight before browser_click / browser_fill / browser_evaluate',
+    'Opening SPA/React pages whose content is client-rendered',
+    'Starting any multi-step web flow (login, forms, pagination)',
+    'Reading a page you will interact with next',
   ],
   avoidWhen: [
-    'Static HTML / JSON — WebFetch is faster and cheaper',
-    'You only need search results — WebSearch',
-    'Rate-sensitive scraping at scale — Playwright is heavy; consider an HTTP-level pipeline',
+    'One-shot reads of static pages — WebFetch is faster and stateless',
+    'Pure API endpoints — WebFetch returns the raw body directly',
   ],
   gotchas: [
-    'First call boots the browser (slow, ~2-5s). Subsequent calls fast.',
-    'Cookies / session persist across calls — by design, but means stale state can confuse later turns. browser_close to reset.',
-    'Page content is the post-hydration snapshot. Some pages render content asynchronously — repeat navigation or wait via browser_evaluate if content seems incomplete.',
-    'Headless detection: some sites refuse headless Chrome. The host may need to expose a non-headless mode for those sites.',
+    'Requires the an-web engine (pip install geny-executor[browser], Python ≥ 3.12); without it the tool returns an install-hint error.',
+    'Large pages truncate at the snapshot node budget — use BrowserExtract for full details.',
+    'iframes are not executed and screenshots are not supported (semantic-first design).',
+    'The tab is per session — parallel tool calls in one session serialize.',
   ],
   examples: [
     {
-      caption: 'Navigate to a JS-rendered page',
-      body: `{
-  "url": "https://app.example.com/dashboard"
-}`,
-      note: 'Returns rendered content + interactive elements. Browser session stays open for follow-ups.',
+      caption: 'Open a JS-rendered page',
+      body: `{"url": "https://news.ycombinator.com"}`,
+      note: 'Returns page metadata + a YAML semantic tree with [ref=...] handles.',
+    },
+    {
+      caption: 'Script-heavy site, capped settle',
+      body: `{"url": "https://example-spa.com", "timeout": 3}`,
+      note: 'Accepts a partial render after 3s instead of waiting for full settle.',
     },
   ],
-  relatedTools: [
-    'browser_click',
-    'browser_fill',
-    'browser_evaluate',
-    'browser_screenshot',
-    'browser_page_info',
-    'browser_close',
-    'WebFetch',
-  ],
+  relatedTools: ['BrowserAct', 'BrowserSnapshot', 'BrowserExtract', 'WebFetch'],
   relatedStages: [],
   codeRef:
-    'Geny / backend/tools/custom/browser_tools.py:BrowserNavigateTool',
+    'geny-executor / tools/built_in/browser_tools.py:BrowserNavigateTool',
 };
 
 const ko: ToolDetailContent = {
-  body: `browser_navigate는 실제 Playwright 관리 브라우저를 launch(또는 재사용), URL로 navigate, 렌더링된 페이지 콘텐츠 반환 — 풀 JS 실행, post-hydration. 세션의 첫 호출이 브라우저 부팅; 후속 호출이 재사용 — 페이지 간 navigation 빠름.
+  body: `BrowserNavigate는 an-web 엔진(httpx + 내장 V8, Chromium 다운로드 불필요)으로 이 세션의 브라우저 탭에서 URL을 엽니다. 페이지의 JavaScript를 실행한 뒤, raw HTML이나 픽셀 대신 렌더링된 페이지의 시맨틱 스냅샷 — role, 이름, 그리고 모든 상호작용 요소의 [ref=nN] 핸들 — 을 반환합니다.
 
-WebFetch와 다름: WebFetch는 서버 측 HTTP, JavaScript 실행 불가, scripts 제거된 raw HTTP 응답 반환. browser_navigate는 SPA 하이드레이트, 인라인 스크립트 실행, 이벤트 발화하는 headless Chrome 실행. 모든 모던 웹 앱이나 비동기 로드 콘텐츠에 사용.
+탭은 에이전트 세션별로 유지됩니다: 쿠키·localStorage·히스토리가 호출 간 보존되어 로그인 플로우가 동작합니다 (navigate → BrowserAct로 입력/클릭 → 보호된 페이지로 navigate).
 
-반환:
-  - 페이지의 렌더링된 HTML / 텍스트 콘텐츠
-  - 리다이렉트 후 최종 URL
-  - 기본 상호작용 요소 카탈로그(링크, 버튼, 폼 필드) — browser_click / browser_fill의 유용한 precursor
+WebFetch와의 차이: WebFetch는 일회성 무상태 fetch(render_js:true로 JS 렌더 선택 가능)이고, BrowserNavigate는 BrowserAct로 조작하고 BrowserSnapshot으로 다시 읽는 상호작용 세션을 유지합니다.
 
-영속 브라우저 세션: 쿠키, localStorage, 로그인 상태가 호출 간 살아남음. 에이전트가 로그인 페이지로 browser_navigate, 자격증명 browser_fill, submit browser_click, 보호된 페이지로 browser_navigate — 세션이 auth 상태 carry.
-
-기본 headless. 일부 호스트 설정은 디버깅 위해 head-on 허용; 운영은 리소스 절약 위해 headless 기본.`,
+스크립트가 많은 사이트는 timeout(예: 3)으로 settle 예산을 제한해 부분 렌더를 받아들일 수 있습니다.`,
   bestFor: [
-    'WebFetch가 못 보는 JS 렌더링 SPA',
-    '세션 상태 중요한 멀티스텝 브라우즈 flow(로그인 → 액션)',
-    'browser_click / browser_fill / browser_evaluate 전 사전 확인',
+    '클라이언트 렌더링되는 SPA/React 페이지 열기',
+    '멀티스텝 웹 플로우 시작(로그인, 폼, 페이지네이션)',
+    '이후 상호작용할 페이지 읽기',
   ],
   avoidWhen: [
-    '정적 HTML / JSON — WebFetch가 더 빠르고 저렴',
-    '검색 결과만 필요 — WebSearch',
-    '대규모 rate-sensitive 스크래핑 — Playwright 무거움; HTTP 레벨 파이프라인 검토',
+    '정적 페이지의 일회성 읽기 — WebFetch가 더 빠르고 무상태',
+    '순수 API 엔드포인트 — WebFetch가 body를 그대로 반환',
   ],
   gotchas: [
-    '첫 호출이 브라우저 부팅(느림, ~2-5초). 후속 호출 빠름.',
-    '쿠키 / 세션이 호출 간 영속 — 설계상이지만 stale 상태가 나중 턴 혼란 가능. 리셋은 browser_close.',
-    '페이지 콘텐츠는 post-hydration 스냅샷. 일부 페이지는 비동기 렌더 — 콘텐츠 불완전해 보이면 navigation 반복 또는 browser_evaluate로 wait.',
-    'Headless 감지: 일부 사이트가 headless Chrome 거부. 호스트가 그런 사이트용 non-headless 모드 노출 필요할 수 있음.',
+    'an-web 엔진 필요(pip install geny-executor[browser], Python ≥ 3.12); 없으면 설치 안내 에러 반환.',
+    '큰 페이지는 스냅샷 노드 예산에서 잘림 — 상세는 BrowserExtract 사용.',
+    'iframe 미실행, 스크린샷 미지원(시맨틱 우선 설계).',
+    '탭은 세션당 하나 — 같은 세션의 병렬 호출은 직렬화됨.',
   ],
   examples: [
     {
-      caption: 'JS 렌더링 페이지로 navigate',
-      body: `{
-  "url": "https://app.example.com/dashboard"
-}`,
-      note: '렌더링된 콘텐츠 + 상호작용 요소 반환. 브라우저 세션이 follow-up용으로 열려 있음.',
+      caption: 'JS 렌더 페이지 열기',
+      body: `{"url": "https://news.ycombinator.com"}`,
+      note: '페이지 메타데이터 + [ref=...] 핸들이 달린 YAML 시맨틱 트리 반환.',
+    },
+    {
+      caption: '스크립트 무거운 사이트, settle 제한',
+      body: `{"url": "https://example-spa.com", "timeout": 3}`,
+      note: '전체 settle 대신 3초 후 부분 렌더 수용.',
     },
   ],
-  relatedTools: [
-    'browser_click',
-    'browser_fill',
-    'browser_evaluate',
-    'browser_screenshot',
-    'browser_page_info',
-    'browser_close',
-    'WebFetch',
-  ],
+  relatedTools: ['BrowserAct', 'BrowserSnapshot', 'BrowserExtract', 'WebFetch'],
   relatedStages: [],
   codeRef:
-    'Geny / backend/tools/custom/browser_tools.py:BrowserNavigateTool',
+    'geny-executor / tools/built_in/browser_tools.py:BrowserNavigateTool',
 };
 
 export const browserNavigateToolHelp: ToolDetailFactory = (locale) =>

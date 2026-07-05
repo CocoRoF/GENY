@@ -270,7 +270,11 @@ def _strip_only_loop_signals(text: Optional[str]) -> Optional[str]:
 
 _FILES_READ_TOOLS = frozenset({"Read", "Glob", "Grep"})
 _BASH_TOOLS = frozenset({"Bash"})
-_WEB_TOOLS = frozenset({"WebFetch", "web_fetch", "web_search", "news_search"})
+# Browser* = the an-web built-ins that replaced the custom web_fetch /
+# browser_* tools (geny-executor 2.43 migration).
+_WEB_TOOLS = frozenset(
+    {"WebFetch", "WebSearch", "web_search", "news_search", "BrowserNavigate"}
+)
 _BASH_PREVIEW_CHARS = 200
 _WEB_PREVIEW_CHARS = 200
 _ERROR_PREVIEW_CHARS = 200
