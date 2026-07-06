@@ -12,6 +12,8 @@
  *   시뮬레이션을 다시 돌리지 않고 위치가 그대로 유지된다
  * - N-hop 하이라이트(클릭, 2-hop) + 호버 이웃 하이라이트(1-hop)
  * - 카테고리 클러스터 force + 클릭 가능한 범례 + 미니맵
+ * - 내비게이션: 좌드래그 팬 / 우드래그 3D 틸트 / 휠 줌 / 화살표·WASD 팬 /
+ *   z·x 줌 (enableNodeDrag=false — 밀집 그래프에서 팬 우선)
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -457,6 +459,7 @@ export default function UnifiedGraphView({
         selectedNodeId={effectiveSelectedId}
         highlightHops={2}
         clickToFocus={false}
+        enableNodeDrag={false}
         hoverHighlight
         hoverHighlightHops={1}
         labelFormatter={labelFormatter}
