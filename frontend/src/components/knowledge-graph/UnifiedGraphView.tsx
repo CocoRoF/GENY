@@ -6,8 +6,8 @@
  * OpsidianHub의 세 가지 모드(sessions/user/curator) 모두에서
  * 동일한 고품질 그래프를 렌더링한다.
  *
- * - @cocorof/graphier — WebGL InstancedMesh 렌더링 (노드 1122개 = 드로우콜 2회)
- * - Web Worker 레이아웃 — 메인 스레드 블로킹 없음, 2D 평면 모드
+ * - @cocorof/graphier — WebGL InstancedMesh 렌더링 (노드 수천 개 = 드로우콜 2회)
+ * - Web Worker 3D 포스 레이아웃 — 메인 스레드 블로킹 없음
  * - 리히트 없는 필터 — visibleNodeIds/linkVisibility로 노드/엣지 토글 시
  *   시뮬레이션을 다시 돌리지 않고 위치가 그대로 유지된다
  * - N-hop 하이라이트(클릭, 2-hop) + 호버 이웃 하이라이트(1-hop)
@@ -26,6 +26,7 @@ import {
   type ThemeConfig,
   type StyleConfig,
   type LayoutConfig,
+  type RendererConfig,
 } from '@cocorof/graphier';
 import { GitGraph, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
@@ -74,9 +75,14 @@ const GRAPH_THEME_LIGHT: ThemeConfig = {
 };
 
 const GRAPH_LAYOUT: LayoutConfig = {
-  dimensions: 2,
+  dimensions: 3,
   clusterBy: 'type',
   clusterStrength: 0.04,
+};
+
+// 좌드래그=팬, 우드래그=회전, 키보드=팬 스킴 (화살표/WASD 팬, z/x 줌)
+const GRAPH_RENDERER: RendererConfig = {
+  navigation: { leftButton: 'pan', rightButton: 'rotate', keyboard: 'pan' },
 };
 
 // ── 호버 노드 상세 툴팁 ─────────────────────────────────
@@ -452,6 +458,7 @@ export default function UnifiedGraphView({
         ref={graphRef}
         data={graphData}
         layout={GRAPH_LAYOUT}
+        renderer={GRAPH_RENDERER}
         theme={isLight ? GRAPH_THEME_LIGHT : GRAPH_THEME_DARK}
         style={graphStyle}
         visibleNodeIds={visibleNodeIds}
