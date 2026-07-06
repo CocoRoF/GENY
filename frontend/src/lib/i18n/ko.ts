@@ -828,6 +828,8 @@ const ko: Translations = {
 
   // ─── Info Tab ───
   info: {
+    wakeUp: '깨우기',
+    wakingUp: '깨우는 중…',
     selectSession: '세션을 선택하세요',
     selectSessionDesc: '상세 정보를 볼 세션을 선택하세요',
     loading: '로딩 중...',

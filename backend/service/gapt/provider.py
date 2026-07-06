@@ -140,23 +140,31 @@ class GaptWorkspaceProvider:
             raise GaptApiError(500, "project.no_id", str(project)[:200])
 
         ws = await self._find_workspace_by_name(project_id, workspace_name)
-        if ws is None:
+        created = ws is None
+        if created:
             ws = await self._client.create_workspace(project_id, name=workspace_name)
         wid = _workspace_id(ws)
         if not wid:
             raise GaptApiError(500, "workspace.no_id", str(ws)[:200])
 
-        if wait_running and (not isinstance(ws, dict) or ws.get("status") != "running"):
-            # Best-effort: GAPT marks the workspace 'running' after it preboots
-            # the container + finishes the (here empty) clone. That status field
-            # can occasionally lag/stick at 'creating' even though the container
-            # is up — and the executor execs the container DIRECTLY (docker exec
-            # bypasses GAPT's status gate), so a status lag must not block the
-            # session. Wait briefly for the happy path, then proceed; the
-            # container is already prebooted at create time.
+        if (
+            wait_running
+            and created
+            and (not isinstance(ws, dict) or ws.get("status") != "running")
+        ):
+            # Best-effort, FRESH workspaces only: give the just-created
+            # container a short window to preboot so the very first tool
+            # call is snappy. EXISTING workspaces (the session-wakeup path)
+            # never wait here — GAPT's status field can lag/stick at
+            # 'creating' even though the container is up, and blocking on
+            # it made every backend-restart wakeup eat the full timeout
+            # (~45s of a ~49s resume, prod 2026-07-06). The executor execs
+            # the container directly and ``GaptSandboxHandle.ensure()``
+            # idempotently ``docker start``s it before the first exec, so
+            # readiness is guaranteed lazily either way.
             try:
                 await self._client.wait_workspace_running(
-                    wid, timeout_s=min(wait_timeout_s, 45.0)
+                    wid, timeout_s=min(wait_timeout_s, 10.0)
                 )
             except GaptApiError as exc:
                 logger.warning(

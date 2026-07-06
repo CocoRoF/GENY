@@ -118,6 +118,39 @@ async def test_provider_get_or_create_returns_handle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_existing_workspace_never_waits_on_status() -> None:
+    """Session-wakeup contract (prod 2026-07-06): re-binding an EXISTING
+    workspace must not poll wait_workspace_running — GAPT's status field
+    can stick at 'creating' and the old 45s wait made every backend-restart
+    resume take ~49s. Readiness is lazy via GaptSandboxHandle.ensure()."""
+    status_polls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = request.url.path
+        if p.endswith("/login"):
+            return httpx.Response(204, headers={"set-cookie": "gapt_session=s"})
+        if p == "/_gapt/api/projects" and request.method == "GET":
+            return httpx.Response(200, json={"projects": [{"id": "proj-1", "slug": "geny"}]})
+        if p == "/_gapt/api/projects/proj-1/workspaces" and request.method == "GET":
+            # Existing workspace whose status is stuck at 'creating'.
+            return httpx.Response(
+                200,
+                json={"workspaces": [{"id": "WS01ABC", "name": "sess-1", "status": "creating"}]},
+            )
+        if p == "/_gapt/api/workspaces/WS01ABC" and request.method == "GET":
+            status_polls.append(p)
+            return httpx.Response(200, json={"id": "WS01ABC", "status": "creating"})
+        return httpx.Response(404, json={"detail": "unexpected " + p})
+
+    c = _client(handler)
+    provider = GaptWorkspaceProvider(c)
+    handle = await provider.ensure_workspace(project_slug="geny", workspace_name="sess-1")
+    assert handle.workspace_id == "WS01ABC"
+    assert status_polls == []  # no status polling for existing workspaces
+    await c.aclose()
+
+
+@pytest.mark.asyncio
 async def test_sandbox_handle_ensure_forces_container_live() -> None:
     calls: list[str] = []
 

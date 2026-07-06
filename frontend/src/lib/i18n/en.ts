@@ -833,6 +833,8 @@ const en = {
 
   // ─── Info Tab ───
   info: {
+    wakeUp: 'Wake Up',
+    wakingUp: 'Waking…',
     selectSession: 'Select a Session',
     selectSessionDesc: 'Choose a session to view its details',
     loading: 'Loading...',
