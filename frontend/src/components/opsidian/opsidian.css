@@ -1443,27 +1443,6 @@ html.light .ss-role-planner {
   height: 100%;
   background: var(--obs-bg-deep) !important;
 }
-.obs-graph .react-flow__background {
-  background: var(--obs-bg-deep) !important;
-}
-.obs-graph .react-flow__minimap {
-  background: var(--obs-bg-panel) !important;
-  border: 1px solid var(--obs-border-subtle) !important;
-  border-radius: var(--obs-radius-md) !important;
-}
-.obs-graph .react-flow__controls {
-  border: 1px solid var(--obs-border-subtle) !important;
-  border-radius: var(--obs-radius-md) !important;
-  overflow: hidden;
-}
-.obs-graph .react-flow__controls-button {
-  background: var(--obs-bg-surface) !important;
-  border-color: var(--obs-border-subtle) !important;
-  fill: var(--obs-text-dim) !important;
-}
-.obs-graph .react-flow__controls-button:hover {
-  background: var(--obs-bg-hover) !important;
-}
 
 /* Graph empty / legend / tooltip */
 .obs-graph-empty {

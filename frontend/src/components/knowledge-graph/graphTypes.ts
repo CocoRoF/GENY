@@ -43,22 +43,3 @@ export interface UnifiedGraphViewProps {
   edges: KnowledgeGraphEdge[];
   onSelectFile: (filename: string) => void;
 }
-
-// ── d3-force 내부용 시뮬레이션 노드 ──────────────────────
-export interface SimNode {
-  id: string;
-  x: number;
-  y: number;
-  vx?: number;
-  vy?: number;
-  category: string;
-  importance: string;
-  connectionCount: number;
-}
-
-export interface SimLink {
-  source: string | SimNode;
-  target: string | SimNode;
-  type: EdgeType;
-  weight: number;
-}

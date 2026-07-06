@@ -1,97 +1,81 @@
 'use client';
 
 /**
- * UnifiedGraphView — Knowledge Graph 통합 뷰
+ * UnifiedGraphView — Knowledge Graph 통합 뷰 (graphier 기반)
  *
  * OpsidianHub의 세 가지 모드(sessions/user/curator) 모두에서
  * 동일한 고품질 그래프를 렌더링한다.
  *
- * - ReactFlow (@xyflow/react) 기반 — Zoom, Pan, Drag, MiniMap 내장
- * - d3-force 레이아웃 — O(n log n) Barnes-Hut 근사
- * - N-hop 하이라이트 — 노드 클릭 시 이웃 밝기 차등
- * - 카테고리 색상 + 중요도 크기 + 엣지 타입 구분
+ * - @cocorof/graphier — WebGL InstancedMesh 렌더링 (노드 1122개 = 드로우콜 2회)
+ * - Web Worker 레이아웃 — 메인 스레드 블로킹 없음, 2D 평면 모드
+ * - 리히트 없는 필터 — visibleNodeIds/linkVisibility로 노드/엣지 토글 시
+ *   시뮬레이션을 다시 돌리지 않고 위치가 그대로 유지된다
+ * - N-hop 하이라이트(클릭, 2-hop) + 호버 이웃 하이라이트(1-hop)
+ * - 카테고리 클러스터 force + 클릭 가능한 범례 + 미니맵
  */
 
-import { useCallback, useMemo, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  type Node,
-  type Edge,
-  type NodeMouseHandler,
-  MarkerType,
-  ConnectionLineType,
-  ReactFlowProvider,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+  NetworkGraph3D,
+  GraphMinimap,
+  type NetworkGraph3DRef,
+  type GraphData,
+  type GraphLink,
+  type ThemeConfig,
+  type StyleConfig,
+  type LayoutConfig,
+} from '@cocorof/graphier';
+import { GitGraph, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
-import type { UnifiedGraphViewProps, KnowledgeGraphNode, GraphFilterState, EdgeType } from './graphTypes';
+import type {
+  UnifiedGraphViewProps,
+  KnowledgeGraphNode,
+  GraphFilterState,
+  EdgeType,
+} from './graphTypes';
 import {
   CATEGORY_COLORS,
   DEFAULT_NODE_COLOR,
-  EDGE_STYLES,
-  DEFAULT_EDGE_STYLE,
   computeNodeSize,
-  HOP_OPACITY,
-  HOP_EDGE_OPACITY,
 } from './graphConstants';
-import { computeForceLayout } from './graphLayout';
-import { computeHighlightSet, isEdgeHighlighted } from './graphHighlight';
 import GraphControls from './GraphControls';
-import {
-  GitGraph,
-  Calendar,
-  Hash,
-  FolderKanban,
-  Lightbulb,
-  BookOpen,
-  Home,
-  FileText,
-  type LucideIcon,
-} from 'lucide-react';
 
-// Per-category glyph rendered inside each node ring (mirrors CATEGORY_COLORS).
-const CATEGORY_ICONS: Record<string, LucideIcon> = {
-  daily: Calendar,
-  topics: Hash,
-  projects: FolderKanban,
-  insights: Lightbulb,
-  reference: BookOpen,
-  root: Home,
+const ALL_EDGE_TYPES: EdgeType[] = ['wikilink', 'tag', 'backlink', 'semantic'];
+const ALL_IMPORTANCE = ['critical', 'high', 'medium', 'low'];
+
+// ── graphier 테마 (opsidian.css의 --obs-* 팔레트와 정합) ──
+const GRAPH_THEME_DARK: ThemeConfig = {
+  nodeColors: CATEGORY_COLORS,
+  linkColors: {
+    wikilink: '#58a6ff',
+    backlink: '#8b949e',
+    tag: '#d29922',
+    semantic: '#a371f7',
+  },
+  defaultNodeColor: DEFAULT_NODE_COLOR,
+  defaultLinkColor: '#58a6ff',
+  backgroundColor: '#0c0c0f', // --obs-bg-deep (dark)
 };
-const DEFAULT_NODE_ICON: LucideIcon = FileText;
 
-// ── 커스텀 노드 레이블 (원 아래 텍스트) ─────────────────
-function NodeLabel({ label, size }: { label: string; size: number }) {
-  const maxLen = size > 24 ? 30 : 18;
-  const display = label.length > maxLen ? label.slice(0, maxLen) + '…' : label;
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: size + 4,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        fontSize: 10,
-        fontWeight: 500,
-        color: 'var(--obs-text-dim)',
-        whiteSpace: 'nowrap',
-        textAlign: 'center',
-        pointerEvents: 'none',
-        textShadow: '0 0 4px var(--obs-bg-deep), 0 0 8px var(--obs-bg-deep)',
-        maxWidth: 120,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }}
-    >
-      {display}
-    </div>
-  );
-}
+const GRAPH_THEME_LIGHT: ThemeConfig = {
+  nodeColors: CATEGORY_COLORS,
+  linkColors: {
+    wikilink: '#2563eb',
+    backlink: '#94a3b8',
+    tag: '#b45309',
+    semantic: '#7c3aed',
+  },
+  defaultNodeColor: DEFAULT_NODE_COLOR,
+  defaultLinkColor: '#2563eb',
+  backgroundColor: '#f8fafc', // --obs-bg-deep (light)
+  blending: 'normal',
+};
+
+const GRAPH_LAYOUT: LayoutConfig = {
+  dimensions: 2,
+  clusterBy: 'type',
+  clusterStrength: 0.04,
+};
 
 // ── 호버 노드 상세 툴팁 ─────────────────────────────────
 function GraphTooltip({ node }: { node: KnowledgeGraphNode | null }) {
@@ -161,11 +145,57 @@ function GraphTooltip({ node }: { node: KnowledgeGraphNode | null }) {
   );
 }
 
-// ── 메인 그래프 내부 컴포넌트 (ReactFlowProvider 내부) ───
-function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedGraphViewProps) {
+// ── 줌 컨트롤 버튼 스택 ─────────────────────────────────
+function ZoomButton({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 28,
+        height: 28,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: '1px solid var(--obs-border-subtle)',
+        color: 'var(--obs-text-dim)',
+        cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default function UnifiedGraphView({
+  nodes: rawNodes,
+  edges: rawEdges,
+  onSelectFile,
+}: UnifiedGraphViewProps) {
+  const graphRef = useRef<NetworkGraph3DRef | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<KnowledgeGraphNode | null>(null);
-  const highlightDepth = 2;
+
+  // 라이트/다크 테마 감지 (html.light 클래스 — 전환 시 그래프 리마운트)
+  const [isLight, setIsLight] = useState(false);
+  useEffect(() => {
+    const el = document.documentElement;
+    const update = () => setIsLight(el.classList.contains('light'));
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(el, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   // 사용 가능한 카테고리 목록
   const availableCategories = useMemo(() => {
@@ -177,250 +207,138 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
   // 필터 상태 — 초기값: 모두 활성 (카테고리는 데이터에서 파생)
   const [filter, setFilter] = useState<GraphFilterState>(() => ({
     categories: new Set<string>(),
-    importance: new Set(['critical', 'high', 'medium', 'low']),
+    importance: new Set(ALL_IMPORTANCE),
     searchQuery: '',
     showOrphans: true,
-    edgeTypes: new Set<EdgeType>(['wikilink', 'tag', 'backlink', 'semantic']),
+    edgeTypes: new Set<EdgeType>(ALL_EDGE_TYPES),
     selectedNodeId: null,
     highlightDepth: 2,
   }));
 
-  // 필터링된 노드/엣지
-  const { filteredNodes, filteredEdges } = useMemo(() => {
-    const searchLower = filter.searchQuery.toLowerCase();
-
-    // 노드 필터링
-    let fNodes = rawNodes.filter((n) => {
-      // 필터에 카테고리가 하나도 없으면 → 모두 표시 (초기 상태)
-      if (filter.categories.size > 0 && !filter.categories.has(n.category)) return false;
-      if (!filter.importance.has(n.importance)) return false;
-      if (searchLower && !n.label.toLowerCase().includes(searchLower)) return false;
-      return true;
-    });
-
-    const nodeIdSet = new Set(fNodes.map((n) => n.id));
-
-    // 엣지 필터링
-    const fEdges = rawEdges.filter((e) => {
-      if (!nodeIdSet.has(e.source) || !nodeIdSet.has(e.target)) return false;
-      const et = e.type ?? 'wikilink';
-      if (!filter.edgeTypes.has(et)) return false;
-      return true;
-    });
-
-    // 고아 노드 필터
-    if (!filter.showOrphans) {
-      const connectedIds = new Set<string>();
-      for (const e of fEdges) {
-        connectedIds.add(e.source);
-        connectedIds.add(e.target);
-      }
-      fNodes = fNodes.filter((n) => connectedIds.has(n.id));
-    }
-
-    return { filteredNodes: fNodes, filteredEdges: fEdges };
-  }, [rawNodes, rawEdges, filter]);
-
-  // d3-force 레이아웃 계산 (필터링된 데이터 기반)
-  const { positions } = useMemo(
-    () => computeForceLayout(filteredNodes, filteredEdges),
-    [filteredNodes, filteredEdges],
-  );
-
-  // N-hop 하이라이트 셋
-  const highlightSet = useMemo(
-    () => (selectedNodeId ? computeHighlightSet(selectedNodeId, filteredEdges, highlightDepth) : null),
-    [selectedNodeId, filteredEdges, highlightDepth],
-  );
-
-  // 연결 수 맵 (백엔드에서 보내지 않을 때 대비)
-  const connectionCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const n of filteredNodes) map.set(n.id, n.connectionCount ?? 0);
-    for (const e of filteredEdges) {
-      map.set(e.source, (map.get(e.source) ?? 0) + 1);
-      map.set(e.target, (map.get(e.target) ?? 0) + 1);
-    }
+  // 노드 원본 맵 (호버 툴팁용)
+  const nodeMap = useMemo(() => {
+    const map = new Map<string, KnowledgeGraphNode>();
+    for (const n of rawNodes) map.set(n.id, n);
     return map;
-  }, [filteredNodes, filteredEdges]);
+  }, [rawNodes]);
 
-  // ReactFlow 노드 변환
-  const initialNodes: Node[] = useMemo(() => {
-    return filteredNodes.map((gn) => {
-      const pos = positions[gn.id] ?? { x: 0, y: 0 };
-      const connCount = connectionCountMap.get(gn.id) ?? 0;
-      const size = computeNodeSize(gn.importance, connCount);
-      const color = CATEGORY_COLORS[gn.category] ?? DEFAULT_NODE_COLOR;
+  // graphier 데이터 — 전체 데이터를 한 번만 넘기고(레이아웃 1회),
+  // 이후 필터는 visibleNodeIds/linkVisibility로만 처리한다.
+  const graphData: GraphData = useMemo(() => {
+    const connCount = new Map<string, number>();
+    for (const e of rawEdges) {
+      connCount.set(e.source, (connCount.get(e.source) ?? 0) + 1);
+      connCount.set(e.target, (connCount.get(e.target) ?? 0) + 1);
+    }
+    return {
+      nodes: rawNodes.map((n) => ({
+        id: n.id,
+        label: n.label,
+        type: n.category,
+        val: computeNodeSize(n.importance, n.connectionCount ?? connCount.get(n.id) ?? 0),
+      })),
+      links: rawEdges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        type: e.type ?? 'wikilink',
+      })),
+    };
+  }, [rawNodes, rawEdges]);
 
-      // 하이라이트 투명도
-      let opacity = 1.0;
-      if (highlightSet) {
-        const hop = highlightSet.get(gn.id);
-        if (hop === 0) opacity = HOP_OPACITY.selected;
-        else if (hop === 1) opacity = HOP_OPACITY.hop1;
-        else if (hop === 2) opacity = HOP_OPACITY.hop2;
-        else opacity = HOP_OPACITY.dimmed;
-      }
+  // 노드 필터 → visibleNodeIds (null = 전체 표시, 리히트 없음)
+  const visibleNodeIds = useMemo<Set<string> | null>(() => {
+    const noCategoryFilter = filter.categories.size === 0;
+    const allImportance = ALL_IMPORTANCE.every((i) => filter.importance.has(i));
+    const query = filter.searchQuery.trim().toLowerCase();
+    if (noCategoryFilter && allImportance && !query && filter.showOrphans) return null;
 
-      const isSelected = gn.id === selectedNodeId;
-      const ringW = Math.max(2, Math.round(size * 0.11));
-      const NodeIcon = CATEGORY_ICONS[gn.category] ?? DEFAULT_NODE_ICON;
+    const visible = new Set<string>();
+    for (const n of rawNodes) {
+      if (!noCategoryFilter && !filter.categories.has(n.category)) continue;
+      if (!filter.importance.has(n.importance)) continue;
+      if (query && !n.label.toLowerCase().includes(query)) continue;
+      visible.add(n.id);
+    }
 
-      return {
-        id: gn.id,
-        position: { x: pos.x - size / 2, y: pos.y - size / 2 },
-        data: {
-          label: (
-            <div style={{ position: 'relative', width: size, height: size }}>
-              {/* Outline ring + theme-surface interior (white in light mode,
-                  dark surface in dark mode) + category glyph. */}
-              <div
-                style={{
-                  width: size,
-                  height: size,
-                  borderRadius: '50%',
-                  background: 'var(--obs-bg-panel)',
-                  border: `${ringW}px solid ${color}`,
-                  boxSizing: 'border-box',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: isSelected
-                    ? `0 0 0 3px ${color}, 0 0 ${Math.round(size * 0.9)}px ${color}66`
-                    : `0 1px 4px rgba(0,0,0,0.18), 0 0 ${Math.round(size * 0.35)}px ${color}1f`,
-                  transition: 'box-shadow 200ms ease, opacity 200ms ease, border-color 200ms ease',
-                }}
-              >
-                <NodeIcon
-                  size={Math.max(10, Math.round(size * 0.46))}
-                  color={color}
-                  strokeWidth={2.25}
-                />
-              </div>
-              {connCount >= 3 && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: -3,
-                    right: -3,
-                    minWidth: 15,
-                    height: 15,
-                    padding: '0 3px',
-                    borderRadius: 8,
-                    background: color,
-                    color: '#fff',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    lineHeight: '15px',
-                    textAlign: 'center',
-                    border: '2px solid var(--obs-bg-panel)',
-                    boxSizing: 'content-box',
-                  }}
-                >
-                  {connCount}
-                </div>
-              )}
-              <NodeLabel label={gn.label} size={size} />
-            </div>
-          ),
-        },
-        style: {
-          background: 'transparent',
-          border: 'none',
-          width: size,
-          height: size,
-          padding: 0,
-          opacity,
-          cursor: 'pointer',
-          transition: 'opacity 200ms ease',
-        },
-        type: 'default',
-      };
-    });
-  }, [filteredNodes, positions, connectionCountMap, highlightSet, selectedNodeId]);
-
-  // ReactFlow 엣지 변환
-  const initialEdges: Edge[] = useMemo(() => {
-    return filteredEdges.map((ge, i) => {
-      const edgeType = ge.type ?? 'wikilink';
-      const style = EDGE_STYLES[edgeType] ?? DEFAULT_EDGE_STYLE;
-
-      let opacity = 0.6;
-      let width = style.width;
-      if (highlightSet) {
-        if (isEdgeHighlighted(ge.source, ge.target, highlightSet)) {
-          const srcHop = highlightSet.get(ge.source) ?? 999;
-          const tgtHop = highlightSet.get(ge.target) ?? 999;
-          const maxHop = Math.max(srcHop, tgtHop);
-          opacity = maxHop <= 1 ? HOP_EDGE_OPACITY.active : HOP_EDGE_OPACITY.secondary;
-          width = maxHop <= 1 ? style.width * 2 : style.width * 1.2;
-        } else {
-          opacity = HOP_EDGE_OPACITY.dimmed;
+    if (!filter.showOrphans) {
+      const connected = new Set<string>();
+      for (const e of rawEdges) {
+        const et = e.type ?? 'wikilink';
+        if (!filter.edgeTypes.has(et)) continue;
+        if (visible.has(e.source) && visible.has(e.target)) {
+          connected.add(e.source);
+          connected.add(e.target);
         }
       }
+      for (const id of visible) if (!connected.has(id)) visible.delete(id);
+    }
+    return visible;
+  }, [rawNodes, rawEdges, filter]);
 
-      return {
-        id: `ke-${i}`,
-        source: ge.source,
-        target: ge.target,
-        animated: false,
-        style: {
-          stroke: style.color,
-          strokeWidth: width,
-          opacity,
-          strokeDasharray: style.dash,
-          transition: 'opacity 200ms ease, stroke-width 200ms ease',
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 10,
-          height: 10,
-          color: style.color,
-        },
-        type: 'default',
-      };
-    });
-  }, [filteredEdges, highlightSet]);
+  // 엣지 타입 필터 → linkVisibility (null = 전체 표시)
+  const linkVisibility = useMemo<((link: GraphLink) => boolean) | null>(() => {
+    if (ALL_EDGE_TYPES.every((t) => filter.edgeTypes.has(t))) return null;
+    const active = filter.edgeTypes;
+    return (link) => active.has((link.type ?? 'wikilink') as EdgeType);
+  }, [filter.edgeTypes]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  // 필터로 선택 노드가 숨겨지면 선택도 숨김 (필터 복귀 시 선택 유지)
+  const effectiveSelectedId =
+    selectedNodeId && (!visibleNodeIds || visibleNodeIds.has(selectedNodeId))
+      ? selectedNodeId
+      : null;
 
-  useEffect(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
-
-  // 노드 클릭 → N-hop 하이라이트 토글 + 파일 열기
-  const onNodeClick: NodeMouseHandler = useCallback(
-    (_, node) => {
+  // 노드 클릭 → 하이라이트 토글 + 파일 열기 / 배경 클릭 → 해제
+  const handleNodeClick = useCallback(
+    (node: { id: string } | null) => {
+      if (!node) {
+        setSelectedNodeId(null);
+        return;
+      }
       setSelectedNodeId((prev) => (prev === node.id ? null : node.id));
       onSelectFile(node.id);
     },
     [onSelectFile],
   );
 
-  // 호버 처리
-  const nodeMap = useMemo(() => {
-    const map = new Map<string, KnowledgeGraphNode>();
-    for (const n of rawNodes) map.set(n.id, n);  // rawNodes 전체로 맵 유지 (호버 시 필터밖 정보도 필요)
-    return map;
-  }, [rawNodes]);
-
-  const onNodeMouseEnter: NodeMouseHandler = useCallback(
-    (_, node) => {
-      const gn = nodeMap.get(node.id) ?? null;
-      setHoveredNode(gn);
+  const handleNodeHover = useCallback(
+    (node: { id: string } | null) => {
+      setHoveredNode(node ? (nodeMap.get(node.id) ?? null) : null);
     },
     [nodeMap],
   );
 
-  const onNodeMouseLeave = useCallback(() => {
-    setHoveredNode(null);
+  // 범례 칩 클릭 → 카테고리 필터 토글 (GraphControls와 동일한 상태 공유)
+  const toggleLegendCategory = useCallback((cat: string) => {
+    setFilter((f) => {
+      const next = new Set(f.categories);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return { ...f, categories: next };
+    });
   }, []);
 
-  // 배경 클릭 → 하이라이트 해제
-  const onPaneClick = useCallback(() => {
-    setSelectedNodeId(null);
+  const graphStyle = useMemo<StyleConfig>(
+    () => ({
+      starField: false,
+      fogDensity: 0,
+      bloomStrength: isLight ? 0 : 0.45,
+      bloomRadius: 0.15,
+      bloomThreshold: 0.1,
+      nodeMinSize: 3.5,
+      nodeMaxSize: 13,
+      edgeOpacity: isLight ? 0.55 : 0.3,
+      showLabels: true,
+      maxLabels: 90,
+      labelScale: 1.1,
+      labelThreshold: 0.85,
+    }),
+    [isLight],
+  );
+
+  const labelFormatter = useCallback((node: { label?: string; id: string }) => {
+    const label = node.label ?? node.id;
+    return label.length > 24 ? label.slice(0, 23) + '…' : label;
   }, []);
 
   // 빈 상태
@@ -438,14 +356,32 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
 
   return (
     <div className="obs-graph" style={{ position: 'relative' }}>
-      {/* 범례 */}
+      {/* 범례 (클릭으로 카테고리 필터 토글) */}
       <div className="obs-graph-legend">
-        {Object.entries(CATEGORY_COLORS).map(([cat, color]) => (
-          <span key={cat} className="obs-graph-legend-item">
-            <span className="obs-graph-legend-dot" style={{ background: color }} />
-            {cat}
-          </span>
-        ))}
+        {Object.entries(CATEGORY_COLORS).map(([cat, color]) => {
+          const filtered = filter.categories.size > 0 && !filter.categories.has(cat);
+          return (
+            <button
+              key={cat}
+              className="obs-graph-legend-item"
+              onClick={() => toggleLegendCategory(cat)}
+              title={`${cat} 카테고리만 보기 (토글)`}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                font: 'inherit',
+                color: 'inherit',
+                cursor: 'pointer',
+                opacity: filtered ? 0.35 : 1,
+                transition: 'opacity 150ms ease',
+              }}
+            >
+              <span className="obs-graph-legend-dot" style={{ background: color }} />
+              {cat}
+            </button>
+          );
+        })}
       </div>
 
       {/* 필터 컨트롤 */}
@@ -455,61 +391,79 @@ function GraphInner({ nodes: rawNodes, edges: rawEdges, onSelectFile }: UnifiedG
         availableCategories={availableCategories}
       />
 
-      {/* 호버 툴팁 — 필터 컨트롤이 우측에 있으므로 좌측 하단에 배치 */}
+      {/* 줌 컨트롤 */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 12,
+          left: 12,
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--obs-bg-surface)',
+          border: '1px solid var(--obs-border-subtle)',
+          borderRadius: 8,
+          overflow: 'hidden',
+        }}
+      >
+        <ZoomButton title="확대" onClick={() => graphRef.current?.zoomIn()}>
+          <ZoomIn size={14} />
+        </ZoomButton>
+        <ZoomButton title="축소" onClick={() => graphRef.current?.zoomOut()}>
+          <ZoomOut size={14} />
+        </ZoomButton>
+        <ZoomButton title="전체 보기" onClick={() => graphRef.current?.zoomToFit(600, 150)}>
+          <Maximize2 size={14} />
+        </ZoomButton>
+      </div>
+
+      {/* 미니맵 */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 12,
+          right: 12,
+          zIndex: 10,
+          background: 'var(--obs-bg-panel)',
+          border: '1px solid var(--obs-border-subtle)',
+          borderRadius: 8,
+          overflow: 'hidden',
+        }}
+      >
+        <GraphMinimap
+          graphRef={graphRef}
+          width={180}
+          height={120}
+          viewportColor={isLight ? '#64748b' : '#94a3b8'}
+        />
+      </div>
+
+      {/* 호버 툴팁 — 줌 컨트롤 위 좌측 하단 */}
       {hoveredNode && (
-        <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 10 }}>
+        <div style={{ position: 'absolute', bottom: 116, left: 12, zIndex: 10 }}>
           <GraphTooltip node={hoveredNode} />
         </div>
       )}
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeClick={onNodeClick}
-        onNodeMouseEnter={onNodeMouseEnter}
-        onNodeMouseLeave={onNodeMouseLeave}
-        onPaneClick={onPaneClick}
-        connectionLineType={ConnectionLineType.SmoothStep}
-        fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.1}
-        maxZoom={3}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background color="var(--obs-border-subtle)" gap={20} size={1} />
-        <Controls
-          showInteractive={false}
-          style={{
-            background: 'var(--obs-bg-surface)',
-            border: '1px solid var(--obs-border-subtle)',
-            borderRadius: 8,
-          }}
-        />
-        <MiniMap
-          nodeColor={(n) => {
-            // 노드 data.label은 JSX이므로 직접 category를 찾아야 함
-            const gn = nodeMap.get(n.id);
-            return CATEGORY_COLORS[gn?.category ?? ''] ?? DEFAULT_NODE_COLOR;
-          }}
-          maskColor="rgba(0,0,0,0.4)"
-          style={{
-            background: 'var(--obs-bg-panel)',
-            border: '1px solid var(--obs-border-subtle)',
-            borderRadius: 8,
-          }}
-        />
-      </ReactFlow>
+      <NetworkGraph3D
+        key={isLight ? 'light' : 'dark'}
+        ref={graphRef}
+        data={graphData}
+        layout={GRAPH_LAYOUT}
+        theme={isLight ? GRAPH_THEME_LIGHT : GRAPH_THEME_DARK}
+        style={graphStyle}
+        visibleNodeIds={visibleNodeIds}
+        linkVisibility={linkVisibility}
+        selectedNodeId={effectiveSelectedId}
+        highlightHops={2}
+        clickToFocus={false}
+        hoverHighlight
+        hoverHighlightHops={1}
+        labelFormatter={labelFormatter}
+        onNodeClick={handleNodeClick}
+        onNodeHover={handleNodeHover}
+        onLayoutSettled={() => graphRef.current?.zoomToFit(600, 150)}
+      />
     </div>
-  );
-}
-
-// ── 외부 export (ReactFlowProvider 래핑) ─────────────────
-export default function UnifiedGraphView(props: UnifiedGraphViewProps) {
-  return (
-    <ReactFlowProvider>
-      <GraphInner {...props} />
-    </ReactFlowProvider>
   );
 }

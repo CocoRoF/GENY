@@ -38,30 +38,8 @@ export const EDGE_STYLES: Record<EdgeType, { color: string; width: number; dash?
   semantic: { color: '#a371f7', width: 1, dash: '2 3' },
 };
 
-export const DEFAULT_EDGE_STYLE = EDGE_STYLES.wikilink;
-
 // ── 노드 크기 계산 ──────────────────────────────────────
 export function computeNodeSize(importance: string, connectionCount: number): number {
   const base = IMPORTANCE_BASE_SIZE[importance] ?? DEFAULT_NODE_SIZE;
   return base + Math.log2(1 + connectionCount) * 3;
 }
-
-// ── N-hop 하이라이트 투명도 ──────────────────────────────
-export const HOP_OPACITY = {
-  selected: 1.0,
-  hop1: 1.0,
-  hop2: 0.8,
-  dimmed: 0.15,
-} as const;
-
-export const HOP_EDGE_OPACITY = {
-  active: 0.8,
-  secondary: 0.5,
-  dimmed: 0.05,
-} as const;
-
-// ── 줌 기반 레이블 표시 임계치 ───────────────────────────
-export const LABEL_ZOOM_THRESHOLDS = {
-  showAll: 0.6,
-  showHighOnly: 0.3,
-} as const;
