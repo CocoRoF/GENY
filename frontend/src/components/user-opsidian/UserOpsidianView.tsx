@@ -447,8 +447,9 @@ function Sidebar({
   onOpenCurationSettings: () => void;
 }) {
   const { t } = useI18n();
+  // Start collapsed — large vaults must open one level at a time.
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'projects', 'insights', 'root']),
+    new Set(),
   );
   const [filterText, setFilterText] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);

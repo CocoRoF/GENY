@@ -1620,15 +1620,33 @@ html.light .opsidian-hub {
 }
 
 /* ── Date-grouped categories (daily / observations / executions / dms) ── */
-.obs-sb-date-group { margin-bottom: 4px; }
-.obs-sb-date-label {
+.obs-sb-date-group { margin-bottom: 2px; }
+.obs-sb-date-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-muted, #94a3b8);
-  padding: 3px 8px 2px 22px;
-  text-transform: none;
-  opacity: 0.85;
+  padding: 3px 8px 2px 18px;
+  border-radius: 4px;
+  text-align: left;
+}
+.obs-sb-date-header:hover {
+  background: var(--obs-bg-hover, rgba(148, 163, 184, 0.08));
+  color: var(--obs-text-dim, #cbd5e1);
+}
+.obs-sb-date-text { flex: 1; }
+.obs-sb-date-count {
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.7;
+  padding-right: 2px;
 }
 
 /* ── Digest panel (compressed-first view) ── */

@@ -412,8 +412,9 @@ function CuratedSidebar({
   onNewNote: () => void;
 }) {
   const { t } = useI18n();
+  // Start collapsed — large vaults must open one level at a time.
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'projects', 'insights', 'reference', 'root']),
+    new Set(),
   );
   const [filterText, setFilterText] = useState('');
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useOpsidianStore, type SidebarPanel } from '@/store/useOpsidianStore';
 import { useI18n } from '@/lib/i18n';
@@ -97,10 +97,17 @@ export default function OpsidianSidebar() {
   } = useOpsidianStore();
   const { t } = useI18n();
 
+  // Everything starts COLLAPSED — a long-running session accumulates
+  // thousands of dated notes, so the tree must open one level at a time
+  // (category → date → notes), never as one flat dump.
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['daily', 'topics', 'projects', 'insights', 'root'])
+    new Set()
   );
+  // Date sub-groups inside time-series categories, keyed `${cat}/${day}`.
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState('');
+  // A live filter overrides collapse state — matches must be visible.
+  const isFiltering = filterText.trim().length > 0;
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
@@ -110,6 +117,50 @@ export default function OpsidianSidebar() {
       return next;
     });
   };
+
+  const toggleDate = (key: string) => {
+    setExpandedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Reveal the selection: a note opened from anywhere else (graph node,
+  // wikilink, search, digest) expands its category + date group so the
+  // tree always shows where you are. Implemented as the React
+  // "adjust state during render" pattern (not an effect) — the lint
+  // forbids setState inside effects, and this genuinely derives from
+  // the store's selection.
+  const [lastRevealed, setLastRevealed] = useState<string | null>(null);
+  if (selectedFile && selectedFile !== lastRevealed && files[selectedFile]) {
+    setLastRevealed(selectedFile);
+    const f = files[selectedFile];
+    const cat = f.category || 'root';
+    if (!expandedCategories.has(cat)) {
+      setExpandedCategories(new Set(expandedCategories).add(cat));
+    }
+    if (DATE_GROUPED_CATEGORIES.has(cat)) {
+      const raw = f.modified || f.created || '';
+      const day = raw.length >= 10 ? raw.slice(0, 10) : '—';
+      const key = `${cat}/${day}`;
+      if (!expandedDates.has(key)) {
+        setExpandedDates(new Set(expandedDates).add(key));
+      }
+    }
+  }
+
+  // Scroll the now-visible active row into view (pure DOM side effect).
+  useEffect(() => {
+    if (!selectedFile) return;
+    const raf = requestAnimationFrame(() => {
+      document
+        .querySelector('.obs-sb-file.active')
+        ?.scrollIntoView({ block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedFile]);
 
   // Group files by category — every category folder (canonical +
   // host-defined) gets a slot even when it currently holds zero
@@ -401,7 +452,7 @@ export default function OpsidianSidebar() {
                 // would just clutter the filtered list.
                 if (filterText && catFiles.length === 0) return null;
                 const CatIcon = CATEGORY_ICONS[cat] || File;
-                const expanded = expandedCategories.has(cat);
+                const expanded = isFiltering || expandedCategories.has(cat);
                 const isEmpty = catFiles.length === 0;
                 const description = categoryDescriptions[cat];
                 return (
@@ -423,12 +474,30 @@ export default function OpsidianSidebar() {
                     {expanded && !isEmpty && (
                       <div className="obs-sb-cat-files">
                         {DATE_GROUPED_CATEGORIES.has(cat)
-                          ? groupFilesByDate(catFiles).map(([day, dayFiles]) => (
-                              <div key={day} className="obs-sb-date-group">
-                                <div className="obs-sb-date-label">{day}</div>
-                                {dayFiles.map((f) => renderFileRow(f))}
-                              </div>
-                            ))
+                          ? groupFilesByDate(catFiles).map(([day, dayFiles]) => {
+                              const dayKey = `${cat}/${day}`;
+                              const dayExpanded =
+                                isFiltering || expandedDates.has(dayKey);
+                              return (
+                                <div key={day} className="obs-sb-date-group">
+                                  <button
+                                    className="obs-sb-date-header"
+                                    onClick={() => toggleDate(dayKey)}
+                                  >
+                                    {dayExpanded ? (
+                                      <ChevronDown size={11} />
+                                    ) : (
+                                      <ChevronRight size={11} />
+                                    )}
+                                    <span className="obs-sb-date-text">{day}</span>
+                                    <span className="obs-sb-date-count">
+                                      {dayFiles.length}
+                                    </span>
+                                  </button>
+                                  {dayExpanded && dayFiles.map((f) => renderFileRow(f))}
+                                </div>
+                              );
+                            })
                           : catFiles.map((f) => renderFileRow(f))}
                       </div>
                     )}
