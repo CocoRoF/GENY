@@ -1794,6 +1794,7 @@ class SessionMemoryManager:
         duration_ms: int,
         execution_number: int = 0,
         success: bool = True,
+        media: Optional[List[str]] = None,
     ) -> None:
         """Record a structured execution summary to long-term memory.
 
@@ -1815,14 +1816,29 @@ class SessionMemoryManager:
             duration_ms: Total execution wall-time in milliseconds.
             execution_number: Sequential execution counter for this session.
             success: Whether execution completed without errors.
+            media: Bare filenames of screen frames USED by this turn
+                (already persisted under ``memory/attachments/`` by
+                ``promote_used_frames``) — embedded into the record so
+                the conversation is complete with what the persona saw.
         """
         try:
+            from service.memory.note_utils import is_silent_reply
+
+            final_output_for_silence = (
+                result_state.get("final_answer", "")
+                or result_state.get("answer", "")
+                or result_state.get("last_output", "")
+                or ""
+            )
+            silent = is_silent_reply(final_output_for_silence)
+
             entry = self._build_execution_entry(
                 input_text=input_text,
                 result_state=result_state,
                 duration_ms=duration_ms,
                 execution_number=execution_number,
                 success=success,
+                media=media,
             )
             # Cycle 20260503_5 — execution summaries land in
             # ``memory/executions/<YYYY-MM-DD>.md`` instead of the
@@ -1871,6 +1887,14 @@ class SessionMemoryManager:
                         f"Execution #{execution_number} — "
                         f"{input_text[:60].strip()}"
                     )
+                    if silent:
+                        # No-response turns are kept for audit but must be
+                        # visually distinct AND inert: tagged (graph
+                        # projection + retention sweep key off it),
+                        # low-importance, and title-marked.
+                        all_tags.append("silent")
+                        imp = "low"
+                        title += " \u00b7 silent"
                     await self._notes_write(
                         title=title,
                         content=entry,
@@ -1889,7 +1913,7 @@ class SessionMemoryManager:
             # Index into vector DB (only when LTM config is enabled)
             from service.config.sub_config.general.ltm_config import LTMConfig
 
-            if LTMConfig.is_enabled() and self._vector_enabled:
+            if LTMConfig.is_enabled() and self._vector_enabled and not silent:
                 try:
                     date_str = datetime.now(_get_tz()).strftime("%Y-%m-%d")
                     source = f"memory/{date_str}.md"
@@ -1918,6 +1942,7 @@ class SessionMemoryManager:
         duration_ms: int,
         execution_number: int,
         success: bool,
+        media: Optional[List[str]] = None,
     ) -> str:
         """Build a structured markdown entry for one graph execution.
 
@@ -1990,6 +2015,15 @@ class SessionMemoryManager:
             f" | **Iterations:** {iteration}/{max_iterations}"
         )
         lines.append("")
+
+        # Screen frames the persona saw during this turn (promoted to the
+        # permanent memory/attachments/ bucket — embed by bare name, the
+        # attachment endpoint resolves it anywhere in the memory tree).
+        if media:
+            lines.append("**Screen:**")
+            for name in media:
+                lines.append(f"![[{name}]]")
+            lines.append("")
 
         # TODO list (hard path)
         todos = result_state.get("todos") or []

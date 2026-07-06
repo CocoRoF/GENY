@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
@@ -617,11 +618,25 @@ async def _record_observation_note(
     return ref
 
 
-def _prune_old_observations(storage_root: Path) -> None:
-    """Best-effort: delete observation IMAGE files older than the
-    retention window so disk doesn't grow unbounded. The markdown notes
-    (caption text) are kept regardless — they're tiny and carry the
-    recall value. Fully guarded; any failure is swallowed."""
+# Per-sweep cap on provider note deletions — bounds the first sweep on a
+# vault with a large backlog (it catches up hourly) and keeps any single
+# upload request from stalling behind thousands of index updates.
+_PRUNE_NOTES_PER_SWEEP = 200
+
+
+async def _prune_old_observations(session_id: str, storage_root: Path) -> None:
+    """Best-effort retention sweep over the AMBIENT observation buffer.
+
+    ``memory/observations/`` is a rolling window, not an archive: frames
+    the persona actually spoke about get promoted to
+    ``memory/attachments/`` (``promote_used_frames``) and embedded in the
+    execution/conversation record, so everything still here after the
+    retention window is by definition unused — including frames the
+    persona glanced at and stayed ``[SILENT]`` about. Past the window we
+    delete BOTH the image files and the observation notes (via the
+    provider, so index/graph stay consistent). Silent-tagged execution
+    notes age out the same way. Fully guarded; any failure is swallowed.
+    """
     days = _retention_days()
     if days <= 0:
         return
@@ -632,23 +647,159 @@ def _prune_old_observations(storage_root: Path) -> None:
     if now - _last_prune_at.get(key, 0.0) < 3600:
         return
     _last_prune_at[key] = now
+    cutoff = time.time() - days * 86400
+
+    # 1) Image files (any non-.md in the observations tree).
     try:
         root = storage_root / "memory" / "observations"
-        if not root.exists():
-            return
-        cutoff = time.time() - days * 86400
-        for img in root.rglob("*"):
-            try:
-                if not img.is_file():
+        if root.exists():
+            for img in root.rglob("*"):
+                try:
+                    if not img.is_file():
+                        continue
+                    if img.suffix.lower() in (".md",):
+                        continue
+                    if img.stat().st_mtime < cutoff:
+                        img.unlink()
+                except OSError:
                     continue
-                if img.suffix.lower() in (".md",):
-                    continue
-                if img.stat().st_mtime < cutoff:
-                    img.unlink()
-            except OSError:
-                continue
     except Exception:  # noqa: BLE001
-        logger.debug("screen_observation: prune skipped", exc_info=True)
+        logger.debug("screen_observation: image prune skipped", exc_info=True)
+
+    # 2) Notes — observation notes past the window, plus silent-turn
+    #    execution notes. Provider-routed deletes keep the index/graph
+    #    consistent; without a live manager we skip (never raw-unlink a
+    #    provider-indexed note).
+    agent = _resolve_agent(session_id)
+    mm = getattr(agent, "memory_manager", None) if agent is not None else None
+    if mm is None:
+        return
+    deleted = 0
+    try:
+        root = storage_root / "memory" / "observations"
+        if root.exists():
+            for md in sorted(root.glob("*.md")):
+                if deleted >= _PRUNE_NOTES_PER_SWEEP:
+                    break
+                try:
+                    if md.stat().st_mtime >= cutoff:
+                        continue
+                except OSError:
+                    continue
+                try:
+                    if await mm.adelete_note(md.name):
+                        deleted += 1
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "observation note prune failed: %s", md.name,
+                        exc_info=True,
+                    )
+    except Exception:  # noqa: BLE001
+        logger.debug("screen_observation: note prune skipped", exc_info=True)
+
+    # 3) Silent execution notes (tagged by record_execution) — same
+    #    window, same cap budget.
+    try:
+        provider = getattr(agent, "memory_provider", None)
+        if provider is not None and deleted < _PRUNE_NOTES_PER_SWEEP:
+            summaries = await provider.index().list_notes(
+                tag="silent", limit=_PRUNE_NOTES_PER_SWEEP, offset=0,
+            )
+            for summary in summaries or []:
+                if deleted >= _PRUNE_NOTES_PER_SWEEP:
+                    break
+                modified = getattr(summary, "modified", "") or ""
+                try:
+                    stamp = datetime.fromisoformat(str(modified)).timestamp()
+                except (ValueError, TypeError):
+                    continue
+                if stamp >= cutoff:
+                    continue
+                try:
+                    if await mm.adelete_note(summary.filename):
+                        deleted += 1
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "silent note prune failed: %s",
+                        getattr(summary, "filename", "?"),
+                        exc_info=True,
+                    )
+    except Exception:  # noqa: BLE001
+        logger.debug("screen_observation: silent prune skipped", exc_info=True)
+
+    if deleted:
+        logger.info(
+            "[USER_OBSERVATION] retention sweep removed %d stale notes", deleted,
+        )
+
+
+# ── Frame promotion (used-in-conversation frames become permanent) ───
+
+# Permanent bucket for frames the persona actually SPOKE about — either a
+# user turn that carried a screen frame or a screen thinking-trigger that
+# produced a non-[SILENT] reply. Lives OUTSIDE memory/observations/ so the
+# retention sweep (which wipes the ambient buffer wholesale) never touches
+# promoted frames; the execution/conversation note embeds them by name.
+_PROMOTED_DIRNAME = "attachments"
+
+
+def promote_used_frames(
+    session_id: str,
+    attachments: Optional[list],
+    result_text: Optional[str],
+) -> list:
+    """Persist this turn's screen frame(s) permanently when the turn was
+    actually spoken, returning the stored bare filenames for embedding
+    into the execution/conversation record.
+
+    Rules (one generalized gate for every caller):
+      * only attachments marked ``source == "screen_observation"`` count;
+      * a ``[SILENT]`` final output promotes nothing — an unspoken glance
+        stays in the ambient observations buffer and ages out;
+      * the file id is a content hash, so the same frame attached twice
+        (e.g. retry) writes exactly one file.
+
+    Fully guarded: any failure returns what was persisted so far.
+    """
+    from service.memory.note_utils import is_silent_reply
+
+    frames = [
+        a
+        for a in (attachments or [])
+        if isinstance(a, dict)
+        and a.get("source") == "screen_observation"
+        and a.get("data")
+    ]
+    if not frames or is_silent_reply(result_text):
+        return []
+    storage_root = _resolve_session_storage(session_id)
+    if storage_root is None:
+        return []
+
+    names: list = []
+    bucket = (
+        storage_root
+        / "memory"
+        / _PROMOTED_DIRNAME
+        / datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    )
+    for att in frames:
+        try:
+            raw = base64.b64decode(att["data"])
+            if not raw:
+                continue
+            ext = _MIME_TO_EXT.get(
+                (att.get("mime_type") or "").lower(), "jpg",
+            )
+            digest = hashlib.sha1(raw).hexdigest()[:12]
+            bucket.mkdir(parents=True, exist_ok=True)
+            path = bucket / f"{digest}.{ext}"
+            if not path.exists():
+                path.write_bytes(raw)
+            names.append(path.name)
+        except Exception:  # noqa: BLE001
+            logger.debug("promote_used_frames: frame skipped", exc_info=True)
+    return names
 
 
 # ── Vision LLM caption ───────────────────────────────────────────────
@@ -794,6 +945,7 @@ async def save_observation(
         observation_id=observation_id,
         force=force,
     )
-    # Best-effort disk hygiene — old frames age out; notes stay for recall.
-    _prune_old_observations(storage_root)
+    # Best-effort hygiene — the ambient buffer ages out wholesale; frames
+    # that mattered were promoted into the conversation record.
+    await _prune_old_observations(session_id, storage_root)
     return result

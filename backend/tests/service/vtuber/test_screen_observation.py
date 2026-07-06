@@ -679,14 +679,19 @@ def test_is_screen_active_tracks_uploads(
     assert is_screen_active("sess-1") is True
 
 
-def test_prune_removes_old_images_keeps_notes(
+@pytest.mark.asyncio
+async def test_prune_removes_old_images(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """2026-07 policy: observations are a rolling buffer — old images go
+    unconditionally; note deletion is provider-routed and covered by
+    ``test_observation_lifecycle.py`` (here no live manager → notes stay)."""
     import os
     import time as _time
     from service.vtuber import screen_observation as so
 
     monkeypatch.setenv("GENY_SCREEN_OBS_RETENTION_DAYS", "7")
+    monkeypatch.setattr(so, "_resolve_agent", lambda _sid: None)
     obs = tmp_path / "memory" / "observations" / "2020-01-01"
     obs.mkdir(parents=True)
     old_img = obs / "old.jpg"
@@ -700,10 +705,10 @@ def test_prune_removes_old_images_keeps_notes(
     os.utime(old_img, (old, old))
     os.utime(old_note, (old, old))
 
-    so._prune_old_observations(tmp_path)
+    await so._prune_old_observations("s-prune", tmp_path)
 
     assert not old_img.exists()   # old image pruned
-    assert old_note.exists()      # note kept (recall value)
+    assert old_note.exists()      # no live manager → provider-indexed note untouched
     assert fresh_img.exists()     # recent image kept
 
 

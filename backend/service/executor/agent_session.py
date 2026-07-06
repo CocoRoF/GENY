@@ -3360,6 +3360,33 @@ class AgentSession:
                 f"[{self._session_id}] creature_state persist failed"
             )
 
+    def _promote_turn_screen_frames(
+        self,
+        attachments: Optional[List[Dict[str, Any]]],
+        final_output: str,
+    ) -> Optional[List[str]]:
+        """Persist screen frames this turn actually SPOKE about into the
+        permanent ``memory/attachments/`` bucket, returning bare names for
+        the execution record to embed (``record_execution(media=...)``).
+        One generalized gate covers every caller: a ``[SILENT]`` reply
+        promotes nothing, so unspoken glances stay in the ambient
+        observations buffer and age out with it. Fully guarded."""
+        if not attachments:
+            return None
+        try:
+            from service.vtuber.screen_observation import promote_used_frames
+
+            media = promote_used_frames(
+                self._session_id, attachments, final_output,
+            )
+            return media or None
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                f"[{self._session_id}] screen frame promotion skipped",
+                exc_info=True,
+            )
+            return None
+
     async def _invoke_pipeline(
         self,
         input_text: str,
@@ -3911,6 +3938,9 @@ class AgentSession:
         self._execution_count += 1
         if self._memory_manager:
             try:
+                _screen_media = self._promote_turn_screen_frames(
+                    attachments, accumulated_output,
+                )
                 await self._memory_manager.record_execution(
                     input_text=input_text,
                     result_state={
@@ -3921,6 +3951,7 @@ class AgentSession:
                     duration_ms=duration_ms,
                     execution_number=self._execution_count,
                     success=success,
+                    media=_screen_media,
                 )
             except Exception:
                 logger.debug(
@@ -4274,6 +4305,9 @@ class AgentSession:
         self._execution_count += 1
         if self._memory_manager:
             try:
+                _screen_media = self._promote_turn_screen_frames(
+                    kwargs.get("attachments"), accumulated_output,
+                )
                 await self._memory_manager.record_execution(
                     input_text=input_text,
                     result_state={
@@ -4284,6 +4318,7 @@ class AgentSession:
                     duration_ms=duration_ms,
                     execution_number=self._execution_count,
                     success=success,
+                    media=_screen_media,
                 )
             except Exception:
                 logger.debug(

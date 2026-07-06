@@ -431,6 +431,18 @@ async def fetch_provider_edges(provider) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
+def is_silent_reply(text: Optional[str]) -> bool:
+    """True when a persona turn's final output is the ``[SILENT]``
+    no-response marker (thinking-trigger protocol). Tolerant of stray
+    whitespace/punctuation but nothing more — any real sentence after
+    the marker counts as a spoken reply."""
+    t = (text or "").strip()
+    if not t.upper().startswith("[SILENT]"):
+        return False
+    rest = t[len("[SILENT]"):].strip()
+    return len(rest) <= 2 and not any(ch.isalnum() for ch in rest)
+
+
 def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Project an index snapshot into a {nodes, edges} graph for the UI.
 
@@ -460,7 +472,18 @@ def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         edges.append(edge)
         return True
 
+    # Silent-turn records (persona chose not to speak) are kept as notes
+    # for audit but carry no conversational meaning — surfacing them as
+    # graph nodes buries the real structure under no-op executions.
+    hidden = {
+        fn
+        for fn, info in files_map.items()
+        if "silent" in (info.get("tags") or [])
+    }
+
     for fn, info in files_map.items():
+        if fn in hidden:
+            continue
         links_to = info.get("links_to") or []
         linked_from = info.get("linked_from") or []
         tags = info.get("tags") or []
@@ -475,7 +498,7 @@ def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             "charCount": info.get("char_count", 0),
         })
         for target in links_to:
-            if target in files_map:
+            if target in files_map and target not in hidden:
                 _add_edge(fn, target, "wikilink", 1.0)
         for tag in tags:
             tag_to_files.setdefault(tag, []).append(fn)
@@ -486,7 +509,10 @@ def build_graph_from_index(idx: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if pre_edges:
         for e in pre_edges:
             src, tgt = e.get("source"), e.get("target")
-            if src in files_map and tgt in files_map:
+            if (
+                src in files_map and tgt in files_map
+                and src not in hidden and tgt not in hidden
+            ):
                 _add_edge(src, tgt, e.get("type", "semantic"),
                           float(e.get("weight", 0.5)), e.get("label"))
         return {"nodes": nodes, "edges": edges}
