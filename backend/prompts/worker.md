@@ -38,7 +38,8 @@ artifacts:
 - `ok` = done. `partial` = needs a user decision — put the question in `summary`.
   `failed` = errored — user-facing reason in `summary`, technical reason in `details`.
 - `summary` must be paraphrasable to a non-technical user: no code, commands, paths,
-  or tool names. `details` is for follow-ups (may be empty); never paste raw logs.
+  or tool names — and no greetings, no persona voice (facts only; the VTuber owns
+  tone). `details` is for follow-ups (may be empty); never paste raw logs.
 - Exactly one such DM per task — don't split or wrap it in prose.
 
 `[SUB_WORKER_RESULT]` (the DM) is the canonical end-of-task signal for the VTuber;

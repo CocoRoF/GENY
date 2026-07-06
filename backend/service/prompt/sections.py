@@ -250,6 +250,34 @@ class SectionLibrary:
     # ========================================================================
 
     @staticmethod
+    def computer_use() -> PromptSection:
+        """Desktop-control guardrails (conditional — connector sessions only).
+
+        The desktop_* tool schemas already teach the mechanics
+        (screenshot-first clicking, offline errors, local MCP discovery);
+        the prompt only states what NO tool description can: which
+        execution surface is the user's real machine, and that the
+        connector is bound to THIS session. Injected only when computer
+        use is enabled for the session (2026-07 prompt diet — this
+        replaced a ~1.5KB unconditional block in vtuber.md).
+        """
+        content = (
+            "Desktop control: when the user asks you to act on THEIR "
+            "computer, use the desktop_* tools yourself — never Bash (that "
+            "runs in a server-side sandbox, not their machine) and never "
+            "the sub-worker (the connector is bound to your session). If a "
+            "tool reports the connector offline, ask the user to connect "
+            "their Geny 접속기 and enable the capability. Their local MCP "
+            "servers are reachable via local_mcp_list / local_mcp_call."
+        )
+        return PromptSection(
+            name="computer_use",
+            content=content,
+            priority=45,
+            modes={PromptMode.FULL, PromptMode.MINIMAL},
+        )
+
+    @staticmethod
     def datetime_info() -> PromptSection:
         """Current time (1-line). Captures the time at prompt build."""
         from service.utils.utils import time_of_day_label
@@ -603,6 +631,7 @@ def build_agent_prompt(
     gapt_cli_on_host: bool = False,
     role_protocol_override: Optional[str] = None,
     storage_path: Optional[str] = None,
+    computer_use_enabled: bool = False,
 ) -> str:
     """Build the agent system prompt via the modular prompt builder.
 
@@ -697,6 +726,11 @@ def build_agent_prompt(
     role_md = role_protocol_override or PromptTemplateLoader().load_role_template(role)
     if role_md:
         builder.override_section("role_protocol", role_md)
+
+    # §2.5 Desktop control — only for sessions that actually carry the
+    # connector capability tools (VTuber, or env opt-in).
+    if computer_use_enabled:
+        builder.add_section(SectionLibrary.computer_use())
 
     # §3 Workspace
     if working_dir:

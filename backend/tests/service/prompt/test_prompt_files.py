@@ -1,10 +1,19 @@
-"""Static prompt-file regression tests (cycle 20260422_6 PR4 + PR5).
+"""Static prompt-file regression tests (2026-07 prompt diet).
 
-These tests guard the *content* of `prompts/worker.md` and
-`prompts/vtuber.md` for the contract changes introduced in this cycle.
-They are deliberately keyword-level (cheap to run, no LLM) so a casual
-edit that drops the structured `[SUB_WORKER_RESULT]` protocol or the
-PR2 acclimation guidance is caught at CI time before it hits the model.
+Keyword-level guards over ``prompts/worker.md`` / ``prompts/vtuber.md``
+so a casual edit that drops a runtime protocol (the structured
+``[SUB_WORKER_RESULT]`` contract, loop markers, naming policy) is
+caught at CI time before it hits the model.
+
+Diet principles these tests now also enforce (2026-07):
+
+* Tool mechanics are NOT restated in prompts — tool schemas carry them.
+  vtuber.md must stay free of the desktop_* walkthrough (now a
+  conditional ``computer_use`` PromptSection) and of the 25-tag emotion
+  taxonomy dump (the affect emitter accepts any lowercase tag).
+* Runtime-injected guidance is NOT duplicated — first-encounter /
+  newborn-trope coaching lives in the [Acclimation]/[StageVoiceGuide]
+  blocks (service/persona/blocks.py), not in the role file.
 """
 
 from __future__ import annotations
@@ -14,22 +23,19 @@ from pathlib import Path
 
 import pytest
 
-
 _PROMPTS_DIR = Path(__file__).resolve().parents[3] / "prompts"
 
 _INCLUDE_RE = re.compile(r"\{\{\s*include:\s*([^}]+?)\s*\}\}")
 
 
 def _read_resolved(name: str) -> str:
-    """Read a role prompt and inline its ``{{include: <path>}}`` directives,
-    mirroring how the prompt builder assembles the file — so these tests assert
-    against the prompt the model actually receives (e.g. the shared
-    memory_ladder template), not the raw file with literal include markers."""
+    """Read a role prompt and inline its ``{{include: …}}`` directives,
+    mirroring the prompt builder — so assertions run against what the
+    model actually receives."""
     text = (_PROMPTS_DIR / name).read_text(encoding="utf-8")
 
     def _sub(m: "re.Match[str]") -> str:
-        inc = (_PROMPTS_DIR / m.group(1).strip()).read_text(encoding="utf-8")
-        return inc
+        return (_PROMPTS_DIR / m.group(1).strip()).read_text(encoding="utf-8")
 
     return _INCLUDE_RE.sub(_sub, text)
 
@@ -44,128 +50,150 @@ def vtuber_md() -> str:
     return _read_resolved("vtuber.md")
 
 
-# ── PR4 worker.md — Sub-Worker pair info moved out of code ──────────
+# ── worker.md — paired Sub-Worker protocol ───────────────────────────
 
 
 def test_worker_md_has_paired_sub_worker_section(worker_md: str) -> None:
     assert "## When You Are a Paired Sub-Worker" in worker_md
-    # Conditional opener so an unpaired Worker is told to ignore the
-    # block (cycle 20260422_6 PR4 §7 risk-mitigation row 4).
-    assert "applies **only** when" in worker_md
-
-
-# ── PR5 worker.md — structured reply protocol ───────────────────────
+    # Conditional opener so an unpaired Worker ignores the block.
+    assert "applies **only** when" in worker_md.lower()
 
 
 def test_worker_md_describes_subworker_result_protocol(worker_md: str) -> None:
     assert "[SUB_WORKER_RESULT]" in worker_md
-    # All three required fields and their canonical enum.
     assert "status: ok | partial | failed" in worker_md
     assert "summary:" in worker_md
     assert "details:" in worker_md
     assert "artifacts:" in worker_md
 
 
-def test_worker_md_subworker_protocol_includes_examples(worker_md: str) -> None:
-    """Few-shot examples improve smaller-model adherence (PR5 §7)."""
-    # Two illustrative cases — at minimum one ok and one failed.
+def test_worker_md_subworker_protocol_includes_example(worker_md: str) -> None:
+    """A worked example improves smaller-model adherence."""
     assert "status: ok" in worker_md
-    assert "status: failed" in worker_md
 
 
 def test_worker_md_forbids_persona_language_in_reply(worker_md: str) -> None:
-    """The Sub-Worker owns facts; the VTuber owns tone. Worker must
-    NOT add greetings/persona language to its structured reply."""
+    """The Sub-Worker owns facts; the VTuber owns tone."""
     assert "no greetings, no persona" in worker_md.lower()
 
 
-def test_worker_md_marks_task_complete_as_loop_internal(
-    worker_md: str,
-) -> None:
-    """Cycle 20260430_1 P1-3 — paired Sub-Worker must be told that
-    ``[TASK_COMPLETE]`` is a pipeline-internal loop signal and does
-    NOT replace the structured DM. Without this clarification a
-    tool-only turn that ends with the bare marker leaves the VTuber
-    with nothing to paraphrase, so the auto-summariser has to step in.
-    """
+def test_worker_md_marks_task_complete_as_loop_internal(worker_md: str) -> None:
+    """``[TASK_COMPLETE]`` is a pipeline loop marker and never replaces
+    the structured DM — without this a tool-only turn leaves the VTuber
+    nothing to paraphrase."""
     text = worker_md.lower()
-    assert "pipeline-internal loop signal" in text
-    assert "does not replace the dm" in text
+    assert "pipeline loop marker" in text
+    assert "never replaces" in text
 
 
-# ── PR5 vtuber.md — trigger uses structured fields ──────────────────
+# ── vtuber.md — trigger payload handling ─────────────────────────────
 
 
 def test_vtuber_md_subworker_trigger_parses_structured_payload(
     vtuber_md: str,
 ) -> None:
-    """The VTuber trigger must instruct the model to *parse* not
-    *quote* the payload, and must reference each canonical field."""
-    # The trigger section's new instructions.
-    assert "parse it" in vtuber_md.lower() or "*parse it" in vtuber_md
-    # Each field referenced explicitly so the model knows what each
-    # one is for.
+    """Paraphrase-not-paste, with every canonical field referenced."""
+    low = vtuber_md.lower()
+    assert "paraphrase" in low and "never paste" in low
     for field in ("status", "summary", "details", "artifacts"):
-        assert f"`{field}" in vtuber_md or f"{field}:" in vtuber_md, field
-    # Status enum coverage.
+        assert f"`{field}`" in vtuber_md or f"{field}:" in vtuber_md, field
     for verdict in ("ok", "partial", "failed"):
-        assert f"status: {verdict}" in vtuber_md or f"`status: {verdict}`" in vtuber_md, verdict
+        assert f"`{verdict}`" in vtuber_md, verdict
 
 
 def test_vtuber_md_warns_against_dumping_details(vtuber_md: str) -> None:
-    """`details` is for the VTuber's reference only — must NOT be
-    forwarded verbatim. The trigger has to say so explicitly so the
-    persona doesn't paste raw tool output to the user."""
-    snippet = vtuber_md.lower()
-    assert "do not dump" in snippet or "do not dump it" in snippet
+    assert "never dump" in vtuber_md.lower()
+
+
+def test_vtuber_md_silent_close_on_unstructured_payload(vtuber_md: str) -> None:
+    """Blank/unstructured result body → silent close-of-loop, and the
+    known failure phrase is called out explicitly."""
+    assert "closes the loop silently" in vtuber_md.lower()
+    assert "출력이 없네요" in vtuber_md
+
+
+def test_vtuber_md_triggers_are_internal_processes(vtuber_md: str) -> None:
+    for tag in ("[THINKING_TRIGGER]", "[ACTIVITY_TRIGGER]", "[SUB_WORKER_RESULT]"):
+        assert tag in vtuber_md, tag
+    assert "[SILENT]" in vtuber_md
+
+
+# ── vtuber.md — memory ladder include ────────────────────────────────
 
 
 def test_vtuber_md_includes_memory_ladder_guide(vtuber_md: str) -> None:
-    """Cycle 20260430_2 D1 — the persona file must announce the
-    progressive-memory tool ladder so the LLM picks the right
-    starting tool without any prompt-side data injection. We grep
-    for each tool name to lock the catalog reference."""
-    text = vtuber_md
-    assert "## Recalling Your Memory" in text
-    for tool in (
-        "memory_status",
-        "memory_with",
-        "memory_event",
-        "memory_artifact",
-        "memory_search",
-        "memory_distill",
-    ):
-        assert tool in text, f"vtuber.md missing reference to {tool!r}"
+    """The shared ladder template must resolve into the prompt. It
+    deliberately does NOT restate memory tool schemas — it only conveys
+    the vault shape the tools can't."""
+    assert "## Your Memory" in vtuber_md
+    assert "Vault Map" in vtuber_md
+    assert "conversations" in vtuber_md
 
 
-def test_vtuber_md_silent_close_on_unstructured_payload(
-    vtuber_md: str,
-) -> None:
-    """Cycle 20260430_1 P1-3 — VTuber must be told NOT to narrate
-    confusion ("워커가 결과를 돌려줬는데 출력이 없네요" / "no output
-    received") when the SUB_WORKER_RESULT body is plain text or empty.
-    Treating it as a silent close-of-loop preserves character.
-    """
-    text = vtuber_md.lower()
-    assert "silent close-of-loop" in text or "silent close of loop" in text
-    # The famous failure mode the user reported should be explicitly
-    # called out as something to avoid.
-    assert "출력이" in vtuber_md and "없네요" in vtuber_md
+# ── vtuber.md — naming policy ────────────────────────────────────────
 
 
-# ── PR2 vtuber.md — acclimation + naming guidance ───────────────────
+def test_vtuber_md_name_policy(vtuber_md: str) -> None:
+    """session_name is an internal handle, never the persona's name."""
+    assert "character_display_name" in vtuber_md
+    assert "internal handle" in vtuber_md
+    assert "never adopt" in vtuber_md.lower()
 
 
-def test_vtuber_md_has_acclimation_first_encounter_section(
-    vtuber_md: str,
-) -> None:
-    assert "first-encounter" in vtuber_md.lower()
-    # The anti-newborn guard from PR2.
-    assert "갓 태어난" in vtuber_md or "newborn" in vtuber_md.lower()
+# ── 2026-07 prompt diet — duplication guards ─────────────────────────
 
 
-def test_vtuber_md_has_on_your_name_section(vtuber_md: str) -> None:
-    """PR2 + PR3: the persona file must instruct the model that
-    `session_name` is an internal handle and not a name."""
-    assert "On Your Name" in vtuber_md
-    assert "internal" in vtuber_md.lower()
+def test_vtuber_md_stays_lean(vtuber_md: str) -> None:
+    """The diet cut the role file from 5.8KB to ~2.5KB (resolved).
+    Growth past 3.5KB means someone is restating tool/runtime knowledge
+    — put it in a tool description, a runtime block, or a conditional
+    PromptSection instead."""
+    assert len(vtuber_md) < 3500, f"vtuber.md grew to {len(vtuber_md)}B"
+
+
+def test_vtuber_md_has_no_desktop_tool_walkthrough(vtuber_md: str) -> None:
+    """desktop_* mechanics live in tool schemas + the conditional
+    computer_use PromptSection (sections.py) — never in the role file."""
+    assert "desktop_screenshot" not in vtuber_md
+    assert "desktop_click" not in vtuber_md
+    assert "local_mcp_list" not in vtuber_md
+
+
+def test_vtuber_md_has_no_first_encounter_duplication(vtuber_md: str) -> None:
+    """First-encounter coaching is runtime-injected per band via
+    [Acclimation]/[StageVoiceGuide] (service/persona/blocks.py) — the
+    role file must not carry a stale copy."""
+    assert "First-Encounter" not in vtuber_md
+    assert "갓 태어난" not in vtuber_md
+
+
+def test_first_encounter_guidance_lives_in_runtime_blocks() -> None:
+    """The coaching the role file dropped must exist at its real home."""
+    from service.persona.blocks import _ACCLIMATION_BANDS
+
+    first = _ACCLIMATION_BANDS[0][1]
+    assert first.band == "first-encounter"
+    low = first.guidance.lower()
+    assert "first" in low and "newborn" in low
+
+
+def test_computer_use_section_is_conditional() -> None:
+    """The desktop guardrails inject only for computer-use sessions."""
+    from service.prompt.sections import build_agent_prompt
+
+    with_cu = build_agent_prompt(role="vtuber", computer_use_enabled=True)
+    without_cu = build_agent_prompt(role="vtuber", computer_use_enabled=False)
+    assert "Desktop control" in with_cu
+    assert "never Bash" in with_cu
+    assert "Desktop control" not in without_cu
+
+
+def test_emotion_tags_cover_primary_axes_only(vtuber_md: str) -> None:
+    """The prompt names the six primary axes; the emitter maps nuance
+    tags itself (AFFECT_TAG_MAPPING + lowercase safety net), so the
+    25-tag taxonomy dump must not return."""
+    for tag in ("[joy]", "[sadness]", "[anger]", "[fear]", "[calm]", "[excitement]"):
+        assert tag in vtuber_md, tag
+    # Spot-check that the old exhaustive dump stayed dead.
+    assert "[amazement]" not in vtuber_md
+    assert "[satisfaction]" not in vtuber_md

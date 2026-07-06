@@ -591,6 +591,7 @@ class AgentSessionManager:
         gapt_workspace_id: Optional[str] = None,
         gapt_cli_on_host: bool = False,
         role_protocol_override: Optional[str] = None,
+        computer_use_enabled: bool = False,
     ) -> str:
         """Build the system prompt using the modular prompt builder.
 
@@ -684,6 +685,7 @@ class AgentSessionManager:
             gapt_cli_on_host=gapt_cli_on_host,
             role_protocol_override=role_protocol_override,
             storage_path=_storage_path,
+            computer_use_enabled=computer_use_enabled,
         )
 
         # Memory v2 PR 11 — memory_context append removed (see comment
@@ -877,6 +879,14 @@ class AgentSessionManager:
                 )
                 gapt_sandbox = None
 
+        # Local Computer Use — decided here (used by the prompt below AND the
+        # connector tool exposure further down). VTuber sessions always carry
+        # the connector tools; other envs opt in via extras.computer_use_enabled.
+        _computer_use_on = (
+            request.role == SessionRole.VTUBER
+            or self._env_computer_use_enabled(env_id)
+        )
+
         # Prepare system prompt. With sandbox fs-isolation (claude_code_cli) the
         # CLI's native host tools are disallowed and it uses the bridged executor
         # tools that run IN /workspace — so EVERY sandboxed session (SDK or CLI)
@@ -890,6 +900,7 @@ class AgentSessionManager:
             # env = single source: the env's stored Stage-3 prompt overrides the
             # on-disk prompts/{role}.md (which becomes just the seed/fallback).
             role_protocol_override=self._env_role_prompt(env_id),
+            computer_use_enabled=_computer_use_on,
         )
         logger.info(f"  📋 System prompt built via PromptBuilder ({len(system_prompt)} chars)")
 
@@ -1041,12 +1052,8 @@ class AgentSessionManager:
         # VTuber env can still opt in explicitly (extras.computer_use_enabled).
         # This is NOT the security gate — real execution is gated locally by the
         # connector (per-capability consent) and fails closed when no desktop is
-        # attached (connector_bridge.py). Computed here (before the sub-agent
-        # registry + companion spawn) so every delegate carries them.
-        _computer_use_on = (
-            request.role == SessionRole.VTUBER
-            or self._env_computer_use_enabled(env_id)
-        )
+        # attached (connector_bridge.py). The flag is computed once, above the
+        # system-prompt build, so the prompt section and the tool exposure agree.
         computer_use_tools: list = (
             connector_provider.list_names() if _computer_use_on else []
         )
