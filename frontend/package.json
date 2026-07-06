@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@cocorof/graphier": "^1.4.2",
+    "@cocorof/graphier": "^1.4.3",
     "@esotericsoftware/spine-pixi-v7": "^4.2.114",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.1.15",
