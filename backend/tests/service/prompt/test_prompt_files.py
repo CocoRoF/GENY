@@ -145,10 +145,11 @@ def test_vtuber_md_name_policy(vtuber_md: str) -> None:
 
 def test_vtuber_md_stays_lean(vtuber_md: str) -> None:
     """The diet cut the role file from 5.8KB to ~2.5KB (resolved).
-    Growth past 3.5KB means someone is restating tool/runtime knowledge
+    Growth past ~3.6KB means someone is restating tool/runtime knowledge
     — put it in a tool description, a runtime block, or a conditional
-    PromptSection instead."""
-    assert len(vtuber_md) < 3500, f"vtuber.md grew to {len(vtuber_md)}B"
+    PromptSection instead. (3.6KB accommodates the memory ladder's
+    Fact Ledger line — vault-shape knowledge, the ladder's charter.)"""
+    assert len(vtuber_md) < 3600, f"vtuber.md grew to {len(vtuber_md)}B"
 
 
 def test_vtuber_md_has_no_desktop_tool_walkthrough(vtuber_md: str) -> None:

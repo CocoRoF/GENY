@@ -406,8 +406,44 @@ class SessionMemoryManager:
         async def _summarize(instruction: str) -> str:
             return await llm.complete(instruction, purpose="memory.rollup")
 
+        # Structured mode (executor >= 2.46.0): digests/evergreen are
+        # schema-bound JSON rendered by code — a conversational reply is a
+        # contract violation and leaves previous state untouched.
+        structured_kwargs = {}
+        if hasattr(llm, "complete_structured"):
+            async def _summarize_structured(instruction: str, schema: dict):
+                return await llm.complete_structured(
+                    instruction, schema, purpose="memory.rollup",
+                )
+
+            structured_kwargs["complete_structured"] = _summarize_structured
+
+        # Fact Ledger extraction (executor >= 2.46.0) — runs FIRST so a
+        # durable fact stated moments ago is already in the ledger before
+        # the narrative tiers compress. Best-effort.
         try:
-            rollup = MemoryRollup(self._memory_provider, summarize=_summarize)
+            from geny_executor.memory import FactExtraction
+
+            if structured_kwargs:
+                fact_report = await FactExtraction(
+                    self._memory_provider,
+                    complete_structured=structured_kwargs["complete_structured"],
+                ).run()
+                if fact_report.ran and fact_report.changes:
+                    logger.info(
+                        "compact_now: fact ledger updated (%d change(s), "
+                        "%d active)",
+                        fact_report.changes, fact_report.active_facts,
+                    )
+        except ImportError:
+            pass  # older executor — narrative tiers only
+        except Exception:  # noqa: BLE001 — facts are best-effort
+            logger.warning("compact_now: fact extraction failed", exc_info=True)
+
+        try:
+            rollup = MemoryRollup(
+                self._memory_provider, summarize=_summarize, **structured_kwargs,
+            )
             digest = await rollup.summarize_segment()
             if digest:
                 logger.info(

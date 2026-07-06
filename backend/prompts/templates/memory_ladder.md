@@ -9,6 +9,9 @@ convey is the shape of your vault:
 - `dms` / `daily-journal` — auto-written indexes that point into `conversations`.
 - `insights` — LLM-distilled conclusions; for precise facts prefer `conversations`.
 - `topics` / `projects` / `MEMORY` — your curated narrative notes.
+- `critical/__facts__` — auto-maintained durable user facts (name/호칭,
+  preferences), always injected; when the user states/corrects one,
+  `memory_pin` it immediately.
 - `conversations` / `dms` / `compactions` / `daily-journal` are automatic — never
   write to them directly.
 

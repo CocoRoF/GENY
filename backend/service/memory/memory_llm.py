@@ -16,15 +16,43 @@ run on the same backend as their chat sessions — no separate
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from logging import getLogger
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from geny_executor.core.config import ModelConfig
 from geny_executor.llm_client import BaseClient, ClientRegistry
 
 logger = getLogger(__name__)
+
+try:  # geny-executor >= 2.46.0
+    from geny_executor.memory import MEMORY_ENGINE_SYSTEM_PROMPT
+except Exception:  # noqa: BLE001 — older executor
+    MEMORY_ENGINE_SYSTEM_PROMPT = (
+        "You are a memory maintenance engine inside an agent platform. You "
+        "are NOT an assistant and you are NOT talking to a user. Produce "
+        "only the requested artifact — no preamble, no questions."
+    )
+
+
+def _parse_json_text(text: str) -> Optional[Dict[str, Any]]:
+    """Best-effort JSON object from a model reply (tolerates code fences)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("```"):
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        cleaned = cleaned[start : end + 1]
+    try:
+        data = json.loads(cleaned)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 @dataclass
@@ -45,16 +73,72 @@ class MemoryLLM:
         self,
         prompt: str,
         *,
-        system: str = "",
+        system: Optional[str] = None,
         purpose: str = "memory.curation",
     ) -> str:
+        """Freeform completion. The engine system framing is applied by
+        default — every memory-path call is maintenance work, and without
+        it a CLI-backed model answers the archival material as an
+        assistant (the root cause of chat replies persisted as memory).
+        Pass ``system=""`` explicitly to opt out."""
         response = await self.client.create_message(
             model_config=self.model_config,
             messages=[{"role": "user", "content": prompt}],
-            system=system,
+            system=MEMORY_ENGINE_SYSTEM_PROMPT if system is None else system,
             purpose=purpose,
         )
         return response.text
+
+    async def complete_structured(
+        self,
+        prompt: str,
+        schema: Dict[str, Any],
+        *,
+        purpose: str = "memory.structured",
+    ) -> Optional[Dict[str, Any]]:
+        """Schema-bound completion → parsed dict, or ``None`` (callers keep
+        previous state on None — never persist an unvalidated reply).
+
+        Enforcement is native where the backend supports it (Claude Code
+        CLI ``--json-schema`` → ``APIResponse.structured``); other
+        backends carry the format as advisory and we parse+validate the
+        text, with one corrective retry."""
+        response_format = {"type": "json_schema", "json_schema": schema}
+        messages = [{"role": "user", "content": prompt}]
+        for attempt in (0, 1):
+            try:
+                response = await self.client.create_message(
+                    model_config=self.model_config,
+                    messages=messages,
+                    system=MEMORY_ENGINE_SYSTEM_PROMPT,
+                    purpose=purpose,
+                    response_format=response_format,
+                )
+            except Exception:  # noqa: BLE001 — transport; caller keeps state
+                logger.warning(
+                    "memory_llm: structured call failed", exc_info=True,
+                )
+                return None
+            structured = getattr(response, "structured", None)
+            if isinstance(structured, dict):
+                return structured
+            parsed = _parse_json_text(response.text)
+            if parsed is not None:
+                return parsed
+            if attempt == 0:
+                messages = messages + [
+                    {"role": "assistant", "content": response.text or ""},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Invalid output. Return ONLY a JSON object "
+                            "matching the provided schema — no prose, no "
+                            "code fences."
+                        ),
+                    },
+                ]
+        logger.warning("memory_llm: structured output unparseable after retry")
+        return None
 
 
 def build_memory_llm() -> Optional[MemoryLLM]:
