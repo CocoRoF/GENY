@@ -100,6 +100,11 @@ interface AppState {
   restoreSession: (id: string) => Promise<void>;
   resumeSession: (id: string) => Promise<void>;
   setActiveTab: (tab: string) => void;
+  /** Path (session-storage relative) the Canvas tab should auto-open —
+   *  set by chat "open in canvas" affordances, consumed once by CanvasTab. */
+  canvasFocus: string | null;
+  openCanvasAt: (path: string) => void;
+  clearCanvasFocus: () => void;
   setEnvSubTab: (id: string) => void;
   setSessionEnvSubTab: (id: string) => void;
   toggleSidebar: () => void;
@@ -130,6 +135,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   prompts: [],
   promptContents: {},
   activeTab: 'main',
+  canvasFocus: null,
   envSubTab: 'library',
   sessionEnvSubTab: 'manifest',
   sidebarCollapsed: false,
@@ -243,6 +249,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  openCanvasAt: (path) => set({ canvasFocus: path, activeTab: 'canvas' }),
+  clearCanvasFocus: () => set({ canvasFocus: null }),
   setActiveTab: (tab) => {
     // Back-compat for legacy persisted activeTab values + sidebar
     // entry points that bypassed setActiveTab.

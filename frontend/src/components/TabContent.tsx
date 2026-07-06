@@ -53,7 +53,9 @@ const TAB_MAP: Record<string, React.ComponentType> = {
 };
 
 // Tabs that should stay mounted once activated (KeepAlive)
-const KEEP_ALIVE_TABS = new Set(['vtuber']);
+// canvas keeps its selection/page position + polling across tab
+// switches — the chat-edit loop bounces between chat and canvas.
+const KEEP_ALIVE_TABS = new Set(['vtuber', 'canvas']);
 
 export default function TabContent() {
   const activeTab = useAppStore(s => s.activeTab);

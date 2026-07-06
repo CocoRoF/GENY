@@ -10,6 +10,12 @@ import { Send, Loader2, Paperclip, X as XIcon } from 'lucide-react';
 
 const MAX_ATTACHMENTS = 8;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// Office documents / PDFs get the backend's larger document cap —
+// decks with images routinely pass 10 MiB.
+const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+const DOCUMENT_EXT_RE = /\.(docx|xlsx|pptx|pdf)$/i;
+const maxBytesFor = (f: File) =>
+  DOCUMENT_EXT_RE.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES;
 
 export default function MessageInput() {
   const { isSending, sendMessage, getActiveRoom } = useMessengerStore();
@@ -56,14 +62,14 @@ export default function MessageInput() {
     try {
       const prepared = await Promise.all(
         accepted.map(async (f) => {
-          if (f.size > MAX_FILE_BYTES && !isImageFile(f)) {
-            throw new Error(`${f.name}: file too large (>10 MiB)`);
+          if (f.size > maxBytesFor(f) && !isImageFile(f)) {
+            throw new Error(`${f.name}: file too large`);
           }
           return isImageFile(f) ? resizeImageIfNeeded(f) : f;
         })
       );
       for (const f of prepared) {
-        if (f.size > MAX_FILE_BYTES) {
+        if (f.size > maxBytesFor(f)) {
           throw new Error(`${f.name}: still too large after resize`);
         }
       }
@@ -201,7 +207,7 @@ export default function MessageInput() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip"
           multiple
           className="hidden"
           onChange={handleFileInputChange}
@@ -211,8 +217,8 @@ export default function MessageInput() {
           className="messenger-input shrink-0 w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all duration-150 border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={() => fileInputRef.current?.click()}
           disabled={isSending || pendingAttachments.length >= MAX_ATTACHMENTS}
-          title={t('messenger.attachFile') ?? 'Attach image'}
-          aria-label="Attach image"
+          title={t('messenger.attachFile') ?? 'Attach file'}
+          aria-label="Attach file"
         >
           <Paperclip size={16} />
         </button>

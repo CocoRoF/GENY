@@ -40,7 +40,19 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 # Configuration
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap per file
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap per file (images etc.)
+# Office documents run bigger (decks with images routinely pass 10 MiB) —
+# they get their own cap. Applied by _validate_mime/_store_one per kind.
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+
+DOCUMENT_MIMES = frozenset(
+    {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
 
 ALLOWED_IMAGE_MIMES = frozenset(
     {
@@ -65,6 +77,9 @@ ALLOWED_FILE_MIMES = frozenset(
         "application/zip",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        # PPTX — the flagship case for the chat-edit → canvas loop
+        # (doc_analyze / doc_edit / native previews).
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
 )
 
@@ -135,6 +150,7 @@ async def _store_one(upload: UploadFile) -> UploadedFile:
 
     mime = upload.content_type or mimetypes.guess_type(upload.filename)[0] or "application/octet-stream"
     _validate_mime(mime)
+    max_bytes = MAX_DOCUMENT_BYTES if mime in DOCUMENT_MIMES else MAX_UPLOAD_BYTES
 
     # Hash + size in a single streaming pass — never load > MAX bytes into RAM.
     hasher = hashlib.sha256()
@@ -145,10 +161,10 @@ async def _store_one(upload: UploadFile) -> UploadedFile:
         if not chunk:
             break
         size += len(chunk)
-        if size > MAX_UPLOAD_BYTES:
+        if size > max_bytes:
             raise HTTPException(
                 status_code=413,
-                detail=f"File exceeds {MAX_UPLOAD_BYTES} bytes",
+                detail=f"File exceeds {max_bytes} bytes",
             )
         hasher.update(chunk)
         chunks.append(chunk)

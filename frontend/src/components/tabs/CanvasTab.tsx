@@ -15,7 +15,7 @@
  * in-flight edit's preview refreshes while the agent works.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
@@ -94,7 +94,7 @@ function PreviewPager({ pages, rawUrl }: { pages: string[]; rawUrl: (p: string) 
 }
 
 export default function CanvasTab() {
-  const { selectedSessionId } = useAppStore();
+  const { selectedSessionId, canvasFocus, clearCanvasFocus } = useAppStore();
   const { t } = useI18n();
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -102,16 +102,35 @@ export default function CanvasTab() {
   const [loadingText, setLoadingText] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // path → mtime: the cache-buster key. The doc tools overwrite
+  // preview/page-N.png in place, so the URL must change when the bytes
+  // do — otherwise the <img> keeps showing the pre-edit render.
+  const mtimeByPath = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const f of files) {
+      if (f.modified_at) map[f.path] = String(f.modified_at);
+    }
+    return map;
+  }, [files]);
+
   const rawUrl = useCallback(
-    (path: string) => `/api/agents/${selectedSessionId}/storage-raw/${path}`,
-    [selectedSessionId],
+    (path: string) => {
+      const base = `/api/agents/${selectedSessionId}/storage-raw/${path}`;
+      const v = mtimeByPath[path];
+      return v ? `${base}?v=${encodeURIComponent(v)}` : base;
+    },
+    [selectedSessionId, mtimeByPath],
   );
 
   const refresh = useCallback(async () => {
     if (!selectedSessionId) return;
     try {
       const res = await agentApi.listStorage(selectedSessionId);
-      setFiles((res.files || []).filter((f) => !f.is_directory && f.path.startsWith('workspace/')));
+      setFiles(
+        (res.files || []).filter(
+          (f) => !(f.is_dir ?? f.is_directory) && f.path.startsWith('workspace/'),
+        ),
+      );
     } catch { /* session may be dormant; keep last view */ }
   }, [selectedSessionId]);
 
@@ -159,6 +178,68 @@ export default function CanvasTab() {
     }
     return jobs;
   }, [sections.drafts, previewsByDir]);
+
+  // ── auto-select: follow the document being edited ────────────────
+  // A manual click "pins" the user's choice; agent activity (a draft
+  // doc whose mtime advances, or a brand-new draft) auto-selects only
+  // when nothing is pinned. Chat's "open in canvas" affordance sets
+  // canvasFocus, which wins once and pins.
+  const pinnedRef = useRef(false);
+  const lastDraftStampRef = useRef<string>('');
+
+  const selectFile = useCallback((path: string, opts?: { pin?: boolean }) => {
+    setSelected(path);
+    if (opts?.pin) pinnedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    pinnedRef.current = false;
+    lastDraftStampRef.current = '';
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (!canvasFocus) return;
+    // Deferred so the store update never happens synchronously inside
+    // the effect (react-hooks/set-state-in-effect).
+    const t = window.setTimeout(() => {
+      // uploads/x.docx → its draft copy when one exists (that's what
+      // the agent actually edited and what carries the preview pages).
+      let target = canvasFocus;
+      const m = canvasFocus.match(/^workspace\/(?:uploads|outputs)\/([^/]+)$/);
+      if (m) {
+        const stem = m[1].replace(/\.[^.]+$/, '');
+        const draft = `workspace/drafts/${stem}/${m[1]}`;
+        if (files.some((f) => f.path === draft)) target = draft;
+      }
+      if (files.some((f) => f.path === target)) {
+        selectFile(target, { pin: true });
+        clearCanvasFocus();
+      }
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [canvasFocus, files, selectFile, clearCanvasFocus]);
+
+  useEffect(() => {
+    let latestPath = '';
+    let latestStamp = '';
+    for (const [, info] of draftJobs) {
+      if (!info.doc) continue;
+      const stamp = mtimeByPath[info.doc.path] ?? '';
+      if (stamp > latestStamp) {
+        latestStamp = stamp;
+        latestPath = info.doc.path;
+      }
+    }
+    if (!latestPath || latestStamp === lastDraftStampRef.current) return;
+    const isFirstScan = lastDraftStampRef.current === '';
+    lastDraftStampRef.current = latestStamp;
+    // Skip on the very first scan (session open) unless nothing is
+    // selected — only *new* agent activity should steal focus.
+    if (pinnedRef.current) return;
+    if (isFirstScan && selected) return;
+    const t = window.setTimeout(() => setSelected(latestPath), 0);
+    return () => window.clearTimeout(t);
+  }, [draftJobs, mtimeByPath, selected]);
 
   // ── selection → load text when previewable as text ──────────────
   const selectedFile = useMemo(
@@ -253,7 +334,7 @@ export default function CanvasTab() {
                       return (
                         <button
                           key={f.path}
-                          onClick={() => setSelected(f.path)}
+                          onClick={() => selectFile(f.path, { pin: true })}
                           className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left text-[0.75rem] transition-colors ${
                             active
                               ? 'bg-[hsl(var(--accent))] text-[var(--text-primary)]'
@@ -285,7 +366,7 @@ export default function CanvasTab() {
               {[...draftJobs.entries()].map(([job, info]) => (
                 <button
                   key={job}
-                  onClick={() => info.doc && setSelected(info.doc.path)}
+                  onClick={() => info.doc && selectFile(info.doc.path, { pin: true })}
                   className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border-color)] text-[0.6875rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                 >
                   <Presentation size={11} className="text-[hsl(var(--primary))]" />

@@ -3231,16 +3231,30 @@ class AgentSession:
                 staged = self._stage_attachments_to_workspace(attachments)
                 non_image = [s for s in staged if not s["mime"].startswith("image/")]
                 if non_image:
-                    lines = "\n".join(
-                        f"- {s['name']} ({s['mime']}, {s['size']} bytes): {s['abs_path']}"
-                        for s in non_image
-                    )
+                    office_exts = (".docx", ".xlsx", ".pptx")
+
+                    def _hint(entry: dict) -> str:
+                        rel = entry.get("rel_path") or entry["abs_path"]
+                        if str(entry["name"]).lower().endswith(office_exts):
+                            return (
+                                f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
+                                f"{rel} — OFFICE DOCUMENT: do NOT Read it (binary). "
+                                f"Use doc_analyze('{rel}') to get its addressable outline, "
+                                f"then doc_edit for precise changes (the user sees the "
+                                f"updated preview in the Canvas tab), doc_convert for "
+                                f"pdf/png/text, doc_generate for new documents."
+                            )
+                        return (
+                            f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
+                            f"{entry['abs_path']} — open with Read."
+                        )
+
+                    lines = "\n".join(_hint(s) for s in non_image)
                     input_text = (input_text or "") + (
                         "\n\n[attached files — saved to your session workspace]\n"
                         f"{lines}\n"
-                        "You MUST open and process these file(s) in THIS turn using your "
-                        "tools (e.g. Read with the absolute path above). The files remain "
-                        "at the same paths for later turns."
+                        "You MUST process these file(s) in THIS turn with the tools named "
+                        "above. The files remain at the same paths for later turns."
                     )
                 pipeline_input: Any = {
                     "text": input_text,

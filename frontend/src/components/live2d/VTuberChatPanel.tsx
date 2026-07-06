@@ -529,6 +529,7 @@ export default function VTuberChatPanel({
   // ── Attachment helpers ────────────────────────────────────────────
   const MAX_ATTACHMENTS = 8;
   const MAX_FILE_BYTES = 10 * 1024 * 1024;
+  const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024; // office/pdf get the larger backend cap
 
   const addFiles = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -547,7 +548,7 @@ export default function VTuberChatPanel({
       // files pass through untouched (resizeImageIfNeeded is a no-op).
       const prepared = await Promise.all(
         accepted.map(async (f) => {
-          if (f.size > MAX_FILE_BYTES && !isImageFile(f)) {
+          if (f.size > (/\.(docx|xlsx|pptx|pdf)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES) && !isImageFile(f)) {
             throw new Error(`${f.name}: file too large (>10 MiB)`);
           }
           return isImageFile(f) ? resizeImageIfNeeded(f) : f;
@@ -555,7 +556,7 @@ export default function VTuberChatPanel({
       );
       // Final guard after resize.
       for (const f of prepared) {
-        if (f.size > MAX_FILE_BYTES) {
+        if (f.size > (/\.(docx|xlsx|pptx|pdf)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES)) {
           throw new Error(`${f.name}: still too large after resize`);
         }
       }
@@ -874,7 +875,7 @@ export default function VTuberChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip"
             multiple
             className="hidden"
             onChange={handleFileInputChange}

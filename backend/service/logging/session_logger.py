@@ -639,6 +639,29 @@ class SessionLogger:
                         ),
                     }
 
+            # Office document edits (edit2docs-backed doc tools): surface
+            # the address-based edit list so the chat bubble + Canvas link
+            # can show "the deck changed" (2026-07 chat-edit loop).
+            elif name_lower in ("doc_edit", "docapplyedits", "doc_generate", "docgenerate"):
+                file_path = tool_input.get("path", tool_input.get("output", ""))
+                doc_edits = tool_input.get("edits") or []
+                if file_path:
+                    changes = [
+                        {"new_str": json.dumps(e, ensure_ascii=False)[:MAX_CONTENT_SIZE]}
+                        for e in doc_edits[:20]
+                        if isinstance(e, dict)
+                    ]
+                    if not changes:
+                        intent = str(tool_input.get("intent", ""))[:MAX_CONTENT_SIZE]
+                        changes = [{"new_str": intent}] if intent else []
+                    return {
+                        "file_path": file_path,
+                        "operation": "edit" if doc_edits else "create",
+                        "changes": changes,
+                        "lines_added": len(doc_edits) or 1,
+                        "lines_removed": 0,
+                    }
+
             # Multi-edit: multiple hunks
             elif name_lower in ("multi_edit", "multiedit"):
                 file_path = tool_input.get("file_path", tool_input.get("path", ""))

@@ -442,7 +442,11 @@ export interface SessionLogsResponse {
 export interface StorageFile {
   path: string;
   size: number;
+  /** Backend field name is is_dir; is_directory kept for back-compat. */
+  is_dir?: boolean;
   is_directory?: boolean;
+  /** ISO mtime from the backend — the canvas cache-buster key. */
+  modified_at?: string | null;
 }
 
 export interface StorageListResponse {

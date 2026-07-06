@@ -231,7 +231,11 @@ class SectionLibrary:
             f"drafts/ (in-progress document edits), outputs/ (artifacts "
             f"delivered to the user). This space serves the built-in file & "
             f"document tools; never install software or run services against "
-            f"it. Inspect contents on demand with WorkspaceInfo."
+            f"it. Inspect contents on demand with WorkspaceInfo. Office files "
+            f"(.docx/.xlsx/.pptx) are binary — never Read them: use "
+            f"doc_analyze for the outline, doc_edit for precise edits (the "
+            f"user watches the updated preview in the Canvas tab), "
+            f"doc_convert for pdf/png/text, doc_generate to create new ones."
         )
         return PromptSection(
             name="files_workspace",

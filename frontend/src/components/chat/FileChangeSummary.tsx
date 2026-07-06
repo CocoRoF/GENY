@@ -1,8 +1,19 @@
 'use client';
 
-import { FileCode2, Plus, Minus } from 'lucide-react';
+import { FileCode2, Plus, Minus, Palette } from 'lucide-react';
 import { shortFileName } from './chat-utils';
+import { useAppStore } from '@/store/useAppStore';
 import type { FileChanges } from '@/types';
+
+/** Session-storage relative path when the change touches the files
+ *  workspace (uploads/drafts/outputs), else null. Doc-tool paths come
+ *  through relative ("workspace/uploads/x.docx") or absolute. */
+function workspacePath(filePath: string): string | null {
+  const idx = filePath.indexOf('workspace/');
+  return idx >= 0 ? filePath.slice(idx) : null;
+}
+
+const OFFICE_RE = /\.(docx|xlsx|pptx)$/i;
 
 interface FileChangeSummaryProps {
   fileChanges: FileChanges[];
@@ -15,8 +26,18 @@ interface FileChangeSummaryProps {
  * Shows file count, lines added/removed, and per-file breakdown.
  */
 export default function FileChangeSummary({ fileChanges, onViewDetail }: FileChangeSummaryProps) {
+  const openCanvasAt = useAppStore((st) => st.openCanvasAt);
   const totalAdded = fileChanges.reduce((s, f) => s + f.lines_added, 0);
   const totalRemoved = fileChanges.reduce((s, f) => s + f.lines_removed, 0);
+  // First edited office document in the session workspace → the Canvas
+  // tab can show its regenerated preview (chat-edit loop).
+  const canvasTarget = (() => {
+    for (const f of fileChanges) {
+      const ws = workspacePath(f.file_path);
+      if (ws && OFFICE_RE.test(ws)) return ws;
+    }
+    return null;
+  })();
 
   const Tag = onViewDetail ? 'button' : 'div';
 
@@ -28,6 +49,26 @@ export default function FileChangeSummary({ fileChanges, onViewDetail }: FileCha
     >
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border-color)]">
         <FileCode2 size={12} className="text-[var(--text-muted)] shrink-0" />
+        {canvasTarget && (
+          <span
+            role="button"
+            tabIndex={0}
+            className="inline-flex items-center gap-1 text-[0.6875rem] text-[hsl(var(--primary))] hover:underline cursor-pointer shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              openCanvasAt(canvasTarget);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation();
+                openCanvasAt(canvasTarget);
+              }
+            }}
+          >
+            <Palette size={11} />
+            캔버스에서 보기
+          </span>
+        )}
         <span className="text-[0.6875rem] font-medium text-[var(--text-secondary)]">
           {fileChanges.length} file{fileChanges.length > 1 ? 's' : ''} changed
         </span>
