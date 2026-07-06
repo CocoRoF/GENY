@@ -22,11 +22,17 @@ Public API
 
 from __future__ import annotations
 
+import re
 from logging import getLogger
 from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = getLogger(__name__)
+
+# ``{{include: templates/foo.md}}`` — shared prompt fragments (e.g. the
+# memory ladder) referenced from role files. Resolved at load time,
+# relative to the prompts/ directory. One level only.
+_INCLUDE_RE = re.compile(r"\{\{\s*include:\s*([^}]+?)\s*\}\}")
 
 # Project root → prompts/ directory
 _DEFAULT_PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -80,6 +86,7 @@ class PromptTemplateLoader:
 
         try:
             content = filepath.read_text(encoding="utf-8").strip()
+            content = self._resolve_includes(content)
             self._cache[role] = content
             logger.debug(
                 "PromptTemplateLoader: loaded %s (%d chars)",
@@ -90,6 +97,30 @@ class PromptTemplateLoader:
         except Exception as exc:
             logger.warning("PromptTemplateLoader: failed to read %s: %s", filepath, exc)
             return None
+
+    def _resolve_includes(self, content: str) -> str:
+        """Inline ``{{include: <path>}}`` fragments (2026-07 fix).
+
+        These markers were previously passed to the model VERBATIM —
+        nothing in the pipeline resolved them, so shared fragments like
+        templates/memory_ladder.md never reached the prompt. A missing
+        include resolves to an empty string with a warning rather than
+        leaking the marker.
+        """
+
+        def _sub(m: "re.Match[str]") -> str:
+            rel = m.group(1).strip()
+            path = self._dir / rel
+            try:
+                return path.read_text(encoding="utf-8").strip()
+            except OSError:
+                logger.warning(
+                    "PromptTemplateLoader: include %r not found under %s — dropped",
+                    rel, self._dir,
+                )
+                return ""
+
+        return _INCLUDE_RE.sub(_sub, content)
 
     def list_available_roles(self) -> List[str]:
         """Return role names whose template files exist on disk."""
