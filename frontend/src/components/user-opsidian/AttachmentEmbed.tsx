@@ -118,10 +118,20 @@ export interface AttachmentEmbedProps {
   /** Path relative to vault root (e.g. ``_attachments/foo.png``) or just leaf name. */
   path: string;
   alt?: string | null;
+  /**
+   * Vault-specific URL resolver. Defaults to the user-opsidian
+   * (whiteboard) attachments endpoint; session-scoped views pass their
+   * own resolver (e.g. ``memoryApi.attachmentUrl(sessionId, path)``)
+   * because observation frames live in the agent session's storage.
+   */
+  resolveUrl?: (path: string) => string;
 }
 
-export default function AttachmentEmbed({ path, alt }: AttachmentEmbedProps) {
-  const url = useMemo(() => whiteboardApi.attachmentUrl(path), [path]);
+export default function AttachmentEmbed({ path, alt, resolveUrl }: AttachmentEmbedProps) {
+  const url = useMemo(
+    () => (resolveUrl ?? whiteboardApi.attachmentUrl)(path),
+    [path, resolveUrl],
+  );
   const filename = path.replace(/^.*\//, '');
   const renderer = pickRenderer(filename);
   return <>{renderer({ url, filename, alt })}</>;
@@ -174,22 +184,31 @@ export const attachmentUrlTransform: UrlTransform = (url) => {
  * `src` to `string | Blob | undefined`, so we narrow defensively
  * before using it.
  */
-export const attachmentMarkdownComponents: Pick<Components, 'img'> = {
-  img: ({ src, alt }) => {
-    const safeSrc =
-      typeof src === 'string' && src.length > 0 ? src : undefined;
-    const safeAlt = typeof alt === 'string' ? alt : undefined;
-    if (safeSrc && safeSrc.startsWith('attachment://')) {
-      const path = decodeURIComponent(safeSrc.replace('attachment://', ''));
-      return <AttachmentEmbed path={path} alt={safeAlt ?? null} />;
-    }
-    // Plain markdown image — fall through to a sane default.
-    return (
-      <img
-        src={safeSrc}
-        alt={safeAlt}
-        style={{ maxWidth: '100%', borderRadius: 6 }}
-      />
-    );
-  },
-};
+export function makeAttachmentMarkdownComponents(
+  resolveUrl?: (path: string) => string,
+): Pick<Components, 'img'> {
+  return {
+    img: ({ src, alt }) => {
+      const safeSrc =
+        typeof src === 'string' && src.length > 0 ? src : undefined;
+      const safeAlt = typeof alt === 'string' ? alt : undefined;
+      if (safeSrc && safeSrc.startsWith('attachment://')) {
+        const path = decodeURIComponent(safeSrc.replace('attachment://', ''));
+        return (
+          <AttachmentEmbed path={path} alt={safeAlt ?? null} resolveUrl={resolveUrl} />
+        );
+      }
+      // Plain markdown image — fall through to a sane default.
+      return (
+        <img
+          src={safeSrc}
+          alt={safeAlt}
+          style={{ maxWidth: '100%', borderRadius: 6 }}
+        />
+      );
+    },
+  };
+}
+
+export const attachmentMarkdownComponents: Pick<Components, 'img'> =
+  makeAttachmentMarkdownComponents();

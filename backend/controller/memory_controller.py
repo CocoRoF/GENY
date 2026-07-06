@@ -9,10 +9,13 @@ the provider's typed handles (``stm()`` / ``ltm()`` / ``notes()`` /
 """
 
 import json
+import re
 from logging import getLogger
+from pathlib import Path as FsPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import FileResponse
 
 from pydantic import BaseModel, Field
 
@@ -311,6 +314,76 @@ async def read_memory_file(
             "session_id": note.session_id,
         },
     }
+
+
+# ── Binary attachments (observation frames etc.) ────────────────────
+
+# Only image types are served — the memory tree also holds .md notes and
+# index files that must never leave through this endpoint.
+_ATTACHMENT_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+# Bare-filename shape (observation ids are hex + extension). Also keeps
+# glob metacharacters out of the rglob pattern below.
+_ATTACHMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _find_memory_attachment(memory_dir: FsPath, filename: str) -> Optional[FsPath]:
+    """Locate *filename* anywhere under the session's memory tree.
+
+    Notes embed attachments by bare name (Obsidian shortest-path
+    convention: ``![[<id>.jpg]]``) while observation frames live
+    date-bucketed at ``memory/observations/<YYYY-MM-DD>/<id>.jpg`` —
+    so resolution is a filename search, not a sibling lookup. Traversal
+    is blocked by the name whitelist + a containment check on the
+    resolved path.
+    """
+    name = FsPath(filename).name
+    if not _ATTACHMENT_NAME_RE.match(name):
+        return None
+    if FsPath(name).suffix.lower() not in _ATTACHMENT_MIME:
+        return None
+    base = memory_dir.resolve()
+    try:
+        for candidate in sorted(memory_dir.rglob(name)):
+            if not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(base):
+                continue  # symlink escaping the vault
+            return resolved
+    except OSError:
+        return None
+    return None
+
+
+@router.get("/{session_id}/memory/attachments/{filename}")
+async def get_memory_attachment(
+    request: Request,
+    session_id: str = Path(...),
+    filename: str = Path(...),
+):
+    """Serve a binary attachment referenced by a memory note (e.g. a
+    screen-observation frame) as raw bytes, so ``![[<id>.jpg]]`` embeds
+    can render in the web UI. Images only; 404 for anything else."""
+    _, memory_dir = _get_provider_and_memory_dir(session_id)
+    if memory_dir is None:
+        raise HTTPException(status_code=404, detail="Memory dir unavailable")
+    found = _find_memory_attachment(FsPath(memory_dir), filename)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail=f"Attachment not found: {filename}",
+        )
+    return FileResponse(
+        str(found),
+        media_type=_ATTACHMENT_MIME[found.suffix.lower()],
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/{session_id}/memory/files/{filename:path}/outline")

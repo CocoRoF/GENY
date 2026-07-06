@@ -6,6 +6,11 @@ import remarkGfm from 'remark-gfm';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { memoryApi } from '@/lib/api';
 import {
+  attachmentUrlTransform,
+  makeAttachmentMarkdownComponents,
+  preprocessAttachmentEmbeds,
+} from '@/components/user-opsidian/AttachmentEmbed';
+import {
   Tag,
   Link2,
   Clock,
@@ -55,12 +60,13 @@ export default function NoteViewer() {
     [files, selectedSessionId, openFile, setFileDetail]
   );
 
-  // Process markdown body to render wikilinks
+  // Process markdown body: attachment embeds FIRST (consumes the leading
+  // `!` of `![[img.jpg]]` — otherwise the wikilink pass below leaves a
+  // broken markdown image), then wikilinks.
   const body = fileDetail?.body ?? '';
   const processedBody = useMemo(() => {
     if (!body) return '';
-    // Replace [[link|alias]] and [[link]] with markdown links
-    return body.replace(
+    return preprocessAttachmentEmbeds(body).replace(
       /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
       (_match, target, alias) => {
         const display = alias || target;
@@ -68,6 +74,18 @@ export default function NoteViewer() {
       }
     );
   }, [body]);
+
+  // Session-scoped attachment resolution — observation frames live in the
+  // agent session's storage, not the user-opsidian vault.
+  const attachmentComponents = useMemo(
+    () =>
+      makeAttachmentMarkdownComponents(
+        selectedSessionId
+          ? (path) => memoryApi.attachmentUrl(selectedSessionId, path)
+          : undefined,
+      ),
+    [selectedSessionId],
+  );
 
   if (!selectedFile) {
     return (
@@ -91,12 +109,23 @@ export default function NoteViewer() {
     );
   }
 
-  const meta = fileDetail.metadata || {};
-  const importance = IMPORTANCE_STYLES[(meta.importance as string) || 'medium'] || IMPORTANCE_STYLES.medium;
-  const CatIcon = CATEGORY_ICONS[(meta.category as string) || 'topics'] || FileText;
-  const tags = Array.isArray(meta.tags) ? meta.tags : [];
-  const linksTo = Array.isArray(meta.links_to) ? meta.links_to : [];
-  const linkedFrom = Array.isArray(meta.linked_from) ? meta.linked_from : [];
+  // Note properties arrive as TOP-LEVEL fields of the read-file response
+  // (`fileDetail.metadata` is the host-extension sidecar and is usually
+  // empty — reading it here used to fall back to 'topics'/'Medium' for
+  // every observation note).
+  const fm = (fileDetail.frontmatter || {}) as Record<string, unknown>;
+  const category = fileDetail.category || (fm.category as string) || 'topics';
+  const importance =
+    IMPORTANCE_STYLES[fileDetail.importance || 'medium'] || IMPORTANCE_STYLES.medium;
+  const CatIcon = CATEGORY_ICONS[category] || FileText;
+  const noteTitle = fileDetail.title || selectedFile;
+  const noteSource = fm.source;
+  const created = fileDetail.created || (fm.created as string) || '';
+  const tags = Array.isArray(fileDetail.tags) ? fileDetail.tags : [];
+  const linksTo = Array.isArray(fileDetail.links_to) ? fileDetail.links_to : [];
+  const linkedFrom = Array.isArray(fileDetail.linked_from)
+    ? fileDetail.linked_from
+    : [];
   const fileInfo = files[selectedFile];
 
   return (
@@ -105,7 +134,7 @@ export default function NoteViewer() {
       <div className="obs-note-header">
         <div className="obs-note-title-row">
           <CatIcon size={18} style={{ color: 'var(--primary-color)' }} />
-          <h1 className="obs-note-title">{(meta.title as string) || selectedFile}</h1>
+          <h1 className="obs-note-title">{noteTitle}</h1>
         </div>
 
         <div className="obs-note-meta-row">
@@ -115,17 +144,17 @@ export default function NoteViewer() {
           </span>
           <span className="obs-note-badge obs-note-badge-cat">
             <CatIcon size={11} />
-            {(meta.category as string) || 'topics'}
+            {category}
           </span>
-          {meta.source ? (
+          {noteSource ? (
             <span className="obs-note-badge obs-note-badge-source">
-              {String(meta.source)}
+              {String(noteSource)}
             </span>
           ) : null}
-          {meta.created ? (
+          {created ? (
             <span className="obs-note-meta-item">
               <Clock size={11} />
-              {new Date(String(meta.created)).toLocaleDateString('ko-KR')}
+              {new Date(String(created)).toLocaleDateString('ko-KR')}
             </span>
           ) : null}
           {fileInfo && (
@@ -188,7 +217,9 @@ export default function NoteViewer() {
       <div className="obs-note-body">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          urlTransform={attachmentUrlTransform}
           components={{
+            ...attachmentComponents,
             a: ({ href, children }) => {
               if (href?.startsWith('wikilink://')) {
                 const target = decodeURIComponent(href.replace('wikilink://', ''));

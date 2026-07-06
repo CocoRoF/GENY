@@ -678,9 +678,20 @@ export interface MemoryFileInfo {
 }
 
 export interface MemoryFileDetail {
+  /** Host-extension sidecar (usually empty). NOT the frontmatter —
+   * category/importance/title/tags arrive as the top-level fields. */
   metadata: Record<string, unknown>;
   body: string;
   filename: string;
+  title?: string;
+  category?: string;
+  importance?: string;
+  tags?: string[];
+  frontmatter?: Record<string, unknown>;
+  links_to?: string[];
+  linked_from?: string[];
+  created?: string;
+  modified?: string;
 }
 
 export interface MemoryStats {

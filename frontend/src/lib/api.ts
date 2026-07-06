@@ -2359,6 +2359,12 @@ export const memoryApi = {
   },
 
   /** GET /api/agents/{sid}/memory/files/{filename} — read a file */
+  /** Relative URL for a memory attachment (observation frame) — usable as <img src>. */
+  attachmentUrl: (sessionId: string, filename: string): string =>
+    `/api/agents/${encodeURIComponent(sessionId)}/memory/attachments/${encodeURIComponent(
+      filename.replace(/^.*\//, ''),
+    )}`,
+
   readFile: (sessionId: string, filename: string) =>
     apiCall<import('@/types').MemoryFileDetail>(`/api/agents/${sessionId}/memory/files/${filename}`),
 

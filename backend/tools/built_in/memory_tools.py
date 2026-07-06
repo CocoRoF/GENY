@@ -87,7 +87,7 @@ class MemoryWriteTool(BaseTool):
             session_id: Your session ID.
             title: Title of the note.
             content: Body content in Markdown format.
-            category: Category — one of: topics, decisions, insights, people, projects, reference (default: topics).
+            category: Category — one of: topics, projects, insights, daily, critical (default: topics; unknown values fall back to topics).
             tags: Comma-separated tags, e.g. "python,architecture,important".
             importance: Importance level — low, medium, high, critical (default: medium).
         """
