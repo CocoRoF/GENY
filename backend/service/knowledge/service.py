@@ -56,20 +56,23 @@ def _qdrant_url() -> str:
 
 
 def _resolve_openai_key() -> str:
-    """OpenAI key for embeddings: LTM embedding key first (explicit),
-    then the general OpenAI API key."""
+    """OpenAI key for embeddings: LTM ``embedding_api_key`` if the user
+    deliberately set a separate embedding key, else the central
+    LLM & Provider key (``service.config.credentials``)."""
     try:
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.ltm_config import LTMConfig
-        from service.config.sub_config.general.api_config import APIConfig
 
-        cm = get_config_manager()
-        ltm = cm.load_config(LTMConfig)
+        ltm = get_config_manager().load_config(LTMConfig)
         key = (getattr(ltm, "embedding_api_key", "") or "").strip()
         if key:
             return key
-        api = cm.load_config(APIConfig)
-        return (getattr(api, "openai_api_key", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from service.config.credentials import resolve_provider_key
+
+        return resolve_provider_key("openai")
     except Exception:  # noqa: BLE001
         return (os.environ.get("OPENAI_API_KEY") or "").strip()
 

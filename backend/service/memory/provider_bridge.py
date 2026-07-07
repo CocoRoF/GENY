@@ -76,12 +76,18 @@ def _resolve_embedding_values(ltm_config: Any) -> Optional[tuple]:
         return None
 
     api_key = (getattr(ltm_config, "embedding_api_key", "") or "").strip()
+    if not api_key and provider in ("openai", "google"):
+        # Central LLM & Provider key — the user pasted the key once in
+        # settings; every service reads it from there.
+        try:
+            from service.config.credentials import resolve_provider_key
+
+            api_key = resolve_provider_key(provider)
+        except Exception:  # noqa: BLE001
+            api_key = ""
     if not api_key:
-        # Provider-specific env fallbacks — Geny-side *value* sourcing
-        # (the user pasted the key once for the LLM; don't make them
-        # paste it twice). Distinct from the executor-internal env
-        # ladder, which is the deprecated transport this bridge now
-        # bypasses by shipping the resolved key in the bundle.
+        # Provider-specific env fallbacks — legacy value sourcing for
+        # providers without a central card (voyage) / pre-config hosts.
         import os
 
         env_keys = {

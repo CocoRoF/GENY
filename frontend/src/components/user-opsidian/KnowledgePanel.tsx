@@ -318,7 +318,7 @@ export default function KnowledgePanel({
             키가 없거나 거부(401)되었습니다.
           </span>
           <Link
-            href="/setup"
+            href="/?tab=settings&settings_category=llm_backends"
             style={{
               padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
               background: '#f59e0b', color: '#fff', textDecoration: 'none', flexShrink: 0,

@@ -77,6 +77,11 @@ function ProviderCard({
   if (provider.available && provider.auth_ok) {
     tone = 'good';
     badgeLabel = t('settings.llmBackends.badge.ready');
+  } else if (provider.auth_ok === false && !isCli) {
+    // API provider whose key the provider itself rejected (401) —
+    // distinct from CLI "login required".
+    tone = 'bad';
+    badgeLabel = t('settings.llmBackends.badge.keyRejected');
   } else if (provider.auth_ok === false) {
     tone = 'warn';
     badgeLabel = t('settings.llmBackends.badge.loginRequired');
@@ -293,11 +298,11 @@ function LLMBackendsPanelInner() {
   const [error, setError] = useState<string | null>(null);
   const [openProvider, setOpenProvider] = useState<string | null>(null);
 
-  const fetchHealth = useCallback(async () => {
+  const fetchHealth = useCallback(async (revalidate = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await llmBackendsApi.health();
+      const res = await llmBackendsApi.health(revalidate);
       setProviders(res.providers);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -311,9 +316,10 @@ function LLMBackendsPanelInner() {
   const handleRecheck = useCallback(
     async (provider: string) => {
       // Only ``claude_code_cli`` has a per-provider recheck endpoint
-      // today; API providers re-fetch the full health card instead.
+      // today; API providers re-fetch the full health card instead
+      // (with a forced key re-probe).
       if (provider !== 'claude_code_cli') {
-        await fetchHealth();
+        await fetchHealth(true);
         return;
       }
       setRecheckLoading(provider);
@@ -365,7 +371,7 @@ function LLMBackendsPanelInner() {
           <button
             type="button"
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-            onClick={fetchHealth}
+            onClick={() => fetchHealth(true)}
             disabled={loading}
           >
             {loading

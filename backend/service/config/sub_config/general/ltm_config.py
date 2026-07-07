@@ -184,9 +184,13 @@ class LTMConfig(BaseConfig):
                         "description": "Embedding model for the selected provider",
                     },
                     "embedding_api_key": {
-                        "label": "Embedding API Key",
-                        "description": "API key for the selected embedding provider",
-                        "placeholder": "sk-… / AIza… / pa-…",
+                        "label": "임베딩 API 키 (오버라이드)",
+                        "description": (
+                            "임베딩 전용 별도 키가 필요할 때만 입력하세요. "
+                            "비워두면 LLM & Provider 설정의 프로바이더 키를 "
+                            "사용합니다(권장 — 키는 한 곳에서만 관리)."
+                        ),
+                        "placeholder": "(비움 = LLM & Provider 키 사용)",
                     },
                     "chunk_size": {
                         "label": "Chunk Size",
@@ -300,10 +304,14 @@ class LTMConfig(BaseConfig):
             ConfigField(
                 name="embedding_api_key",
                 field_type=FieldType.PASSWORD,
-                label="Embedding API Key",
-                description="API key for the selected embedding provider",
+                label="Embedding API Key (override)",
+                description=(
+                    "Optional embedding-only key. Leave EMPTY to use the "
+                    "provider key from the LLM & Provider settings section "
+                    "(recommended — one key, managed in one place)."
+                ),
                 required=False,
-                placeholder="sk-… / AIza… / pa-…",
+                placeholder="(empty = LLM & Provider key)",
                 group="embedding",
                 secure=True,
                 apply_change=env_sync("LTM_EMBEDDING_API_KEY"),

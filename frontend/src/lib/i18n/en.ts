@@ -399,9 +399,9 @@ const en = {
 
     // ─── LLM panel + per-provider modals ────────────────
     llmBackends: {
-      navLabel: 'LLM',
-      title: 'LLM',
-      description: '{count} providers map to the executor\'s ClientRegistry. Each card is the single editor for that provider — paste an API key for cloud (Anthropic / OpenAI / Google), enter an OpenAI-compatible endpoint for local (vLLM / Ollama / LM Studio / Custom), or run the in-modal login flow (Claude Code). Once a card turns green any Environment whose Stage 6 picks that provider routes actual VTuber / Worker sessions through it.',
+      navLabel: 'LLM & Provider',
+      title: 'LLM & Provider',
+      description: '{count} providers map to the executor\'s ClientRegistry, and this section is the single home for every provider credential — the keys saved here are what ALL of Geny uses: sessions, memory embeddings, the knowledge repository, TTS, and document tools. Paste an API key for cloud (Anthropic / OpenAI / Google), enter an OpenAI-compatible endpoint for local (vLLM / Ollama / LM Studio / Custom), or run the in-modal login flow (Claude Code). Cloud keys are live-verified against the provider — a rejected key shows red here instead of failing silently downstream.',
       refreshAll: 'Refresh all',
       reCheck: 'Re-check',
       docs: 'Docs',
@@ -412,6 +412,7 @@ const en = {
       badge: {
         ready: 'Ready',
         loginRequired: 'Login required',
+        keyRejected: 'Key rejected',
         notConfigured: 'Not configured',
         idle: 'Idle',
       },
@@ -424,6 +425,8 @@ const en = {
       // {path}, {version}, {auth}, {extension} are template params.
       detail: {
         'api.key_configured': '{env} is configured.',
+        'api.key_verified': '{env} verified with the provider — key is valid.',
+        'api.key_rejected': '{env} is set but the provider REJECTED it (401). Open this card and paste a valid key.',
         'api.key_missing': 'No API key set.',
         'vllm.base_url_set': 'base_url={url}',
         'vllm.base_url_missing': 'vLLM base URL not set. Open this card and paste the OpenAI-compatible endpoint.',

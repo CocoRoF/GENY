@@ -1957,8 +1957,13 @@ export interface TestConnectionResponse {
 }
 
 export const llmBackendsApi = {
-  /** GET /api/llm-backends/health — every provider's status. */
-  health: () => apiCall<BackendsHealthResponse>('/api/llm-backends/health'),
+  /** GET /api/llm-backends/health — every provider's status.
+   *  ``revalidate`` re-probes cloud API keys against their providers
+   *  (bypasses the per-key verdict cache). */
+  health: (revalidate = false) =>
+    apiCall<BackendsHealthResponse>(
+      `/api/llm-backends/health${revalidate ? '?revalidate=true' : ''}`,
+    ),
 
   /** POST /api/llm-backends/cli/claude-code/recheck */
   recheckClaudeCode: () =>

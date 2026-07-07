@@ -155,32 +155,63 @@ def _detect(name: str, override: Optional[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _api_key_health(provider: str, env_var: str, bundle) -> ProviderHealth:
+async def _api_key_health(
+    provider: str, env_var: str, bundle, revalidate: bool = False,
+) -> ProviderHealth:
     creds = bundle.get(provider)
     have = bool(creds.api_key)
+    if not have:
+        return ProviderHealth(
+            provider=provider,
+            label=PROVIDER_LABELS[provider],
+            kind="api",
+            available=False,
+            detail="No API key set.",
+            detail_code="api.key_missing",
+            detail_params={"env": env_var},
+            auth_method=None,
+            auth_ok=None,
+        )
+
+    # Live auth probe (cached per key value) — a rejected key must show
+    # RED here, not a green "configured" that fails downstream.
+    from service.config.credentials import validate_provider_key
+
+    ok, verdict = await validate_provider_key(
+        provider, creds.api_key, force=revalidate,
+    )
+    if ok is False:
+        detail = f"{env_var} is set but the provider REJECTED it ({verdict})."
+        detail_code = "api.key_rejected"
+    elif ok is True:
+        detail = f"{env_var} verified with the provider."
+        detail_code = "api.key_verified"
+    else:
+        detail = f"{env_var} configured."
+        detail_code = "api.key_configured"
     return ProviderHealth(
         provider=provider,
         label=PROVIDER_LABELS[provider],
         kind="api",
-        available=have,
-        detail=(f"{env_var} configured." if have else "No API key set."),
-        detail_code="api.key_configured" if have else "api.key_missing",
+        available=ok is not False,
+        detail=detail,
+        detail_code=detail_code,
         detail_params={"env": env_var},
-        auth_method="api_key" if have else None,
-        auth_ok=have or None,
+        auth_method="api_key",
+        auth_ok=(True if ok is not False else False),
     )
 
 
-async def _check_anthropic(bundle) -> ProviderHealth:
-    return _api_key_health("anthropic", "ANTHROPIC_API_KEY", bundle)
+async def _check_anthropic(bundle, revalidate: bool = False) -> ProviderHealth:
+    return await _api_key_health("anthropic", "ANTHROPIC_API_KEY", bundle, revalidate)
 
 
-async def _check_openai(bundle) -> ProviderHealth:
-    return _api_key_health("openai", "OPENAI_API_KEY", bundle)
+async def _check_openai(bundle, revalidate: bool = False) -> ProviderHealth:
+    return await _api_key_health("openai", "OPENAI_API_KEY", bundle, revalidate)
 
 
-async def _check_google(bundle) -> ProviderHealth:
-    return _api_key_health("google", "GOOGLE_API_KEY", bundle)
+async def _check_google(bundle, revalidate: bool = False) -> ProviderHealth:
+    return await _api_key_health("google", "GOOGLE_API_KEY", bundle, revalidate)
 
 
 async def _check_vllm(bundle) -> ProviderHealth:
@@ -534,18 +565,20 @@ async def _check_claude_code(bundle, claude_cfg: CLIBackendClaudeCodeConfig) -> 
 
 
 @router.get("/health", response_model=BackendsHealthResponse, dependencies=[Depends(require_auth)])
-async def get_backends_health() -> BackendsHealthResponse:
+async def get_backends_health(revalidate: bool = False) -> BackendsHealthResponse:
     """Per-provider health probe. Surfaces what the UI needs to render
-    the LLM backends settings card: which providers are usable now,
-    what's missing, and how the user can finish the setup."""
+    the LLM & Provider settings cards: which providers are usable now,
+    what's missing, and how the user can finish the setup.
+    ``revalidate=true`` (the panel's refresh button) re-probes the cloud
+    keys against their providers instead of using the cached verdict."""
     cm = get_config_manager()
     bundle = CredentialBundleBuilder(cm).build()
     claude_cfg = cm.load_config(CLIBackendClaudeCodeConfig)
 
     results = await asyncio.gather(
-        _check_anthropic(bundle),
-        _check_openai(bundle),
-        _check_google(bundle),
+        _check_anthropic(bundle, revalidate),
+        _check_openai(bundle, revalidate),
+        _check_google(bundle, revalidate),
         _check_vllm(bundle),
         _check_claude_code(bundle, claude_cfg),
         _check_local("ollama", bundle),

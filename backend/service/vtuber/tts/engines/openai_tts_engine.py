@@ -48,14 +48,28 @@ class OpenAITTSEngine(TTSEngine):
     supports_clone = False
     license = "OpenAI ToS"
 
+    @staticmethod
+    def _resolve_key(config) -> str:
+        """Engine-specific key if set, else the central LLM & Provider
+        OpenAI key — one paste in settings covers TTS too."""
+        key = (config.api_key or "").strip()
+        if key:
+            return key
+        try:
+            from service.config.credentials import resolve_provider_key
+
+            return resolve_provider_key("openai")
+        except Exception:  # noqa: BLE001
+            return ""
+
     async def is_available(self) -> tuple[bool, str]:
         try:
             from service.config.manager import get_config_manager
             from service.config.sub_config.tts.openai_tts_config import OpenAITTSConfig
 
             cfg = get_config_manager().load_config(OpenAITTSConfig)
-            if not cfg.api_key:
-                return False, "missing OPENAI_API_KEY"
+            if not self._resolve_key(cfg):
+                return False, "missing OpenAI API key (LLM & Provider settings)"
             return True, "ok"
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
@@ -67,8 +81,11 @@ class OpenAITTSEngine(TTSEngine):
 
         config = get_config_manager().load_config(OpenAITTSConfig)
 
-        if not config.api_key:
-            raise ValueError("OpenAI TTS API key is not configured")
+        api_key = self._resolve_key(config)
+        if not api_key:
+            raise ValueError(
+                "OpenAI API key is not configured (LLM & Provider settings)"
+            )
 
         request = await self.apply_emotion(request)
 
@@ -82,7 +99,7 @@ class OpenAITTSEngine(TTSEngine):
                 "POST",
                 "https://api.openai.com/v1/audio/speech",
                 headers={
-                    "Authorization": f"Bearer {config.api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -121,6 +138,6 @@ class OpenAITTSEngine(TTSEngine):
             from service.config.sub_config.tts.openai_tts_config import OpenAITTSConfig
 
             config = get_config_manager().load_config(OpenAITTSConfig)
-            return bool(config.api_key)
+            return bool(self._resolve_key(config))
         except Exception:
             return False

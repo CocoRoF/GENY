@@ -202,12 +202,17 @@ def _engine():
 
 
 def _anthropic_api_key() -> str:
-    key = os.environ.get("ANTHROPIC_API_KEY")
+    try:
+        from service.config.credentials import resolve_provider_key
+
+        key = resolve_provider_key("anthropic")
+    except Exception:  # noqa: BLE001
+        key = os.environ.get("ANTHROPIC_API_KEY") or ""
     if not key:
         raise ToolError(
-            "doc_generate needs an Anthropic API key (ANTHROPIC_API_KEY env "
-            "var on the backend). For key-free editing use doc_analyze + "
-            "doc_edit."
+            "doc_generate needs an Anthropic API key — set it in the "
+            "LLM & Provider settings section. For key-free editing use "
+            "doc_analyze + doc_edit."
         )
     return key
 

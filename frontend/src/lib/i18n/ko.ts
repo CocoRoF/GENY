@@ -400,9 +400,9 @@ const ko: Translations = {
 
     // ─── LLM 패널 + 프로바이더 모달 ────────────────────
     llmBackends: {
-      navLabel: 'LLM',
-      title: 'LLM',
-      description: '{count}개 프로바이더가 executor의 ClientRegistry에 매핑됩니다. 각 카드가 해당 프로바이더의 유일한 편집창이에요 — 클라우드는 API 키를 붙여넣고(Anthropic / OpenAI / Google), 로컬은 OpenAI 호환 엔드포인트를 입력하고(vLLM / Ollama / LM Studio / Custom), Claude Code는 모달 내 로그인 흐름을 실행하면 됩니다. 카드가 초록색이 되면 해당 프로바이더를 Stage 6에서 선택한 Environment가 실제 VTuber / Worker 세션을 그 백엔드로 라우팅합니다.',
+      navLabel: 'LLM & Provider',
+      title: 'LLM & Provider',
+      description: '{count}개 프로바이더가 executor의 ClientRegistry에 매핑되며, 모든 프로바이더 키는 이 섹션에서만 관리합니다 — 여기 저장한 키가 Geny 전체(세션·메모리 임베딩·지식 저장소·TTS·문서 도구)에 그대로 적용돼요. 클라우드는 API 키를 붙여넣고(Anthropic / OpenAI / Google), 로컬은 OpenAI 호환 엔드포인트를 입력하고(vLLM / Ollama / LM Studio / Custom), Claude Code는 모달 내 로그인 흐름을 실행하면 됩니다. 클라우드 키는 프로바이더에 실제 검증되며, 거부된 키는 조용히 실패하는 대신 여기서 빨간색으로 표시됩니다.',
       refreshAll: '전체 새로고침',
       reCheck: '다시 확인',
       docs: '문서',
@@ -413,6 +413,7 @@ const ko: Translations = {
       badge: {
         ready: '준비됨',
         loginRequired: '로그인 필요',
+        keyRejected: '키 거부됨',
         notConfigured: '미설정',
         idle: '대기 중',
       },
@@ -423,6 +424,8 @@ const ko: Translations = {
       },
       detail: {
         'api.key_configured': '{env}가 설정되어 있습니다.',
+        'api.key_verified': '{env} 프로바이더 검증 완료 — 유효한 키입니다.',
+        'api.key_rejected': '{env}가 설정돼 있지만 프로바이더가 거부(401)했습니다. 카드를 열어 유효한 키로 교체하세요.',
         'api.key_missing': 'API 키가 설정되지 않았습니다.',
         'vllm.base_url_set': 'base_url={url}',
         'vllm.base_url_missing': 'vLLM base URL이 비어 있습니다. 카드를 열고 OpenAI 호환 엔드포인트를 입력하세요.',
