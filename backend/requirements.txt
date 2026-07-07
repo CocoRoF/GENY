@@ -38,6 +38,9 @@ ddgs==9.11.4
 # blow up on `from geny_executor import CredentialBundle`.
 geny-executor[qdrant]>=2.47.0,<3.0.0
 contextifier[pdf]>=0.3.0
+# Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
+croniter>=2.0.0
+sqlalchemy>=2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 # TTS (Text-to-Speech)

@@ -803,6 +803,54 @@ class OpsidianReadTool(BaseTool):
 # ============================================================================
 
 
+async def _knowledge_semantic_hits(
+    opsidian, query: str, max_results: int,
+):
+    """qdrant semantic hits from the user's knowledge repository, shaped
+    like keyword results. Returns [] when the repo isn't operational
+    (no OpenAI key / qdrant down) — the caller degrades to keyword-only."""
+    username = getattr(opsidian, "username", None)
+    if not username:
+        return []
+    try:
+        from service.knowledge import KnowledgeUnavailable, get_knowledge_service
+
+        svc = get_knowledge_service(username)
+        hits = await svc.search(query, top_k=max_results)
+    except Exception:  # noqa: BLE001 — incl. KnowledgeUnavailable
+        return []
+    return [
+        {
+            "filename": f"knowledge/{h.get('filename') or ('doc-' + h.get('doc_id', '') + '.md')}",
+            "title": h.get("title") or h.get("doc_id", ""),
+            "category": "knowledge",
+            "tags": ["knowledge"],
+            "importance": "medium",
+            "score": h.get("score", 0.0),
+            "snippet": (h.get("text") or "")[:500],
+            "page": h.get("page"),
+            "heading": h.get("heading"),
+            "match": "semantic",
+        }
+        for h in hits
+    ]
+
+
+def _merge_hybrid(semantic, keyword, max_results: int):
+    """Interleave semantic + keyword hits, dedup by filename, semantic
+    first at equal footing (scores aren't comparable across engines)."""
+    out, seen = [], set()
+    for row in semantic + keyword:
+        key = row.get("filename") or row.get("title")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+        if len(out) >= max_results * 2:
+            break
+    return out
+
+
 class OpsidianSearchTool(BaseTool):
     """Keyword-search the user's personal Opsidian vault.
 
@@ -824,7 +872,10 @@ class OpsidianSearchTool(BaseTool):
 
     name = "opsidian_search"
     description = (
-        "Search the user's personal Opsidian vault by keyword. "
+        "Search the user's personal Opsidian vault — hybrid: semantic "
+        "search over the knowledge repository (uploaded documents, "
+        "collected sources; results carry title/page/heading) plus "
+        "keyword search over notes. "
         "Returns the most relevant notes with title, category, "
         "tags, score, and a short snippet. Use this BEFORE "
         "opsidian_read when you don't already know the filename. "
@@ -876,11 +927,22 @@ class OpsidianSearchTool(BaseTool):
             }
             for r in results
         ]
+        # Knowledge repository (qdrant) semantic plane — hybrid merge.
+        try:
+            from service.memory.sync_async_bridge import run_coro_sync
+
+            semantic = run_coro_sync(
+                _knowledge_semantic_hits(opsidian, query, max_results)
+            )
+        except Exception:  # noqa: BLE001
+            semantic = []
+        engine = "opsidian.hybrid" if semantic else "opsidian.keyword"
+        items = _merge_hybrid(semantic, items, max_results)
         _log_knowledge_event(
             session_id,
             event_type="opsidian_search",
             source="Opsidian",
-            engine="legacy.keyword",
+            engine=engine,
             message=(
                 f"opsidian_search: '{query[:60]}' → {len(items)} hits"
             ),
@@ -894,7 +956,7 @@ class OpsidianSearchTool(BaseTool):
             "query": query,
             "total": len(items),
             "results": items,
-            "engine": "opsidian.keyword",
+            "engine": engine,
         })
 
     async def arun(
@@ -925,6 +987,7 @@ class OpsidianSearchTool(BaseTool):
             if callable(asearch)
             else opsidian.search(query, max_results=max_results)
         )
+        semantic = await _knowledge_semantic_hits(opsidian, query, max_results)
         items = [
             {
                 "filename": r.get("filename"),
@@ -937,11 +1000,13 @@ class OpsidianSearchTool(BaseTool):
             }
             for r in results
         ]
+        engine = "opsidian.hybrid" if semantic else "opsidian.keyword"
+        items = _merge_hybrid(semantic, items, max_results)
         _log_knowledge_event(
             session_id,
             event_type="opsidian_search",
             source="Opsidian",
-            engine="legacy.keyword",
+            engine=engine,
             message=(
                 f"opsidian_search: '{query[:60]}' → {len(items)} hits"
             ),
@@ -953,7 +1018,7 @@ class OpsidianSearchTool(BaseTool):
             "query": query,
             "total": len(items),
             "results": items,
-            "engine": "opsidian.keyword",
+            "engine": engine,
         })
 
     # ── Size guard helpers ───────────────────────────────────────

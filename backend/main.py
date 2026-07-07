@@ -584,6 +584,13 @@ async def lifespan(app: FastAPI):
     curation_scheduler.start()
     app.state.curation_scheduler = curation_scheduler
 
+    # ── Knowledge Collection Scheduler ─────────────────────────────────
+    # Fires due api/web/db knowledge sources (cron) into the user vault.
+    from service.knowledge.connectors import get_knowledge_scheduler
+    knowledge_scheduler = get_knowledge_scheduler()
+    knowledge_scheduler.start()
+    app.state.knowledge_scheduler = knowledge_scheduler
+
     # ── Background Task Runtime ────────────────────────────────────────
     # geny-executor 1.1.0 ships TaskRegistry + BackgroundTaskRunner
     # primitives. Wire them with the in-memory store as the default

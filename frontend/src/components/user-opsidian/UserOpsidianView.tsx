@@ -41,10 +41,12 @@ import {
   Loader2,
   Sparkles,
   Copy,
+  BookOpenText,
 } from 'lucide-react';
 import UnifiedGraphView from '../knowledge-graph/UnifiedGraphView';
 import CurationSettingsPanel from './CurationSettingsPanel';
 import InboxPanel from './InboxPanel';
+import KnowledgePanel from './KnowledgePanel';
 import {
   attachmentMarkdownComponents,
   attachmentUrlTransform,
@@ -399,6 +401,14 @@ export default function UserOpsidianView() {
               }}
             />
           )}
+          {viewMode === 'knowledge' && (
+            <KnowledgePanel
+              onSelectFile={(fn) => {
+                handleSelectFile(fn);
+                setViewMode('editor');
+              }}
+            />
+          )}
           {viewMode === 'graph' && (
             <UnifiedGraphView nodes={graphNodes} edges={graphEdges} onSelectFile={handleSelectFile} />
           )}
@@ -441,7 +451,7 @@ function Sidebar({
   onSelectFile: (fn: string) => void;
   onSetSidebarCollapsed: (v: boolean) => void;
   onSetSidebarPanel: (p: 'files' | 'tags' | 'backlinks') => void;
-  onSetViewMode: (v: 'editor' | 'graph' | 'search' | 'inbox') => void;
+  onSetViewMode: (v: 'editor' | 'graph' | 'search' | 'inbox' | 'knowledge') => void;
   onRefresh: () => void;
   onNewNote: () => void;
   onOpenCurationSettings: () => void;
@@ -624,6 +634,9 @@ function Sidebar({
         </button>
         <button className={`obs-sb-view-btn ${viewMode === 'inbox' ? 'active' : ''}`} onClick={() => onSetViewMode('inbox')} title="Whiteboard inbox — raw captures">
           <Inbox size={12} /> Inbox
+        </button>
+        <button className={`obs-sb-view-btn ${viewMode === 'knowledge' ? 'active' : ''}`} onClick={() => onSetViewMode('knowledge')} title="지식 저장소 — 문서 업로드·시맨틱 검색">
+          <BookOpenText size={12} /> 지식
         </button>
         <button className={`obs-sb-view-btn ${viewMode === 'graph' ? 'active' : ''}`} onClick={() => onSetViewMode('graph')}>
           <GitGraph size={12} /> {t('opsidian.graph')}

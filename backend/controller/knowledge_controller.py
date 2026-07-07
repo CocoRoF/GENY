@@ -10,12 +10,20 @@ the frontend can route the user to settings.
 from __future__ import annotations
 
 from logging import getLogger
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
 from service.knowledge import KnowledgeUnavailable, get_knowledge_service
+from service.knowledge.connectors import (
+    SOURCE_TYPES,
+    delete_source,
+    load_sources,
+    run_source,
+    upsert_source,
+)
 from service.whiteboard._task_tracker import schedule as _schedule_task
 
 logger = getLogger(__name__)
@@ -28,6 +36,17 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(8, ge=1, le=50)
+
+
+class SourceRequest(BaseModel):
+    """Continuous-collection source (api / web / db)."""
+
+    id: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=120)
+    type: str
+    schedule: str = "0 * * * *"  # cron; hourly default
+    enabled: bool = True
+    config: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _unavailable(exc: KnowledgeUnavailable) -> HTTPException:
@@ -99,3 +118,67 @@ async def search_knowledge(
     except KnowledgeUnavailable as exc:
         raise _unavailable(exc)
     return {"hits": hits, "total": len(hits)}
+
+
+# ── continuous collection sources ────────────────────────────────────
+
+
+@router.get("/sources")
+async def list_knowledge_sources(auth: dict = Depends(require_auth)):
+    return {"sources": load_sources(auth.get("sub", "anonymous"))}
+
+
+@router.post("/sources")
+async def save_knowledge_source(
+    req: SourceRequest, auth: dict = Depends(require_auth),
+):
+    if req.type not in SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"type must be one of {list(SOURCE_TYPES)}",
+        )
+    try:
+        from croniter import croniter
+
+        croniter(req.schedule)
+    except (ValueError, KeyError):
+        raise HTTPException(
+            status_code=400, detail=f"invalid cron schedule: {req.schedule!r}",
+        )
+    source = upsert_source(auth.get("sub", "anonymous"), req.model_dump())
+    return {"source": source}
+
+
+@router.delete("/sources/{source_id}")
+async def delete_knowledge_source(
+    source_id: str = Path(...), auth: dict = Depends(require_auth),
+):
+    if not delete_source(auth.get("sub", "anonymous"), source_id):
+        raise HTTPException(status_code=404, detail=f"source not found: {source_id}")
+    return {"deleted": source_id}
+
+
+@router.post("/sources/{source_id}/run")
+async def run_knowledge_source(
+    source_id: str = Path(...), auth: dict = Depends(require_auth),
+):
+    username = auth.get("sub", "anonymous")
+    svc = get_knowledge_service(username)
+    try:
+        svc._vector()  # noqa: SLF001 — fail fast before scheduling the run
+    except KnowledgeUnavailable as exc:
+        raise _unavailable(exc)
+    source = next(
+        (s for s in load_sources(username) if s.get("id") == source_id), None,
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"source not found: {source_id}")
+
+    async def _run():
+        try:
+            await run_source(username, source)
+        except Exception:  # noqa: BLE001 — recorded on the source
+            logger.warning("knowledge: source run failed", exc_info=True)
+
+    _schedule_task(_run(), name=f"knowledge.collect:{source_id}")
+    return {"accepted": True, "source_id": source_id, "status": "running"}

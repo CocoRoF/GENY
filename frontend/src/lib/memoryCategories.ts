@@ -39,6 +39,7 @@ import {
   Lightbulb,
   MessageSquare,
   ScanEye,
+  BookOpenText,
 } from 'lucide-react';
 
 /** All categories the backend can write to. Order matters — the
@@ -49,6 +50,7 @@ export const MEMORY_CATEGORIES = [
   'dms',
   'executions',
   'observations',
+  'knowledge',
   'insights',
   'topics',
   'projects',
@@ -92,6 +94,7 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   executions: GitGraph,
   // Screen-observation notes (auto-captured frames + captions).
   observations: ScanEye,
+  knowledge: BookOpenText,
   insights: Lightbulb,
   topics: Bookmark,
   projects: FolderKanban,
@@ -109,6 +112,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   dms: '#a78bfa',           // violet — counterpart channel
   executions: '#22c55e',    // green — execution-summary stream
   observations: '#06b6d4',  // cyan — auto-captured screen frames
+  knowledge: '#10b981',     // emerald — knowledge repository documents
   insights: '#ec4899',      // pink — distilled knowledge
   topics: '#3b82f6',        // blue — curated subject pages
   projects: '#8b5cf6',      // violet — curated initiative pages
@@ -128,6 +132,7 @@ export const CATEGORY_FALLBACK_LABELS: Record<string, string> = {
   dms: 'DMs',
   executions: 'Executions',
   observations: 'Observations',
+  knowledge: 'Knowledge',
   insights: 'Insights',
   topics: 'Topics',
   projects: 'Projects',

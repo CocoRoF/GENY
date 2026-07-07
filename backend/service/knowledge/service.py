@@ -142,6 +142,7 @@ class KnowledgeService:
         data: bytes,
         source_type: str = "upload",
         source_ref: str = "",
+        doc_key: str = "",
     ) -> Dict[str, Any]:
         """Full pipeline for one document: attach original → card note
         (processing) → extract+chunk → embed+index → card ready/failed.
@@ -150,10 +151,34 @@ class KnowledgeService:
         vector = self._vector()  # fail fast on missing key
         vault = self._vault()
 
-        doc_id = hashlib.sha1(data).hexdigest()[:12]
+        content_sha = hashlib.sha1(data).hexdigest()
+        # Connectors pass a STABLE doc_key so re-fetches UPDATE the same
+        # document (same card, replaced vectors); uploads default to the
+        # content hash (identical file re-upload is a no-op identity).
+        doc_id = (
+            hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:12]
+            if doc_key
+            else content_sha[:12]
+        )
         captured = datetime.now(timezone.utc)
         safe_name = Path(filename).name or f"document-{doc_id}"
         card_filename = f"doc-{doc_id}.md"
+
+        # Incremental skip: unchanged content for a known document.
+        existing = await self._vault().aread_note(
+            f"{KNOWLEDGE_CATEGORY}/{card_filename}",
+        )
+        if existing is not None:
+            prev = (existing.get("metadata") or {})
+            if (
+                prev.get("content_sha") == content_sha
+                and prev.get("knowledge_status") == "ready"
+            ):
+                return {
+                    "doc_id": doc_id, "filename": card_filename,
+                    "title": safe_name, "status": "unchanged",
+                    "chunks": prev.get("chunk_count", 0),
+                }
 
         # 1) Original bytes into the vault's attachment area.
         attachment_rel = vault.save_attachment(
@@ -172,6 +197,7 @@ class KnowledgeService:
             captured=captured,
             summary="",
             chunk_count=0,
+            content_sha=content_sha,
         )
 
         # 3) Extract + chunk + index. Any failure lands on the card.
@@ -195,6 +221,7 @@ class KnowledgeService:
                 captured=captured,
                 summary=preview,
                 chunk_count=indexed,
+                content_sha=content_sha,
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
@@ -213,6 +240,7 @@ class KnowledgeService:
                 captured=captured,
                 summary=f"ingestion failed: {exc}",
                 chunk_count=0,
+                content_sha=content_sha,
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
@@ -227,13 +255,17 @@ class KnowledgeService:
         source_type: str,
         source_ref: str = "",
         extension: str = "md",
+        doc_key: str = "",
     ) -> Dict[str, Any]:
-        """Connector-facing entry: ingest already-fetched text/payload."""
+        """Connector-facing entry: ingest already-fetched text/payload.
+        ``doc_key`` (e.g. source id + page url) makes re-fetches update
+        the same document instead of accreting duplicates."""
         return await self.ingest_file(
             filename=f"{title}.{extension}",
             data=text.encode("utf-8"),
             source_type=source_type,
             source_ref=source_ref,
+            doc_key=doc_key,
         )
 
     def _extract_chunks(self, filename: str, data: bytes) -> List[Dict[str, Any]]:
@@ -310,6 +342,7 @@ class KnowledgeService:
         self, *, card_filename: str, title: str, doc_id: str,
         attachment_rel: str, source_type: str, source_ref: str,
         status: str, captured, summary: str, chunk_count: int,
+        content_sha: str = "",
     ) -> None:
         vault = self._vault()
         body = (
@@ -336,6 +369,7 @@ class KnowledgeService:
                 "source_ref": source_ref,
                 "chunk_count": chunk_count,
                 "attachment": attachment_rel,
+                "content_sha": content_sha,
             },
         )
 

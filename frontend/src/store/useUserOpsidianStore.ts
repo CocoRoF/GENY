@@ -8,7 +8,7 @@ import type {
 } from '@/types';
 
 // 'inbox' is the whiteboard P1 raw-captures view.
-export type ViewMode = 'editor' | 'graph' | 'search' | 'inbox';
+export type ViewMode = 'editor' | 'graph' | 'search' | 'inbox' | 'knowledge';
 export type SidebarPanel = 'files' | 'tags' | 'backlinks';
 
 export interface UserOpsidianState {

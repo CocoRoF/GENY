@@ -3495,6 +3495,121 @@ export interface WhiteboardViewStats {
   events: Record<string, number>;
 }
 
+export interface KnowledgeDoc {
+  filename: string | null;
+  title: string;
+  doc_id: string;
+  status: 'processing' | 'ready' | 'failed' | string;
+  source_type: string;
+  source_ref: string;
+  chunk_count: number;
+  modified: string;
+}
+
+export interface KnowledgeHit {
+  score: number;
+  text: string;
+  doc_id: string;
+  title: string;
+  page: number | null;
+  heading: string | null;
+  source_type: string;
+  filename: string;
+}
+
+export interface KnowledgeSourceRunReport {
+  started_at: string;
+  ok: boolean;
+  fetched?: number;
+  ingested?: number;
+  unchanged?: number;
+  failed?: number;
+  error?: string;
+}
+
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  type: 'api' | 'web' | 'db' | string;
+  schedule: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  last_run_at?: string | null;
+  last_result?: KnowledgeSourceRunReport | null;
+}
+
+/** Knowledge repository — documents in the user vault, qdrant-searchable. */
+export const knowledgeApi = {
+  status: () =>
+    apiCall<{
+      enabled: boolean;
+      embedding_model: string;
+      embedding_ready: boolean;
+      collection: string;
+    }>('/api/opsidian/knowledge/status'),
+
+  /** Multipart upload — resolves once accepted (processing continues server-side). */
+  upload: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/opsidian/knowledge/upload', {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<{ accepted: boolean; filename: string }>;
+  },
+
+  listDocuments: () =>
+    apiCall<{ documents: KnowledgeDoc[] }>('/api/opsidian/knowledge/documents'),
+
+  deleteDocument: (docId: string) =>
+    apiCall<{ deleted: string }>(
+      `/api/opsidian/knowledge/documents/${encodeURIComponent(docId)}`,
+      { method: 'DELETE' },
+    ),
+
+  search: (query: string, topK = 8) =>
+    apiCall<{ hits: KnowledgeHit[]; total: number }>(
+      '/api/opsidian/knowledge/search',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, top_k: topK }),
+      },
+    ),
+
+  // ── continuous collection sources (api / web / db connectors) ──
+  listSources: () =>
+    apiCall<{ sources: KnowledgeSource[] }>('/api/opsidian/knowledge/sources'),
+
+  saveSource: (source: Partial<KnowledgeSource> & { name: string; type: string }) =>
+    apiCall<{ source: KnowledgeSource }>('/api/opsidian/knowledge/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(source),
+    }),
+
+  deleteSource: (sourceId: string) =>
+    apiCall<{ deleted: string }>(
+      `/api/opsidian/knowledge/sources/${encodeURIComponent(sourceId)}`,
+      { method: 'DELETE' },
+    ),
+
+  runSource: (sourceId: string) =>
+    apiCall<{ accepted: boolean; source_id: string }>(
+      `/api/opsidian/knowledge/sources/${encodeURIComponent(sourceId)}/run`,
+      { method: 'POST' },
+    ),
+};
+
 export const whiteboardApi = {
   /** POST /api/opsidian/captures — JSON ingest (text/link/clipboard-text). */
   createCapture: (data: {

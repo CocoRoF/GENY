@@ -58,6 +58,9 @@ dependencies = [
     # requirements.txt.
     "geny-executor[qdrant]>=2.47.0,<3.0.0",
     "contextifier[pdf]>=0.3.0",
+    # Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
+    "croniter>=2.0.0",
+    "sqlalchemy>=2.0.0",
     "edit2docs>=0.6.0",
     "an-web>=0.9.1",
     # MCP (Model Context Protocol)
