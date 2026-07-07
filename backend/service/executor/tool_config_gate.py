@@ -80,14 +80,16 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
         ltm = get_config_manager().load_config(LTMConfig)
         if getattr(ltm, "curated_knowledge_enabled", False):
             satisfied.add("feature:curated_knowledge")
-        # The user vault (Opsidian) is where the knowledge repository —
-        # uploaded documents — lives. Its browse/read/search/fetch tools
-        # must be available whenever the vault is usable, INDEPENDENT of
-        # the curated-knowledge feature (a different store). Both flags
-        # default True, so the token is present out of the box.
-        if getattr(ltm, "user_opsidian_index_enabled", True) or getattr(
-            ltm, "user_opsidian_raw_read_enabled", True
-        ):
+        # The knowledge REPOSITORY (documents the user explicitly uploaded
+        # for the agent) is operational whenever LTM is on — its read/
+        # search/fetch tools gate on this, INDEPENDENT of the
+        # user_opsidian raw-access flags (which govern free access to ALL
+        # personal notes, a privacy control, not agent-facing uploads).
+        if getattr(ltm, "enabled", False):
+            satisfied.add("feature:knowledge_repository")
+        # Raw access to the FULL personal vault (browse every note) still
+        # respects the index flag.
+        if getattr(ltm, "user_opsidian_index_enabled", True):
             satisfied.add("feature:user_opsidian")
     except Exception:  # noqa: BLE001
         pass

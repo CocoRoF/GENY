@@ -791,16 +791,38 @@ class OpsidianReadTool(BaseTool):
     )
     CAPABILITIES = _READ_ONLY_KNOWLEDGE
 
+    @staticmethod
+    def _is_knowledge_card(filename: str) -> bool:
+        """Knowledge-repository cards are documents the user uploaded FOR
+        the agent — always readable, even when raw access to the rest of
+        the personal vault is disabled."""
+        f = (filename or "").replace("\\", "/")
+        return f.startswith("knowledge/") or bool(
+            re.search(r"(^|/)doc-[0-9a-f]{6,}\.md$", f)
+        )
+
+    def _guard(self, filename: str):
+        config = _get_ltm_config()
+        if self._is_knowledge_card(filename):
+            return None  # uploaded document — no raw-vault gate
+        if config is None or not config.user_opsidian_raw_read_enabled:
+            return _error(
+                "raw access to personal notes is disabled — only "
+                "knowledge-repository documents (knowledge/doc-*.md) are "
+                "readable"
+            )
+        return None
+
     def run(self, session_id: str, filename: str) -> str:
-        """Read a User Opsidian note.
+        """Read a User Opsidian note (or a knowledge-repository document).
 
         Args:
             session_id: Your session ID.
             filename: The filename of the note to read.
         """
-        config = _get_ltm_config()
-        if config is None or not config.user_opsidian_raw_read_enabled:
-            return _error("User Opsidian raw read access is not enabled")
+        blocked = self._guard(filename)
+        if blocked is not None:
+            return blocked
 
         _, opsidian = _get_context_managers(session_id)
         if opsidian is None:
@@ -813,9 +835,9 @@ class OpsidianReadTool(BaseTool):
         return _ok(note)
 
     async def arun(self, session_id: str, filename: str) -> str:
-        config = _get_ltm_config()
-        if config is None or not config.user_opsidian_raw_read_enabled:
-            return _error("User Opsidian raw read access is not enabled")
+        blocked = self._guard(filename)
+        if blocked is not None:
+            return blocked
         _, opsidian = _get_context_managers(session_id)
         if opsidian is None:
             return _error("User Opsidian manager not available")
@@ -990,35 +1012,39 @@ class OpsidianSearchTool(BaseTool):
             max_results: Maximum results to return (default: 5).
         """
         config = _get_ltm_config()
-        if config is None or not config.user_opsidian_index_enabled:
-            return _error("User Opsidian index access is not enabled")
         _, opsidian = _get_context_managers(session_id)
         if opsidian is None:
             return _error("User Opsidian manager not available")
         if not query or not query.strip():
             return _error("query is required")
 
-        warning = self._size_guard(opsidian)
-        if warning is not None:
-            return _ok({
-                "query": query, "total": 0, "results": [],
-                "engine": "opsidian.keyword", "warning": warning,
-            })
-
-        results = opsidian.search(query, max_results=max_results)
-        items = [
-            {
-                "filename": r.get("filename"),
-                "title": r.get("title"),
-                "category": r.get("category"),
-                "tags": r.get("tags"),
-                "importance": r.get("importance"),
-                "score": round(float(r.get("score", 0) or 0), 4),
-                "snippet": (r.get("snippet") or "")[:500],
-            }
-            for r in results
-        ]
-        # Knowledge repository (qdrant) semantic plane — hybrid merge.
+        # The keyword plane reads EVERY personal note, so it respects the
+        # raw-index flag. The semantic plane touches ONLY uploaded
+        # knowledge-repository documents, so it always runs — search must
+        # find uploaded docs even when raw vault access is off.
+        keyword_enabled = bool(config and config.user_opsidian_index_enabled)
+        items = []
+        if keyword_enabled:
+            warning = self._size_guard(opsidian)
+            if warning is not None:
+                return _ok({
+                    "query": query, "total": 0, "results": [],
+                    "engine": "opsidian.keyword", "warning": warning,
+                })
+            results = opsidian.search(query, max_results=max_results)
+            items = [
+                {
+                    "filename": r.get("filename"),
+                    "title": r.get("title"),
+                    "category": r.get("category"),
+                    "tags": r.get("tags"),
+                    "importance": r.get("importance"),
+                    "score": round(float(r.get("score", 0) or 0), 4),
+                    "snippet": (r.get("snippet") or "")[:500],
+                }
+                for r in results
+            ]
+        # Knowledge repository (qdrant) semantic plane — always on.
         try:
             from service.memory.sync_async_bridge import run_coro_sync
 
@@ -1027,7 +1053,9 @@ class OpsidianSearchTool(BaseTool):
             )
         except Exception:  # noqa: BLE001
             semantic = []
-        engine = "opsidian.hybrid" if semantic else "opsidian.keyword"
+        engine = "opsidian.hybrid" if (semantic and items) else (
+            "opsidian.knowledge" if semantic else "opsidian.keyword"
+        )
         items = _merge_hybrid(semantic, items, max_results)
         _log_knowledge_event(
             session_id,
@@ -1057,41 +1085,45 @@ class OpsidianSearchTool(BaseTool):
         max_results: int = 5,
     ) -> str:
         config = _get_ltm_config()
-        if config is None or not config.user_opsidian_index_enabled:
-            return _error("User Opsidian index access is not enabled")
         _, opsidian = _get_context_managers(session_id)
         if opsidian is None:
             return _error("User Opsidian manager not available")
         if not query or not query.strip():
             return _error("query is required")
 
-        warning = await self._asize_guard(opsidian)
-        if warning is not None:
-            return _ok({
-                "query": query, "total": 0, "results": [],
-                "engine": "opsidian.keyword", "warning": warning,
-            })
-
-        asearch = getattr(opsidian, "asearch", None)
-        results = (
-            await asearch(query, max_results=max_results)
-            if callable(asearch)
-            else opsidian.search(query, max_results=max_results)
-        )
+        # Keyword plane (all personal notes) respects the raw-index flag;
+        # semantic plane (uploaded documents only) always runs.
+        keyword_enabled = bool(config and config.user_opsidian_index_enabled)
+        items = []
+        if keyword_enabled:
+            warning = await self._asize_guard(opsidian)
+            if warning is not None:
+                return _ok({
+                    "query": query, "total": 0, "results": [],
+                    "engine": "opsidian.keyword", "warning": warning,
+                })
+            asearch = getattr(opsidian, "asearch", None)
+            results = (
+                await asearch(query, max_results=max_results)
+                if callable(asearch)
+                else opsidian.search(query, max_results=max_results)
+            )
+            items = [
+                {
+                    "filename": r.get("filename"),
+                    "title": r.get("title"),
+                    "category": r.get("category"),
+                    "tags": r.get("tags"),
+                    "importance": r.get("importance"),
+                    "score": round(float(r.get("score", 0) or 0), 4),
+                    "snippet": (r.get("snippet") or "")[:500],
+                }
+                for r in results
+            ]
         semantic = await _knowledge_semantic_hits(opsidian, query, max_results)
-        items = [
-            {
-                "filename": r.get("filename"),
-                "title": r.get("title"),
-                "category": r.get("category"),
-                "tags": r.get("tags"),
-                "importance": r.get("importance"),
-                "score": round(float(r.get("score", 0) or 0), 4),
-                "snippet": (r.get("snippet") or "")[:500],
-            }
-            for r in results
-        ]
-        engine = "opsidian.hybrid" if semantic else "opsidian.keyword"
+        engine = "opsidian.hybrid" if (semantic and items) else (
+            "opsidian.knowledge" if semantic else "opsidian.keyword"
+        )
         items = _merge_hybrid(semantic, items, max_results)
         _log_knowledge_event(
             session_id,
@@ -1185,17 +1217,26 @@ TOOLS = [
 ]
 
 # Progressive disclosure — hide tools whose backing store is off instead of
-# erroring at call time. TWO distinct stores, TWO gates:
-#   * curated ``knowledge_*`` tools  → feature:curated_knowledge
-#   * user-vault ``opsidian_*`` tools → feature:user_opsidian
-# The opsidian tools read the KNOWLEDGE REPOSITORY (uploaded documents), which
-# lives in the user vault — gating them on curated_knowledge (a different,
-# off-by-default store) hid document reading from every agent even when the
-# repository was in active use. Both gate tokens come from
+# erroring at call time. THREE gates for THREE access classes:
+#   * curated ``knowledge_*`` tools         → feature:curated_knowledge
+#   * knowledge-repository reads            → feature:knowledge_repository
+#     (opsidian_read / opsidian_search / opsidian_fetch_document — reading
+#      documents the user UPLOADED for the agent; always intended)
+#   * raw full-vault browse                 → feature:user_opsidian
+#     (opsidian_browse lists EVERY personal note — a privacy surface)
+# Gating the repository reads on curated_knowledge (a different, off-by-
+# default store) or on the raw-vault flags hid document reading from every
+# agent even when the repository was in active use. Tokens come from
 # tool_config_gate.compute_satisfied_config.
-_CURATED_GATE = ("feature:curated_knowledge",)
-_VAULT_GATE = ("feature:user_opsidian",)
+_GATE = {
+    "knowledge_search": ("feature:curated_knowledge",),
+    "knowledge_read": ("feature:curated_knowledge",),
+    "knowledge_list": ("feature:curated_knowledge",),
+    "knowledge_promote": ("feature:curated_knowledge",),
+    "opsidian_browse": ("feature:user_opsidian",),
+    "opsidian_read": ("feature:knowledge_repository",),
+    "opsidian_search": ("feature:knowledge_repository",),
+    "opsidian_fetch_document": ("feature:knowledge_repository",),
+}
 for _t in TOOLS:
-    _t.REQUIRED_CONFIG = (
-        _VAULT_GATE if _t.name.startswith("opsidian_") else _CURATED_GATE
-    )
+    _t.REQUIRED_CONFIG = _GATE.get(_t.name, ("feature:curated_knowledge",))
