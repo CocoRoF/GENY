@@ -19,6 +19,7 @@ import { X, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from 'lucide-react
 import { configApi, llmBackendsApi, type ProviderHealth } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
+import { dimensionOf, modelsFor } from '@/lib/embeddingModels';
 
 
 type ApiProviderId = 'anthropic' | 'openai' | 'google' | 'vllm';
@@ -36,6 +37,101 @@ const FIELDS: Record<ApiProviderId, FieldSpec> = {
   google:    { configField: 'google_api_key',    password: true },
   vllm:      { configField: 'base_url',          password: false },
 };
+
+
+/** Embedding models of one provider + "use as common embedding backend". */
+function EmbeddingSection({ providerId }: { providerId: 'openai' | 'google' }) {
+  const { t } = useI18n();
+  const models = modelsFor(providerId);
+  const [model, setModel] = useState(models[0] ?? '');
+  const [current, setCurrent] = useState<{ provider: string; model: string } | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await configApi.get('embedding_settings');
+        const values = (res.values ?? {}) as { provider?: string; model?: string };
+        if (cancelled) return;
+        setCurrent({
+          provider: values.provider ?? 'openai',
+          model: values.model ?? '',
+        });
+        if (values.provider === providerId && values.model && models.includes(values.model)) {
+          setModel(values.model);
+        }
+      } catch {
+        /* section stays usable with defaults */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerId]);
+
+  const isActive = current?.provider === providerId && current?.model === model;
+
+  const apply = async () => {
+    setApplying(true);
+    setError(null);
+    try {
+      await configApi.update('embedding_settings', { provider: providerId, model });
+      setCurrent({ provider: providerId, model });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3">
+      <div className="text-[0.8125rem] font-medium">
+        {t('settings.llmBackends.embedding.sectionTitle')}
+      </div>
+      <p className="text-[0.7rem] text-[var(--text-tertiary)] leading-relaxed">
+        {t('settings.llmBackends.embedding.sectionHelp')}
+      </p>
+      <div className="flex gap-2 items-center">
+        <select
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          className="flex-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[0.8125rem]"
+        >
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m} ({dimensionOf(providerId, m)}d)
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void apply()}
+          disabled={applying || isActive}
+          className="px-3 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50 whitespace-nowrap"
+        >
+          {applying ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
+          ) : isActive ? (
+            t('settings.llmBackends.embedding.activeLabel')
+          ) : (
+            t('settings.llmBackends.embedding.useAsDefault')
+          )}
+        </button>
+      </div>
+      {current && current.provider !== providerId && (
+        <p className="text-[0.7rem] text-[var(--text-tertiary)]">
+          {t('settings.llmBackends.embedding.currentOther', {
+            provider: current.provider,
+            model: current.model,
+          })}
+        </p>
+      )}
+      {error && <p className="text-[0.7rem] text-rose-300">{error}</p>}
+    </div>
+  );
+}
 
 
 export default function ApiBackendModal({
@@ -197,6 +293,13 @@ export default function ApiBackendModal({
           </div>
           <p className="text-[0.7rem] text-[var(--text-tertiary)] leading-relaxed">{helper}</p>
         </div>
+
+        {/* Embedding models this provider offers — pick one and make
+             this provider the COMMON embedding backend (saves to the
+             embedding_settings config the knowledge repository reads). */}
+        {(providerId === 'openai' || providerId === 'google') && (
+          <EmbeddingSection providerId={providerId} />
+        )}
 
         {error && (
           <div className="text-[0.75rem] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded p-2">

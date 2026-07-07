@@ -115,6 +115,58 @@ async def delete_document(
     return {"deleted": doc_id}
 
 
+@router.post("/documents/{doc_id}/reembed")
+async def reembed_document(
+    doc_id: str = Path(...), auth: dict = Depends(require_auth),
+):
+    """Re-embed one document from its stored original under the CURRENT
+    embedding model (the repair for embedding-model mismatches)."""
+    svc = get_knowledge_service(auth.get("sub", "anonymous"))
+    try:
+        await svc.verify_embedding()
+    except KnowledgeUnavailable as exc:
+        raise _unavailable(exc)
+    docs = await svc.list_documents()
+    if not any(d.get("doc_id") == doc_id for d in docs):
+        raise HTTPException(status_code=404, detail=f"document not found: {doc_id}")
+
+    async def _reembed():
+        try:
+            await svc.reembed_document(doc_id)
+        except Exception:  # noqa: BLE001 — recorded on the card
+            logger.warning("knowledge: reembed failed", exc_info=True)
+
+    _schedule_task(_reembed(), name=f"knowledge.reembed:{doc_id}")
+    return {"accepted": True, "doc_id": doc_id, "status": "processing"}
+
+
+@router.post("/reembed")
+async def reembed_stale_documents(auth: dict = Depends(require_auth)):
+    """Re-embed every READY document whose recorded embedding model
+    differs from the current setting."""
+    svc = get_knowledge_service(auth.get("sub", "anonymous"))
+    try:
+        await svc.verify_embedding()
+    except KnowledgeUnavailable as exc:
+        raise _unavailable(exc)
+    docs = await svc.list_documents()
+    stale = [
+        d["doc_id"] for d in docs
+        if d.get("embedding_stale") and d.get("status") == "ready" and d.get("doc_id")
+    ]
+
+    async def _reembed_all():
+        for did in stale:
+            try:
+                await svc.reembed_document(did)
+            except Exception:  # noqa: BLE001 — per-doc, recorded on cards
+                logger.warning("knowledge: reembed failed for %s", did, exc_info=True)
+
+    if stale:
+        _schedule_task(_reembed_all(), name=f"knowledge.reembed_all:{len(stale)}")
+    return {"accepted": True, "count": len(stale)}
+
+
 @router.post("/search")
 async def search_knowledge(
     req: SearchRequest, auth: dict = Depends(require_auth),

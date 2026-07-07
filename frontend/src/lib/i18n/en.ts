@@ -399,9 +399,9 @@ const en = {
 
     // ─── LLM panel + per-provider modals ────────────────
     llmBackends: {
-      navLabel: 'LLM & Provider',
-      title: 'LLM & Provider',
-      description: '{count} providers map to the executor\'s ClientRegistry, and this section is the single home for every provider credential — the keys saved here are what ALL of Geny uses: sessions, memory embeddings, the knowledge repository, TTS, and document tools. Paste an API key for cloud (Anthropic / OpenAI / Google), enter an OpenAI-compatible endpoint for local (vLLM / Ollama / LM Studio / Custom), or run the in-modal login flow (Claude Code). Cloud keys are live-verified against the provider — a rejected key shows red here instead of failing silently downstream.',
+      navLabel: 'Model & Provider',
+      title: 'Model & Provider',
+      description: '{count} providers map to the executor\'s ClientRegistry, and this section is the single home for every provider credential and model choice — the keys saved here are what ALL of Geny uses: sessions, memory embeddings, the knowledge repository, TTS, and document tools. Paste an API key for cloud (Anthropic / OpenAI / Google), enter an OpenAI-compatible endpoint for local (vLLM / Ollama / LM Studio / Custom), or run the in-modal login flow (Claude Code). The Embedding card picks the provider/model that embeds knowledge documents. Cloud keys are live-verified against the provider — a rejected key shows red here instead of failing silently downstream.',
       refreshAll: 'Refresh all',
       reCheck: 'Re-check',
       docs: 'Docs',
@@ -415,6 +415,24 @@ const en = {
         keyRejected: 'Key rejected',
         notConfigured: 'Not configured',
         idle: 'Idle',
+      },
+      embedding: {
+        title: 'Embedding',
+        cardAria: 'Open embedding settings',
+        keyMissingBadge: 'Key needed',
+        detailReady: 'Documents are embedded with this provider/model. Every knowledge document records the model it was embedded with.',
+        detailKeyMissing: 'The {provider} key is missing or rejected — set it on the {provider} card above.',
+        modalTitle: 'Embedding settings',
+        modalHelp: 'The COMMON embedding backend: the knowledge repository embeds every document (and every search query) with this provider/model. The API key comes from the provider cards in this panel.',
+        providerLabel: 'Provider',
+        modelLabel: 'Model',
+        modalKeyWarning: 'No valid {provider} key — documents cannot be embedded until you set one on the {provider} card.',
+        reembedHint: 'Changing the model marks existing documents as stale; re-embed them from the knowledge panel.',
+        sectionTitle: 'Embedding models',
+        sectionHelp: 'Models this provider offers for document embedding. Pick one and make this provider the common embedding backend.',
+        useAsDefault: 'Use for embedding',
+        activeLabel: 'In use',
+        currentOther: 'Currently embedding with {provider} / {model}.',
       },
       authMethod: {
         api_key: 'API key',

@@ -3509,6 +3509,11 @@ export interface KnowledgeDoc {
   source_ref: string;
   chunk_count: number;
   modified: string;
+  /** Provider/model that embedded this document (recorded per doc). */
+  embedding_provider?: string;
+  embedding_model?: string;
+  /** True when the doc's model ≠ the current embedding setting. */
+  embedding_stale?: boolean;
 }
 
 export interface KnowledgeHit {
@@ -3548,7 +3553,9 @@ export const knowledgeApi = {
   status: () =>
     apiCall<{
       enabled: boolean;
+      embedding_provider: string;
       embedding_model: string;
+      embedding_dim: number;
       embedding_ready: boolean;
       collection: string;
     }>('/api/opsidian/knowledge/status'),
@@ -3579,6 +3586,20 @@ export const knowledgeApi = {
     apiCall<{ deleted: string }>(
       `/api/opsidian/knowledge/documents/${encodeURIComponent(docId)}`,
       { method: 'DELETE' },
+    ),
+
+  /** Re-embed one document under the CURRENT embedding model. */
+  reembedDocument: (docId: string) =>
+    apiCall<{ accepted: boolean; doc_id: string }>(
+      `/api/opsidian/knowledge/documents/${encodeURIComponent(docId)}/reembed`,
+      { method: 'POST' },
+    ),
+
+  /** Re-embed every ready document whose recorded model is stale. */
+  reembedStale: () =>
+    apiCall<{ accepted: boolean; count: number }>(
+      '/api/opsidian/knowledge/reembed',
+      { method: 'POST' },
     ),
 
   search: (query: string, topK = 8) =>

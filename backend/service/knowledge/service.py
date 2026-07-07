@@ -9,10 +9,13 @@ Design (2026-07 knowledge-repository plan):
   note. Auto-collected content (connectors) lands the same way.
 * **Contextifier converts, executor embeds, qdrant serves.** Extraction +
   chunking is `contextifier` (`extract_chunks` with position metadata:
-  page/heading/sheet per chunk); embeddings are the executor's OpenAI
-  client (``text-embedding-3-large``, 3072-dim, fixed for now); vectors
-  live in a per-user qdrant collection via the executor's
-  ``QdrantVectorStore`` (one point per chunk, payload carries provenance).
+  page/heading/sheet per chunk); the embedding provider/model comes from
+  the Model & Provider panel's Embedding card (``embedding_settings``);
+  vectors live in a per-(user, model) qdrant collection via the
+  executor's ``QdrantVectorStore``. Each document card records the model
+  that embedded it — a mismatch with the current setting marks the doc
+  ``embedding_stale`` and ``reembed_document`` repairs it from the
+  stored original bytes.
 * **Failures are visible, not silent.** A missing OpenAI key raises
   :class:`KnowledgeUnavailable` with ``reason="openai_key_missing"`` — the
   API layer maps it to a response that sends the UI to settings.
@@ -35,11 +38,31 @@ from typing import Any, Dict, List, Optional
 logger = getLogger(__name__)
 
 KNOWLEDGE_CATEGORY = "knowledge"
-EMBEDDING_MODEL = "text-embedding-3-large"
-EMBEDDING_DIM = 3072
 _CHUNK_SIZE = 1200
 _CHUNK_OVERLAP = 150
 _MAX_CHUNKS_PER_DOC = 2000
+
+
+def _embedding_spec() -> "tuple[str, str, int]":
+    """(provider, model, dimension) from the Model & Provider panel's
+    Embedding card (``embedding_settings``), normalised against the
+    model registry. Falls back to the registry default."""
+    from service.config.sub_config.general.embedding_config import (
+        DEFAULT_EMBEDDING_MODEL,
+        DEFAULT_EMBEDDING_PROVIDER,
+        EmbeddingSettingsConfig,
+        resolve_embedding_spec,
+    )
+
+    provider, model = DEFAULT_EMBEDDING_PROVIDER, DEFAULT_EMBEDDING_MODEL
+    try:
+        from service.config.manager import get_config_manager
+
+        cfg = get_config_manager().load_config(EmbeddingSettingsConfig)
+        provider, model = cfg.provider, cfg.model
+    except Exception:  # noqa: BLE001 — config layer down → defaults
+        pass
+    return resolve_embedding_spec(provider, model)
 
 
 class KnowledgeUnavailable(RuntimeError):
@@ -55,10 +78,10 @@ def _qdrant_url() -> str:
     return os.environ.get("GENY_QDRANT_URL", "http://qdrant:6333")
 
 
-def _resolve_openai_key() -> str:
-    """OpenAI key for embeddings: LTM ``embedding_api_key`` if the user
-    deliberately set a separate embedding key, else the central
-    LLM & Provider key (``service.config.credentials``)."""
+def _resolve_embedding_key(provider: str) -> str:
+    """Embedding key: LTM ``embedding_api_key`` if the user deliberately
+    set a separate embedding key, else the central Model & Provider key
+    for the configured embedding provider."""
     try:
         from service.config.manager import get_config_manager
         from service.config.sub_config.general.ltm_config import LTMConfig
@@ -72,14 +95,22 @@ def _resolve_openai_key() -> str:
     try:
         from service.config.credentials import resolve_provider_key
 
-        return resolve_provider_key("openai")
+        return resolve_provider_key(provider)
     except Exception:  # noqa: BLE001
-        return (os.environ.get("OPENAI_API_KEY") or "").strip()
+        env_var = {"openai": "OPENAI_API_KEY", "google": "GOOGLE_API_KEY"}.get(
+            provider, "OPENAI_API_KEY",
+        )
+        return (os.environ.get(env_var) or "").strip()
 
 
-def _collection_for(username: str) -> str:
+def _collection_for(username: str, model: str) -> str:
+    """Per-(user, embedding-model) qdrant collection. A model switch gets
+    a FRESH collection — vector dimensions differ between models, and
+    re-embedded documents move over one by one instead of a destructive
+    drop-and-recreate of a shared collection."""
     safe = "".join(c if c.isalnum() else "_" for c in username.lower())
-    return f"geny_kb__{safe or 'anonymous'}"
+    model_slug = "".join(c if c.isalnum() else "_" for c in model.lower())
+    return f"geny_kb__{safe or 'anonymous'}__{model_slug}"
 
 
 # sha1(key) → "ok" | "auth". A non-empty but REJECTED key otherwise fails
@@ -95,7 +126,9 @@ class KnowledgeService:
         self.username = username
         self._store = None  # lazy QdrantVectorStore
         self._embedder = None  # EmbeddingClient handle for verify_embedding
-        self._key_sha = None  # key the cached store/embedder were built with
+        # (key sha, provider, model) the cached store was built with —
+        # any change rebuilds it.
+        self._built_with = None
 
     # ── wiring ───────────────────────────────────────────────────────
 
@@ -105,24 +138,28 @@ class KnowledgeService:
         return get_user_opsidian_manager(self.username)
 
     def _vector(self):
-        key = _resolve_openai_key()
+        provider, model, dim = _embedding_spec()
+        key = _resolve_embedding_key(provider)
         key_sha = hashlib.sha1(key.encode("utf-8")).hexdigest() if key else None
+        build_id = (key_sha, provider, model)
         if self._store is not None:
-            # An injected store (tests / custom wiring) has no key sha —
+            # An injected store (tests / custom wiring) has no build id —
             # keep it. A self-built store is only valid while the resolved
-            # key is unchanged: after a key rotation in settings the old
-            # embedder would keep pinging with the RETIRED key and poison
-            # the new key's validity verdict.
-            if self._key_sha is None or self._key_sha == key_sha:
+            # key AND the embedding spec are unchanged: after a rotation
+            # the old embedder would ping with the RETIRED key and poison
+            # the new key's validity verdict; after a model switch it
+            # would index into the wrong collection at the wrong
+            # dimension.
+            if self._built_with is None or self._built_with == build_id:
                 return self._store
             self._store = None
             self._embedder = None
-            self._key_sha = None
+            self._built_with = None
         if not key:
             raise KnowledgeUnavailable(
                 "openai_key_missing",
-                "OpenAI API key is required for knowledge embeddings "
-                "(text-embedding-3-large) — configure it in settings.",
+                f"{provider} API key is required for knowledge embeddings "
+                f"({model}) — configure it in the Model & Provider settings.",
             )
         try:
             from geny_executor.memory.embedding.registry import (
@@ -135,17 +172,34 @@ class KnowledgeService:
                 f"geny-executor knowledge surfaces unavailable: {exc}",
             ) from exc
         client = create_embedding_client(
-            "openai", model=EMBEDDING_MODEL, api_key=key,
-            dimension=EMBEDDING_DIM,
+            provider, model=model, api_key=key, dimension=dim,
         )
         self._embedder = client
         self._store = QdrantVectorStore(
             url=_qdrant_url(),
-            collection=_collection_for(self.username),
+            collection=_collection_for(self.username, model),
             client=client,
         )
-        self._key_sha = key_sha
+        self._built_with = build_id
         return self._store
+
+    def _store_for_model(self, model: str):
+        """A QdrantVectorStore bound to *model*'s collection — used to
+        remove vectors of documents embedded under a previous model. The
+        current embedder is reused: removal never embeds."""
+        provider, current_model, _ = _embedding_spec()
+        if model == current_model:
+            return self._vector()
+        vector = self._vector()  # ensures self._embedder exists
+        try:
+            from geny_executor.memory import QdrantVectorStore
+        except ImportError:
+            return vector
+        return QdrantVectorStore(
+            url=_qdrant_url(),
+            collection=_collection_for(self.username, model),
+            client=self._embedder,
+        )
 
     async def verify_embedding(self) -> None:
         """One embed round-trip validating the credential, cached per key
@@ -155,8 +209,9 @@ class KnowledgeService:
         self._vector()  # raises openai_key_missing / qdrant_unavailable
         if self._embedder is None:
             return  # store injected directly (tests / custom wiring)
+        provider, _, _ = _embedding_spec()
         key_id = hashlib.sha1(
-            _resolve_openai_key().encode("utf-8"),
+            _resolve_embedding_key(provider).encode("utf-8"),
         ).hexdigest()
         state = _KEY_VALIDITY.get(key_id)
         if state is None:
@@ -174,23 +229,26 @@ class KnowledgeService:
         if state == "auth":
             raise KnowledgeUnavailable(
                 "openai_key_invalid",
-                "the configured OpenAI API key was rejected (401) — "
-                "update it in settings.",
+                f"the configured {provider} API key was rejected (401) — "
+                "update it in the Model & Provider settings.",
             )
 
     def status(self) -> Dict[str, Any]:
-        key = _resolve_openai_key()
+        provider, model, dim = _embedding_spec()
+        key = _resolve_embedding_key(provider)
         key_state = (
             _KEY_VALIDITY.get(hashlib.sha1(key.encode("utf-8")).hexdigest())
             if key else None
         )
         return {
             "enabled": True,
-            "embedding_model": EMBEDDING_MODEL,
+            "embedding_provider": provider,
+            "embedding_model": model,
+            "embedding_dim": dim,
             "embedding_ready": bool(key) and key_state != "auth",
             "embedding_key_state": key_state or ("unchecked" if key else "missing"),
             "qdrant_url": _qdrant_url(),
-            "collection": _collection_for(self.username),
+            "collection": _collection_for(self.username, model),
         }
 
     # ── ingestion ────────────────────────────────────────────────────
@@ -225,7 +283,10 @@ class KnowledgeService:
         safe_name = Path(filename).name or f"document-{doc_id}"
         card_filename = f"doc-{doc_id}.md"
 
-        # Incremental skip: unchanged content for a known document.
+        # Incremental skip: unchanged content for a known document —
+        # but only while its recorded embedding model is still current;
+        # a stale doc re-fetched by a connector re-embeds itself.
+        _, current_model, _ = _embedding_spec()
         existing = await self._vault().aread_note(
             f"{KNOWLEDGE_CATEGORY}/{card_filename}",
         )
@@ -234,6 +295,7 @@ class KnowledgeService:
             if (
                 prev.get("content_sha") == content_sha
                 and prev.get("knowledge_status") == "ready"
+                and prev.get("embedding_model", current_model) == current_model
             ):
                 return {
                     "doc_id": doc_id, "filename": card_filename,
@@ -406,6 +468,7 @@ class KnowledgeService:
         content_sha: str = "",
     ) -> None:
         vault = self._vault()
+        provider, model, _ = _embedding_spec()
         body = (
             f"![[{Path(attachment_rel).name}]]\n\n"
             + (f"{summary}\n\n" if summary else "")
@@ -413,6 +476,7 @@ class KnowledgeService:
             + f"- source: {source_type}{f' ({source_ref})' if source_ref else ''}\n"
             + f"- status: {status}\n"
             + f"- chunks: {chunk_count}\n"
+            + f"- embedding: {provider}/{model}\n"
             + f"- ingested_at: {captured.isoformat()}\n"
         )
         await vault.awrite_note(
@@ -431,6 +495,10 @@ class KnowledgeService:
                 "chunk_count": chunk_count,
                 "attachment": attachment_rel,
                 "content_sha": content_sha,
+                # Exactly which model produced this document's vectors —
+                # the mismatch signal that drives re-embedding.
+                "embedding_provider": provider,
+                "embedding_model": model,
             },
         )
 
@@ -455,12 +523,16 @@ class KnowledgeService:
         ]
 
     async def list_documents(self) -> List[Dict[str, Any]]:
+        _, current_model, _ = _embedding_spec()
         vault = self._vault()
         metas = await vault.alist_notes(category=KNOWLEDGE_CATEGORY)
         out = []
         for meta in metas[:500]:
             detail = await vault.aread_note(meta.get("filename", ""))
             fm = (detail or {}).get("metadata") or {}
+            # Docs from before model recording carry no embedding_model —
+            # treat them as embedded with the launch default.
+            doc_model = fm.get("embedding_model") or "text-embedding-3-large"
             out.append({
                 "filename": meta.get("filename"),
                 "title": meta.get("title"),
@@ -470,19 +542,123 @@ class KnowledgeService:
                 "source_ref": fm.get("source_ref", ""),
                 "chunk_count": fm.get("chunk_count", 0),
                 "modified": meta.get("modified", ""),
+                "embedding_provider": fm.get("embedding_provider", ""),
+                "embedding_model": doc_model,
+                # Mismatch with the CURRENT embedding model → its vectors
+                # live in another collection and no longer serve search.
+                "embedding_stale": doc_model != current_model,
             })
         return out
 
+    async def reembed_document(self, doc_id: str) -> Dict[str, Any]:
+        """Re-run extract+embed+index for one document from its stored
+        original bytes, under the CURRENT embedding model — the repair
+        action for embedding-model mismatches."""
+        await self.verify_embedding()
+        vault = self._vault()
+        card_filename = f"doc-{doc_id}.md"
+        note = await vault.aread_note(f"{KNOWLEDGE_CATEGORY}/{card_filename}")
+        if note is None:
+            raise KeyError(f"document not found: {doc_id}")
+        fm = (note.get("metadata") or {})
+        attachment = fm.get("attachment", "")
+        data = vault.read_attachment(attachment) if attachment else None
+        if not data:
+            raise RuntimeError(
+                f"original attachment missing for {doc_id} — re-upload the file",
+            )
+
+        # Drop the old-model vectors so nothing orphans, then ingest the
+        # stored bytes through the normal pipeline (current model records
+        # itself on the card; content unchanged → same doc identity).
+        old_model = fm.get("embedding_model") or ""
+        _, current_model, _ = _embedding_spec()
+        if old_model and old_model != current_model:
+            try:
+                from geny_executor.memory.provider import NoteRef, Scope
+
+                await self._store_for_model(old_model).remove(
+                    NoteRef(filename=card_filename, scope=Scope.USER),
+                )
+            except Exception:  # noqa: BLE001 — old vectors are harmless
+                logger.info("reembed: old-model vector cleanup skipped", exc_info=True)
+
+        title = note.get("title") or fm.get("doc_id", doc_id)
+        original_name = Path(attachment).name
+        # save_attachment prefixes "knowledge-<doc_id>-" — strip it back
+        # to the user-facing filename for extraction suffix detection.
+        prefix = f"knowledge-{doc_id}-"
+        if original_name.startswith(prefix):
+            original_name = original_name[len(prefix):] or title
+        return await self._reingest_existing(
+            doc_id=doc_id,
+            card_filename=card_filename,
+            filename=original_name,
+            data=data,
+            fm=fm,
+        )
+
+    async def _reingest_existing(
+        self, *, doc_id: str, card_filename: str, filename: str,
+        data: bytes, fm: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Ingest pipeline for an EXISTING card — keeps the doc_id even
+        when it originally came from a connector doc_key (whose sha the
+        content hash can't reproduce)."""
+        vector = self._vector()
+        captured = datetime.now(timezone.utc)
+        source_type = fm.get("source_type") or "upload"
+        source_ref = fm.get("source_ref", "")
+        attachment_rel = fm.get("attachment", "")
+        content_sha = hashlib.sha1(data).hexdigest()
+        common = dict(
+            card_filename=card_filename, title=filename, doc_id=doc_id,
+            attachment_rel=attachment_rel, source_type=source_type,
+            source_ref=source_ref, captured=captured, content_sha=content_sha,
+        )
+        try:
+            chunks = self._extract_chunks(filename, data)
+            if not chunks:
+                raise RuntimeError("no extractable text")
+            indexed = await self._index_chunks(
+                vector, card_filename, doc_id, filename, source_type,
+                source_ref, chunks,
+            )
+            await self._write_card(
+                status="ready", summary=chunks[0]["text"][:400],
+                chunk_count=indexed, **common,
+            )
+            return {
+                "doc_id": doc_id, "filename": card_filename,
+                "title": filename, "status": "ready", "chunks": indexed,
+            }
+        except Exception as exc:  # noqa: BLE001 — recorded on the card
+            logger.warning("knowledge: reembed failed for %s", doc_id, exc_info=True)
+            await self._write_card(
+                status="failed", summary=f"re-embedding failed: {exc}",
+                chunk_count=0, **common,
+            )
+            return {
+                "doc_id": doc_id, "filename": card_filename,
+                "title": filename, "status": "failed", "error": str(exc),
+            }
+
     async def delete_document(self, doc_id: str) -> bool:
-        """Card note + original attachment + qdrant points."""
+        """Card note + original attachment + qdrant points (removed from
+        the collection of the model the doc was actually embedded with)."""
         from geny_executor.memory.provider import NoteRef, Scope
 
         vault = self._vault()
         card_filename = f"doc-{doc_id}.md"
         note = await vault.aread_note(f"{KNOWLEDGE_CATEGORY}/{card_filename}")
-        attachment = ((note or {}).get("metadata") or {}).get("attachment", "")
+        fm = ((note or {}).get("metadata") or {})
+        attachment = fm.get("attachment", "")
+        doc_model = fm.get("embedding_model") or ""
         try:
-            await self._vector().remove(
+            store = (
+                self._store_for_model(doc_model) if doc_model else self._vector()
+            )
+            await store.remove(
                 NoteRef(filename=card_filename, scope=Scope.USER),
             )
         except KnowledgeUnavailable:

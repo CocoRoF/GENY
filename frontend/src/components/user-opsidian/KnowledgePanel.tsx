@@ -168,6 +168,8 @@ export default function KnowledgePanel({
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [keyMissing, setKeyMissing] = useState(false);
+  const [embeddingLabel, setEmbeddingLabel] = useState<string | null>(null);
+  const [reembedding, setReembedding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
@@ -203,7 +205,14 @@ export default function KnowledgePanel({
       await refreshSources();
       try {
         const s = await knowledgeApi.status();
-        if (!cancelled) setKeyMissing(!s.embedding_ready);
+        if (!cancelled) {
+          setKeyMissing(!s.embedding_ready);
+          setEmbeddingLabel(
+            s.embedding_model
+              ? `${s.embedding_provider || 'openai'}/${s.embedding_model}`
+              : null,
+          );
+        }
       } catch {
         /* status is advisory */
       }
@@ -275,6 +284,39 @@ export default function KnowledgePanel({
     [refresh, refreshSources],
   );
 
+  const staleCount = docs.filter(
+    (d) => d.embedding_stale && d.status === 'ready',
+  ).length;
+
+  const reembedAll = useCallback(async () => {
+    setReembedding(true);
+    try {
+      await knowledgeApi.reembedStale();
+      // 카드가 processing→ready로 돌 때까지 폴링이 이어받는다.
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/openai_key_(missing|invalid)/.test(msg)) setKeyMissing(true);
+      else setError(msg);
+    } finally {
+      setReembedding(false);
+    }
+  }, [refresh]);
+
+  const reembedOne = useCallback(
+    async (docId: string) => {
+      try {
+        await knowledgeApi.reembedDocument(docId);
+        await refresh();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/openai_key_(missing|invalid)/.test(msg)) setKeyMissing(true);
+        else setError(msg);
+      }
+    },
+    [refresh],
+  );
+
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
@@ -297,6 +339,11 @@ export default function KnowledgePanel({
         <BookOpenText size={18} style={{ color: 'var(--obs-purple, #8b5cf6)' }} />
         <h2 style={{ fontSize: 16, fontWeight: 700, flex: 1 }}>
           지식 저장소 <span style={{ fontWeight: 400, opacity: 0.6 }}>{docs.length} documents</span>
+          {embeddingLabel && (
+            <span style={{ fontWeight: 400, fontSize: 11, opacity: 0.5, marginLeft: 8 }}>
+              임베딩 {embeddingLabel}
+            </span>
+          )}
         </h2>
         <button className="obs-sb-icon-btn" onClick={() => void refresh()} title="새로고침">
           <RefreshCw size={14} />
@@ -326,6 +373,36 @@ export default function KnowledgePanel({
           >
             설정으로 이동
           </Link>
+        </div>
+      )}
+
+      {/* 임베딩 모델 불일치 — 재임베딩 안내 */}
+      {staleCount > 0 && !keyMissing && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+            borderRadius: 8, marginBottom: 14,
+            background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.35)',
+            fontSize: 12.5,
+          }}
+        >
+          <RefreshCw size={15} style={{ color: 'var(--obs-purple, #8b5cf6)', flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>
+            문서 {staleCount}개가 현재 임베딩 모델({embeddingLabel ?? '—'})과 다른 모델로
+            인덱싱되어 검색에서 제외됩니다.
+          </span>
+          <button
+            onClick={() => void reembedAll()}
+            disabled={reembedding}
+            style={{
+              padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+              background: 'var(--obs-purple, #8b5cf6)', color: '#fff',
+              border: 'none', cursor: 'pointer', flexShrink: 0,
+              opacity: reembedding ? 0.6 : 1,
+            }}
+          >
+            {reembedding ? '재임베딩 중…' : '전체 재임베딩'}
+          </button>
         </div>
       )}
 
@@ -463,10 +540,30 @@ export default function KnowledgePanel({
                 </div>
                 <div style={{ fontSize: 10.5, opacity: 0.55 }}>
                   {d.source_type}{d.source_ref ? ` · ${d.source_ref}` : ''} · {d.chunk_count} chunks
+                  {d.embedding_model && ` · ${d.embedding_model}`}
                   {d.status === 'processing' && ' · 변환 중…'}
                   {d.status === 'failed' && ' · 실패 — 카드 노트에서 원인 확인'}
                 </div>
+                {d.embedding_stale && d.status === 'ready' && (
+                  <div style={{
+                    fontSize: 10, marginTop: 3, display: 'inline-block',
+                    padding: '1px 7px', borderRadius: 9,
+                    background: 'rgba(139,92,246,0.12)',
+                    color: 'var(--obs-purple, #8b5cf6)', fontWeight: 600,
+                  }}>
+                    임베딩 모델 불일치 — 재임베딩 필요
+                  </div>
+                )}
               </button>
+              {d.embedding_stale && d.status === 'ready' && (
+                <button
+                  className="obs-sb-icon-btn"
+                  title="현재 모델로 재임베딩"
+                  onClick={() => d.doc_id && void reembedOne(d.doc_id)}
+                >
+                  <RefreshCw size={13} />
+                </button>
+              )}
               <button
                 className="obs-sb-icon-btn"
                 title="문서 삭제 (카드+원본+벡터)"

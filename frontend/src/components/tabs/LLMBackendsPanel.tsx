@@ -18,6 +18,7 @@ import {
 import { llmBackendsApi, syncApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
+import { EmbeddingSettingsCard } from '@/components/tabs/EmbeddingSettingsCard';
 import ClaudeCodeAuthModal from './ClaudeCodeAuthModal';
 import ApiBackendModal from './ApiBackendModal';
 import LocalBackendModal, { type LocalProviderId } from './LocalBackendModal';
@@ -412,6 +413,11 @@ function LLMBackendsPanelInner() {
             onOpenSettings={(id) => setOpenProvider(id)}
           />
         ))}
+        {/* Common embedding setting — which provider/model embeds
+             knowledge documents. Key comes from the cards above. */}
+        {providers.length > 0 && (
+          <EmbeddingSettingsCard providers={providers} />
+        )}
       </div>
 
       {/* Claude Code CLI version management */}

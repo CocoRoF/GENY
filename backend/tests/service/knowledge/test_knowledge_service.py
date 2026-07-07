@@ -104,7 +104,7 @@ async def test_delete_document_cleans_everything(svc, tmp_path):
 
 
 def test_missing_key_raises_actionable_reason(monkeypatch):
-    monkeypatch.setattr(ks, "_resolve_openai_key", lambda: "")
+    monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: "")
     service = ks.KnowledgeService("nokey")
     with pytest.raises(ks.KnowledgeUnavailable) as exc:
         service._vector()
@@ -118,7 +118,7 @@ async def test_rejected_key_raises_openai_key_invalid(monkeypatch):
     from geny_executor.memory.embedding.client import EmbeddingError
 
     ks._KEY_VALIDITY.clear()
-    monkeypatch.setattr(ks, "_resolve_openai_key", lambda: "sk-stale")
+    monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: "sk-stale")
     service = ks.KnowledgeService("badkey")
     service._store = object()  # bypass real store construction
 
@@ -147,7 +147,7 @@ def test_vector_rebuilds_on_key_rotation(monkeypatch):
     the cached client keeps pinging with the RETIRED key and poisons the
     new key's validity verdict (observed on prod 2026-07-07)."""
     current = {"key": "sk-old"}
-    monkeypatch.setattr(ks, "_resolve_openai_key", lambda: current["key"])
+    monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: current["key"])
     service = ks.KnowledgeService("rotator")
 
     store1 = service._vector()
@@ -158,6 +158,55 @@ def test_vector_rebuilds_on_key_rotation(monkeypatch):
     store2 = service._vector()
     assert store2 is not store1
     assert service._embedder is not embedder1
+
+
+def test_collection_is_per_user_and_model():
+    assert (
+        ks._collection_for("User-1", "text-embedding-3-large")
+        == "geny_kb__user_1__text_embedding_3_large"
+    )
+
+
+@pytest.mark.asyncio
+async def test_embedding_model_recorded_stale_and_reembed(svc, monkeypatch):
+    """Card records the model that embedded it; switching the common
+    embedding setting marks docs stale; reembed repairs from the stored
+    original and re-records the current model."""
+    service, fake = svc
+    monkeypatch.setattr(
+        ks, "_embedding_spec",
+        lambda: ("openai", "text-embedding-3-large", 3072),
+    )
+    out = await service.ingest_file(
+        filename="policy.md", data=("규정 본문 문단. " * 150).encode("utf-8"),
+    )
+    assert out["status"] == "ready"
+    row = next(
+        d for d in await service.list_documents() if d["doc_id"] == out["doc_id"]
+    )
+    assert row["embedding_model"] == "text-embedding-3-large"
+    assert row["embedding_stale"] is False
+
+    # Common embedding setting changes → the doc is now stale.
+    monkeypatch.setattr(
+        ks, "_embedding_spec",
+        lambda: ("openai", "text-embedding-3-small", 1536),
+    )
+    row = next(
+        d for d in await service.list_documents() if d["doc_id"] == out["doc_id"]
+    )
+    assert row["embedding_stale"] is True
+
+    # Re-embed from the stored attachment under the current model.
+    fake.indexed.clear()
+    res = await service.reembed_document(out["doc_id"])
+    assert res["status"] == "ready" and res["chunks"] >= 1
+    assert f"doc-{out['doc_id']}.md" in fake.indexed
+    row = next(
+        d for d in await service.list_documents() if d["doc_id"] == out["doc_id"]
+    )
+    assert row["embedding_model"] == "text-embedding-3-small"
+    assert row["embedding_stale"] is False
 
 
 def test_json_upload_uses_structured_rendering(svc):

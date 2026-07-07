@@ -400,9 +400,9 @@ const ko: Translations = {
 
     // ─── LLM 패널 + 프로바이더 모달 ────────────────────
     llmBackends: {
-      navLabel: 'LLM & Provider',
-      title: 'LLM & Provider',
-      description: '{count}개 프로바이더가 executor의 ClientRegistry에 매핑되며, 모든 프로바이더 키는 이 섹션에서만 관리합니다 — 여기 저장한 키가 Geny 전체(세션·메모리 임베딩·지식 저장소·TTS·문서 도구)에 그대로 적용돼요. 클라우드는 API 키를 붙여넣고(Anthropic / OpenAI / Google), 로컬은 OpenAI 호환 엔드포인트를 입력하고(vLLM / Ollama / LM Studio / Custom), Claude Code는 모달 내 로그인 흐름을 실행하면 됩니다. 클라우드 키는 프로바이더에 실제 검증되며, 거부된 키는 조용히 실패하는 대신 여기서 빨간색으로 표시됩니다.',
+      navLabel: 'Model & Provider',
+      title: 'Model & Provider',
+      description: '{count}개 프로바이더가 executor의 ClientRegistry에 매핑되며, 모든 프로바이더 키와 모델 선택은 이 섹션에서만 관리합니다 — 여기 저장한 값이 Geny 전체(세션·메모리 임베딩·지식 저장소·TTS·문서 도구)에 그대로 적용돼요. 클라우드는 API 키를 붙여넣고(Anthropic / OpenAI / Google), 로컬은 OpenAI 호환 엔드포인트를 입력하고(vLLM / Ollama / LM Studio / Custom), Claude Code는 모달 내 로그인 흐름을 실행하면 됩니다. Embedding 카드에서 문서 임베딩에 쓸 프로바이더/모델을 고릅니다. 클라우드 키는 프로바이더에 실제 검증되며, 거부된 키는 조용히 실패하는 대신 여기서 빨간색으로 표시됩니다.',
       refreshAll: '전체 새로고침',
       reCheck: '다시 확인',
       docs: '문서',
@@ -416,6 +416,24 @@ const ko: Translations = {
         keyRejected: '키 거부됨',
         notConfigured: '미설정',
         idle: '대기 중',
+      },
+      embedding: {
+        title: 'Embedding',
+        cardAria: '임베딩 설정 열기',
+        keyMissingBadge: '키 필요',
+        detailReady: '문서는 이 프로바이더/모델로 임베딩됩니다. 모든 지식 문서에는 임베딩에 사용된 모델이 기록돼요.',
+        detailKeyMissing: '{provider} 키가 없거나 거부됐습니다 — 위의 {provider} 카드에서 설정하세요.',
+        modalTitle: '임베딩 설정',
+        modalHelp: '공통 임베딩 백엔드입니다: 지식 저장소가 모든 문서(그리고 모든 검색 쿼리)를 이 프로바이더/모델로 임베딩합니다. API 키는 이 패널의 프로바이더 카드에서 가져와요.',
+        providerLabel: '프로바이더',
+        modelLabel: '모델',
+        modalKeyWarning: '유효한 {provider} 키가 없습니다 — {provider} 카드에서 키를 설정해야 문서를 임베딩할 수 있어요.',
+        reembedHint: '모델을 바꾸면 기존 문서는 불일치(stale)로 표시되며, 지식 패널에서 재임베딩할 수 있습니다.',
+        sectionTitle: '임베딩 모델',
+        sectionHelp: '이 프로바이더가 제공하는 문서 임베딩 모델입니다. 하나를 골라 공통 임베딩 백엔드로 지정하세요.',
+        useAsDefault: '임베딩에 사용',
+        activeLabel: '사용 중',
+        currentOther: '현재 임베딩: {provider} / {model}',
       },
       authMethod: {
         api_key: 'API 키',
