@@ -31,7 +31,7 @@
 
 services:
 
-  # ── PostgreSQL Database ───────────────────────────────────────────
+  # ── Qdrant (knowledge repository vector store) ────────────────────
   qdrant:
     image: qdrant/qdrant:v1.13.4
     container_name: geny-qdrant-prod
@@ -39,8 +39,9 @@ services:
     volumes:
       - geny-qdrant-prod:/qdrant/storage
     networks:
-      - geny-network
+      - geny-net-prod
 
+  # ── PostgreSQL Database ───────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: geny-postgres-prod
