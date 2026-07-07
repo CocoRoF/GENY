@@ -14,6 +14,22 @@ export default function Home() {
   const { checkAuth, initialized, hasUsers } = useAuthStore();
   const router = useRouter();
 
+  // Deep links from other routes: ``/?tab=settings&settings_category=…``
+  // (Opsidian knowledge banner, Environment editor). Without this the
+  // query was silently ignored and the link appeared dead. Read
+  // window.location directly — useSearchParams would need a Suspense
+  // boundary for the prerender pass.
+  useEffect(() => {
+    try {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab && tab.trim()) {
+        useAppStore.getState().setActiveTab(tab.trim());
+      }
+    } catch {
+      /* malformed query — ignore */
+    }
+  }, []);
+
   // Check auth status on mount
   useEffect(() => {
     checkAuth();

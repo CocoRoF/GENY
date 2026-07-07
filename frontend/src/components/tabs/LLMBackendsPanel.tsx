@@ -77,9 +77,9 @@ function ProviderCard({
   if (provider.available && provider.auth_ok) {
     tone = 'good';
     badgeLabel = t('settings.llmBackends.badge.ready');
-  } else if (provider.auth_ok === false && !isCli) {
-    // API provider whose key the provider itself rejected (401) —
-    // distinct from CLI "login required".
+  } else if (provider.detail_code === 'api.key_rejected') {
+    // Cloud API key the provider itself rejected (401) — distinct from
+    // CLI "login required" AND from unreachable local backends.
     tone = 'bad';
     badgeLabel = t('settings.llmBackends.badge.keyRejected');
   } else if (provider.auth_ok === false) {
