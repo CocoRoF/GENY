@@ -19,6 +19,23 @@ A multi-agent <strong>VTuber + autonomous worker</strong> platform. Pair a chatt
 <a href="docs/error_codes.md">Error Codes</a>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/CocoRoF/Geny/releases/latest"><img src="https://img.shields.io/github/v/release/CocoRoF/Geny?label=desktop%20connector&color=8b5cf6" alt="Latest release"></a>
+  <a href="https://pypi.org/project/geny-executor/"><img src="https://img.shields.io/pypi/v/geny-executor?label=geny-executor&color=3775a9" alt="geny-executor on PyPI"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776ab" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/next.js-16-black" alt="Next.js 16">
+  <a href="https://github.com/CocoRoF/Geny/stargazers"><img src="https://img.shields.io/github/stars/CocoRoF/Geny?style=social" alt="GitHub stars"></a>
+</p>
+
+```bash
+# 60-second start — no GPU, no API key required
+git clone https://github.com/CocoRoF/Geny.git && cd Geny && ./geny up
+# → open http://localhost:3000
+```
+
+<p align="center"><sub>Details, profiles and manual setup → <a href="#installation">Installation</a></sub></p>
+
 ## The Geny ecosystem
 
 These projects are built to work together. **Geny** is the product at the top of the stack; everything below is a building block you can also use on its own. **➡️ marks where you are.**
@@ -29,6 +46,8 @@ These projects are built to work together. **Geny** is the product at the top of
 | [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21-stage, manifest-driven agent pipeline · PyPI · Apache-2.0 | The engine everything runs on |
 | [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | Self-hosted AI DevOps platform — sandbox · edit · build · deploy | Where agents safely touch real repos |
 | [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | 2D live-avatar editor with AI texture generation | Where Geny's faces are made |
+| [**edit2docs**](https://github.com/CocoRoF/edit2docs) | AI-agent-native DOCX / XLSX / PPTX engine · PyPI · Apache-2.0 | How agents generate, edit and preview office documents |
+| [**AN-Web**](https://github.com/CocoRoF/an-web) | AI-native headless browser engine · PyPI | How agents read and search the web |
 
 <details>
 <summary>How they fit together</summary>
@@ -42,6 +61,9 @@ These projects are built to work together. **Geny** is the product at the top of
       ▼             ▼              ▼
  geny-executor  geny-avatar      GAPT
   (the engine)  (avatar editor)  (AI DevOps platform)
+      │
+      ├── edit2docs  (documents: generate · edit · native preview)
+      └── AN-Web     (web: browse · read · search)
 ```
 
 </details>
@@ -144,7 +166,7 @@ The backend is built on [`geny-executor`](https://github.com/CocoRoF/geny-execut
 │   ├── scripts/geny_mcp_bridge.py ← per-session MCP wrap for CLI  │
 │   └── prompts/  ← role markdown (vtuber.md, worker.md, …)        │
 │                                                                  │
-│  geny-executor ≥2.21  (PyPI dep)                                 │
+│  geny-executor ≥2.47  (PyPI dep)                                 │
 │   ├── 21-stage agent pipeline                                    │
 │   ├── 5 LLM client implementations                               │
 │   ├── ContainerCLIRunner + SandboxHandle (run CLI in a sandbox) │
@@ -217,7 +239,7 @@ geny/
 ├── docs/                             # topic-page docs (architecture, sessions, …)
 ├── backend/                          # FastAPI + geny-executor host
 │   ├── main.py                       # app entry + executor wiring
-│   ├── pyproject.toml                # pins geny-executor >= 2.21.0
+│   ├── pyproject.toml                # pins geny-executor >= 2.47.0
 │   ├── controller/                   # FastAPI routes
 │   │   ├── agent_controller.py       # session + stream + invoke
 │   │   ├── llm_backends_controller.py# 5-provider health + auth
@@ -351,7 +373,7 @@ Custom ports + data dirs documented in [`docs/architecture.md`](docs/architectur
 
 For non-Docker development see the expandable section in [`docs/architecture.md`](docs/architecture.md). Minimum requirements: Python 3.11+, Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`), and at least one provider's credentials.
 
-**Recommended: LibreOffice + poppler-utils (document editing / preview).** Agents can edit office files a user uploads (pptx / docx / xlsx) and show live previews in the session's Canvas tab. Rendering those previews needs LibreOffice headless and `pdftoppm`. The Docker images install these automatically (`libreoffice-impress libreoffice-writer libreoffice-calc poppler-utils fonts-noto-cjk` — Noto CJK keeps Korean documents from rendering as tofu); for bare-metal runs install the same packages, or document conversion/preview will report itself unavailable (text editing itself still works).
+**Document editing / preview needs no extra system packages.** Agents edit office files a user uploads (pptx / docx / xlsx) and show live previews in the session's Canvas tab through [edit2docs](https://github.com/CocoRoF/edit2docs)' native OOXML render pipeline (geny-executor ≥2.44) — LibreOffice and poppler are no longer required and are gone from the Docker images (~500 MB lighter). Korean documents render correctly out of the box (bundled Noto CJK handling).
 
 ---
 
@@ -536,6 +558,18 @@ Part of **the Geny ecosystem** — see [The Geny ecosystem](#the-geny-ecosystem)
 
 ---
 
+## Contributing
+
+Issues and pull requests are welcome — bug reports, docs, translations, avatars, tools and skills all count. The fastest way in:
+
+1. `./geny up` (60-second local stack) → reproduce or build against it.
+2. Check [`docs/`](docs/) for the architecture / sessions / environments guides.
+3. Open an issue first for anything large; small fixes can go straight to a PR.
+
+If Geny is useful to you, a ⭐ helps other people find it.
+
+---
+
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2026 CocoRoF — see [NOTICE](NOTICE).
@@ -546,6 +580,11 @@ Part of **the Geny ecosystem** — see [The Geny ecosystem](#the-geny-ecosystem)
 
 | Date | Highlight |
 |---|---|
+| 2026-07-06 | Opsidian 3D knowledge graph rebuilt on [@cocorof/graphier](https://github.com/CocoRoF/graphier) — WebGL instancing, reheat-free filters, minimap |
+| 2026-07-06 | Screen-observation vision pipeline fixed end-to-end (geny-executor 2.45 CLI vision wire) |
+| 2026-07-05 | geny-executor 2.44 — LibreOffice-free document preview via edit2docs native render |
+| 2026-07-04 | geny-executor 2.43 — Browser* / Doc* built-ins on AN-Web + edit2docs engines |
+| 2026-07-03 | Deferred tool search — tool schemas load on demand instead of every-turn upfront |
 | 2026-05-22 | Doc refresh — README EN/KO, docs/* topic pages |
 | 2026-05-22 | Phase 2: executor error codes → frontend i18n (PR #830) |
 | 2026-05-21 | geny-executor 2.1.0 — `ExecutorErrorCode` taxonomy + structured event payloads |

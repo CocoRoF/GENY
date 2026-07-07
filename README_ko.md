@@ -19,6 +19,23 @@
 <a href="docs/error_codes.md">Error Codes</a>
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/CocoRoF/Geny/releases/latest"><img src="https://img.shields.io/github/v/release/CocoRoF/Geny?label=%EB%8D%B0%EC%8A%A4%ED%81%AC%ED%83%91%20%EC%A0%91%EC%86%8D%EA%B8%B0&color=8b5cf6" alt="최신 릴리스"></a>
+  <a href="https://pypi.org/project/geny-executor/"><img src="https://img.shields.io/pypi/v/geny-executor?label=geny-executor&color=3775a9" alt="geny-executor on PyPI"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776ab" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/next.js-16-black" alt="Next.js 16">
+  <a href="https://github.com/CocoRoF/Geny/stargazers"><img src="https://img.shields.io/github/stars/CocoRoF/Geny?style=social" alt="GitHub stars"></a>
+</p>
+
+```bash
+# 60초 시작 — GPU 불필요, API 키 불필요
+git clone https://github.com/CocoRoF/Geny.git && cd Geny && ./geny up
+# → http://localhost:3000 접속
+```
+
+<p align="center"><sub>상세 옵션·프로파일·수동 설치 → <a href="#설치">설치</a></sub></p>
+
 ## Geny 에코시스템
 
 이 프로젝트들은 함께 동작하도록 만들어졌습니다. **Geny** 가 스택 최상단의 제품이고, 그 아래는 전부 단독으로도 쓸 수 있는 빌딩 블록입니다. **➡️ 가 현재 위치입니다.**
@@ -29,6 +46,8 @@
 | [**geny-executor**](https://github.com/CocoRoF/geny-executor) | 21단계 manifest 기반 에이전트 파이프라인 · PyPI · Apache-2.0 | 모든 것이 돌아가는 엔진 |
 | [**GAPT**](https://github.com/CocoRoF/geny-adapted-project-toolkit) | 셀프호스트 AI DevOps 플랫폼 — 샌드박스·편집·빌드·배포 | 에이전트가 실제 레포를 안전하게 다루는 곳 |
 | [**geny-avatar**](https://github.com/CocoRoF/geny-avatar) | AI 텍스처 생성 기반 2D 라이브 아바타 에디터 | Geny 의 얼굴이 만들어지는 곳 |
+| [**edit2docs**](https://github.com/CocoRoF/edit2docs) | AI-agent-native DOCX/XLSX/PPTX 엔진 · PyPI · Apache-2.0 | 에이전트가 오피스 문서를 생성·편집·미리보기하는 방법 |
+| [**AN-Web**](https://github.com/CocoRoF/an-web) | AI-native 헤드리스 브라우저 엔진 · PyPI | 에이전트가 웹을 읽고 검색하는 방법 |
 
 <details>
 <summary>서로 어떻게 연결되는가</summary>
@@ -42,6 +61,9 @@
       ▼             ▼              ▼
  geny-executor  geny-avatar      GAPT
   (엔진)        (아바타 에디터)  (AI DevOps 플랫폼)
+      │
+      ├── edit2docs  (문서: 생성 · 편집 · 네이티브 미리보기)
+      └── AN-Web     (웹: 브라우징 · 읽기 · 검색)
 ```
 
 </details>
@@ -144,7 +166,7 @@ Backend 는 [`geny-executor`](https://github.com/CocoRoF/geny-executor) 위에�
 │   ├── scripts/geny_mcp_bridge.py ← CLI 용 per-session MCP wrap   │
 │   └── prompts/  ← role markdown (vtuber.md, worker.md, …)        │
 │                                                                  │
-│  geny-executor ≥2.21  (PyPI 의존)                                │
+│  geny-executor ≥2.47  (PyPI 의존)                                │
 │   ├── 21-stage agent pipeline                                    │
 │   ├── 5개 LLM client 구현                                        │
 │   ├── ContainerCLIRunner + SandboxHandle (샌드박스에서 CLI 실행)│
@@ -217,7 +239,7 @@ geny/
 ├── docs/                             # 주제별 문서 (architecture, sessions, …)
 ├── backend/                          # FastAPI + geny-executor 호스트
 │   ├── main.py                       # 앱 entry + executor 연결
-│   ├── pyproject.toml                # geny-executor >= 2.21.0 pin
+│   ├── pyproject.toml                # geny-executor >= 2.47.0 pin
 │   ├── controller/                   # FastAPI routes
 │   │   ├── agent_controller.py       # 세션 + 스트림 + invoke
 │   │   ├── llm_backends_controller.py# 5 provider health + auth
@@ -346,6 +368,8 @@ Compose 프로필:
 ### Manual 설정
 
 비-Docker 개발은 [`docs/architecture.md`](docs/architecture.md) 의 확장 섹션 참조. 최소 요구사항: Python 3.11+, Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`), 최소 1개 provider 자격증명.
+
+**문서 편집/미리보기에 추가 시스템 패키지가 필요 없습니다.** 세션 Canvas 탭의 오피스 문서(pptx/docx/xlsx) 미리보기는 [edit2docs](https://github.com/CocoRoF/edit2docs) 네이티브 OOXML 렌더 파이프라인(geny-executor ≥2.44)으로 동작 — LibreOffice·poppler 는 더 이상 필요 없고 Docker 이미지에서도 제거됐습니다(~500 MB 경량화). 한국어 문서도 기본 렌더가 정상입니다.
 
 ---
 
@@ -530,6 +554,18 @@ TOOLS = [search_database]
 
 ---
 
+## 기여하기
+
+이슈와 PR 을 환영합니다 — 버그 리포트, 문서, 번역, 아바타, tool/skill 전부 좋습니다. 가장 빠른 시작:
+
+1. `./geny up` (60초 로컬 스택) → 재현하거나 그 위에서 개발.
+2. [`docs/`](docs/) 의 아키텍처 / 세션 / 환경 가이드 확인.
+3. 큰 변경은 이슈 먼저, 작은 수정은 바로 PR.
+
+Geny 가 유용했다면 ⭐ 하나가 다른 사람들이 찾는 데 큰 도움이 됩니다.
+
+---
+
 ## 라이선스
 
 [Apache License 2.0](LICENSE). Copyright 2026 CocoRoF — [NOTICE](NOTICE) 참조.
@@ -540,6 +576,11 @@ TOOLS = [search_database]
 
 | 날짜 | 주요 변경 |
 |---|---|
+| 2026-07-06 | Opsidian 3D 지식 그래프를 [@cocorof/graphier](https://github.com/CocoRoF/graphier) 기반으로 재구축 — WebGL 인스턴싱·무리히트 필터·미니맵 |
+| 2026-07-06 | 화면 관측(vision) 파이프라인 엔드투엔드 수리 (geny-executor 2.45 CLI vision wire) |
+| 2026-07-05 | geny-executor 2.44 — edit2docs 네이티브 렌더로 LibreOffice 없는 문서 미리보기 |
+| 2026-07-04 | geny-executor 2.43 — AN-Web + edit2docs 엔진 기반 Browser*/Doc* 빌트인 |
+| 2026-07-03 | Deferred tool search — tool schema 를 매 턴 선적재 대신 온디맨드 로드 |
 | 2026-05-22 | Doc 재정비 — README EN/KO, docs/* 주제별 문서 |
 | 2026-05-22 | Phase 2: executor error code → frontend i18n (PR #830) |
 | 2026-05-21 | geny-executor 2.1.0 — `ExecutorErrorCode` taxonomy + 구조화된 event payload |
