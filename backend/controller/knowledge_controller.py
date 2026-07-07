@@ -58,6 +58,13 @@ def _unavailable(exc: KnowledgeUnavailable) -> HTTPException:
 @router.get("/status")
 async def knowledge_status(auth: dict = Depends(require_auth)):
     svc = get_knowledge_service(auth.get("sub", "anonymous"))
+    try:
+        await svc.verify_embedding()
+    except KnowledgeUnavailable as exc:
+        st = svc.status()
+        st["embedding_ready"] = False
+        st["reason"] = exc.reason
+        return st
     return svc.status()
 
 
@@ -75,7 +82,7 @@ async def upload_document(
 
     try:
         # Fail fast on config gaps BEFORE accepting the document.
-        svc._vector()  # noqa: SLF001 — deliberate pre-flight
+        await svc.verify_embedding()
     except KnowledgeUnavailable as exc:
         raise _unavailable(exc)
 
@@ -165,7 +172,7 @@ async def run_knowledge_source(
     username = auth.get("sub", "anonymous")
     svc = get_knowledge_service(username)
     try:
-        svc._vector()  # noqa: SLF001 — fail fast before scheduling the run
+        await svc.verify_embedding()  # fail fast before scheduling the run
     except KnowledgeUnavailable as exc:
         raise _unavailable(exc)
     source = next(

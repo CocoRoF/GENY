@@ -33,7 +33,9 @@ services:
 
   # ── Qdrant (knowledge repository vector store) ────────────────────
   qdrant:
-    image: qdrant/qdrant:v1.13.4
+    # Keep within one minor of the qdrant-client the backend installs
+    # (1.18.x) — mismatch beyond that raises compatibility warnings.
+    image: qdrant/qdrant:v1.18.2
     container_name: geny-qdrant-prod
     restart: unless-stopped
     volumes:

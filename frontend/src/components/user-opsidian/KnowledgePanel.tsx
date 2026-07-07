@@ -6,7 +6,7 @@
  * - 드래그드롭/클릭 업로드 → /api/opsidian/knowledge/upload (fire-and-forget)
  * - 문서 목록: 카드 노트의 status(processing→ready/failed)를 폴링으로 반영
  * - 시맨틱 검색 미리보기 (qdrant, title/page/heading 출처 포함)
- * - OpenAI 키 미설정(409 openai_key_missing) → 설정 화면 이동 배너
+ * - OpenAI 키 미설정/무효(409 openai_key_missing|invalid) → 설정 화면 이동 배너
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -231,7 +231,7 @@ export default function KnowledgePanel({
             await knowledgeApi.upload(file);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (msg.includes('openai_key_missing')) {
+            if (/openai_key_(missing|invalid)/.test(msg)) {
               setKeyMissing(true);
             } else {
               setError(`${file.name}: ${msg}`);
@@ -262,7 +262,7 @@ export default function KnowledgePanel({
         await refresh();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('openai_key_missing')) setKeyMissing(true);
+        if (/openai_key_(missing|invalid)/.test(msg)) setKeyMissing(true);
         else setError(`${source.name}: ${msg}`);
       } finally {
         setRunningIds((prev) => {
@@ -284,7 +284,7 @@ export default function KnowledgePanel({
       setHits(res.hits);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('openai_key_missing')) setKeyMissing(true);
+      if (/openai_key_(missing|invalid)/.test(msg)) setKeyMissing(true);
       setHits([]);
     } finally {
       setSearching(false);
@@ -314,7 +314,8 @@ export default function KnowledgePanel({
         >
           <KeyRound size={15} style={{ color: '#f59e0b', flexShrink: 0 }} />
           <span style={{ flex: 1 }}>
-            문서 임베딩(text-embedding-3-large)에 OpenAI API 키가 필요합니다.
+            문서 임베딩(text-embedding-3-large)에 유효한 OpenAI API 키가 필요합니다 —
+            키가 없거나 거부(401)되었습니다.
           </span>
           <Link
             href="/setup"

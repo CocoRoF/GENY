@@ -111,6 +111,37 @@ def test_missing_key_raises_actionable_reason(monkeypatch):
     assert exc.value.reason == "openai_key_missing"
 
 
+@pytest.mark.asyncio
+async def test_rejected_key_raises_openai_key_invalid(monkeypatch):
+    """A non-empty but 401-rejected key must surface as an actionable
+    reason (the vector store swallows embed errors by design)."""
+    from geny_executor.memory.embedding.client import EmbeddingError
+
+    ks._KEY_VALIDITY.clear()
+    monkeypatch.setattr(ks, "_resolve_openai_key", lambda: "sk-stale")
+    service = ks.KnowledgeService("badkey")
+    service._store = object()  # bypass real store construction
+
+    calls = {"n": 0}
+
+    class _RejectingEmbedder:
+        async def embed(self, texts):
+            calls["n"] += 1
+            raise EmbeddingError("401 unauthorized", category="auth")
+
+    service._embedder = _RejectingEmbedder()
+    with pytest.raises(ks.KnowledgeUnavailable) as exc:
+        await service.verify_embedding()
+    assert exc.value.reason == "openai_key_invalid"
+
+    # Verdict is cached per key value — no repeat ping.
+    with pytest.raises(ks.KnowledgeUnavailable):
+        await service.verify_embedding()
+    assert calls["n"] == 1
+    assert service.status()["embedding_ready"] is False
+    ks._KEY_VALIDITY.clear()
+
+
 def test_json_upload_uses_structured_rendering(svc):
     service, _ = svc
     rows = service._extract_chunks(

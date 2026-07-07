@@ -79,12 +79,19 @@ def _collection_for(username: str) -> str:
     return f"geny_kb__{safe or 'anonymous'}"
 
 
+# sha1(key) → "ok" | "auth". A non-empty but REJECTED key otherwise fails
+# silently inside the vector store (it swallows embed errors by design),
+# leaving users staring at "failed" cards instead of a fix-your-key banner.
+_KEY_VALIDITY: Dict[str, str] = {}
+
+
 class KnowledgeService:
     """Per-user knowledge repository over the Opsidian user vault."""
 
     def __init__(self, username: str) -> None:
         self.username = username
         self._store = None  # lazy QdrantVectorStore
+        self._embedder = None  # EmbeddingClient handle for verify_embedding
 
     # ── wiring ───────────────────────────────────────────────────────
 
@@ -117,6 +124,7 @@ class KnowledgeService:
             "openai", model=EMBEDDING_MODEL, api_key=key,
             dimension=EMBEDDING_DIM,
         )
+        self._embedder = client
         self._store = QdrantVectorStore(
             url=_qdrant_url(),
             collection=_collection_for(self.username),
@@ -124,11 +132,48 @@ class KnowledgeService:
         )
         return self._store
 
+    async def verify_embedding(self) -> None:
+        """One embed round-trip validating the credential, cached per key
+        value. Raises ``openai_key_invalid`` when the provider rejects the
+        key; transient (non-auth) failures pass — the pipeline itself is
+        best-effort and will surface them on the document card."""
+        self._vector()  # raises openai_key_missing / qdrant_unavailable
+        if self._embedder is None:
+            return  # store injected directly (tests / custom wiring)
+        key_id = hashlib.sha1(
+            _resolve_openai_key().encode("utf-8"),
+        ).hexdigest()
+        state = _KEY_VALIDITY.get(key_id)
+        if state is None:
+            try:
+                from geny_executor.memory.embedding.client import EmbeddingError
+            except ImportError:
+                return
+            try:
+                await self._embedder.embed(["ping"])
+                _KEY_VALIDITY[key_id] = state = "ok"
+            except EmbeddingError as exc:
+                if exc.category != "auth":
+                    return  # transient — don't cache, don't block
+                _KEY_VALIDITY[key_id] = state = "auth"
+        if state == "auth":
+            raise KnowledgeUnavailable(
+                "openai_key_invalid",
+                "the configured OpenAI API key was rejected (401) — "
+                "update it in settings.",
+            )
+
     def status(self) -> Dict[str, Any]:
+        key = _resolve_openai_key()
+        key_state = (
+            _KEY_VALIDITY.get(hashlib.sha1(key.encode("utf-8")).hexdigest())
+            if key else None
+        )
         return {
             "enabled": True,
             "embedding_model": EMBEDDING_MODEL,
-            "embedding_ready": bool(_resolve_openai_key()),
+            "embedding_ready": bool(key) and key_state != "auth",
+            "embedding_key_state": key_state or ("unchecked" if key else "missing"),
             "qdrant_url": _qdrant_url(),
             "collection": _collection_for(self.username),
         }
@@ -148,7 +193,8 @@ class KnowledgeService:
         (processing) → extract+chunk → embed+index → card ready/failed.
         Returns the card descriptor. Raises KnowledgeUnavailable for
         actionable config gaps BEFORE any side effect."""
-        vector = self._vector()  # fail fast on missing key
+        await self.verify_embedding()  # fail fast on missing/rejected key
+        vector = self._vector()
         vault = self._vault()
 
         content_sha = hashlib.sha1(data).hexdigest()
@@ -376,6 +422,7 @@ class KnowledgeService:
     # ── consumption ──────────────────────────────────────────────────
 
     async def search(self, query: str, *, top_k: int = 8) -> List[Dict[str, Any]]:
+        await self.verify_embedding()  # a rejected key would read as "no results"
         vector = self._vector()
         hits = await vector.search(query, top_k=top_k)
         return [
