@@ -79,6 +79,7 @@ from controller.tts_controller import router as tts_router
 from controller.voice_studio import router as voice_studio_router
 from controller.auth_controller import router as auth_router
 from controller.user_opsidian_controller import router as user_opsidian_router
+from controller.knowledge_controller import router as knowledge_router
 from controller.curated_knowledge_controller import router as curated_knowledge_router
 from controller.whiteboard_controller import router as whiteboard_router  # whiteboard P0
 from controller.stt_controller import router as stt_router  # voice-notes W1
@@ -937,6 +938,7 @@ app.include_router(vtuber_library_router)  # geny-avatar library auto-sync (push
 app.include_router(tts_router)  # TTS (Text-to-Speech) API
 app.include_router(voice_studio_router)  # Voice Studio (/voice-studio synth/preview + languages)
 app.include_router(user_opsidian_router)  # User Opsidian (personal knowledge vault)
+app.include_router(knowledge_router)  # Knowledge repository (documents + qdrant)
 app.include_router(curated_knowledge_router)  # Curated Knowledge (refined knowledge layer)
 app.include_router(whiteboard_router)  # Whiteboard captures + view ledger (P0)
 app.include_router(stt_router)  # Whisper STT diagnostics + on-demand transcribe (voice-notes W1)

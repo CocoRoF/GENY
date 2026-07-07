@@ -32,6 +32,15 @@
 services:
 
   # ── PostgreSQL Database ───────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    container_name: geny-qdrant-prod
+    restart: unless-stopped
+    volumes:
+      - geny-qdrant-prod:/qdrant/storage
+    networks:
+      - geny-network
+
   postgres:
     image: postgres:16-alpine
     container_name: geny-postgres-prod
@@ -71,6 +80,8 @@ services:
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
       - GENY_AGENT_STORAGE_ROOT=/data/geny_agent_sessions
+      # Knowledge repository vector store
+      - GENY_QDRANT_URL=http://qdrant:6333
       # PostgreSQL
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -434,6 +445,7 @@ networks:
     external: true
 
 volumes:
+  geny-qdrant-prod:
   geny-pgdata-prod:
     driver: local
   # avatar-editor 의 런타임 config.json (API 키 설정 모달)

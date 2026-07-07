@@ -318,6 +318,8 @@ class UserOpsidianManager:
         importance: str = "medium",
         source: str = "user",
         links_to: Optional[List[str]] = None,
+        filename_override: Optional[str] = None,
+        frontmatter_extra: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         if self._provider is None:
             return None
@@ -342,18 +344,23 @@ class UserOpsidianManager:
         except ValueError:
             importance_enum = _ExecutorImportance.MEDIUM
 
-        slug = _slugify(title)
-        bare_filename = f"{slug}.md"
-        cat_dir = (
-            Path(self.memory_dir) if cat == "root"
-            else Path(self.memory_dir) / cat
-        )
-        candidate = cat_dir / bare_filename
-        if candidate.exists():
-            counter = 1
-            while (cat_dir / f"{slug}-{counter}.md").exists():
-                counter += 1
-            bare_filename = f"{slug}-{counter}.md"
+        if filename_override:
+            # Stable machine-owned filename (e.g. knowledge document cards
+            # rewritten across status transitions) — no collision counter.
+            bare_filename = Path(filename_override).name
+        else:
+            slug = _slugify(title)
+            bare_filename = f"{slug}.md"
+            cat_dir = (
+                Path(self.memory_dir) if cat == "root"
+                else Path(self.memory_dir) / cat
+            )
+            candidate = cat_dir / bare_filename
+            if candidate.exists():
+                counter = 1
+                while (cat_dir / f"{slug}-{counter}.md").exists():
+                    counter += 1
+                bare_filename = f"{slug}-{counter}.md"
 
         passthrough: Dict[str, Any] = {
             "aliases": [],
@@ -362,6 +369,8 @@ class UserOpsidianManager:
             "linked_from": [],
             "links_to": list(all_links),
         }
+        for key, value in (frontmatter_extra or {}).items():
+            passthrough.setdefault(key, value)
         draft = NoteDraft(
             title=title,
             body=content,
