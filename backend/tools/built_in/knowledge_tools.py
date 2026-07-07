@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from logging import getLogger
 from typing import Any, Awaitable, Dict, List, Optional, TypeVar
 
@@ -750,6 +751,33 @@ class OpsidianBrowseTool(BaseTool):
 # Opsidian Read Tool — read a specific user note
 # ============================================================================
 
+async def _augment_knowledge_note(opsidian, note: dict) -> dict:
+    """If ``note`` is a knowledge-repository document card, replace its
+    body-preview with the FULL reassembled document text. An uploaded
+    PDF/DOCX card only stores a ~400-char preview in its body; reading it
+    should give the agent the whole document, not the teaser."""
+    meta = (note or {}).get("metadata") or {}
+    doc_id = meta.get("doc_id")
+    if not doc_id or meta.get("category") != "knowledge":
+        return note
+    username = getattr(opsidian, "username", None)
+    if not username:
+        return note
+    try:
+        from service.knowledge import get_knowledge_service
+
+        detail = await get_knowledge_service(username).get_document_text(doc_id)
+    except Exception:  # noqa: BLE001 — fall back to the preview body
+        return note
+    text = detail.get("text") or ""
+    if text:
+        note = dict(note)
+        note["document_text"] = text
+        note["body"] = text  # what the agent reads
+        note["chunk_count"] = detail.get("chunk_count")
+    return note
+
+
 class OpsidianReadTool(BaseTool):
     """Read a specific note from the user's personal Opsidian vault."""
 
@@ -757,6 +785,8 @@ class OpsidianReadTool(BaseTool):
     description = (
         "Read a specific note from the user's personal Opsidian vault. "
         "This gives you access to the user's raw personal knowledge. "
+        "Reading a knowledge-repository document card (knowledge/doc-*.md) "
+        "returns the document's FULL text, not just the preview. "
         "Use opsidian_browse first to find the filename."
     )
     CAPABILITIES = _READ_ONLY_KNOWLEDGE
@@ -779,6 +809,7 @@ class OpsidianReadTool(BaseTool):
         note = opsidian.read_note(filename)
         if note is None:
             return _error(f"Note not found: {filename}")
+        note = _run_async_in_sync_call(_augment_knowledge_note(opsidian, note))
         return _ok(note)
 
     async def arun(self, session_id: str, filename: str) -> str:
@@ -795,7 +826,62 @@ class OpsidianReadTool(BaseTool):
         )
         if note is None:
             return _error(f"Note not found: {filename}")
+        note = await _augment_knowledge_note(opsidian, note)
         return _ok(note)
+
+
+class OpsidianFetchDocumentTool(BaseTool):
+    """Return the full text of an uploaded knowledge-repository document."""
+
+    name = "opsidian_fetch_document"
+    description = (
+        "Return the COMPLETE text of a document in the user's knowledge "
+        "repository (an uploaded PDF/DOCX/etc.), reassembled from all its "
+        "chunks in order. Pass the document's doc_id (from opsidian_search "
+        "hits or a knowledge/doc-<id>.md filename). Use this when a search "
+        "snippet isn't enough and you need to read the whole document."
+    )
+    CAPABILITIES = _READ_ONLY_KNOWLEDGE
+
+    @staticmethod
+    def _doc_id_from(identifier: str) -> str:
+        ident = (identifier or "").strip()
+        m = re.search(r"doc-([0-9a-f]{6,})", ident)
+        if m:
+            return m.group(1)
+        return ident.replace(".md", "").replace("knowledge/", "")
+
+    def run(self, session_id: str, doc_id: str) -> str:
+        return _run_async_in_sync_call(self.arun(session_id, doc_id))
+
+    async def arun(self, session_id: str, doc_id: str) -> str:
+        """Fetch a knowledge-repository document's full text.
+
+        Args:
+            session_id: Your session ID.
+            doc_id: The document id (or a knowledge/doc-<id>.md filename).
+        """
+        _, opsidian = _get_context_managers(session_id)
+        if opsidian is None:
+            return _error("User Opsidian manager not available")
+        username = getattr(opsidian, "username", None)
+        if not username:
+            return _error("no user bound to this session")
+        did = self._doc_id_from(doc_id)
+        try:
+            from service.knowledge import (
+                KnowledgeUnavailable,
+                get_knowledge_service,
+            )
+
+            detail = await get_knowledge_service(username).get_document_text(did)
+        except KeyError:
+            return _error(f"document not found: {did}")
+        except KnowledgeUnavailable as exc:
+            return _error(f"knowledge repository unavailable: {exc.reason}")
+        except Exception as exc:  # noqa: BLE001
+            return _error(f"failed to fetch document: {exc}")
+        return _ok(detail)
 
 
 # ============================================================================
@@ -827,10 +913,15 @@ async def _knowledge_semantic_hits(
             "tags": ["knowledge"],
             "importance": "medium",
             "score": h.get("score", 0.0),
-            "snippet": (h.get("text") or "")[:500],
+            # The matching chunk's full text (chunks are ~1200 chars). A
+            # search hit clipped to 500 chars makes the agent think that's
+            # all there is; keep the whole chunk and point at
+            # opsidian_fetch_document for the rest of the document.
+            "snippet": (h.get("text") or "")[:2000],
             "page": h.get("page"),
             "heading": h.get("heading"),
             "match": "semantic",
+            "doc_id": h.get("doc_id", ""),
         }
         for h in hits
     ]
@@ -1090,11 +1181,21 @@ TOOLS = [
     OpsidianBrowseTool(),
     OpsidianReadTool(),
     OpsidianSearchTool(),
+    OpsidianFetchDocumentTool(),
 ]
 
-# Progressive disclosure: these tools are useless unless LTM curated-knowledge is
-# enabled, so hide them entirely when it isn't (instead of returning a "not
-# enabled" error at call time). The gate token is satisfied by
-# tool_config_gate.compute_satisfied_config when LTMConfig.curated_knowledge_enabled.
+# Progressive disclosure — hide tools whose backing store is off instead of
+# erroring at call time. TWO distinct stores, TWO gates:
+#   * curated ``knowledge_*`` tools  → feature:curated_knowledge
+#   * user-vault ``opsidian_*`` tools → feature:user_opsidian
+# The opsidian tools read the KNOWLEDGE REPOSITORY (uploaded documents), which
+# lives in the user vault — gating them on curated_knowledge (a different,
+# off-by-default store) hid document reading from every agent even when the
+# repository was in active use. Both gate tokens come from
+# tool_config_gate.compute_satisfied_config.
+_CURATED_GATE = ("feature:curated_knowledge",)
+_VAULT_GATE = ("feature:user_opsidian",)
 for _t in TOOLS:
-    _t.REQUIRED_CONFIG = ("feature:curated_knowledge",)
+    _t.REQUIRED_CONFIG = (
+        _VAULT_GATE if _t.name.startswith("opsidian_") else _CURATED_GATE
+    )

@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -28,9 +29,14 @@ from typing import Iterable, Optional
 _ATTACHMENTS_DIR = "_attachments"
 _CAPTURES_LOG = "_captures.jsonl"
 
-# Conservative — alphanumerics, hyphen, underscore, period only.
-# Anything else gets replaced. Path separators MUST not survive.
-_SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+# Characters that are genuinely unsafe in a filename — path separators,
+# the shell/Windows-reserved set, and anything the FS can't hold. Unicode
+# LETTERS (Hangul, CJK, accented Latin, …) are PRESERVED: an ASCII-only
+# filter mangled "빅데이터.pdf" into "_______.pdf". We strip only what is
+# actually dangerous and normalise to NFC so the on-disk name is stable.
+_UNSAFE_NAME_RE = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
+# The reserved-char filter also catches ``..`` traversal because ``/`` and
+# ``\`` cannot survive; a leading dot is additionally stripped below.
 
 
 def _utc_stamp() -> str:
@@ -41,8 +47,9 @@ def safe_attachment_name(suggested: Optional[str], *, default_ext: str = "bin") 
     """Return a filesystem-safe attachment basename.
 
     The result is always a leaf name (no separators), preserves the
-    extension when one is detectable, and falls back to a UTC-stamped
-    random name when ``suggested`` is empty.
+    extension when one is detectable, PRESERVES Unicode letters (Korean,
+    CJK, accented Latin), and falls back to a UTC-stamped random name when
+    ``suggested`` is empty or reduces to nothing.
     """
     if suggested:
         # Strip any path components an over-eager client may have sent.
@@ -50,11 +57,18 @@ def safe_attachment_name(suggested: Optional[str], *, default_ext: str = "bin") 
     if not suggested:
         return f"{_utc_stamp()}-{secrets.token_hex(4)}.{default_ext.strip('.')}"
 
+    suggested = unicodedata.normalize("NFC", suggested)
     stem, dot, ext = suggested.rpartition(".")
     if not dot:
         stem, ext = suggested, default_ext
-    safe_stem = _SAFE_NAME_RE.sub("_", stem).strip("._-") or "capture"
-    safe_ext = _SAFE_NAME_RE.sub("", ext).lower() or default_ext.strip(".")
+
+    # Replace only genuinely-unsafe characters; keep Unicode letters.
+    safe_stem = _UNSAFE_NAME_RE.sub("_", stem)
+    # Collapse whitespace runs, trim leading dots/spaces (hidden-file /
+    # trailing-dot hazards), but leave inner Unicode intact.
+    safe_stem = re.sub(r"\s+", " ", safe_stem).strip(" .")
+    safe_stem = safe_stem or "capture"
+    safe_ext = _UNSAFE_NAME_RE.sub("", ext).strip().lower() or default_ext.strip(".")
     return f"{safe_stem}.{safe_ext}"
 
 

@@ -3514,6 +3514,10 @@ export interface KnowledgeDoc {
   embedding_model?: string;
   /** True when the doc's model ≠ the current embedding setting. */
   embedding_stale?: boolean;
+  /** Clean human filename (Unicode preserved), for the download name. */
+  original_filename?: string;
+  /** Vault-relative path to the original bytes (_attachments/…). */
+  attachment?: string;
 }
 
 export interface KnowledgeHit {
@@ -3600,6 +3604,28 @@ export const knowledgeApi = {
     apiCall<{ accepted: boolean; count: number }>(
       '/api/opsidian/knowledge/reembed',
       { method: 'POST' },
+    ),
+
+  /** Every stored chunk of a document, ordered, with page/heading. */
+  documentChunks: (docId: string) =>
+    apiCall<{
+      doc_id: string;
+      title: string;
+      embedding_model: string;
+      chunk_count: number;
+      chunks: Array<{
+        chunk_index: number;
+        text: string;
+        page: number | null;
+        heading: string | null;
+        sheet: string | null;
+      }>;
+    }>(`/api/opsidian/knowledge/documents/${encodeURIComponent(docId)}/chunks`),
+
+  /** Reassembled full text of a document. */
+  documentText: (docId: string) =>
+    apiCall<{ doc_id: string; title: string; chunk_count: number; text: string }>(
+      `/api/opsidian/knowledge/documents/${encodeURIComponent(docId)}/text`,
     ),
 
   search: (query: string, topK = 8) =>
@@ -3705,6 +3731,32 @@ export const whiteboardApi = {
     const cleaned = relativePath.replace(/^\/+/, '');
     const stripped = cleaned.startsWith('_attachments/') ? cleaned.slice('_attachments/'.length) : cleaned;
     return `/api/opsidian/attachments/${encodeURI(stripped)}`;
+  },
+
+  /** Download an attachment through an AUTHENTICATED fetch (so the Bearer
+   *  token rides along — a plain <a download> can only send the cookie,
+   *  which expires before the token) and save it under ``downloadName``. */
+  downloadAttachment: async (relativePath: string, downloadName?: string): Promise<void> => {
+    const cleaned = relativePath.replace(/^\/+/, '');
+    const stripped = cleaned.startsWith('_attachments/')
+      ? cleaned.slice('_attachments/'.length)
+      : cleaned;
+    let url = `/api/opsidian/attachments/${encodeURI(stripped)}`;
+    if (downloadName) url += `?download=${encodeURIComponent(downloadName)}`;
+    const token = getToken();
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = downloadName || stripped.replace(/^.*\//, '');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
   },
 
   /** DELETE /api/opsidian/captures/{capture_id} — remove draft + attachment. */

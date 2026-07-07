@@ -321,6 +321,7 @@ class KnowledgeService:
             summary="",
             chunk_count=0,
             content_sha=content_sha,
+            original_filename=safe_name,
         )
 
         # 3) Extract + chunk + index. Any failure lands on the card.
@@ -345,6 +346,7 @@ class KnowledgeService:
                 summary=preview,
                 chunk_count=indexed,
                 content_sha=content_sha,
+                original_filename=safe_name,
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
@@ -364,6 +366,7 @@ class KnowledgeService:
                 summary=f"ingestion failed: {exc}",
                 chunk_count=0,
                 content_sha=content_sha,
+                original_filename=safe_name,
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
@@ -465,10 +468,14 @@ class KnowledgeService:
         self, *, card_filename: str, title: str, doc_id: str,
         attachment_rel: str, source_type: str, source_ref: str,
         status: str, captured, summary: str, chunk_count: int,
-        content_sha: str = "",
+        content_sha: str = "", original_filename: str = "",
     ) -> None:
         vault = self._vault()
         provider, model, _ = _embedding_spec()
+        # The clean human filename (Unicode preserved), independent of the
+        # on-disk attachment name — this is what re-embedding restores as
+        # the title and what downloads name the file.
+        original_filename = original_filename or title
         body = (
             f"![[{Path(attachment_rel).name}]]\n\n"
             + (f"{summary}\n\n" if summary else "")
@@ -495,6 +502,7 @@ class KnowledgeService:
                 "chunk_count": chunk_count,
                 "attachment": attachment_rel,
                 "content_sha": content_sha,
+                "original_filename": original_filename,
                 # Exactly which model produced this document's vectors —
                 # the mismatch signal that drives re-embedding.
                 "embedding_provider": provider,
@@ -533,9 +541,12 @@ class KnowledgeService:
             # Docs from before model recording carry no embedding_model —
             # treat them as embedded with the launch default.
             doc_model = fm.get("embedding_model") or "text-embedding-3-large"
+            original_filename = fm.get("original_filename") or meta.get("title")
             out.append({
                 "filename": meta.get("filename"),
-                "title": meta.get("title"),
+                "title": original_filename or meta.get("title"),
+                "original_filename": original_filename,
+                "attachment": fm.get("attachment", ""),
                 "doc_id": fm.get("doc_id", ""),
                 "status": fm.get("knowledge_status", "ready"),
                 "source_type": fm.get("source_type", ""),
@@ -549,6 +560,63 @@ class KnowledgeService:
                 "embedding_stale": doc_model != current_model,
             })
         return out
+
+    async def get_document_chunks(self, doc_id: str) -> Dict[str, Any]:
+        """Every stored chunk of a document, ordered by chunk_index, each
+        with its full text + page/heading provenance. Reads from the
+        collection the doc was actually embedded into (so a stale doc is
+        still viewable). Powers the chunk viewer and the document-read
+        tool's reassembly."""
+        from geny_executor.memory.provider import NoteRef, Scope
+
+        vault = self._vault()
+        card_filename = f"doc-{doc_id}.md"
+        note = await vault.aread_note(f"{KNOWLEDGE_CATEGORY}/{card_filename}")
+        if note is None:
+            raise KeyError(f"document not found: {doc_id}")
+        fm = (note.get("metadata") or {})
+        doc_model = fm.get("embedding_model") or ""
+        store = self._store_for_model(doc_model) if doc_model else self._vector()
+
+        fetch = getattr(store, "fetch_document", None)
+        chunks: List[Dict[str, Any]] = []
+        if callable(fetch):
+            for mc in await fetch(NoteRef(filename=card_filename, scope=Scope.USER)):
+                meta = mc.metadata or {}
+                chunks.append({
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "text": mc.content,
+                    "page": meta.get("page"),
+                    "heading": meta.get("heading"),
+                    "sheet": meta.get("sheet"),
+                })
+        return {
+            "doc_id": doc_id,
+            "title": fm.get("original_filename") or note.get("title") or doc_id,
+            "embedding_model": doc_model,
+            "chunk_count": fm.get("chunk_count", len(chunks)),
+            "chunks": chunks,
+        }
+
+    async def get_document_text(self, doc_id: str) -> Dict[str, Any]:
+        """The reassembled full text of a document (ordered chunks joined),
+        with light page markers. This is what the document-read tool
+        returns to an agent."""
+        detail = await self.get_document_chunks(doc_id)
+        parts: List[str] = []
+        last_page = None
+        for ch in detail["chunks"]:
+            page = ch.get("page")
+            if page is not None and page != last_page:
+                parts.append(f"\n[Page {page}]")
+                last_page = page
+            parts.append(ch["text"])
+        return {
+            "doc_id": doc_id,
+            "title": detail["title"],
+            "chunk_count": detail["chunk_count"],
+            "text": "\n\n".join(p for p in parts if p).strip(),
+        }
 
     async def reembed_document(self, doc_id: str) -> Dict[str, Any]:
         """Re-run extract+embed+index for one document from its stored
@@ -583,28 +651,37 @@ class KnowledgeService:
             except Exception:  # noqa: BLE001 — old vectors are harmless
                 logger.info("reembed: old-model vector cleanup skipped", exc_info=True)
 
-        title = note.get("title") or fm.get("doc_id", doc_id)
-        original_name = Path(attachment).name
-        # save_attachment prefixes "knowledge-<doc_id>-" — strip it back
-        # to the user-facing filename for extraction suffix detection.
+        # Preserve the clean human filename across re-embedding. Prefer the
+        # stored original_filename; fall back to the card title, then to the
+        # attachment name with the "knowledge-<doc_id>-" prefix stripped.
+        attachment_leaf = Path(attachment).name
+        stripped = attachment_leaf
         prefix = f"knowledge-{doc_id}-"
-        if original_name.startswith(prefix):
-            original_name = original_name[len(prefix):] or title
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+        display_name = (
+            fm.get("original_filename")
+            or note.get("title")
+            or stripped
+            or f"document-{doc_id}"
+        )
         return await self._reingest_existing(
             doc_id=doc_id,
             card_filename=card_filename,
-            filename=original_name,
+            display_name=display_name,
+            extract_name=stripped or display_name,  # extension for extraction
             data=data,
             fm=fm,
         )
 
     async def _reingest_existing(
-        self, *, doc_id: str, card_filename: str, filename: str,
-        data: bytes, fm: Dict[str, Any],
+        self, *, doc_id: str, card_filename: str, display_name: str,
+        extract_name: str, data: bytes, fm: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Ingest pipeline for an EXISTING card — keeps the doc_id even
         when it originally came from a connector doc_key (whose sha the
-        content hash can't reproduce)."""
+        content hash can't reproduce), and preserves the human filename
+        (``display_name``) as the title/original_filename."""
         vector = self._vector()
         captured = datetime.now(timezone.utc)
         source_type = fm.get("source_type") or "upload"
@@ -612,16 +689,17 @@ class KnowledgeService:
         attachment_rel = fm.get("attachment", "")
         content_sha = hashlib.sha1(data).hexdigest()
         common = dict(
-            card_filename=card_filename, title=filename, doc_id=doc_id,
+            card_filename=card_filename, title=display_name, doc_id=doc_id,
             attachment_rel=attachment_rel, source_type=source_type,
             source_ref=source_ref, captured=captured, content_sha=content_sha,
+            original_filename=display_name,
         )
         try:
-            chunks = self._extract_chunks(filename, data)
+            chunks = self._extract_chunks(extract_name, data)
             if not chunks:
                 raise RuntimeError("no extractable text")
             indexed = await self._index_chunks(
-                vector, card_filename, doc_id, filename, source_type,
+                vector, card_filename, doc_id, display_name, source_type,
                 source_ref, chunks,
             )
             await self._write_card(
@@ -630,7 +708,7 @@ class KnowledgeService:
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
-                "title": filename, "status": "ready", "chunks": indexed,
+                "title": display_name, "status": "ready", "chunks": indexed,
             }
         except Exception as exc:  # noqa: BLE001 — recorded on the card
             logger.warning("knowledge: reembed failed for %s", doc_id, exc_info=True)
@@ -640,7 +718,7 @@ class KnowledgeService:
             )
             return {
                 "doc_id": doc_id, "filename": card_filename,
-                "title": filename, "status": "failed", "error": str(exc),
+                "title": display_name, "status": "failed", "error": str(exc),
             }
 
     async def delete_document(self, doc_id: str) -> bool:

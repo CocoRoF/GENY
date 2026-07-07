@@ -18,6 +18,27 @@ import {
   type UrlTransform,
 } from 'react-markdown';
 import { whiteboardApi } from '@/lib/api';
+import { getToken } from '@/lib/authApi';
+
+/** Authenticated download: sends the Bearer token (a plain <a download>
+ *  can only send the cookie, which expires before the token), streams to
+ *  a blob, and saves under ``filename``. */
+async function authedDownload(url: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+}
 
 export type AttachmentRenderer = (props: {
   url: string;
@@ -54,11 +75,13 @@ const renderVideo: AttachmentRenderer = ({ url }) => (
 );
 
 const renderDownload: AttachmentRenderer = ({ url, filename }) => (
-  <a
-    href={url}
-    target="_blank"
-    rel="noopener noreferrer"
-    download={filename}
+  <button
+    type="button"
+    onClick={() => {
+      void authedDownload(url, filename).catch(() => {
+        /* download failed — surfaced by the browser's own error */
+      });
+    }}
     style={{
       display: 'inline-flex',
       alignItems: 'center',
@@ -68,12 +91,12 @@ const renderDownload: AttachmentRenderer = ({ url, filename }) => (
       background: 'var(--obs-bg-secondary, rgba(255,255,255,0.04))',
       border: '1px solid var(--obs-border, #2c2c2e)',
       color: 'var(--obs-text, #d1d1d6)',
-      textDecoration: 'none',
+      cursor: 'pointer',
       fontSize: 13,
     }}
   >
     📎 {filename}
-  </a>
+  </button>
 );
 
 /**

@@ -15,6 +15,14 @@ import pytest
 import service.knowledge.service as ks
 
 
+class _FakeChunk:
+    """MemoryChunk-shaped object for fetch_document."""
+
+    def __init__(self, content, metadata):
+        self.content = content
+        self.metadata = metadata
+
+
 class _FakeStore:
     def __init__(self):
         self.indexed: Dict[str, List[Any]] = {}
@@ -30,6 +38,14 @@ class _FakeStore:
     async def remove(self, ref):
         self.removed.append(ref.filename)
         return True
+
+    async def fetch_document(self, ref, *, max_chunks=5000):
+        out = []
+        for i, dc in enumerate(self.indexed.get(ref.filename, [])):
+            meta = dict(getattr(dc, "metadata", {}) or {})
+            meta.setdefault("chunk_index", i)
+            out.append(_FakeChunk(dc.text, meta))
+        return out
 
 
 @pytest.fixture()
@@ -207,6 +223,63 @@ async def test_embedding_model_recorded_stale_and_reembed(svc, monkeypatch):
     )
     assert row["embedding_model"] == "text-embedding-3-small"
     assert row["embedding_stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_korean_filename_preserved_in_title_and_original(svc):
+    service, fake = svc
+    out = await service.ingest_file(
+        filename="빅데이터응용학과 시행세칙.md",
+        data=("본문 문단입니다. " * 120).encode("utf-8"),
+    )
+    assert out["status"] == "ready"
+    row = next(
+        d for d in await service.list_documents() if d["doc_id"] == out["doc_id"]
+    )
+    assert row["title"] == "빅데이터응용학과 시행세칙.md"
+    assert row["original_filename"] == "빅데이터응용학과 시행세칙.md"
+
+
+@pytest.mark.asyncio
+async def test_get_document_text_reassembles_full(svc):
+    service, fake = svc
+    body = "첫 문단. " * 200 + "PAYMENT_TIMEOUT=7500ms. " + "끝 문단. " * 50
+    out = await service.ingest_file(filename="정책.md", data=body.encode("utf-8"))
+    detail = await service.get_document_text(out["doc_id"])
+    assert detail["title"] == "정책.md"
+    assert "7500ms" in detail["text"]
+    # Reassembled text is materially longer than the 400-char card preview.
+    assert len(detail["text"]) > 400
+    chunks = await service.get_document_chunks(out["doc_id"])
+    assert chunks["chunk_count"] == out["chunks"]
+    assert [c["chunk_index"] for c in chunks["chunks"]] == list(
+        range(len(chunks["chunks"]))
+    )
+
+
+@pytest.mark.asyncio
+async def test_reembed_preserves_korean_title(svc, monkeypatch):
+    """A prior bug rebuilt the title from the mangled attachment name on
+    re-embed. It must survive from original_filename instead."""
+    service, fake = svc
+    monkeypatch.setattr(
+        ks, "_embedding_spec",
+        lambda: ("openai", "text-embedding-3-large", 3072),
+    )
+    out = await service.ingest_file(
+        filename="한글 문서.md", data=("본문. " * 120).encode("utf-8"),
+    )
+    monkeypatch.setattr(
+        ks, "_embedding_spec",
+        lambda: ("openai", "text-embedding-3-small", 1536),
+    )
+    res = await service.reembed_document(out["doc_id"])
+    assert res["status"] == "ready"
+    row = next(
+        d for d in await service.list_documents() if d["doc_id"] == out["doc_id"]
+    )
+    assert row["title"] == "한글 문서.md"
+    assert row["original_filename"] == "한글 문서.md"
 
 
 def test_json_upload_uses_structured_rendering(svc):

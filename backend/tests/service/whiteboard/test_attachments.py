@@ -117,6 +117,32 @@ def test_safe_attachment_name_falls_back_when_empty() -> None:
     assert "/" not in name
 
 
+def test_safe_attachment_name_preserves_korean() -> None:
+    # An ASCII-only filter used to mangle Hangul into underscores.
+    name = safe_attachment_name("빅데이터응용학과 시행세칙.pdf")
+    assert name == "빅데이터응용학과 시행세칙.pdf"
+
+
+def test_safe_attachment_name_preserves_cjk_and_accents() -> None:
+    assert safe_attachment_name("研究レポート.docx") == "研究レポート.docx"
+    assert safe_attachment_name("résumé.pdf") == "résumé.pdf"
+
+
+def test_safe_attachment_name_strips_only_unsafe_chars() -> None:
+    # Reserved (non-separator) chars go; the Korean stem survives.
+    # (``/`` is a genuine path separator handled by basename, so it's
+    # not part of a realistic single-segment filename.)
+    name = safe_attachment_name('보고서:2025*.pdf')
+    assert ":" not in name and "*" not in name
+    assert "보고서" in name and name.endswith(".pdf")
+
+
+def test_save_attachment_round_trip_korean(vault: str) -> None:
+    rel = save_attachment(vault, b"data", suggested_name="한글 문서.pdf")
+    assert "한글 문서.pdf" in rel
+    assert read_attachment(vault, rel) == b"data"
+
+
 def test_append_capture_log_writes_one_json_per_line(vault: str) -> None:
     append_capture_log(vault, {"capture_id": "1", "kind": "screen"})
     append_capture_log(vault, {"capture_id": "2", "kind": "clipboard"})

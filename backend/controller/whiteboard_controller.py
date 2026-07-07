@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -681,6 +682,7 @@ async def list_recent_captures(
 @router.get("/attachments/{rel_path:path}")
 async def download_attachment(
     rel_path: str,
+    request: Request,
     auth: dict = Depends(_resolve_user_for_capture),
 ):
     """Stream a previously stored attachment.
@@ -728,7 +730,25 @@ async def download_attachment(
 
     if not target.is_file():
         raise HTTPException(status_code=404, detail="attachment not found")
-    return FileResponse(path=str(target))
+
+    # Download filename: honour an explicit ?download=<name> (the UI passes
+    # the document's clean Unicode name), else derive it from the on-disk
+    # leaf by stripping the "knowledge-<doc_id>-" storage prefix. Encoded
+    # per RFC 5987 so Korean/CJK names survive the header.
+    from urllib.parse import quote
+
+    download_name = (request.query_params.get("download") or "").strip()
+    if not download_name:
+        leaf = target.name
+        m = re.match(r"^knowledge-[0-9a-f]{6,}-(.+)$", leaf)
+        download_name = m.group(1) if m else leaf
+    disposition = (
+        f"attachment; filename*=UTF-8''{quote(download_name)}"
+    )
+    return FileResponse(
+        path=str(target),
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @router.delete("/captures/{capture_id}")

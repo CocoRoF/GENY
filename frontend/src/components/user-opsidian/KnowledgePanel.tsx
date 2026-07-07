@@ -14,9 +14,11 @@ import Link from 'next/link';
 import {
   BookOpenText,
   Database,
+  Download,
   FileUp,
   Globe,
   KeyRound,
+  Layers,
   Loader2,
   Play,
   Plus,
@@ -24,13 +26,111 @@ import {
   Search,
   Trash2,
   Webhook,
+  X,
 } from 'lucide-react';
 import {
   knowledgeApi,
+  whiteboardApi,
   type KnowledgeDoc,
   type KnowledgeHit,
   type KnowledgeSource,
 } from '@/lib/api';
+
+/** Full-chunk viewer — every stored chunk of a document, in order, with
+ *  page/heading provenance. This is the "정확한 청크 내용 전부" surface. */
+function ChunkViewer({ doc, onClose }: { doc: KnowledgeDoc; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [chunks, setChunks] = useState<
+    Array<{ chunk_index: number; text: string; page: number | null; heading: string | null }>
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await knowledgeApi.documentChunks(doc.doc_id);
+        if (!cancelled) setChunks(res.chunks);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [doc.doc_id]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 60, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.5)', padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 820, maxHeight: '85vh', display: 'flex',
+          flexDirection: 'column', borderRadius: 10,
+          background: 'var(--obs-bg, #1a1a1c)',
+          border: '1px solid var(--obs-border, #2c2c2e)',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px',
+          borderBottom: '1px solid var(--obs-border-subtle, #222)',
+        }}>
+          <Layers size={16} style={{ color: 'var(--obs-purple, #8b5cf6)' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {doc.title}
+            </div>
+            <div style={{ fontSize: 10.5, opacity: 0.55 }}>
+              {chunks.length || doc.chunk_count} chunks · {doc.embedding_model}
+            </div>
+          </div>
+          <button className="obs-sb-icon-btn" onClick={onClose} title="닫기">
+            <X size={15} />
+          </button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: 16 }}>
+          {loading && (
+            <div style={{ textAlign: 'center', padding: 30 }}>
+              <Loader2 size={20} className="animate-spin" />
+            </div>
+          )}
+          {error && <div style={{ color: '#ef4444', fontSize: 12.5 }}>{error}</div>}
+          {!loading && !error && chunks.length === 0 && (
+            <div style={{ fontSize: 12.5, opacity: 0.6 }}>
+              저장된 청크가 없습니다 (임베딩 모델 불일치 상태라면 재임베딩 후 다시 확인).
+            </div>
+          )}
+          {chunks.map((c) => (
+            <div
+              key={c.chunk_index}
+              style={{
+                marginBottom: 12, padding: '10px 12px', borderRadius: 8,
+                border: '1px solid var(--obs-border-subtle, #222)',
+                background: 'var(--obs-bg-secondary, rgba(255,255,255,0.02))',
+              }}
+            >
+              <div style={{ fontSize: 10.5, opacity: 0.5, marginBottom: 5, fontFamily: 'monospace' }}>
+                #{c.chunk_index}
+                {c.page != null && ` · p.${c.page}`}
+                {c.heading && ` · ${c.heading}`}
+              </div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                {c.text}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const STATUS_STYLE: Record<string, { color: string; label: string }> = {
   ready: { color: '#22c55e', label: 'ready' },
@@ -177,6 +277,7 @@ export default function KnowledgePanel({
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [showSourceForm, setShowSourceForm] = useState(false);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
+  const [viewerDoc, setViewerDoc] = useState<KnowledgeDoc | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -555,6 +656,28 @@ export default function KnowledgePanel({
                   </div>
                 )}
               </button>
+              {d.status === 'ready' && d.chunk_count > 0 && (
+                <button
+                  className="obs-sb-icon-btn"
+                  title="청크 전체 보기"
+                  onClick={() => setViewerDoc(d)}
+                >
+                  <Layers size={13} />
+                </button>
+              )}
+              <button
+                className="obs-sb-icon-btn"
+                title="원본 다운로드"
+                onClick={() => {
+                  const rel = d.attachment;
+                  if (!rel) return;
+                  void whiteboardApi
+                    .downloadAttachment(rel, d.original_filename || d.title)
+                    .catch((e) => setError(String(e)));
+                }}
+              >
+                <Download size={13} />
+              </button>
               {d.embedding_stale && d.status === 'ready' && (
                 <button
                   className="obs-sb-icon-btn"
@@ -674,6 +797,10 @@ export default function KnowledgePanel({
           </div>
         )}
       </div>
+
+      {viewerDoc && (
+        <ChunkViewer doc={viewerDoc} onClose={() => setViewerDoc(null)} />
+      )}
     </div>
   );
 }

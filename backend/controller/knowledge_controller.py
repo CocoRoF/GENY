@@ -104,6 +104,35 @@ async def list_documents(auth: dict = Depends(require_auth)):
     return {"documents": await svc.list_documents()}
 
 
+@router.get("/documents/{doc_id}/chunks")
+async def document_chunks(
+    doc_id: str = Path(...), auth: dict = Depends(require_auth),
+):
+    """Every stored chunk of a document, ordered, with page/heading — the
+    chunk viewer's data source."""
+    svc = get_knowledge_service(auth.get("sub", "anonymous"))
+    try:
+        return await svc.get_document_chunks(doc_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"document not found: {doc_id}")
+    except KnowledgeUnavailable as exc:
+        raise _unavailable(exc)
+
+
+@router.get("/documents/{doc_id}/text")
+async def document_text(
+    doc_id: str = Path(...), auth: dict = Depends(require_auth),
+):
+    """Reassembled full text of a document (ordered chunks joined)."""
+    svc = get_knowledge_service(auth.get("sub", "anonymous"))
+    try:
+        return await svc.get_document_text(doc_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"document not found: {doc_id}")
+    except KnowledgeUnavailable as exc:
+        raise _unavailable(exc)
+
+
 @router.delete("/documents/{doc_id}")
 async def delete_document(
     doc_id: str = Path(...), auth: dict = Depends(require_auth),
