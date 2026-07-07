@@ -142,6 +142,24 @@ async def test_rejected_key_raises_openai_key_invalid(monkeypatch):
     ks._KEY_VALIDITY.clear()
 
 
+def test_vector_rebuilds_on_key_rotation(monkeypatch):
+    """A key rotated in settings must rebuild the embedder — otherwise
+    the cached client keeps pinging with the RETIRED key and poisons the
+    new key's validity verdict (observed on prod 2026-07-07)."""
+    current = {"key": "sk-old"}
+    monkeypatch.setattr(ks, "_resolve_openai_key", lambda: current["key"])
+    service = ks.KnowledgeService("rotator")
+
+    store1 = service._vector()
+    embedder1 = service._embedder
+    assert service._vector() is store1  # unchanged key → cached
+
+    current["key"] = "sk-new"
+    store2 = service._vector()
+    assert store2 is not store1
+    assert service._embedder is not embedder1
+
+
 def test_json_upload_uses_structured_rendering(svc):
     service, _ = svc
     rows = service._extract_chunks(

@@ -95,6 +95,7 @@ class KnowledgeService:
         self.username = username
         self._store = None  # lazy QdrantVectorStore
         self._embedder = None  # EmbeddingClient handle for verify_embedding
+        self._key_sha = None  # key the cached store/embedder were built with
 
     # ── wiring ───────────────────────────────────────────────────────
 
@@ -104,9 +105,19 @@ class KnowledgeService:
         return get_user_opsidian_manager(self.username)
 
     def _vector(self):
-        if self._store is not None:
-            return self._store
         key = _resolve_openai_key()
+        key_sha = hashlib.sha1(key.encode("utf-8")).hexdigest() if key else None
+        if self._store is not None:
+            # An injected store (tests / custom wiring) has no key sha —
+            # keep it. A self-built store is only valid while the resolved
+            # key is unchanged: after a key rotation in settings the old
+            # embedder would keep pinging with the RETIRED key and poison
+            # the new key's validity verdict.
+            if self._key_sha is None or self._key_sha == key_sha:
+                return self._store
+            self._store = None
+            self._embedder = None
+            self._key_sha = None
         if not key:
             raise KnowledgeUnavailable(
                 "openai_key_missing",
@@ -133,6 +144,7 @@ class KnowledgeService:
             collection=_collection_for(self.username),
             client=client,
         )
+        self._key_sha = key_sha
         return self._store
 
     async def verify_embedding(self) -> None:
