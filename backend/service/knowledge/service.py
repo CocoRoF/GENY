@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from logging import getLogger
@@ -529,6 +530,55 @@ class KnowledgeService:
             }
             for h in hits
         ]
+
+    async def index_note(self, *, filename: str, title: str, text: str) -> int:
+        """Embed a user-created vault note into the knowledge index so the
+        agent's ``opsidian_search`` finds it semantically — the SAME
+        treatment uploads and connectors get, keeping all three supply
+        paths consistent. Keyed by the note's real vault path (no doc
+        card — the note IS its own record). Best-effort: returns 0 and
+        stays silent when embedding isn't configured, so note creation
+        never fails on a missing key. Managed document cards
+        (``doc-<id>.md``) are skipped (ingest_file already indexed them)."""
+        leaf = filename.replace("\\", "/").split("/")[-1]
+        if re.match(r"^doc-[0-9a-f]{6,}\.md$", leaf):
+            return 0
+        try:
+            vector = self._vector()
+        except KnowledgeUnavailable:
+            return 0  # embedding not ready — note stays markdown-only
+        text = (text or "").strip()
+        if not text:
+            await self.remove_note(filename)
+            return 0
+        try:
+            rows = self._extract_chunks(leaf, text.encode("utf-8"))
+        except Exception:  # noqa: BLE001 — fall back to whole-note as one chunk
+            rows = [{"text": text}]
+        if not rows:
+            await self.remove_note(filename)
+            return 0
+        try:
+            return await self._index_chunks(
+                vector, filename, "", title or leaf, "note", "", rows,
+            )
+        except Exception:  # noqa: BLE001 — best-effort; note is already saved
+            logger.info("knowledge: note index skipped for %s", filename, exc_info=True)
+            return 0
+
+    async def remove_note(self, filename: str) -> bool:
+        """Drop a note's vectors from the current-model collection (called
+        on note delete / when a note is emptied)."""
+        from geny_executor.memory.provider import NoteRef, Scope
+
+        try:
+            vector = self._vector()
+        except KnowledgeUnavailable:
+            return False
+        try:
+            return await vector.remove(NoteRef(filename=filename, scope=Scope.USER))
+        except Exception:  # noqa: BLE001
+            return False
 
     async def list_documents(self) -> List[Dict[str, Any]]:
         _, current_model, _ = _embedding_spec()

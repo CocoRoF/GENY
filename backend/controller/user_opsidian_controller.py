@@ -20,6 +20,45 @@ logger = getLogger(__name__)
 router = APIRouter(prefix="/api/opsidian", tags=["user-opsidian"])
 
 
+def _schedule_note_index(username: str, filename: str, title: str, text: str) -> None:
+    """Fire-and-forget: embed a user-created/edited note into the knowledge
+    index so the agent's opsidian_search finds it semantically — the same
+    treatment uploads/connectors get. Best-effort; never blocks the write."""
+    async def _run():
+        try:
+            from service.knowledge import get_knowledge_service
+
+            await get_knowledge_service(username).index_note(
+                filename=filename, title=title, text=text,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("opsidian: note index skipped", exc_info=True)
+
+    try:
+        from service.whiteboard._task_tracker import schedule as _schedule_task
+
+        _schedule_task(_run(), name=f"opsidian.note_index:{filename}")
+    except Exception:  # noqa: BLE001
+        logger.debug("opsidian: note index scheduling skipped", exc_info=True)
+
+
+def _schedule_note_remove(username: str, filename: str) -> None:
+    async def _run():
+        try:
+            from service.knowledge import get_knowledge_service
+
+            await get_knowledge_service(username).remove_note(filename)
+        except Exception:  # noqa: BLE001
+            logger.debug("opsidian: note vector removal skipped", exc_info=True)
+
+    try:
+        from service.whiteboard._task_tracker import schedule as _schedule_task
+
+        _schedule_task(_run(), name=f"opsidian.note_remove:{filename}")
+    except Exception:  # noqa: BLE001
+        logger.debug("opsidian: note removal scheduling skipped", exc_info=True)
+
+
 # ============================================================================
 # Request / Response Models
 # ============================================================================
@@ -151,6 +190,7 @@ async def create_opsidian_file(
     )
     if filename is None:
         raise HTTPException(status_code=500, detail="Failed to create note")
+    _schedule_note_index(username, filename, req.title, req.content)
     return {"filename": filename, "message": "Note created successfully"}
 
 
@@ -168,6 +208,8 @@ async def update_opsidian_file(
     )
     if not ok:
         raise HTTPException(status_code=404, detail=f"Update failed: {filename}")
+    # Re-embed the edited note (title unchanged here → derive from leaf).
+    _schedule_note_index(username, filename, filename.split("/")[-1], req.content or "")
     return {"filename": filename, "message": "Note updated successfully"}
 
 
@@ -182,6 +224,7 @@ async def delete_opsidian_file(
     ok = await mgr.adelete_note(filename)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Delete failed: {filename}")
+    _schedule_note_remove(username, filename)
     return {"message": "Note deleted successfully"}
 
 

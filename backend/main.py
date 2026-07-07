@@ -791,6 +791,10 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, 'curation_scheduler'):
         app.state.curation_scheduler.stop()
 
+    # Stop knowledge collection scheduler
+    if hasattr(app.state, 'knowledge_scheduler'):
+        app.state.knowledge_scheduler.stop()
+
     # Stop idle monitor
     await agent_manager.stop_idle_monitor()
 

@@ -365,10 +365,15 @@ class KnowledgeCollectionScheduler:
             return []
 
     async def _loop(self) -> None:
+        # Brief settle so the first due source doesn't race app startup,
+        # but far shorter than a full cycle (was a 60s cold gap).
+        first = True
         while True:
             try:
-                await asyncio.sleep(_CHECK_INTERVAL_S)
+                await asyncio.sleep(10 if first else _CHECK_INTERVAL_S)
+                first = False
                 now = time.time()
+                fired = 0
                 for username in self._discover_usernames():
                     for source in load_sources(username):
                         sid = str(source.get("id"))
@@ -387,6 +392,9 @@ class KnowledgeCollectionScheduler:
                         asyncio.create_task(
                             _run(), name=f"knowledge.collect:{sid}",
                         )
+                        fired += 1
+                if fired:
+                    logger.info("knowledge scheduler: fired %d source(s)", fired)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 — the loop must survive

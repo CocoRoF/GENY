@@ -927,11 +927,17 @@ async def _knowledge_semantic_hits(
         hits = await svc.search(query, top_k=max_results)
     except Exception:  # noqa: BLE001 — incl. KnowledgeUnavailable
         return []
+    def _hit_path(h):
+        # Document cards live in the knowledge category (stored without the
+        # prefix); user notes carry their real vault path verbatim.
+        raw = h.get("filename") or f"doc-{h.get('doc_id', '')}.md"
+        return f"knowledge/{raw}" if raw.startswith("doc-") else raw
+
     return [
         {
-            "filename": f"knowledge/{h.get('filename') or ('doc-' + h.get('doc_id', '') + '.md')}",
+            "filename": _hit_path(h),
             "title": h.get("title") or h.get("doc_id", ""),
-            "category": "knowledge",
+            "category": "knowledge" if (h.get("source_type") != "note") else "note",
             "tags": ["knowledge"],
             "importance": "medium",
             "score": h.get("score", 0.0),

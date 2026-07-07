@@ -282,6 +282,47 @@ async def test_reembed_preserves_korean_title(svc, monkeypatch):
     assert row["original_filename"] == "한글 문서.md"
 
 
+@pytest.mark.asyncio
+async def test_index_note_embeds_direct_note(svc):
+    """A directly-created vault note gets embedded into the SAME knowledge
+    index (consistency across supply paths), keyed by its real path, with
+    source_type=note and no doc card."""
+    service, fake = svc
+    n = await service.index_note(
+        filename="ideas/제품아이디어.md",
+        title="제품 아이디어",
+        text="신제품 결제 흐름은 3단계로 단순화한다. " * 60,
+    )
+    assert n >= 1
+    indexed = fake.indexed["ideas/제품아이디어.md"]
+    assert indexed[0].metadata["source_type"] == "note"
+    assert indexed[0].metadata["title"] == "제품 아이디어"
+    # A note is NOT a document card — it doesn't show in list_documents.
+    docs = await service.list_documents()
+    assert all(d["filename"] != "ideas/제품아이디어.md" for d in docs)
+
+
+@pytest.mark.asyncio
+async def test_index_note_skips_doc_cards(svc):
+    """Managed document cards are already indexed by ingest — index_note
+    must not double-index them."""
+    service, fake = svc
+    n = await service.index_note(
+        filename="knowledge/doc-abc123def456.md", title="x", text="body " * 50,
+    )
+    assert n == 0
+    assert "knowledge/doc-abc123def456.md" not in fake.indexed
+
+
+@pytest.mark.asyncio
+async def test_index_note_empty_removes(svc):
+    service, fake = svc
+    await service.index_note(filename="n.md", title="n", text="content " * 50)
+    assert "n.md" in fake.indexed
+    await service.index_note(filename="n.md", title="n", text="   ")
+    assert "n.md" in fake.removed
+
+
 def test_json_upload_uses_structured_rendering(svc):
     service, _ = svc
     rows = service._extract_chunks(
