@@ -107,9 +107,14 @@ async def ws_voice_realtime(websocket: WebSocket, session_id: str):
             if raw.get("type") == "websocket.disconnect":
                 break
 
-            # Binary uplink = raw utterance audio (default webm from MediaRecorder).
+            # Binary uplink. In server_vad mode it's a raw 16 kHz PCM stream
+            # chunk (server detects end-of-speech); in client_vad mode it's a
+            # complete utterance blob (browser already segmented it).
             if raw.get("bytes") is not None:
-                await voice.on_utterance(raw["bytes"], fmt="webm")
+                if voice._input_mode == "server_vad":  # noqa: SLF001
+                    await voice.on_audio_frame(raw["bytes"])
+                else:
+                    await voice.on_utterance(raw["bytes"], fmt="webm")
                 continue
 
             text = raw.get("text")
@@ -138,14 +143,17 @@ async def ws_voice_realtime(websocket: WebSocket, session_id: str):
 async def _dispatch(voice: RealtimeVoiceSession, msg: dict, emit) -> None:
     mtype = msg.get("type", "")
     if mtype == "start":
-        # Reconfigure language / voice for this call.
+        # Reconfigure language / voice / input mode for this call.
         lang = msg.get("language")
         if lang is not None:
             voice._language = lang  # noqa: SLF001 — controlled reconfigure
         vp = msg.get("voice_profile")
         if vp is not None:
             voice._voice_profile = vp  # noqa: SLF001
-        await emit("ready", {"reconfigured": True})
+        mode = msg.get("input_mode")
+        if mode in ("server_vad", "client_vad"):
+            voice.configure(input_mode=mode)
+        await emit("ready", {"reconfigured": True, "input_mode": voice._input_mode})  # noqa: SLF001
     elif mtype == "speech_started":
         await voice.on_speech_started()
     elif mtype == "utterance":

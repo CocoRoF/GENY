@@ -8,6 +8,10 @@ python-dotenv>=1.0.0
 jinja2>=3.1.0
 # numpy stays for image / waveform / statistics; FAISS removed.
 numpy>=1.26.0
+# Silero VAD (server-side realtime voice turn detection) runs on onnxruntime
+# only — the silero-vad pip package would drag in ~2GB of torch. We bundle
+# the 1.3MB onnx model (service/voice_realtime/models/) and drive it directly.
+onnxruntime>=1.20,<2
 # File pattern matching
 pathspec>=0.12.0
 # PostgreSQL database

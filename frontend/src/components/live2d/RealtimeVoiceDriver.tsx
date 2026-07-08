@@ -3,20 +3,23 @@
 /**
  * RealtimeVoiceDriver — full-duplex hands-free voice conversation.
  *
- * A third voice mode alongside STTControls (inbox capture) and
+ * A third voice mode alongside STTControls (inbox/Opsidian capture) and
  * PushToTalkDriver (utterance→chat). When `active`, it opens the realtime
- * voice WebSocket (`/ws/voice/realtime/{sid}`), streams each VAD-detected
- * utterance up, and plays the persona's streamed reply back through the
- * shared AudioManager — so the avatar lip-syncs for free.
+ * voice WebSocket (`/ws/voice/realtime/{sid}`) and plays the persona's
+ * streamed reply through the shared AudioManager — so the avatar lip-syncs
+ * for free.
  *
- * Barge-in: the mic keeps capturing while the avatar speaks
- * (`pauseWhileSpeaking:false`). The instant the local VAD opens an
- * utterance, it stops the current playback AND signals the server so the
- * in-flight persona turn is cancelled.
+ * Two input modes (config `realtimeInputMode`, default `server_vad`):
+ *   • server_vad — stream raw 16 kHz PCM continuously; the BACKEND runs
+ *     Silero VAD and decides end-of-speech. This is the "realtime input
+ *     accumulates, end-of-speech goes straight to the executor" flow. The
+ *     server emits `speech_start`, on which we cut local playback (barge-in).
+ *   • client_vad — the browser's VAD segments complete utterances (webm)
+ *     and uploads each; barge-in fires on local speech onset.
  *
- * Additive: reuses useVoiceActivityRecorder (capture) + AudioManager
- * (playback/lip-sync). It does not touch the existing chat/TTS paths; the
- * store enforces mutual exclusion with STT/PTT.
+ * Additive: reuses AudioManager (playback/lip-sync) + the existing subtitle
+ * box; never touches the existing chat/TTS paths. The store enforces mutual
+ * exclusion with STT (single mic owner).
  */
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -24,6 +27,7 @@ import { useVoiceActivityRecorder } from '@/lib/useVoiceActivityRecorder';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import { openRealtimeVoiceWs } from '@/lib/api';
+import { startPcmStream, type PcmStreamHandle } from '@/lib/pcmStreamer';
 
 interface ServerEvent {
   type: string;
@@ -37,75 +41,34 @@ export default function RealtimeVoiceDriver({
   sessionId: string;
   active: boolean;
 }) {
+  const inputMode = useVTuberStore((s) => s.realtimeInputMode);
+  const clientVad = inputMode === 'client_vad';
+
   const wsRef = useRef<WebSocket | null>(null);
-  const readyRef = useRef(false);
   const currentTurnRef = useRef<string | null>(null);
-  // Accumulated assistant text for the current turn (drives the overlay
-  // subtitle box, reusing the existing subtitle rendering).
   const turnTextRef = useRef('');
+  const pcmHandleRef = useRef<PcmStreamHandle | null>(null);
 
-  // ── WebSocket lifecycle (open while active) ──────────────────────
-  useEffect(() => {
-    if (!active) return;
-
-    let closed = false;
-    const ws = openRealtimeVoiceWs(sessionId);
-    ws.binaryType = 'arraybuffer';
-    wsRef.current = ws;
+  const cutPlayback = useCallback(() => {
     const am = getAudioManager();
-    am.ensureResumed();
-
-    ws.onopen = () => {
-      if (closed) return;
-      // Empty language = Whisper auto-detect (Korean/English both covered).
-      ws.send(JSON.stringify({ type: 'start', language: '' }));
-    };
-
-    ws.onmessage = async (ev) => {
-      let msg: ServerEvent;
-      try {
-        msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
-      } catch {
-        return;
-      }
-      await handleServerEvent(msg, am);
-    };
-
-    ws.onclose = () => {
-      readyRef.current = false;
-    };
-    ws.onerror = () => {
-      readyRef.current = false;
-    };
-
-    return () => {
-      closed = true;
-      readyRef.current = false;
-      try {
-        ws.close();
-      } catch {
-        /* already closing */
-      }
-      wsRef.current = null;
-      // Drop any queued realtime audio on teardown.
-      if (currentTurnRef.current) {
-        am.clearTurn(currentTurnRef.current, true);
-        currentTurnRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, sessionId]);
+    if (currentTurnRef.current) am.clearTurn(currentTurnRef.current, true);
+  }, []);
 
   const handleServerEvent = useCallback(
-    async (msg: ServerEvent, am: ReturnType<typeof getAudioManager>) => {
+    (msg: ServerEvent) => {
+      const am = getAudioManager();
       const d = msg.data ?? {};
       switch (msg.type) {
         case 'ready':
-          readyRef.current = true;
           break;
+        case 'speech_start':
+          // Server VAD detected the user speaking → barge in on the reply.
+          cutPlayback();
+          useVTuberStore.getState().settleSubtitle(sessionId);
+          break;
+        case 'speech_end':
         case 'transcript':
-          // User transcript — Phase 1 doesn't surface it in the overlay
-          // (the avatar subtitle box is for the persona). Kept for logs.
+          // (user transcript not surfaced in the avatar subtitle box)
           break;
         case 'turn_start': {
           const turnId = `rt:${sessionId}:${d.turn}`;
@@ -115,7 +78,6 @@ export default function RealtimeVoiceDriver({
           break;
         }
         case 'assistant_text': {
-          // Accumulate sentences into the existing overlay subtitle box.
           const text = String(d.text ?? '');
           if (text) {
             turnTextRef.current = (turnTextRef.current + ' ' + text).trim();
@@ -130,13 +92,10 @@ export default function RealtimeVoiceDriver({
           const seq = Number(d.seq ?? 0);
           const bytes = base64ToBytes(b64);
           const fmt = String(d.format ?? 'wav');
-          // Synthetic Response so we reuse AudioManager.enqueue verbatim
-          // (it reads response.blob() → decodeAudioData → lip-sync).
           const blob = new Blob([bytes.buffer as ArrayBuffer], {
             type: fmt === 'wav' ? 'audio/wav' : 'audio/mpeg',
           });
-          const resp = new Response(blob);
-          void am.enqueue(resp, sessionId, undefined, undefined, { turnId, seq });
+          void am.enqueue(new Response(blob), sessionId, undefined, undefined, { turnId, seq });
           break;
         }
         case 'cancelled': {
@@ -148,44 +107,96 @@ export default function RealtimeVoiceDriver({
         case 'turn_end':
           useVTuberStore.getState().settleSubtitle(sessionId);
           break;
-        case 'heartbeat':
-        case 'pong':
         default:
           break;
       }
     },
-    [sessionId],
+    [sessionId, cutPlayback],
   );
 
-  // ── barge-in: cut local playback + tell the server the moment we speak ──
-  const onSpeechStart = useCallback(() => {
+  // ── WebSocket lifecycle + server_vad PCM streaming ───────────────
+  useEffect(() => {
+    if (!active) return;
+
+    let closed = false;
+    const ws = openRealtimeVoiceWs(sessionId);
+    ws.binaryType = 'arraybuffer';
+    wsRef.current = ws;
     const am = getAudioManager();
-    if (currentTurnRef.current) {
-      am.clearTurn(currentTurnRef.current, true);
-    }
+    am.ensureResumed();
+
+    ws.onopen = () => {
+      if (closed) return;
+      ws.send(JSON.stringify({ type: 'start', language: '', input_mode: inputMode }));
+      // server_vad: begin streaming raw PCM immediately.
+      if (!clientVad) {
+        startPcmStream({
+          onFrame: (pcm) => {
+            const sock = wsRef.current;
+            if (sock && sock.readyState === WebSocket.OPEN) sock.send(pcm);
+          },
+        })
+          .then((h) => {
+            if (closed) h.stop();
+            else pcmHandleRef.current = h;
+          })
+          .catch((e) => console.error('[realtime-voice] pcm stream failed', e));
+      }
+    };
+
+    ws.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return;
+      try {
+        handleServerEvent(JSON.parse(ev.data));
+      } catch {
+        /* ignore malformed */
+      }
+    };
+    ws.onclose = ws.onerror = () => {};
+
+    return () => {
+      closed = true;
+      pcmHandleRef.current?.stop();
+      pcmHandleRef.current = null;
+      try {
+        ws.close();
+      } catch {
+        /* already closing */
+      }
+      wsRef.current = null;
+      if (currentTurnRef.current) {
+        am.clearTurn(currentTurnRef.current, true);
+        currentTurnRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, sessionId, inputMode, clientVad]);
+
+  // ── client_vad: local VAD onset → barge-in signal ────────────────
+  const onSpeechStart = useCallback(() => {
+    cutPlayback();
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'speech_started' }));
     }
-  }, []);
+  }, [cutPlayback]);
 
-  // ── each detected utterance → upload over the WS ─────────────────
+  // ── client_vad: each utterance → upload as a webm blob ───────────
   const onUtterance = useCallback(async (blob: Blob) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try {
-      const buf = await blob.arrayBuffer();
-      ws.send(buf); // binary uplink = raw utterance audio (webm)
+      ws.send(await blob.arrayBuffer());
     } catch (e) {
       console.error('[realtime-voice] utterance send failed', e);
     }
   }, []);
 
+  // Hook is always called (rules of hooks); enabled only in client_vad mode.
   useVoiceActivityRecorder({
-    enabled: active,
+    enabled: active && clientVad,
     onUtterance,
     onSpeechStart,
-    // Keep capturing while the avatar talks so the user can barge in.
     pauseWhileSpeaking: false,
     isAgentSpeaking: false,
     speechThreshold: useVTuberStore.getState().sttSensitivity,

@@ -86,6 +86,17 @@ class RealtimeVoiceSession:
         self._closed = False
         self._stream_raw = ""  # cumulative reply tokens for the active turn
 
+        # ── server-side streaming VAD state (input_mode="server_vad") ──
+        self._input_mode = _cfg.default_input_mode()
+        self._vad = None                 # lazy SileroOnnx
+        self._turn_detector = None       # lazy StreamingTurnDetector
+        self._pcm_tail = b""             # bytes not yet aligned to a frame
+        self._utt_frames: list[bytes] = []   # PCM frames of the current utterance
+        self._recent_frames: list[bytes] = []  # ring for pre-speech padding
+        self._utt_ms = 0.0               # length of the open utterance
+        self._last_partial_ms = 0.0      # utt length at the last interim transcript
+        self._partial_task: Optional[asyncio.Task] = None
+
     # ── lifecycle ────────────────────────────────────────────────────
 
     async def close(self) -> None:
@@ -149,6 +160,126 @@ class RealtimeVoiceSession:
             _gen = self._generation
             await self._cancel_active_turn()
         self._turn_task = asyncio.create_task(self._run_turn(text, _gen))
+
+    # ── server-side streaming VAD input (input_mode="server_vad") ────
+
+    def configure(self, *, input_mode: Optional[str] = None) -> None:
+        """Per-connection reconfigure from the WS ``start`` message."""
+        if input_mode in ("server_vad", "client_vad"):
+            self._input_mode = input_mode
+
+    def _ensure_vad(self) -> None:
+        if self._vad is not None:
+            return
+        from .vad import SileroOnnx, StreamingTurnDetector
+        self._vad = SileroOnnx()
+        self._turn_detector = StreamingTurnDetector(
+            threshold=_cfg.vad_threshold(),
+            min_speech_ms=_cfg.vad_min_speech_ms(),
+            min_silence_ms=_cfg.vad_min_silence_ms(),
+            speech_pad_ms=_cfg.vad_speech_pad_ms(),
+        )
+
+    async def on_audio_frame(self, pcm: bytes) -> None:
+        """Feed a chunk of raw 16 kHz int16 mono PCM (server_vad mode).
+
+        Audio streams in continuously; the server VAD detects speech
+        start (→ barge-in) and end (→ transcribe the accumulated
+        utterance → run one persona turn). This is the "realtime input
+        accumulates, end-of-speech goes straight to the executor" flow.
+        """
+        if self._closed:
+            return
+        from .vad import FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE, pcm16_to_f32
+        self._ensure_vad()
+        frame_ms = FRAME_SAMPLES / SAMPLE_RATE * 1000.0
+        max_utt_ms = _cfg.vad_max_utterance_ms()
+        pad = self._turn_detector.pad_frames
+
+        self._pcm_tail += pcm
+        while len(self._pcm_tail) >= FRAME_BYTES:
+            frame = self._pcm_tail[:FRAME_BYTES]
+            self._pcm_tail = self._pcm_tail[FRAME_BYTES:]
+
+            prob = self._vad(pcm16_to_f32(frame))
+            ev = self._turn_detector.process(prob)
+
+            # Maintain a short pre-speech ring so the leading sound survives.
+            if not self._turn_detector.in_speech and ev is None:
+                self._recent_frames.append(frame)
+                if len(self._recent_frames) > pad:
+                    self._recent_frames.pop(0)
+
+            if ev is not None and ev.kind == "start":
+                # Barge in on any active reply the instant speech starts.
+                await self.on_speech_started()
+                self._utt_frames = list(self._recent_frames)  # pre-pad
+                self._recent_frames = []
+                self._utt_ms = len(self._utt_frames) * frame_ms
+                await self._safe_emit("speech_start", {})
+
+            if self._turn_detector.in_speech:
+                self._utt_frames.append(frame)
+                self._utt_ms += frame_ms
+                # Optional live "you're saying…" caption — re-transcribe the
+                # growing utterance in the background (never blocks the loop).
+                if (
+                    _cfg.partial_transcripts_enabled()
+                    and self._utt_ms - self._last_partial_ms >= _cfg.partial_interval_ms()
+                ):
+                    self._last_partial_ms = self._utt_ms
+                    self._spawn_partial(b"".join(self._utt_frames))
+                # Force a turn if the user never pauses.
+                if self._utt_ms >= max_utt_ms:
+                    await self._finish_utterance()
+                    continue
+
+            if ev is not None and ev.kind == "end":
+                await self._finish_utterance()
+
+    def _spawn_partial(self, pcm_snapshot: bytes) -> None:
+        """Fire-and-forget interim transcription of the open utterance. Only
+        one runs at a time (skip if the previous is still going) so a slow
+        GPU can't pile up requests. Emits a non-final transcript event."""
+        if self._partial_task and not self._partial_task.done():
+            return
+        gen = self._generation
+
+        async def _run() -> None:
+            wav = _pcm16_to_wav(pcm_snapshot)
+            text = await self._transcribe(wav, fmt="wav")
+            # Drop if the utterance already ended / a new turn started.
+            if text and gen == self._generation and self._turn_detector and self._turn_detector.in_speech:
+                await self._safe_emit("transcript", {"text": text, "final": False})
+
+        self._partial_task = asyncio.create_task(_run())
+
+    async def _finish_utterance(self) -> None:
+        """Close the open utterance: assemble WAV → transcribe → run turn."""
+        frames = self._utt_frames
+        self._utt_frames = []
+        self._utt_ms = 0.0
+        self._last_partial_ms = 0.0
+        # Reset the detector's in-speech latch if a forced (max-length) end.
+        if self._turn_detector is not None and self._turn_detector.in_speech:
+            self._turn_detector.reset_turn()
+        if not frames:
+            return
+        await self._safe_emit("speech_end", {})
+        pcm = b"".join(frames)
+        wav = _pcm16_to_wav(pcm)
+
+        self._generation += 1
+        gen = self._generation
+        await self._cancel_active_turn()
+        text = await self._transcribe(wav, fmt="wav")
+        if self._is_stale(gen):
+            return
+        if not text:
+            await self._safe_emit("transcript", {"text": "", "final": True, "empty": True})
+            return
+        await self._safe_emit("transcript", {"text": text, "final": True})
+        await self.on_text(text, _gen=gen)
 
     # ── STT ──────────────────────────────────────────────────────────
 
@@ -328,3 +459,16 @@ class RealtimeVoiceSession:
             await self._emit(event_type, data)
         except Exception:  # noqa: BLE001
             logger.debug("[RealtimeVoice] emit failed (%s)", event_type, exc_info=True)
+
+
+def _pcm16_to_wav(pcm: bytes, *, sample_rate: int = 16000) -> bytes:
+    """Wrap raw 16 kHz int16 mono PCM in a WAV container so Whisper's
+    librosa decoder accepts it (it can't decode headerless PCM)."""
+    import struct
+
+    data_len = len(pcm)
+    byte_rate = sample_rate * 2  # mono, 16-bit
+    header = b"RIFF" + struct.pack("<I", 36 + data_len) + b"WAVE"
+    header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, byte_rate, 2, 16)
+    header += b"data" + struct.pack("<I", data_len)
+    return header + pcm

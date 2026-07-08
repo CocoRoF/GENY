@@ -47,3 +47,64 @@ def stream_poll_seconds() -> float:
 def turn_hard_timeout_seconds() -> float:
     """Backstop cap on one turn's loop (the executor has its own timeout)."""
     return _float("GENY_RT_TURN_TIMEOUT_S", 180.0)
+
+
+# ── Server-side streaming VAD (input_mode="server_vad") ──────────────
+#
+# These control how the server decides a spoken turn is over when audio is
+# streamed continuously (as opposed to client_vad, where the browser sends
+# a complete utterance blob). Defaults mirror the reference speech-to-speech
+# tuning (thresh 0.5, ~250 ms min speech, ~700 ms trailing silence).
+
+
+def default_input_mode() -> str:
+    """'server_vad' (stream raw PCM, server detects end-of-speech) or
+    'client_vad' (browser VAD sends complete utterances). A per-connection
+    ``start`` message overrides this default."""
+    mode = os.environ.get("GENY_RT_INPUT_MODE", "server_vad").strip().lower()
+    return mode if mode in ("server_vad", "client_vad") else "server_vad"
+
+
+def vad_threshold() -> float:
+    """Speech probability at/above which a frame counts as speech."""
+    return _float("GENY_RT_VAD_THRESHOLD", 0.5)
+
+
+def vad_min_speech_ms() -> int:
+    """Speech must sustain this long to open a turn (filters clicks)."""
+    return _int("GENY_RT_VAD_MIN_SPEECH_MS", 250)
+
+
+def vad_min_silence_ms() -> int:
+    """Trailing silence this long closes a turn — the end-of-speech gate.
+    Lower = snappier turn-taking but risks cutting mid-sentence pauses."""
+    return _int("GENY_RT_VAD_MIN_SILENCE_MS", 700)
+
+
+def vad_speech_pad_ms() -> int:
+    """Audio kept before the trigger so the leading sound isn't clipped."""
+    return _int("GENY_RT_VAD_SPEECH_PAD_MS", 120)
+
+
+def vad_max_utterance_ms() -> int:
+    """Force end-of-speech after this long even without a silence gap, so a
+    non-stop talker still gets a turn."""
+    return _int("GENY_RT_VAD_MAX_UTTERANCE_MS", 30000)
+
+
+# ── Progressive partial transcripts (live "you're saying…" captions) ─
+#
+# OFF by default: it re-transcribes the growing utterance every interval
+# via the SAME Whisper GPU the persona uses, so it competes for the single
+# GPU. Turn on only when live user captions matter more than that budget.
+
+
+def partial_transcripts_enabled() -> bool:
+    return os.environ.get("GENY_RT_PARTIAL_TRANSCRIPTS", "0").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def partial_interval_ms() -> int:
+    """Minimum gap between interim transcriptions of the open utterance."""
+    return _int("GENY_RT_PARTIAL_INTERVAL_MS", 900)
