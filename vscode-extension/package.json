@@ -1,0 +1,123 @@
+{
+  "name": "geny-vscode",
+  "displayName": "Geny",
+  "description": "Chat with your Geny agents from VSCode — they read, edit, search, and run commands in your real workspace, like Copilot/Claude Code but powered by your Geny server.",
+  "version": "0.1.0",
+  "publisher": "geny",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "geny",
+          "title": "Geny",
+          "icon": "media/geny-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "geny": [
+        {
+          "type": "webview",
+          "id": "geny.chat",
+          "name": "Geny",
+          "icon": "media/geny-icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "geny.login",
+        "title": "Geny: Log in"
+      },
+      {
+        "command": "geny.logout",
+        "title": "Geny: Log out"
+      },
+      {
+        "command": "geny.newSession",
+        "title": "Geny: New VSCode session"
+      },
+      {
+        "command": "geny.reconnect",
+        "title": "Geny: Reconnect"
+      },
+      {
+        "command": "geny.showConnectorStatus",
+        "title": "Geny: Connector status"
+      }
+    ],
+    "configuration": {
+      "title": "Geny",
+      "properties": {
+        "geny.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Geny server base URL, e.g. https://your-geny-host:port. Leave empty to be prompted on login."
+        },
+        "geny.consent.fileWrite": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "session",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask every time before the agent writes/edits a file",
+            "Ask once, then allow file writes for the rest of this VSCode session",
+            "Allow file writes without asking (use with care)"
+          ],
+          "default": "ask",
+          "description": "Consent for the agent writing or editing files in your workspace."
+        },
+        "geny.consent.terminal": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "session",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask every time before the agent runs a terminal command",
+            "Ask once, then allow terminal commands for the rest of this VSCode session",
+            "Allow terminal commands without asking (use with care)"
+          ],
+          "default": "ask",
+          "description": "Consent for the agent running shell commands on your machine."
+        },
+        "geny.terminal.show": {
+          "type": "boolean",
+          "default": true,
+          "description": "Echo agent-run commands into a visible 'Geny Agent' terminal (output is still captured and returned to the agent)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

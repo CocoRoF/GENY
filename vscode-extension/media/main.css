@@ -1,0 +1,77 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+.pane { display: flex; flex-direction: column; gap: 8px; padding: 12px; height: 100vh; }
+.pane.chat { padding: 8px; gap: 6px; }
+
+.brand { font-size: 20px; font-weight: 700; }
+.sub { opacity: 0.7; font-size: 12px; }
+.err { color: var(--vscode-errorForeground); font-size: 12px; min-height: 14px; }
+
+.in {
+  width: 100%; padding: 7px 9px; border-radius: 4px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  outline: none; font-size: 13px;
+}
+.in:focus { border-color: var(--vscode-focusBorder); }
+
+.btn {
+  padding: 7px 12px; border: none; border-radius: 4px; cursor: pointer;
+  font-size: 13px; font-weight: 600;
+}
+.btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.btn.primary:hover { background: var(--vscode-button-hoverBackground); }
+.btn.stop { background: var(--vscode-inputValidation-warningBackground, #7a5c00); color: var(--vscode-foreground); }
+.link { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 12px; padding: 0; }
+.refresh { font-size: 11px; opacity: 0.6; cursor: pointer; align-self: flex-start; }
+.refresh:hover { opacity: 1; }
+
+.topbar { display: flex; align-items: center; gap: 8px; }
+.topbar .who { flex: 1; opacity: 0.7; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .title2 { flex: 1; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; margin-top: 4px; }
+.grouphdr { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; opacity: 0.5; margin: 10px 0 2px; }
+.empty { font-size: 12px; opacity: 0.55; padding: 4px 2px; }
+.row {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  background: none; border: none; color: inherit; cursor: pointer;
+  padding: 8px 8px; border-radius: 6px;
+}
+.row:hover { background: var(--vscode-list-hoverBackground); }
+.rowmain { min-width: 0; }
+.rowtitle { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rowmeta { font-size: 11px; opacity: 0.55; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot.on { background: #3fb950; }
+.dot.off { background: #6e7681; }
+
+.conn { font-size: 11px; flex-shrink: 0; }
+.conn.on { color: #3fb950; }
+.conn.mid { color: #d29922; }
+.conn.off { color: #f85149; }
+.conn.none { opacity: 0.5; }
+
+.chat { height: 100vh; }
+.chatlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.bubble { padding: 7px 10px; border-radius: 8px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-width: 95%; }
+.bubble.user { align-self: flex-end; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.bubble.agent { align-self: flex-start; background: var(--vscode-input-background); }
+.bubble.tool { align-self: flex-start; font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; opacity: 0.75; padding: 3px 8px; }
+.bubble.system { align-self: center; font-size: 11.5px; opacity: 0.6; background: none; }
+
+.composer { display: flex; gap: 6px; align-items: flex-end; }
+.chatin {
+  flex: 1; resize: none; padding: 7px 9px; border-radius: 6px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  font-family: inherit; font-size: 13px; outline: none;
+}
+.chatin:focus { border-color: var(--vscode-focusBorder); }
