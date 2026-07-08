@@ -209,6 +209,12 @@ interface VTuberState {
   // enabled per session, browser permission requested once.
   screenObservationEnabled: boolean;
 
+  // Realtime voice mode (2026-07) — full-duplex hands-free conversation via
+  // the /ws/voice/realtime WebSocket. Mutually exclusive with sttEnabled
+  // (both drive the mic). Transient (not persisted) — a live mode, defaults
+  // OFF each session. See RealtimeVoiceDriver.
+  realtimeVoiceEnabled: boolean;
+
   // ── Persisted overlay tuning (see OverlaySettings) ──
   sttSensitivity: number;
   sttSilenceMs: number;
@@ -248,6 +254,10 @@ interface VTuberState {
   toggleSTT: () => void;
   setSTTEnabled: (enabled: boolean) => void;
 
+  // Realtime voice actions (mutually exclusive with STT)
+  toggleRealtimeVoice: () => void;
+  setRealtimeVoiceEnabled: (enabled: boolean) => void;
+
   // Screen-observation actions (V3)
   toggleScreenObservation: () => void;
   setScreenObservationEnabled: (enabled: boolean) => void;
@@ -280,6 +290,7 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   _assignmentStreamSub: null,
   ttsSpeaking: {},
   subtitle: {},
+  realtimeVoiceEnabled: false,  // transient live mode — always OFF on load
   // Persisted per-machine settings hydrated from localStorage: ON/OFF toggles
   // (ttsEnabled default ON; sttEnabled / screenObservationEnabled default OFF)
   // AND the tuning knobs (TTS volume, STT thresholds, screen interval/source).
@@ -470,11 +481,39 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
     const next = !get().sttEnabled;
     set({ sttEnabled: next });
     persistOverlaySettings({ sttEnabled: next });
+    // STT and realtime voice both own the mic — never both on.
+    if (next && get().realtimeVoiceEnabled) {
+      set({ realtimeVoiceEnabled: false });
+    }
   },
 
   setSTTEnabled: (enabled) => {
     set({ sttEnabled: enabled });
     persistOverlaySettings({ sttEnabled: enabled });
+    // STT and realtime voice both own the mic — never both on.
+    if (enabled && get().realtimeVoiceEnabled) {
+      set({ realtimeVoiceEnabled: false });
+    }
+  },
+
+  // ─── Realtime voice Actions (mutually exclusive with STT) ───
+
+  toggleRealtimeVoice: () => {
+    const next = !get().realtimeVoiceEnabled;
+    set({ realtimeVoiceEnabled: next });
+    // Turning realtime on releases the STT mic path (single mic owner).
+    if (next && get().sttEnabled) {
+      set({ sttEnabled: false });
+      persistOverlaySettings({ sttEnabled: false });
+    }
+  },
+
+  setRealtimeVoiceEnabled: (enabled) => {
+    set({ realtimeVoiceEnabled: enabled });
+    if (enabled && get().sttEnabled) {
+      set({ sttEnabled: false });
+      persistOverlaySettings({ sttEnabled: false });
+    }
   },
 
   // ─── Screen-observation Actions (V3) ───

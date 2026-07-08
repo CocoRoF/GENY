@@ -30,6 +30,7 @@ const VTuberChatPanel = dynamic(() => import('@/components/live2d/VTuberChatPane
 // based on store state; the visible compact bar below toggles that same state.
 const STTControls = dynamic(() => import('@/components/live2d/STTControls'), { ssr: false });
 const PushToTalkDriver = dynamic(() => import('@/components/live2d/PushToTalkDriver'), { ssr: false });
+const RealtimeVoiceDriver = dynamic(() => import('@/components/live2d/RealtimeVoiceDriver'), { ssr: false });
 const ConnectorBridgeClient = dynamic(() => import('@/components/live2d/ConnectorBridgeClient'), { ssr: false });
 const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
@@ -67,6 +68,8 @@ export default function OverlayPage() {
   const toggleTTS = useVTuberStore((s) => s.toggleTTS);
   const toggleSTT = useVTuberStore((s) => s.toggleSTT);
   const toggleScreen = useVTuberStore((s) => s.toggleScreenObservation);
+  const realtimeOn = useVTuberStore((s) => s.realtimeVoiceEnabled);
+  const toggleRealtime = useVTuberStore((s) => s.toggleRealtimeVoice);
 
   // 1) token + transparency + resolve the target session (once).
   useEffect(() => {
@@ -282,6 +285,7 @@ export default function OverlayPage() {
           </span>
           <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
+          <Toggle active={realtimeOn} onClick={toggleRealtime} label="대화" title="실시간 음성 대화 (핸즈프리)" />
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
           {/* 말풍선 — open the chat window (the control/chat window). */}
@@ -304,6 +308,7 @@ export default function OverlayPage() {
       <div aria-hidden style={HIDDEN}>
         {resolved.rid && <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />}
         {resolved.rid && <PushToTalkDriver sessionId={resolved.sid} roomId={resolved.rid} active={pttActive} />}
+        <RealtimeVoiceDriver sessionId={resolved.sid} active={realtimeOn} />
         <STTControls sessionId={resolved.sid} />
         <ScreenObservationControls sessionId={resolved.sid} />
         {/* Inverse-MCP capability bridge (desktop only; no-op in a browser). */}

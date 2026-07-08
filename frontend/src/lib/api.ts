@@ -142,6 +142,11 @@ export function openConnectorBridgeWs(sessionId: string): WebSocket {
   return makeAuthedWs(`${_getWsBase()}/ws/connector/${encodeURIComponent(sessionId)}`);
 }
 
+/** Open the realtime voice conversation WS (full-duplex audio) for a session. */
+export function openRealtimeVoiceWs(sessionId: string): WebSocket {
+  return makeAuthedWs(`${_getWsBase()}/ws/voice/realtime/${encodeURIComponent(sessionId)}`);
+}
+
 /**
  * Token is stale/invalid (REST 401 or 4401 WS close). Clear it and emit a
  * global ``geny:auth-failed`` signal the UI listens for to prompt re-login

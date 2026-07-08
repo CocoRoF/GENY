@@ -55,6 +55,12 @@ export interface UseVoiceActivityRecorderOptions {
    *  is logged and skipped — never breaks the next utterance. */
   onUtterance: (blob: Blob, durationMs: number) => void | Promise<void>;
 
+  /** Fires the instant an utterance STARTS (speech onset confirmed),
+   *  before the utterance completes. Used by the realtime voice driver
+   *  for barge-in: cut the avatar's current playback the moment the user
+   *  begins talking. Optional; failure is swallowed. */
+  onSpeechStart?: () => void;
+
   /** When true, the VAD ignores audio while the consumer reports
    *  ``isAgentSpeaking=true``. Useful when TTS is playing through
    *  the same speakers the mic can hear. Defaults to ``true``. */
@@ -160,6 +166,11 @@ export function useVoiceActivityRecorder(
   // Same mirror trick for the utterance callback so callers can pass
   // a fresh closure on each render without restarting the recorder.
   const onUtteranceRef = useRef(onUtterance);
+  const onSpeechStartRef = useRef(opts.onSpeechStart);
+
+  useEffect(() => {
+    onSpeechStartRef.current = opts.onSpeechStart;
+  }, [opts.onSpeechStart]);
 
   useEffect(() => {
     muteRef.current = pauseWhileSpeaking && isAgentSpeaking;
@@ -436,6 +447,12 @@ export function useVoiceActivityRecorder(
             utteranceStartRef.current = now;
             setPhase('speaking');
             startUtteranceRecording();
+            // Speech onset confirmed — signal barge-in consumers.
+            try {
+              onSpeechStartRef.current?.();
+            } catch {
+              /* callback failure never breaks capture */
+            }
           }
         } else {
           // Recording. Stop on sustained silence OR forced max length.
