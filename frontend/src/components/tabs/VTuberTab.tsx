@@ -12,6 +12,8 @@ import VTuberLogPanel from '@/components/live2d/VTuberLogPanel';
 import VTuberChatPanel from '@/components/live2d/VTuberChatPanel';
 import AudioControls from '@/components/live2d/AudioControls';
 import STTControls from '@/components/live2d/STTControls';
+import RealtimeVoiceControls from '@/components/live2d/RealtimeVoiceControls';
+import RealtimeVoiceDriver from '@/components/live2d/RealtimeVoiceDriver';
 import ScreenObservationControls from '@/components/live2d/ScreenObservationControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 import BakedImportsModal from '@/components/avatar/BakedImportsModal';
@@ -45,6 +47,7 @@ export default function VTuberTab() {
   const models = useVTuberStore((s) => s.models);
   const modelsLoaded = useVTuberStore((s) => s.modelsLoaded);
   const assignedModelName = useVTuberStore((s) => s.assignments[sessionId]);
+  const realtimeVoiceOn = useVTuberStore((s) => s.realtimeVoiceEnabled);
   const currentState = useVTuberStore((s) => s.avatarStates[sessionId]);
   const fetchModels = useVTuberStore((s) => s.fetchModels);
   const assignModel = useVTuberStore((s) => s.assignModel);
@@ -235,6 +238,7 @@ export default function VTuberTab() {
           <div className="flex items-center gap-3">
             <AudioControls sessionId={sessionId} />
             <STTControls sessionId={sessionId} />
+            <RealtimeVoiceControls />
             <ScreenObservationControls sessionId={sessionId} />
           </div>
         )}
@@ -262,6 +266,11 @@ export default function VTuberTab() {
         {isVTuberRole && (
           <div className="w-1/2 bg-[var(--bg-secondary)]">
             <VTuberChatPanel sessionId={sessionId} roomId={currentSession?.chat_room_id} />
+            <RealtimeVoiceDriver
+              sessionId={sessionId}
+              roomId={currentSession?.chat_room_id}
+              active={realtimeVoiceOn}
+            />
           </div>
         )}
       </div>

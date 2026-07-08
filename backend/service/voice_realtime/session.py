@@ -86,6 +86,9 @@ class RealtimeVoiceSession:
         self._closed = False
         self._stream_raw = ""  # cumulative reply tokens for the active turn
 
+        # STT-only: emit the transcript and let the frontend broadcast it to
+        # the visible chat (default), vs run the persona turn here.
+        self._stt_only = _cfg.stt_only_default()
         # ── server-side streaming VAD state (input_mode="server_vad") ──
         self._input_mode = _cfg.default_input_mode()
         self._vad = None                 # lazy SileroOnnx
@@ -151,7 +154,8 @@ class RealtimeVoiceSession:
             await self._safe_emit("transcript", {"text": "", "final": True, "empty": True})
             return
         await self._safe_emit("transcript", {"text": text, "final": True})
-        await self.on_text(text, _gen=gen)
+        if not self._stt_only:
+            await self.on_text(text, _gen=gen)
 
     async def on_text(self, text: str, *, _gen: Optional[int] = None) -> None:
         """Run one persona turn from ready text (typed input or post-STT)."""
@@ -163,10 +167,14 @@ class RealtimeVoiceSession:
 
     # ── server-side streaming VAD input (input_mode="server_vad") ────
 
-    def configure(self, *, input_mode: Optional[str] = None) -> None:
+    def configure(
+        self, *, input_mode: Optional[str] = None, stt_only: Optional[bool] = None
+    ) -> None:
         """Per-connection reconfigure from the WS ``start`` message."""
         if input_mode in ("server_vad", "client_vad"):
             self._input_mode = input_mode
+        if stt_only is not None:
+            self._stt_only = bool(stt_only)
 
     def _ensure_vad(self) -> None:
         if self._vad is not None:
@@ -279,7 +287,8 @@ class RealtimeVoiceSession:
             await self._safe_emit("transcript", {"text": "", "final": True, "empty": True})
             return
         await self._safe_emit("transcript", {"text": text, "final": True})
-        await self.on_text(text, _gen=gen)
+        if not self._stt_only:
+            await self.on_text(text, _gen=gen)
 
     # ── STT ──────────────────────────────────────────────────────────
 

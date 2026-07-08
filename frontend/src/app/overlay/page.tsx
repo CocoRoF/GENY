@@ -308,7 +308,7 @@ export default function OverlayPage() {
       <div aria-hidden style={HIDDEN}>
         {resolved.rid && <VTuberChatPanel sessionId={resolved.sid} roomId={resolved.rid} />}
         {resolved.rid && <PushToTalkDriver sessionId={resolved.sid} roomId={resolved.rid} active={pttActive} />}
-        <RealtimeVoiceDriver sessionId={resolved.sid} active={realtimeOn} />
+        <RealtimeVoiceDriver sessionId={resolved.sid} roomId={resolved.rid} active={realtimeOn} />
         <STTControls sessionId={resolved.sid} />
         <ScreenObservationControls sessionId={resolved.sid} />
         {/* Inverse-MCP capability bridge (desktop only; no-op in a browser). */}

@@ -124,8 +124,9 @@ async def test_streaming_input_fires_turn_on_end_of_speech(monkeypatch):
     monkeypatch.setattr(RealtimeVoiceSession, "_transcribe", fake_transcribe)
     monkeypatch.setattr(RealtimeVoiceSession, "on_text", fake_on_text)
 
+    # stt_only=False → the session runs the persona turn itself.
     voice = RealtimeVoiceSession("sid", emit, language="ko")
-    voice.configure(input_mode="server_vad")
+    voice.configure(input_mode="server_vad", stt_only=False)
 
     # Inject a scripted VAD: ~10 speech frames then ~8 silence → one turn.
     from service.voice_realtime import vad as vadmod
@@ -145,3 +146,38 @@ async def test_streaming_input_fires_turn_on_end_of_speech(monkeypatch):
     assert "transcript" in kinds
     assert transcribed.get("is_wav") is True
     assert turn_prompts == ["안녕하세요"], "end-of-speech must feed the persona turn"
+
+
+@pytest.mark.asyncio
+async def test_stt_only_emits_transcript_without_running_turn(monkeypatch):
+    """Default stt_only mode: end-of-speech emits the final transcript but
+    does NOT run the persona turn (the frontend broadcasts it to chat)."""
+    events = []
+
+    async def emit(t, d):
+        events.append((t, d))
+
+    async def fake_transcribe(self, audio_bytes, *, fmt):
+        return "실시간 발화"
+
+    turn_calls = []
+
+    async def fake_on_text(self, text, *, _gen=None):
+        turn_calls.append(text)
+
+    monkeypatch.setattr(RealtimeVoiceSession, "_transcribe", fake_transcribe)
+    monkeypatch.setattr(RealtimeVoiceSession, "on_text", fake_on_text)
+
+    voice = RealtimeVoiceSession("sid", emit, language="ko")
+    voice.configure(input_mode="server_vad", stt_only=True)
+    from service.voice_realtime import vad as vadmod
+    monkeypatch.setattr(voice, "_vad", _ScriptedVad([0.9] * 10 + [0.02] * 20))
+    voice._turn_detector = vadmod.StreamingTurnDetector(min_speech_ms=64, min_silence_ms=128)
+
+    frame = b"\x00\x00" * FRAME_SAMPLES
+    for _ in range(30):
+        await voice.on_audio_frame(frame)
+
+    final = [d for t, d in events if t == "transcript" and d.get("final")]
+    assert final and final[0]["text"] == "실시간 발화"
+    assert turn_calls == [], "stt_only must NOT run the persona turn"

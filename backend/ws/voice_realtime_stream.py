@@ -153,7 +153,16 @@ async def _dispatch(voice: RealtimeVoiceSession, msg: dict, emit) -> None:
         mode = msg.get("input_mode")
         if mode in ("server_vad", "client_vad"):
             voice.configure(input_mode=mode)
-        await emit("ready", {"reconfigured": True, "input_mode": voice._input_mode})  # noqa: SLF001
+        if isinstance(msg.get("stt_only"), bool):
+            voice.configure(stt_only=msg["stt_only"])
+        await emit(
+            "ready",
+            {
+                "reconfigured": True,
+                "input_mode": voice._input_mode,  # noqa: SLF001
+                "stt_only": voice._stt_only,  # noqa: SLF001
+            },
+        )
     elif mtype == "speech_started":
         await voice.on_speech_started()
     elif mtype == "utterance":

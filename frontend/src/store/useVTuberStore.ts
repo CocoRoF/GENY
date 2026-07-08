@@ -219,6 +219,11 @@ interface VTuberState {
   //                  end-of-speech (true realtime, default).
   //   'client_vad' — the browser segments utterances and uploads blobs.
   realtimeInputMode: 'server_vad' | 'client_vad';
+  // Live feedback so the user SEES realtime voice working:
+  //   realtimeListening — true while the server VAD hears speech.
+  //   realtimePartial   — interim transcript of the current utterance.
+  realtimeListening: boolean;
+  realtimePartial: string;
 
   // ── Persisted overlay tuning (see OverlaySettings) ──
   sttSensitivity: number;
@@ -263,6 +268,8 @@ interface VTuberState {
   toggleRealtimeVoice: () => void;
   setRealtimeVoiceEnabled: (enabled: boolean) => void;
   setRealtimeInputMode: (mode: 'server_vad' | 'client_vad') => void;
+  setRealtimeListening: (listening: boolean) => void;
+  setRealtimePartial: (text: string) => void;
 
   // Screen-observation actions (V3)
   toggleScreenObservation: () => void;
@@ -298,6 +305,8 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   subtitle: {},
   realtimeVoiceEnabled: false,  // transient live mode — always OFF on load
   realtimeInputMode: 'server_vad',  // backend Silero VAD by default
+  realtimeListening: false,
+  realtimePartial: '',
   // Persisted per-machine settings hydrated from localStorage: ON/OFF toggles
   // (ttsEnabled default ON; sttEnabled / screenObservationEnabled default OFF)
   // AND the tuning knobs (TTS volume, STT thresholds, screen interval/source).
@@ -524,6 +533,8 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   },
 
   setRealtimeInputMode: (mode) => set({ realtimeInputMode: mode }),
+  setRealtimeListening: (listening) => set({ realtimeListening: listening }),
+  setRealtimePartial: (text) => set({ realtimePartial: text }),
 
   // ─── Screen-observation Actions (V3) ───
 

@@ -57,6 +57,18 @@ def turn_hard_timeout_seconds() -> float:
 # tuning (thresh 0.5, ~250 ms min speech, ~700 ms trailing silence).
 
 
+def stt_only_default() -> bool:
+    """When true (default), the realtime WS does STT ONLY — it emits the
+    final transcript and lets the frontend post it to the visible chat room
+    (so the spoken message + persona reply appear in the chat like typing,
+    and TTS plays through the existing per-sentence path). When false, the
+    session runs the persona turn itself and streams reply audio over the
+    realtime WS (invisible to the chat window)."""
+    return os.environ.get("GENY_RT_STT_ONLY", "1").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def default_input_mode() -> str:
     """'server_vad' (stream raw PCM, server detects end-of-speech) or
     'client_vad' (browser VAD sends complete utterances). A per-connection
