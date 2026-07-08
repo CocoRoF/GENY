@@ -125,3 +125,54 @@ async def test_tool_success_and_failure_mapping():
 
 def test_provider_lists_ping():
     assert "connector_ping" in ConnectorToolProvider().list_names()
+
+
+# ── vscode_* tools route over the SAME bridge on vscode.* capabilities ──
+
+from service.executor.vscode_bridge import VSCodeToolProvider
+
+
+@pytest.mark.asyncio
+async def test_vscode_tool_routes_capability_and_maps_result():
+    """A vscode_* tool must send its vscode.* capability + args over the
+    connector and map the connector's result back — same bridge, distinct
+    capability vocabulary."""
+    reg = get_connector_registry()
+    conn = ConnectorConnection(FakeWS(), ["vscode.write_file"])
+    reg.register("sVs", conn)
+    tool = VSCodeToolProvider().get("vscode_write_file")
+    try:
+        task = asyncio.create_task(
+            tool.execute({"path": "a.txt", "content": "hi"}, _ctx("sVs"))
+        )
+        await asyncio.sleep(0.01)
+        # the frame carries the vscode.* capability string + the args verbatim
+        sent = conn._ws.sent[0]["data"]
+        assert sent["tool"] == "vscode.write_file"
+        assert sent["args"] == {"path": "a.txt", "content": "hi"}
+        rid = list(conn._pending.keys())[0]
+        conn.resolve_result(rid, {"ok": True, "result": {"written": "a.txt"}})
+        res = await task
+        assert not res.is_error and "written" in str(res.content)
+    finally:
+        reg.unregister("sVs")
+
+
+@pytest.mark.asyncio
+async def test_vscode_tool_unsupported_capability_is_error():
+    reg = get_connector_registry()
+    reg.register("sVs2", ConnectorConnection(FakeWS(), ["ping"]))  # no vscode caps
+    try:
+        tool = VSCodeToolProvider().get("vscode_read_file")
+        res = await tool.execute({"path": "x"}, _ctx("sVs2"))
+        assert res.is_error and "not supported" in str(res.content)
+    finally:
+        reg.unregister("sVs2")
+
+
+@pytest.mark.asyncio
+async def test_vscode_tool_offline_is_error():
+    get_connector_registry().unregister("sVs3")
+    tool = VSCodeToolProvider().get("vscode_run_terminal")
+    res = await tool.execute({"command": "echo hi"}, _ctx("sVs3"))
+    assert res.is_error and "offline" in str(res.content)
