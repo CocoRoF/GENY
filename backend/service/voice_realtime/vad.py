@@ -34,6 +34,10 @@ logger = getLogger(__name__)
 SAMPLE_RATE = 16000
 FRAME_SAMPLES = 512           # 32 ms @ 16 kHz — Silero v5's native window
 FRAME_BYTES = FRAME_SAMPLES * 2  # int16
+# Silero v5 prepends the previous frame's last 64 samples as context, so the
+# actual model input is 64 + 512 = 576 samples. Omitting this yields ~0
+# probability on real speech (the model never sees a valid window).
+_CONTEXT_SAMPLES = 64
 
 _MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "silero_vad_16k.onnx")
 
@@ -60,16 +64,24 @@ class SileroOnnx:
         self.reset()
 
     def reset(self) -> None:
-        # v5 state: [2, batch=1, 128]
+        # v5 state: [2, batch=1, 128]; context: last 64 samples of prev frame
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros((1, _CONTEXT_SAMPLES), dtype=np.float32)
 
     def __call__(self, frame_f32: np.ndarray) -> float:
-        """Return speech probability [0, 1] for one 512-sample frame."""
+        """Return speech probability [0, 1] for one 512-sample frame.
+
+        The model input is the 64-sample context from the previous call
+        prepended to this frame (→ 576 samples) — matching Silero's own
+        OnnxWrapper. Without the context the model scores real speech ~0.
+        """
         x = frame_f32.reshape(1, -1).astype(np.float32)
+        x = np.concatenate([self._context, x], axis=1)
         out, self._state = self._sess.run(
             ["output", "stateN"],
             {"input": x, "state": self._state, "sr": self._sr},
         )
+        self._context = x[:, -_CONTEXT_SAMPLES:]
         return float(out[0, 0])
 
 
