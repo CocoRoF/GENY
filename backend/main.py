@@ -5,6 +5,20 @@ from logging import basicConfig, getLogger, INFO
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+# Hang diagnostics: dump every thread's stack on SIGUSR1 (→ container logs)
+# so a frozen event loop can be root-caused without ptrace/py-spy (which the
+# container lacks the capability for). Trigger with:
+#   docker exec <backend> kill -USR1 1   (or the python pid)
+try:
+    import faulthandler
+    import signal
+
+    faulthandler.enable()
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+except Exception:  # noqa: BLE001
+    pass
+
 # Load .env BEFORE any other imports so that modules reading os.getenv()
 # at import time (e.g. database_config → POSTGRES_PORT) pick up the
 # correct values.
