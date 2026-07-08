@@ -44,10 +44,12 @@ __all__ = [
     "VTUBER_ENV_ID",
     "CLAUDE_CODE_WORKER_ENV_ID",
     "CLAUDE_CODE_VTUBER_ENV_ID",
+    "VSCODE_ENV_ID",
     "create_worker_env",
     "create_vtuber_env",
     "create_claude_code_worker_env",
     "create_claude_code_vtuber_env",
+    "create_vscode_env",
     "install_environment_templates",
     # Re-export of the library's known_manifest_presets() under the
     # historical Geny name (frontend validation hook).
@@ -57,6 +59,18 @@ __all__ = [
 
 WORKER_ENV_ID = "template-worker-env"
 VTUBER_ENV_ID = "template-vtuber-env"
+# Geny VSCode extension — a dedicated environment whose ONLY external tools are
+# the isolated vscode_* local-development set (gated by extras.vscode_enabled).
+VSCODE_ENV_ID = "template-vscode-env"
+# Minimal framework built-ins for the VSCode coding agent: plan / interact /
+# research + tool discovery. Deliberately EXCLUDES the sandbox fs/shell tools
+# (Read/Write/Edit/Bash/Glob/Grep) — those act on the session's server sandbox,
+# not the user's VSCode workspace; the vscode_* tools are the only file/terminal
+# interface here, so the agent never confuses the two targets.
+_VSCODE_BUILT_IN_TOOL_NAMES = [
+    "AskUserQuestion", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+    "WebSearch", "WebFetch", "ToolSearch",
+]
 # Dedicated Claude Code engine presets — the worker/vtuber stage blueprints
 # locked to the ``claude_code_cli`` provider (geny-executor 2.4.0 catalog).
 # Distinct from the default worker/vtuber seeds (which use whichever provider
@@ -356,6 +370,37 @@ def create_worker_env(
     manifest.metadata.description = (
         "범용 작업 환경 — 적응형 루프 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
+    _use_llm_compactor(manifest)
+    return manifest
+
+
+def create_vscode_env(*, provider: Optional[str] = None) -> EnvironmentManifest:
+    """Geny VSCode-extension environment manifest.
+
+    A coding agent that operates the user's real VSCode workspace through the
+    Geny VSCode extension (a connector). Its ONLY external tools are the
+    isolated ``vscode_*`` local-development set, injected at session build by the
+    ``extras.vscode_enabled`` gate (set here) — never baked into
+    ``tools.external`` and never present in any other environment. Built-ins are
+    narrowed to plan/interact/research so the agent's file/terminal work always
+    goes through the ``vscode_*`` tools (the user's machine), not the server
+    sandbox. ``model`` is filled at session creation.
+    """
+    manifest = build_manifest(
+        "worker_adaptive",
+        provider=provider or "anthropic",
+        external_tools=[],  # vscode_* arrive via the runtime vscode_enabled gate
+        built_in_tools=list(_VSCODE_BUILT_IN_TOOL_NAMES),
+    )
+    manifest.metadata.id = VSCODE_ENV_ID
+    manifest.metadata.name = "VSCode 확장"
+    manifest.metadata.description = (
+        "VSCode 확장 코딩 환경 — 에이전트가 vscode_* 도구로 사용자의 실제 "
+        "워크스페이스(파일 읽기·편집·검색·터미널)를 조작합니다. 이 환경에서만 "
+        "vscode_* 도구가 노출됩니다."
+    )
+    extras = manifest.host_selections.extras
+    extras["vscode_enabled"] = True
     _use_llm_compactor(manifest)
     return manifest
 
@@ -743,6 +788,8 @@ def install_environment_templates(
             "Local LLM · VTuber", "로컬 LLM(Ollama) 백엔드 · VTuber 페르소나 환경 — 모든 도구.",
             all_names, vtuber=True,
         ),
+        # Geny VSCode extension — isolated vscode_* coding environment.
+        create_vscode_env(provider=active_provider),
     ]
     for manifest in seeds:
         _seed_system_prompt(manifest)
@@ -766,7 +813,13 @@ def _seed_system_prompt(manifest: "EnvironmentManifest") -> None:
             extras.get("persona_preset_id")
             or (isinstance(owned, dict) and owned.get("enabled"))
         )
-        text = PromptTemplateLoader().load_role_template("vtuber" if is_vtuber else "worker")
+        if extras.get("vscode_enabled"):
+            role = "vscode"
+        elif is_vtuber:
+            role = "vtuber"
+        else:
+            role = "worker"
+        text = PromptTemplateLoader().load_role_template(role)
         if not text:
             return
         entries = manifest.stage_entries()

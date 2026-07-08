@@ -415,6 +415,29 @@ class AgentSessionManager:
         except Exception:  # noqa: BLE001
             return False
 
+    def _env_vscode_enabled(self, env_id: Optional[str]) -> bool:
+        """Whether this env opted into the VSCode-extension local-development
+        tool set (``vscode_*``). Stored at
+        ``host_selections.extras.vscode_enabled`` and set ONLY on
+        ``template-vscode-env``. Deliberately NOT auto-enabled for any role
+        (unlike computer-use for VTuber): the vscode tools drive file writes and
+        terminal commands and must never leak into a general session. When true,
+        the ``vscode_*`` names are unioned into ``tools.external`` so the session
+        exposes them; local execution runs in the VSCode extension (which
+        advertises the matching ``vscode.*`` capabilities and enforces
+        per-capability consent). Both gates must pass; the tools fail-closed
+        ("connector offline") when no extension is attached."""
+        if not env_id or self._environment_service is None:
+            return False
+        try:
+            manifest = self._environment_service.load_manifest(env_id)
+            if manifest is None:
+                return False
+            extras = getattr(manifest.host_selections, "extras", None) or {}
+            return bool(extras.get("vscode_enabled"))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _env_tool_settings(self, env_id: Optional[str]) -> dict:
         """The env's per-tool settings map, or ``{}``.
 
@@ -1045,6 +1068,24 @@ class AgentSessionManager:
         connector_provider = ConnectorToolProvider()
         adhoc_providers.append(connector_provider)
 
+        # VSCode extension local-development tools — a SEPARATE, isolated
+        # capability set (vscode_*). Registered always (inert); activated ONLY
+        # by the per-env vscode_enabled gate (never auto-on for a role). Its
+        # names live only in this provider, so they can't leak into a normal
+        # env's tools.external whitelist.
+        from service.executor.vscode_bridge import VSCodeToolProvider
+
+        vscode_provider = VSCodeToolProvider()
+        adhoc_providers.append(vscode_provider)
+        vscode_tools: list = (
+            vscode_provider.list_names() if self._env_vscode_enabled(env_id) else []
+        )
+        if vscode_tools:
+            logger.info(
+                "  vscode: %d local-development capability tool(s) exposed",
+                len(vscode_tools),
+            )
+
         # Local Computer Use — the connector capability tool names, unioned into
         # tools.external so the session AND its delegated sub-agents (companion /
         # sub-worker) expose them. The connector is a conduit bound to a VTuber's
@@ -1180,9 +1221,12 @@ class AgentSessionManager:
                 lifecycle_tools = ["gapt_run_command", "list_tool_packs", "use_tool_pack"]
         except Exception:  # noqa: BLE001
             lifecycle_tools = []
-        # computer_use_tools was computed above (before the sub-agent registry).
+        # computer_use_tools + vscode_tools were computed above (before the
+        # sub-agent registry).
         _extra_tools = list(
-            dict.fromkeys([*lifecycle_tools, *pack_tool_names, *computer_use_tools])
+            dict.fromkeys(
+                [*lifecycle_tools, *pack_tool_names, *computer_use_tools, *vscode_tools]
+            )
         )
 
         # MCP connectors (config-gated): inject configured connectors' MCP servers
