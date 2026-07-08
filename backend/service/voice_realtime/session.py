@@ -92,8 +92,9 @@ class RealtimeVoiceSession:
         # ── server-side streaming VAD state (input_mode="server_vad") ──
         self._input_mode = _cfg.default_input_mode()
         self._vad = None                 # lazy SileroOnnx
+        self._vad_failed = False         # VAD init failed → server_vad disabled
         self._turn_detector = None       # lazy StreamingTurnDetector
-        self._pcm_tail = b""             # bytes not yet aligned to a frame
+        self._pcm_tail = bytearray()     # bytes not yet aligned to a frame
         self._utt_frames: list[bytes] = []   # PCM frames of the current utterance
         self._recent_frames: list[bytes] = []  # ring for pre-speech padding
         self._utt_ms = 0.0               # length of the open utterance
@@ -105,6 +106,16 @@ class RealtimeVoiceSession:
     async def close(self) -> None:
         self._closed = True
         await self._cancel_active_turn()
+        # Also cancel any in-flight partial-transcription task so it doesn't
+        # keep holding a Whisper request for a session that's gone.
+        pt = self._partial_task
+        self._partial_task = None
+        if pt and not pt.done():
+            pt.cancel()
+            try:
+                await pt
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
     def _is_stale(self, gen: int) -> bool:
         return gen != self._generation or self._closed
@@ -118,7 +129,14 @@ class RealtimeVoiceSession:
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except asyncio.CancelledError:
+                # Propagate cancellation that targets THIS coroutine (e.g. the
+                # WS teardown being cancelled) — only swallow the awaited task's.
+                if task.cancelled():
+                    pass
+                else:
+                    raise
+            except Exception:  # noqa: BLE001
                 pass
         # Also stop the underlying executor turn if it's still admitted.
         try:
@@ -196,20 +214,53 @@ class RealtimeVoiceSession:
         utterance → run one persona turn). This is the "realtime input
         accumulates, end-of-speech goes straight to the executor" flow.
         """
-        if self._closed:
+        if self._closed or self._vad_failed:
             return
         from .vad import FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE, pcm16_to_f32
-        self._ensure_vad()
+        try:
+            self._ensure_vad()
+        except Exception:  # noqa: BLE001
+            # onnxruntime missing / model unreadable — disable server VAD for
+            # this connection once (don't die on every frame) and tell the
+            # client so it can fall back to client_vad.
+            self._vad_failed = True
+            logger.warning("[RealtimeVoice] VAD init failed; server_vad disabled", exc_info=True)
+            await self._safe_emit("error", {"error": "server_vad_unavailable"})
+            return
         frame_ms = FRAME_SAMPLES / SAMPLE_RATE * 1000.0
         max_utt_ms = _cfg.vad_max_utterance_ms()
-        pad = self._turn_detector.pad_frames
+        # Retain enough recent frames to cover the whole speech build-up +
+        # pre-pad, so the utterance onset isn't clipped when a turn opens.
+        pad = self._turn_detector.lookback_frames
 
-        self._pcm_tail += pcm
-        while len(self._pcm_tail) >= FRAME_BYTES:
-            frame = self._pcm_tail[:FRAME_BYTES]
-            self._pcm_tail = self._pcm_tail[FRAME_BYTES:]
+        # Bound the backlog: a single oversized/malicious binary frame (or a
+        # burst) must never make the synchronous per-frame VAD loop below block
+        # the event loop for seconds. Keep at most ~4 s of audio; drop the
+        # oldest excess. Normal 128 ms chunks are far under this.
+        self._pcm_tail.extend(pcm)
+        max_tail = FRAME_BYTES * (SAMPLE_RATE * 4 // FRAME_SAMPLES)
+        if len(self._pcm_tail) > max_tail:
+            drop = len(self._pcm_tail) - max_tail
+            del self._pcm_tail[:drop]
+            logger.warning("[RealtimeVoice] dropped %d bytes of backlogged audio", drop)
 
-            prob = self._vad(pcm16_to_f32(frame))
+        # Process frames via a moving offset (avoids O(n^2) bytes re-slicing),
+        # yielding to the loop every ~1 s of audio so long batches don't stall.
+        off = 0
+        n = len(self._pcm_tail)
+        processed = 0
+        while n - off >= FRAME_BYTES:
+            frame = bytes(self._pcm_tail[off:off + FRAME_BYTES])
+            off += FRAME_BYTES
+            processed += 1
+            if processed % 32 == 0:
+                await asyncio.sleep(0)  # let the event loop breathe
+
+            try:
+                prob = self._vad(pcm16_to_f32(frame))
+            except Exception:  # noqa: BLE001
+                logger.debug("[RealtimeVoice] VAD frame error", exc_info=True)
+                continue
             ev = self._turn_detector.process(prob)
 
             # Maintain a short pre-speech ring so the leading sound survives.
@@ -244,6 +295,10 @@ class RealtimeVoiceSession:
 
             if ev is not None and ev.kind == "end":
                 await self._finish_utterance()
+
+        # Drop all consumed frames in one O(n) splice, keeping the <1-frame tail.
+        if off:
+            del self._pcm_tail[:off]
 
     def _spawn_partial(self, pcm_snapshot: bytes) -> None:
         """Fire-and-forget interim transcription of the open utterance. Only
@@ -385,14 +440,14 @@ class RealtimeVoiceSession:
                 logger.warning("[RealtimeVoice] TTS failed for a sentence", exc_info=True)
 
         try:
-            deadline = asyncio.get_event_loop().time() + _cfg.turn_hard_timeout_seconds()
+            deadline = asyncio.get_running_loop().time() + _cfg.turn_hard_timeout_seconds()
             # Poll STREAM logs → extract sentences → speak, until the
             # persona turn completes (or we go stale / time out).
             while not exec_task.done():
                 if self._is_stale(gen):
                     break
-                await asyncio.sleep(_cfg.stream_poll_seconds())
-                if asyncio.get_event_loop().time() > deadline:
+                await asyncio.sleep(max(0.005, _cfg.stream_poll_seconds()))
+                if asyncio.get_running_loop().time() > deadline:
                     logger.warning("[RealtimeVoice] turn hard-timeout")
                     break
                 if not session_logger:

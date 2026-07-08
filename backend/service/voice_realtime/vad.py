@@ -41,25 +41,38 @@ _CONTEXT_SAMPLES = 64
 
 _MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "silero_vad_16k.onnx")
 
+# The ONNX InferenceSession is stateless and thread-safe for inference — the
+# only per-stream state (LSTM hidden state + context window) lives in each
+# SileroOnnx instance's numpy arrays. So load the 1.3 MB model ONCE and share
+# it across every connection, instead of re-loading per WebSocket.
+_SHARED_SESSION = None
 
-class SileroOnnx:
-    """Silero VAD v5 onnx model, driven with onnxruntime only.
 
-    Stateful across frames (LSTM hidden state). One instance per audio
-    stream; call :meth:`reset` between turns is optional (the detector
-    handles turn state itself).
-    """
-
-    def __init__(self) -> None:
+def _get_shared_session():
+    global _SHARED_SESSION
+    if _SHARED_SESSION is None:
         import onnxruntime as ort
 
         opts = ort.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
         # VAD is tiny; single-thread avoids contention with the event loop.
-        self._sess = ort.InferenceSession(
+        _SHARED_SESSION = ort.InferenceSession(
             _MODEL_PATH, sess_options=opts, providers=["CPUExecutionProvider"]
         )
+    return _SHARED_SESSION
+
+
+class SileroOnnx:
+    """Silero VAD v5 onnx model, driven with onnxruntime only.
+
+    Stateful across frames (LSTM hidden state). One instance per audio
+    stream; call :meth:`reset` between turns is optional (the detector
+    handles turn state itself). The underlying InferenceSession is shared.
+    """
+
+    def __init__(self) -> None:
+        self._sess = _get_shared_session()
         self._sr = np.array(SAMPLE_RATE, dtype=np.int64)
         self.reset()
 
@@ -169,7 +182,22 @@ class StreamingTurnDetector:
         buffer doesn't clip the leading consonant)."""
         return self._pad_frames
 
+    @property
+    def lookback_frames(self) -> int:
+        """How many recent frames the caller must retain so that, when a turn
+        opens, the whole speech build-up (the min_speech frames that had to
+        accumulate BEFORE 'start' fired) plus the pre-pad are available.
+        Sizing the pre-speech ring smaller than this clips the utterance
+        onset — the leading ~min_speech_ms of real speech would be lost."""
+        return self._min_speech_frames + self._pad_frames
+
 
 def pcm16_to_f32(pcm: bytes) -> np.ndarray:
-    """int16 little-endian PCM bytes → float32 [-1, 1] samples."""
+    """int16 little-endian PCM bytes → float32 [-1, 1] samples.
+
+    Defensive: an odd byte count would make ``np.frombuffer('<i2')`` raise;
+    the drain loop always hands exact 1024-byte frames, but drop a trailing
+    stray byte so a future caller can't crash here."""
+    if len(pcm) & 1:
+        pcm = pcm[:-1]
     return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0

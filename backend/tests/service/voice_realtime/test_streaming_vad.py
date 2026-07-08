@@ -69,6 +69,39 @@ def test_reset_turn_clears_latch():
     assert not det.in_speech
 
 
+def test_shared_session_but_independent_state():
+    """The onnx InferenceSession is shared across streams; the per-stream LSTM
+    state/context must stay independent (else multi-connection VAD corrupts)."""
+    import numpy as np
+    from service.voice_realtime.vad import SileroOnnx, FRAME_SAMPLES, _get_shared_session
+
+    a, b = SileroOnnx(), SileroOnnx()
+    assert a._sess is b._sess is _get_shared_session(), "session must be shared"
+    rng = np.random.default_rng(3)
+    for _ in range(8):
+        a(rng.standard_normal(FRAME_SAMPLES).astype(np.float32) * 0.2)
+    assert not np.array_equal(a._state, b._state), "streams must not share state"
+
+
+@pytest.mark.asyncio
+async def test_oversized_frame_is_bounded_not_blocking(monkeypatch):
+    """A single huge binary frame must be capped (not processed frame-by-frame
+    for seconds) so it can't stall the event loop."""
+    from service.voice_realtime.session import RealtimeVoiceSession
+    from service.voice_realtime.vad import SAMPLE_RATE
+
+    async def emit(t, d):
+        pass
+
+    voice = RealtimeVoiceSession("sid", emit)
+    voice.configure(input_mode="server_vad")
+    # 10 s of silence = 320 KB — far over the ~4 s cap.
+    big = b"\x00\x00" * (SAMPLE_RATE * 10)
+    await voice.on_audio_frame(big)
+    # Backlog was trimmed to the cap and fully consumed → tiny remainder.
+    assert len(voice._pcm_tail) < 1024
+
+
 # ── WAV wrapping ─────────────────────────────────────────────────────
 
 

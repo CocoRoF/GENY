@@ -62,35 +62,64 @@ export async function startPcmStream(opts: PcmStreamOptions): Promise<PcmStreamH
     },
   });
 
-  // 16 kHz context = Silero's native rate, so no resampling in the worklet.
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new AudioCtx({ sampleRate: 16000 });
-  if (ctx.state === 'suspended') {
-    try {
-      await ctx.resume();
-    } catch {
-      /* resumed on first gesture elsewhere */
-    }
-  }
-
-  const blobUrl = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+  // Everything after getUserMedia can throw (AudioContext unsupported at
+  // 16 kHz, CSP blocking the blob: worklet, worklet parse error). If it does,
+  // the mic is already live — release it (and the ctx) before rethrowing, or
+  // the mic stays hot forever with no handle to stop it.
+  let ctx: AudioContext | null = null;
   try {
-    await ctx.audioWorklet.addModule(blobUrl);
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    // 16 kHz context = Silero's native rate, so no resampling in the worklet.
+    ctx = new AudioCtx({ sampleRate: 16000 });
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {
+        /* resumed on first gesture elsewhere */
+      }
+    }
+    // If the browser ignored the 16 kHz hint we'd ship wrong-rate PCM that the
+    // server VAD/Whisper silently misread — fail loudly instead.
+    if (ctx.sampleRate !== 16000) {
+      throw new Error(`AudioContext gave ${ctx.sampleRate} Hz, need 16000`);
+    }
 
-  const source = ctx.createMediaStreamSource(stream);
-  const node = new AudioWorkletNode(ctx, 'pcm-processor');
-  node.port.onmessage = (e) => opts.onFrame(e.data as ArrayBuffer);
-  source.connect(node);
-  // A muted sink keeps the graph pulling on some browsers without audible echo.
-  const sink = ctx.createGain();
-  sink.gain.value = 0;
-  node.connect(sink);
-  sink.connect(ctx.destination);
+    const blobUrl = URL.createObjectURL(
+      new Blob([WORKLET_SRC], { type: 'application/javascript' }),
+    );
+    try {
+      await ctx.audioWorklet.addModule(blobUrl);
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+
+    const source = ctx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ctx, 'pcm-processor');
+    node.port.onmessage = (e) => opts.onFrame(e.data as ArrayBuffer);
+    source.connect(node);
+    // A muted sink keeps the graph pulling on some browsers without audible echo.
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    node.connect(sink);
+    sink.connect(ctx.destination);
+
+    return _makeHandle(stream, ctx, node, source, sink);
+  } catch (err) {
+    stream.getTracks().forEach((t) => t.stop());
+    if (ctx) void ctx.close().catch(() => {});
+    throw err;
+  }
+}
+
+function _makeHandle(
+  stream: MediaStream,
+  ctx: AudioContext,
+  node: AudioWorkletNode,
+  source: MediaStreamAudioSourceNode,
+  sink: GainNode,
+): PcmStreamHandle {
 
   let stopped = false;
   return {

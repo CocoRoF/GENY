@@ -132,6 +132,10 @@ async def ws_voice_realtime(websocket: WebSocket, session_id: str):
     finally:
         disconnected.set()
         hb_task.cancel()
+        try:
+            await hb_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
         await voice.close()
         try:
             await websocket.close()

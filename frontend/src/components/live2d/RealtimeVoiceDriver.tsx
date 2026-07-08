@@ -51,6 +51,8 @@ export default function RealtimeVoiceDriver({
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcmHandleRef = useRef<PcmStreamHandle | null>(null);
+  // Dedup guard so a duplicated final transcript can't post the message twice.
+  const lastSentRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
 
   // ── barge-in: cut current TTS + cancel the in-flight chat reply ──
   const bargeIn = useCallback(() => {
@@ -64,6 +66,10 @@ export default function RealtimeVoiceDriver({
     async (text: string) => {
       const msg = text.trim();
       if (!msg || !roomId) return;
+      // Dedup: a duplicated final transcript (server retry) must not double-post.
+      const now = Date.now();
+      if (msg === lastSentRef.current.text && now - lastSentRef.current.at < 4000) return;
+      lastSentRef.current = { text: msg, at: now };
       try {
         const st = useVTuberStore.getState();
         if (st.ttsEnabled) {
@@ -119,6 +125,11 @@ export default function RealtimeVoiceDriver({
     [bargeIn, sendToChat],
   );
 
+  // Keep the WS onmessage bound to the LATEST handler so a late-resolving
+  // roomId (null → real id) isn't stuck in a stale closure.
+  const handlerRef = useRef(handleServerEvent);
+  handlerRef.current = handleServerEvent;
+
   // ── WebSocket lifecycle + server_vad PCM streaming ───────────────
   useEffect(() => {
     if (!active) return;
@@ -127,6 +138,12 @@ export default function RealtimeVoiceDriver({
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
     getAudioManager().ensureResumed();
+
+    const resetIndicators = () => {
+      const st = useVTuberStore.getState();
+      st.setRealtimeListening(false);
+      st.setRealtimePartial('');
+    };
 
     ws.onopen = () => {
       if (closed) return;
@@ -147,12 +164,19 @@ export default function RealtimeVoiceDriver({
     ws.onmessage = (ev) => {
       if (typeof ev.data !== 'string') return;
       try {
-        handleServerEvent(JSON.parse(ev.data));
+        handlerRef.current(JSON.parse(ev.data));
       } catch {
         /* ignore */
       }
     };
-    ws.onclose = ws.onerror = () => {};
+    // On drop/error: reset the indicator and release the mic (the worklet
+    // would otherwise keep capturing into a dead socket). No auto-reconnect —
+    // the user re-toggles 대화, which re-runs this effect cleanly.
+    ws.onclose = ws.onerror = () => {
+      resetIndicators();
+      pcmHandleRef.current?.stop();
+      pcmHandleRef.current = null;
+    };
 
     return () => {
       closed = true;
@@ -164,9 +188,7 @@ export default function RealtimeVoiceDriver({
         /* already closing */
       }
       wsRef.current = null;
-      const st = useVTuberStore.getState();
-      st.setRealtimeListening(false);
-      st.setRealtimePartial('');
+      resetIndicators();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, sessionId, inputMode, clientVad]);
