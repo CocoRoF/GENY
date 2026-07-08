@@ -323,6 +323,31 @@ async def test_index_note_empty_removes(svc):
     assert "n.md" in fake.removed
 
 
+def test_byte_safe_chunks_bounds_every_piece():
+    # A single huge line (no paragraph breaks) far over the byte cap.
+    huge = "가나다라마" * 5000  # 75000 UTF-8 bytes, one line
+    pieces = ks._byte_safe_chunks(huge, limit=7000)
+    assert len(pieces) > 1
+    assert all(len(p.encode("utf-8")) <= 7000 for p in pieces)
+    # Normal text is a no-op.
+    small = "짧은 노트"
+    assert ks._byte_safe_chunks(small) == [small]
+
+
+@pytest.mark.asyncio
+async def test_index_note_never_embeds_over_budget_chunk(svc):
+    """A very long note must be split so no chunk exceeds the embedding
+    token budget (the prod freeze was an 8192-token 400 on whole text)."""
+    service, fake = svc
+    long_note = "결제 재시도 정책 문단. " * 4000  # well over 8192 tokens whole
+    n = await service.index_note(
+        filename="topics/긴메모.md", title="긴 메모", text=long_note,
+    )
+    assert n >= 1
+    chunks = fake.indexed["topics/긴메모.md"]
+    assert all(len(c.text.encode("utf-8")) <= ks._MAX_CHUNK_BYTES for c in chunks)
+
+
 def test_json_upload_uses_structured_rendering(svc):
     service, _ = svc
     rows = service._extract_chunks(

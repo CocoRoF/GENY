@@ -42,6 +42,43 @@ KNOWLEDGE_CATEGORY = "knowledge"
 _CHUNK_SIZE = 1200
 _CHUNK_OVERLAP = 150
 _MAX_CHUNKS_PER_DOC = 2000
+# Every chunk we embed must fit the embedding model's token budget (8192
+# for OpenAI text-embedding-*). A token never exceeds the UTF-8 byte count,
+# so keeping each chunk under this byte cap guarantees it never trips the
+# provider's limit. Contextifier normally yields ~1200-char chunks, well
+# under this — but a table / protected region / structure-aware JSON line
+# can be larger, so we hard-split anything over the cap as defense in depth.
+_MAX_CHUNK_BYTES = 7000
+
+
+def _byte_safe_chunks(text: str, limit: int = _MAX_CHUNK_BYTES) -> List[str]:
+    """Split ``text`` so each piece's UTF-8 encoding is ≤ ``limit`` bytes,
+    preferring line boundaries and hard-cutting any single oversized line
+    on a UTF-8 char boundary. A no-op for already-small text."""
+    if len(text.encode("utf-8")) <= limit:
+        return [text]
+    out: List[str] = []
+    buf = ""
+
+    def _flush() -> None:
+        nonlocal buf
+        if buf.strip():
+            out.append(buf.strip())
+        buf = ""
+
+    for line in text.splitlines(keepends=True):
+        if buf and len((buf + line).encode("utf-8")) > limit:
+            _flush()
+        if len(line.encode("utf-8")) > limit:
+            encoded = line.encode("utf-8")
+            for i in range(0, len(encoded), limit):
+                piece = encoded[i : i + limit].decode("utf-8", errors="ignore")
+                if piece.strip():
+                    out.append(piece.strip())
+            continue
+        buf += line
+    _flush()
+    return [p for p in out if p] or [text[: limit // 2]]
 
 
 def _embedding_spec() -> "tuple[str, str, int]":
@@ -430,12 +467,21 @@ class KnowledgeService:
             if not text:
                 continue
             meta = getattr(chunk, "metadata", None)
-            rows.append({
-                "text": text,
-                "page": getattr(meta, "page_number", None) if meta else None,
-                "heading": getattr(meta, "heading_path", None) if meta else None,
-                "sheet": getattr(meta, "sheet_name", None) if meta else None,
-            })
+            page = getattr(meta, "page_number", None) if meta else None
+            heading = getattr(meta, "heading_path", None) if meta else None
+            sheet = getattr(meta, "sheet_name", None) if meta else None
+            # Guarantee every chunk fits the embedding token budget — a
+            # single Contextifier chunk (big table / protected block) can
+            # exceed it; split those so embedding never 400s.
+            for piece in _byte_safe_chunks(text):
+                rows.append({
+                    "text": piece, "page": page,
+                    "heading": heading, "sheet": sheet,
+                })
+                if len(rows) >= _MAX_CHUNKS_PER_DOC:
+                    break
+            if len(rows) >= _MAX_CHUNKS_PER_DOC:
+                break
         return rows
 
     async def _index_chunks(
@@ -553,8 +599,8 @@ class KnowledgeService:
             return 0
         try:
             rows = self._extract_chunks(leaf, text.encode("utf-8"))
-        except Exception:  # noqa: BLE001 — fall back to whole-note as one chunk
-            rows = [{"text": text}]
+        except Exception:  # noqa: BLE001 — Contextifier failed; chunk it ourselves
+            rows = [{"text": p} for p in _byte_safe_chunks(text)]
         if not rows:
             await self.remove_note(filename)
             return 0
