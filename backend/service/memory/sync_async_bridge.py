@@ -92,4 +92,50 @@ def run_coro_sync(coro: Awaitable[_T]) -> _T:
         return pool.submit(_runner).result()
 
 
-__all__ = ["run_coro_sync"]
+# ── Off-loop side-effect executor ────────────────────────────────────
+#
+# A dedicated single-worker thread pool for host-side memory SIDE-EFFECTS
+# that are (a) best-effort and (b) implemented as SYNC chains which call
+# ``run_coro_sync`` internally — specifically conversation/DM archiving
+# (``_on_record_turn`` hook) and compaction-snapshot writes
+# (``PersistingLLMSummaryCompactor.compact``).
+#
+# Why this is mandatory, not an optimisation:
+#   Those chains reach ``run_coro_sync``. If invoked directly from a
+#   coroutine on the main event loop, ``run_coro_sync`` takes its
+#   *in-loop* branch — it spins a worker future and BLOCKS the loop
+#   thread on ``.result()``. That worker then does ``notes.write`` /
+#   ``notes.update`` which acquires a ``LoopAgnosticLock`` (a process-wide
+#   ``threading.Lock``). If that lock is momentarily held by ANOTHER
+#   coroutine on the (now frozen) main loop that yielded mid-critical-
+#   section, the holder can never resume to release it → permanent
+#   process deadlock. (Observed in prod as repeated backend hangs;
+#   executor 2.48.2's non-blocking acquire only fixed the same-loop
+#   contention case, not this cross-thread block.)
+#
+#   Running the sync chain HERE instead means ``run_coro_sync`` sees no
+#   running loop → uses ``asyncio.run`` on this worker thread, blocking
+#   only the worker. The main loop stays free, so any lock holder on it
+#   resumes and releases normally. ``max_workers=1`` preserves the global
+#   "one archiver/compaction writer at a time" serialisation these code
+#   paths were written under (previously enforced implicitly by the
+#   loop-blocking behaviour), so no new concurrency races are introduced.
+_SIDE_EFFECT_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="mem-sideeffect"
+)
+
+
+async def offload_blocking(fn):
+    """Run a blocking, ``run_coro_sync``-using memory side-effect OFF the
+    event loop, from an async caller, and await its completion.
+
+    Keeps loop-blocking (and its deadlock class, see ``_SIDE_EFFECT_POOL``)
+    out of the pipeline while preserving back-pressure — the awaiting
+    coroutine still waits for the side-effect, it just no longer freezes
+    the loop for every other task while it runs.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_SIDE_EFFECT_POOL, fn)
+
+
+__all__ = ["run_coro_sync", "offload_blocking"]

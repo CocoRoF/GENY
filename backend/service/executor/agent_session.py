@@ -1408,11 +1408,28 @@ class AgentSession:
                 role = str(turn.role or "")
                 content = _turn_text(turn.content)
                 metadata = dict(turn.metadata or {}) or None
-                archived = mgr._maybe_archive_conversation(
-                    role, content, metadata,
-                )
-                conv_ref = archived.relative_path if archived is not None else None
-                mgr._maybe_archive_dm(role, content, metadata, conv_ref)
+
+                # Archiving is a SYNC chain (ConversationArchiver /
+                # DmArchiver) that reaches ``run_coro_sync`` for its
+                # provider note writes. This hook runs ON the main event
+                # loop, so calling it inline would make ``run_coro_sync``
+                # take its in-loop branch and BLOCK the loop on a worker
+                # future — and if that worker then contends for a memory
+                # ``LoopAgnosticLock`` held by another (now unresumable)
+                # loop coroutine, the process deadlocks. So run the whole
+                # archive side-effect off the loop on the dedicated
+                # single-worker pool. See ``sync_async_bridge``.
+                def _archive_offloop() -> None:
+                    archived = mgr._maybe_archive_conversation(
+                        role, content, metadata,
+                    )
+                    conv_ref = (
+                        archived.relative_path if archived is not None else None
+                    )
+                    mgr._maybe_archive_dm(role, content, metadata, conv_ref)
+
+                from service.memory.sync_async_bridge import offload_blocking
+                await offload_blocking(_archive_offloop)
             except Exception:  # noqa: BLE001
                 logger.debug(
                     "[%s] memory after_record_turn hook failed",
@@ -4582,10 +4599,19 @@ class AgentSession:
         """
         logger.info(f"[{self._session_id}] Cleaning up AgentSession...")
 
-        # Flush memory before shutdown
+        # Flush memory before shutdown.
+        # ``auto_flush`` is SYNC and internally does
+        # ``run_coro_sync(compact_now(...))`` — a full end-of-session
+        # compaction (LLM summary + note/vector writes). Called inline on
+        # this async cleanup path it would BLOCK the event loop for the
+        # entire compaction (seconds), freezing every other session, and
+        # its provider writes could deadlock on a memory lock held by a
+        # now-unresumable loop coroutine. Run it off the loop. See
+        # ``service.memory.sync_async_bridge.offload_blocking``.
         if self._memory_manager:
             try:
-                self._memory_manager.auto_flush()
+                from service.memory.sync_async_bridge import offload_blocking
+                await offload_blocking(self._memory_manager.auto_flush)
                 logger.debug(f"[{self._session_id}] Memory flushed to long-term storage")
             except Exception:
                 logger.debug("Failed to flush memory — non-critical", exc_info=True)

@@ -90,10 +90,19 @@ class PersistingLLMSummaryCompactor(LLMSummaryCompactor):
                     if isinstance(b, dict) and b.get("type") == "text"
                 )
             replaced = old_count - new_count + 2  # +2 = the summary pair just inserted
-            self._memory_manager.record_compaction(
-                str(summary_text),
-                replaced_count=int(replaced),
-                strategy=self.name,
+            # ``record_compaction`` is a SYNC chain (CompactionArchiver)
+            # that reaches ``run_coro_sync`` for its vault note write.
+            # ``compact`` runs ON the main event loop, so calling it inline
+            # would make ``run_coro_sync`` block the loop on a worker future
+            # that contends for a memory lock — the same deadlock class that
+            # froze the backend. Run it off the loop. See ``sync_async_bridge``.
+            from service.memory.sync_async_bridge import offload_blocking
+            await offload_blocking(
+                lambda: self._memory_manager.record_compaction(
+                    str(summary_text),
+                    replaced_count=int(replaced),
+                    strategy=self.name,
+                )
             )
         except Exception:
             logger.debug(

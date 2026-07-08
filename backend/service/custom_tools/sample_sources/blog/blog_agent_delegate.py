@@ -144,7 +144,7 @@ async def _ensure_blog_session_uid(
     return blog_uid
 
 
-def _record_request_in_stm(
+async def _record_request_in_stm(
     *,
     geny_session_id: str,
     blog_session_uid: str,
@@ -155,8 +155,15 @@ def _record_request_in_stm(
     """위임 호출 시 호출자 STM 에 EXTERNAL_TASK_REQUEST 이벤트 기록.
 
     DM 이 아니라 도구 호출 결과이므로 자동 분류 경로가 아니라 이쪽에서
-    손으로 metadata 를 만들어 ``record_message`` 한다. 실패해도 도구
-    흐름은 계속 (best-effort).
+    손으로 metadata 를 만들어 기록한다. 실패해도 도구 흐름은 계속
+    (best-effort).
+
+    Records ASYNC-NATIVELY (``await ...stm().append``) instead of the sync
+    ``record_message`` wrapper. ``record_message`` bridges through
+    ``run_coro_sync`` — on the event loop that blocks the loop on a worker
+    future whose ``notes.write`` (fired by the ``after_record_turn`` archive
+    hook) can deadlock on a memory ``LoopAgnosticLock``. Awaiting the append
+    directly keeps the loop free; the hook then offloads archiving normally.
     """
     try:
         from service.executor import get_agent_session_manager
@@ -187,7 +194,10 @@ def _record_request_in_stm(
             counterpart_id=f"blog:{blog_session_uid}",
             counterpart_role=CounterpartRole.EXTERNAL_AGENT,
         )
-        memory.record_message("assistant_tool", body[:8000], metadata=metadata)
+        # Equivalent to ``record_message`` (no ``extra`` kwargs → out_meta ==
+        # metadata) but async-native, so it fires the archive hook on the
+        # live loop rather than through the loop-blocking sync bridge.
+        await memory._stm_append_message("assistant_tool", body[:8000], metadata)
     except Exception:
         logger.debug(
             "external_task_request STM record failed (non-critical)",
@@ -308,8 +318,9 @@ class BlogAgentDelegateTool(BaseTool):
             on_finished=_on_finished,
         )
 
-        # STM 에 EXTERNAL_TASK_REQUEST 기록 (best-effort)
-        _record_request_in_stm(
+        # STM 에 EXTERNAL_TASK_REQUEST 기록 (best-effort). Async-native —
+        # see the note on ``_record_request_in_stm``.
+        await _record_request_in_stm(
             geny_session_id=session_id,
             blog_session_uid=blog_uid,
             task_id=state.task_id,
