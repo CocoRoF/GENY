@@ -23,6 +23,8 @@ import base64
 from logging import getLogger
 from typing import Awaitable, Callable, Dict, Optional
 
+from . import config as _cfg
+
 logger = getLogger(__name__)
 
 # Fallback emotion→expression map when the persona's live2d model map isn't
@@ -41,13 +43,6 @@ _DEFAULT_EMOTION_MAP: Dict[str, int] = {
     "fear": 4,
     "disgust": 5,
 }
-
-# How often to drain the STREAM log cache while the persona is generating.
-# Matches the chat controller's token-streaming granularity (50 ms).
-_STREAM_POLL_S = 0.05
-# Cap a single turn so a stuck persona can't pin the loop forever; the
-# executor has its own timeout, this is a backstop.
-_TURN_HARD_TIMEOUT_S = 180.0
 
 EmitFn = Callable[[str, dict], Awaitable[None]]
 
@@ -186,7 +181,10 @@ class RealtimeVoiceSession:
         session_logger = get_session_logger(self.session_id, create_if_missing=False)
         cursor = session_logger.get_cache_length() if session_logger else 0
 
-        extractor = IncrementalSentenceExtractor()
+        extractor = IncrementalSentenceExtractor(
+            min_chars=_cfg.sentence_min_chars(),
+            max_chars=_cfg.sentence_max_chars(),
+        )
         emotion_extractor = EmotionExtractor(self._emotion_map)
         seq = 0  # audio sequence within this turn
         self._stream_raw = ""  # cumulative reply tokens for THIS turn
@@ -247,13 +245,13 @@ class RealtimeVoiceSession:
                 logger.warning("[RealtimeVoice] TTS failed for a sentence", exc_info=True)
 
         try:
-            deadline = asyncio.get_event_loop().time() + _TURN_HARD_TIMEOUT_S
+            deadline = asyncio.get_event_loop().time() + _cfg.turn_hard_timeout_seconds()
             # Poll STREAM logs → extract sentences → speak, until the
             # persona turn completes (or we go stale / time out).
             while not exec_task.done():
                 if self._is_stale(gen):
                     break
-                await asyncio.sleep(_STREAM_POLL_S)
+                await asyncio.sleep(_cfg.stream_poll_seconds())
                 if asyncio.get_event_loop().time() > deadline:
                     logger.warning("[RealtimeVoice] turn hard-timeout")
                     break
