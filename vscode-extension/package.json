@@ -3,7 +3,7 @@
   "displayName": "Geny",
   "description": "Chat with your Geny agents from VSCode — they read, edit, search, and run commands in your real workspace, like Copilot/Claude Code but powered by your Geny server.",
   "version": "0.1.0",
-  "publisher": "geny",
+  "publisher": "geny-extension",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
   "engines": {
