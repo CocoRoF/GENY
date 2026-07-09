@@ -1736,6 +1736,14 @@ class AgentSessionManager:
         if not params:
             return None
 
+        # Defensive: clear any stale teardown gate for this id (a prior evict
+        # or delete may have left it set) so the rebuilt session accepts turns.
+        try:
+            from service.execution.agent_executor import clear_session_closing
+            clear_session_closing(session_id)
+        except Exception:
+            pass
+
         stored_system_prompt = record.get("system_prompt")
         linked_id = record.get("linked_session_id")
 
@@ -2063,6 +2071,26 @@ class AgentSessionManager:
             if session_logger:
                 session_logger.log_session_event("deleted")
 
+            # QUIESCE before teardown. cleanup() tears the pipeline down
+            # (aclose → cancels HITL futures, closes event taps, disconnects
+            # MCP) — doing that UNDER a live turn corrupts the turn and leaks
+            # its pipeline/MCP/HITL resources. Block new turns, then wait for
+            # any in-flight turn to finish (or gracefully cancel it past a
+            # bounded window), so cleanup only runs once the session is idle.
+            try:
+                from service.execution.agent_executor import close_session_execution
+                drained = await close_session_execution(session_id)
+                if not drained:
+                    logger.warning(
+                        f"[{session_id}] delete: in-flight turn did not fully "
+                        "drain; proceeding with teardown",
+                    )
+            except Exception:
+                logger.debug(
+                    f"[{session_id}] delete drain failed — proceeding with teardown",
+                    exc_info=True,
+                )
+
             # Clean up AgentSession (stop process, release resources)
             await agent.cleanup()
 
@@ -2102,6 +2130,15 @@ class AgentSessionManager:
 
             # Soft-delete in persistent store (keeps metadata for restore)
             self._store.soft_delete(session_id)
+
+            # Re-open the teardown gate: the record is soft-deleted so no turn
+            # can resolve it now, but a later restore reuses this id and must
+            # not inherit a stale "closing" flag (which would reject its turns).
+            try:
+                from service.execution.agent_executor import clear_session_closing
+                clear_session_closing(session_id)
+            except Exception:
+                pass
 
             # SESSION_DELETED bus emit — ``hard`` reflects whether the
             # caller asked for storage cleanup (permanent delete flow).

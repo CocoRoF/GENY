@@ -49,6 +49,13 @@ class AlreadyExecutingError(Exception):
     """Raised when a command is already running on this session."""
 
 
+class SessionClosingError(AlreadyExecutingError):
+    """Raised when a new turn is refused because the session is being torn
+    down (DELETE drain). Subclasses ``AlreadyExecutingError`` so existing
+    "busy, try later" handlers reject it the same way — the session will be
+    gone shortly, so a new turn must not start."""
+
+
 # ============================================================================
 # Result model
 # ============================================================================
@@ -634,6 +641,77 @@ _exec_locks: Dict[str, asyncio.Lock] = {}
 #: Sessions currently draining their inbox — re-entry guard for ``_drain_inbox``.
 _draining_sessions: Set[str] = set()
 
+#: Sessions being torn down (DELETE / teardown drain). While a session id is
+#: in this set the admission critical section refuses NEW turns
+#: (``SessionClosingError``), so a delete can quiesce the session — wait for
+#: the in-flight turn to finish, or gracefully cancel it — and then tear the
+#: pipeline down without a new turn slipping in behind the drain.
+_closing_sessions: Set[str] = set()
+
+
+def mark_session_closing(session_id: str) -> None:
+    """Gate new turns for *session_id* (teardown in progress)."""
+    _closing_sessions.add(session_id)
+
+
+def clear_session_closing(session_id: str) -> None:
+    """Re-open *session_id* for turns (teardown aborted, or a fresh restore)."""
+    _closing_sessions.discard(session_id)
+
+
+async def close_session_execution(
+    session_id: str, *, drain_timeout: float = 30.0, cancel_timeout: float = 10.0
+) -> bool:
+    """Quiesce a session for teardown, robustly.
+
+    1. Gate new turns (``_closing_sessions``) so nothing new starts.
+    2. Synchronise with any in-flight *admission* by taking the admission
+       lock once — after that, a racing admission has either registered its
+       holder (drained below) or seen the gate and bailed.
+    3. Wait up to ``drain_timeout`` for the in-flight turn to finish on its
+       own (shielded, so our wait never cancels it mid-step).
+    4. If it is still running, gracefully ``cancel()`` the turn task and wait
+       for it — the turn's own ``finally`` runs (``cleanup_execution`` + its
+       per-turn resource release), so we NEVER tear the pipeline down under a
+       live turn.
+
+    Returns True once the session is idle (safe to ``cleanup()``); False only
+    if a turn is somehow still registered after a cancel (abnormal). The gate
+    stays set — the caller clears it (``clear_session_closing``) if it decides
+    NOT to tear down.
+    """
+    _closing_sessions.add(session_id)
+    async with _get_exec_lock(session_id):
+        holder = _active_executions.get(session_id)
+    if holder is None or holder.get("done", True):
+        return True
+    task = holder.get("task")
+    if task is None or task.done():
+        return not is_executing(session_id)
+
+    # 3. Wait for natural completion.
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=drain_timeout)
+        return True
+    except asyncio.TimeoutError:
+        pass
+    except Exception:  # noqa: BLE001 — the turn raised: it is DONE, that's fine
+        return True
+
+    # 4. Still running past the window — cancel gracefully, let its finally run.
+    logger.warning(
+        "[Executor:%s] teardown drain exceeded %ss; cancelling in-flight turn",
+        session_id[:8], drain_timeout,
+    )
+    task.cancel()
+    try:
+        await asyncio.wait_for(task, timeout=cancel_timeout)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
+    except Exception:  # noqa: BLE001
+        pass
+    return not is_executing(session_id)
+
 
 def _get_exec_lock(session_id: str) -> asyncio.Lock:
     """Get-or-create the admission lock for *session_id* (atomic in asyncio:
@@ -1107,6 +1185,15 @@ async def execute_command(
     # through across an await). The lock is released BEFORE awaiting the turn.
     exec_id = uuid.uuid4().hex
     async with _get_exec_lock(session_id):
+        # 1c. Teardown gate — the session is being deleted/quiesced. Refuse
+        # new turns under the same lock that registers holders, so a delete's
+        # drain cannot have a fresh turn slip in behind it (checked here, atomic
+        # with the holder register below).
+        if session_id in _closing_sessions:
+            raise SessionClosingError(
+                f"Session {session_id} is being deleted"
+            )
+
         # 2. Double-execution guard — with trigger preemption
         if is_executing(session_id):
             if not is_trigger and is_trigger_executing(session_id):
