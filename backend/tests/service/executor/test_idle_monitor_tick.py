@@ -39,6 +39,9 @@ def _make_manager_skeleton() -> AgentSessionManager:
     mgr._idle_monitor_interval = 60.0
     mgr._idle_monitor_jitter = 3.0
     mgr._idle_monitor_running = False
+    # Eviction disabled here — these tests pin only the RUNNING → IDLE flip.
+    mgr._idle_evict_seconds = 0.0
+    mgr._rehydrate_locks = {}
     mgr._local_agents = {}
     mgr._store = _FakeStore()
     mgr._lifecycle_bus = SessionLifecycleBus()

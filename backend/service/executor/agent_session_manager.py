@@ -15,6 +15,7 @@ Usage example:
     result = await agent.invoke("Hello")
 """
 
+from datetime import datetime
 from logging import getLogger
 from typing import Any, Dict, List, Optional
 import asyncio
@@ -148,6 +149,26 @@ class AgentSessionManager:
         self._idle_monitor_interval: float = 60.0  # spec cadence (s)
         self._idle_monitor_jitter: float = 3.0     # spec jitter (s)
         self._idle_monitor_running: bool = False
+
+        # Long-idle EVICTION (memory reclaim). Marking a session IDLE keeps
+        # its AgentSession — pipeline, MemoryProvider, embedding client —
+        # fully resident; ``_local_agents`` is otherwise unbounded, so idle
+        # sessions accumulate in memory until explicit delete or a process
+        # restart. After this many seconds of inactivity a non-always-on
+        # session is torn down (resources released) but its store record +
+        # on-disk memory are preserved, so the NEXT access transparently
+        # rehydrates it (same id, same conversation) — only restore latency
+        # is added. Set ``GENY_IDLE_EVICT_SECONDS=0`` to disable (keep the
+        # old always-warm behaviour). Default 30 min; a floor keeps it well
+        # clear of the 10-min IDLE transition.
+        try:
+            self._idle_evict_seconds: float = float(
+                os.environ.get("GENY_IDLE_EVICT_SECONDS", "1800")
+            )
+        except (TypeError, ValueError):
+            self._idle_evict_seconds = 1800.0
+        if 0 < self._idle_evict_seconds < 900:
+            self._idle_evict_seconds = 900.0
 
         # Plugin registry — cycle 20260422 PR-X5-2/3. Manager-scoped
         # singleton. TamagotchiPlugin owns the four live blocks and the
@@ -2200,10 +2221,14 @@ class AgentSessionManager:
         if self._owns_idle_tick_engine:
             await self._idle_tick_engine.start()
         self._idle_monitor_running = True
+        _evict = (
+            f"{self._idle_evict_seconds:.0f}s" if self._idle_evict_seconds > 0 else "disabled"
+        )
         logger.info(
-            "✅ Idle monitor started (interval=%ss±%ss, owned=%s)",
+            "✅ Idle monitor started (interval=%ss±%ss, evict=%s, owned=%s)",
             self._idle_monitor_interval,
             self._idle_monitor_jitter,
+            _evict,
             self._owns_idle_tick_engine,
         )
 
@@ -2221,12 +2246,18 @@ class AgentSessionManager:
         logger.info("Idle monitor stopped")
 
     async def _scan_for_idle_sessions(self) -> None:
-        """Scan all agent sessions and mark idle ones.
+        """Scan all agent sessions: mark idle ones, then EVICT long-idle ones.
 
-        Lightweight — flips the status flag and emits SESSION_IDLE on the
-        bus for each transition. No process restarts, no heavy I/O.
+        Two passes. (1) RUNNING → IDLE after ``idle_transition_seconds`` —
+        lightweight, just flips the flag. (2) IDLE sessions inactive beyond
+        ``_idle_evict_seconds`` are torn down to reclaim RAM (their store
+        record + on-disk memory are kept, so they rehydrate transparently on
+        next access). Eviction is gated (never always-on, never mid-turn)
+        and serialised against reconnects via the per-session rehydrate lock.
         """
         transitioned = 0
+        evicted = 0
+        now = datetime.now()
         # Snapshot items() so a concurrent create/delete does not mutate
         # the dict mid-scan.
         for session_id, agent in list(self._local_agents.items()):
@@ -2245,8 +2276,88 @@ class AgentSessionManager:
                         reason="timeout",
                     )
 
+            # Eviction pass — only when enabled. Cheap pre-checks here; the
+            # authoritative re-check + teardown happens under the lock inside.
+            if self._idle_evict_seconds > 0 and self._is_evict_candidate(agent, now):
+                if await self._evict_idle_session(session_id, agent):
+                    evicted += 1
+
         if transitioned > 0:
             logger.info(f"Idle monitor: {transitioned} session(s) transitioned to IDLE")
+        if evicted > 0:
+            logger.info(
+                "Idle monitor: evicted %d long-idle session(s) — resources "
+                "released; each rehydrates on next access", evicted,
+            )
+
+    def _is_evict_candidate(self, agent: AgentSession, now: datetime) -> bool:
+        """Cheap, lock-free filter for the eviction pass: a sleeping
+        (IDLE), non-always-on session that has been inactive past the evict
+        threshold and isn't mid-turn. Re-verified under the lock before any
+        teardown (see :meth:`_evict_idle_session`)."""
+        if agent.status != SessionStatus.IDLE:
+            return False
+        if getattr(agent, "_is_always_on", False):
+            return False  # VTuber / linked CLI unit — always resident
+        last = getattr(agent, "_execution_start_time", None) or getattr(agent, "_created_at", None)
+        if last is None:
+            return False
+        if (now - last).total_seconds() < self._idle_evict_seconds:
+            return False
+        return not self._session_busy(agent._session_id, agent)
+
+    async def _evict_idle_session(self, session_id: str, agent: AgentSession) -> bool:
+        """Tear down a long-idle session to reclaim memory, preserving its
+        store record + on-disk state so it rehydrates on next access.
+
+        Safety: runs under the per-session rehydrate lock (the same one
+        :meth:`ensure_session_live` takes to rebuild a dormant session), so a
+        concurrent reconnect blocks here, then takes the absent path and
+        rehydrates a FRESH agent after we finish — no two providers touch the
+        same ``storage_path`` at once. The agent is removed from the registry
+        FIRST (under the lock) so no new caller can bind to a torn-down agent,
+        and cleanup runs with ``flush=False`` to keep the lock hold short.
+        """
+        lock = self._rehydrate_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            try:
+                # Authoritative re-check under the lock — state may have moved
+                # since the cheap pre-filter (a turn started, a reload rebuilt
+                # the agent, another scan already evicted it).
+                cur = self._local_agents.get(session_id)
+                if cur is not agent:
+                    return False
+                if cur.status != SessionStatus.IDLE:
+                    return False
+                if getattr(cur, "_is_always_on", False):
+                    return False
+                if self._session_busy(session_id, cur):
+                    return False
+
+                # Remove from the registry FIRST: any concurrent
+                # ensure_session_live now misses the fast path and will
+                # rehydrate a fresh agent (blocking on this same lock).
+                self._local_agents.pop(session_id, None)
+                try:
+                    await cur.cleanup(flush=False)
+                except Exception:  # noqa: BLE001 — reclaim anyway
+                    logger.debug(
+                        f"[{session_id}] evict cleanup failed — resources may "
+                        "partially leak, but the session is unbound", exc_info=True,
+                    )
+                # Persist the STOPPED status so the UI shows it dormant and
+                # the record (with creation params) stays rehydratable.
+                try:
+                    info = cur.get_session_info()
+                    self._store.register(session_id, info.model_dump(mode="json"))
+                except Exception:
+                    pass  # non-critical
+                await self._lifecycle_bus.emit(
+                    LifecycleEvent.SESSION_IDLE, session_id, reason="evicted",
+                )
+                return True
+            finally:
+                self._rehydrate_locks.pop(session_id, None)
 
 # ============================================================================
 # Singleton

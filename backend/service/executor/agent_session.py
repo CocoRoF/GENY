@@ -116,6 +116,13 @@ def _classify_input_role(input_text: str) -> str:
 _LONELINESS_AFFECTION_LOSS = -0.10
 _LONELINESS_FAMILIARITY_LOSS = -0.05
 
+# Hard cap on the best-effort end-of-session memory flush in ``cleanup``.
+# The flush runs off the loop on a shared single-worker pool; this bound
+# guarantees a saturated pool can never strand the resource-release steps
+# that follow (see ``cleanup``). Unflushed STM survives on disk, so a
+# timeout is safe.
+_CLEANUP_FLUSH_TIMEOUT_S = 20.0
+
 # Plan/Phase01 §3.2 — attention recovery constants. Hunger now models
 # attention deprivation (see Plan/01); every user-initiated turn
 # refunds a chunk of it, while autonomous (TRIGGER) turns do not. The
@@ -4585,7 +4592,7 @@ class AgentSession:
     # Lifecycle Methods
     # ========================================================================
 
-    async def cleanup(self):
+    async def cleanup(self, *, flush: bool = True):
         """Clean up the AgentSession and release all resources.
 
         Flushes short-term memory to long-term, closes the executor
@@ -4596,8 +4603,16 @@ class AgentSession:
         ``events()`` taps, disconnects MCP servers (reaping the stdio
         bridge child Geny used to leak per stopped session), and shuts
         down tool providers.
+
+        ``flush=False`` skips the end-of-session memory compaction — used
+        by long-idle EVICTION, where the goal is to reclaim RAM, not to
+        shut the session down. Unflushed STM stays on disk and is re-read
+        verbatim when the session rehydrates on next access; the LTM fold
+        defers to the next real close. Skipping it keeps eviction fast so a
+        concurrent reconnect (which serialises on the same rehydrate lock)
+        isn't stalled by an up-to-20s compaction.
         """
-        logger.info(f"[{self._session_id}] Cleaning up AgentSession...")
+        logger.info(f"[{self._session_id}] Cleaning up AgentSession (flush=%s)...", flush)
 
         # Flush memory before shutdown.
         # ``auto_flush`` is SYNC and internally does
@@ -4608,13 +4623,31 @@ class AgentSession:
         # its provider writes could deadlock on a memory lock held by a
         # now-unresumable loop coroutine. Run it off the loop. See
         # ``service.memory.sync_async_bridge.offload_blocking``.
+        #
+        # BOUNDED: the flush runs on a shared single-worker pool. If that
+        # pool is saturated by other sessions' side-effects, an unbounded
+        # await here would STRAND the resource-release steps below
+        # (MemoryProvider / Pipeline close → embedding client, MCP stdio
+        # child, HITL futures, event taps) and re-leak exactly what this
+        # method exists to reclaim. The flush is best-effort (unflushed STM
+        # still lives on disk), so cap it and release resources regardless.
         if self._memory_manager:
-            try:
-                from service.memory.sync_async_bridge import offload_blocking
-                await offload_blocking(self._memory_manager.auto_flush)
-                logger.debug(f"[{self._session_id}] Memory flushed to long-term storage")
-            except Exception:
-                logger.debug("Failed to flush memory — non-critical", exc_info=True)
+            if flush:
+                try:
+                    from service.memory.sync_async_bridge import offload_blocking
+                    await asyncio.wait_for(
+                        offload_blocking(self._memory_manager.auto_flush),
+                        timeout=_CLEANUP_FLUSH_TIMEOUT_S,
+                    )
+                    logger.debug(f"[{self._session_id}] Memory flushed to long-term storage")
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[%s] memory flush exceeded %ss in cleanup — releasing "
+                        "resources anyway (unflushed STM remains on disk)",
+                        self._session_id, _CLEANUP_FLUSH_TIMEOUT_S,
+                    )
+                except Exception:
+                    logger.debug("Failed to flush memory — non-critical", exc_info=True)
             self._memory_manager = None
 
         # Release the executor MemoryProvider — pre-audit fix this was
