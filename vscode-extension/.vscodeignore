@@ -1,0 +1,12 @@
+# Ship only the bundled extension + assets — not sources or dev tooling.
+src/**
+node_modules/**
+.vscode/**
+.vscode-test/**
+esbuild.js
+tsconfig.json
+_harness*.mjs
+**/*.map
+**/*.ts
+!dist/**
+.gitignore

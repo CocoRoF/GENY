@@ -5,8 +5,31 @@
   "version": "0.1.0",
   "publisher": "geny",
   "license": "Apache-2.0",
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CocoRoF/Geny.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/CocoRoF/Geny/tree/main/vscode-extension",
+  "bugs": {
+    "url": "https://github.com/CocoRoF/Geny/issues"
+  },
+  "keywords": [
+    "geny",
+    "agent",
+    "ai",
+    "chat",
+    "copilot",
+    "coding assistant",
+    "claude"
+  ],
+  "galleryBanner": {
+    "color": "#1e93e6",
+    "theme": "dark"
   },
   "categories": [
     "AI",
