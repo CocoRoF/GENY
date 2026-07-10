@@ -64,9 +64,16 @@ _VTUBER_CHARACTERS_DIR = _Path(__file__).resolve().parent.parent.parent / "promp
 # this string for an already-paired VTuber is a no-op.
 _VTUBER_SUB_WORKER_NOTICE_DEFAULT = (
     "\n\n## Execution layer\n"
-    "Your sub-worker delegate is live. Hand heavy / tool-heavy work to it (no target "
-    "id, no new session); its result returns as a `[SUB_WORKER_RESULT]` trigger. "
-    "Summarize results in your own words and reply in Korean — don't paste raw output."
+    "You have your OWN tools — DO quick work yourself, inline. If a task finishes in "
+    "roughly a minute with a handful of tool calls (a status/health check, a quick SSH "
+    "command, a short lookup, a small edit), just say a brief \"잠깐만\" and do it — a few "
+    "tool turns don't break the conversation.\n"
+    "DELEGATE to your sub-worker ONLY genuinely long or heavy multi-step work (a full "
+    "audit, a build or deploy, a large migration — anything that would run many minutes "
+    "or dozens of steps): hand it off with no target id and no new session; its result "
+    "returns as a `[SUB_WORKER_RESULT]` trigger, which you summarize in your own words in "
+    "Korean — don't paste raw output.\n"
+    "When unsure, do it yourself — over-delegating a trivial task wastes time and feels evasive."
 )
 
 
