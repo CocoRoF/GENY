@@ -46,6 +46,7 @@ from controller.agent_tasks_controller import router as agent_tasks_router
 from controller.hook_automation_controller import router as hooks_router
 from controller.slash_commands_controller import router as slash_router
 from controller.config_controller import router as config_router
+from controller.ssh_controller import router as ssh_router  # SSH connection test
 from controller.tool_settings_controller import router as tool_settings_router
 from controller.gapt_controller import router as gapt_router  # GAPT integration status
 from controller.gapt_settings_controller import router as gapt_settings_router  # GAPT settings proxy
@@ -922,6 +923,7 @@ app.include_router(agent_tasks_router)  # background tasks REST (PR-A.5.4)
 app.include_router(hooks_router)  # Hooks (user automation) REST — agent-created
 app.include_router(slash_router)  # slash commands REST (PR-A.6.2)
 app.include_router(config_router)  # Configuration management
+app.include_router(ssh_router)  # SSH server connection test
 app.include_router(tool_settings_router)  # Per-environment tool settings schemas
 app.include_router(gapt_router)  # GAPT integration status (header button detection)
 app.include_router(gapt_settings_router)  # GAPT settings proxy (GAPT category in Settings)

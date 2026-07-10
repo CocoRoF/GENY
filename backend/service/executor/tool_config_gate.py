@@ -152,6 +152,17 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
+    # 6) SSH provisioned (enabled + at least one fully-valid server) → unlocks
+    # the native SshRun / SshListServers / SshUpload / SshDownload tools.
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.tools.ssh_config import SSHConfig
+
+        if get_config_manager().load_config(SSHConfig).has_valid_servers():
+            satisfied.add("feature:ssh_enabled")
+    except Exception:  # noqa: BLE001
+        pass
+
     return satisfied
 
 

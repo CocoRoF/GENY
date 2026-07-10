@@ -1836,6 +1836,36 @@ export const configApi = {
     }),
 };
 
+// ==================== SSH (server connection test) =========================
+
+export interface SshServer {
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  password?: string;
+  private_key?: string;
+  passphrase?: string;
+  description?: string;
+  strict_host_key?: boolean;
+}
+
+export interface SshTestResponse {
+  success: boolean;
+  latency_ms?: number | null;
+  error?: string | null;
+}
+
+export const sshApi = {
+  /** POST /api/ssh/test — dry-run a single server draft (need not be saved).
+   *  Verifies reachability + auth via the executor's SSH helper. */
+  testServer: (server: Partial<SshServer>) =>
+    apiCall<SshTestResponse>('/api/ssh/test', {
+      method: 'POST',
+      body: JSON.stringify(server),
+    }),
+};
+
 // ==================== Tool Settings API (per-environment) ====================
 
 /**

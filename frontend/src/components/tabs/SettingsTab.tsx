@@ -8,6 +8,7 @@ import GoogleSettingsPanel from './GoogleSettingsPanel';
 import ConnectorsPanel from './ConnectorsPanel';
 import AvatarSettingsPanel from './AvatarSettingsPanel';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
+import SshServersEditor from '@/components/settings/SshServersEditor';
 import { PROVIDERS } from '@/lib/modelCatalog';
 import { useLLMBackendsHealthStore } from '@/store/useLLMBackendsHealthStore';
 import { twMerge } from 'tailwind-merge';
@@ -429,6 +430,17 @@ export default function SettingsTab() {
                       </h4>
                       <div className="p-4 flex flex-col gap-4">
                         {fields.map(field => {
+                          // SSH servers: bespoke list-of-servers editor — the
+                          // generic auto-form has no list-of-dicts widget.
+                          if (editing.name === 'ssh' && field.name === 'servers') {
+                            return (
+                              <SshServersEditor
+                                key={field.name}
+                                value={editing.values.servers as any}
+                                onChange={v => updateField('servers', v)}
+                              />
+                            );
+                          }
                           const value = editing.values[field.name] ?? field.default ?? '';
                           const lf = getLocalizedField(field, editing.schema, locale);
                           return <ConfigFieldInput key={field.name} field={field} value={value} onChange={v => updateField(field.name, v)} allValues={editing.values} allFields={editing.schema.fields} onChangeField={updateField} localizedLabel={lf.label} localizedDescription={lf.description} localizedPlaceholder={lf.placeholder} />;

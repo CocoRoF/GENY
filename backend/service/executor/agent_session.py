@@ -2674,6 +2674,23 @@ class AgentSession:
         except Exception:  # noqa: BLE001 — never block session build on this
             pass
 
+        # SSH servers for the native ssh_* tools — the user's configured server
+        # list (host/user/password/key), handed to the executor per session. The
+        # executor persists it to <storage_path>/ssh/servers.json and resolves a
+        # server by NAME at call time, so the agent never handles a credential.
+        # The tools are gated out via feature:ssh_enabled unless a valid server
+        # exists (compute_satisfied_config), so injecting here is harmless when
+        # SSH is unused.
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.tools.ssh_config import SSHConfig
+
+            _ssh_cfg = get_config_manager().load_config(SSHConfig)
+            if _ssh_cfg.enabled and _ssh_cfg.servers:
+                _tool_extras["ssh"] = {"servers": list(_ssh_cfg.servers)}
+        except Exception:  # noqa: BLE001 — never block session build on this
+            pass
+
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 
