@@ -16,7 +16,7 @@
  *   room    — chat room_id for TTS (default: the session's chat_room_id).
  */
 
-import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
 import { agentApi, chatApi } from '@/lib/api';
@@ -288,13 +288,13 @@ export default function OverlayPage() {
           <span style={GRIP} title="드래그하여 아바타 이동">
             <GripIcon />
           </span>
-          <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
-          <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
-          <Toggle active={realtimeOn} onClick={toggleRealtime} label="핸즈프리" title="실시간 음성 대화 — 말하면 자막이 뜨고, 멈추면 채팅으로 입력됩니다" />
+          <Toggle active={ttsEnabled} onClick={toggleTTS} icon={<TtsIcon />} title="TTS — 음성 출력" />
+          <Toggle active={sttEnabled} onClick={toggleSTT} icon={<MicIcon />} title="STT — 음성 입력 (마이크)" />
+          <Toggle active={realtimeOn} onClick={toggleRealtime} icon={<HeadsetIcon />} title="핸즈프리 — 실시간 음성 대화 (말하면 자막이 뜨고, 멈추면 채팅으로 입력)" />
           {realtimeOn && (
-            <Toggle active={captionsOn} onClick={() => setCaptionsOn(!captionsOn)} label="자막" title="말하는 동안 인식 자막 표시" />
+            <Toggle active={captionsOn} onClick={() => setCaptionsOn(!captionsOn)} icon={<CaptionIcon />} title="자막 — 말하는 동안 인식 자막 표시" />
           )}
-          <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
+          <Toggle active={screenOn} onClick={toggleScreen} icon={<ScreenIcon />} title="화면 — 화면 관찰" />
           <span style={DIVIDER} />
           {/* 말풍선 — open the chat window (the control/chat window). */}
           <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
@@ -372,12 +372,57 @@ function ResizeFrame() {
 }
 
 // ── compact bar pieces ───────────────────────────────────────────────────────
-function Toggle({ active, onClick, label, title }: { active: boolean; onClick: () => void; label: string; title: string }) {
+function Toggle({ active, onClick, icon, title }: { active: boolean; onClick: () => void; icon: ReactNode; title: string }) {
   return (
-    <button type="button" onClick={onClick} title={title} style={pill(active)}>
-      <span style={dot(active)} />
-      {label}
+    <button type="button" onClick={onClick} title={title} aria-pressed={active} style={iconPill(active)}>
+      {icon}
     </button>
+  );
+}
+
+// ── Toggle icons (stroke style matches Chat/Gear/Lock) ──
+function TtsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polygon points="11 5 6 9 3 9 3 15 6 15 11 19 11 5" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+    </svg>
+  );
+}
+function MicIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  );
+}
+function HeadsetIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 13v-1a8 8 0 0 1 16 0v1" />
+      <rect x="2.5" y="13" width="4" height="6" rx="1.6" />
+      <rect x="17.5" y="13" width="4" height="6" rx="1.6" />
+      <path d="M19.5 19a3.5 3.5 0 0 1-3.5 3h-2.5" />
+    </svg>
+  );
+}
+function CaptionIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+      <path d="M9 10.5a2.5 2.5 0 1 0 0 3M17 10.5a2.5 2.5 0 1 0 0 3" />
+    </svg>
+  );
+}
+function ScreenIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2.5" y="3.5" width="19" height="13" rx="2" />
+      <line x1="8.5" y1="20.5" x2="15.5" y2="20.5" />
+      <line x1="12" y1="16.5" x2="12" y2="20.5" />
+    </svg>
   );
 }
 function LockIcon({ open }: { open: boolean }) {
@@ -538,28 +583,21 @@ const SPINNER: CSSProperties = {
   animation: 'geny-spin 0.8s linear infinite',
 };
 
-function pill(active: boolean): CSSProperties {
+// Icon-only toggle: green fill when on, subtle when off (matches the bar).
+function iconPill(active: boolean): CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 6,
-    padding: '5px 10px',
+    justifyContent: 'center',
+    width: 30,
+    height: 28,
     border: 'none',
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: 600,
+    borderRadius: 9,
     cursor: 'pointer',
     color: active ? '#0c0c10' : '#cfd0e0',
     background: active ? '#5be39a' : 'rgba(255,255,255,0.08)',
-  };
-}
-function dot(active: boolean): CSSProperties {
-  return {
-    width: 7,
-    height: 7,
-    borderRadius: '50%',
-    background: active ? '#0a7d44' : 'rgba(255,255,255,0.35)',
-    boxShadow: active ? '0 0 6px #5be39a' : 'none',
+    boxShadow: active ? '0 0 8px rgba(91,227,154,0.45)' : 'none',
+    transition: 'background 0.15s, color 0.15s',
   };
 }
 const HIDDEN: CSSProperties = { position: 'fixed', left: -99999, top: 0, width: 380, height: 380, opacity: 0, pointerEvents: 'none' };
