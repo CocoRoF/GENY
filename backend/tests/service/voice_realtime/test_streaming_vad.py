@@ -160,6 +160,7 @@ async def test_streaming_input_fires_turn_on_end_of_speech(monkeypatch):
     # stt_only=False → the session runs the persona turn itself.
     voice = RealtimeVoiceSession("sid", emit, language="ko")
     voice.configure(input_mode="server_vad", stt_only=False)
+    monkeypatch.setenv("GENY_RT_END_OF_TURN_MS", "10")  # tiny end-of-turn debounce
 
     # Inject a scripted VAD: ~10 speech frames then ~8 silence → one turn.
     from service.voice_realtime import vad as vadmod
@@ -172,6 +173,7 @@ async def test_streaming_input_fires_turn_on_end_of_speech(monkeypatch):
     frame = b"\x00\x00" * FRAME_SAMPLES
     for _ in range(30):
         await voice.on_audio_frame(frame)
+    await asyncio.sleep(0.05)  # let the end-of-turn debounce fire the final
 
     kinds = [t for t, _ in events]
     assert "speech_start" in kinds
@@ -203,6 +205,7 @@ async def test_stt_only_emits_transcript_without_running_turn(monkeypatch):
 
     voice = RealtimeVoiceSession("sid", emit, language="ko")
     voice.configure(input_mode="server_vad", stt_only=True)
+    monkeypatch.setenv("GENY_RT_END_OF_TURN_MS", "10")  # tiny end-of-turn debounce
     from service.voice_realtime import vad as vadmod
     monkeypatch.setattr(voice, "_vad", _ScriptedVad([0.9] * 10 + [0.02] * 20))
     voice._turn_detector = vadmod.StreamingTurnDetector(min_speech_ms=64, min_silence_ms=128)
@@ -210,7 +213,58 @@ async def test_stt_only_emits_transcript_without_running_turn(monkeypatch):
     frame = b"\x00\x00" * FRAME_SAMPLES
     for _ in range(30):
         await voice.on_audio_frame(frame)
+    await asyncio.sleep(0.05)  # let the end-of-turn debounce fire the final
 
     final = [d for t, d in events if t == "transcript" and d.get("final")]
     assert final and final[0]["text"] == "실시간 발화"
     assert turn_calls == [], "stt_only must NOT run the persona turn"
+
+
+@pytest.mark.asyncio
+async def test_brief_pause_coalesces_segments_into_one_turn(monkeypatch):
+    """Two speech segments split by a BRIEF pause (segment gap, shorter than
+    the end-of-turn debounce) must merge into ONE final turn — not two
+    colliding messages. This is the fix for the fragmented "아니 오늘 뭐" / "어"
+    behaviour."""
+    events = []
+
+    async def emit(t, d):
+        events.append((t, d))
+
+    calls = {"n": 0}
+
+    async def fake_transcribe(self, audio_bytes, *, fmt):
+        calls["n"] += 1
+        return "첫째" if calls["n"] == 1 else "둘째"
+
+    turn_prompts = []
+
+    async def fake_on_text(self, text, *, _gen=None):
+        turn_prompts.append(text)
+
+    monkeypatch.setattr(RealtimeVoiceSession, "_transcribe", fake_transcribe)
+    monkeypatch.setattr(RealtimeVoiceSession, "on_text", fake_on_text)
+    monkeypatch.setenv("GENY_RT_END_OF_TURN_MS", "40")
+
+    voice = RealtimeVoiceSession("sid", emit, language="ko")
+    voice.configure(input_mode="server_vad", stt_only=False, partials=False)
+    from service.voice_realtime import vad as vadmod
+    # speech, short silence (closes segment 1), speech again (segment 2),
+    # then long silence (closes segment 2 → end-of-turn debounce fires).
+    monkeypatch.setattr(
+        voice, "_vad",
+        _ScriptedVad([0.9] * 8 + [0.02] * 6 + [0.9] * 8 + [0.02] * 20),
+    )
+    voice._turn_detector = vadmod.StreamingTurnDetector(min_speech_ms=64, min_silence_ms=128)
+
+    frame = b"\x00\x00" * FRAME_SAMPLES
+    for _ in range(42):
+        await voice.on_audio_frame(frame)
+    await asyncio.sleep(0.1)  # let the end-of-turn debounce finalize
+
+    # Exactly one turn start and one finalized transcript, combining both segments.
+    assert [t for t, _ in events].count("speech_start") == 1
+    finals = [d for t, d in events if t == "transcript" and d.get("final")]
+    assert len(finals) == 1, f"expected ONE coalesced final, got {finals}"
+    assert finals[0]["text"] == "첫째 둘째"
+    assert turn_prompts == ["첫째 둘째"], "the persona sees the whole thought, once"

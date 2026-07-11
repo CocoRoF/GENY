@@ -103,12 +103,24 @@ class RealtimeVoiceSession:
         # Live-caption (interim transcript) state.
         self._partials_enabled = _cfg.partial_transcripts_enabled()  # per-conn default
         self._prev_partial = ""          # last interim text — for stable-prefix commit
+        # ── Turn coalescing (two-level endpointing) ──
+        # A VAD segment end closes a caption chunk, NOT the user's turn. Segments
+        # accumulate into _turn_text; the turn finalises only after end_of_turn_ms
+        # of continued silence, so brief pauses don't fragment one thought into
+        # several colliding messages.
+        self._in_turn = False            # inside an open user turn (≥1 segment)
+        self._turn_text = ""             # committed segment texts joined, this turn
+        self._finalize_task: Optional[asyncio.Task] = None
 
     # ── lifecycle ────────────────────────────────────────────────────
 
     async def close(self) -> None:
         self._closed = True
         await self._cancel_active_turn()
+        # Drop any pending end-of-turn finalize so it can't fire after close.
+        self._cancel_finalize()
+        self._in_turn = False
+        self._turn_text = ""
         # Also cancel any in-flight partial-transcription task so it doesn't
         # keep holding a Whisper request for a session that's gone.
         pt = self._partial_task
@@ -279,12 +291,18 @@ class RealtimeVoiceSession:
                     self._recent_frames.pop(0)
 
             if ev is not None and ev.kind == "start":
-                # Barge in on any active reply the instant speech starts.
-                await self.on_speech_started()
+                # New speech: a pending finalize means the user is resuming the
+                # SAME turn — cancel it so segments coalesce instead of splitting.
+                self._cancel_finalize()
+                if not self._in_turn:
+                    # First segment of a fresh turn: barge in on any active reply
+                    # (genuine interruption) and tell the client speech began.
+                    self._in_turn = True
+                    await self.on_speech_started()
+                    await self._safe_emit("speech_start", {})
                 self._utt_frames = list(self._recent_frames)  # pre-pad
                 self._recent_frames = []
                 self._utt_ms = len(self._utt_frames) * frame_ms
-                await self._safe_emit("speech_start", {})
 
             if self._turn_detector.in_speech:
                 self._utt_frames.append(frame)
@@ -300,13 +318,13 @@ class RealtimeVoiceSession:
                     self._last_partial_ms = self._utt_ms
                     win_frames = max(1, int(_cfg.partial_window_ms() / frame_ms))
                     self._spawn_partial(b"".join(self._utt_frames[-win_frames:]))
-                # Force a turn if the user never pauses.
+                # Force a segment close if the user never pauses.
                 if self._utt_ms >= max_utt_ms:
-                    await self._finish_utterance()
+                    await self._close_segment()
                     continue
 
             if ev is not None and ev.kind == "end":
-                await self._finish_utterance()
+                await self._close_segment()
 
         # Drop all consumed frames in one O(n) splice, keeping the <1-frame tail.
         if off:
@@ -326,6 +344,7 @@ class RealtimeVoiceSession:
             return
         gen = self._generation
         prev = self._prev_partial
+        committed = self._turn_text  # segments already settled this turn
 
         async def _run() -> None:
             wav = _pcm16_to_wav(pcm_snapshot)
@@ -336,38 +355,79 @@ class RealtimeVoiceSession:
             if not (self._turn_detector and self._turn_detector.in_speech):
                 return
             self._prev_partial = text
+            # Caption = committed segments + the live current segment. The
+            # committed prefix is fully stable; within the current segment only
+            # the twice-seen prefix is (LocalAgreement).
+            sep = " " if committed else ""
+            full = committed + sep + text
+            stable = len(committed) + len(sep) + _stable_prefix_chars(prev, text)
             await self._safe_emit(
-                "transcript",
-                {"text": text, "final": False, "stable_chars": _stable_prefix_chars(prev, text)},
+                "transcript", {"text": full, "final": False, "stable_chars": stable}
             )
 
         self._partial_task = asyncio.create_task(_run())
 
-    async def _finish_utterance(self) -> None:
-        """Close the open utterance: assemble WAV → transcribe → run turn."""
+    async def _close_segment(self) -> None:
+        """A VAD segment ended (a caption chunk). Transcribe it, append to the
+        turn, refresh the caption, and (re)arm the end-of-turn debounce. Does
+        NOT finalise — the turn ends only if silence continues past
+        ``end_of_turn_ms`` (see :meth:`_finalize_turn`)."""
         frames = self._utt_frames
         self._utt_frames = []
         self._utt_ms = 0.0
         self._last_partial_ms = 0.0
         self._prev_partial = ""
-        # Reset the detector's in-speech latch if a forced (max-length) end.
+        # Reset the detector's in-speech latch if this was a forced (max-len) end.
         if self._turn_detector is not None and self._turn_detector.in_speech:
             self._turn_detector.reset_turn()
-        if not frames:
-            return
-        await self._safe_emit("speech_end", {})
-        pcm = b"".join(frames)
-        wav = _pcm16_to_wav(pcm)
 
+        if frames:
+            text = (await self._transcribe(_pcm16_to_wav(b"".join(frames)), fmt="wav")).strip()
+            if text:
+                self._turn_text = (self._turn_text + " " + text).strip() if self._turn_text else text
+                # Commit the segment into the caption (whole accumulated turn,
+                # fully stable) so it doesn't flicker while we wait for more.
+                await self._safe_emit(
+                    "transcript",
+                    {"text": self._turn_text, "final": False, "stable_chars": len(self._turn_text)},
+                )
+        # Arm / re-arm the finalize timer. A new speech-start cancels it.
+        self._schedule_finalize()
+
+    def _schedule_finalize(self) -> None:
+        """(Re)start the end-of-turn debounce — finalise the turn if no new
+        speech arrives within ``end_of_turn_ms``."""
+        self._cancel_finalize()
+
+        async def _wait() -> None:
+            try:
+                await asyncio.sleep(_cfg.end_of_turn_ms() / 1000.0)
+            except asyncio.CancelledError:
+                return
+            await self._finalize_turn()
+
+        self._finalize_task = asyncio.create_task(_wait())
+
+    def _cancel_finalize(self) -> None:
+        t = self._finalize_task
+        self._finalize_task = None
+        if t is not None and not t.done():
+            t.cancel()
+
+    async def _finalize_turn(self) -> None:
+        """End-of-turn reached: emit the coalesced final once, run the turn."""
+        text = (self._turn_text or "").strip()
+        self._turn_text = ""
+        self._in_turn = False
+        self._finalize_task = None
+        if not text:
+            return
         self._generation += 1
         gen = self._generation
         await self._cancel_active_turn()
-        text = await self._transcribe(wav, fmt="wav")
         if self._is_stale(gen):
             return
-        if not text:
-            await self._safe_emit("transcript", {"text": "", "final": True, "empty": True})
-            return
+        await self._safe_emit("speech_end", {})
         await self._safe_emit("transcript", {"text": text, "final": True})
         if not self._stt_only:
             await self.on_text(text, _gen=gen)

@@ -31,6 +31,7 @@ const VTuberChatPanel = dynamic(() => import('@/components/live2d/VTuberChatPane
 const STTControls = dynamic(() => import('@/components/live2d/STTControls'), { ssr: false });
 const PushToTalkDriver = dynamic(() => import('@/components/live2d/PushToTalkDriver'), { ssr: false });
 const RealtimeVoiceDriver = dynamic(() => import('@/components/live2d/RealtimeVoiceDriver'), { ssr: false });
+const RealtimeCaption = dynamic(() => import('@/components/live2d/RealtimeCaption'), { ssr: false });
 const ConnectorBridgeClient = dynamic(() => import('@/components/live2d/ConnectorBridgeClient'), { ssr: false });
 const ScreenObservationControls = dynamic(
   () => import('@/components/live2d/ScreenObservationControls'),
@@ -70,6 +71,8 @@ export default function OverlayPage() {
   const toggleScreen = useVTuberStore((s) => s.toggleScreenObservation);
   const realtimeOn = useVTuberStore((s) => s.realtimeVoiceEnabled);
   const toggleRealtime = useVTuberStore((s) => s.toggleRealtimeVoice);
+  const captionsOn = useVTuberStore((s) => s.realtimePartialsEnabled);
+  const setCaptionsOn = useVTuberStore((s) => s.setRealtimePartialsEnabled);
 
   // 1) token + transparency + resolve the target session (once).
   useEffect(() => {
@@ -261,6 +264,8 @@ export default function OverlayPage() {
           viewStorageKey={`geny_overlay_view_${resolved.sid}`}
         />
         {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} charMs={subtitleCharMs} />}
+        {/* Live hands-free caption (what the mic is hearing, in real time). */}
+        <RealtimeCaption />
       </div>
 
       {/* Unlocked → show a resize frame (outline + edge/corner handles) so the
@@ -285,7 +290,10 @@ export default function OverlayPage() {
           </span>
           <Toggle active={ttsEnabled} onClick={toggleTTS} label="TTS" title="음성 출력" />
           <Toggle active={sttEnabled} onClick={toggleSTT} label="STT" title="음성 입력 (마이크)" />
-          <Toggle active={realtimeOn} onClick={toggleRealtime} label="대화" title="실시간 음성 대화 (핸즈프리)" />
+          <Toggle active={realtimeOn} onClick={toggleRealtime} label="핸즈프리" title="실시간 음성 대화 — 말하면 자막이 뜨고, 멈추면 채팅으로 입력됩니다" />
+          {realtimeOn && (
+            <Toggle active={captionsOn} onClick={() => setCaptionsOn(!captionsOn)} label="자막" title="말하는 동안 인식 자막 표시" />
+          )}
           <Toggle active={screenOn} onClick={toggleScreen} label="화면" title="화면 관찰" />
           <span style={DIVIDER} />
           {/* 말풍선 — open the chat window (the control/chat window). */}

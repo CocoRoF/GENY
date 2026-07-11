@@ -88,9 +88,18 @@ def vad_min_speech_ms() -> int:
 
 
 def vad_min_silence_ms() -> int:
-    """Trailing silence this long closes a turn — the end-of-speech gate.
-    Lower = snappier turn-taking but risks cutting mid-sentence pauses."""
-    return _int("GENY_RT_VAD_MIN_SILENCE_MS", 700)
+    """Trailing silence this long closes a SEGMENT (a caption chunk).
+    Kept short so live captions update promptly; a segment end does NOT end
+    the user's turn — that's the end-of-turn debounce below."""
+    return _int("GENY_RT_VAD_MIN_SILENCE_MS", 550)
+
+
+def end_of_turn_ms() -> int:
+    """After a segment closes, wait this long for the user to resume before
+    finalising the turn. Brief mid-thought pauses (segment gap + this) merge
+    into ONE message instead of fragmenting into several colliding turns.
+    Effective end-of-turn silence ≈ vad_min_silence_ms + this."""
+    return _int("GENY_RT_END_OF_TURN_MS", 800)
 
 
 def vad_speech_pad_ms() -> int:
