@@ -100,6 +100,9 @@ class RealtimeVoiceSession:
         self._utt_ms = 0.0               # length of the open utterance
         self._last_partial_ms = 0.0      # utt length at the last interim transcript
         self._partial_task: Optional[asyncio.Task] = None
+        # Live-caption (interim transcript) state.
+        self._partials_enabled = _cfg.partial_transcripts_enabled()  # per-conn default
+        self._prev_partial = ""          # last interim text — for stable-prefix commit
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -186,13 +189,19 @@ class RealtimeVoiceSession:
     # ── server-side streaming VAD input (input_mode="server_vad") ────
 
     def configure(
-        self, *, input_mode: Optional[str] = None, stt_only: Optional[bool] = None
+        self,
+        *,
+        input_mode: Optional[str] = None,
+        stt_only: Optional[bool] = None,
+        partials: Optional[bool] = None,
     ) -> None:
         """Per-connection reconfigure from the WS ``start`` message."""
         if input_mode in ("server_vad", "client_vad"):
             self._input_mode = input_mode
         if stt_only is not None:
             self._stt_only = bool(stt_only)
+        if partials is not None:
+            self._partials_enabled = bool(partials)
 
     def _ensure_vad(self) -> None:
         if self._vad is not None:
@@ -280,14 +289,17 @@ class RealtimeVoiceSession:
             if self._turn_detector.in_speech:
                 self._utt_frames.append(frame)
                 self._utt_ms += frame_ms
-                # Optional live "you're saying…" caption — re-transcribe the
-                # growing utterance in the background (never blocks the loop).
+                # Live "you're saying…" caption — transcribe the recent audio
+                # window in the background (never blocks the loop). Bounded to
+                # the last partial_window_ms so a long utterance can't blow up
+                # the GPU cost.
                 if (
-                    _cfg.partial_transcripts_enabled()
+                    self._partials_enabled
                     and self._utt_ms - self._last_partial_ms >= _cfg.partial_interval_ms()
                 ):
                     self._last_partial_ms = self._utt_ms
-                    self._spawn_partial(b"".join(self._utt_frames))
+                    win_frames = max(1, int(_cfg.partial_window_ms() / frame_ms))
+                    self._spawn_partial(b"".join(self._utt_frames[-win_frames:]))
                 # Force a turn if the user never pauses.
                 if self._utt_ms >= max_utt_ms:
                     await self._finish_utterance()
@@ -301,19 +313,33 @@ class RealtimeVoiceSession:
             del self._pcm_tail[:off]
 
     def _spawn_partial(self, pcm_snapshot: bytes) -> None:
-        """Fire-and-forget interim transcription of the open utterance. Only
-        one runs at a time (skip if the previous is still going) so a slow
-        GPU can't pile up requests. Emits a non-final transcript event."""
+        """Fire-and-forget interim transcription of the recent audio window.
+        Only one runs at a time (skip if the previous is still going) so a slow
+        GPU can't pile up requests.
+
+        Emits a non-final ``transcript`` with ``stable_chars`` — the length of
+        the prefix that also appeared in the PREVIOUS interim (LocalAgreement:
+        text seen twice is settled). The client renders that prefix solid and
+        the changing tail faded, so the caption grows smoothly instead of
+        rewriting itself each pass."""
         if self._partial_task and not self._partial_task.done():
             return
         gen = self._generation
+        prev = self._prev_partial
 
         async def _run() -> None:
             wav = _pcm16_to_wav(pcm_snapshot)
             text = await self._transcribe(wav, fmt="wav")
             # Drop if the utterance already ended / a new turn started.
-            if text and gen == self._generation and self._turn_detector and self._turn_detector.in_speech:
-                await self._safe_emit("transcript", {"text": text, "final": False})
+            if not text or gen != self._generation:
+                return
+            if not (self._turn_detector and self._turn_detector.in_speech):
+                return
+            self._prev_partial = text
+            await self._safe_emit(
+                "transcript",
+                {"text": text, "final": False, "stable_chars": _stable_prefix_chars(prev, text)},
+            )
 
         self._partial_task = asyncio.create_task(_run())
 
@@ -323,6 +349,7 @@ class RealtimeVoiceSession:
         self._utt_frames = []
         self._utt_ms = 0.0
         self._last_partial_ms = 0.0
+        self._prev_partial = ""
         # Reset the detector's in-speech latch if a forced (max-length) end.
         if self._turn_detector is not None and self._turn_detector.in_speech:
             self._turn_detector.reset_turn()
@@ -523,6 +550,30 @@ class RealtimeVoiceSession:
             await self._emit(event_type, data)
         except Exception:  # noqa: BLE001
             logger.debug("[RealtimeVoice] emit failed (%s)", event_type, exc_info=True)
+
+
+def _stable_prefix_chars(prev: str, cur: str) -> int:
+    """Char length of the leading run of WORDS that ``cur`` shares with
+    ``prev`` — the interim text that has now been transcribed twice, so it is
+    settled (LocalAgreement-2). Returns 0 when nothing matches yet.
+
+    Word-granular (not char) so a half-typed word in ``cur`` isn't marked
+    stable off a shorter ``prev``. The client renders ``cur[:n]`` solid and
+    ``cur[n:]`` faded, so committed text stops flickering as later audio
+    refines the tail.
+    """
+    if not prev or not cur:
+        return 0
+    pw, cw = prev.split(), cur.split()
+    match = 0
+    for a, b in zip(pw, cw):
+        if a == b:
+            match += 1
+        else:
+            break
+    if match == 0:
+        return 0
+    return len(" ".join(cw[:match]))
 
 
 def _pcm16_to_wav(pcm: bytes, *, sample_rate: int = 16000) -> bytes:

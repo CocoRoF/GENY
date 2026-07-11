@@ -22,6 +22,7 @@ export interface OverlaySettings {
   ttsEnabled: boolean;
   sttEnabled: boolean;
   screenObservationEnabled: boolean;
+  realtimePartialsEnabled: boolean; // live "you're saying…" captions in hands-free
   ttsVolume: number;          // 0..1 output volume
   sttSensitivity: number;     // VAD speech threshold (lower = more sensitive)
   sttSilenceMs: number;       // silence trail before an utterance ends (ms)
@@ -47,6 +48,7 @@ const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
   ttsEnabled: true,           // audio output on by default
   sttEnabled: false,          // mic opt-in
   screenObservationEnabled: false, // screen-capture opt-in
+  realtimePartialsEnabled: true,   // live captions on by default (lightweight)
   ttsVolume: 0.7,
   sttSensitivity: 0.04,
   sttSilenceMs: 1200,
@@ -224,6 +226,11 @@ interface VTuberState {
   //   realtimePartial   — interim transcript of the current utterance.
   realtimeListening: boolean;
   realtimePartial: string;
+  //   realtimePartialStable — char count of the settled prefix of realtimePartial
+  //   (rendered solid; the tail after it is faded, so the caption doesn't flicker).
+  realtimePartialStable: number;
+  //   realtimePartialsEnabled — show live captions while speaking (persisted).
+  realtimePartialsEnabled: boolean;
 
   // ── Persisted overlay tuning (see OverlaySettings) ──
   sttSensitivity: number;
@@ -269,7 +276,8 @@ interface VTuberState {
   setRealtimeVoiceEnabled: (enabled: boolean) => void;
   setRealtimeInputMode: (mode: 'server_vad' | 'client_vad') => void;
   setRealtimeListening: (listening: boolean) => void;
-  setRealtimePartial: (text: string) => void;
+  setRealtimePartial: (text: string, stable?: number) => void;
+  setRealtimePartialsEnabled: (enabled: boolean) => void;
 
   // Screen-observation actions (V3)
   toggleScreenObservation: () => void;
@@ -307,6 +315,8 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   realtimeInputMode: 'server_vad',  // backend Silero VAD by default
   realtimeListening: false,
   realtimePartial: '',
+  realtimePartialStable: 0,
+  // realtimePartialsEnabled is hydrated below via ...loadOverlaySettings().
   // Persisted per-machine settings hydrated from localStorage: ON/OFF toggles
   // (ttsEnabled default ON; sttEnabled / screenObservationEnabled default OFF)
   // AND the tuning knobs (TTS volume, STT thresholds, screen interval/source).
@@ -534,7 +544,11 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
 
   setRealtimeInputMode: (mode) => set({ realtimeInputMode: mode }),
   setRealtimeListening: (listening) => set({ realtimeListening: listening }),
-  setRealtimePartial: (text) => set({ realtimePartial: text }),
+  setRealtimePartial: (text, stable) => set({ realtimePartial: text, realtimePartialStable: stable ?? 0 }),
+  setRealtimePartialsEnabled: (enabled) => {
+    set({ realtimePartialsEnabled: enabled });
+    persistOverlaySettings({ realtimePartialsEnabled: enabled });
+  },
 
   // ─── Screen-observation Actions (V3) ───
 

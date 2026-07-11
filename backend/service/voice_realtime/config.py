@@ -106,17 +106,27 @@ def vad_max_utterance_ms() -> int:
 
 # ── Progressive partial transcripts (live "you're saying…" captions) ─
 #
-# OFF by default: it re-transcribes the growing utterance every interval
-# via the SAME Whisper GPU the persona uses, so it competes for the single
-# GPU. Turn on only when live user captions matter more than that budget.
+# ON by default now that the partial path is lightweight: each interim
+# transcription is bounded to the last ``partial_window_ms`` of audio (not the
+# whole growing utterance), and the display commits its stable prefix so it
+# never re-transcribes a long monologue from scratch and the caption doesn't
+# jitter. Still a per-connection toggle (the ``start`` message's ``partials``
+# flag) so a client can opt out; this env sets only the DEFAULT.
 
 
 def partial_transcripts_enabled() -> bool:
-    return os.environ.get("GENY_RT_PARTIAL_TRANSCRIPTS", "0").strip().lower() in (
+    return os.environ.get("GENY_RT_PARTIAL_TRANSCRIPTS", "1").strip().lower() in (
         "1", "true", "yes", "on",
     )
 
 
 def partial_interval_ms() -> int:
     """Minimum gap between interim transcriptions of the open utterance."""
-    return _int("GENY_RT_PARTIAL_INTERVAL_MS", 900)
+    return _int("GENY_RT_PARTIAL_INTERVAL_MS", 700)
+
+
+def partial_window_ms() -> int:
+    """Cap the audio each interim transcription covers to the most recent
+    window — bounds the Whisper GPU cost regardless of how long the user
+    speaks. Utterances shorter than this transcribe whole (the common case)."""
+    return _int("GENY_RT_PARTIAL_WINDOW_MS", 12000)

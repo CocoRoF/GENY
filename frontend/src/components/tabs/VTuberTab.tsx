@@ -14,6 +14,7 @@ import AudioControls from '@/components/live2d/AudioControls';
 import STTControls from '@/components/live2d/STTControls';
 import RealtimeVoiceControls from '@/components/live2d/RealtimeVoiceControls';
 import RealtimeVoiceDriver from '@/components/live2d/RealtimeVoiceDriver';
+import RealtimeCaption from '@/components/live2d/RealtimeCaption';
 import ScreenObservationControls from '@/components/live2d/ScreenObservationControls';
 import CreatureStatePanel from '@/components/info/CreatureStatePanel';
 import BakedImportsModal from '@/components/avatar/BakedImportsModal';
@@ -260,6 +261,8 @@ export default function VTuberTab() {
               </p>
             </div>
           )}
+          {/* Live hands-free caption — overlaid at the bottom of the avatar. */}
+          <RealtimeCaption />
         </div>
 
         {/* Chat Panel (VTuber role only) */}

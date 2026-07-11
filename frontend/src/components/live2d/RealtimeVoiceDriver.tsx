@@ -112,7 +112,8 @@ export default function RealtimeVoiceDriver({
             st.setRealtimePartial('');
             if (text) void sendToChat(text); // → visible chat message + reply
           } else {
-            st.setRealtimePartial(text); // interim caption
+            // interim caption: stable_chars = settled prefix (rendered solid).
+            st.setRealtimePartial(text, Number(d.stable_chars ?? 0));
           }
           break;
         }
@@ -148,7 +149,13 @@ export default function RealtimeVoiceDriver({
     ws.onopen = () => {
       if (closed) return;
       ws.send(
-        JSON.stringify({ type: 'start', language: '', input_mode: inputMode, stt_only: true }),
+        JSON.stringify({
+          type: 'start',
+          language: '',
+          input_mode: inputMode,
+          stt_only: true,
+          partials: useVTuberStore.getState().realtimePartialsEnabled,
+        }),
       );
       if (!clientVad) {
         startPcmStream({

@@ -159,12 +159,15 @@ async def _dispatch(voice: RealtimeVoiceSession, msg: dict, emit) -> None:
             voice.configure(input_mode=mode)
         if isinstance(msg.get("stt_only"), bool):
             voice.configure(stt_only=msg["stt_only"])
+        if isinstance(msg.get("partials"), bool):
+            voice.configure(partials=msg["partials"])
         await emit(
             "ready",
             {
                 "reconfigured": True,
                 "input_mode": voice._input_mode,  # noqa: SLF001
                 "stt_only": voice._stt_only,  # noqa: SLF001
+                "partials": voice._partials_enabled,  # noqa: SLF001
             },
         )
     elif mtype == "speech_started":
