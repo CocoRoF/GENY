@@ -2609,6 +2609,18 @@ class AgentSession:
         ):
             _tail_blocks = list(_tail_blocks) + [SpotlightContextBlock()]
 
+        # TTFT (executor >=2.50.0) — stable-first ordering. The executor
+        # splits the system prompt at the FIRST volatile block (clock,
+        # retrieved memory) and keeps only what precedes it in the cached
+        # prefix. Stable blocks (host memory-tool catalogue, spotlight)
+        # ordered after a volatile one would ride the uncached turn
+        # context every turn for no reason. Stable partition — relative
+        # order within each group is preserved, and on older executor
+        # pins (no ``volatile`` attr anywhere) this is a no-op.
+        _tail_blocks = [
+            b for b in _tail_blocks if not getattr(b, "volatile", False)
+        ] + [b for b in _tail_blocks if getattr(b, "volatile", False)]
+
         if self._persona_provider is not None:
             from service.persona import DynamicPersonaSystemBuilder
             system_builder: Any = DynamicPersonaSystemBuilder(

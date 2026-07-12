@@ -69,7 +69,7 @@ class DynamicPersonaSystemBuilder(PromptBuilder):
     def session_meta(self) -> Dict[str, Any]:
         return dict(self._session_meta)
 
-    def build(self, state: PipelineState) -> Union[str, List[Dict[str, Any]]]:
+    def _compose_inner(self, state: PipelineState) -> ComposablePromptBuilder:
         resolution: PersonaResolution = self._provider.resolve(
             state, session_meta=self._session_meta
         )
@@ -80,12 +80,31 @@ class DynamicPersonaSystemBuilder(PromptBuilder):
         if resolution.system_tail:
             blocks.append(_TailTextBlock(resolution.system_tail))
 
-        inner = ComposablePromptBuilder(
+        return ComposablePromptBuilder(
             blocks=blocks,
             separator=self._separator,
             use_content_blocks=self._use_content_blocks,
         )
-        return inner.build(state)
+
+    def build(self, state: PipelineState) -> Union[str, List[Dict[str, Any]]]:
+        return self._compose_inner(state).build(state)
+
+    def build_parts(self, state: PipelineState) -> Optional[List[Dict[str, Any]]]:
+        """Stable/volatile prompt parts (executor >=2.50.0 TTFT split).
+
+        Stage 3 calls this FIRST; delegating to the inner
+        ``ComposablePromptBuilder.build_parts`` lets the executor pull
+        the volatile tail (clock, retrieved memory, runtime persona
+        tail) out of the cached prompt prefix. Persona resolution runs
+        once per turn either way. Returns ``None`` on older executor
+        pins (attribute missing) or in content-blocks mode — Stage 3
+        then falls back to :meth:`build` unchanged.
+        """
+        if self._use_content_blocks:
+            return None
+        inner = self._compose_inner(state)
+        parts_fn = getattr(inner, "build_parts", None)
+        return parts_fn(state) if callable(parts_fn) else None
 
 
 class _TailTextBlock(PromptBlock):
@@ -97,6 +116,13 @@ class _TailTextBlock(PromptBlock):
     @property
     def name(self) -> str:
         return "persona_tail"
+
+    @property
+    def volatile(self) -> bool:
+        # Runtime-appended persona context (append_context / observation
+        # digests) changes turn-to-turn — it must never sit inside the
+        # cached prompt prefix (executor >=2.50.0 TTFT split).
+        return True
 
     def render(self, state: PipelineState) -> str:
         return self._text
