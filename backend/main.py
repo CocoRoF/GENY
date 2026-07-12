@@ -877,10 +877,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration (allow backend access)
+# ---------------------------------------------------------------------------
+# Global "login required" gate.
+#
+# Registered BEFORE CORS on purpose: Starlette runs the LAST-added middleware
+# OUTERMOST, so adding CORS after this one makes CORS the outer layer. That
+# lets CORS attach Access-Control-* headers to the 401s this gate emits, so a
+# cross-origin frontend can read the 401 and redirect to login. This gate is
+# secure-by-default — every HTTP request needs a valid JWT except a small
+# public allowlist (health, the login flow, the OAuth callback, static assets,
+# and the self-authenticating MCP bridge). WebSocket routes keep their own
+# auth (ws_auth_or_close); this gate ignores non-http scopes.
+from service.auth.auth_middleware import RequireLoginMiddleware  # noqa: E402
+
+app.add_middleware(RequireLoginMiddleware)
+
+
+# CORS configuration. Origins are configurable via GENY_ALLOWED_ORIGINS
+# (comma-separated); defaults to "*" to preserve current behavior. Note that
+# with the login gate above, an unauthenticated cross-origin request is 401'd
+# regardless of CORS, so "*" no longer implies unauthenticated data exposure.
+def _cors_allowed_origins() -> list[str]:
+    raw = os.getenv("GENY_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict to specific origins in production
+    allow_origins=_cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

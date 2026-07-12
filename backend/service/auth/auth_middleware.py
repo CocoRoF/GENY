@@ -20,6 +20,7 @@ import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, WebSocket
+from fastapi.responses import JSONResponse
 
 from service.auth.auth_service import get_auth_service
 
@@ -336,3 +337,121 @@ async def ws_auth_or_close(websocket: WebSocket) -> WSAuthResult | None:
             pass
         return None
     return result
+
+
+# ================================================================
+#  Global "login required" HTTP gate  (secure-by-default)
+# ================================================================
+#
+# Rather than remembering to add ``Depends(require_auth)`` to every single
+# endpoint (the pattern that let S1/S2 slip through unauthenticated), this
+# middleware INVERTS the default: every HTTP request must carry a valid JWT
+# UNLESS its path is on the small public allowlist below. A new or forgotten
+# endpoint is therefore protected automatically. Per-endpoint ``require_auth``
+# dependencies stay in place as defense-in-depth and to supply the decoded
+# payload (owner checks, ``sub``, etc.).
+
+# EXACT-match paths that bypass the gate. Keep this list minimal — everything
+# not listed (and not matching a prefix below) requires a valid login.
+PUBLIC_EXACT_PATHS: frozenset = frozenset(
+    {
+        "/",                     # redirects to /dashboard (itself gated)
+        "/health",               # liveness/readiness probe — no data
+        "/favicon.ico",          # browser auto-request; avoids 401 log noise
+        "/api/auth/status",      # "is first-run setup needed?" — asked before login
+        "/api/auth/login",       # obtain a token
+        "/api/auth/setup",       # first-run admin account creation
+        "/api/auth/logout",      # idempotent cookie clear
+        "/api/google/callback",  # Google OAuth external redirect (state-authenticated)
+    }
+)
+
+# PREFIX paths that bypass the gate (``str.startswith``).
+PUBLIC_PATH_PREFIXES: tuple = (
+    "/static/",            # legacy dashboard assets — no data
+    "/api/internal/mcp/",  # MCP bridge — guarded by its own per-session bearer token
+)
+
+
+def is_public_path(path: str) -> bool:
+    """True when ``path`` may be reached without a login.
+
+    Note: API docs (``/docs``, ``/redoc``, ``/openapi.json``) are deliberately
+    NOT public — they enumerate the whole API surface and are never needed
+    before login. A logged-in admin can still reach them (cookie/bearer).
+    """
+    if path in PUBLIC_EXACT_PATHS:
+        return True
+    return path.startswith(PUBLIC_PATH_PREFIXES)
+
+
+class RequireLoginMiddleware:
+    """Secure-by-default gate: every HTTP request needs a valid JWT unless its
+    path is public (see :func:`is_public_path`).
+
+    Implementation notes:
+
+    * **Pure ASGI**, not ``BaseHTTPMiddleware`` — it never reads/buffers the
+      response body, so SSE and other streaming endpoints pass straight through
+      once the caller is authenticated.
+    * **HTTP only.** WebSocket and lifespan scopes are forwarded untouched; WS
+      routes enforce auth themselves via :func:`ws_auth_or_close`.
+    * **Ordering.** Register this BEFORE ``CORSMiddleware`` so CORS wraps it and
+      attaches ``Access-Control-*`` headers to the 401s emitted here (letting a
+      cross-origin frontend read the 401 and redirect to login).
+    * **No-DB posture** mirrors :func:`require_auth` (audit S7): fail CLOSED
+      (503) under ``GENY_AUTH_STRICT``, else allow (dev/no-DB back-compat). In
+      production the DB is present, so a valid login is always required.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "GET")
+        path = scope.get("path", "")
+
+        # CORS preflight carries no credentials/data — let CORS answer it.
+        if method == "OPTIONS" or is_public_path(path):
+            await self.app(scope, receive, send)
+            return
+
+        auth_service = get_auth_service()
+        if auth_service is None:
+            if _auth_strict():
+                await self._deny(scope, receive, send, 503, "Authentication unavailable")
+                return
+            # No DB / auth not configured → dev back-compat: allow through.
+            await self.app(scope, receive, send)
+            return
+
+        token = _extract_token(Request(scope))
+        if not token:
+            await self._deny(scope, receive, send, 401, "Authentication required")
+            return
+
+        try:
+            auth_service.verify_token(token)
+        except Exception as e:
+            detail = (
+                "Token expired"
+                if "ExpiredSignature" in type(e).__name__
+                else "Invalid token"
+            )
+            await self._deny(scope, receive, send, 401, detail)
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _deny(scope, receive, send, status: int, detail: str) -> None:
+        response = JSONResponse(
+            {"detail": detail},
+            status_code=status,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        await response(scope, receive, send)
