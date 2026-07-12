@@ -3037,6 +3037,22 @@ class AgentSession:
                 f"[{self._session_id}] PipelineResumeRequester install failed: {exc}"
             )
 
+        # TTFT (executor >=2.50.0): pre-warm the LLM backend in the
+        # background AFTER all runtime wiring — TLS pool prewarm for SDK
+        # providers, ``--version`` handshake for the CLI — so the
+        # session's first turn skips the cold start. attach_runtime may
+        # have bumped the client generation (sandbox), which drops the
+        # executor's build-time warm memo; this post-wiring call warms
+        # the client the first turn will actually use. Fire-and-forget;
+        # older executor pins without warmup() are a silent no-op.
+        try:
+            _warm = getattr(self._pipeline, "warmup", None)
+            if callable(_warm):
+                _warm_task = asyncio.get_running_loop().create_task(_warm())
+                _warm_task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        except RuntimeError:
+            pass  # no running loop (sync construction path)
+
         logger.info(
             f"[{self._session_id}] Pipeline adopted + runtime attached: "
             f"preset={self._preset_name}, role={self._role.value}, "
