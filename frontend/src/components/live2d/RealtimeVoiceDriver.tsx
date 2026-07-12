@@ -30,6 +30,7 @@ import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import { openRealtimeVoiceWs, chatApi } from '@/lib/api';
 import { startPcmStream, type PcmStreamHandle } from '@/lib/pcmStreamer';
+import { audioRouting } from '@/lib/audioDevices';
 import { grabCurrentScreenAttachment } from '@/lib/screenFrameAccess';
 
 interface ServerEvent {
@@ -157,17 +158,37 @@ export default function RealtimeVoiceDriver({
           partials: useVTuberStore.getState().realtimePartialsEnabled,
         }),
       );
-      if (!clientVad) {
-        startPcmStream({
+      if (!clientVad) void startMic();
+    };
+
+    // Open (or re-open) the mic on the chosen input device. Re-openable so a
+    // late-appearing device (VoiceMeeter) can be switched to live.
+    const startMic = async () => {
+      const deviceId = (await audioRouting.currentInputDeviceId()) || undefined;
+      pcmHandleRef.current?.stop();
+      pcmHandleRef.current = null;
+      try {
+        const h = await startPcmStream({
+          deviceId,
           onFrame: (pcm) => {
             const sock = wsRef.current;
             if (sock && sock.readyState === WebSocket.OPEN) sock.send(pcm);
           },
-        })
-          .then((h) => (closed ? h.stop() : (pcmHandleRef.current = h)))
-          .catch((e) => console.error('[realtime-voice] pcm stream failed', e));
+        });
+        if (closed) h.stop();
+        else pcmHandleRef.current = h;
+      } catch (e) {
+        console.error('[realtime-voice] pcm stream failed', e);
       }
     };
+
+    // The mic input device changed (e.g. VoiceMeeter just came up) → restart the
+    // capture on the new device without dropping the WS.
+    const offInput = clientVad
+      ? undefined
+      : audioRouting.onInputChange(() => {
+          if (!closed && wsRef.current?.readyState === WebSocket.OPEN) void startMic();
+        });
     ws.onmessage = (ev) => {
       if (typeof ev.data !== 'string') return;
       try {
@@ -187,6 +208,7 @@ export default function RealtimeVoiceDriver({
 
     return () => {
       closed = true;
+      offInput?.();
       pcmHandleRef.current?.stop();
       pcmHandleRef.current = null;
       try {

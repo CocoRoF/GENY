@@ -44,6 +44,79 @@ const TUNING_DEFAULTS = {
   screenSourceId: null as string | null,
   subtitlesEnabled: true,
   subtitleCharMs: 100,
+  audioOutputLabel: '',
+  audioInputLabel: '',
+}
+
+/** Audio output/input device picker. Saves the chosen device by LABEL (not
+ *  deviceId, which isn't portable to the overlay's origin). Labels need a media
+ *  grant, so it requests + releases the mic once to unlock them, and refreshes
+ *  on devicechange so a late-arriving device (VoiceMeeter) shows up. */
+function AudioDeviceSelect(props: {
+  kind: 'audiooutput' | 'audioinput'
+  label: string
+  value: string
+  onChange: (label: string) => void
+  t: (k: string, v?: Record<string, string>) => string
+}): ReactNode {
+  const { kind, label, value, onChange, t } = props
+  const [devices, setDevices] = useState<{ deviceId: string; label: string }[]>([])
+  const refresh = async (): Promise<void> => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true })
+      s.getTracks().forEach((tr) => tr.stop())
+    } catch {
+      /* denied → labels may be blank, but the list still populates */
+    }
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices()
+      setDevices(
+        all
+          .filter((d) => d.kind === kind && d.deviceId)
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || d.deviceId })),
+      )
+    } catch {
+      setDevices([])
+    }
+  }
+  useEffect(() => {
+    void refresh()
+    const md = navigator.mediaDevices
+    md?.addEventListener?.('devicechange', refresh)
+    return () => md?.removeEventListener?.('devicechange', refresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind])
+  const offline = !!value && !devices.some((d) => d.label === value)
+  return (
+    <div className="gy-field" style={{ marginBottom: 10 }}>
+      <label className="gy-field-label">{label}</label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <select
+          className="gy-input"
+          style={{ flex: 1 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{t('voice.deviceDefault')}</option>
+          {devices.map((d) => (
+            <option key={d.deviceId} value={d.label}>
+              {d.label}
+            </option>
+          ))}
+          {offline && <option value={value}>{value}{t('voice.deviceOffline')}</option>}
+        </select>
+        <button
+          type="button"
+          className="gy-btn"
+          title={t('voice.deviceRefresh')}
+          onClick={() => void refresh()}
+          style={{ padding: '0 10px' }}
+        >
+          {I.refresh}
+        </button>
+      </div>
+    </div>
+  )
 }
 const INTERVAL_OPTIONS = [
   { ms: 60_000, key: 'app.interval1m' },
@@ -524,6 +597,19 @@ export function ControlApp() {
                 onChange={(v) => patchTuning({ ttsVolume: v })}
               />
               <p className="gy-hint" style={{ margin: 0 }}>{t('voice.volumeHint')}</p>
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.sliders} {t('voice.deviceCard')}</div>
+              <AudioDeviceSelect
+                kind="audiooutput" label={t('voice.outputDevice')}
+                value={tget('audioOutputLabel')} onChange={(v) => patchTuning({ audioOutputLabel: v })} t={t}
+              />
+              <AudioDeviceSelect
+                kind="audioinput" label={t('voice.inputDevice')}
+                value={tget('audioInputLabel')} onChange={(v) => patchTuning({ audioInputLabel: v })} t={t}
+              />
+              <p className="gy-hint" style={{ margin: '4px 0 0' }}>{t('voice.deviceHint')}</p>
             </section>
 
             <section className="gy-card">

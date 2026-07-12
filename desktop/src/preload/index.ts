@@ -23,6 +23,12 @@ export interface OverlayTuning {
   subtitlesEnabled?: boolean
   /** Subtitle typewriter pace — ms per character (default 100 = 0.1s/char). */
   subtitleCharMs?: number
+  /** TTS output device, chosen by LABEL ('' = system default). deviceId isn't
+   *  portable across windows/origins, so the overlay resolves the label to a
+   *  current device (and re-resolves when devices change — VoiceMeeter race). */
+  audioOutputLabel?: string
+  /** Mic input device, chosen by LABEL ('' = system default). */
+  audioInputLabel?: string
 }
 
 /** Consent posture for an actuation capability group. */

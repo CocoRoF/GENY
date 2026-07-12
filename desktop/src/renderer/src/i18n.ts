@@ -65,6 +65,18 @@ export const messages: Record<string, Entry> = {
   'voice.volume': { ko: '볼륨', en: 'Volume' },
   'voice.volumeHint': { ko: '아바타 창의 음성 출력 볼륨입니다.', en: 'The voice output volume of the avatar window.' },
 
+  // ── voice tab: audio devices (sound driver in/out) ──
+  'voice.deviceCard': { ko: '오디오 장치 (출력 · 입력)', en: 'Audio devices (output · input)' },
+  'voice.outputDevice': { ko: '출력 (TTS 스피커)', en: 'Output (TTS speaker)' },
+  'voice.inputDevice': { ko: '입력 (마이크)', en: 'Input (microphone)' },
+  'voice.deviceDefault': { ko: '시스템 기본값', en: 'System default' },
+  'voice.deviceOffline': { ko: ' (오프라인)', en: ' (offline)' },
+  'voice.deviceRefresh': { ko: '장치 목록 새로고침', en: 'Refresh device list' },
+  'voice.deviceHint': {
+    ko: '선택한 장치는 이름으로 기억되고, 재접속하거나 장치가 늦게 켜질 때(예: VoiceMeeter가 나중에 시작) 자동으로 다시 연결됩니다. 목록이 비어 있으면 마이크 권한을 허용한 뒤 새로고침하세요.',
+    en: 'The chosen device is remembered by name and re-applied automatically on reconnect or when it appears late (e.g. VoiceMeeter starting after Geny). If the list is empty, allow mic permission then refresh.',
+  },
+
   // ── voice tab: subtitles ──
   'voice.subtitlesCard': { ko: '대사창 (자막)', en: 'Dialogue box (subtitles)' },
   'voice.subtitlesToggle': { ko: '아바타 하단에 대사 표시', en: 'Show dialogue at the bottom of the avatar' },

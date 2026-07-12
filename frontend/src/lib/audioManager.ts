@@ -51,6 +51,10 @@ export class AudioManager {
   private onAmplitudeChange: ((amplitude: number) => void) | null = null;
   private animFrameId: number | null = null;
   private _volume: number = 0.7;
+  /** Chosen output device id ('' = system default). Routed via
+   *  AudioContext.setSinkId (+ HTMLAudioElement.setSinkId fallback) so TTS can
+   *  play into e.g. a VoiceMeeter virtual cable. Set by the audio-routing layer. */
+  private _sinkId: string = '';
 
   // ── 현재 재생 중인 소스 (HTMLAudioElement 또는 AudioBufferSourceNode) ──
   private currentAudio: HTMLAudioElement | null = null;
@@ -91,6 +95,39 @@ export class AudioManager {
   /**
    * AudioContext 초기화 (사용자 인터랙션 후 호출 필요)
    */
+  /**
+   * Route TTS output to a specific device (deviceId ''=system default).
+   * Applied to the live AudioContext and any current HTMLAudioElement; also
+   * re-applied whenever a new context/element is created. Seamless — no
+   * playback restart. Unsupported engines silently keep the default device.
+   */
+  async setOutputSinkId(deviceId: string): Promise<void> {
+    this._sinkId = deviceId || '';
+    await this._applySink();
+  }
+
+  private async _applySink(): Promise<void> {
+    // Prefer AudioContext.setSinkId (Chromium 110+/Electron) — routes the whole
+    // graph (which is how TTS is played).
+    const ctx = this.audioContext as unknown as { setSinkId?: (id: string) => Promise<void> } | null;
+    if (ctx && typeof ctx.setSinkId === 'function') {
+      try {
+        await ctx.setSinkId(this._sinkId);
+      } catch {
+        /* device busy / unsupported → keep default */
+      }
+    }
+    // HTMLAudioElement fallback path.
+    const el = this.currentAudio as unknown as { setSinkId?: (id: string) => Promise<void> } | null;
+    if (el && typeof el.setSinkId === 'function') {
+      try {
+        await el.setSinkId(this._sinkId);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   async init(): Promise<void> {
     if (this.audioContext) return;
     this.audioContext = new AudioContext();
@@ -103,6 +140,7 @@ export class AudioManager {
     this.gainNode = this.audioContext.createGain();
     this.gainNode.gain.value = this._volume;
     this.gainNode.connect(this.audioContext.destination);
+    void this._applySink();  // route to the chosen device if one is set
 
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 256;
@@ -132,6 +170,7 @@ export class AudioManager {
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
+      void this._applySink();  // route a freshly-created context too
     }
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
@@ -583,6 +622,11 @@ export class AudioManager {
       this.currentAudio = audio;
       this._currentOnEnd = onEnd ?? null;
       audio.volume = this._volume;
+      // Route this element to the chosen output device (fallback playback path).
+      const sinkEl = audio as unknown as { setSinkId?: (id: string) => Promise<void> };
+      if (this._sinkId && typeof sinkEl.setSinkId === 'function') {
+        void sinkEl.setSinkId(this._sinkId).catch(() => undefined);
+      }
 
       const cleanup = () => {
         URL.revokeObjectURL(url);

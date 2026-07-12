@@ -50,6 +50,8 @@ export interface PcmStreamOptions {
   echoCancellation?: boolean;
   noiseSuppression?: boolean;
   autoGainControl?: boolean;
+  /** Capture from a specific input device ('' / undefined = system default). */
+  deviceId?: string;
 }
 
 export async function startPcmStream(opts: PcmStreamOptions): Promise<PcmStreamHandle> {
@@ -59,6 +61,8 @@ export async function startPcmStream(opts: PcmStreamOptions): Promise<PcmStreamH
       echoCancellation: opts.echoCancellation ?? true,
       noiseSuppression: opts.noiseSuppression ?? true,
       autoGainControl: opts.autoGainControl ?? true,
+      // Prefer the chosen device but fall back to default if it's gone.
+      ...(opts.deviceId ? { deviceId: { ideal: opts.deviceId } } : {}),
     },
   });
 

@@ -132,6 +132,10 @@ export interface OverlayTuning {
   subtitlesEnabled?: boolean
   /** Subtitle typewriter pace — ms per character (default 100 = 0.1s/char). */
   subtitleCharMs?: number
+  /** TTS output device by LABEL ('' = system default; resolved in the overlay). */
+  audioOutputLabel?: string
+  /** Mic input device by LABEL ('' = system default). */
+  audioInputLabel?: string
 }
 function configPath(): string {
   const dir = app.getPath('userData')

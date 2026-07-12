@@ -23,6 +23,10 @@ export interface OverlaySettings {
   sttEnabled: boolean;
   screenObservationEnabled: boolean;
   realtimePartialsEnabled: boolean; // live "you're saying…" captions in hands-free
+  // Audio device routing, by LABEL ('' = system default). deviceId isn't
+  // portable across origins, so we remember the label and resolve it here.
+  audioOutputLabel: string;   // TTS output device (e.g. a VoiceMeeter cable)
+  audioInputLabel: string;    // mic input device
   ttsVolume: number;          // 0..1 output volume
   sttSensitivity: number;     // VAD speech threshold (lower = more sensitive)
   sttSilenceMs: number;       // silence trail before an utterance ends (ms)
@@ -49,6 +53,8 @@ const OVERLAY_SETTINGS_DEFAULTS: OverlaySettings = {
   sttEnabled: false,          // mic opt-in
   screenObservationEnabled: false, // screen-capture opt-in
   realtimePartialsEnabled: true,   // live captions on by default (lightweight)
+  audioOutputLabel: '',            // '' = system default output
+  audioInputLabel: '',             // '' = system default mic
   ttsVolume: 0.7,
   sttSensitivity: 0.04,
   sttSilenceMs: 1200,
@@ -231,6 +237,9 @@ interface VTuberState {
   realtimePartialStable: number;
   //   realtimePartialsEnabled — show live captions while speaking (persisted).
   realtimePartialsEnabled: boolean;
+  //   audio device routing by label (persisted; '' = system default).
+  audioOutputLabel: string;
+  audioInputLabel: string;
 
   // ── Persisted overlay tuning (see OverlaySettings) ──
   sttSensitivity: number;
@@ -278,6 +287,7 @@ interface VTuberState {
   setRealtimeListening: (listening: boolean) => void;
   setRealtimePartial: (text: string, stable?: number) => void;
   setRealtimePartialsEnabled: (enabled: boolean) => void;
+  setAudioDevices: (patch: { audioOutputLabel?: string; audioInputLabel?: string }) => void;
 
   // Screen-observation actions (V3)
   toggleScreenObservation: () => void;
@@ -548,6 +558,15 @@ export const useVTuberStore = create<VTuberState>((set, get) => ({
   setRealtimePartialsEnabled: (enabled) => {
     set({ realtimePartialsEnabled: enabled });
     persistOverlaySettings({ realtimePartialsEnabled: enabled });
+  },
+  setAudioDevices: (patch) => {
+    set(patch);
+    persistOverlaySettings(patch);
+    // Apply to the live routing layer (TTS output sink + mic input target).
+    void import('@/lib/audioDevices').then(({ audioRouting }) => {
+      if (typeof patch.audioOutputLabel === 'string') audioRouting.setOutputLabel(patch.audioOutputLabel);
+      if (typeof patch.audioInputLabel === 'string') audioRouting.setInputLabel(patch.audioInputLabel);
+    });
   },
 
   // ─── Screen-observation Actions (V3) ───

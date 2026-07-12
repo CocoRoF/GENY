@@ -180,6 +180,7 @@ export default function OverlayPage() {
       sttEchoCancellation?: boolean; sttNoiseSuppression?: boolean; sttAutoGain?: boolean;
       screenIntervalMs?: number; screenSourceId?: string | null;
       subtitlesEnabled?: boolean; subtitleCharMs?: number;
+      audioOutputLabel?: string; audioInputLabel?: string;
     }) => {
       // Subtitle toggle + pace are independent of the other drivers and have
       // defaults, so read them even when `t` is absent.
@@ -199,10 +200,29 @@ export default function OverlayPage() {
         ...(typeof t.screenIntervalMs === 'number' ? { screenIntervalMs: t.screenIntervalMs } : {}),
         ...('screenSourceId' in t ? { screenSourceId: t.screenSourceId ?? null } : {}),
       });
+      // Audio device routing (TTS output + mic input), chosen by label in the
+      // desktop 음성 tab → resolve + apply here (where the audio actually runs).
+      if (typeof t.audioOutputLabel === 'string' || typeof t.audioInputLabel === 'string') {
+        st.setAudioDevices({
+          ...(typeof t.audioOutputLabel === 'string' ? { audioOutputLabel: t.audioOutputLabel } : {}),
+          ...(typeof t.audioInputLabel === 'string' ? { audioInputLabel: t.audioInputLabel } : {}),
+        });
+      }
     };
     conn.serverConfig.get().then((c) => apply(c.overlayTuning)).catch(() => undefined);
     const off = conn.serverConfig.onChange((c) => apply(c.overlayTuning));
     return () => off?.();
+  }, []);
+
+  // Apply persisted audio-device routing on load (browser case + before any
+  // tuning arrives), and start the devicechange watcher so a late VoiceMeeter
+  // is picked up automatically.
+  useEffect(() => {
+    const st = useVTuberStore.getState();
+    void import('@/lib/audioDevices').then(({ audioRouting }) => {
+      audioRouting.setOutputLabel(st.audioOutputLabel || '');
+      audioRouting.setInputLabel(st.audioInputLabel || '');
+    });
   }, []);
 
   // Global push-to-talk hotkey (from the connector). On each press: if the avatar
