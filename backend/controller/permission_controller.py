@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
+from service.settings import SETTINGS_WRITE_LOCK  # audit H1
 
 logger = getLogger(__name__)
 
@@ -225,12 +226,13 @@ async def append_rule(
     """Append a rule. Returns the full updated list."""
     entry = _validate_payload(body)
     path = _user_settings_path()
-    data = _read_settings(path)
-    rules = _get_rules_section(data)
-    rules.append(entry)
-    _set_rules_section(data, rules)
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1 — atomic read-modify-write
+        data = _read_settings(path)
+        rules = _get_rules_section(data)
+        rules.append(entry)
+        _set_rules_section(data, rules)
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -243,14 +245,15 @@ async def replace_rule(
     """Replace the rule at the given 0-based index."""
     entry = _validate_payload(body)
     path = _user_settings_path()
-    data = _read_settings(path)
-    rules = _get_rules_section(data)
-    if idx < 0 or idx >= len(rules):
-        raise HTTPException(404, f"rule index {idx} out of range (0..{len(rules) - 1})")
-    rules[idx] = entry
-    _set_rules_section(data, rules)
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        rules = _get_rules_section(data)
+        if idx < 0 or idx >= len(rules):
+            raise HTTPException(404, f"rule index {idx} out of range (0..{len(rules) - 1})")
+        rules[idx] = entry
+        _set_rules_section(data, rules)
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -261,14 +264,15 @@ async def delete_rule(
 ):
     """Remove the rule at the given 0-based index."""
     path = _user_settings_path()
-    data = _read_settings(path)
-    rules = _get_rules_section(data)
-    if idx < 0 or idx >= len(rules):
-        raise HTTPException(404, f"rule index {idx} out of range (0..{len(rules) - 1})")
-    rules.pop(idx)
-    _set_rules_section(data, rules)
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        rules = _get_rules_section(data)
+        if idx < 0 or idx >= len(rules):
+            raise HTTPException(404, f"rule index {idx} out of range (0..{len(rules) - 1})")
+        rules.pop(idx)
+        _set_rules_section(data, rules)
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -302,20 +306,21 @@ async def patch_mode(
         )
 
     path = _user_settings_path()
-    data = _read_settings(path)
-    perms = _get_perms_block(data)
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        perms = _get_perms_block(data)
 
-    if body.mode is not None:
-        if body.mode == "":
-            perms.pop("mode", None)
-        else:
-            perms["mode"] = body.mode
-    if body.executor_mode is not None:
-        if body.executor_mode == "":
-            perms.pop("executor_mode", None)
-        else:
-            perms["executor_mode"] = body.executor_mode
+        if body.mode is not None:
+            if body.mode == "":
+                perms.pop("mode", None)
+            else:
+                perms["mode"] = body.mode
+        if body.executor_mode is not None:
+            if body.executor_mode == "":
+                perms.pop("executor_mode", None)
+            else:
+                perms["executor_mode"] = body.executor_mode
 
-    _write_settings_atomic(path, data)
-    _reload_loader()
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)

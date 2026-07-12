@@ -56,6 +56,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from service.auth.auth_middleware import require_auth
+from service.settings import SETTINGS_WRITE_LOCK  # audit H1
 
 logger = getLogger(__name__)
 
@@ -361,16 +362,17 @@ async def append_entry(
 ):
     event = _validate_event(body.event)
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = _hooks_section(data)
-    entries_map = _entries_map(section)
-    # Migrate legacy uppercase key in-place if present.
-    upper = event.upper()
-    if upper in entries_map and event not in entries_map:
-        entries_map[event] = entries_map.pop(upper)
-    entries_map.setdefault(event, []).append(_entry_to_dict(body))
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        section = _hooks_section(data)
+        entries_map = _entries_map(section)
+        # Migrate legacy uppercase key in-place if present.
+        upper = event.upper()
+        if upper in entries_map and event not in entries_map:
+            entries_map[event] = entries_map.pop(upper)
+        entries_map.setdefault(event, []).append(_entry_to_dict(body))
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -385,19 +387,20 @@ async def replace_entry(
     if body.event and _validate_event(body.event) != event_norm:
         raise HTTPException(400, "URL event differs from body event")
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = _hooks_section(data)
-    entries_map = _entries_map(section)
-    upper = event_norm.upper()
-    if upper in entries_map and event_norm not in entries_map:
-        entries_map[event_norm] = entries_map.pop(upper)
-    bucket = entries_map.get(event_norm) or []
-    if idx < 0 or idx >= len(bucket):
-        raise HTTPException(404, f"hook index {idx} out of range for event {event_norm}")
-    bucket[idx] = _entry_to_dict(body)
-    entries_map[event_norm] = bucket
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        section = _hooks_section(data)
+        entries_map = _entries_map(section)
+        upper = event_norm.upper()
+        if upper in entries_map and event_norm not in entries_map:
+            entries_map[event_norm] = entries_map.pop(upper)
+        bucket = entries_map.get(event_norm) or []
+        if idx < 0 or idx >= len(bucket):
+            raise HTTPException(404, f"hook index {idx} out of range for event {event_norm}")
+        bucket[idx] = _entry_to_dict(body)
+        entries_map[event_norm] = bucket
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -409,22 +412,23 @@ async def delete_entry(
 ):
     event_norm = _validate_event(event)
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = _hooks_section(data)
-    entries_map = _entries_map(section)
-    upper = event_norm.upper()
-    if upper in entries_map and event_norm not in entries_map:
-        entries_map[event_norm] = entries_map.pop(upper)
-    bucket = entries_map.get(event_norm) or []
-    if idx < 0 or idx >= len(bucket):
-        raise HTTPException(404, f"hook index {idx} out of range for event {event_norm}")
-    bucket.pop(idx)
-    if bucket:
-        entries_map[event_norm] = bucket
-    else:
-        entries_map.pop(event_norm, None)
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        section = _hooks_section(data)
+        entries_map = _entries_map(section)
+        upper = event_norm.upper()
+        if upper in entries_map and event_norm not in entries_map:
+            entries_map[event_norm] = entries_map.pop(upper)
+        bucket = entries_map.get(event_norm) or []
+        if idx < 0 or idx >= len(bucket):
+            raise HTTPException(404, f"hook index {idx} out of range for event {event_norm}")
+        bucket.pop(idx)
+        if bucket:
+            entries_map[event_norm] = bucket
+        else:
+            entries_map.pop(event_norm, None)
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -438,11 +442,12 @@ async def patch_enabled(
     controls the config-side gate.
     """
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = _hooks_section(data)
-    section["enabled"] = bool(body.enabled)
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        section = _hooks_section(data)
+        section["enabled"] = bool(body.enabled)
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)
 
 
@@ -453,12 +458,13 @@ async def patch_audit_log(
 ):
     """Set / clear the audit log path. ``None`` removes it."""
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = _hooks_section(data)
-    if body.audit_log_path is None or not body.audit_log_path.strip():
-        section.pop("audit_log_path", None)
-    else:
-        section["audit_log_path"] = body.audit_log_path.strip()
-    _write_settings_atomic(path, data)
-    _reload_loader()
+    async with SETTINGS_WRITE_LOCK:  # audit H1
+        data = _read_settings(path)
+        section = _hooks_section(data)
+        if body.audit_log_path is None or not body.audit_log_path.strip():
+            section.pop("audit_log_path", None)
+        else:
+            section["audit_log_path"] = body.audit_log_path.strip()
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return _build_response(data, path)

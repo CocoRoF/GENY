@@ -309,6 +309,23 @@ class MemoryTuningSection(BaseModel):
     recent_turns: Optional[int] = Field(None, ge=0)
     enable_vector_search: Optional[bool] = None
     enable_reflection: Optional[bool] = None
+    # audit H2: these four ARE read by service.memory.tuning.load_memory_tuning
+    # but were undeclared here, so Pydantic's extra='ignore' silently dropped
+    # them (model_dump omits them) — setting them in settings.json / the UI
+    # was a no-op. Declared now so they actually take effect.
+    pin_budget_ratio: Optional[float] = Field(
+        None, ge=0.0, le=0.7,
+        description="Fraction of the inject budget reserved for pinned facts (default 0.30).",
+    )
+    category_boosts: Optional[Dict[str, float]] = Field(
+        None, description="Per-category relevance multipliers for keyword search.",
+    )
+    always_render_vault_map: Optional[bool] = Field(
+        None, description="Always inject the vault directory map, even outside slim mode.",
+    )
+    slim_mode: Optional[bool] = Field(
+        None, description="Skip the heavy L2-L6 retrieval layers (recent + pinned + vault only).",
+    )
 
 
 class MemoryConfigSection(BaseModel):

@@ -52,6 +52,34 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 agent_manager = get_agent_session_manager()
 
 
+def _enforce_session_owner(session_id: str, auth: dict) -> None:
+    """Ownership guard for /api/agents/{session_id}/* (audit S6).
+
+    Resolves the session's owner cheaply from the store record (which now
+    persists ``owner_username``), falling back to a live in-memory agent,
+    then delegates to ``verify_session_ownership`` (403 on mismatch,
+    fail-open on unknown owner, admin bypass). Single-admin deployments
+    are unaffected — the owner always matches the caller.
+    """
+    from service.auth.auth_middleware import verify_session_ownership
+
+    owner = None
+    try:
+        rec = get_session_store().get(session_id)
+        if isinstance(rec, dict):
+            owner = rec.get("owner_username")
+    except Exception:  # noqa: BLE001 — never fail the request on lookup error
+        owner = None
+    if owner is None:
+        try:
+            live = agent_manager.get_agent(session_id)
+        except Exception:  # noqa: BLE001
+            live = None
+        if live is not None:
+            owner = getattr(live, "owner_username", None)
+    verify_session_ownership(auth, owner)
+
+
 # ============================================================================
 # Request/Response Models
 # ============================================================================
@@ -422,6 +450,7 @@ async def update_system_prompt(
     The new prompt takes effect on the next execution.
     Pass null or empty string to clear the system prompt.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     agent = agent_manager.get_agent(session_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
@@ -587,6 +616,7 @@ async def change_session_env(
     Returns 404 when the session is unknown, 400 when the target env is
     unknown or its provider has no credentials.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     try:
         result = await agent_manager.change_session_env(
             session_id, request.env_id
@@ -612,6 +642,7 @@ async def delete_agent_session(
     Storage is preserved by default so the session can be restored later.
     Pass cleanup_storage=true to also remove the storage directory.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     success = await agent_manager.delete_session(session_id, cleanup_storage)
     if not success:
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
@@ -768,6 +799,7 @@ async def invoke_agent(
 
     If checkpointing is enabled, state is restored/saved using thread_id.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     # Hydrate-on-access: transparently re-hydrate a dormant (post-restart)
     # session so messaging a "stopped" session just resumes it.
     agent = await agent_manager.ensure_session_live(session_id)
@@ -843,6 +875,7 @@ async def execute_agent_prompt(
     auto-revival, session logging, cost tracking, and double-execution
     prevention.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     try:
         result = await execute_command(
             session_id=session_id,
@@ -1001,6 +1034,7 @@ async def get_agent_state(
 
     State can only be queried if checkpointing is enabled.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     agent = agent_manager.get_agent(session_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
@@ -1036,6 +1070,7 @@ async def get_agent_history(
 
     History can only be queried if checkpointing is enabled.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     agent = agent_manager.get_agent(session_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"AgentSession not found: {session_id}")
@@ -1111,6 +1146,7 @@ async def list_storage_files(
     """
     List session storage files. Works for dormant sessions too.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     from service.utils import file_storage as storage_utils
 
     storage_path = _storage_root_live_or_dormant(session_id)
@@ -1142,6 +1178,7 @@ async def download_storage_file_raw(
     Works for dormant sessions too (storage_path from the session store), so
     links keep working after a backend restart.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     import mimetypes as _mimetypes
     from pathlib import Path as _FilePath
 
@@ -1171,6 +1208,7 @@ async def read_storage_file(
     """
     Read storage file content. Works for dormant sessions too.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     from service.utils import file_storage as storage_utils
 
     storage_path = _storage_root_live_or_dormant(session_id)
@@ -1197,6 +1235,7 @@ async def download_storage_folder(
 
     Streams the ZIP file directly so the browser triggers a download.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     import os
     import io
     import zipfile
@@ -1539,6 +1578,7 @@ async def restore_checkpoint_endpoint(
     no storage_path or the executor pin is too old, and 410 when the
     checkpoint id doesn't exist.
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     storage_path = _resolve_storage_path(session_id)
     agent: Optional[AgentSession] = agent_manager.get_agent(session_id)
     if not agent:
@@ -1703,6 +1743,7 @@ async def add_mcp_server(
     survive session restarts and are auditable in git, so we refuse
     runtime mutation rather than silently shadowing them).
     """
+    _enforce_session_owner(session_id, auth)  # audit S6
     manager = _resolve_mcp_manager(session_id)
     connect = getattr(manager, "connect", None)
     if not callable(connect):

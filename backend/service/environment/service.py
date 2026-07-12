@@ -94,6 +94,17 @@ class EnvironmentService:
         self._storage = Path(path)
         self._storage.mkdir(parents=True, exist_ok=True)
         self._app_db = app_db
+        # Short-TTL parsed-manifest memo (audit L2): a single session
+        # build calls load_manifest ~13× (each _env_* helper independently)
+        # and each call is a blocking DB read + full parse on the event
+        # loop — a rehydrate storm serialized ~13·N of them. The memo
+        # coalesces the calls within one build; the TTL is tiny so an env
+        # edit is picked up almost immediately, and _write_raw invalidates
+        # the entry outright.
+        import threading
+
+        self._manifest_cache: Dict[str, tuple] = {}
+        self._manifest_cache_lock = threading.Lock()
 
     @property
     def storage_path(self) -> Path:
@@ -154,6 +165,10 @@ class EnvironmentService:
 
     def _write_raw(self, env_id: str, data: Dict[str, Any]) -> None:
         """DB-UPSERT first; always mirror to the JSON file."""
+        # Invalidate the parsed-manifest memo so an edit is visible at once
+        # (audit L2), regardless of the 3s TTL.
+        with self._manifest_cache_lock:
+            self._manifest_cache.pop(env_id, None)
         if self._db_available:
             try:
                 self._upsert_to_db(env_id, data)
@@ -214,6 +229,18 @@ class EnvironmentService:
         ``EnvironmentManifest.from_dict`` since geny-executor 2.2.0 —
         the load path needs no host-side coercion shims anymore.
         """
+        import time
+
+        # Serve from the short-TTL memo when fresh (audit L2). The manifest
+        # is treated read-only by every caller (the _env_* extractors and
+        # instantiate_pipeline read fields; they don't mutate it), so
+        # sharing the parsed object across the coalesced calls is safe.
+        _CACHE_TTL = 3.0
+        with self._manifest_cache_lock:
+            hit = self._manifest_cache.get(env_id)
+            if hit is not None and (time.monotonic() - hit[0]) < _CACHE_TTL:
+                return hit[1]
+
         raw = self._read_raw(env_id)
         if raw is None:
             return None
@@ -231,6 +258,8 @@ class EnvironmentService:
                 description=raw.get("description", ""),
                 tags=raw.get("tags", []),
             )
+        with self._manifest_cache_lock:
+            self._manifest_cache[env_id] = (time.monotonic(), manifest)
         return manifest
 
     @staticmethod

@@ -17,6 +17,7 @@ Design:
 """
 import logging
 import os
+from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 
@@ -101,6 +102,35 @@ async def require_auth(request: Request) -> dict:
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def _admin_users() -> set:
+    """Usernames allowed to act on any session regardless of owner
+    (audit S6). Comma-separated ``GENY_ADMIN_USERS``; empty by default."""
+    raw = os.getenv("GENY_ADMIN_USERS", "")
+    return {u.strip() for u in raw.split(",") if u.strip()}
+
+
+def verify_session_ownership(auth: dict, owner_username: Optional[str]) -> None:
+    """Raise 403 when ``auth`` doesn't own the session (audit S6).
+
+    Fails OPEN when the session has no recorded owner (legacy / gateway
+    sessions) so this can be rolled out without breaking pre-owner
+    records; enforces once an owner is known. Admins (``GENY_ADMIN_USERS``)
+    bypass. Under the current single-admin deployment the owner always
+    matches ``auth["sub"]``, so this never fires — it protects the
+    multi-user future.
+    """
+    if not owner_username:
+        return  # unknown owner → allow (fail-open, back-compat)
+    sub = (auth or {}).get("sub")
+    if sub == owner_username:
+        return
+    if sub in _admin_users():
+        return
+    from fastapi import HTTPException
+
+    raise HTTPException(status_code=403, detail="You do not own this session")
 
 
 async def optional_auth(request: Request) -> dict | None:

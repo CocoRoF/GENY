@@ -286,6 +286,14 @@ class SessionInfo(BaseModel):
         description="Session-specific storage path"
     )
 
+    # Owning user (audit S6). Persisted so ownership can be enforced on
+    # offline/stored sessions, not just live ones. None for legacy /
+    # gateway-owned sessions (ownership check fails open on None).
+    owner_username: Optional[str] = Field(
+        default=None,
+        description="Username that owns this session (multi-tenant guard)."
+    )
+
     # Pod information for multi-pod routing
     pod_name: Optional[str] = Field(
         default=None,

@@ -4816,6 +4816,7 @@ class AgentSession:
             timeout=self._timeout,
             max_iterations=self._max_iterations,
             storage_path=self.storage_path,
+            owner_username=self._owner_username,  # audit S6
             pod_name=pod_name,
             pod_ip=pod_ip,
             role=self._role,

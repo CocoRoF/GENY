@@ -219,23 +219,29 @@ async def patch_section(
         raise HTTPException(404, f"unknown section {name!r}; registry: {_registry_names()}")
 
     path = _user_settings_path()
-    data = _read_settings(path)
-    section = data.get(name)
-    if not isinstance(section, dict):
-        section = {}
-    merged = _deep_merge(dict(section), body.values)
+    # Serialize the read-modify-write so a concurrent PATCH to another
+    # section can't clobber this one (audit H1). Validation stays inside
+    # the lock so an invalid merge doesn't hold it needlessly long.
+    from service.settings import SETTINGS_WRITE_LOCK
 
-    # Validate before writing.
-    schema = _schema_for(name)
-    if schema is not None:
-        try:
-            schema(**merged)
-        except Exception as exc:  # noqa: BLE001 — surface every validation error as 400
-            raise HTTPException(400, f"section {name!r} validation failed: {exc}")
+    async with SETTINGS_WRITE_LOCK:
+        data = _read_settings(path)
+        section = data.get(name)
+        if not isinstance(section, dict):
+            section = {}
+        merged = _deep_merge(dict(section), body.values)
 
-    data[name] = merged
-    _write_settings_atomic(path, data)
-    _reload_loader()
+        # Validate before writing.
+        schema = _schema_for(name)
+        if schema is not None:
+            try:
+                schema(**merged)
+            except Exception as exc:  # noqa: BLE001 — surface every validation error as 400
+                raise HTTPException(400, f"section {name!r} validation failed: {exc}")
+
+        data[name] = merged
+        _write_settings_atomic(path, data)
+        _reload_loader()
     return FrameworkSectionResponse(
         name=name,
         has_schema=True,
