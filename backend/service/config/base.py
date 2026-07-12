@@ -56,6 +56,35 @@ class ConfigField:
 # Registry for all config classes
 _config_registry: Dict[str, Type['BaseConfig']] = {}
 
+# Field-name substrings that mark a value as secret even when the field
+# metadata didn't flag it (backstop for nested list/dict secrets like
+# ssh.servers[].password). Used by _mask_value (audit S1).
+_SECRET_NAME_HINTS = (
+    "password", "passphrase", "private_key", "secret", "token",
+    "api_key", "apikey", "credential", "client_secret",
+)
+
+
+def _looks_secret(name: str) -> bool:
+    n = str(name).lower()
+    return any(h in n for h in _SECRET_NAME_HINTS)
+
+
+def _mask_value(name: str, value: Any, is_secure: bool) -> Any:
+    """Redact ``value`` when the field is secure or its name looks secret;
+    recurse into lists/dicts so nested credentials are masked too."""
+    if isinstance(value, dict):
+        return {
+            k: _mask_value(k, v, is_secure or _looks_secret(k)) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_value(name, v, is_secure) for v in value]
+    if is_secure or _looks_secret(name):
+        if value in (None, "", 0, False):
+            return value
+        return BaseConfig.SECRET_MASK
+    return value
+
 
 def register_config(cls: Type['BaseConfig']) -> Type['BaseConfig']:
     """Decorator to register a config class for auto-discovery"""
@@ -207,6 +236,25 @@ class BaseConfig(ABC):
         for field_meta in self.get_fields_metadata():
             result[field_meta.name] = getattr(self, field_meta.name, field_meta.default)
         return result
+
+    #: Placeholder returned in place of a set secret by :meth:`to_dict_masked`.
+    SECRET_MASK = "__SECRET_SET__"
+
+    def to_dict_masked(self) -> Dict[str, Any]:
+        """Serialize with ``secure=True`` fields redacted (audit S1).
+
+        A set secret becomes :data:`SECRET_MASK` (so the client knows it is
+        configured) and an empty one stays empty — the cleartext value is
+        never sent. Used by the bulk/unauthenticated-surface serializers so
+        API keys, SSH passwords and bot tokens don't ride a config listing.
+        Nested secrets inside list/dict fields (e.g. ``ssh.servers[].password``)
+        are masked by field-name heuristic as a backstop.
+        """
+        values = self.to_dict()
+        secure_names = {
+            f.name for f in self.get_fields_metadata() if getattr(f, "secure", False)
+        }
+        return {k: _mask_value(k, v, k in secure_names) for k, v in values.items()}
 
     def to_json(self) -> str:
         """Serialize config to JSON string"""

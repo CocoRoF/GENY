@@ -357,7 +357,11 @@ class ConfigManager:
                 config = self.load_config(config_class)
                 result.append({
                     "schema": config_class.get_schema(),
-                    "values": config.to_dict(),
+                    # Secret-masked (audit S1): the bulk listing must never
+                    # return cleartext credentials. The single-config editor
+                    # (get_config) still returns real values to the
+                    # authenticated admin for its show/hide toggle.
+                    "values": config.to_dict_masked(),
                     "valid": config.is_valid(),
                     "errors": config.validate()
                 })

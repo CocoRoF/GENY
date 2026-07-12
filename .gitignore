@@ -357,3 +357,7 @@ data/geny_agent_sessions/
 # Voice Studio runtime data (synthesis history sqlite + generated audio)
 backend/data/voice_studio/
 
+
+# Secrets (audit S10)
+backend/service/auth/.auth_secret
+**/.auth_secret

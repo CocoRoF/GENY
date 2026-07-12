@@ -1416,6 +1416,19 @@ class AgentSessionManager:
 
         session_id = agent.session_id
 
+        # Hand the per-session skill hot-reload watcher to the session so
+        # its polling thread is stopped at teardown (audit L1). Before this
+        # the watcher was a leaked local — every create/rehydrate started a
+        # new daemon thread that nothing ever stopped.
+        try:
+            agent.attach_skill_watcher(skill_watcher)
+        except Exception:  # noqa: BLE001 — never fail create on watcher wiring
+            if skill_watcher is not None:
+                try:
+                    skill_watcher.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+
         # Register in local store
         self._local_agents[session_id] = agent
 

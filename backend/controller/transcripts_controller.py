@@ -28,14 +28,21 @@ from __future__ import annotations
 from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
+from service.auth.auth_middleware import require_auth
 from service.executor import get_agent_session_manager
 
 logger = getLogger(__name__)
 
-router = APIRouter(prefix="/api/agents", tags=["transcripts"])
+# Auth on the whole router (audit S2): transcript listings and event
+# streams were unauthenticated, exposing every session's conversation.
+router = APIRouter(
+    prefix="/api/agents",
+    tags=["transcripts"],
+    dependencies=[Depends(require_auth)],
+)
 
 
 # ---------------------------------------------------------------------------

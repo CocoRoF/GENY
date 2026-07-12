@@ -56,6 +56,20 @@ class HttpRequestTool(BaseTool):
         if not (url.startswith("http://") or url.startswith("https://")):
             raise ToolError("url must start with http:// or https://")
 
+        # SSRF guard (audit S5): block cloud-metadata / loopback / private
+        # targets on the initial URL and every redirect hop, so a
+        # model-driven http_request can't steal IMDS credentials or reach
+        # internal admin APIs. GENY_ALLOW_PRIVATE_URLS=1 opts out.
+        from geny_executor.security import SSRFError, validate_url as _ssrf_validate
+
+        def _ssrf_hook(request):
+            _ssrf_validate(str(request.url))
+
+        try:
+            _ssrf_validate(url)
+        except SSRFError as e:
+            raise ToolError(f"blocked (SSRF guard): {e}")
+
         kw: Dict[str, Any] = {"headers": headers or {}, "params": params or {}}
         if json_body is not None:
             kw["json"] = json_body
@@ -63,8 +77,14 @@ class HttpRequestTool(BaseTool):
             kw["content"] = body
 
         try:
-            with httpx.Client(timeout=30, follow_redirects=True) as c:
+            with httpx.Client(
+                timeout=30,
+                follow_redirects=True,
+                event_hooks={"request": [_ssrf_hook]},
+            ) as c:
                 r = c.request(m, url, **kw)
+        except SSRFError as e:
+            raise ToolError(f"blocked (SSRF guard): {e}")
         except Exception as e:  # noqa: BLE001
             raise ToolError(f"HTTP request failed: {e}")
 

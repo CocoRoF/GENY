@@ -62,8 +62,17 @@ async def require_auth(request: Request) -> dict:
     """
     auth_service = get_auth_service()
 
-    # If auth service is not available (no DB), allow all requests
+    # If auth service is not available (no DB / auth init failed):
     if auth_service is None:
+        # Fail CLOSED under strict mode (audit S7): previously GENY_AUTH_STRICT
+        # only gated the WebSocket path, so a DB outage silently turned every
+        # "protected" HTTP endpoint anonymous. Strict now refuses HTTP too.
+        if _auth_strict():
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication unavailable",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         logger.debug("AuthService not initialized — skipping auth check (no DB mode)")
         return {"sub": "anonymous", "display_name": "Anonymous"}
 

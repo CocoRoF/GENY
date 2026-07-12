@@ -539,6 +539,9 @@ class AgentSession:
 
         # Internal components
         self._pipeline: Optional[Any] = None  # geny-executor Pipeline
+        # Per-session skill hot-reload watcher (audit L1). Held so its
+        # polling thread is stopped in cleanup() instead of leaking.
+        self._skill_watcher: Optional[Any] = None
 
         # Environment / memory wiring (Phase 3 — env_id pre-builds Pipeline,
         # memory_config is retained for Phase 4 attachment + observability).
@@ -4638,6 +4641,18 @@ class AgentSession:
     # Lifecycle Methods
     # ========================================================================
 
+    def attach_skill_watcher(self, watcher: Optional[Any]) -> None:
+        """Hold the per-session skill hot-reload watcher so cleanup() can
+        stop its polling thread (audit L1). Idempotent — replacing an
+        existing watcher stops the old one first."""
+        old = getattr(self, "_skill_watcher", None)
+        if old is not None and old is not watcher:
+            try:
+                old.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._skill_watcher = watcher
+
     async def cleanup(self, *, flush: bool = True):
         """Clean up the AgentSession and release all resources.
 
@@ -4659,6 +4674,15 @@ class AgentSession:
         isn't stalled by an up-to-20s compaction.
         """
         logger.info(f"[{self._session_id}] Cleaning up AgentSession (flush=%s)...", flush)
+
+        # Stop the skill hot-reload watcher's polling thread (audit L1).
+        watcher = getattr(self, "_skill_watcher", None)
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception:  # noqa: BLE001 — teardown must not raise
+                logger.debug("skill watcher stop failed", exc_info=True)
+            self._skill_watcher = None
 
         # Flush memory before shutdown.
         # ``auto_flush`` is SYNC and internally does

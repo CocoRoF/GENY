@@ -78,12 +78,22 @@ class AuthService:
             except Exception as e:
                 logger.warning(f"Failed to read auth secret file: {e}")
 
-        # 3. Generate new secret and persist it
+        # 3. Generate new secret and persist it with owner-only perms
+        #    (audit S10: was written world-readable at default umask; the
+        #    JWT signing key leaking lets anyone forge tokens).
         secret = secrets.token_urlsafe(48)
         try:
-            with open(secret_file, "w") as f:
-                f.write(secret)
-            logger.info("New auth secret generated and persisted")
+            # Create/truncate at 0600 atomically via os.open, then write.
+            fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, secret.encode("utf-8"))
+            finally:
+                os.close(fd)
+            try:
+                os.chmod(secret_file, 0o600)  # tighten if it pre-existed at 0644
+            except OSError:
+                pass
+            logger.info("New auth secret generated and persisted (chmod 600)")
         except Exception as e:
             logger.warning(f"Failed to persist auth secret: {e} (will regenerate on restart)")
 

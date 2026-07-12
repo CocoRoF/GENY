@@ -70,7 +70,7 @@ class ConfigSchemasResponse(BaseModel):
 
 
 @router.get("", response_model=ConfigListResponse)
-async def list_configs():
+async def list_configs(auth: dict = Depends(require_auth)):
     """
     List all configurations with their current values.
 
@@ -79,6 +79,9 @@ async def list_configs():
     excluded — they have a dedicated editor surface (e.g.
     ``llm_credentials`` via the LLM Backends panel) and must not
     leak into the generic auto-form list.
+
+    Auth-gated + secret-masked (audit S1): this bulk listing must never
+    return cleartext credentials, and previously required no auth at all.
     """
     manager = get_config_manager()
 
@@ -115,11 +118,13 @@ async def list_configs():
 
 
 @router.get("/schemas", response_model=ConfigSchemasResponse)
-async def get_schemas():
+async def get_schemas(auth: dict = Depends(require_auth)):
     """
     Get schemas for all registered configurations.
 
     Returns field definitions for building configuration forms.
+    Auth-gated (audit S1) — schemas enumerate config names an attacker
+    would otherwise use to target the value endpoints.
     """
     manager = get_config_manager()
     schemas = manager.get_all_schemas()
@@ -128,7 +133,7 @@ async def get_schemas():
 
 
 @router.get("/{config_name}")
-async def get_config(config_name: str):
+async def get_config(config_name: str, auth: dict = Depends(require_auth)):
     """
     Get a specific configuration by name.
 
@@ -137,6 +142,11 @@ async def get_config(config_name: str):
 
     Returns:
         Config schema, values, and validation status.
+
+    Auth-gated (audit S1): previously unauthenticated — this returned
+    cleartext SSH passwords / API keys / bot tokens to any caller. Values
+    are still returned in full to the authenticated admin so the editor's
+    secret show/hide toggle keeps working.
     """
     manager = get_config_manager()
     config_classes = manager.get_registered_config_classes()
@@ -192,7 +202,16 @@ async def update_config(
         raise HTTPException(status_code=404, detail=f"Config '{config_name}' not found")
 
     try:
-        updated_config = manager.update_config(config_name, request.values)
+        # Drop any field left at the secret-mask sentinel (audit S1): a
+        # client that round-trips the masked bulk-list value must not
+        # overwrite the real stored secret with the placeholder string.
+        from service.config.base import BaseConfig as _BaseConfig
+
+        incoming = {
+            k: v for k, v in (request.values or {}).items()
+            if v != _BaseConfig.SECRET_MASK
+        }
+        updated_config = manager.update_config(config_name, incoming)
 
         if updated_config is None:
             raise HTTPException(status_code=500, detail="Failed to update config")
@@ -338,7 +357,7 @@ async def reload_configs(auth: dict = Depends(require_auth)):
 
 
 @router.get("/{config_name}/validate")
-async def validate_config(config_name: str):
+async def validate_config(config_name: str, auth: dict = Depends(require_auth)):
     """
     Validate a configuration without saving.
 

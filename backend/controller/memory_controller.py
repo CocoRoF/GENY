@@ -727,7 +727,15 @@ async def promote_to_global(
 # Endpoints — Global Memory
 # ============================================================================
 
-global_router = APIRouter(prefix="/api/memory/global", tags=["global-memory"])
+# Auth on the whole router (audit S2): global memory read/list/create/
+# update/delete/search were all unauthenticated — a full read + poison +
+# delete channel into the personal knowledge base that feeds every agent
+# turn. A router-level dependency gates every route at once.
+global_router = APIRouter(
+    prefix="/api/memory/global",
+    tags=["global-memory"],
+    dependencies=[Depends(require_auth)],
+)
 
 
 @global_router.get("")

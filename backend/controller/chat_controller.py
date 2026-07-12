@@ -423,8 +423,14 @@ async def get_room(room_id: str):
 
 
 @router.patch("/rooms/{room_id}", response_model=RoomResponse)
-async def update_room(room_id: str, request: UpdateRoomRequest):
-    """Update a chat room (name and/or sessions)."""
+async def update_room(
+    room_id: str, request: UpdateRoomRequest, auth: dict = Depends(require_auth)
+):
+    """Update a chat room (name and/or sessions).
+
+    Auth-gated (audit S2): create_room / delete_room already require auth,
+    but this mutating PATCH (room name + membership) did not.
+    """
     store = get_chat_store()
     room = store.get_room(room_id)
     if not room:
