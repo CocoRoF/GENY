@@ -28,7 +28,7 @@ import {
   type LayoutConfig,
   type RendererConfig,
 } from '@cocorof/graphier';
-import { GitGraph, ZoomIn, ZoomOut, Maximize2, Minimize2, Frame } from 'lucide-react';
+import { GitGraph, ZoomIn, ZoomOut, Maximize2, Minimize2, Frame, Pin, X, ArrowUpRight } from 'lucide-react';
 
 import type {
   UnifiedGraphViewProps,
@@ -76,67 +76,155 @@ const GRAPH_RENDERER: RendererConfig = {
 };
 
 // ── 호버 노드 상세 툴팁 ─────────────────────────────────
-function GraphTooltip({ node }: { node: KnowledgeGraphNode | null }) {
-  if (!node) return null;
+// 노드 정보 패널 — 우측 상단(검색 아래) 고정 위치. 호버 시 미리보기, 클릭 시
+// 고정(pinned). 고정 상태에서만 [문서로 이동] 버튼이 노출된다.
+function NodeInfoPanel({
+  node,
+  pinned,
+  onNavigate,
+  onClose,
+}: {
+  node: KnowledgeGraphNode;
+  pinned: boolean;
+  onNavigate: () => void;
+  onClose: () => void;
+}) {
   const color = CATEGORY_COLORS[node.category] ?? DEFAULT_NODE_COLOR;
   return (
     <div
       style={{
         background: 'var(--obs-bg-panel)',
-        border: '1px solid var(--obs-border-subtle)',
-        borderRadius: 8,
-        padding: '10px 14px',
-        maxWidth: 260,
-        minWidth: 180,
-        backdropFilter: 'blur(8px)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        border: `1px solid ${pinned ? `${color}66` : 'var(--obs-border-subtle)'}`,
+        borderRadius: 10,
+        backdropFilter: 'blur(10px)',
+        boxShadow: pinned
+          ? `0 10px 32px rgba(0,0,0,0.45), 0 0 0 1px ${color}22`
+          : '0 8px 24px rgba(0,0,0,0.4)',
+        overflow: 'hidden',
       }}
     >
-      <div className="obs-graph-tooltip-title">{node.label}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span
-          style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: color,
-            boxShadow: `0 0 4px ${color}`,
-          }}
-        />
-        <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', textTransform: 'capitalize' }}>
-          {node.category}
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', marginLeft: 'auto' }}>
-          {node.importance}
-        </span>
-      </div>
-      {node.tags && node.tags.length > 0 && (
-        <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 2 }}>
-          {node.tags.map((t) => `#${t}`).join(' ')}
-        </div>
-      )}
-      {node.summary && (
+      {pinned && (
         <div
           style={{
-            fontSize: 10,
-            color: 'var(--obs-text-dim)',
-            marginTop: 6,
-            paddingTop: 6,
-            borderTop: '1px solid var(--obs-border-subtle)',
-            lineHeight: 1.4,
-            display: '-webkit-box',
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 12px',
+            borderBottom: '1px solid var(--obs-border-subtle)',
+            background: `${color}12`,
           }}
         >
-          {node.summary}
+          <Pin size={12} style={{ color }} />
+          <span
+            style={{
+              fontSize: 10,
+              letterSpacing: 0.6,
+              textTransform: 'uppercase',
+              color: 'var(--obs-text-muted)',
+            }}
+          >
+            고정됨
+          </span>
+          <button
+            onClick={onClose}
+            title="고정 해제"
+            style={{
+              marginLeft: 'auto',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--obs-text-dim)',
+              padding: 2,
+              display: 'flex',
+            }}
+          >
+            <X size={13} />
+          </button>
         </div>
       )}
-      {node.connectionCount != null && (
-        <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 4 }}>
-          연결: {node.connectionCount}개
+
+      <div style={{ padding: '10px 14px' }}>
+        <div className="obs-graph-tooltip-title">{node.label}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: color,
+              boxShadow: `0 0 4px ${color}`,
+            }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', textTransform: 'capitalize' }}>
+            {node.category}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', marginLeft: 'auto' }}>
+            {node.importance}
+          </span>
+        </div>
+        {node.tags && node.tags.length > 0 && (
+          <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 2 }}>
+            {node.tags.map((t) => `#${t}`).join(' ')}
+          </div>
+        )}
+        {node.summary && (
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--obs-text-dim)',
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: '1px solid var(--obs-border-subtle)',
+              lineHeight: 1.4,
+              display: '-webkit-box',
+              WebkitLineClamp: 4,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {node.summary}
+          </div>
+        )}
+        {node.connectionCount != null && (
+          <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 4 }}>
+            연결: {node.connectionCount}개
+          </div>
+        )}
+      </div>
+
+      {pinned ? (
+        <button
+          onClick={onNavigate}
+          style={{
+            width: '100%',
+            padding: '9px 12px',
+            border: 'none',
+            borderTop: '1px solid var(--obs-border-subtle)',
+            background: `${color}1f`,
+            color,
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+        >
+          <ArrowUpRight size={14} /> 문서로 이동
+        </button>
+      ) : (
+        <div
+          style={{
+            padding: '6px 12px',
+            fontSize: 10,
+            color: 'var(--obs-text-muted)',
+            borderTop: '1px solid var(--obs-border-subtle)',
+            textAlign: 'center',
+          }}
+        >
+          클릭하면 초점 · 고정됩니다
         </div>
       )}
     </div>
@@ -199,6 +287,7 @@ export default function UnifiedGraphView({
   }, []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<KnowledgeGraphNode | null>(null);
+  const [pinnedNode, setPinnedNode] = useState<KnowledgeGraphNode | null>(null);
 
   // 라이트/다크 테마 감지 (html.light 클래스 — 전환 시 그래프 리마운트)
   const [isLight, setIsLight] = useState(false);
@@ -302,18 +391,35 @@ export default function UnifiedGraphView({
       ? selectedNodeId
       : null;
 
-  // 노드 클릭 → 하이라이트 토글 + 파일 열기 / 배경 클릭 → 해제
+  // 노드 클릭 → 문서 이동이 아니라 "해당 노드로 카메라 초점 + 정보 고정".
+  // 실제 문서 이동은 고정 패널의 [문서로 이동] 버튼이 담당한다.
+  // 같은 노드를 다시 클릭하거나 배경을 클릭하면 고정 해제.
   const handleNodeClick = useCallback(
     (node: { id: string } | null) => {
-      if (!node) {
+      if (!node || selectedNodeId === node.id) {
         setSelectedNodeId(null);
+        setPinnedNode(null);
         return;
       }
-      setSelectedNodeId((prev) => (prev === node.id ? null : node.id));
-      onSelectFile(node.id);
+      setSelectedNodeId(node.id);
+      setPinnedNode(nodeMap.get(node.id) ?? null);
+      graphRef.current?.focusNode?.(node.id, 700);
     },
-    [onSelectFile],
+    [nodeMap, selectedNodeId],
   );
+
+  // 고정 패널의 [문서로 이동] → 실제 파일 열기
+  const handleNavigate = useCallback(() => {
+    if (pinnedNode) onSelectFile(pinnedNode.id);
+  }, [pinnedNode, onSelectFile]);
+
+  const handleUnpin = useCallback(() => {
+    setPinnedNode(null);
+    setSelectedNodeId(null);
+  }, []);
+
+  // 표시할 노드: 고정이 있으면 고정 우선, 없으면 호버
+  const infoNode = pinnedNode ?? hoveredNode;
 
   const handleNodeHover = useCallback(
     (node: { id: string } | null) => {
@@ -458,10 +564,15 @@ export default function UnifiedGraphView({
         />
       </div>
 
-      {/* 호버 툴팁 — 줌 컨트롤 위 좌측 하단 */}
-      {hoveredNode && (
-        <div style={{ position: 'absolute', bottom: 116, left: 12, zIndex: 10 }}>
-          <GraphTooltip node={hoveredNode} />
+      {/* 노드 정보 패널 — 우측 상단(검색 아래). 호버=미리보기, 클릭=고정. */}
+      {infoNode && (
+        <div style={{ position: 'absolute', top: 58, right: 12, zIndex: 10, width: 260 }}>
+          <NodeInfoPanel
+            node={infoNode}
+            pinned={!!pinnedNode}
+            onNavigate={handleNavigate}
+            onClose={handleUnpin}
+          />
         </div>
       )}
 
