@@ -363,6 +363,20 @@ PUBLIC_EXACT_PATHS: frozenset = frozenset(
         "/api/auth/setup",       # first-run admin account creation
         "/api/auth/logout",      # idempotent cookie clear
         "/api/google/callback",  # Google OAuth external redirect (state-authenticated)
+        # VTuber live-sync notification streams. These are consumed via a plain
+        # browser EventSource (which CANNOT send an Authorization header) from
+        # cookieless display surfaces — the OBS browser-source overlay and the
+        # desktop connector bootstrap from a URL token into localStorage, so no
+        # geny_auth_token cookie is present. They were public by design and
+        # carry only low-sensitivity change signals: /models/stream emits a
+        # bare "models_changed" ping (no data); /assignments/stream emits
+        # {sessionId, modelName}. The underlying DATA and ACTION endpoints
+        # (/api/vtuber/models, /assignments, interact, emotion, …) stay gated —
+        # their callers send a Bearer token via apiCall. Keeping these two
+        # notification streams public restores overlay/connector live re-sync
+        # without weakening any data/action surface.
+        "/api/vtuber/models/stream",
+        "/api/vtuber/assignments/stream",
     }
 )
 

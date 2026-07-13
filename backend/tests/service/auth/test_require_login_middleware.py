@@ -76,6 +76,21 @@ def _build_app() -> FastAPI:
     async def mcp_bridge(session: str):
         return {"bridge": session}
 
+    # VTuber notification streams — intentionally public (plain EventSource
+    # from cookieless overlay/connector display surfaces).
+    @app.get("/api/vtuber/models/stream")
+    async def vtuber_models_stream():
+        return {"stream": "models"}
+
+    @app.get("/api/vtuber/assignments/stream")
+    async def vtuber_assignments_stream():
+        return {"stream": "assignments"}
+
+    # VTuber DATA endpoint — must stay gated (callers send a Bearer token).
+    @app.get("/api/vtuber/models")
+    async def vtuber_models():
+        return {"models": []}
+
     return app
 
 
@@ -129,11 +144,20 @@ def test_cookie_token_accepted(client, auth_service):
         "/api/auth/status",
         "/static/app.js",
         "/api/internal/mcp/sess-1/rpc",
+        "/api/vtuber/models/stream",
+        "/api/vtuber/assignments/stream",
     ],
 )
 def test_public_paths_open(client, path):
     r = client.get(path)
     assert r.status_code == 200
+
+
+def test_vtuber_data_endpoint_stays_gated(client):
+    # The notification STREAMS are public, but the DATA endpoint they mirror
+    # must still require a token (its callers send Bearer via apiCall).
+    r = client.get("/api/vtuber/models")
+    assert r.status_code == 401
 
 
 def test_options_preflight_passes(client):
