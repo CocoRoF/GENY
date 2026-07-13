@@ -484,7 +484,13 @@ export default function UnifiedGraphView({
         labelFormatter={labelFormatter}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
-        onLayoutSettled={() => graphRef.current?.zoomToFit(600, 150)}
+        onLayoutSettled={() => {
+          // Frame the graph once it settles — but never if the user already
+          // moved the camera during the layout (keep their viewpoint).
+          if (!graphRef.current?.hasUserAdjustedCamera?.()) {
+            graphRef.current?.zoomToFit(600, 150);
+          }
+        }}
       />
     </div>
   );
