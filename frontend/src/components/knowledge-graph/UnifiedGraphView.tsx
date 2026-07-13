@@ -28,7 +28,7 @@ import {
   type LayoutConfig,
   type RendererConfig,
 } from '@cocorof/graphier';
-import { GitGraph, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { GitGraph, ZoomIn, ZoomOut, Maximize2, Minimize2, Frame } from 'lucide-react';
 
 import type {
   UnifiedGraphViewProps,
@@ -181,6 +181,22 @@ export default function UnifiedGraphView({
   onSelectFile,
 }: UnifiedGraphViewProps) {
   const graphRef = useRef<NetworkGraph3DRef | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Real browser fullscreen on the graph viewport. graphier's ResizeObserver
+  // re-fits the canvas when the container resizes.
+  const toggleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen?.();
+    else void el.requestFullscreen?.();
+  }, []);
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<KnowledgeGraphNode | null>(null);
 
@@ -356,7 +372,7 @@ export default function UnifiedGraphView({
   }
 
   return (
-    <div className="obs-graph" style={{ position: 'relative' }}>
+    <div ref={containerRef} className="obs-graph" style={{ position: 'relative' }}>
       {/* 범례 (클릭으로 카테고리 필터 토글) */}
       <div className="obs-graph-legend">
         {Object.entries(CATEGORY_COLORS).map(([cat, color]) => {
@@ -413,8 +429,11 @@ export default function UnifiedGraphView({
         <ZoomButton title="축소" onClick={() => graphRef.current?.zoomOut()}>
           <ZoomOut size={14} />
         </ZoomButton>
-        <ZoomButton title="전체 보기" onClick={() => graphRef.current?.zoomToFit(600, 150)}>
-          <Maximize2 size={14} />
+        <ZoomButton title="전체 보기 (초기화)" onClick={() => graphRef.current?.zoomToFit(600, 150)}>
+          <Frame size={14} />
+        </ZoomButton>
+        <ZoomButton title={isFullscreen ? '전체화면 종료' : '전체화면'} onClick={toggleFullscreen}>
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </ZoomButton>
       </div>
 
