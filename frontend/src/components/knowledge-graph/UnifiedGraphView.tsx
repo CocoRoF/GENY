@@ -46,32 +46,22 @@ import GraphControls from './GraphControls';
 const ALL_EDGE_TYPES: EdgeType[] = ['wikilink', 'tag', 'backlink', 'semantic'];
 const ALL_IMPORTANCE = ['critical', 'high', 'medium', 'low'];
 
-// ── graphier 테마 (opsidian.css의 --obs-* 팔레트와 정합) ──
-const GRAPH_THEME_DARK: ThemeConfig = {
+// ── graphier "Memory Cosmos" 테마 ──
+// 지식 그래프를 심우주 뷰포트로 확정한다(앱 라이트/다크와 무관). 노드=행성,
+// 링크=중력 필라멘트(additive), 배경=성운+별필드. 깊은 보이드 위에서만 우주가
+// 제대로 읽히므로 그래프는 항상 이 코스모스 테마를 쓴다.
+const GRAPH_THEME_COSMIC: ThemeConfig = {
   nodeColors: CATEGORY_COLORS,
   linkColors: {
-    wikilink: '#58a6ff',
-    backlink: '#8b949e',
-    tag: '#d29922',
-    semantic: '#a371f7',
+    wikilink: '#6cb2ff',
+    backlink: '#9aa6d8',
+    tag: '#e3b34a',
+    semantic: '#b98cff',
   },
   defaultNodeColor: DEFAULT_NODE_COLOR,
-  defaultLinkColor: '#58a6ff',
-  backgroundColor: '#0c0c0f', // --obs-bg-deep (dark)
-};
-
-const GRAPH_THEME_LIGHT: ThemeConfig = {
-  nodeColors: CATEGORY_COLORS,
-  linkColors: {
-    wikilink: '#2563eb',
-    backlink: '#94a3b8',
-    tag: '#b45309',
-    semantic: '#7c3aed',
-  },
-  defaultNodeColor: DEFAULT_NODE_COLOR,
-  defaultLinkColor: '#2563eb',
-  backgroundColor: '#f8fafc', // --obs-bg-deep (light)
-  blending: 'normal',
+  defaultLinkColor: '#6cb2ff',
+  backgroundColor: '#05060f', // deep space void
+  blending: 'additive',
 };
 
 const GRAPH_LAYOUT: LayoutConfig = {
@@ -326,22 +316,25 @@ export default function UnifiedGraphView({
     });
   }, []);
 
+  // Cosmos style — deep-space backdrop + planetary bloom. Constant (the graph
+  // is a committed cosmic viewport regardless of the app's light/dark chrome).
   const graphStyle = useMemo<StyleConfig>(
     () => ({
-      starField: false,
+      starField: true,
+      nebula: true,
       fogDensity: 0,
-      bloomStrength: isLight ? 0 : 0.45,
-      bloomRadius: 0.15,
-      bloomThreshold: 0.1,
+      bloomStrength: 0.95,
+      bloomRadius: 0.42,
+      bloomThreshold: 0.02,
       nodeMinSize: 3.5,
       nodeMaxSize: 13,
-      edgeOpacity: isLight ? 0.55 : 0.3,
+      edgeOpacity: 0.34,
       showLabels: true,
       maxLabels: 90,
       labelScale: 1.1,
       labelThreshold: 0.85,
     }),
-    [isLight],
+    [],
   );
 
   const labelFormatter = useCallback((node: { label?: string; id: string }) => {
@@ -454,12 +447,12 @@ export default function UnifiedGraphView({
       )}
 
       <NetworkGraph3D
-        key={isLight ? 'light' : 'dark'}
+        key="cosmic"
         ref={graphRef}
         data={graphData}
         layout={GRAPH_LAYOUT}
         renderer={GRAPH_RENDERER}
-        theme={isLight ? GRAPH_THEME_LIGHT : GRAPH_THEME_DARK}
+        theme={GRAPH_THEME_COSMIC}
         style={graphStyle}
         visibleNodeIds={visibleNodeIds}
         linkVisibility={linkVisibility}
