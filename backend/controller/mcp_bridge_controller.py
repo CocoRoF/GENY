@@ -171,10 +171,28 @@ async def _session_runtime(session_id: str):
 async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     """Return MCP-shaped tool descriptors for the session.
 
-    Prefers the session's live pipeline registry (built-ins + env-enabled +
-    forged + per-env pack tools — exactly the active set), so claude_code_cli sees
-    the SAME tools an SDK agent would. Falls back to the shared ``ToolLoader``
-    when there's no live session (older path / not yet built).
+    Parity with the SDK (Anthropic API) path — advertise the EXPOSED set only.
+    -------------------------------------------------------------------------
+    The executor keeps a *core* / *deferred* split: core tools ship to the model
+    every turn; deferred tools stay registered + dispatchable but hidden until
+    the model discovers them via ``ToolSearch``. On the SDK path that split IS
+    the model's tool list (Stage 3 exports ``exposed_only``). On the
+    ``claude_code_cli`` path the model's tool list is instead whatever THIS
+    bridge advertises — so to give the CLI the same "few core tools + ToolSearch
+    for the rest" behaviour (and to keep the advertised set small enough that
+    Claude Code's own tool-search deferral, which we disable via
+    ``ENABLE_TOOL_SEARCH=false``, never even needs to kick in), we advertise
+    **exposed-only** when a live registry is present.
+
+    Deferred tools are deliberately withheld here; they remain in the registry
+    so the executor's ``ToolSearch`` (bridged as ``mcp__geny__ToolSearch``) can
+    ``activate`` them, after which they become exposed and appear on the next
+    ``tools/list`` — a fresh one per ``claude --print`` spawn, plus a
+    ``list_changed`` nudge (see ``_maybe_notify_tools_changed``) for same-turn
+    pickup.
+
+    Falls back to the shared ``ToolLoader`` (all tools, best effort) only when
+    there is no live session registry yet.
     """
     from service.executor.agent_session_manager import get_agent_session_manager
 
@@ -182,23 +200,31 @@ async def _list_session_tools(session_id: str) -> List[Dict[str, Any]]:
     tools: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
-    if registry is not None:
-        # Session registry FIRST — carries env (executor built-in) + forged +
-        # per-env pack tools that the global loader does NOT have.
+    if registry is not None and len(registry) > 0:
+        # Live session — the registry is authoritative. Advertise the exposed
+        # (core + runtime-activated) set only; deferred tools stay hidden but
+        # reachable via ToolSearch. This mirrors the SDK path's exposed_only
+        # export and keeps the CLI's tool surface small.
         try:
             for name in registry.list_names():
+                if name in seen:
+                    continue
+                is_exposed = getattr(registry, "is_exposed", None)
+                if callable(is_exposed) and not is_exposed(name):
+                    continue  # deferred → discover via ToolSearch, not here
                 tool = registry.get(name)
-                if tool is None or name in seen:
+                if tool is None:
                     continue
                 seen.add(name)
                 tools.append(_describe_tool(name, tool))
         except Exception:  # noqa: BLE001
             logger.debug("mcp_bridge: registry listing failed for %s", session_id, exc_info=True)
+        return tools
 
-    # ALWAYS also union the global loader (the base Geny tool set the CLI has
-    # always seen: gapt_*, custom, list_tool_packs, use_tool_pack). The registry
-    # may be empty/partial for some provider paths, so this guarantees the CLI
-    # never loses its base tools; the registry adds env + session-scoped tools.
+    # Fallback ONLY when there is no live registry (older path / not yet built):
+    # union the global loader so the CLI never loses its base tools. Here there
+    # is no core/deferred split to honour, so advertise everything the loader
+    # knows about (gapt_*, custom, list_tool_packs, use_tool_pack, …).
     manager = get_agent_session_manager()
     loader = getattr(manager, "_tool_loader", None)
     if loader is not None:
@@ -288,6 +314,17 @@ async def _execute_tool(
         )
     else:
         ctx = ToolContext(session_id=session_id)
+    # Bind the live registry so a bridged ``ToolSearch`` can ``activate`` deferred
+    # tools in the SAME registry this bridge advertises from — otherwise
+    # discovery is a no-op on the CLI path and the long tail is unreachable. Only
+    # set it when absent (never clobber an executor-bound registry); it's the
+    # same session registry either way, so this is idempotent.
+    if registry is not None:
+        try:
+            if getattr(ctx, "tool_registry", None) is None:
+                ctx.tool_registry = registry
+        except Exception:  # noqa: BLE001 — context may forbid attribute set
+            pass
     result = await tool.execute(call_input, ctx)
     return {"content": _to_mcp_content(result.content), "isError": bool(result.is_error)}
 

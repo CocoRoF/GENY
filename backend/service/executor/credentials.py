@@ -337,6 +337,20 @@ class CredentialBundleBuilder:
         # can be added later by merging the dicts here.
         if mcp_bridge is not None:
             extras["mcp_config"] = _build_mcp_bridge_config(mcp_bridge)
+            # Disable Claude Code's native MCP tool-search deferral. Our bridge
+            # advertises only the executor's *exposed* (core + activated) set —
+            # a small surface, memory/base tools included — and the executor's
+            # own ToolSearch (``mcp__geny__ToolSearch``) surfaces the deferred
+            # long tail on demand (parity with the SDK/Anthropic path). If Claude
+            # Code ALSO deferred on top of that, it would re-hide the core tools
+            # behind a redundant native search step — exactly the "memory needs a
+            # ToolSearch first" bug. ``false`` loads the advertised set upfront.
+            # Merge (don't clobber a setup_token's CLAUDE_CODE_OAUTH_TOKEN).
+            _env_extras = extras.get("env_extras")
+            if not isinstance(_env_extras, dict):
+                _env_extras = {}
+            _env_extras.setdefault("ENABLE_TOOL_SEARCH", "false")
+            extras["env_extras"] = _env_extras
             # Claude Code CLI's default permission mode prompts the
             # user before dispatching each tool call. In ``--print``
             # (non-interactive) mode there is no terminal to answer

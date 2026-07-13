@@ -70,6 +70,40 @@ def _default_storage_path() -> str:
     return (os.getenv("ENVIRONMENT_STORAGE_PATH") or "./data/environments").strip()
 
 
+# Platform tool families exposed as *core* (upfront, no ToolSearch) on EVERY
+# environment — including custom envs that predate the seed-template promotion
+# (`templates._promote_core_tools`). The memory family is Geny's always-on base
+# toolkit; the agent should be able to store/recall from turn 1 without a
+# ToolSearch round-trip. This is the runtime guarantee that backs the
+# claude_code_cli bridge's exposed-only advertisement (a deferred memory tool
+# would not be advertised, forcing a search). knowledge_* / hook_* stay deferred.
+_RUNTIME_CORE_PROMOTIONS = {"memory_*": True}
+
+
+def _promote_platform_core_tools(manifest: "EnvironmentManifest") -> None:
+    """Ensure the always-on platform tool families are *core* on ``manifest``.
+
+    Applied to every loaded manifest (seed or custom). Merge-safe: ``setdefault``
+    keeps any explicit per-env override. A wildcard override for a family the env
+    doesn't include is a harmless no-op. Never raises — a promotion failure must
+    not break session build.
+    """
+    try:
+        tools = getattr(manifest, "tools", None)
+        if tools is None:
+            return
+        overrides = dict(getattr(tools, "core_overrides", None) or {})
+        changed = False
+        for pattern, core in _RUNTIME_CORE_PROMOTIONS.items():
+            if pattern not in overrides:
+                overrides[pattern] = core
+                changed = True
+        if changed:
+            tools.core_overrides = overrides
+    except Exception:  # noqa: BLE001
+        logger.debug("core-tool promotion skipped for manifest", exc_info=True)
+
+
 class EnvironmentService:
     """Save, load, diff, and mutate pipeline environments.
 
@@ -258,6 +292,7 @@ class EnvironmentService:
                 description=raw.get("description", ""),
                 tags=raw.get("tags", []),
             )
+        _promote_platform_core_tools(manifest)
         with self._manifest_cache_lock:
             self._manifest_cache[env_id] = (time.monotonic(), manifest)
         return manifest

@@ -330,13 +330,16 @@ async def test_unknown_method_still_returns_method_not_found(stub_session):
     assert r.error["code"] == -32601
 
 
-# ── Sanity: list_session_tools no longer filters via _allowed_tools ─
+# ── Fallback path: no live registry → advertise the full loader roster ─
 
 
-def test_w2_list_session_tools_advertises_full_registry(stub_session):
+@pytest.mark.asyncio
+async def test_w2_list_session_tools_fallback_advertises_loader(stub_session):
+    # The stub agent has no ``_pipeline`` → no live registry, so the bridge
+    # falls back to the global loader and advertises every loader tool.
     from controller.mcp_bridge_controller import _list_session_tools
 
-    tools = _list_session_tools(stub_session)
+    tools = await _list_session_tools(stub_session)
     names = [t["name"] for t in tools]
     assert {"echo_tool", "legacy_err_tool", "tool_error_tool", "boom_tool"}.issubset(
         set(names)
@@ -346,3 +349,46 @@ def test_w2_list_session_tools_advertises_full_registry(stub_session):
         s = t["inputSchema"]
         assert s["additionalProperties"] is False
         assert "session_id" not in s["properties"]
+
+
+# ── Live registry: advertise the EXPOSED (core + activated) set only ───
+
+
+@pytest.mark.asyncio
+async def test_list_session_tools_advertises_exposed_only_with_live_registry(monkeypatch):
+    """With a live pipeline registry, the bridge mirrors the SDK path: only
+    core/activated tools are advertised; deferred tools stay hidden (reachable
+    via ToolSearch), keeping the claude_code_cli tool surface small."""
+    from controller.mcp_bridge_controller import _list_session_tools
+    from service.executor.agent_session_manager import get_agent_session_manager
+    from geny_executor.tools.registry import ToolRegistry
+
+    reg = ToolRegistry()
+    reg.register(_EchoTool(), core=True)       # exposed
+    reg.register(_BoomTool(), core=False)      # deferred
+    reg.register(_LegacyErrEnvelopeTool(), core=False)  # deferred
+    reg.activate("boom_tool")                  # runtime-activated → exposed
+
+    class _FakePipeline:
+        _tool_registry = reg
+        environment = None
+
+    class _FakeAgent:
+        _pipeline = _FakePipeline()
+        _mcp_bridge_token = "STUB_TOKEN"
+
+    mgr = get_agent_session_manager()
+    sid = "test-exposed-only-sid"
+    prior = mgr._local_agents.get(sid)
+    mgr._local_agents[sid] = _FakeAgent()  # type: ignore[index]
+    try:
+        tools = await _list_session_tools(sid)
+        names = {t["name"] for t in tools}
+        assert "echo_tool" in names            # core → advertised
+        assert "boom_tool" in names            # activated → advertised
+        assert "legacy_err_tool" not in names  # deferred → hidden
+    finally:
+        if prior is None:
+            mgr._local_agents.pop(sid, None)
+        else:
+            mgr._local_agents[sid] = prior
