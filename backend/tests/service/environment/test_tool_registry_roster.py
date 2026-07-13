@@ -395,3 +395,74 @@ def test_vtuber_pipeline_registers_all_built_ins() -> None:
             f"VTuber pipeline missing mutating built-in {mutating!r}. "
             f"Got: {sorted(registered)}"
         )
+
+
+# ── memory tools promoted to core (upfront, no ToolSearch) ──────────
+#
+# Executor default: external tools are *deferred* — the model must
+# ToolSearch to discover them. Geny promotes the memory_* family to
+# *core* via manifest.tools.core_overrides (see _promote_core_tools in
+# templates.py), so memory schemas ship in the request payload from
+# turn 1. These tests assert the whole chain: template override →
+# Pipeline.from_manifest → registry exposure.
+
+
+def test_worker_pipeline_exposes_memory_tools_as_core() -> None:
+    """Worker seed: every ``memory_*`` external tool is *exposed* (core),
+    while other external tools (``knowledge_*``, custom) stay *deferred*.
+    This is the "memory usable from turn 1, no ToolSearch" contract."""
+    from geny_executor.core.pipeline import Pipeline
+
+    from service.environment.templates import create_worker_env
+
+    manifest = create_worker_env(external_tool_names=_REPRESENTATIVE_ROSTER)
+    pipeline = Pipeline.from_manifest(
+        manifest,
+        api_key="sk-test",
+        strict=False,
+        adhoc_providers=[_FakeProvider(_REPRESENTATIVE_ROSTER)],
+    )
+    reg = pipeline.tool_registry
+
+    # memory_* → core / exposed (upfront schema)
+    for name in ("memory_read", "memory_write"):
+        assert reg.is_exposed(name), (
+            f"{name!r} should be exposed (core) but is deferred. "
+            f"Exposed: {sorted(t.name for t in reg.list_exposed())}"
+        )
+
+    # Non-memory externals stay deferred (ToolSearch-discoverable)
+    for name in ("knowledge_search", "web_search", "browser_navigate"):
+        assert not reg.is_exposed(name), (
+            f"{name!r} should stay deferred but is exposed"
+        )
+
+    # ToolSearch itself stays core so the deferred long tail is reachable
+    assert reg.is_exposed("ToolSearch"), "ToolSearch must remain core"
+
+
+def test_vtuber_pipeline_exposes_memory_tools_as_core() -> None:
+    """VTuber seed gets the same memory promotion (decision C) — memory_*
+    exposed, knowledge_* deferred."""
+    from geny_executor.core.pipeline import Pipeline
+
+    from service.environment.templates import create_vtuber_env
+
+    manifest = create_vtuber_env(
+        all_tool_names=_REPRESENTATIVE_ROSTER,
+        tool_loader=_representative_loader(),
+    )
+    pipeline = Pipeline.from_manifest(
+        manifest,
+        api_key="sk-test",
+        strict=False,
+        adhoc_providers=[_FakeProvider(_REPRESENTATIVE_ROSTER)],
+    )
+    reg = pipeline.tool_registry
+
+    for name in ("memory_read", "memory_write"):
+        assert reg.is_exposed(name), f"VTuber: {name!r} should be core/exposed"
+    assert not reg.is_exposed("knowledge_search"), (
+        "VTuber: knowledge_search should stay deferred"
+    )
+    assert reg.is_exposed("ToolSearch"), "VTuber: ToolSearch must remain core"

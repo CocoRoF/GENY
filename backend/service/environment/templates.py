@@ -29,7 +29,7 @@ hand-mirrors the stage catalogue (the old
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from geny_executor import EnvironmentManifest, build_manifest, build_manifest_for
 from geny_executor import known_manifest_presets as known_presets
@@ -370,6 +370,7 @@ def create_worker_env(
     manifest.metadata.description = (
         "범용 작업 환경 — 적응형 루프 + 모든 도구. 현재 로그인된 백엔드를 사용합니다."
     )
+    _promote_core_tools(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -457,6 +458,7 @@ def create_vtuber_env(
     _declare_owned_subagent(manifest)
     _declare_gapt_subworker(manifest)
     _declare_persona_preset(manifest)
+    _promote_core_tools(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -472,6 +474,45 @@ def _use_llm_compactor(manifest: "EnvironmentManifest") -> None:
             if e.order == 2:
                 e.strategies = {**(e.strategies or {}), "compactor": "llm_summary"}
         manifest.set_stage_entries(entries)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# Platform tool families promoted to *core* exposure — always in the request
+# payload, no ToolSearch round-trip. The always-on memory family (memory_* —
+# CRUD in ``memory_tools.py`` plus the progressive-inspection ``memory_status``
+# / ``memory_with`` / ``memory_event`` / ``memory_artifact`` / ``memory_distill``)
+# is high-frequency and cohesive, so the agent should see the whole memory API
+# from turn 1 instead of discovering it via ``ToolSearch``. ``knowledge_*`` /
+# ``hook_*`` stay deferred for now (consulted less often; promote later if the
+# same friction shows up). Bash and the other executor built-ins are already
+# core via ``built_in_tools=["*"]``.
+_CORE_PROMOTED_TOOL_PATTERNS: Dict[str, bool] = {"memory_*": True}
+
+
+def _promote_core_tools(manifest: "EnvironmentManifest") -> None:
+    """Promote the always-on platform tool families to *core* exposure.
+
+    Executor default (geny-executor 2.42+): framework built-ins are core,
+    everything else — external / provider / MCP — is *deferred* behind the
+    ``ToolSearch`` built-in. Geny's memory tools attach as ``tools.external``,
+    so an agent had to ``ToolSearch("memory")`` before it could store or recall.
+    Writing ``manifest.tools.core_overrides`` (a wildcard the executor honours
+    for external tools too — see ``_resolve_core_flag``) ships them in the
+    request payload from turn 1. ``ToolSearch`` itself stays core because
+    ``knowledge_*`` / ``hook_*`` / custom / MCP tools remain deferred, so the
+    discovery path for the long tail is preserved.
+
+    Idempotent and merge-safe (``setdefault`` keeps any pre-existing override,
+    e.g. a user who deliberately deferred a family in a custom env). The
+    wildcard is a harmless no-op for a manifest that carries no memory tools
+    (e.g. the VSCode env). Never fails template build.
+    """
+    try:
+        overrides = dict(getattr(manifest.tools, "core_overrides", None) or {})
+        for pattern, core in _CORE_PROMOTED_TOOL_PATTERNS.items():
+            overrides.setdefault(pattern, core)
+        manifest.tools.core_overrides = overrides
     except Exception:  # noqa: BLE001
         pass
 
@@ -601,6 +642,7 @@ def create_claude_code_worker_env(
     manifest.metadata.description = (
         "Claude Code CLI(구독 인증) 백엔드 · 일반 환경 — 적응형 루프 + 모든 도구."
     )
+    _promote_core_tools(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -628,6 +670,7 @@ def create_claude_code_vtuber_env(
     _declare_owned_subagent(manifest)
     _declare_gapt_subworker(manifest)
     _declare_persona_preset(manifest)
+    _promote_core_tools(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
@@ -664,6 +707,7 @@ def _backend_env(
         _declare_owned_subagent(manifest)
         _declare_gapt_subworker(manifest)
         _declare_persona_preset(manifest)
+    _promote_core_tools(manifest)
     _use_llm_compactor(manifest)
     return manifest
 
