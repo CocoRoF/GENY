@@ -860,6 +860,18 @@ class EnvironmentService:
         manifest = self.load_manifest(env_id)
         if manifest is None:
             raise EnvironmentNotFoundError(env_id)
+        # Platform core-tool promotion at BUILD time (not just template
+        # creation): envs persisted before a pattern was added would
+        # otherwise never receive it — the stored core_overrides snapshot
+        # is frozen at env creation. ``_promote_core_tools`` is idempotent
+        # and merge-safe (setdefault — a user's deliberate override wins),
+        # so applying it on every build is the robust path.
+        try:
+            from service.environment.templates import _promote_core_tools
+
+            _promote_core_tools(manifest)
+        except Exception:  # noqa: BLE001 — promotion must never block a build
+            pass
         # Sandbox tool packs (per-env opt-in): union the selected packs' tool
         # names into tools.external so they activate like custom tools. The
         # pack provider (resolving these names) is passed in adhoc_providers.

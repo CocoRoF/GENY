@@ -158,6 +158,23 @@ def main() -> int:
         # everything and let Geny decide whether to respond.
         response = _forward(envelope)
         _write_response(response)
+
+        # Same-turn tool activation: when a tools/call (e.g. ToolSearch)
+        # changed the session's exposed tool set, the server stamps
+        # ``result._meta.genyToolsChanged``. Emit the MCP list_changed
+        # notification so the CLI re-fetches tools/list and can call the
+        # newly activated tool within THIS turn instead of the next spawn.
+        try:
+            if (
+                envelope.get("method") == "tools/call"
+                and isinstance(response.get("result"), dict)
+                and (response["result"].get("_meta") or {}).get("genyToolsChanged")
+            ):
+                _write_response(
+                    {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+                )
+        except Exception:  # noqa: BLE001 — a nudge must never break the proxy
+            pass
     return 0
 
 

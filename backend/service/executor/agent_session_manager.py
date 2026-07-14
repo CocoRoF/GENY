@@ -70,9 +70,11 @@ _VTUBER_SUB_WORKER_NOTICE_DEFAULT = (
     "tool turns don't break the conversation.\n"
     "DELEGATE to your sub-worker ONLY genuinely long or heavy multi-step work (a full "
     "audit, a build or deploy, a large migration — anything that would run many minutes "
-    "or dozens of steps): hand it off with no target id and no new session; its result "
-    "returns as a `[SUB_WORKER_RESULT]` trigger, which you summarize in your own words in "
-    "Korean — don't paste raw output.\n"
+    "or dozens of steps). To delegate, CALL the `send_direct_message_internal` tool with "
+    "the full task description as `content` — saying you will hand it off does NOT "
+    "delegate anything; only that tool call does. No target id is needed (it routes to "
+    "your paired sub-worker). Its result returns as a `[SUB_WORKER_RESULT]` trigger, "
+    "which you summarize in your own words in Korean — don't paste raw output.\n"
     "When unsure, do it yourself — over-delegating a trivial task wastes time and feels evasive."
 )
 

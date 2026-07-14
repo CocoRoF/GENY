@@ -483,11 +483,20 @@ def _use_llm_compactor(manifest: "EnvironmentManifest") -> None:
 # CRUD in ``memory_tools.py`` plus the progressive-inspection ``memory_status``
 # / ``memory_with`` / ``memory_event`` / ``memory_artifact`` / ``memory_distill``)
 # is high-frequency and cohesive, so the agent should see the whole memory API
-# from turn 1 instead of discovering it via ``ToolSearch``. ``knowledge_*`` /
-# ``hook_*`` stay deferred for now (consulted less often; promote later if the
-# same friction shows up). Bash and the other executor built-ins are already
-# core via ``built_in_tools=["*"]``.
-_CORE_PROMOTED_TOOL_PATTERNS: Dict[str, bool] = {"memory_*": True}
+# from turn 1 instead of discovering it via ``ToolSearch``.
+# ``send_direct_message_internal`` is THE delegation verb for any agent that
+# owns a companion sub-agent (VTuber sub-worker) — hiding it behind ToolSearch
+# made models narrate delegation without ever calling it (2026-07-14
+# regression: "워커한테 넘긴다" with tool_call_count=0). ``knowledge_*`` /
+# ``hook_*`` stay deferred (consulted less often; the Stage-3 deferred catalog
+# + ToolSearch browse mode make them discoverable). Bash and the other
+# executor built-ins are already core via ``built_in_tools=["*"]``.
+# NOTE: applied at env-template build AND at every ``build_pipeline`` (see
+# environment/service.py) so existing envs receive new patterns too.
+_CORE_PROMOTED_TOOL_PATTERNS: Dict[str, bool] = {
+    "memory_*": True,
+    "send_direct_message_internal": True,
+}
 
 
 def _promote_core_tools(manifest: "EnvironmentManifest") -> None:

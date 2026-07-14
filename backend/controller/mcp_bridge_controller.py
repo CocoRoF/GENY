@@ -415,7 +415,13 @@ async def mcp_rpc(
             result={
                 "protocolVersion": _PROTOCOL_VERSION,
                 "capabilities": {
-                    "tools": {"listChanged": False},
+                    # The tool list DOES change mid-turn: a bridged
+                    # ToolSearch activates deferred tools. The stdio bridge
+                    # emits notifications/tools/list_changed when a
+                    # tools/call response carries _meta.genyToolsChanged, so
+                    # the CLI re-fetches tools/list and can call the newly
+                    # activated tool in the SAME turn.
+                    "tools": {"listChanged": True},
                     # We advertise empty resources/prompts so clients
                     # that probe these surfaces (Claude Code CLI 2.1+
                     # does) see a coherent "yes, supported but empty"
@@ -518,6 +524,18 @@ async def mcp_rpc(
 
         import time as _time
         _t0 = _time.monotonic()
+        # Same-turn activation detection: a bridged ToolSearch (or any tool
+        # that mutates the registry) changes the exposed set mid-turn. The
+        # registry version captures that; a moved version stamps
+        # ``_meta.genyToolsChanged`` on the result so the stdio bridge can
+        # nudge the CLI with notifications/tools/list_changed.
+        _reg_before = None
+        try:
+            _reg, _, _, _ = await _session_runtime(session_id)
+            if _reg is not None:
+                _reg_before = getattr(_reg, "version", None)
+        except Exception:  # noqa: BLE001 — detection must never block dispatch
+            _reg = None
         try:
             result = await _execute_tool(session_id, name, arguments)
         except HTTPException:
@@ -567,6 +585,23 @@ async def mcp_rpc(
                     "mcp_bridge: session_logger.log_tool_result failed for %s",
                     display_tool_name, exc_info=True,
                 )
+
+        try:
+            if (
+                _reg is not None
+                and _reg_before is not None
+                and getattr(_reg, "version", None) != _reg_before
+                and isinstance(result, dict)
+            ):
+                meta = dict(result.get("_meta") or {})
+                meta["genyToolsChanged"] = True
+                result["_meta"] = meta
+                logger.info(
+                    "mcp_bridge: registry version moved during tools/call "
+                    "'%s' — flagging genyToolsChanged", name,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
         return JsonRpcResponse(id=request.id, result=result)
 

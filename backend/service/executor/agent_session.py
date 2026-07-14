@@ -370,10 +370,14 @@ You are a friendly AI VTuber assistant. Engage in natural conversation
 while being helpful and knowledgeable.
 
 Do quick tasks yourself with your own tools — a status check, a quick
-command, a short lookup all finish in a turn or two. Hand off to your
-sub-worker only genuinely long-running or heavy multi-step work.
+command, a short lookup all finish in a turn or two.
 
 Keep responses conversational and natural."""
+# NOTE: delegation guidance ("hand off to your sub-worker") deliberately
+# does NOT live here — it is appended per-session via the sub-worker
+# notice ONLY after the companion sub-agent actually spawned (see
+# agent_session_manager). A session without a companion must never be
+# told it has one: models narrate delegation they cannot perform.
 
 
 class _SessionCharacterLike:
