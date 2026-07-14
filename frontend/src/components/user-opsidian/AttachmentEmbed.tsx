@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   defaultUrlTransform,
   type Components,
@@ -46,20 +46,91 @@ export type AttachmentRenderer = (props: {
   alt?: string | null;
 }) => React.ReactNode;
 
+const IMG_STYLE: React.CSSProperties = {
+  maxWidth: '100%',
+  maxHeight: 480,
+  borderRadius: 8,
+  border: '1px solid var(--obs-border, #2c2c2e)',
+  display: 'block',
+  margin: '8px 0',
+};
+
+/**
+ * Authenticated image: attachment endpoints require a valid login, and a bare
+ * `<img src>` can only carry the same-origin cookie — which is absent in the
+ * desktop connector (it boots from a URL token into localStorage, no cookie).
+ * So fetch the bytes with the Bearer token, hand the model a blob: URL, and
+ * revoke it on unmount. Works identically in the web app and the connector.
+ */
+function AuthedImage({ url, alt }: { url: string; alt: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let obj: string | null = null;
+    setBlobUrl(null);
+    setFailed(false);
+    const token = getToken();
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((b) => {
+        if (cancelled) return;
+        obj = URL.createObjectURL(b);
+        setBlobUrl(obj);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [url]);
+
+  if (failed) {
+    return (
+      <span
+        style={{
+          display: 'inline-block',
+          padding: '6px 10px',
+          margin: '8px 0',
+          fontSize: 12,
+          color: 'var(--obs-text-muted, #8b949e)',
+          background: 'var(--obs-bg-surface, rgba(255,255,255,0.04))',
+          border: '1px dashed var(--obs-border, #2c2c2e)',
+          borderRadius: 6,
+        }}
+      >
+        🖼️ 이미지를 불러오지 못했습니다 — {alt}
+      </span>
+    );
+  }
+  if (!blobUrl) {
+    return (
+      <span
+        style={{
+          display: 'block',
+          maxWidth: 320,
+          height: 140,
+          margin: '8px 0',
+          borderRadius: 8,
+          background:
+            'linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.07), rgba(255,255,255,0.03))',
+          border: '1px solid var(--obs-border, #2c2c2e)',
+        }}
+        aria-label={`${alt} 불러오는 중`}
+      />
+    );
+  }
+  return <img src={blobUrl} alt={alt} style={IMG_STYLE} loading="lazy" />;
+}
+
 const renderImage: AttachmentRenderer = ({ url, alt, filename }) => (
-  <img
-    src={url}
-    alt={alt ?? filename}
-    style={{
-      maxWidth: '100%',
-      maxHeight: 480,
-      borderRadius: 8,
-      border: '1px solid var(--obs-border, #2c2c2e)',
-      display: 'block',
-      margin: '8px 0',
-    }}
-    loading="lazy"
-  />
+  <AuthedImage url={url} alt={alt ?? filename} />
 );
 
 const renderAudio: AttachmentRenderer = ({ url }) => (

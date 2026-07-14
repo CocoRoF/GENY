@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { useUserOpsidianStore } from '@/store/useUserOpsidianStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppStore } from '@/store/useAppStore';
-import { userOpsidianApi } from '@/lib/api';
+import { userOpsidianApi, memoryApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { useMultiSelection } from '@/lib/useMultiSelection';
 import { useHubMode } from '@/components/OpsidianHubContext';
@@ -48,7 +48,7 @@ import CurationSettingsPanel from './CurationSettingsPanel';
 import InboxPanel from './InboxPanel';
 import KnowledgePanel from './KnowledgePanel';
 import {
-  attachmentMarkdownComponents,
+  makeAttachmentMarkdownComponents,
   attachmentUrlTransform,
   preprocessAttachmentEmbeds,
 } from './AttachmentEmbed';
@@ -917,6 +917,20 @@ function NoteEditor({
   // bucket and the [USER_SHARED] trigger fires for that session.
   const activeSessionId = useAppStore((s) => s.selectedSessionId);
 
+  // Session-scoped attachment resolution — screen-observation frames live in
+  // the AGENT SESSION's memory store (/api/agents/{sid}/memory/attachments/…),
+  // not the user-opsidian vault. Without this the default resolver points
+  // `![[<id>.jpg]]` at the wrong endpoint and the frame 404s.
+  const attachmentComponents = useMemo(
+    () =>
+      makeAttachmentMarkdownComponents(
+        activeSessionId
+          ? (path) => memoryApi.attachmentUrl(activeSessionId, path)
+          : undefined,
+      ),
+    [activeSessionId],
+  );
+
   // ShareWithVTuberMenu (P2a) owns its own toast — no top-level
   // curate-message state needed here any more.
 
@@ -1271,7 +1285,7 @@ function NoteEditor({
             remarkPlugins={[remarkGfm]}
             urlTransform={attachmentUrlTransform}
             components={{
-              ...attachmentMarkdownComponents,
+              ...attachmentComponents,
               a: ({ href, children, ...props }) => {
                 if (href?.startsWith('wikilink://')) {
                   const target = decodeURIComponent(href.replace('wikilink://', ''));
