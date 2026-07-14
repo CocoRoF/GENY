@@ -18,6 +18,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
+import { getToken } from '@/lib/authApi';
 import { useI18n } from '@/lib/i18n';
 import {
   RefreshCw, Download, FileText, Image as ImageIcon, Presentation,
@@ -54,7 +55,103 @@ function fmtSize(n?: number | null): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Slide/page pager over drafts/<job>/preview/page-N.png files. */
+/**
+ * Fetch a (gated) asset with the Bearer token → blob URL. A bare `<img src>` /
+ * `<a href>` / `<iframe src>` can only carry the same-origin cookie, which the
+ * desktop connector doesn't have (it boots from a URL token into localStorage).
+ * That is why previews / downloads 401'd there. Authenticated fetch → blob
+ * works in the web app AND the connector. Revokes the object URL on cleanup.
+ */
+function useAuthedBlob(url: string | null): { blobUrl: string | null; error: boolean } {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!url) { setBlobUrl(null); setError(false); return; }
+    let cancelled = false;
+    let obj: string | null = null;
+    setBlobUrl(null);
+    setError(false);
+    const token = getToken();
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); })
+      .then((b) => { if (cancelled) return; obj = URL.createObjectURL(b); setBlobUrl(obj); })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; if (obj) URL.revokeObjectURL(obj); };
+  }, [url]);
+  return { blobUrl, error };
+}
+
+function AuthedImg({ url, alt, className }: { url: string; alt: string; className?: string }) {
+  const { blobUrl, error } = useAuthedBlob(url);
+  if (error) {
+    return (
+      <div className="text-[0.75rem] text-[var(--text-muted)] p-4">
+        🖼️ 미리보기를 불러오지 못했습니다.
+      </div>
+    );
+  }
+  if (!blobUrl) {
+    return <div className="w-40 h-56 rounded-md bg-[var(--bg-hover)] animate-pulse" />;
+  }
+  return <img src={blobUrl} alt={alt} className={className} />;
+}
+
+function PdfPreview({ url }: { url: string }) {
+  const { blobUrl, error } = useAuthedBlob(url);
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center text-[0.8125rem] text-[var(--text-muted)]">
+        PDF를 불러오지 못했습니다.
+      </div>
+    );
+  }
+  if (!blobUrl) {
+    return <div className="w-full h-full rounded-md bg-[var(--bg-hover)] animate-pulse" />;
+  }
+  return (
+    <iframe
+      src={blobUrl}
+      title="pdf"
+      className="w-full h-full rounded-md border border-[var(--border-color)] bg-white"
+    />
+  );
+}
+
+/** Authenticated download → blob → save (Bearer, not the cookie). */
+async function authedDownload(url: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const obj = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = obj;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(obj);
+}
+
+function DownloadButton({ url, filename }: { url: string; filename: string }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try { await authedDownload(url, filename); } catch { /* ignore */ }
+        setBusy(false);
+      }}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+    >
+      <Download size={12} /> {busy ? '…' : t('canvasTab.download')}
+    </button>
+  );
+}
+
+/** Slide/page pager over preview pages (draft PNGs or on-demand SVG/PNG). */
 function PreviewPager({ pages, rawUrl }: { pages: string[]; rawUrl: (p: string) => string }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => { setIdx(0); }, [pages.length, pages[0]]);
@@ -63,9 +160,8 @@ function PreviewPager({ pages, rawUrl }: { pages: string[]; rawUrl: (p: string) 
   return (
     <div className="flex flex-col items-center gap-2 h-full min-h-0">
       <div className="flex-1 min-h-0 flex items-center justify-center w-full">
-        {/* cache-bust on mtime-ish key so a regenerated preview refreshes */}
-        <img
-          src={rawUrl(pages[clamped])}
+        <AuthedImg
+          url={rawUrl(pages[clamped])}
           alt={`page ${clamped + 1}`}
           className="max-w-full max-h-full object-contain rounded-md border border-[var(--border-color)] shadow-sm bg-white"
         />
@@ -101,6 +197,10 @@ export default function CanvasTab() {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loadingText, setLoadingText] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // On-demand server-rendered preview for an office file with no live draft
+  // pages (e.g. a freshly uploaded deck). Keyed to the path it was rendered for.
+  const [docPreview, setDocPreview] = useState<{ path: string; pages: string[] } | null>(null);
+  const [docPreviewErr, setDocPreviewErr] = useState(false);
 
   // path → mtime: the cache-buster key. The doc tools overwrite
   // preview/page-N.png in place, so the URL must change when the bytes
@@ -279,6 +379,34 @@ export default function CanvasTab() {
     return previewsByDir[dir] ?? [];
   }, [selected, selectedKind, previewsByDir]);
 
+  // Office file with no live draft pages (uploads, outputs) → auto-render a
+  // preview server-side (edit2docs, cached). Fires on selection; no agent turn.
+  useEffect(() => {
+    setDocPreview(null);
+    setDocPreviewErr(false);
+    if (!selected || !selectedSessionId || selectedKind !== 'office') return;
+    if (officePages.length > 0) return; // live draft pages already cover it
+    let cancelled = false;
+    const target = selected;
+    agentApi
+      .docPreview(selectedSessionId, target)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.pages?.length) setDocPreview({ path: target, pages: res.pages });
+        else setDocPreviewErr(true);
+      })
+      .catch(() => { if (!cancelled) setDocPreviewErr(true); });
+    return () => { cancelled = true; };
+  }, [selected, selectedSessionId, selectedKind, officePages.length]);
+
+  // Pages to show for the office preview: live draft pages first, else on-demand.
+  const officePreviewPages =
+    officePages.length > 0
+      ? officePages
+      : docPreview && docPreview.path === selected
+        ? docPreview.pages
+        : [];
+
   if (!selectedSessionId) {
     return (
       <TabShell title={t('tabs.canvas')} icon={Palette}>
@@ -384,29 +512,29 @@ export default function CanvasTab() {
               <EmptyState icon={Palette} title={t('canvasTab.selectFile')} />
             ) : selectedKind === 'image' ? (
               <div className="h-full flex items-center justify-center">
-                <img
-                  src={rawUrl(selected)}
+                <AuthedImg
+                  url={rawUrl(selected)}
                   alt={selected}
                   className="max-w-full max-h-full object-contain rounded-md border border-[var(--border-color)]"
                 />
               </div>
             ) : selectedKind === 'pdf' ? (
-              <iframe src={rawUrl(selected)} title={selected} className="w-full h-full rounded-md border border-[var(--border-color)] bg-white" />
+              <PdfPreview url={rawUrl(selected)} />
             ) : selectedKind === 'office' ? (
-              officePages.length > 0 ? (
-                <PreviewPager pages={officePages} rawUrl={rawUrl} />
-              ) : (
+              officePreviewPages.length > 0 ? (
+                <PreviewPager pages={officePreviewPages} rawUrl={rawUrl} />
+              ) : docPreviewErr ? (
                 <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
                   <Presentation size={32} className="text-[var(--text-muted)] opacity-40" />
                   <p className="text-[0.8125rem] text-[var(--text-muted)] max-w-[420px]">
                     {t('canvasTab.noPreview')}
                   </p>
-                  <a
-                    href={rawUrl(selected)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                  >
-                    <Download size={12} /> {t('canvasTab.download')}
-                  </a>
+                  <DownloadButton url={rawUrl(selected)} filename={selected.split('/').pop() || selected} />
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-[var(--border-color)] border-t-[hsl(var(--primary))] animate-spin" />
+                  <p className="text-[0.75rem] text-[var(--text-muted)]">미리보기 생성 중…</p>
                 </div>
               )
             ) : selectedKind === 'text' ? (
@@ -420,12 +548,7 @@ export default function CanvasTab() {
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-3">
                 <FileIcon size={32} className="text-[var(--text-muted)] opacity-40" />
-                <a
-                  href={rawUrl(selected)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                >
-                  <Download size={12} /> {t('canvasTab.download')}
-                </a>
+                <DownloadButton url={rawUrl(selected)} filename={selected.split('/').pop() || selected} />
               </div>
             )}
           </div>

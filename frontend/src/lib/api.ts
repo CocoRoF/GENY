@@ -599,6 +599,14 @@ export const agentApi = {
   getStorageFile: (id: string, path: string) =>
     apiCall<StorageFileContent>(`/api/agents/${id}/storage/${encodeURIComponent(path)}`),
 
+  /** GET /api/agents/{id}/doc-preview?path= — on-demand office/pdf preview
+   *  (pptx→per-slide SVG, docx/xlsx→PNG, pdf→PNG), rendered + cached server-side.
+   *  Returns page paths (relative to storage) to load via storage-raw. */
+  docPreview: (id: string, path: string) =>
+    apiCall<{ kind: 'svg' | 'png' | 'unsupported'; count: number; pages: string[] }>(
+      `/api/agents/${id}/doc-preview?path=${encodeURIComponent(path)}`,
+    ),
+
   /** GET /api/agents/{id}/download-folder — download storage as ZIP */
   downloadFolder: async (id: string) => {
     const res = await fetch(`/api/agents/${id}/download-folder`);

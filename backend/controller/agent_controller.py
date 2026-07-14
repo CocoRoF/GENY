@@ -1198,6 +1198,122 @@ async def download_storage_file_raw(
     return FileResponse(target, media_type=media_type, filename=target.name)
 
 
+# ── On-demand Canvas document preview (edit2docs, no agent / no LibreOffice) ──
+
+_DOC_PREVIEW_EXTS = {".pptx", ".docx", ".xlsx", ".pdf"}
+_DOC_PREVIEW_SEM = asyncio.Semaphore(2)  # bound concurrent CPU-bound renders
+
+
+def _doc_page_num(p) -> int:
+    import re as _re
+
+    m = _re.search(r"(\d+)", p.stem)
+    return int(m.group(1)) if m else 0
+
+
+def _render_doc_preview(src, ext: str, cache_dir):
+    """Render *src* into *cache_dir* → (kind, [page paths]). Runs in a thread."""
+    import edit2docs
+
+    if ext == ".pptx":
+        edit2docs.preview_doc(str(src), out_dir=str(cache_dir))  # slide_NNN.svg
+        pages = sorted(cache_dir.glob("slide_*.svg"))
+        return ("svg", pages)
+    if ext in (".docx", ".xlsx"):
+        edit2docs.render_doc(str(src), to="png", out_dir=str(cache_dir), dpi=120)
+        pages = sorted(cache_dir.glob("page-*.png"), key=_doc_page_num)
+        return ("png", pages)
+    if ext == ".pdf":
+        from tools.built_in.document_tools import _pdf_to_pngs
+
+        pages = _pdf_to_pngs(src, cache_dir)
+        return ("png", pages)
+    raise ValueError(f"unsupported preview ext {ext}")
+
+
+@router.get("/{session_id}/doc-preview")
+async def get_doc_preview(
+    session_id: str = Path(..., description="Session ID"),
+    path: str = Query(..., description="File path relative to session storage"),
+    auth: dict = Depends(require_auth),
+):
+    """On-demand Canvas preview — render an office/pdf file to per-slide SVGs
+    (pptx, via ``edit2docs.preview_doc``) or page PNGs (docx/xlsx via
+    ``edit2docs.render_doc``; pdf via pdftoppm). No agent turn and — for the
+    modern office formats — no LibreOffice. The result is cached under
+    ``.canvas-preview/<key>/<mtime>/`` keyed on the source's mtime, so
+    re-selecting a file is instant and an edited doc re-renders automatically.
+    Returns page paths (relative to storage) that the client loads through the
+    ``storage-raw`` endpoint. Works for dormant sessions too."""
+    _enforce_session_owner(session_id, auth)  # audit S6
+    import hashlib
+    import shutil
+    from pathlib import Path as _FilePath
+
+    storage_path = _storage_root_live_or_dormant(session_id)
+    root = _FilePath(storage_path).resolve()
+    src = (root / path).resolve()
+    try:
+        src.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path escapes session storage")
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    ext = src.suffix.lower()
+    if ext not in _DOC_PREVIEW_EXTS:
+        return {"kind": "unsupported", "count": 0, "pages": []}
+
+    mtime = int(src.stat().st_mtime)
+    key = hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+    rel_base = f".canvas-preview/{key}/{mtime}"
+    cache_dir = root / ".canvas-preview" / key / str(mtime)
+
+    def _cached_pages():
+        if not cache_dir.is_dir():
+            return None
+        svgs = sorted(cache_dir.glob("slide_*.svg"))
+        if svgs:
+            return ("svg", svgs)
+        pngs = sorted(cache_dir.glob("page-*.png"), key=_doc_page_num)
+        if pngs:
+            return ("png", pngs)
+        return None
+
+    result = _cached_pages()
+    if result is None:
+        # Prune stale mtime dirs for this file so the cache doesn't grow forever.
+        try:
+            parent = cache_dir.parent
+            if parent.is_dir():
+                for old in parent.iterdir():
+                    if old.is_dir() and old.name != str(mtime):
+                        shutil.rmtree(old, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        async with _DOC_PREVIEW_SEM:
+            result = _cached_pages()  # another request may have rendered it
+            if result is None:
+                try:
+                    result = await asyncio.to_thread(
+                        _render_doc_preview, src, ext, cache_dir
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "doc-preview render failed for %s: %s", path, e, exc_info=True
+                    )
+                    raise HTTPException(
+                        status_code=422, detail=f"Preview render failed: {e}"
+                    )
+
+    kind, pages = result
+    return {
+        "kind": kind,
+        "count": len(pages),
+        "pages": [f"{rel_base}/{p.name}" for p in pages],
+    }
+
+
 @router.get("/{session_id}/storage/{file_path:path}")
 async def read_storage_file(
     session_id: str = Path(..., description="Session ID"),
