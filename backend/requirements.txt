@@ -40,7 +40,7 @@ ddgs==9.11.4
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor[qdrant,ssh]>=2.54.0,<3.0.0
+geny-executor[qdrant,ssh]>=2.55.0,<3.0.0
 contextifier[pdf]>=0.4.0
 # Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
 croniter>=2.0.0
@@ -54,7 +54,7 @@ edge-tts>=6.1
 # openpyxl/python-pptx/Pillow transitively). PDF/PNG conversion & previews
 # additionally need LibreOffice + poppler-utils (installed in the Docker
 # image; recommended for bare-metal runs — see README).
-edit2docs>=0.9.0
+edit2docs>=0.10.0
 # Web exploration — the an-web engine backs the executor's Browser* built-ins
 # and WebFetch render_js (embedded V8; no Chromium / playwright install).
 an-web>=0.9.1
