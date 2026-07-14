@@ -56,12 +56,12 @@ dependencies = [
     # discord / slack / ntfy) so Geny declares channels in config and the
     # executor builds them (no host transport code). Keep in sync with
     # requirements.txt.
-    "geny-executor[qdrant,ssh]>=2.56.0,<3.0.0",
+    "geny-executor[qdrant,ssh]>=2.57.0,<3.0.0",
     "contextifier[pdf]>=0.4.0",
     # Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
     "croniter>=2.0.0",
     "sqlalchemy>=2.0.0",
-    "edit2docs>=0.11.0",
+    "edit2docs>=0.12.0",
     "an-web>=0.9.1",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",

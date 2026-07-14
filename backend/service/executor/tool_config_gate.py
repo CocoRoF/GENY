@@ -163,6 +163,27 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
+    # 7) Document-engine LLM verbs (DocGenerate / DocEdit) need an Anthropic
+    # API key. Without one they fail in 0 ms and push the model into REPL
+    # fallbacks — so they only register when a key actually exists. The six
+    # deterministic Doc* tools are always on (no token needed).
+    try:
+        import os as _os
+
+        key = (_os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+        if not key:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.llm_credentials_config import (
+                LLMCredentialsConfig,
+            )
+
+            cfg = get_config_manager().load_config(LLMCredentialsConfig)
+            key = (getattr(cfg, "anthropic_api_key", "") or "").strip()
+        if key:
+            satisfied.add("feature:docs_llm")
+    except Exception:  # noqa: BLE001
+        pass
+
     return satisfied
 
 
