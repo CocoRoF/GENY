@@ -1128,12 +1128,33 @@ def _storage_root_live_or_dormant(session_id: str) -> str:
     agent = agent_manager.get_agent(session_id)
     storage_path = getattr(agent, "storage_path", None) if agent else None
     if not storage_path:
-        record = get_session_store().get(session_id)
-        if not record or record.get("is_deleted"):
+        record = None
+        try:
+            record = get_session_store().get(session_id)
+        except Exception:  # noqa: BLE001 — store may be unavailable; fall through
+            record = None
+        if record and record.get("is_deleted"):
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        storage_path = record.get("storage_path")
+        if record:
+            storage_path = record.get("storage_path")
     if not storage_path:
-        raise HTTPException(status_code=400, detail="Session storage_path not available")
+        # No live agent and no store record — but the session's files survive on
+        # disk after the store record is idle-evicted / pruned, and storage
+        # endpoints (download / preview / list) must keep serving them. Derive
+        # <storage_root>/<session_id> when it actually exists. Validate the id to
+        # a safe leaf so this can't traverse or probe arbitrary paths; the
+        # per-endpoint owner guard still applies.
+        import re as _re
+        from pathlib import Path as _P
+
+        from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+        if _re.match(r"^[A-Za-z0-9_-]{1,128}$", session_id):
+            cand = _P(DEFAULT_STORAGE_ROOT) / session_id
+            if cand.is_dir():
+                storage_path = str(cand)
+    if not storage_path:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
     return storage_path
 
 
