@@ -28,7 +28,7 @@ import {
   type LayoutConfig,
   type RendererConfig,
 } from '@cocorof/graphier';
-import { GitGraph, ZoomIn, ZoomOut, Maximize2, Minimize2, Frame, Pin, X, ArrowUpRight } from 'lucide-react';
+import { GitGraph, ZoomIn, ZoomOut, Maximize2, Minimize2, Frame, Pin, X, ArrowUpRight, Share2 } from 'lucide-react';
 
 import type {
   UnifiedGraphViewProps,
@@ -76,8 +76,26 @@ const GRAPH_RENDERER: RendererConfig = {
 };
 
 // ── 호버 노드 상세 툴팁 ─────────────────────────────────
-// 노드 정보 패널 — 우측 상단(검색 아래) 고정 위치. 호버 시 미리보기, 클릭 시
-// 고정(pinned). 고정 상태에서만 [문서로 이동] 버튼이 노출된다.
+// 메모리 노트 본문에서 meta 주석(<!--meta ...-->) / frontmatter를 걷어낸 깨끗한 텍스트.
+function cleanSummary(s?: string): string {
+  if (!s) return '';
+  return s
+    .replace(/<!--[\s\S]*?-->/g, '') // HTML/meta 주석
+    .replace(/^---[\s\S]*?\n---\s*/m, '') // YAML frontmatter
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// 중요도 → 세맨틱 색 (카테고리 accent와 별개 축)
+const IMPORTANCE_COLOR: Record<string, string> = {
+  critical: '#ff6b6b',
+  high: '#f5a623',
+  medium: '#58a6ff',
+  low: '#8b95b0',
+};
+
+// 노드 정보 패널 — 우측 상단(검색 아래) 고정 위치. 호버=미리보기, 클릭=고정.
+// 고정 상태에서만 [문서로 이동] 버튼이 노출된다.
 function NodeInfoPanel({
   node,
   pinned,
@@ -90,35 +108,36 @@ function NodeInfoPanel({
   onClose: () => void;
 }) {
   const color = CATEGORY_COLORS[node.category] ?? DEFAULT_NODE_COLOR;
+  const impColor = IMPORTANCE_COLOR[(node.importance ?? '').toLowerCase()] ?? '#8b95b0';
+  const summary = cleanSummary(node.summary);
+  const hasTags = !!node.tags && node.tags.length > 0;
+
   return (
     <div
       style={{
         background: 'var(--obs-bg-panel)',
-        border: `1px solid ${pinned ? `${color}66` : 'var(--obs-border-subtle)'}`,
-        borderRadius: 10,
-        backdropFilter: 'blur(10px)',
+        border: '1px solid var(--obs-border-subtle)',
+        borderRadius: 12,
+        backdropFilter: 'blur(16px) saturate(1.2)',
+        WebkitBackdropFilter: 'blur(16px) saturate(1.2)',
         boxShadow: pinned
-          ? `0 10px 32px rgba(0,0,0,0.45), 0 0 0 1px ${color}22`
-          : '0 8px 24px rgba(0,0,0,0.4)',
+          ? '0 16px 44px rgba(0,0,0,0.55)'
+          : '0 10px 30px rgba(0,0,0,0.45)',
         overflow: 'hidden',
       }}
     >
+      {/* 카테고리 액센트 바 */}
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${color}, ${color}22)` }} />
+
+      {/* 고정 헤더 */}
       {pinned && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 12px',
-            borderBottom: '1px solid var(--obs-border-subtle)',
-            background: `${color}12`,
-          }}
-        >
-          <Pin size={12} style={{ color }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px 0' }}>
+          <Pin size={11} style={{ color, transform: 'rotate(18deg)' }} />
           <span
             style={{
-              fontSize: 10,
-              letterSpacing: 0.6,
+              fontSize: 9.5,
+              letterSpacing: 1,
+              fontWeight: 700,
               textTransform: 'uppercase',
               color: 'var(--obs-text-muted)',
             }}
@@ -133,9 +152,10 @@ function NodeInfoPanel({
               background: 'none',
               border: 'none',
               cursor: 'pointer',
-              color: 'var(--obs-text-dim)',
-              padding: 2,
+              color: 'var(--obs-text-muted)',
+              padding: 3,
               display: 'flex',
+              borderRadius: 6,
             }}
           >
             <X size={13} />
@@ -143,89 +163,132 @@ function NodeInfoPanel({
         </div>
       )}
 
-      <div style={{ padding: '10px 14px' }}>
-        <div className="obs-graph-tooltip-title">{node.label}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+      {/* 본문 */}
+      <div style={{ padding: pinned ? '6px 15px 13px' : '13px 15px' }}>
+        <div
+          style={{
+            fontSize: 15,
+            fontWeight: 650,
+            color: 'var(--obs-text)',
+            lineHeight: 1.3,
+            marginBottom: 9,
+            wordBreak: 'break-word',
+          }}
+        >
+          {node.label}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: hasTags || summary || node.connectionCount != null ? 11 : 0,
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--obs-text-dim)' }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 7px ${color}` }} />
+            <span style={{ textTransform: 'capitalize' }}>{node.category}</span>
+          </span>
           <span
             style={{
-              display: 'inline-block',
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: color,
-              boxShadow: `0 0 4px ${color}`,
+              marginLeft: 'auto',
+              fontSize: 9.5,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              textTransform: 'uppercase',
+              padding: '2.5px 9px',
+              borderRadius: 999,
+              background: `${impColor}22`,
+              color: impColor,
+              border: `1px solid ${impColor}33`,
             }}
-          />
-          <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', textTransform: 'capitalize' }}>
-            {node.category}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--obs-text-muted)', marginLeft: 'auto' }}>
+          >
             {node.importance}
           </span>
         </div>
-        {node.tags && node.tags.length > 0 && (
-          <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 2 }}>
-            {node.tags.map((t) => `#${t}`).join(' ')}
+
+        {hasTags && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: summary ? 11 : 0 }}>
+            {node.tags!.map((t) => (
+              <span
+                key={t}
+                style={{
+                  fontSize: 10,
+                  color: 'var(--obs-text-muted)',
+                  background: 'var(--obs-bg-surface)',
+                  border: '1px solid var(--obs-border-subtle)',
+                  borderRadius: 6,
+                  padding: '1.5px 7px',
+                }}
+              >
+                #{t}
+              </span>
+            ))}
           </div>
         )}
-        {node.summary && (
+
+        {summary && (
           <div
             style={{
-              fontSize: 10,
+              fontSize: 11.5,
               color: 'var(--obs-text-dim)',
-              marginTop: 6,
-              paddingTop: 6,
-              borderTop: '1px solid var(--obs-border-subtle)',
-              lineHeight: 1.4,
+              lineHeight: 1.55,
               display: '-webkit-box',
               WebkitLineClamp: 4,
               WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
+              paddingTop: 9,
+              borderTop: '1px solid var(--obs-border-subtle)',
             }}
           >
-            {node.summary}
+            {summary}
           </div>
         )}
+
         {node.connectionCount != null && (
-          <div style={{ fontSize: 10, color: 'var(--obs-text-muted)', marginTop: 4 }}>
-            연결: {node.connectionCount}개
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              marginTop: 11,
+              fontSize: 11,
+              color: 'var(--obs-text-muted)',
+            }}
+          >
+            <Share2 size={11} style={{ opacity: 0.7 }} />
+            연결{' '}
+            <b style={{ color: 'var(--obs-text-dim)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {node.connectionCount}
+            </b>
+            개
           </div>
         )}
       </div>
 
-      {pinned ? (
+      {pinned && (
         <button
           onClick={onNavigate}
           style={{
             width: '100%',
-            padding: '9px 12px',
+            padding: '10px 12px',
             border: 'none',
             borderTop: '1px solid var(--obs-border-subtle)',
-            background: `${color}1f`,
+            background: `${color}1c`,
             color,
             cursor: 'pointer',
-            fontSize: 12,
+            fontSize: 12.5,
             fontWeight: 600,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 6,
+            gap: 7,
+            letterSpacing: 0.2,
           }}
         >
-          <ArrowUpRight size={14} /> 문서로 이동
+          <ArrowUpRight size={15} /> 문서로 이동
         </button>
-      ) : (
-        <div
-          style={{
-            padding: '6px 12px',
-            fontSize: 10,
-            color: 'var(--obs-text-muted)',
-            borderTop: '1px solid var(--obs-border-subtle)',
-            textAlign: 'center',
-          }}
-        >
-          클릭하면 초점 · 고정됩니다
-        </div>
       )}
     </div>
   );
@@ -320,10 +383,19 @@ export default function UnifiedGraphView({
 
   // 노드 원본 맵 (호버 툴팁용)
   const nodeMap = useMemo(() => {
+    // Real degree from the actual edges — the backend's connectionCount is
+    // often 0/absent, which made the info panel always read "연결: 0개".
+    const degree = new Map<string, number>();
+    for (const e of rawEdges) {
+      degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+      degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    }
     const map = new Map<string, KnowledgeGraphNode>();
-    for (const n of rawNodes) map.set(n.id, n);
+    for (const n of rawNodes) {
+      map.set(n.id, { ...n, connectionCount: degree.get(n.id) ?? n.connectionCount ?? 0 });
+    }
     return map;
-  }, [rawNodes]);
+  }, [rawNodes, rawEdges]);
 
   // graphier 데이터 — 전체 데이터를 한 번만 넘기고(레이아웃 1회),
   // 이후 필터는 visibleNodeIds/linkVisibility로만 처리한다.
@@ -338,7 +410,7 @@ export default function UnifiedGraphView({
         id: n.id,
         label: n.label,
         type: n.category,
-        val: computeNodeSize(n.importance, n.connectionCount ?? connCount.get(n.id) ?? 0),
+        val: computeNodeSize(n.importance, connCount.get(n.id) ?? n.connectionCount ?? 0),
       })),
       links: rawEdges.map((e) => ({
         source: e.source,
