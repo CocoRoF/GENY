@@ -362,6 +362,47 @@ def _find_memory_attachment(memory_dir: FsPath, filename: str) -> Optional[FsPat
     return None
 
 
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _resolve_attachment_memory_dir(session_id: str) -> Optional[FsPath]:
+    """Locate a session's on-disk memory dir for SERVING static attachments.
+
+    Unlike :func:`_get_provider_and_memory_dir` this must NOT require a live
+    agent — screen-observation frames belong to whichever session recorded
+    them, and the user browses historical notes long after that session has
+    stopped. Prefer the live agent's authoritative dir when present, otherwise
+    derive ``<storage_root>/<session_id>/memory`` so old frames still resolve.
+    The session id is validated (safe leaf only) and the endpoint's containment
+    check keeps traversal out.
+    """
+    try:
+        agent = get_agent_session_manager().get_agent(session_id)
+        if agent is not None:
+            mgr = getattr(agent, "memory_manager", None) or getattr(
+                agent, "_memory_manager", None
+            )
+            md = getattr(mgr, "_memory_dir", None) if mgr is not None else None
+            if md:
+                return FsPath(md)
+            storage = getattr(agent, "storage_path", None) or getattr(
+                agent, "_storage_path", None
+            )
+            if storage:
+                return FsPath(storage) / "memory"
+    except Exception:  # noqa: BLE001 — live lookup is best-effort
+        logger.debug("live memory dir lookup failed for %s", session_id, exc_info=True)
+
+    if not _SESSION_ID_RE.match(session_id):
+        return None
+    try:
+        from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+        return FsPath(DEFAULT_STORAGE_ROOT) / session_id / "memory"
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.get("/{session_id}/memory/attachments/{filename}")
 async def get_memory_attachment(
     request: Request,
@@ -370,9 +411,11 @@ async def get_memory_attachment(
 ):
     """Serve a binary attachment referenced by a memory note (e.g. a
     screen-observation frame) as raw bytes, so ``![[<id>.jpg]]`` embeds
-    can render in the web UI. Images only; 404 for anything else."""
-    _, memory_dir = _get_provider_and_memory_dir(session_id)
-    if memory_dir is None:
+    can render in the web UI. Images only; 404 for anything else. Works for
+    historical (stopped) sessions too — static frames must not require a live
+    agent."""
+    memory_dir = _resolve_attachment_memory_dir(session_id)
+    if memory_dir is None or not memory_dir.is_dir():
         raise HTTPException(status_code=404, detail="Memory dir unavailable")
     found = _find_memory_attachment(FsPath(memory_dir), filename)
     if found is None:
