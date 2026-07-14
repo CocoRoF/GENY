@@ -551,21 +551,29 @@ async def broadcast_to_room(
     # Pydantic models don't survive ``asyncio.create_task`` boundaries cleanly
     # when executors thread them through ``**invoke_kwargs``.
     attachments_payload: Optional[List[Dict[str, Any]]] = None
+    attachments_for_storage: Optional[List[Dict[str, Any]]] = None
     if has_attachments:
-        attachments_payload = [
-            _rewrite_local_attachment_url(a.model_dump(exclude_none=True))
-            for a in request.attachments
-        ]
+        # Raw dicts carry the browser-facing ``/static/uploads/...`` URL.
         # VTuber screen-vision: auto-captured screen frames are ambient
-        # CONTEXT, not user content. (a) Honour the screen-image kill-switch
-        # by dropping them before they reach the executor; (b) never persist
-        # their raw base64 into chat history (it bloats the DB + JSON backup
-        # — the BroadcastAttachment contract says raw bytes don't travel).
-        attachments_payload = _filter_observation_frames_for_send(attachments_payload)
-
-    # Storage copy: strip auto-screen frames entirely (ambient context, not
-    # user content) so chat history never carries hundreds of KB of base64.
-    attachments_for_storage = _attachments_for_storage(attachments_payload)
+        # CONTEXT, not user content — honour the screen-image kill-switch by
+        # dropping them before they reach the executor AND before we persist
+        # them (raw base64 bloats the DB + JSON backup). Filter keys on
+        # ``source`` (not url), so it runs safely on the pre-rewrite dicts.
+        raw = _filter_observation_frames_for_send(
+            [a.model_dump(exclude_none=True) for a in request.attachments]
+        )
+        # Executor payload: rewrite ``/static/uploads/...`` → ``file:///...``
+        # so the executor's MultimodalNormalizer can inline the bytes as
+        # base64. This URI points at the SERVER filesystem — usable by the
+        # executor, but NOT loadable by a browser.
+        if raw:
+            attachments_payload = [_rewrite_local_attachment_url(a) for a in raw]
+        # Storage / broadcast copy: keep the ORIGINAL public URL. The UI
+        # renders ``<img src="/static/uploads/...">`` which nginx serves 200
+        # (allowlisted, no auth); the server-side ``file:///app/...`` URI the
+        # executor needs would render as a BROKEN image in the browser. Never
+        # let the executor rewrite leak into what the client sees.
+        attachments_for_storage = _attachments_for_storage(raw)
 
     # 1. Save user message
     try:
