@@ -17,7 +17,7 @@ import { getToken } from '@/lib/authApi';
  * API URLs, fetch the bytes with the Bearer token, and serve them as blob:
  * URLs — for inline rendering AND for click-through viewing.
  */
-function apiPathOf(href?: string): string | null {
+export function apiPathOf(href?: string): string | null {
   if (!href) return null;
   if (href.startsWith('/api/')) return href;
   if (typeof window !== 'undefined' && (href.startsWith('http://') || href.startsWith('https://'))) {
@@ -40,7 +40,7 @@ async function fetchApiBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await res.blob());
 }
 
-function AuthedChatImage({ path, alt }: { path: string; alt: string }) {
+export function AuthedChatImage({ path, alt }: { path: string; alt: string }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -88,7 +88,7 @@ function AuthedChatImage({ path, alt }: { path: string; alt: string }) {
 }
 
 /** Open a gated API link: fetch with Bearer → blob URL → new tab. */
-async function openAuthedLink(path: string) {
+export async function openAuthedLink(path: string) {
   try {
     const u = await fetchApiBlobUrl(path);
     const w = window.open(u, '_blank', 'noopener,noreferrer');

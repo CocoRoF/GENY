@@ -9,7 +9,7 @@ import { getAudioManager } from '@/lib/audioManager';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
-import { parseEmotion, EMOTION_COLORS, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble } from '@/components/chat';
+import { parseEmotion, EMOTION_COLORS, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble, apiPathOf, AuthedChatImage, openAuthedLink } from '@/components/chat';
 import { ChevronDown, ChevronRight, XCircle, Paperclip, X as XIcon } from 'lucide-react';
 import type { ChatRoomMessage, ChatAttachment, FileChanges, AgentProgressState, AgentLogEntry } from '@/types';
 
@@ -728,28 +728,45 @@ export default function VTuberChatPanel({
                     agent delivered via SendUserFile (workspace-canvas P1). */}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {msg.attachments.map((att, i) => (
-                      att.kind === 'image' && att.url ? (
-                        <a
-                          key={`${att.attachment_id ?? att.url ?? i}`}
-                          href={att.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block"
-                        >
-                          <img
-                            src={att.url}
-                            alt={att.name ?? 'image'}
-                            className="max-w-[160px] max-h-[160px] object-cover rounded-md border border-[var(--border-color)]"
-                          />
-                        </a>
+                    {msg.attachments.map((att, i) => {
+                      // Auth-gated session-storage URLs need a Bearer fetch
+                      // (no cookie in the connector; bare clicks 401).
+                      const attApiPath = apiPathOf(att.url ?? undefined);
+                      return att.kind === 'image' && att.url ? (
+                        attApiPath ? (
+                          <div key={`${att.attachment_id ?? att.url ?? i}`} className="max-w-[200px]">
+                            <AuthedChatImage path={attApiPath} alt={att.name ?? 'image'} />
+                          </div>
+                        ) : (
+                          <a
+                            key={`${att.attachment_id ?? att.url ?? i}`}
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block"
+                          >
+                            <img
+                              src={att.url}
+                              alt={att.name ?? 'image'}
+                              className="max-w-[160px] max-h-[160px] object-cover rounded-md border border-[var(--border-color)]"
+                            />
+                          </a>
+                        )
                       ) : (
                         <div
                           key={`${att.attachment_id ?? att.url ?? i}`}
                           className="flex items-center gap-1.5 px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-md text-[0.6875rem] text-[var(--text-secondary)]"
                         >
                           <Paperclip size={12} />
-                          {att.url ? (
+                          {att.url && attApiPath ? (
+                            <a
+                              href={att.url}
+                              onClick={(e) => { e.preventDefault(); void openAuthedLink(attApiPath); }}
+                              className="underline truncate max-w-[160px] cursor-pointer"
+                            >
+                              {att.name ?? 'file'}
+                            </a>
+                          ) : att.url ? (
                             <a href={att.url} target="_blank" rel="noopener noreferrer" className="underline truncate max-w-[160px]">
                               {att.name ?? 'file'}
                             </a>
@@ -757,8 +774,8 @@ export default function VTuberChatPanel({
                             <span className="truncate max-w-[160px]">{att.name ?? 'file'}</span>
                           )}
                         </div>
-                      )
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 {/* File changes */}

@@ -8,7 +8,7 @@ import { Bot, User, Loader2, MessageCircle, Clock, ChevronDown, ChevronRight, XC
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 import type { ChatRoomMessage, AgentLogEntry, ChatAttachment } from '@/types';
-import { ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, getRoleColor, formatTime, formatDate } from '@/components/chat';
+import { ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, getRoleColor, formatTime, formatDate, apiPathOf, AuthedChatImage, openAuthedLink } from '@/components/chat';
 
 const MiniAvatar = dynamic(() => import('@/components/live2d/MiniAvatar'), { ssr: false });
 
@@ -43,8 +43,20 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
       {attachments.map((att, i) => {
         const href = att.url ?? att.data;
         const key = `${att.attachment_id ?? att.url ?? i}`;
+        // Session-storage attachments (/api/agents/<sid>/storage-raw/...)
+        // are auth-gated: a bare <img>/<a> can't carry the Bearer token
+        // (no cookie in the connector; direct clicks 401). Route those
+        // through an authed blob fetch; public /static/uploads stays plain.
+        const apiPath = apiPathOf(href ?? undefined);
 
         if (att.kind === 'image' && href) {
+          if (apiPath) {
+            return (
+              <div key={key} className="max-w-[220px]">
+                <AuthedChatImage path={apiPath} alt={att.name ?? 'image'} />
+              </div>
+            );
+          }
           return (
             <a
               key={key}
@@ -70,6 +82,18 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
           </div>
         );
 
+        if (href && apiPath) {
+          return (
+            <a
+              key={key}
+              href={href}
+              onClick={(e) => { e.preventDefault(); void openAuthedLink(apiPath); }}
+              className="no-underline cursor-pointer"
+            >
+              {inner}
+            </a>
+          );
+        }
         return href ? (
           <a
             key={key}
