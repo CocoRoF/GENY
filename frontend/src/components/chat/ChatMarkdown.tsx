@@ -1,10 +1,110 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { splitEmotionSegments, EMOTION_COLORS } from './chat-utils';
+import { getToken } from '@/lib/authApi';
+
+/**
+ * Agent replies routinely embed gated API URLs (session storage files:
+ * `/api/agents/<sid>/storage-raw/...`) as markdown images/links. Those
+ * endpoints require auth, and a bare `<img src>`/`<a href>` can only carry
+ * the same-origin cookie — absent in the desktop connector (URL-token →
+ * localStorage, no cookie) and absent when the browser opens the URL
+ * directly (→ {"detail":"Authentication required"}). So: detect same-origin
+ * API URLs, fetch the bytes with the Bearer token, and serve them as blob:
+ * URLs — for inline rendering AND for click-through viewing.
+ */
+function apiPathOf(href?: string): string | null {
+  if (!href) return null;
+  if (href.startsWith('/api/')) return href;
+  if (typeof window !== 'undefined' && (href.startsWith('http://') || href.startsWith('https://'))) {
+    try {
+      const u = new URL(href);
+      if (u.origin === window.location.origin && u.pathname.startsWith('/api/')) {
+        return u.pathname + u.search;
+      }
+    } catch { /* not a URL */ }
+  }
+  return null;
+}
+
+async function fetchApiBlobUrl(path: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+function AuthedChatImage({ path, alt }: { path: string; alt: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let obj: string | null = null;
+    setBlobUrl(null);
+    setFailed(false);
+    fetchApiBlobUrl(path)
+      .then((u) => {
+        if (cancelled) { URL.revokeObjectURL(u); return; }
+        obj = u;
+        setBlobUrl(u);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => {
+      cancelled = true;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [path]);
+
+  if (failed) {
+    return (
+      <span className="inline-block px-2 py-1 my-1 text-[0.6875rem] text-[var(--text-muted)] border border-dashed border-[var(--border-color)] rounded">
+        🖼️ {alt || 'image'} — 불러오지 못했습니다
+      </span>
+    );
+  }
+  if (!blobUrl) {
+    return (
+      <span className="inline-block px-2 py-1 my-1 text-[0.6875rem] text-[var(--text-muted)] animate-pulse">
+        🖼️ {alt || 'image'} 로딩…
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={blobUrl}
+      alt={alt}
+      className="max-w-full max-h-[420px] rounded-md border border-[var(--border-color)] my-1.5 cursor-zoom-in"
+      onClick={() => window.open(blobUrl, '_blank', 'noopener,noreferrer')}
+    />
+  );
+}
+
+/** Open a gated API link: fetch with Bearer → blob URL → new tab. */
+async function openAuthedLink(path: string) {
+  try {
+    const u = await fetchApiBlobUrl(path);
+    const w = window.open(u, '_blank', 'noopener,noreferrer');
+    if (!w) {
+      // Popup blocked — fall back to a download.
+      const a = document.createElement('a');
+      a.href = u;
+      a.download = path.split('/').pop() || 'file';
+      a.click();
+    }
+    // Give the new tab time to load before revoking.
+    setTimeout(() => URL.revokeObjectURL(u), 60_000);
+  } catch {
+    /* leave the default 401 page to explain */
+  }
+}
 
 /**
  * Lightweight Markdown renderer for chat messages.
@@ -89,8 +189,37 @@ const mdComponents: Components = {
       </td>
     );
   },
-  // Links
+  // Images — gated API URLs render through an authed blob fetch; everything
+  // else (public /static/uploads, external) stays a plain <img>.
+  img({ src, alt }) {
+    const url = typeof src === 'string' ? src : '';
+    const apiPath = apiPathOf(url);
+    if (apiPath) return <AuthedChatImage path={apiPath} alt={alt ?? ''} />;
+    if (!url) return null;
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={alt ?? ''}
+        className="max-w-full max-h-[420px] rounded-md border border-[var(--border-color)] my-1.5"
+      />
+    );
+  },
+  // Links — gated API URLs open via authed fetch → blob (a bare href would
+  // land on {"detail":"Authentication required"}).
   a({ href, children }) {
+    const apiPath = apiPathOf(href);
+    if (apiPath) {
+      return (
+        <a
+          href={href}
+          onClick={(e) => { e.preventDefault(); void openAuthedLink(apiPath); }}
+          className="text-[var(--primary-color)] hover:underline cursor-pointer"
+        >
+          {children}
+        </a>
+      );
+    }
     return (
       <a
         href={href}
