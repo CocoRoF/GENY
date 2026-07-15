@@ -61,7 +61,7 @@ dependencies = [
     # Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
     "croniter>=2.0.0",
     "sqlalchemy>=2.0.0",
-    "edit2docs>=0.13.0",
+    "edit2docs>=0.14.0",
     "an-web>=0.9.1",
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",

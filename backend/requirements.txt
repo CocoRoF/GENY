@@ -54,7 +54,7 @@ edge-tts>=6.1
 # openpyxl/python-pptx/Pillow transitively). PDF/PNG conversion & previews
 # additionally need LibreOffice + poppler-utils (installed in the Docker
 # image; recommended for bare-metal runs — see README).
-edit2docs>=0.13.0
+edit2docs>=0.14.0
 # Web exploration — the an-web engine backs the executor's Browser* built-ins
 # and WebFetch render_js (embedded V8; no Chromium / playwright install).
 an-web>=0.9.1

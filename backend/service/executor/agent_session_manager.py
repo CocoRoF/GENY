@@ -938,6 +938,12 @@ class AgentSessionManager:
                     gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
                         project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
                         workspace_name=session_id,
+                        # Never block session creation on container boot:
+                        # the handle's ensure() ladder brings the workspace
+                        # up lazily on the FIRST sandboxed tool call (the
+                        # toolchain-baked image makes that a ~1s docker
+                        # run). Session create stays snappy regardless.
+                        wait_running=False,
                         bind_host_dir=_bind_host,
                         backend_workspace_dir=(_backend_ws if _bind_host else None),
                     )
