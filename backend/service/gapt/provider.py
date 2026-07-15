@@ -72,6 +72,11 @@ class GaptSandboxHandle:
             if r and r.strip()
         )
         self.container_workdir = "/workspace"
+        # Bind workspaces: the mounted dir is owned by the host service
+        # user (root in the backend container), while the ws image defaults
+        # to ubuntu:1000 — pin exec to root so container-side writes and
+        # host-side tools agree (executor 2.60.1 exec_user protocol).
+        self.exec_user = "0:0" if self._roots else None
         self._reprovision = reprovision
 
     # ── executor path-mapping protocol ──────────────────────────────
