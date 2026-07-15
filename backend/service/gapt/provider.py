@@ -115,11 +115,20 @@ class GaptSandboxHandle:
             rc2, _ = await self._docker("start", self.container_name)
             if rc2 == 0:
                 return
-        # 3) Missing / start failed: authoritative recreate through GAPT —
-        # rebuilds the container from the workspace row with its mounts.
+        # 3) Missing / start failed: flip GAPT state through the API. NB:
+        # /start acts on the PROJECT sandbox + row status — the gapt-ws-*
+        # container itself is (re)created lazily by GAPT's exec path
+        # (WorkspaceSandbox.ensure inside run_command). So a 200 here does
+        # NOT yet guarantee the container exists: verify, and fall through
+        # to run_command when it still isn't up.
         try:
             await self._client.start_workspace(self.workspace_id)
-            return
+            rc3, out3 = await self._docker(
+                "inspect", "-f", "{{.State.Running}}", self.container_name,
+                timeout_s=5.0,
+            )
+            if rc3 == 0 and out3.strip().lower() == "true":
+                return
         except GaptApiError as exc:
             if exc.status == 404 and self._reprovision is not None:
                 # 4) Workspace row itself is gone — re-create by name and
