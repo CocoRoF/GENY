@@ -36,6 +36,7 @@ def _make_parent_env_companion_factory(
     parent_env_id: str,
     adhoc_providers: Any = (),
     extra_external_tools: Any = (),
+    workspace_ctx: Any = None,
 ):
     """Build a PipelineFactory that clones the PARENT agent's environment.
 
@@ -115,6 +116,31 @@ def _make_parent_env_companion_factory(
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("companion: system_prompt attach failed", exc_info=True)
+        # One session = one workspace, companion INCLUDED: the companion
+        # works in the OWNER's workspace with the OWNER's sandbox handle,
+        # so its Bash/files land exactly where the owner (and the web UI)
+        # look. Without this the companion ran with a bare ToolContext —
+        # host cwd surprises and no sandbox (the 2026-07-15 PPTX
+        # delegation ran 20 min partly because Bash had no valid cwd).
+        if workspace_ctx is not None:
+            try:
+                from geny_executor.tools.base import ToolContext
+
+                pipeline.attach_runtime(
+                    tool_context=ToolContext(
+                        session_id=workspace_ctx.get("sub_agent_id") or "",
+                        working_dir=workspace_ctx.get("working_dir") or "",
+                        storage_path=workspace_ctx.get("storage_path") or "",
+                        extras=dict(workspace_ctx.get("extras") or {}),
+                    ),
+                    **(
+                        {"sandbox": workspace_ctx["sandbox"]}
+                        if workspace_ctx.get("sandbox") is not None
+                        else {}
+                    ),
+                )
+            except Exception:  # noqa: BLE001 — never fail companion build
+                logger.warning("companion: workspace ctx attach failed", exc_info=True)
         return pipeline
 
     return _factory
@@ -131,6 +157,9 @@ async def spawn_owned_subagent(
     parent_provider: Optional[str] = None,
     adhoc_providers: Any = (),
     extra_external_tools: Any = (),
+    sandbox: Any = None,
+    working_dir: Optional[str] = None,
+    storage_path: Optional[str] = None,
 ) -> Optional[str]:
     """Spawn the persistent sub-agent an env-declaring agent owns.
 
@@ -147,6 +176,12 @@ async def spawn_owned_subagent(
     try:
         factory = _make_parent_env_companion_factory(
             env_service, parent_env_id, adhoc_providers, extra_external_tools,
+            workspace_ctx={
+                "sub_agent_id": sub_agent_id,
+                "working_dir": working_dir,
+                "storage_path": storage_path,
+                "sandbox": sandbox,
+            },
         )
         await manager.spawn(
             "owned",

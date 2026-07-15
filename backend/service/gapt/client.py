@@ -214,13 +214,25 @@ class GaptClient:
         *,
         name: str,
         selections: Optional[list] = None,
+        kind: Optional[str] = None,
+        worktree_path: Optional[str] = None,
     ) -> Any:
         body: dict[str, Any] = {"name": name}
         if selections is not None:
             body["selections"] = selections
+        if kind:
+            # Workspace generalization — 'bind' wraps a caller-owned host
+            # dir (requires worktree_path under GAPT_BIND_WORKSPACE_ROOTS).
+            body["kind"] = kind
+        if worktree_path:
+            body["worktree_path"] = worktree_path
         return await self.post(
             f"/_gapt/api/projects/{project_id}/workspaces", json=body
         )
+
+    async def delete_workspace(self, workspace_id: str) -> Any:
+        """Archive + tear down a workspace (bind dirs are never removed)."""
+        return await self.delete(f"/_gapt/api/workspaces/{workspace_id}")
 
     async def get_workspace(self, workspace_id: str) -> Any:
         return await self.get(f"/_gapt/api/workspaces/{workspace_id}")

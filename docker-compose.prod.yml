@@ -135,6 +135,11 @@ services:
       # Opt-in: run agent sessions inside GAPT workspace sandboxes (sysbox).
       # Default off → host execution unchanged. Flip to 1 to enable.
       - GENY_GAPT_WORKSPACES=${GENY_GAPT_WORKSPACES:-0}
+      # One session = one GAPT bind workspace: the HOST path of the
+      # agent-sessions volume (…/docker/volumes/<proj>_geny-agent-sessions-…/_data).
+      # Set it (usually in .env) to unify each session's workspace with its
+      # sandbox /workspace; empty keeps the legacy split-filesystem worktree.
+      - GENY_AGENT_SESSIONS_HOST_DIR=${GENY_AGENT_SESSIONS_HOST_DIR:-}
       - GENY_GAPT_PROJECT_SLUG=${GENY_GAPT_PROJECT_SLUG:-geny}
       # Sandbox Tool Packs self-service: an agent that builds+saves a pack has it
       # auto-enabled + auto-opted-into its OWN env, so its future sessions auto-

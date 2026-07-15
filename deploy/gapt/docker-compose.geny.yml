@@ -37,6 +37,16 @@ services:
       # Workspace containers (gapt-ws-<id>, what Geny execs into) on sysbox
       # for kernel-level isolation. Empty = runc.
       GAPT_WORKSPACE_RUNTIME: ${GAPT_WORKSPACE_RUNTIME:-}
+      # One Geny session = one GAPT 'bind' workspace: allow bind workspaces
+      # rooted at the Geny agent-sessions volume (host path). Empty = bind
+      # workspaces disabled (worktree-only, the OSS default).
+      GAPT_BIND_WORKSPACE_ROOTS: ${GENY_AGENT_SESSIONS_HOST_DIR:-}
+    volumes:
+      # The server validates bind dirs with an isdir() check and serves the
+      # workspace file APIs from them — mount the sessions volume at the
+      # SAME path the host sees so both the check and `docker run -v`
+      # agree. The noop default keeps deployments without the env valid.
+      - ${GENY_AGENT_SESSIONS_HOST_DIR:-/var/empty}:${GENY_AGENT_SESSIONS_HOST_DIR:-/var/empty}:rw
     networks:
       default: {}
       gapt-net:

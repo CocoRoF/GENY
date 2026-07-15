@@ -157,8 +157,14 @@ async def test_sandbox_handle_ensure_forces_container_live() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/login"):
             return httpx.Response(204, headers={"set-cookie": "gapt_session=s"})
-        # ensure() runs a trivial command — the path that triggers GAPT's
-        # WorkspaceSandbox.ensure() (docker run), not the no-op /start.
+        # Self-healing ladder (2026-07-15): with docker unavailable in the
+        # test env, ensure() walks API /start first (authoritative
+        # recreate)…
+        if request.url.path == "/_gapt/api/workspaces/WS9/start":
+            calls.append("start")
+            return httpx.Response(404)
+        # …then falls back to run_command, which triggers GAPT's
+        # WorkspaceSandbox.ensure() (docker run).
         if request.url.path == "/_gapt/api/workspaces/WS9/tests/run":
             calls.append("run_command")
             return httpx.Response(200, text='data: {"type":"log","line":"ok"}\n')
@@ -167,5 +173,84 @@ async def test_sandbox_handle_ensure_forces_container_live() -> None:
     c = _client(handler)
     handle = GaptSandboxHandle(c, "WS9")
     await handle.ensure()
-    assert calls == ["run_command"]
+    assert calls == ["start", "run_command"]
+    await c.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_handle_path_mapping() -> None:
+    """Workspace-unified sandboxes: backend + host session-workspace paths
+    translate to the container's /workspace (executor mapping protocol)."""
+    c = _client(lambda r: httpx.Response(404))
+    h = GaptSandboxHandle(
+        c,
+        "WS1",
+        backend_workspace_dir="/data/geny_agent_sessions/abc/workspace",
+        bind_host_dir="/host/volumes/sessions/_data/abc/workspace",
+    )
+    assert h.container_workdir == "/workspace"
+    assert (
+        h.map_path("/data/geny_agent_sessions/abc/workspace/uploads/a.pptx")
+        == "/workspace/uploads/a.pptx"
+    )
+    assert h.map_path("/host/volumes/sessions/_data/abc/workspace") == "/workspace"
+    # Session ROOT (not under workspace/) is unmappable → executor degrades
+    # the exec cwd to /workspace instead of a dead host path.
+    assert h.map_path("/data/geny_agent_sessions/abc") is None
+    # Legacy handle (no roots): everything unmappable.
+    legacy = GaptSandboxHandle(c, "WS2")
+    assert legacy.map_path("/data/geny_agent_sessions/abc/workspace") is None
+    await c.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ensure_workspace_creates_bind_kind() -> None:
+    """bind_host_dir → create_workspace carries kind='bind' + worktree_path,
+    and a legacy worktree workspace under the same name is archived first."""
+    posted: list[dict] = []
+    deleted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/login"):
+            return httpx.Response(204, headers={"set-cookie": "gapt_session=s"})
+        if path == "/_gapt/api/projects" and request.method == "GET":
+            return httpx.Response(
+                200, json=[{"id": "P1", "slug": "geny", "archived_at": None}]
+            )
+        if path == "/_gapt/api/projects/P1/workspaces" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[{"id": "W_OLD", "name": "sess-1", "status": "stopped",
+                       "kind": "worktree"}],
+            )
+        if path == "/_gapt/api/workspaces/W_OLD" and request.method == "DELETE":
+            deleted.append("W_OLD")
+            return httpx.Response(200, json={"id": "W_OLD", "status": "archived"})
+        if path == "/_gapt/api/projects/P1/workspaces" and request.method == "POST":
+            import json as _json
+
+            body = _json.loads(request.content.decode())
+            posted.append(body)
+            return httpx.Response(
+                200, json={"id": "W_NEW", "name": body["name"], "status": "running",
+                           "kind": body.get("kind", "worktree")}
+            )
+        return httpx.Response(404)
+
+    c = _client(handler)
+    from service.gapt.provider import GaptWorkspaceProvider
+
+    prov = GaptWorkspaceProvider(c)
+    handle = await prov.ensure_workspace(
+        project_slug="geny",
+        workspace_name="sess-1",
+        bind_host_dir="/host/vol/sess-1/workspace",
+        backend_workspace_dir="/data/geny_agent_sessions/sess-1/workspace",
+    )
+    assert deleted == ["W_OLD"]  # legacy worktree ws archived (migration)
+    assert posted and posted[0]["kind"] == "bind"
+    assert posted[0]["worktree_path"] == "/host/vol/sess-1/workspace"
+    assert handle.workspace_id == "W_NEW"
+    assert handle.map_path("/data/geny_agent_sessions/sess-1/workspace/x") == "/workspace/x"
     await c.aclose()

@@ -915,14 +915,37 @@ class AgentSessionManager:
 
                 _gc = get_gapt_client()
                 if _gc.configured:
+                    # One session = one GAPT workspace = ONE filesystem.
+                    # When the deployment exports the sessions volume's HOST
+                    # path (GENY_AGENT_SESSIONS_HOST_DIR), the workspace is
+                    # created as GAPT kind='bind': its /workspace mounts the
+                    # session's own workspace dir, so sandboxed Bash/CLI and
+                    # host-side tools (Doc*, uploads, storage tab) see the
+                    # SAME files. Without the env we fall back to the legacy
+                    # GAPT-owned worktree (split filesystems).
+                    from service.utils.platform import DEFAULT_STORAGE_ROOT as _ROOT
+
+                    _host_root = os.getenv(
+                        "GENY_AGENT_SESSIONS_HOST_DIR", ""
+                    ).strip().rstrip("/")
+                    _backend_ws = os.path.join(str(_ROOT), session_id, "workspace")
+                    _bind_host = (
+                        f"{_host_root}/{session_id}/workspace" if _host_root else None
+                    )
+                    if _bind_host:
+                        # The dir must exist before GAPT validates/mounts it.
+                        os.makedirs(_backend_ws, exist_ok=True)
                     gapt_sandbox = await GaptWorkspaceProvider(_gc).ensure_workspace(
                         project_slug=os.getenv("GENY_GAPT_PROJECT_SLUG", "geny"),
                         workspace_name=session_id,
+                        bind_host_dir=_bind_host,
+                        backend_workspace_dir=(_backend_ws if _bind_host else None),
                     )
                     logger.info(
-                        "[%s] bound to GAPT workspace %s (tools sandboxed; CLI on host)",
+                        "[%s] bound to GAPT workspace %s (%s; tools sandboxed; CLI on host)",
                         session_id,
                         gapt_sandbox.container_name,
+                        "bind: unified session filesystem" if _bind_host else "legacy worktree",
                     )
             except Exception:  # noqa: BLE001
                 logger.warning(
@@ -1547,6 +1570,10 @@ class AgentSessionManager:
         ):
             try:
                 from service.vtuber.sub_agent_bridge import spawn_owned_subagent
+                # One session = one workspace, companion included: hand the
+                # OWNER's sandbox handle + workspace paths to the companion
+                # so delegated work runs in the same unified filesystem.
+                _owner_storage = str(getattr(agent, "storage_path", "") or "")
                 sa_id = await spawn_owned_subagent(
                     _vt_app_state, session_id,
                     parent_env_id=env_id,
@@ -1555,6 +1582,9 @@ class AgentSessionManager:
                     credentials=credentials, parent_provider=primary_provider,
                     adhoc_providers=adhoc_providers,
                     extra_external_tools=computer_use_tools,
+                    sandbox=gapt_sandbox,
+                    working_dir=_owner_storage,
+                    storage_path=_owner_storage,
                 )
                 agent._executor_sub_agent_id = sa_id
                 self._store.update(session_id, {"executor_sub_agent_id": sa_id})
@@ -2152,6 +2182,31 @@ class AgentSessionManager:
 
             # Soft-delete in persistent store (keeps metadata for restore)
             self._store.soft_delete(session_id)
+            # Archive the session's GAPT workspace (resource hygiene + keeps
+            # the GAPT view clean). Bind workspaces never delete the session
+            # dir, so a restore simply re-provisions under the same name.
+            try:
+                from service.gapt import GaptWorkspaceProvider, get_gapt_client
+
+                _gc = get_gapt_client()
+                if _gc.configured:
+                    _prov = GaptWorkspaceProvider(_gc)
+                    _proj = await _prov._find_project_by_slug(
+                        os.getenv("GENY_GAPT_PROJECT_SLUG", "geny")
+                    )
+                    if _proj:
+                        _ws = await _prov._find_workspace_by_name(
+                            _proj.get("id") or "", session_id
+                        )
+                        if _ws and _ws.get("id"):
+                            await _gc.delete_workspace(_ws["id"])
+                            logger.info(
+                                f"[{session_id}] gapt workspace archived with delete"
+                            )
+            except Exception:  # noqa: BLE001 — never block session delete
+                logger.debug(
+                    f"[{session_id}] gapt workspace archive failed", exc_info=True
+                )
 
             # Re-open the teardown gate: the record is soft-deleted so no turn
             # can resolve it now, but a later restore reuses this id and must
@@ -2411,6 +2466,25 @@ class AgentSessionManager:
                     self._store.register(session_id, info.model_dump(mode="json"))
                 except Exception:
                     pass  # non-critical
+                # Resource efficiency: an evicted (sleeping) session's GAPT
+                # workspace container sleeps too. Best-effort — the handle's
+                # ensure() ladder revives it on the next tool call after
+                # rehydrate.
+                _sb = getattr(cur, "_gapt_sandbox", None)
+                if _sb is not None and getattr(_sb, "workspace_id", None):
+                    try:
+                        from service.gapt import get_gapt_client
+
+                        await get_gapt_client().stop_workspace(_sb.workspace_id)
+                        logger.info(
+                            f"[{session_id}] gapt workspace stopped with evict "
+                            f"({_sb.workspace_id})"
+                        )
+                    except Exception:  # noqa: BLE001 — never block eviction
+                        logger.debug(
+                            f"[{session_id}] gapt workspace stop failed",
+                            exc_info=True,
+                        )
                 await self._lifecycle_bus.emit(
                     LifecycleEvent.SESSION_IDLE, session_id, reason="evicted",
                 )
