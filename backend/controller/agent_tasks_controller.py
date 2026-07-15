@@ -159,13 +159,24 @@ async def list_tasks(
         except ValueError:
             raise HTTPException(400, f"unknown status: {status}")
 
-    # Session scoping (GAP E): the registry is global, so fetch a wide
-    # window then keep only this session's (and its linked peer's) tasks
-    # before applying the caller's limit.
+    # Session scoping (GAP E): the registry is global. Prefer the
+    # SQL-pushdown path (PostgresTaskRegistryStore.list_for_sessions) —
+    # the legacy "global newest-200 window, then scope in Python" broke
+    # the moment foreign rows dominated the window: 'All statuses' came
+    # back empty while narrower filters (e.g. Done) still found matches
+    # (2026-07-15 — 20k failed session_message rows swamped the window).
     scope = _session_scope(session_id, include_linked)
-    rows = registry.list_filtered(
-        TaskFilter(status=parsed_status, kind=kind, limit=200),
-    )
+    lister = getattr(registry, "list_for_sessions", None)
+    if callable(lister):
+        rows = lister(
+            sorted(scope), status=parsed_status, kind=kind, limit=max(limit * 3, 60)
+        )
+    else:
+        # In-memory registries stay small — a wide window is safe there.
+        rows = registry.list_filtered(
+            TaskFilter(status=parsed_status, kind=kind, limit=1000),
+        )
+    # Exact membership re-check (the SQL path uses a substring probe).
     scoped = [r for r in rows if _row_session_id(r) in scope][:limit]
     return TaskListResponse(
         tasks=[TaskRecordResponse(**_serialize(r)) for r in scoped],

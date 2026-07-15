@@ -276,6 +276,57 @@ class PostgresTaskRegistryStore(TaskRegistry):
         rows = self._execute(query, tuple(params))
         return [_row_to_record(r) for r in (rows or [])]
 
+    def list_for_sessions(
+        self,
+        session_ids: List[str],
+        *,
+        status: Optional[Any] = None,
+        kind: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[TaskRecord]:
+        """Session-scoped listing with the scope pushed into SQL.
+
+        The registry is global and the session id lives inside the JSON
+        ``payload`` (``_session_id``, stamped at create). The controller
+        used to fetch a global newest-N window and scope in Python — with
+        tens of thousands of foreign rows (e.g. failed session_message
+        spew) the window contained ZERO rows for the session and the
+        "All statuses" view came back empty while narrower status filters
+        still found matches. Pushing the scope into the query makes every
+        filter combination see the same complete set.
+
+        Matching uses a substring probe on the raw payload text (robust
+        against non-JSON payloads; no jsonb cast that could raise) — the
+        caller re-verifies exact membership via the parsed payload.
+        """
+        ids = [str(i) for i in session_ids if i]
+        if not ids:
+            return []
+        where: List[str] = []
+        params: List[Any] = []
+        probes: List[str] = []
+        for sid in ids:
+            # json.dumps writes '"_session_id": "<sid>"'; tolerate both
+            # spaced and compact separators.
+            probes.append("payload LIKE %s")
+            params.append(f'%"_session_id": "{sid}"%')
+            probes.append("payload LIKE %s")
+            params.append(f'%"_session_id":"{sid}"%')
+        where.append("(" + " OR ".join(probes) + ")")
+        if status is not None:
+            where.append("status = %s")
+            params.append(getattr(status, "value", str(status)))
+        if kind is not None:
+            where.append("kind = %s")
+            params.append(kind)
+        clause = "WHERE " + " AND ".join(where)
+        query = (
+            f"SELECT * FROM {_TASKS_TABLE} {clause} "
+            f"ORDER BY created_at DESC LIMIT {int(limit)}"
+        )
+        rows = self._execute(query, tuple(params))
+        return [_row_to_record(r) for r in (rows or [])]
+
     # ── Output streaming ─────────────────────────────────────────────
 
     async def append_output(self, task_id: str, chunk: bytes) -> None:
