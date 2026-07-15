@@ -31,6 +31,38 @@ _MEMORY_STAGE_ORDERS = (2, 18, 19, 20)  # context / memory / summarize / persist
 _AGENT_STAGE_ORDER = 12
 
 
+def _companion_attach_kwargs(workspace_ctx: dict) -> dict:
+    """attach_runtime kwargs for the companion — mirrors the OWNER's contract.
+
+    INVARIANT (2026-07-15 auth regression): a companion must NEVER
+    containerize its CLI. The executor default (containerize_cli=True)
+    wraps a resolved claude_code_cli client in a ContainerCLIRunner the
+    moment a sandbox is attached — the CLI then runs inside the gapt-ws
+    container with its own baked binary and WITHOUT the auth Geny
+    configured (host OAuth / in_modal_login), failing every turn with
+    authentication_failed while the owner keeps working. The owner
+    attaches sandbox + containerize_cli=False (agent_session ~2951);
+    the companion does exactly the same: tools run IN the sandbox
+    (unified workspace), the CLI runs on the host with Geny's auth.
+    """
+    from geny_executor.tools.base import ToolContext
+
+    kwargs: dict = {
+        "tool_context": ToolContext(
+            session_id=workspace_ctx.get("sub_agent_id") or "",
+            working_dir=workspace_ctx.get("working_dir") or "",
+            storage_path=workspace_ctx.get("storage_path") or "",
+            extras=dict(workspace_ctx.get("extras") or {}),
+        ),
+        # Unconditional: even a future code path that attaches a sandbox
+        # later must not flip the CLI into a container implicitly.
+        "containerize_cli": False,
+    }
+    if workspace_ctx.get("sandbox") is not None:
+        kwargs["sandbox"] = workspace_ctx["sandbox"]
+    return kwargs
+
+
 def _make_parent_env_companion_factory(
     env_service: Any,
     parent_env_id: str,
@@ -124,20 +156,10 @@ def _make_parent_env_companion_factory(
         # delegation ran 20 min partly because Bash had no valid cwd).
         if workspace_ctx is not None:
             try:
-                from geny_executor.tools.base import ToolContext
-
-                pipeline.attach_runtime(
-                    tool_context=ToolContext(
-                        session_id=workspace_ctx.get("sub_agent_id") or "",
-                        working_dir=workspace_ctx.get("working_dir") or "",
-                        storage_path=workspace_ctx.get("storage_path") or "",
-                        extras=dict(workspace_ctx.get("extras") or {}),
-                    ),
-                    **(
-                        {"sandbox": workspace_ctx["sandbox"]}
-                        if workspace_ctx.get("sandbox") is not None
-                        else {}
-                    ),
+                pipeline.attach_runtime(**_companion_attach_kwargs(workspace_ctx))
+                logger.info(
+                    "companion runtime: tools %s; CLI on host (containerize_cli=False)",
+                    "sandboxed" if workspace_ctx.get("sandbox") is not None else "on host",
                 )
             except Exception:  # noqa: BLE001 — never fail companion build
                 logger.warning("companion: workspace ctx attach failed", exc_info=True)
