@@ -184,6 +184,17 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
+    # 8) Atlassian provisioned (enabled + site URL + API token) → unlocks the
+    # native jira_* / confluence_* tools.
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.tools.atlassian_config import AtlassianConfig
+
+        if get_config_manager().load_config(AtlassianConfig).is_connected():
+            satisfied.add("feature:atlassian_connected")
+    except Exception:  # noqa: BLE001
+        pass
+
     return satisfied
 
 

@@ -145,4 +145,38 @@ TOOL_DESCRIPTIONS_KO: dict[str, str] = {
         "뉴스 기사를 검색합니다. 일반 웹 검색과 달리 시간 가중치가 "
         "걸려 최근 기사가 우선합니다."
     ),
+    # ── Atlassian tools (executor built-in atlassian family) ──
+    "jira_search": (
+        "JQL로 Jira 이슈를 검색합니다. 키·요약·상태·유형·우선순위·"
+        "담당자를 반환하며, 상세는 jira_issue로 조회합니다."
+    ),
+    "jira_issue": (
+        "Jira 이슈 하나를 상세 조회합니다. 필드·설명·라벨과 최근 "
+        "코멘트까지 반환합니다."
+    ),
+    "jira_create": (
+        "Jira 이슈를 생성합니다. 프로젝트 키, 이슈 유형, 요약이 필수이며 "
+        "설명과 추가 필드를 지정할 수 있습니다."
+    ),
+    "jira_update": (
+        "Jira 이슈의 필드(요약·설명·라벨 등)를 수정합니다. 상태 이동은 "
+        "jira_transition, 코멘트는 jira_comment를 사용하세요."
+    ),
+    "jira_comment": "Jira 이슈에 코멘트를 답니다.",
+    "jira_transition": (
+        "Jira 이슈의 워크플로 상태를 이동합니다. 대상을 생략하면 가능한 "
+        "전환 목록을 보여주고, 이름/ID를 주면 적용합니다."
+    ),
+    "confluence_search": (
+        "Confluence 페이지를 검색합니다. CQL 또는 일반 텍스트(+스페이스 "
+        "필터)로 검색하고, 내용은 confluence_page로 읽습니다."
+    ),
+    "confluence_page": (
+        "Confluence 페이지를 읽습니다. 제목·스페이스·버전과 본문을 "
+        "읽기 좋은 텍스트(또는 raw XHTML)로 반환합니다."
+    ),
+    "confluence_write": (
+        "Confluence 페이지를 생성하거나 수정합니다. 수정 시 현재 버전을 "
+        "자동으로 올려서 저장합니다."
+    ),
 }

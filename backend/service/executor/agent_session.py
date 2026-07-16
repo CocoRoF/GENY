@@ -2711,6 +2711,22 @@ class AgentSession:
         except Exception:  # noqa: BLE001 — never block session build on this
             pass
 
+        # Atlassian credentials for the native jira_* / confluence_* tools —
+        # site URL + API token from the global AtlassianConfig. Gated out via
+        # feature:atlassian_connected unless the config is complete, so
+        # injecting here is harmless when Atlassian is unused.
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.tools.atlassian_config import (
+                AtlassianConfig,
+            )
+
+            _atl_cfg = get_config_manager().load_config(AtlassianConfig)
+            if _atl_cfg.is_connected():
+                _tool_extras["atlassian"] = _atl_cfg.executor_extras()
+        except Exception:  # noqa: BLE001 — never block session build on this
+            pass
+
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 
