@@ -56,6 +56,28 @@ def test_executor_extras_shape_and_trimming():
     }
 
 
+def test_none_fields_from_auto_form_do_not_break_extras():
+    # The settings auto-form saves untouched optional fields as None (not "").
+    # Regression: prod 2026-07-16 — confluence_base_url=None made
+    # executor_extras() raise inside agent_session's swallowed try, so the
+    # tools were registered (gate passed) but the credential bag was never
+    # injected → every call failed "not connected".
+    cfg = AtlassianConfig(
+        base_url="https://acme.atlassian.net",
+        email=None,  # type: ignore[arg-type]
+        api_token="tok",
+        confluence_base_url=None,  # type: ignore[arg-type]
+    )
+    assert cfg.is_connected() is True
+    assert cfg.executor_extras() == {
+        "base_url": "https://acme.atlassian.net",
+        "email": "",
+        "api_token": "tok",
+        "confluence_base_url": "",
+    }
+    assert AtlassianConfig(base_url=None, api_token=None).is_connected() is False  # type: ignore[arg-type]
+
+
 def test_registered_in_tools_category():
     assert AtlassianConfig.get_config_name() == "atlassian"
     assert AtlassianConfig.get_category() == "tools"

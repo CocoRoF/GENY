@@ -28,6 +28,12 @@ from typing import Any, Dict, List
 from service.config.base import BaseConfig, ConfigField, FieldType, register_config
 
 
+def _s(value: Any) -> str:
+    """Coerce a field to a trimmed string — the settings auto-form saves
+    untouched optional fields as ``None`` (not ``""``)."""
+    return str(value or "").strip()
+
+
 @register_config
 @dataclass
 class AtlassianConfig(BaseConfig):
@@ -48,17 +54,15 @@ class AtlassianConfig(BaseConfig):
 
     def is_connected(self) -> bool:
         """Gate condition for ``feature:atlassian_connected``."""
-        return bool(
-            self.enabled and self.base_url.strip() and self.api_token.strip()
-        )
+        return bool(self.enabled and _s(self.base_url) and _s(self.api_token))
 
     def executor_extras(self) -> Dict[str, str]:
         """The ``ToolContext.extras['atlassian']`` credential bag."""
         return {
-            "base_url": self.base_url.strip(),
-            "email": self.email.strip(),
-            "api_token": self.api_token.strip(),
-            "confluence_base_url": self.confluence_base_url.strip(),
+            "base_url": _s(self.base_url),
+            "email": _s(self.email),
+            "api_token": _s(self.api_token),
+            "confluence_base_url": _s(self.confluence_base_url),
         }
 
     @classmethod
