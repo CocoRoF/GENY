@@ -1349,6 +1349,23 @@ class AgentSessionManager:
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"  MCP prompts bridge failed: {exc}", exc_info=True)
 
+        # Connector local MCP → first-class tools. If the desktop connector is
+        # already attached (catalog held on its ConnectorConnection), register
+        # mcp_<server>_<tool> into the fresh pipeline's registry now; later
+        # catalog updates arrive via the /ws/connector handler.
+        try:
+            from service.executor.connector_mcp_tools import sync_from_registry
+
+            _mcp_counts = sync_from_registry(
+                session_id, registry=getattr(prebuilt_pipeline, "_tool_registry", None)
+            )
+            if _mcp_counts.get("registered"):
+                logger.info(
+                    f"  connector local MCP: {_mcp_counts['registered']} first-class tool(s) registered"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"  connector MCP sync failed: {exc}", exc_info=True)
+
         # Role-gate the creature-state provider wiring. GameConfig
         # (``vtuber_only=True`` by default) means only ``VTUBER`` role
         # sessions get the provider — plain Worker / sub-Worker keep

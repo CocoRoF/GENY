@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import genyIcon from './assets/geny_character.png'
-import type { OverlayTuning, ComputerUseConfig, ConsentMode, MCPServerConfig } from '../../preload/index'
+import type { OverlayTuning, ComputerUseConfig, ConsentMode, MCPServerConfig, MCPServerStatus } from '../../preload/index'
 import { makeT, type Lang } from './i18n'
 
 // Sentinels marking spans that should render as <b> inside an interpolated i18n
@@ -322,33 +322,99 @@ export function ControlApp() {
 
   // ── Local MCP servers (Phase 3) ──
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([])
+  const [mcpOn, setMcpOn] = useState(true)
+  const [mcpStatus, setMcpStatus] = useState<Record<string, MCPServerStatus>>({})
+  const [mcpEditing, setMcpEditing] = useState<string | null>(null)
   const [mcpForm, setMcpForm] = useState<MCPServerConfig>({ name: '', transport: 'stdio', command: '' })
-  const [mcpTest, setMcpTest] = useState<Record<string, string>>({})
+  const [mcpEnvText, setMcpEnvText] = useState('')
+  const [mcpHeadersText, setMcpHeadersText] = useState('')
+  const [mcpFormTest, setMcpFormTest] = useState('')
   useEffect(() => {
-    window.connector?.mcp?.listServers?.().then(setMcpServers).catch(() => setMcpServers([]))
+    const m = window.connector?.mcp
+    if (!m) return
+    m.listServers?.().then(setMcpServers).catch(() => setMcpServers([]))
+    m.getEnabled?.().then(setMcpOn).catch(() => {})
+    const applyStatus = (rows: MCPServerStatus[]) => {
+      const map: Record<string, MCPServerStatus> = {}
+      for (const r of rows || []) map[r.name] = r
+      setMcpStatus(map)
+    }
+    m.status?.().then(applyStatus).catch(() => {})
+    const off = m.onStatus?.(applyStatus)
+    return () => { try { off?.() } catch { /* ignore */ } }
   }, [])
-  const addMcpServer = async () => {
-    const name = mcpForm.name.trim()
-    if (!name) return
-    const cfg: MCPServerConfig = { ...mcpForm, name, enabled: true }
-    const list = (await window.connector?.mcp?.addServer(cfg)) ?? []
-    setMcpServers(list)
+  const kvToText = (o?: Record<string, string>, sep = '=') =>
+    Object.entries(o || {}).map(([k, v]) => `${k}${sep}${v}`).join('\n')
+  const textToKv = (text: string, sep: '=' | ':'): Record<string, string> | undefined => {
+    const out: Record<string, string> = {}
+    for (const line of text.split('\n')) {
+      const l = line.trim()
+      if (!l) continue
+      const i = l.indexOf(sep)
+      if (i <= 0) continue
+      out[l.slice(0, i).trim()] = l.slice(i + 1).trim()
+    }
+    return Object.keys(out).length ? out : undefined
+  }
+  const mcpFormCfg = (): MCPServerConfig => {
+    const cfg: MCPServerConfig = { ...mcpForm, name: mcpForm.name.trim() }
+    if (cfg.transport === 'stdio') {
+      cfg.env = textToKv(mcpEnvText, '=')
+      delete cfg.url; delete cfg.headers
+    } else {
+      cfg.headers = textToKv(mcpHeadersText, ':')
+      delete cfg.command; delete cfg.env
+    }
+    return cfg
+  }
+  const resetMcpForm = () => {
+    setMcpEditing(null)
     setMcpForm({ name: '', transport: 'stdio', command: '' })
+    setMcpEnvText(''); setMcpHeadersText(''); setMcpFormTest('')
+  }
+  const startEditMcp = (s: MCPServerConfig) => {
+    setMcpEditing(s.name)
+    setMcpForm({ ...s })
+    setMcpEnvText(kvToText(s.env, '='))
+    setMcpHeadersText(kvToText(s.headers, ': '))
+    setMcpFormTest('')
+  }
+  const saveMcpServer = async () => {
+    const cfg = mcpFormCfg()
+    if (!cfg.name) return
+    if (cfg.enabled === undefined) cfg.enabled = true
+    const list = mcpEditing
+      ? (await window.connector?.mcp?.updateServer?.(mcpEditing, cfg)) ?? (await window.connector?.mcp?.addServer(cfg)) ?? []
+      : (await window.connector?.mcp?.addServer(cfg)) ?? []
+    setMcpServers(list)
+    resetMcpForm()
   }
   const removeMcpServer = async (name: string) => {
     const list = (await window.connector?.mcp?.removeServer(name)) ?? []
     setMcpServers(list)
+    if (mcpEditing === name) resetMcpForm()
   }
-  const testMcpServer = async (cfg: MCPServerConfig) => {
-    setMcpTest((p) => ({ ...p, [cfg.name]: t('mcp.testing') }))
-    const r = await window.connector?.mcp?.testServer(cfg)
-    setMcpTest((p) => ({
-      ...p,
-      [cfg.name]: r?.ok
-        ? t('mcp.testOk', { count: r.tools?.length ?? 0 })
-        : t('mcp.testFail', { error: r?.error ?? t('mcp.testFailUnknown') }),
-    }))
+  const toggleMcpServer = async (s: MCPServerConfig, enabled: boolean) => {
+    const next = { ...s, enabled }
+    const list = (await window.connector?.mcp?.updateServer?.(s.name, next)) ?? (await window.connector?.mcp?.addServer(next)) ?? []
+    setMcpServers(list)
   }
+  const toggleMcpMaster = async (enabled: boolean) => {
+    setMcpOn(enabled)
+    await window.connector?.mcp?.setEnabled?.(enabled)
+  }
+  const testMcpForm = async () => {
+    setMcpFormTest(t('mcp.testing'))
+    const r = await window.connector?.mcp?.testServer(mcpFormCfg())
+    setMcpFormTest(r?.ok
+      ? t('mcp.testOkNames', {
+          count: r.tools?.length ?? 0,
+          names: (r.tools || []).slice(0, 8).map((x) => x.name).join(', '),
+        })
+      : t('mcp.testFail', { error: r?.error ?? t('mcp.testFailUnknown') }))
+  }
+  const mcpConnectedCount = Object.values(mcpStatus).filter((s) => s.connected).length
+  const mcpToolCount = Object.values(mcpStatus).reduce((n, s) => n + (s.connected ? s.toolCount : 0), 0)
 
   // Track the OS theme so 'system' resolves live.
   useEffect(() => {
@@ -725,31 +791,61 @@ export function ControlApp() {
               <p className="gy-hint" style={{ margin: '0 0 12px' }}>
                 {t('mcp.serversHint')}
               </p>
+              <ToggleLine label={t('mcp.master')} checked={mcpOn} onChange={toggleMcpMaster} />
+              {mcpOn ? (
+                <p className="gy-hint" style={{ margin: '4px 0 12px' }}>
+                  {t('mcp.summary', { servers: mcpConnectedCount, tools: mcpToolCount })}
+                </p>
+              ) : (
+                <p className="gy-hint" style={{ margin: '4px 0 12px' }}>{t('mcp.masterOffHint')}</p>
+              )}
 
               {mcpServers.length === 0 && (
                 <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('mcp.empty')}</p>
               )}
-              {mcpServers.map((s) => (
-                <div key={s.name} className="gy-card" style={{ marginBottom: 8, padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600 }}>{s.name} <span className="gy-hint">· {s.transport}</span></div>
-                      <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {s.transport === 'stdio' ? s.command : s.url}
+              {mcpServers.map((s) => {
+                const st = mcpStatus[s.name]
+                const on = s.enabled !== false
+                const dotColor = !on ? 'var(--gy-muted, #888)' : st?.connected ? '#2fbf71' : st?.error ? '#e5534b' : 'var(--gy-muted, #888)'
+                const stateText = !on ? t('mcp.rowDisabled') : st?.connected ? t('mcp.rowConnected') : st?.error ? st.error : t('mcp.rowIdle')
+                return (
+                  <div key={s.name} className="gy-card" style={{ marginBottom: 8, padding: '10px 12px', opacity: on ? 1 : 0.55 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span title={stateText} style={{ width: 8, height: 8, borderRadius: 4, background: dotColor, flexShrink: 0 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                          <span className="gy-hint">· {s.transport}</span>
+                          {on && st?.connected && <span className="gy-hint">· {t('mcp.rowTools', { count: st.toolCount })}</span>}
+                        </div>
+                        <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {s.transport === 'stdio' ? s.command : s.url}
+                        </div>
+                        {on && st?.error && !st.connected && (
+                          <div className="gy-hint" style={{ marginTop: 4, color: '#e5534b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={st.error}>
+                            {st.error}
+                          </div>
+                        )}
                       </div>
-                      {mcpTest[s.name] && <div className="gy-hint" style={{ marginTop: 4 }}>{mcpTest[s.name]}</div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => testMcpServer(s)}>{t('mcp.test')}</button>
-                      <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={() => removeMcpServer(s.name)}>{t('mcp.remove')}</button>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+                        <label className="gy-switch" title={t('mcp.master')}>
+                          <input type="checkbox" checked={on} onChange={(e) => toggleMcpServer(s, e.target.checked)} />
+                          <span className="track" />
+                          <span className="thumb" />
+                        </label>
+                        <button className="gy-btn gy-btn--ghost gy-btn--sm" onClick={() => startEditMcp(s)}>{t('mcp.edit')}</button>
+                        <button className="gy-btn gy-btn--danger gy-btn--sm" onClick={() => removeMcpServer(s.name)}>{t('mcp.remove')}</button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.plug} {t('mcp.addCard')}</div>
+              <div className="gy-card-h">
+                {I.plug} {mcpEditing ? t('mcp.editCard', { name: mcpEditing }) : t('mcp.addCard')}
+              </div>
               <input
                 className="gy-input" placeholder={t('mcp.namePlaceholder')} value={mcpForm.name}
                 onChange={(e) => setMcpForm((p) => ({ ...p, name: e.target.value }))}
@@ -763,24 +859,50 @@ export function ControlApp() {
               </div>
               <div style={{ height: 8 }} />
               {mcpForm.transport === 'stdio' ? (
-                <input
-                  className="gy-input" placeholder={t('mcp.commandPlaceholder')}
-                  value={mcpForm.command ?? ''}
-                  onChange={(e) => setMcpForm((p) => ({ ...p, command: e.target.value }))}
-                />
+                <>
+                  <input
+                    className="gy-input" placeholder={t('mcp.commandPlaceholder')}
+                    value={mcpForm.command ?? ''}
+                    onChange={(e) => setMcpForm((p) => ({ ...p, command: e.target.value }))}
+                  />
+                  <div style={{ height: 8 }} />
+                  <label className="gy-hint" style={{ display: 'block', marginBottom: 4 }}>{t('mcp.envLabel')}</label>
+                  <textarea
+                    className="gy-input" rows={2} placeholder={t('mcp.envPlaceholder')}
+                    value={mcpEnvText} onChange={(e) => setMcpEnvText(e.target.value)}
+                    style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                </>
               ) : (
-                <input
-                  className="gy-input" placeholder={t('mcp.urlPlaceholder')}
-                  value={mcpForm.url ?? ''}
-                  onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
-                />
+                <>
+                  <input
+                    className="gy-input" placeholder={t('mcp.urlPlaceholder')}
+                    value={mcpForm.url ?? ''}
+                    onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
+                  />
+                  <div style={{ height: 8 }} />
+                  <label className="gy-hint" style={{ display: 'block', marginBottom: 4 }}>{t('mcp.headersLabel')}</label>
+                  <textarea
+                    className="gy-input" rows={2} placeholder={t('mcp.headersPlaceholder')}
+                    value={mcpHeadersText} onChange={(e) => setMcpHeadersText(e.target.value)}
+                    style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                </>
               )}
               <div style={{ height: 10 }} />
-              <button className="gy-btn gy-btn--primary" onClick={addMcpServer} disabled={!mcpForm.name.trim()}>{t('mcp.add')}</button>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button className="gy-btn gy-btn--primary" onClick={saveMcpServer} disabled={!mcpForm.name.trim()}>
+                  {mcpEditing ? t('mcp.save') : t('mcp.add')}
+                </button>
+                <button className="gy-btn gy-btn--ghost" onClick={testMcpForm} disabled={!mcpForm.name.trim()}>{t('mcp.test')}</button>
+                {mcpEditing && (
+                  <button className="gy-btn gy-btn--ghost" onClick={resetMcpForm}>{t('mcp.cancel')}</button>
+                )}
+              </div>
+              {mcpFormTest && <p className="gy-hint" style={{ margin: '8px 0 0' }}>{mcpFormTest}</p>}
               <p className="gy-hint" style={{ margin: '10px 0 0' }}>
                 {markTokens(t('mcp.addHint', {
-                  list: `${CODE0}local_mcp_list${CODE1}`,
-                  call: `${CODE0}local_mcp_call${CODE1}`,
+                  name: `${CODE0}mcp_<server>_<tool>${CODE1}`,
                 }))}
               </p>
             </section>

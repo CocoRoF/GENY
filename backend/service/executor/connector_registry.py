@@ -26,6 +26,11 @@ class ConnectorConnection:
     def __init__(self, websocket: Any, accepted_capabilities: Any) -> None:
         self._ws = websocket
         self.accepted_capabilities = set(accepted_capabilities or [])
+        # Local MCP tool catalog advertised by the connector (hello.mcp_catalog
+        # / mcp_catalog frames): [{name, connected, error?, tools:[...]}].
+        # Consumed by service.executor.connector_mcp_tools for first-class
+        # tool registration.
+        self.mcp_catalog: list = []
         self._pending: Dict[str, "asyncio.Future[dict]"] = {}
         # Serialize sends — concurrent tool calls must not interleave frames on
         # one socket (concurrent receive lives only in the WS handler loop).

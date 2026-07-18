@@ -219,9 +219,29 @@ export interface ConnectorBridge {
     testServer(cfg: MCPServerConfig): Promise<{ ok: boolean; tools?: MCPToolSchema[]; error?: string }>
     /** Add/replace a server (persisted). Returns the new list. */
     addServer(cfg: MCPServerConfig): Promise<MCPServerConfig[]>
+    /** Edit a server (handles rename via originalName). Returns the new list. */
+    updateServer(originalName: string, cfg: MCPServerConfig): Promise<MCPServerConfig[]>
     /** Remove a server by name (persisted). Returns the new list. */
     removeServer(name: string): Promise<MCPServerConfig[]>
+    /** Local MCP master switch (default on). */
+    getEnabled(): Promise<boolean>
+    setEnabled(enabled: boolean): Promise<boolean>
+    /** Live status snapshot: connected/error/tool counts per server. */
+    status(): Promise<MCPServerStatus[]>
+    /** Deduped status push — fires on connect/disconnect/tool-list/config
+     *  changes. The overlay bridge re-advertises the catalog on this. */
+    onStatus(cb: (status: MCPServerStatus[]) => void): () => void
   }
+}
+
+export interface MCPServerStatus {
+  name: string
+  transport: 'stdio' | 'http'
+  enabled: boolean
+  connected: boolean
+  error?: string
+  toolCount: number
+  toolNames: string[]
 }
 
 export interface ActuationResult {
@@ -302,7 +322,16 @@ const api: ConnectorBridge = {
     callTool: (server, tool, args) => ipcRenderer.invoke('mcp:call-tool', server, tool, args),
     testServer: (cfg) => ipcRenderer.invoke('mcp:test-server', cfg),
     addServer: (cfg) => ipcRenderer.invoke('mcp:add-server', cfg),
+    updateServer: (originalName, cfg) => ipcRenderer.invoke('mcp:update-server', originalName, cfg),
     removeServer: (name) => ipcRenderer.invoke('mcp:remove-server', name),
+    getEnabled: () => ipcRenderer.invoke('mcp:get-enabled'),
+    setEnabled: (enabled) => ipcRenderer.invoke('mcp:set-enabled', enabled),
+    status: () => ipcRenderer.invoke('mcp:status'),
+    onStatus: (cb) => {
+      const h = (_e: unknown, status: MCPServerStatus[]) => cb(status)
+      ipcRenderer.on('mcp:status-event', h)
+      return () => ipcRenderer.removeListener('mcp:status-event', h)
+    },
   },
   hotkeys: {
     getPushToTalk: () => ipcRenderer.invoke('hotkey:get-ptt'),

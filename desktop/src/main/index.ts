@@ -98,6 +98,9 @@ interface ConnectorConfig {
   /** Local MCP servers the connector hosts + proxies to the Geny agent
    *  (local bridge Phase 3). Configured in settings → MCP. */
   mcpServers?: MCPServerConfig[]
+  /** Local MCP master switch — off hides every server from the agent without
+   *  deleting the configs. Default true. */
+  mcpEnabled?: boolean
 }
 interface WinBounds { x: number; y: number; width: number; height: number }
 /** Consent posture for an actuation capability group. */
@@ -1408,11 +1411,22 @@ function registerIpc(): void {
 
   // ── Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
   //    local MCP servers; the renderer bridge + server reach them via these. ──
+  const broadcastMcpStatus = (): void => {
+    let status: unknown = []
+    try { status = getMcpManager().status() } catch { /* SDK missing */ }
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send('mcp:status-event', status) } catch { /* window gone */ }
+    }
+  }
   ipcMain.handle('mcp:list-servers', () => loadConfig().mcpServers ?? [])
   ipcMain.handle('mcp:advertise', async () => {
-    try { return await getMcpManager().advertise() } catch (e) { return [{ name: '', connected: false, error: String((e as Error).message), tools: [] }] }
+    // Master off → advertise nothing (server unregisters the tools). A total
+    // failure is an EMPTY catalog, never a phantom server entry.
+    if (loadConfig().mcpEnabled === false) return []
+    try { return await getMcpManager().advertise() } catch { return [] }
   })
   ipcMain.handle('mcp:call-tool', async (_e, server: string, tool: string, args: unknown) => {
+    if (loadConfig().mcpEnabled === false) return { ok: false, error: 'local MCP is disabled in the connector settings' }
     try { return { ok: true, result: await getMcpManager().callTool(server, tool, args) } }
     catch (e) { return { ok: false, error: String((e as Error).message) } }
   })
@@ -1421,10 +1435,27 @@ function registerIpc(): void {
     const list = (loadConfig().mcpServers ?? []).filter((s) => s.name !== cfg.name)
     return (saveConfig({ mcpServers: [...list, cfg] }).mcpServers) ?? []
   })
+  // Edit in place; renaming replaces the original entry (originalName ≠ cfg.name).
+  ipcMain.handle('mcp:update-server', (_e, originalName: string, cfg: MCPServerConfig) => {
+    const list = (loadConfig().mcpServers ?? []).filter((s) => s.name !== originalName && s.name !== cfg.name)
+    return (saveConfig({ mcpServers: [...list, cfg] }).mcpServers) ?? []
+  })
   ipcMain.handle('mcp:remove-server', (_e, name: string) => {
     const list = (loadConfig().mcpServers ?? []).filter((s) => s.name !== name)
     return (saveConfig({ mcpServers: list }).mcpServers) ?? []
   })
+  ipcMain.handle('mcp:get-enabled', () => loadConfig().mcpEnabled !== false)
+  ipcMain.handle('mcp:set-enabled', (_e, enabled: boolean) => {
+    saveConfig({ mcpEnabled: !!enabled })
+    broadcastMcpStatus() // windows repaint + the bridge re-advertises
+    return !!enabled
+  })
+  ipcMain.handle('mcp:status', () => getMcpManager().status())
+  // Status push → every window (settings UI repaints; the overlay's
+  // ConnectorBridgeClient re-advertises the catalog to the backend).
+  try {
+    getMcpManager().onStatusChange(() => broadcastMcpStatus())
+  } catch { /* SDK missing */ }
 
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {

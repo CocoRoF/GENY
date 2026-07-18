@@ -49,6 +49,17 @@ interface ServerState {
   connecting?: Promise<void>
 }
 
+/** Live status row for the settings UI (and the catalog re-advertise push). */
+export interface MCPServerStatus {
+  name: string
+  transport: MCPTransport
+  enabled: boolean
+  connected: boolean
+  error?: string
+  toolCount: number
+  toolNames: string[]
+}
+
 // Quote-aware split of a command line into [command, ...args].
 function tokenize(cmd: string): string[] {
   const m = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []
@@ -83,6 +94,46 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
 
 export class MCPManager {
   private states = new Map<string, ServerState>()
+  private statusListeners = new Set<(status: MCPServerStatus[]) => void>()
+  private lastStatusJson = ''
+
+  /** Subscribe to deduped status snapshots (server connect/disconnect, tool
+   *  list changes, config edits). Returns an unsubscribe. Dedupe at the source
+   *  is what keeps the catalog re-advertise loop from thrashing: a failing
+   *  server emits its error once, not on every advertise retry. */
+  onStatusChange(cb: (status: MCPServerStatus[]) => void): () => void {
+    this.statusListeners.add(cb)
+    return () => this.statusListeners.delete(cb)
+  }
+
+  /** Current status snapshot — no connecting, purely observed state. */
+  status(): MCPServerStatus[] {
+    return [...this.states.entries()]
+      .filter(([name]) => !name.startsWith('__test__'))
+      .map(([name, st]) => ({
+        name,
+        transport: st.config.transport,
+        enabled: st.config.enabled !== false,
+        connected: !!st.client,
+        error: st.error,
+        toolCount: st.tools.length,
+        toolNames: st.tools.map((t) => t.name),
+      }))
+  }
+
+  private emitStatus(): void {
+    const status = this.status()
+    const json = JSON.stringify(status)
+    if (json === this.lastStatusJson) return
+    this.lastStatusJson = json
+    for (const cb of [...this.statusListeners]) {
+      try {
+        cb(status)
+      } catch {
+        /* listener errors never break the manager */
+      }
+    }
+  }
 
   /** Reconcile the configured server list into live state (drops removed,
    *  updates changed configs by reconnecting lazily). Does NOT connect yet. */
@@ -100,6 +151,7 @@ export class MCPManager {
     for (const [name, cfg] of next) {
       if (!this.states.has(name)) this.states.set(name, { config: cfg, client: null, tools: [] })
     }
+    this.emitStatus()
   }
 
   private async connect(name: string): Promise<void> {
@@ -146,6 +198,7 @@ export class MCPManager {
       throw e
     } finally {
       st.connecting = undefined
+      if (!name.startsWith('__test__')) this.emitStatus()
     }
   }
 
@@ -160,6 +213,7 @@ export class MCPManager {
     } catch {
       /* ignore */
     }
+    if (!name.startsWith('__test__')) this.emitStatus()
   }
 
   /** Connect every enabled server + return their tool catalogs (for hello). */

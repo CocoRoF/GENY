@@ -80,6 +80,9 @@ declare global {
       mcp?: {
         advertise(): Promise<Array<{ name: string; connected: boolean; error?: string; tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>>
         callTool(server: string, tool: string, args: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }>
+        /** Status push (newer connectors): fired on server connect/disconnect
+         *  or tool-list changes — the bridge re-advertises the catalog. */
+        onStatus?(cb: () => void): () => void
       }
     }
   }

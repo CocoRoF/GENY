@@ -134,6 +134,36 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
     let ws: WebSocket | null = null;
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    // Local MCP catalog push: advertise → send an `mcp_catalog` frame so the
+    // backend registers the tools first-class. Deduped by content; re-sent on
+    // WS reconnect and on connector MCP status changes (debounced).
+    let lastCatalogJson = '';
+    let catalogTimer: ReturnType<typeof setTimeout> | null = null;
+    let catalogInFlight = false;
+    let offMcpStatus: (() => void) | null = null;
+
+    const sendCatalog = async (force = false) => {
+      if (closed || !conn.mcp || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (catalogInFlight) return;
+      catalogInFlight = true;
+      try {
+        const catalog = await conn.mcp.advertise();
+        const json = JSON.stringify(catalog);
+        if (force || json !== lastCatalogJson) {
+          lastCatalogJson = json;
+          ws.send(JSON.stringify({ type: 'mcp_catalog', data: { catalog } }));
+        }
+      } catch {
+        /* connector MCP unavailable — dispatcher tools still work */
+      } finally {
+        catalogInFlight = false;
+      }
+    };
+
+    const scheduleCatalog = () => {
+      if (catalogTimer) clearTimeout(catalogTimer);
+      catalogTimer = setTimeout(() => { catalogTimer = null; void sendCatalog(); }, 1500);
+    };
 
     const respond = (payload: Record<string, unknown>) => {
       try {
@@ -216,6 +246,10 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
         } catch {
           /* ignore */
         }
+        // Push the local MCP tool catalog right after hello (fresh socket →
+        // force so the backend of a restarted server re-learns the tools).
+        lastCatalogJson = '';
+        void sendCatalog(true);
       };
       ws.onmessage = (ev) => {
         try {
@@ -238,9 +272,23 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
     };
 
     connect();
+    // Connector MCP status changes (server connected / tools refreshed /
+    // config edited) → re-advertise. Older connectors without onStatus just
+    // send the catalog once per connection.
+    try {
+      offMcpStatus = conn.mcp?.onStatus?.(() => scheduleCatalog()) ?? null;
+    } catch {
+      offMcpStatus = null;
+    }
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
+      if (catalogTimer) clearTimeout(catalogTimer);
+      try {
+        offMcpStatus?.();
+      } catch {
+        /* ignore */
+      }
       try {
         ws?.close();
       } catch {
