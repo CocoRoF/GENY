@@ -438,6 +438,48 @@ function resetWindowPositions(): void {
   // quick-chat re-centers on its next summon now that quickChatBar is cleared.
 }
 
+// Keep a window in the 'screen-saver' top band even as OTHER processes churn
+// the z-order. Windows demotes/overtakes TOPMOST in several paths — a newer
+// topmost window (game launcher, borderless-fullscreen toggle, volume OSD
+// hosts) stacks above ours, and some fullscreen/DPI transitions strip the bit
+// outright — and Electron never re-asserts on its own, so a one-shot
+// setAlwaysOnTop decays over the session. Re-assert on the events that
+// correlate with z-order churn plus a slow heartbeat. setAlwaysOnTop/moveTop
+// are cheap SetWindowPos calls, never steal focus, and are no-ops when the
+// window is already where it should be (no flicker).
+function armAlwaysOnTop(win: BrowserWindow): void {
+  const assert = (): void => {
+    if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return
+    try {
+      win.setAlwaysOnTop(true, 'screen-saver')
+      if (process.platform === 'darwin') {
+        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      }
+      win.moveTop() // top of the topmost band — above later-created topmost peers
+    } catch {
+      /* window mid-teardown */
+    }
+  }
+  assert()
+  const beat = setInterval(assert, 3000)
+  win.on('show', assert)
+  win.on('restore', assert)
+  // Focus moved elsewhere — exactly when another window may have claimed the
+  // top of the topmost band.
+  win.on('blur', assert)
+  // The OS actively stripped the bit (fullscreen/DPI transitions do this).
+  win.on('always-on-top-changed', (_e, isOnTop) => {
+    if (!isOnTop) assert()
+  })
+  // Display topology / fullscreen-driven metric changes reshuffle z-order.
+  const onMetrics = (): void => assert()
+  screen.on('display-metrics-changed', onMetrics)
+  win.on('closed', () => {
+    clearInterval(beat)
+    screen.removeListener('display-metrics-changed', onMetrics)
+  })
+}
+
 // ── overlay window: the floating avatar ─────────────────────────────────────
 function createOverlay(): void {
   const wa = screen.getPrimaryDisplay().workArea
@@ -476,11 +518,11 @@ function createOverlay(): void {
     },
   })
 
-  // Float above full-screen apps too (macOS).
-  overlay.setAlwaysOnTop(true, 'screen-saver')
-  if (process.platform === 'darwin') {
-    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  }
+  // Float above full-screen apps and STAY there — one-shot always-on-top
+  // decays on Windows as other processes churn the z-order (see
+  // armAlwaysOnTop); this asserts now and keeps re-asserting for the
+  // window's lifetime.
+  armAlwaysOnTop(overlay)
 
   // External links open in the OS browser, never inside the overlay.
   overlay.webContents.setWindowOpenHandler(({ url }) => {
@@ -640,14 +682,11 @@ function createQuickChat(): void {
       backgroundThrottling: false,
     },
   })
-  // Float above full-screen apps — mirror the avatar overlay's proven recipe
-  // (it surfaces over borderless / windowed-fullscreen games): the 'screen-saver'
-  // top band, and visibleOnFullScreen ONLY on macOS. On Windows that call is a
-  // macOS-only feature that misbehaves, so it's guarded like the overlay.
-  quickchat.setAlwaysOnTop(true, 'screen-saver')
-  if (process.platform === 'darwin') {
-    quickchat.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  }
+  // Float above full-screen apps — same armed recipe as the avatar overlay
+  // ('screen-saver' band + lifetime re-assertion; visibleOnFullScreen is
+  // macOS-only inside armAlwaysOnTop). One caveat handled there: assert is a
+  // no-op while hidden, and the 'show' hook re-asserts on every open.
+  armAlwaysOnTop(quickchat)
   attachContentResilience(quickchat, () => quickchat && loadRoute(quickchat, 'quickchat'))
   loadRoute(quickchat, 'quickchat')
   // Dismiss on focus loss (click elsewhere) — Spotlight behaviour. But ignore the
