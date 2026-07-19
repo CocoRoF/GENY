@@ -439,16 +439,24 @@ function resetWindowPositions(): void {
 }
 
 // Keep a window in the 'screen-saver' top band even as OTHER processes churn
-// the z-order. Windows demotes/overtakes TOPMOST in several paths — a newer
-// topmost window (game launcher, borderless-fullscreen toggle, volume OSD
-// hosts) stacks above ours, and some fullscreen/DPI transitions strip the bit
-// outright — and Electron never re-asserts on its own, so a one-shot
-// setAlwaysOnTop decays over the session. Re-assert on the events that
-// correlate with z-order churn plus a slow heartbeat. setAlwaysOnTop/moveTop
-// are cheap SetWindowPos calls, never steal focus, and are no-ops when the
-// window is already where it should be (no flicker).
+// the z-order. A one-shot setAlwaysOnTop decays on Windows — but only through
+// OBSERVABLE transitions, so this is purely event-driven (zero idle cost, no
+// polling):
+//   · An ordinary window — even maximized — can NEVER cover a TOPMOST one, so
+//     "opened another app and the avatar sank" always means a fullscreen /
+//     borderless transition or a stripped TOPMOST bit was involved.
+//   · Fullscreen & borderless toggles hide the taskbar / change the work area
+//     → `display-metrics-changed` fires. DPI moves fire it too.
+//   · The OS stripping the bit surfaces as `always-on-top-changed(false)`.
+//   · Our own focus churn (user clicks our windows then away) → blur/show/
+//     restore.
+// Each trigger asserts twice: immediately, and once more shortly after via a
+// ONE-SHOT timer (transitions finish after the event; the second pass lands
+// on the settled z-order). setAlwaysOnTop/moveTop are cheap SetWindowPos
+// calls — no-ops when already top, never steal focus, no flicker.
 function armAlwaysOnTop(win: BrowserWindow): void {
-  const assert = (): void => {
+  let settle: ReturnType<typeof setTimeout> | null = null
+  const assertNow = (): void => {
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return
     try {
       win.setAlwaysOnTop(true, 'screen-saver')
@@ -460,8 +468,15 @@ function armAlwaysOnTop(win: BrowserWindow): void {
       /* window mid-teardown */
     }
   }
-  assert()
-  const beat = setInterval(assert, 3000)
+  const assert = (): void => {
+    assertNow()
+    if (settle) clearTimeout(settle)
+    settle = setTimeout(() => {
+      settle = null
+      assertNow()
+    }, 900)
+  }
+  assertNow()
   win.on('show', assert)
   win.on('restore', assert)
   // Focus moved elsewhere — exactly when another window may have claimed the
@@ -471,11 +486,12 @@ function armAlwaysOnTop(win: BrowserWindow): void {
   win.on('always-on-top-changed', (_e, isOnTop) => {
     if (!isOnTop) assert()
   })
-  // Display topology / fullscreen-driven metric changes reshuffle z-order.
+  // Display topology / fullscreen-driven metric changes (taskbar hide, work-
+  // area, DPI) — the signal that fires when another app goes fullscreen.
   const onMetrics = (): void => assert()
   screen.on('display-metrics-changed', onMetrics)
   win.on('closed', () => {
-    clearInterval(beat)
+    if (settle) clearTimeout(settle)
     screen.removeListener('display-metrics-changed', onMetrics)
   })
 }
