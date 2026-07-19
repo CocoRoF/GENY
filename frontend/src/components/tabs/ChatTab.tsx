@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { ChatRoom, ChatRoomMessage, BroadcastStatus, AgentProgressState } from '@/types';
 import { AttachmentList } from '@/components/messenger/MessageList';
+import SelectionActionMenu from '@/components/chat/SelectionActionMenu';
 
 // ==================== Helpers ====================
 
@@ -79,6 +80,7 @@ export default function ChatTab() {
   const [agentProgress, setAgentProgress] = useState<AgentProgressState[] | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSubRef = useRef<{ close: () => void } | null>(null);
   const lastMsgIdRef = useRef<string | null>(null);
@@ -223,11 +225,12 @@ export default function ChatTab() {
   }, [t]);
 
   // ── Send message (fire-and-forget broadcast) ──
-  const handleSend = useCallback(async () => {
-    const trimmed = input.trim();
+  // Core send takes the text explicitly so the composer AND external
+  // triggers (selection action menu) share one path.
+  const sendDirect = useCallback(async (rawText: string) => {
+    const trimmed = rawText.trim();
     if (!trimmed || isSending || !activeRoomId) return;
 
-    setInput('');
     setIsSending(true);
 
     try {
@@ -262,7 +265,14 @@ export default function ChatTab() {
       setIsSending(false);
       inputRef.current?.focus();
     }
-  }, [input, isSending, activeRoomId, t]);
+  }, [isSending, activeRoomId, t]);
+
+  const handleSend = useCallback(async () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    setInput('');
+    await sendDirect(trimmed);
+  }, [input, sendDirect]);
 
   // ── Toggle session selection ──
   const toggleSession = (sid: string) => {
@@ -516,7 +526,11 @@ export default function ChatTab() {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-4 space-y-3">
+      <SelectionActionMenu
+        containerRef={chatScrollRef}
+        onAskGeny={(text) => void sendDirect(t('selectionMenu.askGenyTemplate', { text }))}
+      />
+      <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-4 space-y-3">
         {loadingMessages && (
           <div className="flex justify-center py-10">
             <Loader2 size={24} className="animate-spin text-[var(--text-muted)]" />

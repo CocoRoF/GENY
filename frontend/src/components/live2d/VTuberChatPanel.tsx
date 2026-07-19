@@ -10,6 +10,7 @@ import { useVTuberStore } from '@/store/useVTuberStore';
 import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { useI18n } from '@/lib/i18n';
 import { parseEmotion, EMOTION_COLORS, ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, MessageBubble, apiPathOf, AuthedChatImage, openAuthedLink } from '@/components/chat';
+import SelectionActionMenu from '@/components/chat/SelectionActionMenu';
 import { ChevronDown, ChevronRight, XCircle, Paperclip, X as XIcon } from 'lucide-react';
 import type { ChatRoomMessage, ChatAttachment, FileChanges, AgentProgressState, AgentLogEntry } from '@/types';
 
@@ -660,6 +661,10 @@ export default function VTuberChatPanel({
         </div>
       )}
       {/* Messages area */}
+      <SelectionActionMenu
+        containerRef={scrollRef}
+        onAskGeny={(text) => void sendText(t('selectionMenu.askGenyTemplate', { text }))}
+      />
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2.5 min-h-0"

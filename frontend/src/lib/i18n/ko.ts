@@ -3431,6 +3431,15 @@ const ko: Translations = {
     errorMessage: '죄송해요, 잠시 문제가 생겼어요.',
   },
 
+  // ─── 드래그 선택 액션 메뉴 (채팅) ───
+  selectionMenu: {
+    askGeny: 'Geny에게 검색하기',
+    searchBrowser: '브라우저에서 검색하기',
+    copy: '복사',
+    copied: '복사됨 ✓',
+    askGenyTemplate: '"{text}" — 이거 검색해서 알아봐줘',
+  },
+
   // ─── TTS ───
   tts: {
     clickToEnable: 'TTS 활성화',

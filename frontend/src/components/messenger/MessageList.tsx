@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useI18n } from '@/lib/i18n';
 import { Bot, User, Loader2, MessageCircle, Clock, ChevronDown, ChevronRight, XCircle, Paperclip } from 'lucide-react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import SelectionActionMenu from '@/components/chat/SelectionActionMenu';
 import dynamic from 'next/dynamic';
 import type { ChatRoomMessage, AgentLogEntry, ChatAttachment } from '@/types';
 import { ChatMarkdown, FileChangeSummary, AgentBadge, ExecutionMeta, getRoleColor, formatTime, formatDate, apiPathOf, AuthedChatImage, openAuthedLink } from '@/components/chat';
@@ -378,9 +379,10 @@ function ConnectionBanner() {
 }
 
 export default function MessageList() {
-  const { messages, loadingMessages, loadingOlderMessages, hasMoreMessages, broadcastStatus, agentProgress, loadOlderMessages, cancelBroadcast } = useMessengerStore();
+  const { messages, loadingMessages, loadingOlderMessages, hasMoreMessages, broadcastStatus, agentProgress, loadOlderMessages, cancelBroadcast, sendMessage } = useMessengerStore();
   const { t } = useI18n();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
 
   // Build flat list for Virtuoso
@@ -435,7 +437,11 @@ export default function MessageList() {
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div ref={listContainerRef} className="flex-1 min-h-0 flex flex-col">
+      <SelectionActionMenu
+        containerRef={listContainerRef}
+        onAskGeny={(text) => void sendMessage(t('selectionMenu.askGenyTemplate', { text }))}
+      />
       <Virtuoso
         ref={virtuosoRef}
         data={flatItems}

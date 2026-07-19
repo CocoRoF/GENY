@@ -3387,6 +3387,15 @@ const en = {
     errorMessage: 'Sorry, something went wrong.',
   },
 
+  // ─── Selection action menu (chat) ───
+  selectionMenu: {
+    askGeny: 'Ask Geny',
+    searchBrowser: 'Search in browser',
+    copy: 'Copy',
+    copied: 'Copied ✓',
+    askGenyTemplate: 'Please look this up: "{text}"',
+  },
+
   // ─── TTS ───
   tts: {
     clickToEnable: 'Click to enable TTS',
