@@ -275,13 +275,14 @@ async def build_memory_provider(
 
             ltm_config = LTMConfig.get_default_instance()
 
-    # Engine choice (LTMConfig.memory_engine): "composite" (default, API
-    # embeddings) or "synapse" (local, learnable, zero-API-call). Synapse can't
-    # go through the factory/manifest path (a custom provider name isn't
-    # registered on the factory the executor builds internally), so it is
-    # assembled here directly: a FileMemoryProvider keeping STM/LTM/Notes as
-    # markdown, with its vector layer replaced by a Synapse-backed VectorHandle.
-    engine = (getattr(ltm_config, "memory_engine", "composite") or "composite").strip()
+    # Engine choice (LTMConfig.memory_engine): "synapse" (default — local,
+    # learnable, zero-API-call, Geny's native memory logic) or "composite" (API
+    # embeddings). Synapse can't go through the factory/manifest path (a custom
+    # provider name isn't registered on the factory the executor builds
+    # internally), so it is assembled here directly: a FileMemoryProvider
+    # keeping STM/LTM/Notes as markdown, its vector layer replaced by a
+    # Synapse-backed VectorHandle.
+    engine = (getattr(ltm_config, "memory_engine", "synapse") or "synapse").strip()
     if engine == "synapse":
         provider = _build_synapse_provider(
             session_id=session_id, storage_path=storage_path, ltm_config=ltm_config)

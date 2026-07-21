@@ -478,6 +478,7 @@ export interface ConfigField {
   min?: number;
   max?: number;
   depends_on?: string;  // Sibling field name whose value filters this field's options (matched via option.group)
+  visible_when?: Record<string, string[]>;  // Field shows only when EVERY {siblingField: [allowedValues]} holds (e.g. { memory_engine: ['composite'] })
 }
 
 export interface ConfigI18nLocale {

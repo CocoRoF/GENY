@@ -59,14 +59,17 @@ class LTMConfig(BaseConfig):
     """Long-Term Memory vector search settings."""
 
     # ── Toggle ──
-    enabled: bool = False
+    # Default ON: the default engine (Synapse) is local and makes zero API
+    # calls, so long-term vector memory works out of the box with no cost and
+    # no key to configure. Hosts can still turn it off in settings.
+    enabled: bool = True
 
     # ── Memory engine ──
-    #: "composite" (default): file notes + API-embedding vector layer.
-    #: "synapse": local, learnable, zero-API-call engine (BM25 + local
-    #: embeddings + typed-edge PageRank + online-learned ranker). When
-    #: synapse, embedding_provider/model/key below are unused.
-    memory_engine: str = "composite"
+    #: "synapse" (default): local, learnable, zero-API-call engine (BM25 +
+    #: local embeddings + typed-edge PageRank + online-learned ranker) — Geny's
+    #: native memory logic. embedding_provider/model/key below are unused here.
+    #: "composite": file notes + API-embedding vector layer (needs a key).
+    memory_engine: str = "synapse"
     #: Synapse local embedding dimension (synapse engine only).
     synapse_dim: int = 256
 
@@ -154,9 +157,9 @@ class LTMConfig(BaseConfig):
     @classmethod
     def get_description(cls) -> str:
         return (
-            "FAISS vector database settings for semantic long-term memory "
-            "retrieval. Configure embedding provider, chunking, and search "
-            "parameters."
+            "Semantic long-term memory retrieval. Defaults to Synapse — a "
+            "local, learnable engine with no API calls; switch to Composite for "
+            "API embeddings. Configure the engine and search parameters."
         )
 
     @classmethod
@@ -173,11 +176,13 @@ class LTMConfig(BaseConfig):
             "ko": {
                 "display_name": "Long-Term Memory (Vector DB)",
                 "description": (
-                    "Semantic long-term memory retrieval settings based on the FAISS vector database. "
-                    "Configure embedding provider, chunking, and search parameters."
+                    "의미 기반 장기 기억 검색. 기본값은 Synapse — API 호출 없이 로컬에서 "
+                    "학습하는 경량 엔진이며, API 임베딩이 필요하면 Composite로 전환하세요. "
+                    "엔진과 검색 파라미터를 설정합니다."
                 ),
                 "groups": {
                     "toggle": "Enable",
+                    "synapse": "Synapse 설정 (로컬 엔진)",
                     "embedding": "Embedding Settings",
                     "chunking": "Chunking Settings",
                     "retrieval": "Retrieval Settings",
@@ -193,8 +198,14 @@ class LTMConfig(BaseConfig):
                     },
                     "memory_engine": {
                         "label": "메모리 엔진",
-                        "description": ("Composite는 API 임베딩을 씁니다. Synapse는 "
-                                        "API 호출 없이 로컬에서 학습하는 경량 엔진입니다."),
+                        "description": ("Synapse는 API 호출 없이 로컬에서 학습하는 경량 "
+                                        "엔진입니다(Geny 기본값). Composite는 API 임베딩을 "
+                                        "쓰며 키가 필요합니다."),
+                    },
+                    "synapse_dim": {
+                        "label": "로컬 임베딩 차원",
+                        "description": ("Synapse 로컬 정적 임베딩의 차원입니다. 256이 무난한 "
+                                        "기본값이며, 크면 약간 더 정밀하지만 무거워집니다."),
                     },
                     "embedding_provider": {
                         "label": "Embedding Provider",
@@ -298,7 +309,7 @@ class LTMConfig(BaseConfig):
                 field_type=FieldType.BOOLEAN,
                 label="Enable Vector Search",
                 description="Enable FAISS-based semantic search for long-term memory",
-                default=False,
+                default=True,
                 group="toggle",
             ),
 
@@ -307,14 +318,30 @@ class LTMConfig(BaseConfig):
                 name="memory_engine",
                 field_type=FieldType.SELECT,
                 label="Memory Engine",
-                description=("Composite uses API embeddings. Synapse runs a "
-                             "local, learnable engine with no API calls."),
-                default="composite",
+                description=("Synapse runs a local, learnable engine with no "
+                             "API calls (Geny's default). Composite uses API "
+                             "embeddings and needs a key."),
+                default="synapse",
                 options=MEMORY_ENGINE_OPTIONS,
                 group="toggle",
             ),
 
-            # ── Embedding ──
+            # ── Synapse (local engine only) ──
+            ConfigField(
+                name="synapse_dim",
+                field_type=FieldType.NUMBER,
+                label="Local Embedding Dimension",
+                description=("Dimension of Synapse's local static embeddings. "
+                             "256 is a good default; larger is slightly sharper "
+                             "but heavier."),
+                default=256,
+                min_value=64,
+                max_value=1024,
+                group="synapse",
+                visible_when={"memory_engine": ["synapse"]},
+            ),
+
+            # ── Embedding (composite engine only) ──
             ConfigField(
                 name="embedding_provider",
                 field_type=FieldType.SELECT,
@@ -323,6 +350,7 @@ class LTMConfig(BaseConfig):
                 default="openai",
                 options=EMBEDDING_PROVIDER_OPTIONS,
                 group="embedding",
+                visible_when={"memory_engine": ["composite"]},
             ),
             ConfigField(
                 name="embedding_model",
@@ -333,6 +361,7 @@ class LTMConfig(BaseConfig):
                 options=ALL_MODEL_OPTIONS,
                 group="embedding",
                 depends_on="embedding_provider",
+                visible_when={"memory_engine": ["composite"]},
             ),
             ConfigField(
                 name="embedding_api_key",
@@ -348,9 +377,11 @@ class LTMConfig(BaseConfig):
                 group="embedding",
                 secure=True,
                 apply_change=env_sync("LTM_EMBEDDING_API_KEY"),
+                visible_when={"memory_engine": ["composite"]},
             ),
 
-            # ── Chunking ──
+            # ── Chunking (composite engine only — Synapse stores one vector
+            #    per note, so there is nothing to chunk) ──
             ConfigField(
                 name="chunk_size",
                 field_type=FieldType.NUMBER,
@@ -360,6 +391,7 @@ class LTMConfig(BaseConfig):
                 min_value=128,
                 max_value=4096,
                 group="chunking",
+                visible_when={"memory_engine": ["composite"]},
             ),
             ConfigField(
                 name="chunk_overlap",
@@ -370,6 +402,7 @@ class LTMConfig(BaseConfig):
                 min_value=0,
                 max_value=512,
                 group="chunking",
+                visible_when={"memory_engine": ["composite"]},
             ),
 
             # ── Retrieval ──

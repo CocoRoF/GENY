@@ -48,6 +48,7 @@ class ConfigField:
     group: str = "general"  # Group name for UI organization
     secure: bool = False  # If True, field is masked with show/hide toggle in UI
     depends_on: Optional[str] = None  # If set, options are filtered by the value of this sibling field (matched via option["group"])
+    visible_when: Optional[Dict[str, List[str]]] = None  # If set, field shows only when EVERY {sibling_field: [allowed_values]} holds (e.g. {"memory_engine": ["composite"]})
     apply_change: Optional[Callable[[Any, Any], None]] = field(
         default=None, repr=False
     )  # Callback(old_value, new_value) invoked when this field changes
@@ -412,6 +413,7 @@ class BaseConfig(ABC):
                     "group": f.group,
                     "secure": f.secure,
                     "depends_on": f.depends_on,
+                    "visible_when": f.visible_when,
                 }
                 for f in cls.get_fields_metadata()
             ],

@@ -51,6 +51,16 @@ export function getLocalizedGroup(groupName: string, schema: ConfigSchema, local
   return loc || fallbackGroups[groupName] || groupName;
 }
 
+/** A field is visible unless its `visible_when` says otherwise: every
+ *  {siblingField: [allowedValues]} entry must match the current form values
+ *  (e.g. embedding fields shown only when memory_engine is "composite"). */
+export function isFieldVisible(field: ConfigField, values: Record<string, unknown>): boolean {
+  if (!field.visible_when) return true;
+  return Object.entries(field.visible_when).every(([sibling, allowed]) =>
+    allowed.includes(String(values[sibling] ?? ''))
+  );
+}
+
 /** Read ``?settings_category=...`` once at mount so deep-links from
  *  the Environment editor (and any other page) can land directly on the
  *  intended sub-category — e.g. ``llm_backends`` to reach the LLM
@@ -423,13 +433,19 @@ export default function SettingsTab() {
                     groups[g].push(f);
                   });
                   const groupLabels = tRaw<Record<string, string>>('settings.groupLabels');
-                  return Object.entries(groups).map(([groupName, fields]) => (
+                  return Object.entries(groups).map(([groupName, fields]) => {
+                    // Conditional visibility: drop fields whose visible_when
+                    // fails, and hide the whole group (header included) when
+                    // nothing remains — e.g. Embedding/Chunking under Synapse.
+                    const visibleFields = fields.filter(f => isFieldVisible(f, editing!.values));
+                    if (visibleFields.length === 0) return null;
+                    return (
                     <div key={groupName} className="border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden">
                       <h4 className="text-[0.8125rem] font-semibold text-[var(--text-secondary)] py-3 px-4 bg-[var(--bg-tertiary)] m-0 border-b border-[var(--border-color)]">
                         {getLocalizedGroup(groupName, editing.schema, locale, groupLabels)}
                       </h4>
                       <div className="p-4 flex flex-col gap-4">
-                        {fields.map(field => {
+                        {visibleFields.map(field => {
                           // SSH servers: bespoke list-of-servers editor — the
                           // generic auto-form has no list-of-dicts widget.
                           if (editing.name === 'ssh' && field.name === 'servers') {
@@ -447,7 +463,8 @@ export default function SettingsTab() {
                         })}
                       </div>
                     </div>
-                  ));
+                    );
+                  });
                 })()}
               </form>
             </div>
