@@ -208,15 +208,49 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
-      interval: 30s
+      # 15s interval + 3 retries → a wedge is flagged unhealthy in <1min, then
+      # the autoheal sidecar restarts it. (Was 30s; tightened after a session
+      # memory-load froze the event loop and the container sat dead for hours.)
+      interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 40s
+    # Let py-spy / gdb attach to the running interpreter for live diagnosis of
+    # an event-loop stall (a hung task can't be sampled otherwise). Inert
+    # during normal operation.
+    cap_add:
+      - SYS_PTRACE
+    labels:
+      # Watched by the `autoheal` sidecar below: when the healthcheck goes
+      # unhealthy the container is auto-restarted instead of sitting dead —
+      # turns a multi-hour outage into a ~30s blip.
+      - autoheal=true
     networks:
       - geny-net-prod
       # Reach the GAPT control plane (gapt-server:8088) + workspace
       # sandbox containers for the bridged MCP callback.
       - gapt-net
+
+  # ── Autoheal (watchdog) ───────────────────────────────────────────
+  # Monitors containers labelled ``autoheal=true`` and restarts any that Docker
+  # reports ``unhealthy``. Docker's own ``restart: unless-stopped`` only fires
+  # on process EXIT — a process that is alive but WEDGED (event loop blocked on
+  # a slow/stuck syscall) never exits, so it would otherwise stay dead until a
+  # human intervenes. This closes that gap.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: geny-autoheal-prod
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=10          # check every 10s
+      - AUTOHEAL_START_PERIOD=45      # grace after a (re)start before watching
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=40  # SIGTERM grace before SIGKILL (a
+                                          # wedged proc in D-state may need the
+                                          # kill; 40s lets in-flight I/O drain)
+      - TZ=${TIMEZONE:-Asia/Seoul}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # ── Frontend (Next.js) ────────────────────────────────────────────
   frontend:
