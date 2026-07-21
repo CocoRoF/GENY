@@ -46,7 +46,9 @@ SYSTEM_TAG_PATTERN = re.compile(
     r"CLI_RESULT|"
     r"ACTIVITY_TRIGGER(?::\w+)?|"
     r"SILENT)"
-    r"\]\s*",
+    # Trailing horizontal whitespace only — never newlines, so stripping a
+    # tag can't swallow the blank line that separates markdown blocks.
+    r"\][^\S\n]*",
     re.IGNORECASE,
 )
 
@@ -65,7 +67,9 @@ EMOTION_TAGS = RECOGNIZED_TAGS
 _STRENGTH_RE = r"(?:\s*:\s*-?\d+(?:\.\d+)?)?"
 
 EMOTION_TAG_PATTERN = re.compile(
-    r"\[\s*(?:" + "|".join(EMOTION_TAGS) + r")" + _STRENGTH_RE + r"\s*\]\s*",
+    # Trailing ``[^\S\n]*`` (not ``\s*``) so removing an inline emotion tag
+    # keeps any following newline — the paragraph break between blocks.
+    r"\[\s*(?:" + "|".join(EMOTION_TAGS) + r")" + _STRENGTH_RE + r"\s*\][^\S\n]*",
     re.IGNORECASE,
 )
 
@@ -78,17 +82,48 @@ EMOTION_TAG_PATTERN = re.compile(
 # payloads like ``[note: todo]`` are preserved by the strict numeric
 # strength rule.
 UNKNOWN_EMOTION_TAG_PATTERN = re.compile(
-    r"\[\s*[a-z][a-z_]{2,19}" + _STRENGTH_RE + r"\s*\]\s*",
+    r"\[\s*[a-z][a-z_]{2,19}" + _STRENGTH_RE + r"\s*\][^\S\n]*",
 )
 
 THINK_BLOCK_PATTERN = re.compile(
-    r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE
+    # Trailing horizontal whitespace only, so a reasoning block wedged
+    # between two paragraphs doesn't glue them when removed.
+    r"<think>.*?</think>[^\S\n]*", re.DOTALL | re.IGNORECASE
 )
 # Open-ended <think> with no closer (the LLM didn't emit </think>
 # yet, e.g. mid-stream). Everything from <think> onward is dropped.
 THINK_OPEN_PATTERN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 
-_WHITESPACE_COLLAPSE = re.compile(r"\s{2,}")
+# Display whitespace tidy — collapse runs of *horizontal* whitespace but
+# KEEP newlines, so markdown block structure (the blank lines that separate
+# headings / tables / block quotes / fenced code) survives into the chat
+# renderer. Collapsing newlines here — as an earlier ``\s{2,}`` pass did —
+# glued every block onto one line, so tables and headings stopped rendering.
+_DISPLAY_HORIZONTAL_WS = re.compile(r"[^\S\n]+")
+_DISPLAY_WS_AROUND_NL = re.compile(r"[^\S\n]*\n[^\S\n]*")
+_DISPLAY_BLANK_LINE_RUN = re.compile(r"\n{3,}")
+# Fenced code is copied verbatim so its indentation isn't flattened.
+_FENCED_CODE_SPAN = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
+
+
+def _tidy_display_whitespace(chunk: str) -> str:
+    chunk = _DISPLAY_HORIZONTAL_WS.sub(" ", chunk)   # space/tab runs → 1 space
+    chunk = _DISPLAY_WS_AROUND_NL.sub("\n", chunk)   # trim spaces hugging \n
+    chunk = _DISPLAY_BLANK_LINE_RUN.sub("\n\n", chunk)  # cap blank-line runs
+    return chunk
+
+
+def _collapse_display_whitespace(text: str) -> str:
+    """Tidy whitespace for display while preserving newlines and leaving
+    fenced code blocks byte-for-byte intact."""
+    out: list[str] = []
+    last = 0
+    for m in _FENCED_CODE_SPAN.finditer(text):
+        out.append(_tidy_display_whitespace(text[last:m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(_tidy_display_whitespace(text[last:]))
+    return "".join(out).strip()
 
 # ──────────────────────────────────────────────────────────────────
 # TTS-specific stripping — emoji + textual emoticon
@@ -247,7 +282,7 @@ def _strip_markdown_for_tts(text: str) -> str:
 
 
 def sanitize_for_display(text: str | None) -> str:
-    """Strip routing / emotion / think markers; collapse whitespace.
+    """Strip routing / emotion / think markers; tidy whitespace.
 
     Safe on ``None`` and empty input — returns ``""`` so callers can
     concatenate / length-check without guarding.
@@ -257,9 +292,17 @@ def sanitize_for_display(text: str | None) -> str:
     emotion labels are removed. This keeps legitimate user text that
     happens to contain brackets intact.
 
+    Newlines are **preserved** (only horizontal whitespace runs collapse,
+    blank-line runs cap at one, and fenced code is left intact). The chat
+    UI renders this text as markdown, so the blank lines separating
+    headings / tables / block quotes / code fences must survive — an
+    earlier ``\\s{2,} → " "`` pass collapsed them and glued every block
+    onto one line, which stopped tables and headings from rendering.
+
     Note — emoji and textual emoticons survive this pass because chat
     UIs render them correctly. Use :func:`sanitize_for_tts` for the
-    audio synthesis path; that pass also strips emoji.
+    audio synthesis path; that pass also strips emoji and flattens
+    newlines for continuous speech.
     """
     if not text:
         return ""
@@ -268,7 +311,7 @@ def sanitize_for_display(text: str | None) -> str:
     text = SYSTEM_TAG_PATTERN.sub("", text)
     text = EMOTION_TAG_PATTERN.sub("", text)
     text = UNKNOWN_EMOTION_TAG_PATTERN.sub("", text)
-    return _WHITESPACE_COLLAPSE.sub(" ", text).strip()
+    return _collapse_display_whitespace(text)
 
 
 def sanitize_for_tts(text: str | None) -> str:
@@ -293,13 +336,14 @@ def sanitize_for_tts(text: str | None) -> str:
     :func:`sanitize_for_display` so the visible transcript still
     shows the emoji and markdown the agent wrote.
 
-    Order is load-bearing: ``sanitize_for_display`` collapses
-    newlines into spaces (good for chat bubbles) which would defeat
-    the line-anchored markdown patterns (headings, blockquotes,
-    list markers, horizontal rules). We therefore run the
-    routing/think/emotion strips manually here while keeping line
-    structure intact, then apply the markdown stripper, *then*
-    collapse whitespace at the end.
+    Order is load-bearing: the markdown stripper relies on
+    line-anchored patterns (headings, blockquotes, list markers,
+    horizontal rules), so line structure is kept intact through the
+    routing/think/emotion strips and the markdown unwrap, and only
+    *then* is every newline flattened into a space so the TTS engine
+    reads continuously. (Unlike :func:`sanitize_for_display`, which
+    now preserves newlines for the markdown-rendering chat UI, the
+    TTS output must end up single-line.)
     """
     if not text:
         return ""

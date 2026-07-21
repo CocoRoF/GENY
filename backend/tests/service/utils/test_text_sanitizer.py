@@ -61,7 +61,9 @@ from service.utils.text_sanitizer import sanitize_for_display
         (
             "[SUB_WORKER_RESULT] 워케에게서 답장이 왔어요! [joy]\n\n"
             "워커가 정말 친근하게 인사해주네요~ [surprise]",
-            "워케에게서 답장이 왔어요! 워커가 정말 친근하게 인사해주네요~",
+            # Blank line is PRESERVED — display renders markdown, so the
+            # paragraph break must survive (only horizontal ws collapses).
+            "워케에게서 답장이 왔어요!\n\n워커가 정말 친근하게 인사해주네요~",
         ),
         # ── <think> blocks ──
         ("<think>internal</think>Hello", "Hello"),
@@ -100,6 +102,44 @@ from service.utils.text_sanitizer import sanitize_for_display
 )
 def test_sanitize_for_display(text: str | None, expected: str) -> None:
     assert sanitize_for_display(text) == expected
+
+
+def test_display_preserves_block_structure() -> None:
+    """Blank lines between markdown blocks must survive so the chat UI
+    renders headings / tables / block quotes instead of one glued line.
+    Regression: a ``\\s{2,}`` collapse used to fuse these onto one line,
+    which broke GFM table detection (the header row glued to prose has the
+    wrong column count) and left ``##`` headings mid-paragraph.
+    """
+    src = (
+        "정리했어.\n\n"
+        "## 1. Jira 등록 항목\n\n"
+        "설명 줄.\n\n"
+        "| Key | 제목 |\n"
+        "|-----|------|\n"
+        "| WG2026-530 | 문서 |\n"
+    )
+    out = sanitize_for_display(src)
+    # Block separators intact → the table header sits on its own line.
+    assert "## 1. Jira 등록 항목" in out
+    assert "\n| Key | 제목 |\n|-----|------|" in out
+    # No block got glued onto the preceding line.
+    assert "정리했어. ##" not in out
+    assert "설명 줄. | Key |" not in out
+
+
+def test_display_collapses_horizontal_ws_and_caps_blank_lines() -> None:
+    # Horizontal runs still collapse; blank-line runs cap at one.
+    assert sanitize_for_display("a   b\t\tc") == "a b c"
+    assert sanitize_for_display("a\n\n\n\n\nb") == "a\n\nb"
+    # Spaces hugging a newline are trimmed but the newline stays.
+    assert sanitize_for_display("a   \n   b") == "a\nb"
+
+
+def test_display_keeps_fenced_code_indentation() -> None:
+    # Code inside a fence must not be flattened (indentation preserved).
+    src = "```python\ndef f():\n    return 1\n```"
+    assert sanitize_for_display(src) == src
 
 
 # ─────────────────────────────────────────────────────────────────
