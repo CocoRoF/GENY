@@ -40,6 +40,9 @@ export interface ComputerUseConfig {
   input?: boolean
   apps?: boolean
   clipboard?: boolean
+  /** Structured browser control (dedicated Chrome/Edge automation instance). */
+  browser?: boolean
+  browserEngine?: 'auto' | 'chrome' | 'edge'
   consentMode?: ConsentMode
 }
 
@@ -207,6 +210,20 @@ export interface ConnectorBridge {
     scroll(amount: number): Promise<ActuationResult>
   }
 
+  /** Phase 7 — structured browser control (CDP on a dedicated Chrome/Edge
+   *  automation instance). Ops: tabs|open|snapshot|act|read|screenshot|eval|close.
+   *  Read ops are toggle-gated; act ops prompt-once like other actuation. */
+  browser: {
+    call(op: string, args: Record<string, unknown>): Promise<GatedCallResult>
+  }
+
+  /** Phase 7 — structured Windows app control (UIA) + live Office documents
+   *  (COM), hosted in a persistent PowerShell STA process. Windows-only.
+   *  Ops: windows|win_snapshot|el_act|win_focus|win_read|office_status|office_read|office_act. */
+  winauto: {
+    call(op: string, args: Record<string, unknown>): Promise<GatedCallResult>
+  }
+
   /** Local MCP proxy (Phase 3) — hosts MCP clients to the user's local servers. */
   mcp: {
     /** Configured servers (from config; no connection). */
@@ -247,6 +264,15 @@ export interface MCPServerStatus {
 export interface ActuationResult {
   ok: boolean
   result?: string
+  denied?: boolean
+  error?: string
+}
+
+/** Result of a gated structured-control call (browser/winauto) — same envelope
+ *  as ActuationResult but the result may be any JSON value. */
+export interface GatedCallResult {
+  ok: boolean
+  result?: unknown
   denied?: boolean
   error?: string
 }
@@ -315,6 +341,12 @@ const api: ConnectorBridge = {
     key: (keys) => ipcRenderer.invoke('actuate:key', keys),
     click: (x, y, button) => ipcRenderer.invoke('actuate:click', x, y, button),
     scroll: (amount) => ipcRenderer.invoke('actuate:scroll', amount),
+  },
+  browser: {
+    call: (op, args) => ipcRenderer.invoke('browser:call', op, args),
+  },
+  winauto: {
+    call: (op, args) => ipcRenderer.invoke('winauto:call', op, args),
   },
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:list-servers'),

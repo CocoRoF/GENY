@@ -176,3 +176,98 @@ async def test_vscode_tool_offline_is_error():
     tool = VSCodeToolProvider().get("vscode_run_terminal")
     res = await tool.execute({"command": "echo hi"}, _ctx("sVs3"))
     assert res.is_error and "offline" in str(res.content)
+
+
+# ── Phase 7: structured local control (browser CDP / app UIA / Office COM) ──
+
+
+def test_provider_lists_structured_control_families():
+    names = set(ConnectorToolProvider().list_names())
+    browser = {"browser_tabs", "browser_open", "browser_snapshot", "browser_act",
+               "browser_read", "browser_screenshot", "browser_eval", "browser_close"}
+    winauto = {"app_windows", "app_snapshot", "app_act", "app_read",
+               "office_status", "office_read", "office_act"}
+    assert browser <= names and winauto <= names
+
+
+def test_structured_tools_capability_equals_name():
+    # The wire capability for each new tool IS its tool name — the frontend
+    # dispatch tables (BROWSER_OPS / WINAUTO_OPS) key on these exact strings.
+    provider = ConnectorToolProvider()
+    for name in ["browser_tabs", "browser_open", "browser_snapshot", "browser_act",
+                 "browser_read", "browser_screenshot", "browser_eval", "browser_close",
+                 "app_windows", "app_snapshot", "app_act", "app_read",
+                 "office_status", "office_read", "office_act"]:
+        assert provider.get(name)._capability == name
+
+
+@pytest.mark.asyncio
+async def test_browser_act_routes_capability_and_maps_result():
+    reg = get_connector_registry()
+    conn = ConnectorConnection(FakeWS(), ["browser_act"])
+    reg.register("sBr", conn)
+    tool = ConnectorToolProvider().get("browser_act")
+    try:
+        task = asyncio.create_task(tool.execute({"action": "click", "element": "e3"}, _ctx("sBr")))
+        await asyncio.sleep(0.01)
+        rid = list(conn._pending.keys())[0]
+        conn.resolve_result(rid, {"ok": True, "result": {"tab_id": "T1", "done": "clicked e3"}})
+        out = await task
+        assert not out.is_error and "clicked e3" in str(out.content)
+    finally:
+        reg.unregister("sBr")
+
+
+@pytest.mark.asyncio
+async def test_browser_tools_unsupported_on_old_connector():
+    # A pre-0.17 connector never advertises browser_* → clean is_error, no send.
+    reg = get_connector_registry()
+    ws = FakeWS()
+    reg.register("sOld", ConnectorConnection(ws, ["ping", "click", "type"]))
+    try:
+        tool = ConnectorToolProvider().get("browser_snapshot")
+        res = await tool.execute({}, _ctx("sOld"))
+        assert res.is_error and "not supported" in str(res.content)
+        assert ws.sent == []
+    finally:
+        reg.unregister("sOld")
+
+
+@pytest.mark.asyncio
+async def test_office_act_denied_maps_to_denied_message():
+    reg = get_connector_registry()
+    conn = ConnectorConnection(FakeWS(), ["office_act"])
+    reg.register("sOf", conn)
+    tool = ConnectorToolProvider().get("office_act")
+    try:
+        task = asyncio.create_task(
+            tool.execute({"app": "powerpoint", "action": "set_shape_text", "slide": 1, "shape": "2", "text": "hi"}, _ctx("sOf"))
+        )
+        await asyncio.sleep(0.01)
+        rid = list(conn._pending.keys())[0]
+        conn.resolve_result(rid, {"ok": False, "denied": True})
+        out = await task
+        assert out.is_error and "denied" in str(out.content)
+    finally:
+        reg.unregister("sOf")
+
+
+@pytest.mark.asyncio
+async def test_browser_screenshot_returns_image_blocks():
+    reg = get_connector_registry()
+    conn = ConnectorConnection(FakeWS(), ["browser_screenshot"])
+    reg.register("sShot", conn)
+    tool = ConnectorToolProvider().get("browser_screenshot")
+    try:
+        task = asyncio.create_task(tool.execute({}, _ctx("sShot")))
+        await asyncio.sleep(0.01)
+        rid = list(conn._pending.keys())[0]
+        conn.resolve_result(rid, {"ok": True, "result": {
+            "image_b64": "aGVsbG8=", "mime": "image/jpeg", "title": "Page", "url": "https://x.test"}})
+        out = await task
+        assert not out.is_error
+        blocks = out.content
+        assert isinstance(blocks, list) and blocks[1]["type"] == "image"
+        assert blocks[1]["source"]["data"] == "aGVsbG8="
+    finally:
+        reg.unregister("sShot")

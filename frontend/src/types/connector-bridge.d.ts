@@ -76,6 +76,15 @@ declare global {
         click(x: number, y: number, button?: string): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
         scroll(amount: number): Promise<{ ok: boolean; result?: string; denied?: boolean; error?: string }>
       }
+      /** Structured browser control (Phase 7, connector ≥0.17) — CDP on a
+       *  dedicated Chrome/Edge automation instance. */
+      browser?: {
+        call(op: string, args: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; denied?: boolean; error?: string }>
+      }
+      /** Structured Windows app + Office control (Phase 7, connector ≥0.17). */
+      winauto?: {
+        call(op: string, args: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; denied?: boolean; error?: string }>
+      }
       /** Local MCP proxy (Phase 3) — present only in the desktop connector. */
       mcp?: {
         advertise(): Promise<Array<{ name: string; connected: boolean; error?: string; tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }> }>>

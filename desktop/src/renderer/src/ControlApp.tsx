@@ -318,7 +318,7 @@ export function ControlApp() {
   const cuOn = computerUse.enabled === true
   // Effective per-capability state for the UI — mirrors main's computerUseGate
   // (a capability is on only when the master is on and it isn't explicitly off).
-  const cuCap = (k: 'screen' | 'input' | 'apps' | 'clipboard') => cuOn && computerUse[k] !== false
+  const cuCap = (k: 'screen' | 'input' | 'apps' | 'clipboard' | 'browser') => cuOn && computerUse[k] !== false
 
   // ── Local MCP servers (Phase 3) ──
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([])
@@ -753,6 +753,11 @@ export function ControlApp() {
                     label={t('control.capClipboard')}
                     checked={cuCap('clipboard')}
                     onChange={(c) => patchComputerUse({ clipboard: c })}
+                  />
+                  <ToggleLine
+                    label={t('control.capBrowser')}
+                    checked={cuCap('browser')}
+                    onChange={(c) => patchComputerUse({ browser: c })}
                   />
                   <div style={{ height: 12 }} />
                   <div className="gy-hint" style={{ margin: '0 0 6px' }}>{t('control.consentTitle')}</div>

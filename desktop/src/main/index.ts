@@ -3,6 +3,8 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
+import { browserCall, getBrowserControl } from './browser-control'
+import { getWinAutoHost, disposeWinAutoHost } from './winauto-host'
 
 // Tray icon (32px), embedded so it works regardless of packaging layout.
 // Generated from img/Geny_Charactor_small.png (the Geny mascot).
@@ -114,10 +116,16 @@ interface ComputerUseConfig {
   screen?: boolean
   /** Input synthesis: type / key / click (+ future scroll/drag). Default true. */
   input?: boolean
-  /** Open an app / URL / path. Default true. */
+  /** Open an app / URL / path + structured app control (UIA / Office COM).
+   *  Default true. */
   apps?: boolean
   /** Write the clipboard. Default true. */
   clipboard?: boolean
+  /** Structured browser control — a dedicated Chrome/Edge automation instance
+   *  driven over CDP (browser_* tools). Default true (when enabled). */
+  browser?: boolean
+  /** Which engine the automation browser uses. Default 'auto' (Chrome → Edge). */
+  browserEngine?: 'auto' | 'chrome' | 'edge'
   /** Consent for the actuation groups: ask every time / allow for this run /
    *  auto (no prompt). Default 'ask'. */
   consentMode?: ConsentMode
@@ -264,6 +272,11 @@ const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
   'act.detailTarget': { ko: '대상: {target}', en: 'Target: {target}' },
   'act.scrollDown': { ko: '아래', en: 'down' },
   'act.scrollUp': { ko: '위', en: 'up' },
+  'act.capBrowser': { ko: '브라우저 조작', en: 'Browser control' },
+  'act.capBrowserOpen': { ko: '브라우저에서 페이지 열기', en: 'Open a page in the browser' },
+  'act.capBrowserEval': { ko: '브라우저에서 스크립트 실행', en: 'Run a script in the browser' },
+  'act.capAppControl': { ko: '프로그램 제어', en: 'Application control' },
+  'act.capOfficeControl': { ko: 'Office 문서 조작', en: 'Office document control' },
   'act.deniedByUser': { ko: '사용자가 거부함', en: 'Denied by the user' },
   'act.capDisabled': { ko: '이 동작이 꺼져 있습니다 (설정 → 로컬 컴퓨터 제어)', en: 'This action is disabled (Settings → Local Computer Use)' },
   // quick-chat delivery errors
@@ -1019,6 +1032,10 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   try { void getMcpManager().closeAll() } catch { /* ignore */ }
+  // Structured-control teardown: drop CDP sockets (the visible automation
+  // browser stays — it's the user's), kill the PowerShell UIA/COM host.
+  try { getBrowserControl().dispose() } catch { /* ignore */ }
+  try { disposeWinAutoHost() } catch { /* ignore */ }
   if (authRefreshTimer) clearInterval(authRefreshTimer)
 })
 
@@ -1147,15 +1164,15 @@ function registerHotkeys(): { ptt: boolean; quickChat: boolean } {
 // Effective gate = master AND the capability toggle. When `computerUse` is
 // absent we fall back to the legacy captureArmed/automationEnabled toggles so
 // existing installs behave exactly as before.
-type ActuationCap = 'input' | 'apps' | 'clipboard'
-interface ComputerUseGate { screen: boolean; input: boolean; apps: boolean; clipboard: boolean; mode: ConsentMode }
+type ActuationCap = 'input' | 'apps' | 'clipboard' | 'browser'
+interface ComputerUseGate { screen: boolean; input: boolean; apps: boolean; clipboard: boolean; browser: boolean; mode: ConsentMode }
 function computerUseGate(): ComputerUseGate {
   const c = loadConfig()
   const cu = c.computerUse
   if (!cu) {
     // Legacy fallback: screen defaults ON, actuation defaults OFF, always ASK.
     const act = c.automationEnabled === true
-    return { screen: c.captureArmed !== false, input: act, apps: act, clipboard: act, mode: 'ask' }
+    return { screen: c.captureArmed !== false, input: act, apps: act, clipboard: act, browser: act, mode: 'ask' }
   }
   const on = cu.enabled === true
   return {
@@ -1163,6 +1180,7 @@ function computerUseGate(): ComputerUseGate {
     input: on && cu.input !== false,
     apps: on && cu.apps !== false,
     clipboard: on && cu.clipboard !== false,
+    browser: on && cu.browser !== false,
     mode: cu.consentMode ?? 'ask',
   }
 }
@@ -1174,15 +1192,16 @@ function patchComputerUse(patch: Partial<ComputerUseConfig>): void {
 // "이 세션 동안 허용" — per-capability session grants, cleared on app restart.
 const sessionAllow = new Set<ActuationCap>()
 
-type ActuationResult = { ok: boolean; result?: string; denied?: boolean; error?: string }
+type ActuationResult = { ok: boolean; result?: unknown; denied?: boolean; error?: string }
 async function runActuation(
   cap: ActuationCap,
   label: string,
   detail: string,
-  fn: () => Promise<string>,
+  fn: () => Promise<unknown>,
 ): Promise<ActuationResult> {
   const gate = computerUseGate()
-  const allowed = cap === 'apps' ? gate.apps : cap === 'clipboard' ? gate.clipboard : gate.input
+  const allowed =
+    cap === 'apps' ? gate.apps : cap === 'clipboard' ? gate.clipboard : cap === 'browser' ? gate.browser : gate.input
   if (!allowed) {
     return { ok: false, denied: true, error: nt('act.capDisabled') }
   }
@@ -1463,6 +1482,58 @@ function registerIpc(): void {
       return `scrolled ${amount}`
     }),
   )
+
+  // ── Phase 7: structured local control — browser (CDP) + apps (UIA) + Office
+  //    (COM). Read ops need only the capability toggle (like screen capture);
+  //    act ops ride the same prompt-once consent as the other actuation groups. ──
+  const BROWSER_READ_OPS = new Set(['tabs', 'snapshot', 'read', 'screenshot'])
+  const browserOpLabel = (op: string): string =>
+    op === 'open' ? nt('act.capBrowserOpen') : op === 'eval' ? nt('act.capBrowserEval') : nt('act.capBrowser')
+  ipcMain.handle('browser:call', async (_e, op: string, args: Record<string, unknown>) => {
+    const gate = computerUseGate()
+    if (!gate.browser) return { ok: false, denied: true, error: nt('act.capDisabled') }
+    const a: Record<string, unknown> = { ...(args ?? {}) }
+    if (op === 'open' && !a.engine) a.engine = loadConfig().computerUse?.browserEngine ?? 'auto'
+    if (BROWSER_READ_OPS.has(op)) {
+      try {
+        return { ok: true, result: await browserCall(op, a) }
+      } catch (e) {
+        return { ok: false, error: String((e as Error).message) }
+      }
+    }
+    const detail = op === 'open' ? String(a.url ?? '') : op === 'act' ? `${a.action} ${a.element ?? ''}` : op
+    return runActuation('browser', browserOpLabel(op), detail.slice(0, 120), () => browserCall(op, a))
+  })
+
+  const WINAUTO_READ_OPS = new Set(['windows', 'win_snapshot', 'win_read', 'office_status', 'office_read'])
+  ipcMain.handle('winauto:call', async (_e, op: string, args: Record<string, unknown>) => {
+    const gate = computerUseGate()
+    if (!gate.apps) return { ok: false, denied: true, error: nt('act.capDisabled') }
+    const host = getWinAutoHost()
+    const a: Record<string, unknown> = args ?? {}
+    if (WINAUTO_READ_OPS.has(op)) {
+      try {
+        return { ok: true, result: await host.call(op, a, 40000) }
+      } catch (e) {
+        return { ok: false, error: String((e as Error).message) }
+      }
+    }
+    const label = op.startsWith('office') ? nt('act.capOfficeControl') : nt('act.capAppControl')
+    const detail = op === 'el_act' ? `${a.action} ${a.element ?? ''}` : op === 'office_act' ? `${a.app}: ${a.action}` : op
+    return runActuation('apps', label, String(detail).slice(0, 120), async () => {
+      const r = (await host.call(op, a, 40000)) as Record<string, unknown> | null
+      // Pattern-less control → fall back to a REAL click at its UIA center
+      // (UIA bounds are physical desktop px — nut.js's coordinate space).
+      if (r && r['no_pattern'] && Array.isArray(r['bounds'])) {
+        const [bx, by, bw, bh] = r['bounds'] as number[]
+        const nut = await loadNut()
+        await nut.mouse.setPosition(new nut.Point(Math.round(bx + bw / 2), Math.round(by + bh / 2)))
+        await nut.mouse.click(nut.Button.LEFT)
+        return { done: `clicked the control center (no automation pattern) at (${Math.round(bx + bw / 2)},${Math.round(by + bh / 2)})`, fallback: 'click' }
+      }
+      return r
+    })
+  })
 
   // ── Local MCP proxy (Phase 3): the connector hosts MCP clients to the user's
   //    local MCP servers; the renderer bridge + server reach them via these. ──

@@ -25,6 +25,30 @@ const CAPABILITIES = [
   'mcp_list', 'mcp_call',
 ];
 
+// Phase 7 (connector ≥0.17): structured local control — advertised only when
+// the preload actually exposes the surfaces, so an old connector never claims
+// capabilities it can't serve.
+const BROWSER_CAPS = [
+  'browser_tabs', 'browser_open', 'browser_snapshot', 'browser_act',
+  'browser_read', 'browser_screenshot', 'browser_eval', 'browser_close',
+];
+const WINAUTO_CAPS = [
+  'app_windows', 'app_snapshot', 'app_act', 'app_read',
+  'office_status', 'office_read', 'office_act',
+];
+
+/** browser_* capability → browser.call op. */
+const BROWSER_OPS: Record<string, string> = {
+  browser_tabs: 'tabs', browser_open: 'open', browser_snapshot: 'snapshot', browser_act: 'act',
+  browser_read: 'read', browser_screenshot: 'screenshot', browser_eval: 'eval', browser_close: 'close',
+};
+/** app_/office_ capability → winauto.call op (app_act with action=focus_window
+ *  routes to the window-level focus op). */
+const WINAUTO_OPS: Record<string, string> = {
+  app_windows: 'windows', app_snapshot: 'win_snapshot', app_act: 'el_act', app_read: 'win_read',
+  office_status: 'office_status', office_read: 'office_read', office_act: 'office_act',
+};
+
 // Capture spec — match the screen-observation cap (16:9, ≤1600×900, JPEG).
 const CAP_W = 1600;
 const CAP_H = 900;
@@ -220,7 +244,18 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
               : { ok: false, error: 'MCP not supported by this connector' };
             break;
           default:
-            payload = { ok: false, error: `unknown capability: ${tool}` };
+            if (tool && BROWSER_OPS[tool]) {
+              payload = conn.browser
+                ? await conn.browser.call(BROWSER_OPS[tool], a)
+                : { ok: false, error: 'browser control needs connector 0.17+ — please update the connector' };
+            } else if (tool && WINAUTO_OPS[tool]) {
+              const op = tool === 'app_act' && a?.action === 'focus_window' ? 'win_focus' : WINAUTO_OPS[tool];
+              payload = conn.winauto
+                ? await conn.winauto.call(op, a)
+                : { ok: false, error: 'app control needs connector 0.17+ — please update the connector' };
+            } else {
+              payload = { ok: false, error: `unknown capability: ${tool}` };
+            }
         }
         respond({ request_id, ...payload });
       } catch (e) {
@@ -242,7 +277,12 @@ export default function ConnectorBridgeClient({ sessionId }: { sessionId: string
       }
       ws.onopen = () => {
         try {
-          ws?.send(JSON.stringify({ type: 'hello', capabilities: CAPABILITIES }));
+          const caps = [
+            ...CAPABILITIES,
+            ...(conn.browser ? BROWSER_CAPS : []),
+            ...(conn.winauto ? WINAUTO_CAPS : []),
+          ];
+          ws?.send(JSON.stringify({ type: 'hello', capabilities: caps }));
         } catch {
           /* ignore */
         }
