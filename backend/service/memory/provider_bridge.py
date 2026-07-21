@@ -318,6 +318,7 @@ def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: A
         from geny_executor.memory.providers.file.provider import FileMemoryProvider
 
         from service.memory.synapse_handle import SynapseVectorHandle
+        from service.memory.usage_tracker import MemoryUsageTracker
     except Exception:  # noqa: BLE001 — extra not installed / import error
         logger.warning("synapse: geny-memory-adaptor not available", exc_info=True)
         return None
@@ -327,7 +328,11 @@ def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: A
     dim = int(getattr(ltm_config, "synapse_dim", 256) or 256)
     mem = SynapseMemory(SynapseConfig(
         path=db_path, dim=dim, store_text=True, store_text_maxlen=20_000))
-    handle = SynapseVectorHandle(mem, dim=dim)
+    # The usage tracker closes the learning loop: search feeds it provenance,
+    # the agent session flushes trusted signals into SynapseMemory.learn. Reach
+    # it from the session as ``provider.vector().usage_tracker``.
+    tracker = MemoryUsageTracker()
+    handle = SynapseVectorHandle(mem, dim=dim, usage_tracker=tracker)
     return FileMemoryProvider(
         root=storage_path, session_id=session_id,
         vector_store=handle, embedding_client=None)

@@ -1452,9 +1452,105 @@ class AgentSession:
                 )
 
         hooks.after_record_turn = _on_record_turn
+
+        async def _on_note_write(meta) -> None:
+            # First-write: register the title so a later citation of it in an
+            # answer can be detected (the vector engine doesn't store titles).
+            # Not a usefulness signal — a brand-new note was never retrieved.
+            try:
+                tracker = self._get_usage_tracker()
+                if tracker is not None:
+                    from service.memory.usage_tracker import ref_key
+                    key = ref_key(getattr(meta, "ref", None))
+                    tracker.register_title(key, str(getattr(meta, "title", "") or ""))
+            except Exception:  # noqa: BLE001
+                logger.debug("[%s] after_note_write signal failed",
+                             self._session_id, exc_info=True)
+
+        async def _on_note_update(meta) -> None:
+            # A re-written note is the strongest "this memory was useful" signal
+            # for the Synapse learner: the agent read it and chose to develop it.
+            # (A brand-new note was never in a search result, so first-writes
+            # can't produce a positive even though we register their title.)
+            try:
+                tracker = self._get_usage_tracker()
+                if tracker is not None:
+                    from service.memory.usage_tracker import SIGNAL_EDIT, ref_key
+                    key = ref_key(getattr(meta, "ref", None))
+                    if key:
+                        tracker.register_title(
+                            key, str(getattr(meta, "title", "") or ""))
+                        tracker.mark_useful(key, SIGNAL_EDIT)
+            except Exception:  # noqa: BLE001
+                logger.debug("[%s] after_note_update signal failed",
+                             self._session_id, exc_info=True)
+
+        hooks.after_note_write = _on_note_write
+        hooks.after_note_update = _on_note_update
         # Re-apply the (mutated) hooks bag so the provider's STM /
         # notes stores observe the new callbacks.
         provider.set_hooks(hooks)
+
+    def _get_usage_tracker(self):
+        """The Synapse usage tracker if the synapse engine is active, else None.
+        Reached as ``provider.vector().usage_tracker`` (see provider_bridge)."""
+        provider = self._memory_provider
+        if provider is None:
+            return None
+        try:
+            vec = provider.vector()
+        except Exception:  # noqa: BLE001
+            return None
+        return getattr(vec, "usage_tracker", None)
+
+    def _observe_memory_signal(self, event_type: str, data) -> None:
+        """Fold retrieval/promotion events into the usage tracker. Called once
+        per pipeline event from both dispatch loops; cheap no-op when the
+        synapse engine isn't active."""
+        tracker = self._get_usage_tracker()
+        if tracker is None or not isinstance(data, dict):
+            return
+        try:
+            if event_type == "context.built":
+                for ch in (data.get("chunks") or []):
+                    key = ch.get("key") if isinstance(ch, dict) else None
+                    if key:
+                        # Injected-as-context: promotes to a RETENTION signal
+                        # only after surviving several distinct turns.
+                        tracker.note_injected(str(key))
+            elif event_type == "memory.promoted":
+                from service.memory.usage_tracker import SIGNAL_PROMOTE, ref_key
+                key = ref_key(data.get("ref"))
+                if key:
+                    tracker.mark_useful(key, SIGNAL_PROMOTE)
+        except Exception:  # noqa: BLE001
+            logger.debug("[%s] memory signal observe failed",
+                         self._session_id, exc_info=True)
+
+    async def _flush_memory_learning(self, answer_text: str) -> None:
+        """End-of-turn: scan the final answer for note citations, then drive
+        Synapse learning from all signals collected this turn. Off-loop —
+        learning is CPU-ms but must never block the event loop."""
+        tracker = self._get_usage_tracker()
+        if tracker is None:
+            return
+        provider = self._memory_provider
+        try:
+            handle = provider.vector()
+        except Exception:  # noqa: BLE001
+            return
+
+        def _do() -> None:
+            tracker.scan_citations(answer_text or "")
+            tracker.flush(handle)
+            tracker.begin_turn()
+
+        try:
+            from service.memory.sync_async_bridge import offload_blocking
+            await offload_blocking(_do)
+        except Exception:  # noqa: BLE001 — learning is best-effort
+            logger.debug("[%s] memory learning flush failed",
+                         self._session_id, exc_info=True)
 
     def record_memory_event(
         self,
@@ -3651,6 +3747,10 @@ class AgentSession:
             event_type = event.type if hasattr(event, "type") else ""
             event_data = event.data if hasattr(event, "data") else {}
 
+            # Memory learning: fold retrieval/promotion signals into the usage
+            # tracker (no-op unless the synapse engine is active).
+            self._observe_memory_signal(event_type, event_data)
+
             # Log pipeline events to session_logger for WebSocket/SSE streaming
             if session_logger:
                 if event_type == "tool.call_start":
@@ -4007,6 +4107,10 @@ class AgentSession:
 
         duration_ms = int((time.time() - start_time) * 1000)
 
+        # Memory learning: end-of-turn flush — scan the final answer for note
+        # citations, then reinforce Synapse from this turn's trusted signals.
+        await self._flush_memory_learning(accumulated_output)
+
         # Log execution completion
         if session_logger:
             session_logger.log_stage_execution_complete(
@@ -4196,6 +4300,10 @@ class AgentSession:
             event_type = event.type if hasattr(event, "type") else ""
             event_data = event.data if hasattr(event, "data") else {}
 
+            # Memory learning: fold retrieval/promotion signals into the usage
+            # tracker (no-op unless the synapse engine is active).
+            self._observe_memory_signal(event_type, event_data)
+
             # ── Log pipeline events to session_logger ──
             if session_logger:
                 if event_type == "tool.execute_start":
@@ -4381,6 +4489,10 @@ class AgentSession:
 
         # Post-stream: log and record
         duration_ms = int((time.time() - start_time) * 1000)
+
+        # Memory learning: end-of-turn flush — scan the final answer for note
+        # citations, then reinforce Synapse from this turn's trusted signals.
+        await self._flush_memory_learning(accumulated_output)
 
         if session_logger:
             session_logger.log_stage_execution_complete(
