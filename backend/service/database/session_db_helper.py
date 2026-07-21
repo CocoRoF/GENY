@@ -217,6 +217,62 @@ def db_permanent_delete_session(db_manager, session_id: str) -> bool:
         return False
 
 
+def _payload_session_probes(session_id: str, keys) -> tuple:
+    """(where_clause, params) matching a session id inside a JSON ``payload``
+    text column for any of ``keys``. json.dumps emits both spaced and compact
+    separators depending on the writer, so probe both. Substring probe (not a
+    jsonb cast) is robust against non-JSON / malformed payloads."""
+    clauses, params = [], []
+    for k in keys:
+        clauses.append("payload LIKE %s"); params.append(f'%"{k}": "{session_id}"%')
+        clauses.append("payload LIKE %s"); params.append(f'%"{k}":"{session_id}"%')
+    return "(" + " OR ".join(clauses) + ")", tuple(params)
+
+
+def db_delete_tasks_by_session(db_manager, session_id: str) -> int:
+    """Delete a session's background tasks (work queue) + their outputs.
+
+    The session is stamped in the task JSON ``payload`` as ``_session_id`` at
+    create. Returns the number of task rows removed. Best-effort — the caller
+    logs and continues so a cleanup miss never blocks the session delete.
+    """
+    mgr = _get_db_manager(db_manager)
+    if not _is_db_available(db_manager):
+        return 0
+    where, params = _payload_session_probes(session_id, ["_session_id"])
+    try:
+        mgr.execute_update_delete(
+            f"DELETE FROM background_task_outputs WHERE task_id IN "
+            f"(SELECT task_id FROM background_tasks WHERE {where})", params)
+        n = mgr.execute_update_delete(
+            f"DELETE FROM background_tasks WHERE {where}", params)
+        return int(n or 0)
+    except Exception as e:
+        logger.warning(f"Failed to delete tasks for session {session_id}: {e}")
+        return 0
+
+
+def db_delete_crons_by_session(db_manager, session_id: str) -> int:
+    """Delete the cron jobs an agent self-scheduled for its session.
+
+    Crons created by a session's agent are stamped with ``_session_id`` in the
+    job payload (SessionScopedCronStore). Legacy/self-targeting crons carry the
+    session under ``session_id`` instead, so match both. Returns rows removed.
+    The running CronRunner re-reads the store each cycle, so a DB delete stops
+    future fires without a restart.
+    """
+    mgr = _get_db_manager(db_manager)
+    if not _is_db_available(db_manager):
+        return 0
+    where, params = _payload_session_probes(session_id, ["_session_id", "session_id"])
+    try:
+        n = mgr.execute_update_delete(f"DELETE FROM cron_jobs WHERE {where}", params)
+        return int(n or 0)
+    except Exception as e:
+        logger.warning(f"Failed to delete crons for session {session_id}: {e}")
+        return 0
+
+
 def db_get_session(db_manager, session_id: str) -> Optional[Dict[str, Any]]:
     """Get a single session record by session_id."""
     mgr = _get_db_manager(db_manager)

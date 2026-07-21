@@ -685,6 +685,16 @@ async def permanent_delete_session(
             except Exception as e:
                 logger.warning(f"Failed to cleanup storage {storage_path}: {e}")
 
+    # GAPT workspace: a live session already archived it via delete_session,
+    # but a dormant one (deleted post-restart) took the direct-rmtree branch
+    # above and never touched GAPT. Call the idempotent helper unconditionally
+    # so the agent's workspace is gone either way.
+    try:
+        from service.gapt import delete_workspace_for_session
+        await delete_workspace_for_session(session_id)
+    except Exception:  # noqa: BLE001 — never block permanent delete
+        logger.debug(f"[{session_id}] gapt cleanup on permanent delete failed", exc_info=True)
+
     removed = store.permanent_delete(session_id)
     if not removed:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found in store")
@@ -705,6 +715,11 @@ async def permanent_delete_session(
                         logger.info(f"Linked session storage cleaned up: {linked_storage}")
                     except Exception as e:
                         logger.warning(f"Failed to cleanup linked storage {linked_storage}: {e}")
+            try:
+                from service.gapt import delete_workspace_for_session
+                await delete_workspace_for_session(linked_id)
+            except Exception:  # noqa: BLE001
+                logger.debug(f"[{linked_id}] gapt cleanup on permanent delete failed", exc_info=True)
             store.permanent_delete(linked_id)
             logger.info(f"✅ Linked session permanently deleted: {linked_id}")
 

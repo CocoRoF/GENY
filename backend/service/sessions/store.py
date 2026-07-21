@@ -332,6 +332,21 @@ class SessionStore:
             except Exception as e:
                 logger.debug(f"[SessionStore] Chat-room cleanup failed for {session_id}: {e}")
 
+            # The agent's own runtime side-effects, deleted WITH the agent:
+            #   • work queue — its background tasks (+ outputs)
+            #   • the crons it self-scheduled (a runaway 1-min cron once spun
+            #     29k failed tasks precisely because delete never removed it)
+            try:
+                from service.database.session_db_helper import (
+                    db_delete_tasks_by_session, db_delete_crons_by_session,
+                )
+                nt = db_delete_tasks_by_session(self._app_db, session_id)
+                nc = db_delete_crons_by_session(self._app_db, session_id)
+                if nt or nc:
+                    logger.info(f"[SessionStore] Cleaned {nt} task(s), {nc} cron(s) for {session_id}")
+            except Exception as e:
+                logger.debug(f"[SessionStore] Task/cron cleanup failed for {session_id}: {e}")
+
         # JSON backup
         with self._lock:
             if session_id in self._data:

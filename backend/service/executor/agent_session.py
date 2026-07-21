@@ -399,6 +399,35 @@ class _SessionCharacterLike:
         self.personality_archetype = personality_archetype
 
 
+class _SessionScopedCronStore:
+    """Wraps the shared cron store so every cron an agent self-schedules is
+    stamped with its owner session id (``_session_id`` in the job payload).
+
+    Crons are per-agent: the executor's ``CronCreate`` tool builds a bare
+    ``CronJob`` and never records who created it, so before this a session's
+    crons couldn't be found — and weren't deleted with the session (a runaway
+    1-minute cron outlived its agent and spun ~29k failed tasks). Stamping the
+    owner here makes ``db_delete_crons_by_session`` reliable. Every other store
+    method passes straight through to the real store.
+    """
+
+    def __init__(self, inner, session_id: str) -> None:
+        self._inner = inner
+        self._sid = session_id
+
+    async def put(self, job):  # the CronCreate tool's write path
+        try:
+            payload = getattr(job, "payload", None)
+            if isinstance(payload, dict):
+                payload.setdefault("_session_id", self._sid)
+        except Exception:  # noqa: BLE001 — stamping must never block cron create
+            pass
+        return await self._inner.put(job)
+
+    def __getattr__(self, name):  # get / list / delete / mark_fired / update_status
+        return getattr(self._inner, name)
+
+
 class AgentSession:
     """geny-executor Pipeline-based agent session.
 
@@ -2863,6 +2892,10 @@ class AgentSession:
             ):
                 _rt_val = getattr(_app_state, _rt_key, None)
                 if _rt_val is not None:
+                    # Scope the cron store to THIS session so every cron the
+                    # agent self-schedules is owned by it (→ deleted with it).
+                    if _rt_key == "cron_store":
+                        _rt_val = _SessionScopedCronStore(_rt_val, self._session_id)
                     _tool_extras[_rt_key] = _rt_val
             _orchestrator = getattr(_app_state, "subagent_orchestrator", None)
             if _orchestrator is not None:

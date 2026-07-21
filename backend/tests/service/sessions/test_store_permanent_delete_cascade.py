@@ -13,7 +13,16 @@ from service.sessions import store as store_mod
 
 @pytest.fixture
 def patched(monkeypatch, tmp_path):
-    calls = {"session": [], "memory": [], "logs": [], "room_del": [], "room_upd": []}
+    calls = {"session": [], "memory": [], "logs": [], "room_del": [], "room_upd": [],
+             "tasks": [], "crons": []}
+    monkeypatch.setattr(
+        "service.database.session_db_helper.db_delete_tasks_by_session",
+        lambda db, sid: (calls["tasks"].append(sid) or 2),
+    )
+    monkeypatch.setattr(
+        "service.database.session_db_helper.db_delete_crons_by_session",
+        lambda db, sid: (calls["crons"].append(sid) or 1),
+    )
 
     # Make _db_available true and stub the row/memory deletes.
     monkeypatch.setattr("service.database.session_db_helper._is_db_available", lambda db: True)
@@ -63,6 +72,9 @@ def test_permanent_delete_cascades_logs_and_rooms(patched):
     # unrelated room untouched.
     assert calls["room_del"] == ["r-solo"]
     assert calls["room_upd"] == [("r-shared", ["OTHER"])]
+    # ... plus the agent's own runtime side-effects: work queue + self-crons.
+    assert calls["tasks"] == ["S"], "background tasks must be deleted"
+    assert calls["crons"] == ["S"], "self-scheduled crons must be deleted"
 
 
 def test_cascade_failure_never_blocks_delete(patched, monkeypatch):
