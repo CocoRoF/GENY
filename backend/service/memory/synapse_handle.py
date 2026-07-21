@@ -16,6 +16,7 @@ the concrete store.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -80,25 +81,44 @@ class SynapseVectorHandle:
             api_key_present=False,
         )
 
+    # Synapse's SQLite/graph ops are sync. They're "CPU-ms" for a small vault,
+    # but a large session's initial re-index (thousands of notes) or a distill
+    # is write-heavy and, on a slow disk, can take many seconds — long enough to
+    # freeze the whole asyncio event loop (a session load once wedged the server
+    # for hours in ``rq_qos_wait``). SynapseMemory is thread-safe
+    # (``check_same_thread=False`` + an internal ``RLock``), so every sync call
+    # here is dispatched through ``asyncio.to_thread`` — the loop keeps serving
+    # other sessions/health while one session's memory work runs on a worker.
+
     async def index(self, ref: NoteRef, text: str) -> int:
-        # Executor calls this off the write lock; Synapse ops are sync CPU ms.
-        self._m.index(
-            _node_id(ref), text,
+        await asyncio.to_thread(
+            self._m.index, _node_id(ref), text,
             kind=str(getattr(ref, "category", None) or "note"),
         )
         return 1
 
     async def index_batch(self, items: Sequence[Tuple[NoteRef, str]]) -> int:
-        for ref, text in items:
-            self._m.index(_node_id(ref), text,
-                          kind=str(getattr(ref, "category", None) or "note"))
-        return len(items)
+        def _run() -> int:
+            for ref, text in items:
+                self._m.index(_node_id(ref), text,
+                              kind=str(getattr(ref, "category", None) or "note"))
+            return len(items)
+        # One hop to the worker for the whole batch (not per item) — the initial
+        # session re-index is exactly this path.
+        return await asyncio.to_thread(_run)
 
     async def search(self, text: str, *, top_k: int = 5,
                      threshold: float = 0.0) -> List[MemoryChunk]:
-        hits = self._m.search(text, top_k=top_k)
+        # Search + per-hit body fetch both hit SQLite → run the whole read on a
+        # worker thread and hand back plain data.
+        def _run() -> Tuple[list, list]:
+            hits = self._m.search(text, top_k=top_k)
+            bodies = [self._m.get_text(h.id) for h in hits if h.score >= threshold]
+            return hits, bodies
+        hits, bodies = await asyncio.to_thread(_run)
         # Record provenance for learning BEFORE thresholding — a note that just
-        # missed the score cut is still a valid negative for this query.
+        # missed the score cut is still a valid negative for this query. Pure
+        # in-memory bookkeeping, cheap on the loop.
         tracker = self.usage_tracker
         if tracker is not None and hits:
             try:
@@ -111,10 +131,12 @@ class SynapseVectorHandle:
             except Exception:  # noqa: BLE001 — never break retrieval
                 logger.debug("usage_tracker.record_search failed", exc_info=True)
         out: List[MemoryChunk] = []
+        bi = 0
         for h in hits:
             if h.score < threshold:
                 continue
-            body = self._m.get_text(h.id) or h.title or ""
+            body = bodies[bi] or h.title or ""
+            bi += 1
             out.append(MemoryChunk(
                 key=h.id,
                 content=body,
@@ -139,13 +161,14 @@ class SynapseVectorHandle:
                              negatives=negatives, label_src=label_src)
 
     async def remove(self, ref: NoteRef) -> bool:
-        self._m.remove(_node_id(ref))
+        await asyncio.to_thread(self._m.remove, _node_id(ref))
         return True
 
     async def reindex(self, *, plan: Optional[ReindexPlan] = None) -> ReindexPlan:
         # Synapse indexes are incremental + derived; distillation is the only
-        # batch maintenance and needs no external tokens/cost.
-        metrics = self._m.distill()
+        # batch maintenance and needs no external tokens/cost. Write-heavy over
+        # the whole graph → off the loop.
+        metrics = await asyncio.to_thread(self._m.distill)
         return ReindexPlan(
             layer="vector",
             reason="synapse distill (local, zero-cost)",
@@ -160,7 +183,7 @@ class SynapseVectorHandle:
         # Synapse stores one vector per note (no sub-chunking), so a document is
         # its single chunk.
         nid = _node_id(ref)
-        body = self._m.get_text(nid)
+        body = await asyncio.to_thread(self._m.get_text, nid)
         if body is None:
             return []
         return [MemoryChunk(key=nid, content=body, source="vector",

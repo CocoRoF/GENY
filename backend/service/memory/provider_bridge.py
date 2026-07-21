@@ -29,6 +29,7 @@ rather than re-deriving the config.
 
 from __future__ import annotations
 
+import asyncio
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -284,9 +285,18 @@ async def build_memory_provider(
     # Synapse-backed VectorHandle.
     engine = (getattr(ltm_config, "memory_engine", "synapse") or "synapse").strip()
     if engine == "synapse":
-        provider = _build_synapse_provider(
+        # Opening SynapseMemory loads/attaches the session's SQLite graph — for a
+        # large session that's heavy disk I/O. Run it on a worker thread so the
+        # event loop never blocks (SynapseMemory is thread-safe:
+        # check_same_thread=False + RLock). Same reason the SynapseVectorHandle
+        # dispatches its ops through asyncio.to_thread. A session's memory once
+        # froze the whole backend for hours in ``rq_qos_wait`` doing this on-loop.
+        provider = await asyncio.to_thread(
+            _build_synapse_provider,
             session_id=session_id, storage_path=storage_path, ltm_config=ltm_config)
         if provider is not None:
+            # provider.initialize() re-indexes existing notes via the handle,
+            # which now offloads each Synapse write to a worker thread too.
             await provider.initialize()
             return provider
         logger.warning("synapse engine unavailable — falling back to composite")
