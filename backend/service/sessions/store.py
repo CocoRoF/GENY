@@ -296,6 +296,42 @@ class SessionStore:
             except Exception as e:
                 logger.debug(f"[SessionStore] Memory cleanup failed for {session_id}: {e}")
 
+            # Session logs (this table is by far the largest per-session store —
+            # hundreds of rows each. The helper existed but was never wired into
+            # delete, so a purged session left its whole log tail orphaned.)
+            try:
+                from service.database.session_log_db_helper import db_delete_session_logs
+                db_delete_session_logs(self._app_db, session_id)
+                logger.debug(f"[SessionStore] Session logs cleaned for {session_id}")
+            except Exception as e:
+                logger.debug(f"[SessionStore] Session-log cleanup failed for {session_id}: {e}")
+
+            # Chat rooms + their messages. A room lists its sessions in a JSON
+            # ``session_ids`` array (usually one). On permanent delete: drop this
+            # session from every room it's in; when that empties the room, delete
+            # the room and its messages. Rooms shared with a surviving session
+            # keep their history. (Previously nothing cleaned these — 78% of
+            # prod rooms/messages were orphaned tails of deleted sessions.)
+            try:
+                from service.database.chat_db_helper import (
+                    db_list_rooms, db_delete_room, db_update_room_sessions,
+                )
+                for room in (db_list_rooms(self._app_db) or []):
+                    sids = room.get("session_ids") or []
+                    if session_id not in sids:
+                        continue
+                    remaining = [s for s in sids if s != session_id]
+                    rid = room.get("room_id")
+                    if not rid:
+                        continue
+                    if remaining:
+                        db_update_room_sessions(self._app_db, rid, remaining)
+                    else:
+                        db_delete_room(self._app_db, rid)  # cascades to messages
+                logger.debug(f"[SessionStore] Chat rooms cleaned for {session_id}")
+            except Exception as e:
+                logger.debug(f"[SessionStore] Chat-room cleanup failed for {session_id}: {e}")
+
         # JSON backup
         with self._lock:
             if session_id in self._data:
