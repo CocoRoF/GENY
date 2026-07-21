@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, type ComponentProps } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import hljs from 'highlight.js';
@@ -149,6 +149,17 @@ function CopyBtn({ text }: { text: string }) {
     </button>
   );
 }
+
+/**
+ * GFM plugins for chat. `singleTilde: false` restricts strikethrough to the
+ * standard ``~~double~~`` form. remark-gfm's default treats a *single* ``~`` as
+ * a strikethrough delimiter, which wrecks Korean output — ``~`` is used
+ * constantly for ranges/waves (``2~3``, ``암복호화~LDAP``, ``~/path``), so the
+ * text between two such tildes was being struck through. Intentional
+ * ``~~strikethrough~~`` still renders.
+ */
+const REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] =
+  [[remarkGfm, { singleTilde: false }]];
 
 // ── Custom components for react-markdown ──
 const mdComponents: Components = {
@@ -341,7 +352,7 @@ function ChatMarkdownInner({ content, className }: ChatMarkdownProps) {
   if (!hasInlineEmotions) {
     return (
       <div className={`chat-markdown text-[0.8125rem] text-[var(--text-primary)] leading-relaxed break-keep ${className || ''}`}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={mdComponents}>
           {content}
         </ReactMarkdown>
       </div>
@@ -355,7 +366,7 @@ function ChatMarkdownInner({ content, className }: ChatMarkdownProps) {
         <div key={i}>
           {seg.emotion && <InlineEmotionBadge emotion={seg.emotion} />}
           {seg.content.trim() && (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={mdComponents}>
               {seg.content.trim()}
             </ReactMarkdown>
           )}
