@@ -3,9 +3,27 @@
 import { memo, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import hljs from 'highlight.js';
 import type { Components } from 'react-markdown';
-import { splitEmotionSegments, EMOTION_COLORS } from './chat-utils';
+import { splitEmotionSegments, normalizeChatMarkdown, EMOTION_COLORS } from './chat-utils';
 import { getToken } from '@/lib/authApi';
+
+/**
+ * Syntax-highlight a fenced code block with highlight.js (already a dep — the
+ * file-viewer uses it too). Returns hljs-classed HTML, or null to fall back to
+ * plain escaped text. We only highlight when the language is known: auto-detect
+ * on arbitrary chat text mis-colours prose, so an unlabelled block stays plain.
+ */
+function highlightToHtml(content: string, lang?: string): string | null {
+  if (!lang) return null;
+  try {
+    const normalized = lang.toLowerCase();
+    if (hljs.getLanguage(normalized)) {
+      return hljs.highlight(content, { language: normalized, ignoreIllegals: true }).value;
+    }
+  } catch { /* fall back to plain */ }
+  return null;
+}
 
 /**
  * Agent replies routinely embed gated API URLs (session storage files:
@@ -143,16 +161,27 @@ const mdComponents: Components = {
     );
   },
   code({ className, children }) {
-    const match = /language-(\w+)/.exec(className || '');
-    const content = String(children).replace(/\n$/, '');
-    if (match) {
+    const match = /language-([\w+-]+)/.exec(className || '');
+    const raw = String(children ?? '');
+    const content = raw.replace(/\n$/, '');
+    // Block vs inline: a language class OR any newline means a fenced block.
+    // (Previously an unlabelled ``` block had no language class and fell through
+    // to the inline branch, rendering multi-line code as a cramped inline span.)
+    const isBlock = !!match || raw.includes('\n');
+    if (isBlock) {
+      const lang = match?.[1];
+      const highlighted = lang ? highlightToHtml(content, lang) : null;
       return (
         <>
-          <div className="flex items-center justify-between px-3 py-1 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] rounded-t-lg">
-            <span className="text-[0.5625rem] text-[var(--text-muted)] uppercase tracking-wider">{match[1]}</span>
-          </div>
-          <pre className="overflow-x-auto px-3 py-2 bg-[var(--bg-primary)] border border-t-0 border-[var(--border-color)] rounded-b-lg text-[0.8125rem] leading-relaxed">
-            <code className={className}>{content}</code>
+          {lang && (
+            <div className="flex items-center justify-between px-3 py-1 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] rounded-t-lg">
+              <span className="text-[0.5625rem] text-[var(--text-muted)] uppercase tracking-wider">{lang}</span>
+            </div>
+          )}
+          <pre className={`overflow-x-auto px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] text-[0.8125rem] leading-relaxed ${lang ? 'border-t-0 rounded-b-lg' : 'rounded-lg'}`}>
+            {highlighted
+              ? <code className={`hljs ${className || ''}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+              : <code className={className}>{content}</code>}
           </pre>
           <CopyBtn text={content} />
         </>
@@ -302,7 +331,10 @@ export interface ChatMarkdownProps {
 }
 
 function ChatMarkdownInner({ content, className }: ChatMarkdownProps) {
-  const segments = splitEmotionSegments(content);
+  // Unwrap ```markdown wrappers first, then split emotion tags — so an answer
+  // the agent wrapped whole in a markdown fence renders as real markdown.
+  const normalized = normalizeChatMarkdown(content);
+  const segments = splitEmotionSegments(normalized);
   const hasInlineEmotions = segments.length > 1 || (segments.length === 1 && segments[0].emotion !== null);
 
   // Fast path: no inline emotion tags

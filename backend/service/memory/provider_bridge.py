@@ -275,6 +275,21 @@ async def build_memory_provider(
 
             ltm_config = LTMConfig.get_default_instance()
 
+    # Engine choice (LTMConfig.memory_engine): "composite" (default, API
+    # embeddings) or "synapse" (local, learnable, zero-API-call). Synapse can't
+    # go through the factory/manifest path (a custom provider name isn't
+    # registered on the factory the executor builds internally), so it is
+    # assembled here directly: a FileMemoryProvider keeping STM/LTM/Notes as
+    # markdown, with its vector layer replaced by a Synapse-backed VectorHandle.
+    engine = (getattr(ltm_config, "memory_engine", "composite") or "composite").strip()
+    if engine == "synapse":
+        provider = _build_synapse_provider(
+            session_id=session_id, storage_path=storage_path, ltm_config=ltm_config)
+        if provider is not None:
+            await provider.initialize()
+            return provider
+        logger.warning("synapse engine unavailable — falling back to composite")
+
     config = build_memory_provider_config(
         session_id=session_id,
         storage_path=storage_path,
@@ -288,6 +303,34 @@ async def build_memory_provider(
     provider = factory.build(config)
     await provider.initialize()
     return provider
+
+
+def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: Any):
+    """FileMemoryProvider whose vector layer is a local Synapse engine.
+
+    Returns None (caller falls back to composite) if geny-memory-adaptor isn't
+    installed. Zero embedding API calls: ``embedding_client=None`` and an
+    injected ``vector_store`` bypass the file provider's embedding path."""
+    try:
+        import os
+
+        from geny_memory_adaptor import SynapseConfig, SynapseMemory
+        from geny_executor.memory.providers.file.provider import FileMemoryProvider
+
+        from service.memory.synapse_handle import SynapseVectorHandle
+    except Exception:  # noqa: BLE001 — extra not installed / import error
+        logger.warning("synapse: geny-memory-adaptor not available", exc_info=True)
+        return None
+
+    os.makedirs(storage_path, exist_ok=True)
+    db_path = os.path.join(storage_path, "synapse.db")
+    dim = int(getattr(ltm_config, "synapse_dim", 256) or 256)
+    mem = SynapseMemory(SynapseConfig(
+        path=db_path, dim=dim, store_text=True, store_text_maxlen=20_000))
+    handle = SynapseVectorHandle(mem, dim=dim)
+    return FileMemoryProvider(
+        root=storage_path, session_id=session_id,
+        vector_store=handle, embedding_client=None)
 
 
 async def build_single_tenant_provider(

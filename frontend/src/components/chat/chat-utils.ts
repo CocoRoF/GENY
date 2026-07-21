@@ -157,3 +157,60 @@ export const shortFileName = (fp: string): string => {
   const parts = fp.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || fp;
 };
+
+// ── Markdown normalization ──
+
+/**
+ * Agents habitually wrap their entire formatted answer in a ```` ```markdown ````
+ * fence. A CommonMark renderer then treats it as a *literal* code block, so the
+ * headings/tables inside show as raw source (the exact bug users hit). Unwrap
+ * fences whose info string is `markdown`/`md` so their inner content renders as
+ * real markdown.
+ *
+ * Everything else is left byte-for-byte intact: other languages (```python,
+ * ```json) and plain ``` blocks stay literal, so genuine code — including lines
+ * that merely *look* like tables — is never mangled. Fence length is respected
+ * per CommonMark (a closer must be at least as long as its opener), so a
+ * ```` ````markdown ```` wrapper can safely contain inner ``` code fences. An
+ * unclosed markdown fence (still streaming) is unwrapped to the end, so partial
+ * answers render live instead of flashing as a code block until the closer lands.
+ */
+export function normalizeChatMarkdown(src: string): string {
+  if (!src) return src;
+  // Fast path: no fences → nothing to unwrap.
+  if (src.indexOf('```') === -1 && src.indexOf('~~~') === -1) return src;
+
+  const parseFence = (line: string): { char: string; len: number; info: string } | null => {
+    const m = /^([ \t]{0,3})(`{3,}|~{3,})[ \t]*(.*?)[ \t]*$/.exec(line);
+    return m ? { char: m[2][0], len: m[2].length, info: m[3] } : null;
+  };
+
+  const lines = src.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const open = parseFence(lines[i]);
+    if (!open) { out.push(lines[i]); i++; continue; }
+
+    // Locate the matching closer: same fence char, length ≥ opener, empty info.
+    let close = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const f = parseFence(lines[j]);
+      if (f && f.char === open.char && f.len >= open.len && f.info === '') { close = j; break; }
+    }
+
+    const info = open.info.trim().toLowerCase();
+    if (info === 'markdown' || info === 'md') {
+      // Unwrap: emit only the inner lines, dropping both fence lines.
+      const end = close === -1 ? lines.length : close;
+      for (let k = i + 1; k < end; k++) out.push(lines[k]);
+      i = close === -1 ? lines.length : close + 1;
+    } else {
+      // Preserve the whole fenced block verbatim (fences included).
+      const last = close === -1 ? lines.length - 1 : close;
+      for (let k = i; k <= last; k++) out.push(lines[k]);
+      i = last + 1;
+    }
+  }
+  return out.join('\n');
+}

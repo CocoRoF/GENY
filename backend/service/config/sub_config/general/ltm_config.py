@@ -17,6 +17,13 @@ from service.config.base import BaseConfig, ConfigField, FieldType, register_con
 from service.config.sub_config.general.env_utils import env_sync, read_env_defaults
 
 
+# ── Memory engine options ─────────────────────────────────────────────
+
+MEMORY_ENGINE_OPTIONS = [
+    {"value": "composite", "label": "Composite (API embeddings)"},
+    {"value": "synapse", "label": "Synapse (local · learnable · no API)"},
+]
+
 # ── Embedding provider options ────────────────────────────────────────
 
 EMBEDDING_PROVIDER_OPTIONS = [
@@ -53,6 +60,15 @@ class LTMConfig(BaseConfig):
 
     # ── Toggle ──
     enabled: bool = False
+
+    # ── Memory engine ──
+    #: "composite" (default): file notes + API-embedding vector layer.
+    #: "synapse": local, learnable, zero-API-call engine (BM25 + local
+    #: embeddings + typed-edge PageRank + online-learned ranker). When
+    #: synapse, embedding_provider/model/key below are unused.
+    memory_engine: str = "composite"
+    #: Synapse local embedding dimension (synapse engine only).
+    synapse_dim: int = 256
 
     # ── Embedding provider ──
     embedding_provider: str = "openai"
@@ -175,6 +191,11 @@ class LTMConfig(BaseConfig):
                         "label": "Enable Long-Term Memory Vector Search",
                         "description": "Enable FAISS vector DB-based semantic search",
                     },
+                    "memory_engine": {
+                        "label": "메모리 엔진",
+                        "description": ("Composite는 API 임베딩을 씁니다. Synapse는 "
+                                        "API 호출 없이 로컬에서 학습하는 경량 엔진입니다."),
+                    },
                     "embedding_provider": {
                         "label": "Embedding Provider",
                         "description": "API provider for converting text to vectors",
@@ -278,6 +299,18 @@ class LTMConfig(BaseConfig):
                 label="Enable Vector Search",
                 description="Enable FAISS-based semantic search for long-term memory",
                 default=False,
+                group="toggle",
+            ),
+
+            # ── Engine ──
+            ConfigField(
+                name="memory_engine",
+                field_type=FieldType.SELECT,
+                label="Memory Engine",
+                description=("Composite uses API embeddings. Synapse runs a "
+                             "local, learnable engine with no API calls."),
+                default="composite",
+                options=MEMORY_ENGINE_OPTIONS,
                 group="toggle",
             ),
 
