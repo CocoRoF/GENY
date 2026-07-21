@@ -306,16 +306,24 @@ async def build_memory_provider(
     return provider
 
 
-def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: Any):
+def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: Any,
+                            scope: Any = "session", with_tracker: bool = True):
     """FileMemoryProvider whose vector layer is a local Synapse engine.
 
     Returns None (caller falls back to composite) if geny-memory-adaptor isn't
     installed. Zero embedding API calls: ``embedding_client=None`` and an
-    injected ``vector_store`` bypass the file provider's embedding path."""
+    injected ``vector_store`` bypass the file provider's embedding path.
+
+    ``with_tracker`` gates the learning loop's usage tracker: the per-session
+    provider wants it (trusted signals flush into ``SynapseMemory.learn``), but
+    single-tenant vaults (curated / global) have no per-turn feedback source, so
+    they run search-only with ``with_tracker=False``. ``scope`` tags the
+    provider's notes (``Scope.USER`` for a user-owned vault like curated)."""
     try:
         import os
 
         from geny_memory_adaptor import SynapseConfig, SynapseMemory
+        from geny_executor.memory.provider import Scope
         from geny_executor.memory.providers.file.provider import FileMemoryProvider
 
         from service.memory.synapse_handle import SynapseVectorHandle
@@ -332,10 +340,11 @@ def _build_synapse_provider(*, session_id: str, storage_path: str, ltm_config: A
     # The usage tracker closes the learning loop: search feeds it provenance,
     # the agent session flushes trusted signals into SynapseMemory.learn. Reach
     # it from the session as ``provider.vector().usage_tracker``.
-    tracker = MemoryUsageTracker()
+    tracker = MemoryUsageTracker() if with_tracker else None
     handle = SynapseVectorHandle(mem, dim=dim, usage_tracker=tracker)
+    scope_enum = Scope(scope) if isinstance(scope, str) else scope
     return FileMemoryProvider(
-        root=storage_path, session_id=session_id,
+        root=storage_path, scope=scope_enum, session_id=session_id,
         vector_store=handle, embedding_client=None)
 
 
@@ -393,6 +402,24 @@ async def build_single_tenant_provider(
                 exc_info=True,
             )
             ltm_config = None
+
+    # Synapse branch: when a vector layer is wanted (enable_embedding) AND the
+    # configured engine is synapse, give this tenant a local Synapse-backed
+    # vector layer instead of an API-embedding store — zero API calls, no key.
+    # This is what lets curated-knowledge vector search work under the synapse
+    # default. Search-only (with_tracker=False): single-tenant vaults have no
+    # per-turn feedback source, so there is no learning loop to close here.
+    if enable_embedding and ltm_config is not None:
+        engine = (getattr(ltm_config, "memory_engine", "synapse") or "synapse").strip()
+        if engine == "synapse":
+            provider = _build_synapse_provider(
+                session_id=scope_id, storage_path=root, ltm_config=ltm_config,
+                scope=scope, with_tracker=False)
+            if provider is not None:
+                await provider.initialize()
+                return provider
+            logger.warning("synapse unavailable for tenant %s — falling back "
+                           "to file/embedding path", scope_id)
 
     config: Dict[str, Any] = {
         "provider": "file",

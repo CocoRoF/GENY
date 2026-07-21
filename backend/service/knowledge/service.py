@@ -81,10 +81,43 @@ def _byte_safe_chunks(text: str, limit: int = _MAX_CHUNK_BYTES) -> List[str]:
     return [p for p in out if p] or [text[: limit // 2]]
 
 
+#: Pseudo-model name for the local Synapse knowledge backend. Used as the
+#: collection/db-file slug and recorded on document cards as embedding_model.
+_SYNAPSE_KB_MODEL = "synapse-hash-static"
+
+
+def _memory_engine() -> str:
+    """Configured memory engine ("synapse" default, or "composite"). Decides
+    whether the knowledge repo runs on the local Synapse backend (zero API) or
+    the qdrant + API-embedding backend."""
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.general.ltm_config import LTMConfig
+
+        ltm = get_config_manager().load_config(LTMConfig) or LTMConfig.get_default_instance()
+        return (getattr(ltm, "memory_engine", "synapse") or "synapse").strip()
+    except Exception:  # noqa: BLE001
+        return "synapse"
+
+
+def _synapse_dim() -> int:
+    try:
+        from service.config.manager import get_config_manager
+        from service.config.sub_config.general.ltm_config import LTMConfig
+
+        ltm = get_config_manager().load_config(LTMConfig) or LTMConfig.get_default_instance()
+        return int(getattr(ltm, "synapse_dim", 256) or 256)
+    except Exception:  # noqa: BLE001
+        return 256
+
+
 def _embedding_spec() -> "tuple[str, str, int]":
-    """(provider, model, dimension) from the Model & Provider panel's
-    Embedding card (``embedding_settings``), normalised against the
-    model registry. Falls back to the registry default."""
+    """(provider, model, dimension). Under the synapse engine this is the local
+    engine's fixed spec (no API); otherwise it's the Model & Provider panel's
+    Embedding card (``embedding_settings``), normalised against the registry."""
+    if _memory_engine() == "synapse":
+        return ("synapse", _SYNAPSE_KB_MODEL, _synapse_dim())
+
     from service.config.sub_config.general.embedding_config import (
         DEFAULT_EMBEDDING_MODEL,
         DEFAULT_EMBEDDING_PROVIDER,
@@ -151,6 +184,15 @@ def _collection_for(username: str, model: str) -> str:
     return f"geny_kb__{safe or 'anonymous'}__{model_slug}"
 
 
+def _knowledge_db_path(username: str, model: str) -> str:
+    """Local Synapse db file for a (user, model) knowledge collection — the
+    single-file analog of a qdrant collection. Per-user isolation = per-file."""
+    from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+    return os.path.join(DEFAULT_STORAGE_ROOT, "_knowledge_kb",
+                        _collection_for(username, model) + ".db")
+
+
 # sha1(key) → "ok" | "auth". A non-empty but REJECTED key otherwise fails
 # silently inside the vector store (it swallows embed errors by design),
 # leaving users staring at "failed" cards instead of a fix-your-key banner.
@@ -177,6 +219,30 @@ class KnowledgeService:
 
     def _vector(self):
         provider, model, dim = _embedding_spec()
+
+        # Synapse engine: a local, zero-API document store. No key, no qdrant.
+        if provider == "synapse":
+            build_id = ("synapse", model, dim)
+            if self._store is not None and self._built_with == build_id:
+                return self._store
+            from service.knowledge.synapse_store import (
+                build_knowledge_synapse_store,
+            )
+
+            store = build_knowledge_synapse_store(
+                db_path=_knowledge_db_path(self.username, model),
+                dim=dim, model=model)
+            if store is None:
+                raise KnowledgeUnavailable(
+                    "qdrant_unavailable",
+                    "geny-memory-adaptor is not installed — the local "
+                    "knowledge engine is unavailable.",
+                )
+            self._store = store
+            self._embedder = None  # synapse embeds internally → verify passes
+            self._built_with = build_id
+            return self._store
+
         key = _resolve_embedding_key(provider)
         key_sha = hashlib.sha1(key.encode("utf-8")).hexdigest() if key else None
         build_id = (key_sha, provider, model)
@@ -226,7 +292,9 @@ class KnowledgeService:
         remove vectors of documents embedded under a previous model. The
         current embedder is reused: removal never embeds."""
         provider, current_model, _ = _embedding_spec()
-        if model == current_model:
+        # Synapse is single-model + single-file per user, so there is never a
+        # cross-model store to reach — the current vector store is authoritative.
+        if provider == "synapse" or model == current_model:
             return self._vector()
         vector = self._vector()  # ensures self._embedder exists
         try:
@@ -273,6 +341,18 @@ class KnowledgeService:
 
     def status(self) -> Dict[str, Any]:
         provider, model, dim = _embedding_spec()
+        if provider == "synapse":
+            # Local engine: always ready, no key, no qdrant.
+            return {
+                "enabled": True,
+                "embedding_provider": "synapse",
+                "embedding_model": model,
+                "embedding_dim": dim,
+                "embedding_ready": True,
+                "embedding_key_state": "local",
+                "qdrant_url": "",
+                "collection": _collection_for(self.username, model),
+            }
         key = _resolve_embedding_key(provider)
         key_state = (
             _KEY_VALIDITY.get(hashlib.sha1(key.encode("utf-8")).hexdigest())

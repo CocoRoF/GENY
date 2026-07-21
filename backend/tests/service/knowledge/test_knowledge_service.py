@@ -120,6 +120,8 @@ async def test_delete_document_cleans_everything(svc, tmp_path):
 
 
 def test_missing_key_raises_actionable_reason(monkeypatch):
+    # Composite-engine behaviour: the synapse default needs no key at all.
+    monkeypatch.setattr(ks, "_memory_engine", lambda: "composite")
     monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: "")
     service = ks.KnowledgeService("nokey")
     with pytest.raises(ks.KnowledgeUnavailable) as exc:
@@ -134,6 +136,7 @@ async def test_rejected_key_raises_openai_key_invalid(monkeypatch):
     from geny_executor.memory.embedding.client import EmbeddingError
 
     ks._KEY_VALIDITY.clear()
+    monkeypatch.setattr(ks, "_memory_engine", lambda: "composite")
     monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: "sk-stale")
     service = ks.KnowledgeService("badkey")
     service._store = object()  # bypass real store construction
@@ -163,6 +166,7 @@ def test_vector_rebuilds_on_key_rotation(monkeypatch):
     the cached client keeps pinging with the RETIRED key and poisons the
     new key's validity verdict (observed on prod 2026-07-07)."""
     current = {"key": "sk-old"}
+    monkeypatch.setattr(ks, "_memory_engine", lambda: "composite")
     monkeypatch.setattr(ks, "_resolve_embedding_key", lambda provider: current["key"])
     service = ks.KnowledgeService("rotator")
 
