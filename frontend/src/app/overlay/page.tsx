@@ -256,10 +256,15 @@ export default function OverlayPage() {
   // excluded so toggles still work.
   const onBarDrag = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
+    // Stop the browser from starting a text selection / native drag on the
+    // press — that gesture would otherwise capture the pointer and block the
+    // window move.
+    e.preventDefault();
     const onMove = (ev: MouseEvent) => window.connector?.windowControl.moveBy(ev.movementX, ev.movementY);
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      window.connector?.windowControl.moveEnd?.();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -499,7 +504,16 @@ function Loading({ label, error }: { label: string; error?: boolean }) {
   );
 }
 // ── styles ───────────────────────────────────────────────────────────────────
-const ROOT: CSSProperties = { width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent', display: 'flex', flexDirection: 'column' };
+const ROOT: CSSProperties = {
+  width: '100vw', height: '100vh', overflow: 'hidden', background: 'transparent',
+  display: 'flex', flexDirection: 'column',
+  // The overlay is a pure control surface — nothing here is meant to be
+  // selected. Without this, dragging the move-bar (or a resize handle) over any
+  // label starts a native TEXT SELECTION that hijacks the pointer and stalls the
+  // window move. Kill selection + the native image/text drag everywhere.
+  userSelect: 'none', WebkitUserSelect: 'none',
+  WebkitUserDrag: 'none',
+} as CSSProperties;
 
 const RESIZE_FRAME: CSSProperties = {
   position: 'fixed',

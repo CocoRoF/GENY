@@ -44,6 +44,8 @@ declare global {
         openControl(): void
         setClickThrough(ignore: boolean): void
         moveBy(dx: number, dy: number): void
+        /** Optional (connector ≥0.17.1): end-of-drag signal. */
+        moveEnd?(): void
         resizeOverlayBy?(edge: string, dx: number, dy: number): void
         restart(): void
         openExternal(url: string): void

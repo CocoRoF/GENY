@@ -390,6 +390,18 @@ function applyOverlaySizeOnCross(): void {
   const y = Math.round(Math.min(Math.max(b.y, wa.y), wa.y + wa.height - height))
   overlay.setBounds({ x, y, width, height })
 }
+// Authoritative drag rect: during a dock-handle drag we track the overlay's
+// intended bounds in JS and re-assert a CONSTANT size each frame, instead of
+// reading getBounds() (which drifts + grows the window on fractional DPI). See
+// the 'overlay:move-by' handler for the full rationale.
+let overlayMoveRect: { x: number; y: number; w: number; h: number } | null = null
+let overlayMoveIdle: ReturnType<typeof setTimeout> | null = null
+function endOverlayMove(): void {
+  if (overlayMoveIdle) { clearTimeout(overlayMoveIdle); overlayMoveIdle = null }
+  overlayMoveRect = null
+  onOverlayMoved() // reconcile size-on-cross + persist the settled bounds
+}
+
 // 'moved' fires during a drag + on the DPI cross; debounce, wait out the DPI
 // rescale, THEN reconcile size-on-cross and persist.
 let overlayMovedTimer: ReturnType<typeof setTimeout> | null = null
@@ -1291,17 +1303,43 @@ function registerIpc(): void {
     overlay?.setIgnoreMouseEvents(ignore, { forward: true })
   })
 
-  // Move the overlay by a delta (dock-handle drag). Use setPosition — NOT
-  // setBounds — so we only change x/y and never re-send width/height. On
-  // Windows multi-DPI, round-tripping the size through getBounds()/setBounds()
-  // while dragging across (or along) monitors with different scale factors
-  // drifts the size via DIP↔physical rounding, so the window (and the avatar
-  // fit to it) slowly GROWS with every move. setPosition leaves the size alone.
+  // Move the overlay by a pointer delta (dock-handle drag).
+  //
+  // The naive `setPosition(getPosition() + delta)` GROWS the window on Windows
+  // fractional-DPI monitors (150%): Electron's setPosition internally does
+  // `SetBounds(newOrigin, getBounds().size())`, and getBounds() reports the
+  // DIP-rounded size — each frame reads a slightly larger rounded size and
+  // writes it back, so over a drag's hundreds of frames the window balloons.
+  // (setBounds has the exact same read-back-and-grow problem.)
+  //
+  // Fix: keep an AUTHORITATIVE rect in JS. Capture the real bounds once at the
+  // start of a drag, then apply deltas to the tracked position and re-assert a
+  // CONSTANT captured size every frame — never reading getBounds() mid-drag. A
+  // constant DIP size converts to the same physical size each call, so it can't
+  // drift; the DIP size also stays put when crossing to a different-scale
+  // monitor (physical size adapts), and the post-drag 'moved' handler snaps to
+  // that monitor's remembered size. The drag rect auto-expires shortly after
+  // the last delta (or on the explicit move-end below).
   ipcMain.on('overlay:move-by', (_e, dx: number, dy: number) => {
-    if (!overlay) return
-    const [x, y] = overlay.getPosition()
-    overlay.setPosition(Math.round(x + dx), Math.round(y + dy))
+    if (!overlay || overlay.isDestroyed()) return
+    if (!overlayMoveRect) {
+      const b = overlay.getBounds()
+      overlayMoveRect = { x: b.x, y: b.y, w: b.width, h: b.height }
+    }
+    overlayMoveRect.x += dx
+    overlayMoveRect.y += dy
+    overlay.setBounds({
+      x: Math.round(overlayMoveRect.x),
+      y: Math.round(overlayMoveRect.y),
+      width: overlayMoveRect.w,
+      height: overlayMoveRect.h,
+    })
+    if (overlayMoveIdle) clearTimeout(overlayMoveIdle)
+    overlayMoveIdle = setTimeout(endOverlayMove, 300) // fallback drag-end
   })
+  // Explicit drag-end (mouseup) — drop the authoritative rect immediately so the
+  // next natural window event reads real bounds again.
+  ipcMain.on('overlay:move-end', endOverlayMove)
 
   // Resize the overlay from an edge/corner handle (unlocked). `edge` is any of
   // n/s/e/w combined (e.g. 'se','n'); dx/dy are pointer deltas. West/north edges

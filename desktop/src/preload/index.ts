@@ -111,6 +111,9 @@ export interface ConnectorBridge {
     setClickThrough(ignore: boolean): void
     /** Move the overlay by a pixel delta (dock-handle drag). */
     moveBy(dx: number, dy: number): void
+    /** Signal the end of a drag so main drops its authoritative drag rect
+     *  immediately (it also auto-expires ~300ms after the last moveBy). */
+    moveEnd(): void
     /** Resize the overlay from an edge/corner handle by a pixel delta (unlocked).
      *  `edge` is a combo of n/s/e/w (e.g. 'se', 'n'). */
     resizeOverlayBy(edge: string, dx: number, dy: number): void
@@ -304,6 +307,7 @@ const api: ConnectorBridge = {
   windowControl: {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
+    moveEnd: () => ipcRenderer.send('overlay:move-end'),
     resizeOverlayBy: (edge, dx, dy) => ipcRenderer.send('overlay:resize-by', edge, dx, dy),
     toggleControl: () => ipcRenderer.send('control:toggle'),
     openControl: () => ipcRenderer.send('control:open'),
