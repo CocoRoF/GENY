@@ -156,9 +156,27 @@ class SynapseVectorHandle:
         *positives* is ``[(note_id, feature_vector), ...]`` for notes an external
         signal confirmed useful; *negatives* is the feature vectors of the same
         query's shown-but-unflagged notes. Synchronous CPU-ms; the caller (the
-        session's end-of-turn flush) runs it off the hot path."""
+        session's end-of-turn flush) runs it off the hot path.
+
+        As of adaptor 1.5.0 positives also bump the per-item TRUST prior
+        (asymmetric, decaying to neutral — the anti-ossification axis).
+        Negative trust is deliberately NOT auto-wired: "shown but unused" can
+        blame a note for a bad query; explicit unhelpful feedback goes through
+        :meth:`trust_unhelpful` when a trustworthy negative signal exists."""
         return self._m.learn(query_key, positives=positives,
                              negatives=negatives, label_src=label_src)
+
+    def trust_unhelpful(self, note_key: str) -> Optional[float]:
+        """Explicit 'this memory was wrong/unhelpful' — loss-averse trust drop
+        (2× the helpful bump). Returns the new trust or None if unknown."""
+        return self._m.trust_feedback(note_key, False)
+
+    def contradictions(self, note_key: str, *, top_k: int = 5) -> list:
+        """Memories likely conflicting with *note_key* (store hygiene,
+        deterministic — negation-marker asymmetry × topical overlap).
+        Diagnostic only; surfaced by the host as observability, never
+        injected into prompts."""
+        return self._m.contradictions(note_key, top_k=top_k)
 
     async def remove(self, ref: NoteRef) -> bool:
         await asyncio.to_thread(self._m.remove, _node_id(ref))

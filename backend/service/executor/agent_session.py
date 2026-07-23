@@ -1510,6 +1510,7 @@ class AgentSession:
                         tracker.register_title(
                             key, str(getattr(meta, "title", "") or ""))
                         tracker.mark_useful(key, SIGNAL_EDIT)
+                        await self._observe_contradictions(key)
             except Exception:  # noqa: BLE001
                 logger.debug("[%s] after_note_update signal failed",
                              self._session_id, exc_info=True)
@@ -1519,6 +1520,29 @@ class AgentSession:
         # Re-apply the (mutated) hooks bag so the provider's STM /
         # notes stores observe the new callbacks.
         provider.set_hooks(hooks)
+
+    async def _observe_contradictions(self, note_key: str) -> None:
+        """Store hygiene: after a note edit, surface memories that likely
+        CONFLICT with it. Observability only (session log) — never injected
+        into prompts, never auto-deleted; deterministic engine math, no LLM."""
+        provider = self._memory_provider
+        if provider is None:
+            return
+        try:
+            handle = provider.vector()
+            fn = getattr(handle, "contradictions", None)
+            if fn is None:
+                return
+            from service.memory.sync_async_bridge import offload_blocking
+            conflicts = await offload_blocking(lambda: fn(note_key, top_k=3))
+            if conflicts:
+                logger.info(
+                    "[%s] memory hygiene: note %s likely conflicts with %s",
+                    self._session_id, note_key,
+                    [(c.get("id"), c.get("score")) for c in conflicts])
+        except Exception:  # noqa: BLE001
+            logger.debug("[%s] contradiction observe failed",
+                         self._session_id, exc_info=True)
 
     def _get_usage_tracker(self):
         """The Synapse usage tracker if the synapse engine is active, else None.
