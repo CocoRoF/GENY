@@ -132,15 +132,30 @@ def exchange_code(code: str, state: str) -> Dict[str, Any]:
     return {"status": "error", "error": err or "unknown"}
 
 
+#: Failure cache — an ``invalid_grant`` refresh token is DEAD until the user
+#: re-connects; retrying it on every session build burns a synchronous HTTP
+#: round-trip on the wake path and spams the log. While hot, attempts
+#: short-circuit to None.
+_REFRESH_FAIL_UNTIL: float = 0.0
+_REFRESH_FAIL_TTL_S = 600.0
+
+
 def refresh_access_token() -> Optional[str]:
     """Mint a fresh access token from the stored refresh token, or None."""
+    import time as _time
+
     import httpx
 
+    global _REFRESH_FAIL_UNTIL
     cfg = _cfg()
     if not cfg.is_connected():
         return None
+    if _time.monotonic() < _REFRESH_FAIL_UNTIL:
+        return None  # known-dead token — skip the round-trip until TTL expires
     try:
-        with httpx.Client(timeout=20) as c:
+        # Short timeout: this runs inside the synchronous session build on the
+        # wake path — a slow Google endpoint must not stall session wakes.
+        with httpx.Client(timeout=6) as c:
             r = c.post(_TOKEN_URL, data={
                 "client_id": cfg.client_id,
                 "client_secret": cfg.client_secret,
@@ -148,10 +163,18 @@ def refresh_access_token() -> Optional[str]:
                 "grant_type": "refresh_token",
             })
         if r.status_code == 200:
+            _REFRESH_FAIL_UNTIL = 0.0
             return r.json().get("access_token")
         logger.warning("Google token refresh failed: %s %s", r.status_code, r.text[:160])
+        if "invalid_grant" in r.text:
+            _REFRESH_FAIL_UNTIL = _time.monotonic() + _REFRESH_FAIL_TTL_S
+            logger.info(
+                "Google refresh token is dead (invalid_grant) — suppressing "
+                "retries for %ds; reconnect Google to restore.",
+                int(_REFRESH_FAIL_TTL_S))
     except Exception as e:  # noqa: BLE001
         logger.warning("Google token refresh error: %s", e)
+        _REFRESH_FAIL_UNTIL = _time.monotonic() + 60.0  # transient backoff
     return None
 
 

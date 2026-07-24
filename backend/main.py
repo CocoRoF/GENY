@@ -161,6 +161,19 @@ async def lifespan(app: FastAPI):
     print_step_banner("START", "GENY AGENT STARTUP", "Initializing agent session management system")
     logger.info("Starting Geny Agent")
 
+    # Event-loop watchdog: a silent loop block (3 separate prod incidents)
+    # now self-diagnoses — after ~10s of unresponsiveness it CRITICAL-logs
+    # every thread's stack, including the exact synchronous call squatting
+    # on the loop. Read-only diagnostics; one daemon thread.
+    try:
+        import asyncio as _asyncio
+
+        from service.observability.loop_watchdog import install_loop_watchdog
+
+        install_loop_watchdog(_asyncio.get_running_loop())
+    except Exception:  # noqa: BLE001 — never block startup on diagnostics
+        logger.warning("loop watchdog install failed", exc_info=True)
+
     # (Step 0 removed — geny-executor 2.2.0 absorbed the llm_patches
     # compensation layer: CLI tool-call observability and structured
     # error envelopes are first-class ``api.*`` pipeline events now,
