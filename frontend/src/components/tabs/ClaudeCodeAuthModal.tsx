@@ -136,7 +136,14 @@ export default function ClaudeCodeAuthModal({
   const [job, setJob] = useState<AuthLoginStartResponse | null>(null);
   const [events, setEvents] = useState<AuthJobEvent[]>([]);
   const [jobRunning, setJobRunning] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
+  // Job output arrives by POLLING the job-status endpoint with the same
+  // authorized fetch as every other API call. The previous EventSource
+  // wiring could only authenticate via cookie (EventSource cannot send
+  // an Authorization header) — a user whose session lives in
+  // localStorage but whose cookie expired got a silent 401 stream and a
+  // modal that "did nothing". Polling has no such split-auth failure
+  // mode and also survives SSE-hostile proxies.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const [testLoading, setTestLoading] = useState(false);
@@ -174,9 +181,9 @@ export default function ClaudeCodeAuthModal({
   // ── Login flow ──────────────────────────────────────────────────
 
   const closeStream = useCallback(() => {
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
   }, []);
 
@@ -189,23 +196,32 @@ export default function ClaudeCodeAuthModal({
     try {
       const j = await llmBackendsApi.claudeCodeStartLogin({ useConsole });
       setJob(j);
-      const es = new EventSource(llmBackendsApi.authJobEventsUrl(j.job_id), { withCredentials: true });
-      esRef.current = es;
-      es.onmessage = (ev) => {
+      let failures = 0;
+      const poll = async () => {
         try {
-          const parsed: AuthJobEvent = JSON.parse(ev.data);
-          setEvents((prev) => [...prev.slice(-200), parsed]);
-          if (parsed.channel === 'exit') {
+          const st = await llmBackendsApi.authJobState(j.job_id);
+          failures = 0;
+          setEvents(st.history.slice(-200));
+          if (st.exit_code !== null) {
             setJobRunning(false);
             closeStream();
             refreshStatus();
             onChange?.();
           }
-        } catch {
-          /* ignore */
+        } catch (e) {
+          // Transient hiccups are fine; persistent failure must be VISIBLE
+          // (the old stream wiring died silently and looked like a dead
+          // button). Three misses in a row → stop and surface the error.
+          failures += 1;
+          if (failures >= 3) {
+            setStatusError(e instanceof Error ? e.message : String(e));
+            setJobRunning(false);
+            closeStream();
+          }
         }
       };
-      es.onerror = () => setJobRunning(false);
+      pollRef.current = setInterval(poll, 1000);
+      void poll(); // immediate first read — the URL is usually already there
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : String(e));
       setJobRunning(false);
