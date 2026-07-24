@@ -54,6 +54,22 @@ from service.logging.session_logger import get_session_logger, SessionLogger, Lo
 
 logger = getLogger(__name__)
 
+# Memory-hygiene checks run on their OWN 1-wide pool — loop-independent
+# (fire-and-forget submit survives run_coro_sync's short-lived loops) and,
+# critically, DISTINCT from sync_async_bridge's single-worker side-effect
+# pool, whose worker can be the very thing driving the note write that
+# triggered the check (circular wait = the 2026-07-25 prod deadlock).
+_HYGIENE_POOL = None
+
+
+def _hygiene_pool():
+    global _HYGIENE_POOL
+    if _HYGIENE_POOL is None:
+        import concurrent.futures
+        _HYGIENE_POOL = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mem-hygiene")
+    return _HYGIENE_POOL
+
 
 def _classify_input_role(input_text: str) -> str:
     """Map invoke input to the STM role it should be recorded under.
@@ -1510,7 +1526,17 @@ class AgentSession:
                         tracker.register_title(
                             key, str(getattr(meta, "title", "") or ""))
                         tracker.mark_useful(key, SIGNAL_EDIT)
-                        await self._observe_contradictions(key)
+                        # Fire-and-forget, NEVER awaited here: this hook is
+                        # awaited inside notes.write, and notes.write can be
+                        # driven from the single-worker side-effect pool via
+                        # run_coro_sync (the archiver path). Awaiting anything
+                        # that needs that same worker from inside this hook
+                        # closes a circular wait — the exact deadlock that
+                        # froze s18 for 720s on 2026-07-25. (A create_task
+                        # variant is also wrong: on the archiver path this
+                        # hook runs on run_coro_sync's short-lived loop and
+                        # the pending task dies with it.)
+                        self._schedule_contradiction_check(key)
             except Exception:  # noqa: BLE001
                 logger.debug("[%s] after_note_update signal failed",
                              self._session_id, exc_info=True)
@@ -1521,10 +1547,20 @@ class AgentSession:
         # notes stores observe the new callbacks.
         provider.set_hooks(hooks)
 
-    async def _observe_contradictions(self, note_key: str) -> None:
+    def _schedule_contradiction_check(self, note_key: str) -> None:
         """Store hygiene: after a note edit, surface memories that likely
         CONFLICT with it. Observability only (session log) — never injected
-        into prompts, never auto-deleted; deterministic engine math, no LLM."""
+        into prompts, never auto-deleted; deterministic engine math, no LLM.
+
+        Submitted to a DEDICATED thread pool, fire-and-forget:
+        - never the single-worker memory side-effect pool — this hook can be
+          reached from a notes.write that that worker is driving through
+          run_coro_sync, and queueing onto the same worker is a circular
+          wait (prod deadlock, 2026-07-25);
+        - never an asyncio task — on the archiver path the hook runs on
+          run_coro_sync's short-lived loop, and a pending task dies with it.
+        The engine call is CPU-milliseconds (94 ms measured on the largest
+        prod vault); the pool is 1-wide so checks queue rather than pile up."""
         provider = self._memory_provider
         if provider is None:
             return
@@ -1533,16 +1569,24 @@ class AgentSession:
             fn = getattr(handle, "contradictions", None)
             if fn is None:
                 return
-            from service.memory.sync_async_bridge import offload_blocking
-            conflicts = await offload_blocking(lambda: fn(note_key, top_k=3))
-            if conflicts:
-                logger.info(
-                    "[%s] memory hygiene: note %s likely conflicts with %s",
-                    self._session_id, note_key,
-                    [(c.get("id"), c.get("score")) for c in conflicts])
         except Exception:  # noqa: BLE001
-            logger.debug("[%s] contradiction observe failed",
-                         self._session_id, exc_info=True)
+            return
+
+        session_id = self._session_id
+
+        def _check() -> None:
+            try:
+                conflicts = fn(note_key, top_k=3)
+                if conflicts:
+                    logger.info(
+                        "[%s] memory hygiene: note %s likely conflicts with %s",
+                        session_id, note_key,
+                        [(c.get("id"), c.get("score")) for c in conflicts])
+            except Exception:  # noqa: BLE001
+                logger.debug("[%s] contradiction check failed",
+                             session_id, exc_info=True)
+
+        _hygiene_pool().submit(_check)
 
     def _get_usage_tracker(self):
         """The Synapse usage tracker if the synapse engine is active, else None.
