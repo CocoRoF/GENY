@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
-import { TabShell, ActionButton, EmptyState } from '@/components/common/layout';
+import { TabShell, IconButton, EmptyState } from '@/components/common/layout';
 
 type Scope = 'workspace' | 'all';
 type SortKey = 'name' | 'size' | 'modified';
@@ -132,6 +132,7 @@ export default function StorageTab() {
   const [resizing, setResizing] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
 
   const canWrite = scope === 'workspace';
@@ -371,15 +372,15 @@ export default function StorageTab() {
       icon={HardDrive}
       actions={
         <>
-          <div className="flex items-center rounded-[var(--border-radius)] border border-[var(--border-color)] overflow-hidden text-[12px] mr-1">
+          <div className="flex items-center h-8 rounded-md border border-[var(--border-color)] overflow-hidden text-[12px] mr-1">
             <button
-              className={`px-2.5 py-1.5 ${scope === 'workspace' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
+              className={`h-full px-2.5 ${scope === 'workspace' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
               onClick={() => setScope('workspace')}
             >
               {t('storageTab.scopeWorkspace')}
             </button>
             <button
-              className={`px-2.5 py-1.5 ${scope === 'all' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
+              className={`h-full px-2.5 ${scope === 'all' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
               onClick={() => setScope('all')}
             >
               {t('storageTab.scopeAll')}
@@ -387,30 +388,27 @@ export default function StorageTab() {
           </div>
           {canWrite && (
             <>
-              <ActionButton icon={FolderPlus} onClick={() => void newFolder()}>
-                {t('storageTab.newFolder')}
-              </ActionButton>
-              <label className="cursor-pointer">
-                <input
-                  type="file" multiple className="hidden"
-                  onChange={(e) => { void uploadFiles(e.target.files); if (e.target) e.target.value = ''; }}
-                />
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--border-radius)] border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
-                  <Upload size={13} />
-                  {uploading ? t('common.loading') : t('storageTab.upload')}
-                </span>
-              </label>
+              <IconButton icon={FolderPlus} title={t('storageTab.newFolder')} onClick={() => void newFolder()} />
+              <input
+                ref={uploadInputRef}
+                type="file" multiple className="hidden"
+                onChange={(e) => { void uploadFiles(e.target.files); if (e.target) e.target.value = ''; }}
+              />
+              <IconButton
+                icon={Upload}
+                title={t('storageTab.upload')}
+                spin={uploading}
+                disabled={uploading}
+                onClick={() => uploadInputRef.current?.click()}
+              />
             </>
           )}
-          <ActionButton
+          <IconButton
             icon={Download}
+            title={t('storageTab.downloadFolder')}
             onClick={() => void agentApi.downloadFolder(selectedSessionId, rootPath(cwd)).catch(() => alert(t('storageTab.downloadFolderError')))}
-          >
-            {t('storageTab.downloadFolder')}
-          </ActionButton>
-          <ActionButton icon={RefreshCw} onClick={fetchFiles}>
-            {t('common.refresh')}
-          </ActionButton>
+          />
+          <IconButton icon={RefreshCw} title={t('common.refresh')} onClick={fetchFiles} />
         </>
       }
     >

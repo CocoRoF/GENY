@@ -25,6 +25,7 @@
 
 import type { ReactNode } from 'react';
 import { Info, Plus, RefreshCw, X, AlertCircle, type LucideIcon } from 'lucide-react';
+import { IconButton } from '@/components/common/layout';
 
 export interface RegistryPageShellProps {
   /** Page title, e.g. "MCP 서버". */
@@ -104,28 +105,16 @@ export default function RegistryPageShell({
             <div className="flex items-center gap-1.5 shrink-0 mt-1">
               {headerExtras}
               {onRefresh && (
-                <button
-                  type="button"
-                  onClick={onRefresh}
-                  disabled={loading}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[0.75rem] font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                <IconButton
+                  icon={RefreshCw}
                   title="Refresh"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
-                  />
-                  Refresh
-                </button>
+                  spin={loading}
+                  disabled={loading}
+                  onClick={onRefresh}
+                />
               )}
               {onAdd && addLabel && (
-                <button
-                  type="button"
-                  onClick={onAdd}
-                  className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-violet-500 text-white text-[0.75rem] font-medium hover:bg-violet-600 transition-colors shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  {addLabel}
-                </button>
+                <IconButton icon={Plus} variant="primary" title={addLabel} onClick={onAdd} />
               )}
             </div>
           </header>

@@ -6,6 +6,7 @@ import { ttsApi, type VoiceProfile } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import CreateProfileModal from '@/components/voice-studio/CreateProfileModal';
 import VoiceCard from '@/components/voice-studio/VoiceCard';
+import { IconButton } from '@/components/common/layout';
 
 type Filter = 'all' | 'templates' | 'mine';
 
@@ -80,13 +81,12 @@ export default function VoicesPage() {
         <span className="text-[0.75rem] text-[var(--text-muted)] ml-auto">
           {t('voiceStudio.voices.count', { n: filtered.length })}
         </span>
-        <button
+        <IconButton
+          icon={Plus}
+          variant="primary"
+          title={t('voiceStudio.voices.newProfile')}
           onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[var(--primary-color)] text-white text-[0.75rem] font-medium border-none cursor-pointer hover:opacity-90 transition-opacity"
-        >
-          <Plus size={12} />
-          {t('voiceStudio.voices.newProfile')}
-        </button>
+        />
       </div>
 
       <CreateProfileModal

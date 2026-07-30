@@ -17,7 +17,7 @@ import MarkdownRenderer from '@/components/file-viewer/MarkdownRenderer';
 import NumberStepper from '@/components/ui/NumberStepper';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 import Selector from '@/components/ui/Selector';
-import { TabShell, ActionButton } from '@/components/common/layout';
+import { TabShell, IconButton } from '@/components/common/layout';
 import { Settings as SettingsIcon, Download, Upload, RefreshCw, Boxes } from 'lucide-react';
 import { useI18n, type Locale } from '@/lib/i18n';
 import type { ConfigItem, ConfigCategory, ConfigField, ConfigSchema, ConfigI18nLocale } from '@/types';
@@ -216,9 +216,9 @@ export default function SettingsTab() {
       icon={SettingsIcon}
       actions={
         <>
-          <ActionButton icon={Download} onClick={exportConfigs}>{t('common.export')}</ActionButton>
-          <ActionButton icon={Upload} onClick={() => setImportOpen(true)}>{t('common.import')}</ActionButton>
-          <ActionButton icon={RefreshCw} onClick={loadConfigs}>{t('common.refresh')}</ActionButton>
+          <IconButton icon={Download} title={t('common.export')} onClick={exportConfigs} />
+          <IconButton icon={Upload} title={t('common.import')} onClick={() => setImportOpen(true)} />
+          <IconButton icon={RefreshCw} title={t('common.refresh')} onClick={loadConfigs} />
         </>
       }
     >

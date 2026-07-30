@@ -24,7 +24,7 @@ import {
   RefreshCw, Download, FileText, Image as ImageIcon, Presentation,
   FileSpreadsheet, File as FileIcon, ChevronLeft, ChevronRight, Palette,
 } from 'lucide-react';
-import { TabShell, ActionButton, EmptyState } from '@/components/common/layout';
+import { TabShell, IconButton, EmptyState } from '@/components/common/layout';
 import { FileViewer } from '@/components/file-viewer';
 import type { StorageFile } from '@/types';
 
@@ -137,17 +137,17 @@ function DownloadButton({ url, filename }: { url: string; filename: string }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   return (
-    <button
+    <IconButton
+      icon={Download}
+      title={t('canvasTab.download')}
+      spin={busy}
       disabled={busy}
       onClick={async () => {
         setBusy(true);
         try { await authedDownload(url, filename); } catch { /* ignore */ }
         setBusy(false);
       }}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-    >
-      <Download size={12} /> {busy ? '…' : t('canvasTab.download')}
-    </button>
+    />
   );
 }
 
@@ -427,13 +427,12 @@ export default function CanvasTab() {
       title={t('tabs.canvas')}
       icon={Palette}
       actions={
-        <ActionButton
+        <IconButton
           icon={RefreshCw}
-          spinIcon={refreshing}
+          title={t('common.refresh')}
+          spin={refreshing}
           onClick={async () => { setRefreshing(true); await refresh(); setRefreshing(false); }}
-        >
-          {t('common.refresh')}
-        </ActionButton>
+        />
       }
     >
       <div className="flex h-full min-h-0">

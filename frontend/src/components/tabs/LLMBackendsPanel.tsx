@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { llmBackendsApi, syncApi, type ProviderHealth, type ClaudeCodeVersionStatus } from '@/lib/api';
+import { IconButton, ActionButton } from '@/components/common/layout';
 import { useI18n } from '@/lib/i18n';
 import { SettingsCard, type CardStatusTone } from '@/components/settings/SettingsCard';
 import { EmbeddingSettingsCard } from '@/components/tabs/EmbeddingSettingsCard';
@@ -205,11 +206,6 @@ function ClaudeCodeVersionCard() {
 
   const upToDate = st && st.current && st.latest && st.current === st.latest;
 
-  const btnCls =
-    'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 px-2.5 py-1.5 rounded-md border ' +
-    'border-[var(--border-color)] text-[0.8rem] text-[var(--text-secondary)] ' +
-    'hover:bg-[var(--bg-hover)] disabled:opacity-50';
-
   return (
     <SettingsCard
       title={t('llmBackendsPanel.versionTitle')}
@@ -224,29 +220,32 @@ function ClaudeCodeVersionCard() {
       }
       footer={
         <>
-          <button type="button" className={btnCls} onClick={refresh} disabled={loading || !!busy}>
-            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            {t('llmBackendsPanel.refresh')}
-          </button>
-          <button
+          <IconButton
+            icon={RefreshCw}
+            title={t('llmBackendsPanel.refresh')}
+            spin={loading}
+            onClick={refresh}
+            disabled={loading || !!busy}
+          />
+          <ActionButton
             type="button"
-            className={btnCls}
+            icon={ArrowUpCircle}
+            spinIcon={busy === 'update'}
             onClick={doUpdate}
             disabled={!!busy || loading || !!upToDate}
           >
-            {busy === 'update' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
             {t('llmBackendsPanel.updateToLatest')}
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             type="button"
-            className={btnCls}
+            icon={RotateCcw}
+            spinIcon={busy === 'rollback'}
             onClick={doRollback}
             disabled={!!busy || loading || !st?.can_rollback}
             title={st?.previous ? t('llmBackendsPanel.rollbackTitle', { version: st.previous }) : t('llmBackendsPanel.rollbackUnavailable')}
           >
-            {busy === 'rollback' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
             {st?.previous ? t('llmBackendsPanel.rollbackTo', { version: st.previous }) : t('llmBackendsPanel.rollback')}
-          </button>
+          </ActionButton>
           {err && (
             <span className="basis-full text-[0.72rem] text-[var(--danger-color)] bg-[var(--bg-tertiary)] rounded-md px-2 py-1.5 break-all">
               {err}
@@ -359,27 +358,22 @@ function LLMBackendsPanelInner() {
         <div className="flex items-center gap-2 shrink-0">
           {/* Push Geny's provider keys to connected sister services (GAPT + avatar).
                Auto-syncs on key change; this is a manual re-push. */}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          <ActionButton
+            icon={RefreshCw}
+            spinIcon={syncing}
             onClick={handleSyncKeys}
             disabled={syncing}
             title={t('llmBackendsPanel.syncKeysTitle')}
           >
-            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             {t('llmBackendsPanel.syncKeys')}
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[var(--border-color)] text-[0.8125rem] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+          </ActionButton>
+          <IconButton
+            icon={RefreshCw}
+            title={t('settings.llmBackends.refreshAll')}
+            spin={loading}
             onClick={() => fetchHealth(true)}
             disabled={loading}
-          >
-            {loading
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <RefreshCw className="w-3.5 h-3.5" />}
-            {t('settings.llmBackends.refreshAll')}
-          </button>
+          />
         </div>
       </div>
       {syncMsg && (

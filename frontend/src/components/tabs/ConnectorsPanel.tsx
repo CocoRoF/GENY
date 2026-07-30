@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { connectorsApi, type Connector, type ConnectorField } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { EntityCard, EditorModal, ActionButton } from '@/components/common/layout';
+import { EntityCard, EditorModal, ActionButton, IconButton } from '@/components/common/layout';
 import { Switch } from '@/components/ui/switch';
 import {
   RefreshCw,
@@ -35,8 +35,6 @@ import {
 const inputCls =
   'w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]';
 const labelCls = 'block text-xs font-medium text-[var(--text-muted)] mb-1';
-const btnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
 /** Map the backend's icon hint to a lucide glyph; generic fallback otherwise. */
 const ICONS: Record<string, LucideIcon> = {
   github: Github,
@@ -90,9 +88,14 @@ export default function ConnectorsPanel() {
       <div className="flex items-center gap-2">
         <Boxes className="w-5 h-5 text-[var(--primary-color)]" />
         <h2 className="text-base font-semibold text-[var(--text-primary)]">{t('connectors.title')}</h2>
-        <button onClick={() => void load()} className={`${btnCls} ml-auto`} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {t('connectors.refresh')}
-        </button>
+        <IconButton
+          icon={RefreshCw}
+          title={t('connectors.refresh')}
+          spin={loading}
+          onClick={() => void load()}
+          disabled={loading}
+          className="ml-auto"
+        />
       </div>
 
       <p className="text-sm text-[var(--text-secondary)]">{t('connectors.subtitle')}</p>

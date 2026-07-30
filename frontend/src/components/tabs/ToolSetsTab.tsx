@@ -19,6 +19,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  Copy,
   ChevronRight,
   Info,
   Package,
@@ -37,6 +38,7 @@ import {
   EditorModal,
   EmptyState,
   ActionButton,
+  IconButton,
   StatusBadge,
   SearchInput,
   DetailDrawer,
@@ -510,7 +512,7 @@ function PresetEditor({
           <StatusBadge tone="neutral" uppercase>{t('toolSetsTab.readOnly')}</StatusBadge>
         )}
         <div className="flex-1" />
-        <ActionButton icon={Plus} onClick={onClone}>{t('common.clone')}</ActionButton>
+        <ActionButton icon={Copy} onClick={onClone}>{t('common.clone')}</ActionButton>
         {onDelete && (
           <ActionButton icon={Trash2} variant="danger" onClick={onDelete}>
             {t('common.delete')}
@@ -966,17 +968,14 @@ export default function ToolSetsTab() {
 
   const headerActions = (
     <>
-      <ActionButton
+      <IconButton
         icon={RefreshCw}
-        spinIcon={isLoading || frameworkLoading}
+        title={t('common.refresh')}
+        spin={isLoading || frameworkLoading}
         disabled={isLoading || frameworkLoading}
         onClick={fetchAll}
-      >
-        {t('common.refresh')}
-      </ActionButton>
-      <ActionButton icon={Plus} variant="primary" onClick={() => setShowCreateDialog(true)}>
-        {t('toolSetsTab.newPreset')}
-      </ActionButton>
+      />
+      <IconButton icon={Plus} variant="primary" title={t('toolSetsTab.newPreset')} onClick={() => setShowCreateDialog(true)} />
     </>
   );
 

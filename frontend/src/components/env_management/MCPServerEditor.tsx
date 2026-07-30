@@ -36,6 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
+import { IconButton } from '@/components/common/layout';
 import {
   customMcpApi,
   type CustomMcpServerSummary,
@@ -432,15 +433,13 @@ function HostMcpPicker({
             </span>{' '}
             · 선택 {selected.size}
           </span>
-          <button
-            type="button"
-            onClick={load}
+          <IconButton
+            icon={RefreshCw}
+            title="새로고침"
+            spin={loading}
             disabled={loading}
-            className="inline-flex items-center gap-1 h-7 px-2 rounded text-[0.7rem] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-            새로고침
-          </button>
+            onClick={load}
+          />
         </div>
 
         {error && (

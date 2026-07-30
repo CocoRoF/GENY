@@ -42,13 +42,16 @@ export function ActionButton({
       variant={VARIANT_TO_SHADCN[variant]}
       size="sm"
       className={cn(
+        // Unified toolbar height: every ActionButton/IconButton is h-8 so
+        // mixed rows of labeled + icon-only buttons always line up.
+        'h-8 px-2.5',
         // outline+danger needs a tint; keep the pre-shadcn red look.
         isDanger && 'bg-transparent text-red-600 border border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-500/40 dark:hover:bg-red-500/10',
         className,
       )}
       {...rest}
     >
-      {Icon && <Icon className={cn('w-3 h-3', spinIcon && 'animate-spin')} />}
+      {Icon && <Icon className={cn('w-3.5 h-3.5', spinIcon && 'animate-spin')} />}
       {children}
     </Button>
   );

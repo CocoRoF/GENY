@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { gaptSettingsApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { RefreshCw, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, Cloud } from 'lucide-react';
+import { IconButton, ActionButton } from '@/components/common/layout';
 
 type AnyObj = Record<string, any>;
 
@@ -39,10 +40,6 @@ function Light({ ok, label }: { ok: boolean | null | undefined; label: string })
 const inputCls =
   'w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]';
 const labelCls = 'block text-xs font-medium text-[var(--text-muted)] mb-1';
-const btnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
-const primaryBtnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
 
 export default function GaptSettingsPanel() {
   const { t } = useI18n();
@@ -174,9 +171,14 @@ export default function GaptSettingsPanel() {
       <div className="flex items-center gap-2">
         <Cloud className="w-5 h-5 text-[var(--primary-color)] shrink-0" />
         <h2 className="text-base font-semibold text-[var(--text-primary)] min-w-0 truncate">{t('gaptSettings.title')}</h2>
-        <button onClick={() => void loadAll()} className={`${btnCls} ml-auto`} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {t('gaptSettings.refresh')}
-        </button>
+        <IconButton
+          icon={RefreshCw}
+          title={t('gaptSettings.refresh')}
+          spin={loading}
+          onClick={() => void loadAll()}
+          disabled={loading}
+          className="ml-auto"
+        />
       </div>
 
       {msg && (
@@ -237,9 +239,9 @@ export default function GaptSettingsPanel() {
                 placeholder={configured ? t('gaptSettings.tokenPlaceholderSet') : t('gaptSettings.tokenPlaceholder')}
                 autoComplete="off"
               />
-              <button onClick={onVerify} className={btnCls} disabled={verifying}>
-                <RefreshCw className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : ''}`} /> {t('gaptSettings.verify')}
-              </button>
+              <ActionButton icon={RefreshCw} spinIcon={verifying} onClick={onVerify} disabled={verifying}>
+                {t('gaptSettings.verify')}
+              </ActionButton>
             </div>
             <p className="text-xs text-[var(--text-muted)] mt-1">{t('gaptSettings.verifyHelp')}</p>
           </div>
@@ -298,11 +300,11 @@ export default function GaptSettingsPanel() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button onClick={onSave} className={primaryBtnCls} disabled={saving}>
+            <ActionButton variant="primary" onClick={onSave} disabled={saving}>
               {saving ? t('gaptSettings.saving') : t('gaptSettings.save')}
-            </button>
-            <button onClick={onEnsureWildcard} className={btnCls}>{t('gaptSettings.applyWildcard')}</button>
-            <button onClick={onEnableTls} className={btnCls}>{t('gaptSettings.enableTotalTls')}</button>
+            </ActionButton>
+            <ActionButton onClick={onEnsureWildcard}>{t('gaptSettings.applyWildcard')}</ActionButton>
+            <ActionButton onClick={onEnableTls}>{t('gaptSettings.enableTotalTls')}</ActionButton>
           </div>
         </div>
       </section>

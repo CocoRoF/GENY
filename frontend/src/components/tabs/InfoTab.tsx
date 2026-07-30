@@ -448,8 +448,12 @@ export default function InfoTab() {
       {/* Actions for deleted */}
       {subTab === 'vtuber' && isDeleted && (
         <div className="flex gap-2 mt-4 pt-4 border-t border-[var(--border-color)]">
-          <button className={cn("py-2 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => restoreSession(data.session_id)}><RotateCcw size={12} /> {t('info.restoreSession')}</button>
-          <button className={cn("py-2 px-4 bg-[var(--danger-color)] hover:brightness-110 text-white text-[0.8125rem] font-medium rounded-[var(--border-radius)] cursor-pointer transition-all duration-150 border-none disabled:opacity-50 disabled:cursor-not-allowed", "!py-1.5 !px-3 text-[0.75rem] inline-flex items-center gap-1.5")} onClick={() => setShowPermanentDeleteModal(true)}><Trash2 size={12} /> {t('info.permanentDelete')}</button>
+          <ActionButton variant="secondary" icon={RotateCcw} onClick={() => restoreSession(data.session_id)}>
+            {t('info.restoreSession')}
+          </ActionButton>
+          <ActionButton variant="danger" icon={Trash2} onClick={() => setShowPermanentDeleteModal(true)}>
+            {t('info.permanentDelete')}
+          </ActionButton>
         </div>
       )}
       {showPermanentDeleteModal && data && (

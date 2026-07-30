@@ -19,6 +19,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
 import type { EnvironmentSessionSummary } from '@/types/environment';
+import { IconButton } from '@/components/common/layout';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import ImportManifestModal from '@/components/modals/ImportManifestModal';
 
@@ -350,14 +351,14 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
                   <h4 className="text-[0.6875rem] font-semibold text-[var(--text-muted)] uppercase tracking-wide flex items-center gap-1.5">
                     <Link2 size={11} />
                     {t('environmentDetail.linkedSessions', { n: linkedSessions.length })}
-                    <button
-                      onClick={handleManualRefreshSessions}
-                      disabled={sessionsFetching}
+                    <IconButton
+                      variant="ghost"
+                      icon={RefreshCw}
                       title={t('environmentDetail.refreshSessions')}
-                      className="inline-flex items-center justify-center w-5 h-5 rounded bg-transparent border-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <RefreshCw size={10} className={sessionsFetching ? 'animate-spin' : 'opacity-60'} />
-                    </button>
+                      spin={sessionsFetching}
+                      disabled={sessionsFetching}
+                      onClick={handleManualRefreshSessions}
+                    />
                   </h4>
                   {linkedSessions.length > 0 && (
                     <div className="flex items-center gap-1 text-[0.625rem]">
@@ -485,54 +486,42 @@ export default function EnvironmentDetailDrawer({ envId, onClose, onCompare }: P
         {/* Footer actions — primary on the right, secondaries collapse to
             icon-only buttons with tooltips so the row no longer bursts. */}
         <div className="flex items-center justify-between gap-3 py-3 px-5 border-t border-[var(--border-color)] shrink-0">
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={!env}
+          <IconButton
+            icon={Trash2}
+            variant="danger"
             title={t('environmentDetail.deleteTitle')}
-            aria-label={t('environmentDetail.deleteTitle')}
-            className="flex items-center justify-center w-9 h-9 rounded-md bg-transparent border border-[rgba(239,68,68,0.3)] text-[var(--danger-color)] hover:bg-[rgba(239,68,68,0.08)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Trash2 size={14} />
-          </button>
+            disabled={!env}
+            onClick={() => setShowDeleteConfirm(true)}
+          />
           <div className="flex items-center gap-1.5">
             {onCompare && (
-              <button
+              <IconButton
+                icon={ArrowLeftRight}
+                title={t('environmentDetail.compareWith')}
                 onClick={onCompare}
                 disabled={!env}
-                title={t('environmentDetail.compareWith')}
-                aria-label={t('environmentDetail.compareWith')}
-                className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ArrowLeftRight size={14} />
-              </button>
+              />
             )}
-            <button
-              onClick={handleDuplicate}
-              disabled={!env || duplicating}
+            <IconButton
+              icon={Copy}
               title={duplicating ? t('environmentDetail.duplicating') : t('common.clone')}
-              aria-label={duplicating ? t('environmentDetail.duplicating') : t('common.clone')}
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Copy size={14} className={duplicating ? 'animate-pulse' : ''} />
-            </button>
-            <button
-              onClick={handleExport}
-              disabled={!env || exporting}
+              spin={duplicating}
+              disabled={!env || duplicating}
+              onClick={handleDuplicate}
+            />
+            <IconButton
+              icon={Download}
               title={exporting ? t('environmentDetail.exporting') : t('common.export')}
-              aria-label={exporting ? t('environmentDetail.exporting') : t('common.export')}
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download size={14} className={exporting ? 'animate-pulse' : ''} />
-            </button>
-            <button
-              onClick={() => setShowImportManifest(true)}
-              disabled={!env}
+              spin={exporting}
+              disabled={!env || exporting}
+              onClick={handleExport}
+            />
+            <IconButton
+              icon={Upload}
               title={t('environmentDetail.importManifest')}
-              aria-label={t('environmentDetail.importManifest')}
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-[var(--bg-primary)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload size={14} />
-            </button>
+              disabled={!env}
+              onClick={() => setShowImportManifest(true)}
+            />
             <div className="w-px h-6 bg-[var(--border-color)] mx-1" aria-hidden />
             <button
               onClick={() => {

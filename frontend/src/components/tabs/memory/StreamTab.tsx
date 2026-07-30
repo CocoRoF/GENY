@@ -30,6 +30,7 @@ import {
   MessageSquare, Activity, User, Bot, Sparkles, AlertCircle,
 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
+import { IconButton } from '@/components/common/layout';
 import StreamEventModal from './StreamEventModal';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
@@ -214,13 +215,7 @@ export default function StreamTab({ sessionId }: { sessionId: string }) {
           <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wide">
             Counterparts
           </span>
-          <button
-            onClick={refresh}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded hover:bg-[var(--bg-hover)]"
-            title="Refresh"
-          >
-            <RefreshCw size={12} />
-          </button>
+          <IconButton variant="ghost" icon={RefreshCw} title="Refresh" onClick={refresh} />
         </div>
 
         {/* "All" pseudo-card */}

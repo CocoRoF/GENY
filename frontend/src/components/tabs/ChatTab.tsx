@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { ChatRoom, ChatRoomMessage, BroadcastStatus, AgentProgressState } from '@/types';
 import { AttachmentList } from '@/components/messenger/MessageList';
+import { IconButton } from '@/components/common/layout';
 import SelectionActionMenu from '@/components/chat/SelectionActionMenu';
 
 // ==================== Helpers ====================
@@ -303,13 +304,7 @@ export default function ChatTab() {
                 </span>
               </div>
             </div>
-            <button
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-[0.75rem] font-medium cursor-pointer border-none transition-all shadow-sm"
-              onClick={() => setView('create-room')}
-            >
-              <Plus size={14} />
-              {t('chatTab.createRoom')}
-            </button>
+            <IconButton icon={Plus} variant="primary" title={t('chatTab.createRoom')} onClick={() => setView('create-room')} />
           </div>
         </div>
 

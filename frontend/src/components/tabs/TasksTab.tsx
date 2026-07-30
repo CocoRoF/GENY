@@ -31,6 +31,7 @@ import {
   EmptyState,
   StatusBadge,
   ActionButton,
+  IconButton,
   DataTable,
   type BadgeTone,
 } from '@/components/common/layout';
@@ -235,12 +236,8 @@ export function TasksTab() {
               { id: 'cancelled', label: 'Cancelled' },
             ] as SelectorItem[]}
           />
-          <ActionButton variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>
-            New task
-          </ActionButton>
-          <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-            Refresh
-          </ActionButton>
+          <IconButton icon={Plus} variant="primary" title="New task" onClick={() => setCreateOpen(true)} />
+          <IconButton icon={RefreshCw} title="Refresh" spin={loading} onClick={refresh} disabled={loading} />
         </>
         )
       }
@@ -484,13 +481,13 @@ function TaskDetailView({
             {formatDuration(task.started_at, task.completed_at)}
           </span>
         </div>
-        <button
-          type="button"
+        <IconButton
+          icon={RefreshCw}
+          title={t('tasksTab.refresh')}
+          spin={outLoading || logLoading}
           onClick={() => void load()}
-          className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-        >
-          <RefreshCw className={`w-3 h-3 ${outLoading || logLoading ? 'animate-spin' : ''}`} /> {t('tasksTab.refresh')}
-        </button>
+          className="ml-auto"
+        />
       </div>
 
       {taskLabel && (

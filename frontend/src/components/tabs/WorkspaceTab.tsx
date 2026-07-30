@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react';
 import { agentWorkspaceApi, AgentWorkspaceResponse } from '@/lib/api';
 import { Folder, Trash2, RefreshCw } from 'lucide-react';
-import { TabShell, EmptyState, ActionButton } from '@/components/common/layout';
+import { TabShell, EmptyState, ActionButton, IconButton } from '@/components/common/layout';
 import { useSessionEnvTargetId } from '@/components/session-env/sessionEnvTarget';
 
 export default function WorkspaceTab() {
@@ -90,9 +90,7 @@ export default function WorkspaceTab() {
       icon={Folder}
       actions={
         <>
-          <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-            Refresh
-          </ActionButton>
+          <IconButton icon={RefreshCw} title="Refresh" spin={loading} onClick={refresh} disabled={loading} />
           <ActionButton
             variant="danger"
             icon={Trash2}

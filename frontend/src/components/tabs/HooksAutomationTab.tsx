@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { useAppStore } from '@/store/useAppStore';
 import { hooksApi, HookRecord } from '@/lib/api';
 import { RefreshCw, Trash2, Power, Zap, Clock, Mail, History, Repeat } from 'lucide-react';
-import { TabShell, ActionButton, EntityCard, EmptyState } from '@/components/common/layout';
+import { TabShell, ActionButton, IconButton, EntityCard, EmptyState } from '@/components/common/layout';
 import { useI18n } from '@/lib/i18n';
 
 const POLL_MS = 30_000;
@@ -111,9 +111,7 @@ export function HooksAutomationTab() {
       loading={loading}
       bodyScroll="auto"
       actions={
-        <ActionButton icon={RefreshCw} spinIcon={loading} onClick={refresh} disabled={loading}>
-          {t('common.refresh')}
-        </ActionButton>
+        <IconButton icon={RefreshCw} title={t('common.refresh')} spin={loading} onClick={refresh} disabled={loading} />
       }
     >
       <div className="p-4 flex flex-col gap-3">

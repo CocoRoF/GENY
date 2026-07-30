@@ -11,7 +11,9 @@
  */
 
 import { useEffect, useRef, useState, type SVGProps } from 'react';
+import { RefreshCw, ExternalLink, Settings, Power } from 'lucide-react';
 import { setToken } from '@/lib/authApi';
+import { IconButton } from '@/components/common/layout';
 import { useAppStore } from '@/store/useAppStore';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { useTheme, type Theme } from '@/lib/theme';
@@ -53,34 +55,17 @@ const ic = (p: SVGProps<SVGSVGElement>) => ({
   viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
   strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, ...p,
 });
-const RefreshIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...ic(p)}><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" /></svg>
-);
-const GearIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...ic(p)}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-);
-const PowerIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...ic(p)}><path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04" /></svg>
-);
 const ChevronIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...ic(p)}><path d="m6 9 6 6 6-6" /></svg>
 );
 const MonitorIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...ic(p)}><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
 );
-const ExternalIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...ic(p)}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-);
-
 const TOOLBAR_SELECT =
   'appearance-none h-8 pl-2.5 pr-7 text-[0.78rem] rounded-lg bg-[var(--bg-tertiary)]/60 ' +
   'border border-[var(--border-color)] text-[var(--text-primary)] outline-none cursor-pointer ' +
   'min-w-[120px] max-w-[210px] transition-colors hover:border-[var(--border-subtle)] ' +
   'focus:border-[var(--primary-color)] focus:ring-2 focus:ring-[var(--primary-subtle)]';
-const ICON_BTN =
-  'w-8 h-8 grid place-items-center rounded-lg border border-[var(--border-color)] ' +
-  'text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] ' +
-  'hover:border-[var(--primary-color)] hover:bg-[var(--primary-subtle)] active:scale-95';
 
 export default function ConnectorPage() {
   const sessions = useAppStore((s) => s.sessions);
@@ -197,9 +182,7 @@ export default function ConnectorPage() {
             </select>
             <ChevronIcon className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
           </div>
-          <button type="button" onClick={() => loadSessions()} title="세션 목록 새로고침" className={ICON_BTN}>
-            <RefreshIcon className="w-4 h-4" />
-          </button>
+          <IconButton icon={RefreshCw} title="세션 목록 새로고침" onClick={() => loadSessions()} />
         </div>
 
         {/* model */}
@@ -233,15 +216,9 @@ export default function ConnectorPage() {
           {isDesktop && (
             <>
               <span className="w-px h-5 bg-[var(--border-color)] mx-0.5" aria-hidden />
-              <button type="button" title="브라우저에서 Geny 서버 열기" onClick={() => window.connector?.windowControl.openExternal(window.location.origin)} className={ICON_BTN}>
-                <ExternalIcon className="w-4 h-4" />
-              </button>
-              <button type="button" title="설정 (서버 · 계정 · 테마)" onClick={() => window.connector?.windowControl.openSettings()} className={ICON_BTN}>
-                <GearIcon className="w-4 h-4" />
-              </button>
-              <button type="button" title="접속기 재시작" onClick={() => window.connector?.windowControl.restart()} className={ICON_BTN}>
-                <PowerIcon className="w-4 h-4" />
-              </button>
+              <IconButton icon={ExternalLink} title="브라우저에서 Geny 서버 열기" onClick={() => window.connector?.windowControl.openExternal(window.location.origin)} />
+              <IconButton icon={Settings} title="설정 (서버 · 계정 · 테마)" onClick={() => window.connector?.windowControl.openSettings()} />
+              <IconButton icon={Power} title="접속기 재시작" onClick={() => window.connector?.windowControl.restart()} />
             </>
           )}
         </div>

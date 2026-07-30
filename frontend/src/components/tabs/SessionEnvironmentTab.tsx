@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 
 import { useAppStore } from '@/store/useAppStore';
+import { IconButton } from '@/components/common/layout';
 import { useEnvironmentStore } from '@/store/useEnvironmentStore';
 import { useI18n } from '@/lib/i18n';
 import { environmentApi } from '@/lib/environmentApi';
@@ -541,18 +542,7 @@ function ErrorState({
       >
         {message}
       </p>
-      <button
-        onClick={onRetry}
-        className="mt-1 flex items-center gap-1.5 py-1 px-3 rounded-md text-[0.75rem] cursor-pointer transition-colors"
-        style={{
-          background: 'var(--pipe-bg-tertiary)',
-          color: 'var(--pipe-text-secondary)',
-          border: '1px solid var(--pipe-border)',
-        }}
-      >
-        <RefreshCw size={12} />
-        {t('common.refresh')}
-      </button>
+      <IconButton icon={RefreshCw} title={t('common.refresh')} onClick={onRetry} className="mt-1" />
     </div>
   );
 }

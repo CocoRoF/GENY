@@ -19,12 +19,12 @@ import { googleApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { RefreshCw, CheckCircle2, XCircle, ExternalLink, Mail, Copy, Check } from 'lucide-react';
+import { IconButton, ActionButton } from '@/components/common/layout';
 
 const inputCls =
   'w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary-color)]';
 const labelCls = 'block text-xs font-medium text-[var(--text-muted)] mb-1';
-const btnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
+/** Still used by the "open console" external link below — anchors can't be ActionButtons. */
 const primaryBtnCls =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[var(--primary-color-hover,var(--primary-color))] transition-colors disabled:opacity-50';
 
@@ -193,9 +193,13 @@ export default function GoogleSettingsPanel() {
           {connected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
           {connected ? t('googleSettings.connected') : t('googleSettings.notConnected')}
         </span>
-        <button onClick={() => void loadStatus()} className={btnCls} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {t('googleSettings.refresh')}
-        </button>
+        <IconButton
+          icon={RefreshCw}
+          title={t('googleSettings.refresh')}
+          spin={loading}
+          onClick={() => void loadStatus()}
+          disabled={loading}
+        />
       </div>
 
       <p className="text-sm text-[var(--text-secondary)]">{t('googleSettings.subtitle')}</p>
@@ -276,13 +280,13 @@ export default function GoogleSettingsPanel() {
             />
           </div>
           <div className="flex items-center gap-2 pt-1">
-            <button
+            <ActionButton
+              variant="primary"
               onClick={onSaveClient}
-              className={primaryBtnCls}
               disabled={saving || !clientId.trim() || !clientSecret.trim()}
             >
               {saving ? t('googleSettings.saving') : t('googleSettings.save')}
-            </button>
+            </ActionButton>
           </div>
         </div>
       </section>
@@ -298,9 +302,9 @@ export default function GoogleSettingsPanel() {
             <div className="flex items-center gap-2 text-sm text-emerald-300">
               <CheckCircle2 className="w-4 h-4" /> {t('googleSettings.connectedNote')}
             </div>
-            <button onClick={onDisconnect} className={`${btnCls} ml-auto`} disabled={disconnecting}>
-              <XCircle className="w-3.5 h-3.5" /> {disconnecting ? t('googleSettings.disconnecting') : t('googleSettings.disconnect')}
-            </button>
+            <ActionButton variant="danger" icon={XCircle} onClick={onDisconnect} disabled={disconnecting} className="ml-auto">
+              {disconnecting ? t('googleSettings.disconnecting') : t('googleSettings.disconnect')}
+            </ActionButton>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -312,31 +316,28 @@ export default function GoogleSettingsPanel() {
                 <code className="flex-1 min-w-0 truncate text-xs font-mono text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-md px-3 py-2 select-all">
                   {redirectUri || '…'}
                 </code>
-                <button
+                <ActionButton
                   type="button"
+                  icon={copied ? Check : Copy}
                   onClick={onCopyRedirect}
-                  className={btnCls}
                   disabled={!redirectUri}
                 >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   {copied ? t('googleSettings.copied') : t('googleSettings.copy')}
-                </button>
+                </ActionButton>
               </div>
               <p className="mt-1.5 text-xs text-[var(--text-muted)]">{t('googleSettings.redirectUriNote')}</p>
             </div>
 
             <div className="flex flex-col gap-2 pt-1">
-              <button onClick={onConnect} className={primaryBtnCls} disabled={connecting || !hasClient}>
-                {connecting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t('googleSettings.connecting')}
-                  </>
-                ) : (
-                  <>
-                    <ExternalLink className="w-3.5 h-3.5" /> {t('googleSettings.connect')}
-                  </>
-                )}
-              </button>
+              <ActionButton
+                variant="primary"
+                icon={connecting ? RefreshCw : ExternalLink}
+                spinIcon={connecting}
+                onClick={onConnect}
+                disabled={connecting || !hasClient}
+              >
+                {connecting ? t('googleSettings.connecting') : t('googleSettings.connect')}
+              </ActionButton>
               {!hasClient ? (
                 <p className="text-xs text-[var(--text-muted)]">{t('googleSettings.connectNeedsClient')}</p>
               ) : (

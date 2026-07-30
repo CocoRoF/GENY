@@ -13,11 +13,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { avatarApi, syncApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { RefreshCw, Image as ImageIcon, CheckCircle2, XCircle } from 'lucide-react';
+import { IconButton, ActionButton } from '@/components/common/layout';
 
 type AnyObj = Record<string, any>;
-
-const btnCls =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 rounded-md px-3 py-2 text-sm font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50';
 
 export default function AvatarSettingsPanel() {
   const { t } = useI18n();
@@ -77,12 +75,16 @@ export default function AvatarSettingsPanel() {
         <ImageIcon className="w-5 h-5 text-[var(--primary-color)]" />
         <h2 className="text-base font-semibold text-[var(--text-primary)]">{t('avatarSettings.title')}</h2>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={onSync} className={btnCls} disabled={syncing || !status?.running}>
-            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} /> {t('avatarSettings.syncFromGeny')}
-          </button>
-          <button onClick={() => void load()} className={btnCls} disabled={loading}>
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {t('avatarSettings.refresh')}
-          </button>
+          <ActionButton icon={RefreshCw} spinIcon={syncing} onClick={onSync} disabled={syncing || !status?.running}>
+            {t('avatarSettings.syncFromGeny')}
+          </ActionButton>
+          <IconButton
+            icon={RefreshCw}
+            title={t('avatarSettings.refresh')}
+            spin={loading}
+            onClick={() => void load()}
+            disabled={loading}
+          />
         </div>
       </div>
 

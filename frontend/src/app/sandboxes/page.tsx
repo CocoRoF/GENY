@@ -24,6 +24,7 @@ import {
   type SnapshotSummary,
 } from '@/lib/api';
 import SnapshotLogView from '@/components/sandbox/SnapshotLogView';
+import { IconButton } from '@/components/common/layout';
 
 export default function SandboxLogsPage() {
   const [sandboxes, setSandboxes] = useState<SandboxSummary[]>([]);
@@ -83,13 +84,12 @@ export default function SandboxLogsPage() {
               </p>
             </div>
           </div>
-          <button
+          <IconButton
+            icon={RefreshCw}
+            title="Refresh"
+            spin={loading}
             onClick={() => void refresh()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[hsl(var(--border))] text-[0.8125rem] hover:bg-[hsl(var(--muted))] transition-colors"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          />
         </div>
 
         {error && (

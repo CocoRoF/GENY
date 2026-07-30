@@ -26,7 +26,7 @@ import {
   SendMessageChannelRow,
 } from '@/lib/api';
 import { Shield, Plug, Sparkles, AlertCircle, RefreshCw, FileText, Activity, Lock, Users, Server, BarChart3, Cog, GitMerge, Bell, MessageSquare } from 'lucide-react';
-import { TabShell, ActionButton } from '@/components/common/layout';
+import { TabShell, IconButton } from '@/components/common/layout';
 import { IntegrationHealthCard } from '@/components/admin/IntegrationHealthCard';
 
 interface PermissionRow {
@@ -179,7 +179,7 @@ export default function AdminPanel() {
       icon={Server}
       subtitle="Read-only viewer for permissions / hooks / skills / runtime telemetry."
       actions={
-        <ActionButton icon={RefreshCw} onClick={loadAll}>Refresh all</ActionButton>
+        <IconButton icon={RefreshCw} title="Refresh all" onClick={loadAll} />
       }
       error={error}
       onDismissError={() => setError(null)}

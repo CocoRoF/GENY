@@ -24,7 +24,7 @@ import {
 import type { LogEntry } from '@/types';
 import LogEntryCard from '@/components/execution/LogEntryCard';
 import StepDetailPanel from '@/components/execution/StepDetailPanel';
-import { TabShell, ActionButton } from '@/components/common/layout';
+import { TabShell, IconButton } from '@/components/common/layout';
 import { SectionIcons } from '@/components/common/icons';
 
 function cn(...classes: (string | boolean | undefined | null)[]) {
@@ -224,14 +224,13 @@ export default function LogsTab() {
             ]}
           />
 
-          <ActionButton
+          <IconButton
             icon={RefreshCw}
-            spinIcon={loading}
+            title={t('common.refresh')}
+            spin={loading}
             onClick={() => fetchLogs(currentPage)}
             disabled={loading}
-          >
-            {t('common.refresh')}
-          </ActionButton>
+          />
 
           {/* Close detail panel button */}
           {selectedEntry && (
