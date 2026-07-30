@@ -47,7 +47,7 @@ contextifier[pdf]>=0.4.0
 croniter>=2.0.0
 sqlalchemy>=2.0.0
 # MCP (Model Context Protocol)
-mcp>=1.0.0
+mcp>=1.0.0,<2
 # TTS (Text-to-Speech)
 edge-tts>=6.1
 # Document tools (workspace-canvas P3, re-engined 2026-07) — the edit2docs

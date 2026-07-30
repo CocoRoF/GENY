@@ -65,7 +65,7 @@ dependencies = [
     "edit2docs>=0.14.0",
     "an-web>=0.9.1",
     # MCP (Model Context Protocol)
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     # Auth
     "bcrypt>=5.0.0",
 ]
