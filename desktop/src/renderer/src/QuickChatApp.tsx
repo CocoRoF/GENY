@@ -45,6 +45,7 @@ export function QuickChatApp() {
   const [lang, setLang] = useState<Lang>('ko')
   const t = makeT(lang)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
   const sentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Resolve the bar's theme + language from the connector config (theme falls
@@ -97,13 +98,31 @@ export function QuickChatApp() {
     return () => window.removeEventListener('focus', onWinFocus)
   }, [visible, focusInput])
 
-  // Auto-grow the textarea up to a few lines.
+  // Auto-grow the textarea; past the cap it scrolls (scrollbar hidden by CSS).
   useEffect(() => {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 84)}px`
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
   }, [text])
+
+  // The WINDOW follows the card: multi-line text and thumbnail rows grow the
+  // card, and main resizes the window to fit — so the page itself never
+  // scrolls (no ugly scrollbars, Spotlight-style downward growth).
+  useEffect(() => {
+    if (!visible) return
+    const el = cardRef.current
+    if (!el) return
+    const report = () => {
+      // + root padding (14px top/bottom).
+      const h = Math.ceil(el.getBoundingClientRect().height) + 28
+      window.connector?.quickChat?.resize?.(h)
+    }
+    report()
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [visible])
 
   // Pasted images: capture image items from the clipboard into thumbnails.
   // Text-only pastes fall through to the textarea untouched.
@@ -192,7 +211,7 @@ export function QuickChatApp() {
 
   return (
     <div className={`qc-root gy ${dark ? '' : 'gy--light'}`}>
-      <div className="qc-card">
+      <div className="qc-card" ref={cardRef}>
         {images.length > 0 && (
           <div className="qc-thumbs">
             {images.map((img, i) => (

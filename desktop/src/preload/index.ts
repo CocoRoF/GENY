@@ -165,6 +165,9 @@ export interface ConnectorBridge {
     }): Promise<{ ok: boolean; error?: string }>
     /** Dismiss the bar (Esc / blur). */
     close(): void
+    /** Content height changed (multi-line text / thumbnails) — main grows the
+     *  window to fit so the page never scrolls. */
+    resize(contentHeight: number): void
     /** Fired each time the bar is summoned (paint the card, reset + focus). */
     onOpened(cb: () => void): () => void
     /** Fired when main dismisses the bar (blur/submit/Esc) — stop painting. */
@@ -397,6 +400,7 @@ const api: ConnectorBridge = {
   quickChat: {
     submit: (payload) => ipcRenderer.invoke('quickchat:submit', payload),
     close: () => ipcRenderer.send('quickchat:close'),
+    resize: (h) => ipcRenderer.send('quickchat:resize', h),
     onOpened: (cb) => {
       const h = () => cb()
       ipcRenderer.on('quickchat:opened', h)

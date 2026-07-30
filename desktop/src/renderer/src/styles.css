@@ -529,6 +529,10 @@ body,
   padding: 14px;
   background: transparent;
   color: var(--gy-text);
+  /* Belt & braces: the window tracks the card's height, so the page should
+     never overflow — but a transient frame between growth and the window
+     resize must not flash scrollbars. */
+  overflow: hidden;
 }
 .qc-card {
   width: 100%;
@@ -579,8 +583,11 @@ body,
   font-size: 17px;
   line-height: 1.35;
   resize: none;
-  max-height: 84px;
+  max-height: 240px;
   overflow-y: auto;
+  /* The window grows with content; past max-height the textarea scrolls but
+     the scrollbar itself stays invisible (caret-follow keeps UX intact). */
+  scrollbar-width: none;
   padding: 4px 0;
   /* Editing must work even though the window disables selection globally. */
   -webkit-user-select: text;
@@ -694,3 +701,9 @@ body,
   padding: 0;
 }
 .qc-thumb-x:hover { background: rgba(220, 60, 60, 0.9); }
+
+.qc-input::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

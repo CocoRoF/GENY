@@ -689,6 +689,8 @@ function showSettings(): void {
 // reusing its proven send/auth/TTS pipeline (no duplicate transport).
 const QUICKCHAT_W = 640
 const QUICKCHAT_H = 188
+// Content-driven growth cap (multi-line text + image thumbnails).
+const QUICKCHAT_MAX_H = 480
 // When the bar was last summoned — used to swallow the spurious `blur` that a
 // focused full-screen game fires immediately after we show (so the bar doesn't
 // vanish before the user can type).
@@ -1469,6 +1471,24 @@ function registerIpc(): void {
 
   // Quick-chat bar → send to the current VTuber, then close. Returns {ok,error}
   // so the bar can show a brief result (전송됨 / 로그인 필요).
+  // Grow/shrink the bar window to fit its content (multi-line text, pasted
+  // image thumbnails) so the page NEVER scrolls — Spotlight-style. Top edge
+  // stays anchored; only height changes, clamped to a sane band. resizable is
+  // false for the USER; programmatic resize toggles it around setBounds
+  // (macOS blocks setBounds on non-resizable windows).
+  ipcMain.on('quickchat:resize', (_e, contentH: number) => {
+    if (!quickchat || quickchat.isDestroyed() || !quickChatOpen) return
+    if (!Number.isFinite(contentH)) return
+    const h = Math.max(QUICKCHAT_H, Math.min(QUICKCHAT_MAX_H, Math.round(contentH)))
+    const b = quickchat.getBounds()
+    if (Math.abs(b.height - h) < 2) return
+    suppressQuickChatPosSave = true
+    quickchat.setResizable(true)
+    quickchat.setBounds({ x: b.x, y: b.y, width: QUICKCHAT_W, height: h })
+    quickchat.setResizable(false)
+    setTimeout(() => { suppressQuickChatPosSave = false }, 120)
+  })
+
   ipcMain.handle('quickchat:submit', async (_e, payload: string | QuickChatPayload) => {
     const r = await deliverQuickChat(payload)
     if (r.ok) dismissQuickChat()
