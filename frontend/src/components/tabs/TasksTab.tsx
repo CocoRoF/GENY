@@ -48,8 +48,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const POLL_INTERVAL_MS = 5_000;
-
 const STATUS_TONE: Record<BackgroundTaskRecord['status'], BadgeTone> = {
   pending: 'neutral',
   running: 'info',
@@ -106,8 +104,6 @@ export function TasksTab() {
         .catch(() => {});
     };
     loadStatus();
-    const id = setInterval(loadStatus, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -127,13 +123,13 @@ export function TasksTab() {
     }
   }, [sessionId, statusFilter]);
 
+  // Manual-refresh model: load once per session/filter change; the user
+  // refreshes explicitly (no background polling).
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
   }, [refresh]);
 
-  // Keep the open detail's header (status/duration) fresh as the list polls.
+  // Keep the open detail's header (status/duration) fresh as the list reloads.
   useEffect(() => {
     setDetailRow((cur) => {
       if (!cur) return cur;

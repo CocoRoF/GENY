@@ -22,7 +22,7 @@ type Variant = 'default' | 'primary' | 'danger' | 'ghost';
 
 const VARIANT_TO_SHADCN: Record<Variant, 'outline' | 'default' | 'destructive' | 'ghost'> = {
   default: 'outline',
-  primary: 'default',
+  primary: 'outline',
   danger: 'destructive',
   ghost: 'ghost',
 };
@@ -54,6 +54,11 @@ export function IconButton({
       aria-label={title}
       className={cn(
         'shrink-0',
+        // "primary" is a SUBTLE emphasis, not a solid fill — same outline
+        // box as default, tinted with the accent so it reads as the
+        // suggested action without looking like a different-sized button.
+        variant === 'primary' &&
+          'text-[hsl(var(--primary))] border-[hsl(var(--primary)/0.35)] bg-[hsl(var(--primary)/0.08)] hover:bg-[hsl(var(--primary)/0.16)] hover:text-[hsl(var(--primary))]',
         // outline+danger keeps the pre-shadcn red-outline look.
         isDanger && 'bg-transparent text-red-600 border border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-500/40 dark:hover:bg-red-500/10',
         className,
