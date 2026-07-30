@@ -245,6 +245,10 @@ export const messages: Record<string, Entry> = {
   'qc.footSend': { ko: '전송', en: 'send' },
   'qc.footNewline': { ko: '줄바꿈', en: 'newline' },
   'qc.footClose': { ko: '닫기', en: 'close' },
+  'qc.footPaste': { ko: '이미지 붙여넣기 가능', en: 'paste images' },
+  'qc.tooManyImages': { ko: '이미지는 최대 4장까지 첨부할 수 있어요', en: 'Up to 4 images per message' },
+  'qc.imageTooLarge': { ko: '이미지가 너무 큽니다 (10MB 이하)', en: 'Image too large (max 10 MB)' },
+  'qc.removeImage': { ko: '이미지 제거', en: 'Remove image' },
 }
 
 /**

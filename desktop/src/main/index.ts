@@ -862,9 +862,40 @@ async function toggleQuickChat(): Promise<void> {
 // Relay a quick-chat message to the current VTuber via the /connector page's
 // existing chat send. Returns whether it was delivered (false → not logged in /
 // panel not ready, so the bar can surface a hint).
-async function deliverQuickChat(text: string): Promise<{ ok: boolean; error?: string }> {
-  const body = (text ?? '').trim()
-  if (!body) return { ok: false, error: nt('qc.emptyMessage') }
+interface QuickChatPayload {
+  text: string
+  images?: Array<{ name: string; type: string; dataUrl: string }>
+}
+
+const QC_MAX_IMAGES = 4
+// data URL overhead ≈ 4/3 of raw bytes; 14 MiB string ≈ 10 MiB image.
+const QC_MAX_DATAURL_CHARS = 14 * 1024 * 1024
+
+function sanitizeQuickImages(images: unknown): QuickChatPayload['images'] {
+  if (!Array.isArray(images)) return undefined
+  const out: NonNullable<QuickChatPayload['images']> = []
+  for (const img of images.slice(0, QC_MAX_IMAGES)) {
+    if (!img || typeof img !== 'object') continue
+    const { name, type, dataUrl } = img as Record<string, unknown>
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) continue
+    if (dataUrl.length > QC_MAX_DATAURL_CHARS) continue
+    out.push({
+      name: typeof name === 'string' && name ? name.slice(0, 200) : 'pasted.png',
+      type: typeof type === 'string' && type.startsWith('image/') ? type : 'image/png',
+      dataUrl,
+    })
+  }
+  return out.length ? out : undefined
+}
+
+async function deliverQuickChat(
+  payload: string | QuickChatPayload,
+): Promise<{ ok: boolean; error?: string }> {
+  // Accept both the structured form and the legacy bare string.
+  const raw = typeof payload === 'string' ? { text: payload } : payload ?? { text: '' }
+  const body = (raw.text ?? '').trim()
+  const images = sanitizeQuickImages(raw.images)
+  if (!body && !images) return { ok: false, error: nt('qc.emptyMessage') }
   const token = await getStoredToken()
   if (!token || !loadConfig().serverUrl) return { ok: false, error: nt('qc.loginRequired') }
   if (!control) createControl()
@@ -878,7 +909,7 @@ async function deliverQuickChat(text: string): Promise<{ ok: boolean; error?: st
   // If we had to (re)load, give React a beat to mount its onQuickSend listener
   // before the event arrives (an early send would be dropped).
   if (justLoaded) await new Promise((r) => setTimeout(r, 450))
-  control!.webContents.send('connector:quick-send', body)
+  control!.webContents.send('connector:quick-send', { text: body, images })
   return { ok: true }
 }
 
@@ -1438,8 +1469,8 @@ function registerIpc(): void {
 
   // Quick-chat bar → send to the current VTuber, then close. Returns {ok,error}
   // so the bar can show a brief result (전송됨 / 로그인 필요).
-  ipcMain.handle('quickchat:submit', async (_e, text: string) => {
-    const r = await deliverQuickChat(text)
+  ipcMain.handle('quickchat:submit', async (_e, payload: string | QuickChatPayload) => {
+    const r = await deliverQuickChat(payload)
     if (r.ok) dismissQuickChat()
     return r
   })

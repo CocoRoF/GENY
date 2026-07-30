@@ -63,7 +63,13 @@ declare global {
       /** Quick-chat relay: the floating bar's message arrives here so the
        *  /connector chat can reuse its own send path. */
       messaging?: {
-        onQuickSend(cb: (text: string) => void): () => void
+        onQuickSend(
+          cb: (
+            payload:
+              | string
+              | { text: string; images?: Array<{ name: string; type: string; dataUrl: string }> },
+          ) => void,
+        ): () => void
       }
       capture: {
         listSources(): Promise<Array<{ id: string; name: string; display_id: string }>>

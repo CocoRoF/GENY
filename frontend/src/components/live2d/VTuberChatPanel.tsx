@@ -449,9 +449,9 @@ export default function VTuberChatPanel({
   // Core send — takes the message text explicitly (not from the input state) so
   // it can be driven both by the in-app composer and by an external trigger
   // (the desktop connector's global quick-chat hotkey).
-  const sendText = useCallback(async (rawText: string) => {
+  const sendText = useCallback(async (rawText: string, extraAttachments?: ChatAttachment[]) => {
     const text = rawText.trim();
-    const hasAttachments = pendingAttachments.length > 0;
+    const hasAttachments = pendingAttachments.length > 0 || (extraAttachments?.length ?? 0) > 0;
     if ((!text && !hasAttachments) || sending || !roomId) return;
     if (uploadingCount > 0) return;  // wait for in-flight uploads
 
@@ -465,7 +465,7 @@ export default function VTuberChatPanel({
       useVTuberStore.getState().beginTTSTurn(sessionId);
     }
 
-    const attachmentsToSend = [...pendingAttachments];
+    const attachmentsToSend = [...pendingAttachments, ...(extraAttachments ?? [])];
     setPendingAttachments([]);
     setAttachmentError(null);
     setSending(true);
@@ -521,8 +521,38 @@ export default function VTuberChatPanel({
   useEffect(() => {
     const onQuickSend = window.connector?.messaging?.onQuickSend;
     if (!onQuickSend) return;
-    const dispose = onQuickSend((text: string) => {
-      void sendText(text);
+    type QuickPayload =
+      | string
+      | { text: string; images?: Array<{ name: string; type: string; dataUrl: string }> };
+    const dispose = onQuickSend((payload: QuickPayload) => {
+      void (async () => {
+        // Legacy bars relay a bare string; current ones send {text, images}.
+        const { text, images } =
+          typeof payload === 'string' ? { text: payload, images: undefined } : payload;
+        let uploaded: ChatAttachment[] = [];
+        if (images?.length) {
+          try {
+            // data URL → File, then the SAME prepare+upload path as the in-app
+            // composer (client-side image resize + server caps stay unified).
+            const files = await Promise.all(
+              images.map(async (img) => {
+                const blob = await (await fetch(img.dataUrl)).blob();
+                return new File([blob], img.name || 'pasted.png', {
+                  type: img.type || blob.type || 'image/png',
+                });
+              })
+            );
+            const prepared = await Promise.all(
+              files.map((f) => (isImageFile(f) ? resizeImageIfNeeded(f) : Promise.resolve(f)))
+            );
+            uploaded = await chatApi.uploadAttachments(prepared);
+          } catch (e) {
+            setAttachmentError(e instanceof Error ? e.message : String(e));
+            if (!text.trim()) return; // nothing sendable — surface the error only
+          }
+        }
+        await sendText(text, uploaded.length ? uploaded : undefined);
+      })();
     });
     return () => dispose?.();
   }, [sendText]);

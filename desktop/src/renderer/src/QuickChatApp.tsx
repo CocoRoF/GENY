@@ -16,6 +16,18 @@ import { makeT, type Lang } from './i18n'
 
 type Phase = 'idle' | 'sending' | 'sent' | 'error'
 
+/** A pasted image, carried as a data URL through the relay chain. The web
+ *  side converts it back to a File and runs the SAME resize+upload path as
+ *  the in-app composer, so caps/formats stay in one place. */
+export interface QuickImage {
+  name: string
+  type: string
+  dataUrl: string
+}
+
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
 const sendIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 2 11 13" />
@@ -26,6 +38,7 @@ const sendIcon = (
 export function QuickChatApp() {
   const [visible, setVisible] = useState(false)
   const [text, setText] = useState('')
+  const [images, setImages] = useState<QuickImage[]>([])
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState('')
   const [dark, setDark] = useState(true)
@@ -63,6 +76,7 @@ export function QuickChatApp() {
     const offOpen = window.connector?.quickChat?.onOpened?.(() => {
       if (sentTimer.current) clearTimeout(sentTimer.current)
       setText('')
+      setImages([])
       setPhase('idle')
       setError('')
       setVisible(true)
@@ -91,15 +105,63 @@ export function QuickChatApp() {
     el.style.height = `${Math.min(el.scrollHeight, 84)}px`
   }, [text])
 
+  // Pasted images: capture image items from the clipboard into thumbnails.
+  // Text-only pastes fall through to the textarea untouched.
+  const onPaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const files: File[] = []
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      if (it.kind === 'file') {
+        const f = it.getAsFile()
+        if (f && f.type.startsWith('image/')) files.push(f)
+      }
+    }
+    if (!files.length) return
+    e.preventDefault()
+    setError('')
+    const room = MAX_IMAGES - images.length
+    if (room <= 0) {
+      setPhase('error')
+      setError(t('qc.tooManyImages'))
+      return
+    }
+    for (const f of files.slice(0, room)) {
+      if (f.size > MAX_IMAGE_BYTES) {
+        setPhase('error')
+        setError(t('qc.imageTooLarge'))
+        continue
+      }
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '')
+        if (!dataUrl.startsWith('data:')) return
+        setImages((prev) =>
+          prev.length >= MAX_IMAGES
+            ? prev
+            : [...prev, { name: f.name || `pasted-${Date.now()}.png`, type: f.type, dataUrl }],
+        )
+      }
+      reader.readAsDataURL(f)
+    }
+  }, [images.length, t])
+
+  const removeImage = useCallback((idx: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== idx))
+    setTimeout(focusInput, 0)
+  }, [focusInput])
+
   const submit = useCallback(async () => {
     const body = text.trim()
-    if (!body || phase === 'sending') return
+    if ((!body && images.length === 0) || phase === 'sending') return
     setPhase('sending')
     setError('')
-    const r = await window.connector?.quickChat?.submit(body)
+    const r = await window.connector?.quickChat?.submit({ text: body, images })
     if (r?.ok) {
       setPhase('sent')
       setText('')
+      setImages([])
       // Main hides the bar on success; show a brief confirmation in case it lingers.
       if (sentTimer.current) clearTimeout(sentTimer.current)
       sentTimer.current = setTimeout(() => setPhase('idle'), 1400)
@@ -108,7 +170,7 @@ export function QuickChatApp() {
       setError(r?.error || t('qc.sendFailed'))
       setTimeout(focusInput, 0)
     }
-  }, [text, phase, focusInput, t])
+  }, [text, images, phase, focusInput, t])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -122,7 +184,7 @@ export function QuickChatApp() {
     }
   }
 
-  const canSend = !!text.trim() && phase !== 'sending'
+  const canSend = (!!text.trim() || images.length > 0) && phase !== 'sending'
 
   // Window stays alive always; paint the card only while summoned so the rest of
   // the time the window is fully transparent (and click-through, set by main).
@@ -131,6 +193,22 @@ export function QuickChatApp() {
   return (
     <div className={`qc-root gy ${dark ? '' : 'gy--light'}`}>
       <div className="qc-card">
+        {images.length > 0 && (
+          <div className="qc-thumbs">
+            {images.map((img, i) => (
+              <div key={`${img.name}-${i}`} className="qc-thumb">
+                <img src={img.dataUrl} alt={img.name} />
+                <button
+                  className="qc-thumb-x"
+                  onClick={() => removeImage(i)}
+                  aria-label={t('qc.removeImage')}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="qc-bar">
           <textarea
             ref={inputRef}
@@ -140,6 +218,7 @@ export function QuickChatApp() {
             placeholder={t('qc.placeholder')}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             spellCheck={false}
             autoFocus
           />
@@ -156,7 +235,7 @@ export function QuickChatApp() {
             <span className="qc-hint">{t('qc.sending')}</span>
           ) : (
             <span className="qc-hint">
-              <kbd>Enter</kbd> {t('qc.footSend')} · <kbd>Shift</kbd>+<kbd>Enter</kbd> {t('qc.footNewline')} · <kbd>Esc</kbd> {t('qc.footClose')}
+              <kbd>Enter</kbd> {t('qc.footSend')} · <kbd>Shift</kbd>+<kbd>Enter</kbd> {t('qc.footNewline')} · <kbd>Esc</kbd> {t('qc.footClose')} · {t('qc.footPaste')}
             </span>
           )}
         </div>

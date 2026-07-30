@@ -157,8 +157,12 @@ export interface ConnectorBridge {
 
   /** Quick-chat input bar (the 'quickchat' window) → relay to the VTuber chat. */
   quickChat: {
-    /** Send the typed text to the current VTuber; main closes the bar on ok. */
-    submit(text: string): Promise<{ ok: boolean; error?: string }>
+    /** Send the typed text (+ pasted images as data URLs) to the current
+     *  VTuber; main closes the bar on ok. */
+    submit(payload: {
+      text: string
+      images?: Array<{ name: string; type: string; dataUrl: string }>
+    }): Promise<{ ok: boolean; error?: string }>
     /** Dismiss the bar (Esc / blur). */
     close(): void
     /** Fired each time the bar is summoned (paint the card, reset + focus). */
@@ -170,8 +174,16 @@ export interface ConnectorBridge {
   /** Inbound messaging from the connector → the /connector chat page reuses its
    *  own send path when a quick-chat message arrives. */
   messaging: {
-    /** Subscribe to quick-chat relays; returns a disposer. */
-    onQuickSend(cb: (text: string) => void): () => void
+    /** Subscribe to quick-chat relays; returns a disposer. Payload is the
+     *  structured `{ text, images? }` form (legacy bars sent a bare string —
+     *  consumers should accept both). */
+    onQuickSend(
+      cb: (
+        payload:
+          | string
+          | { text: string; images?: Array<{ name: string; type: string; dataUrl: string }> },
+      ) => void,
+    ): () => void
   }
 
   /** GitHub Releases auto-update controls. */
@@ -383,7 +395,7 @@ const api: ConnectorBridge = {
     resume: () => ipcRenderer.send('hotkey:resume'),
   },
   quickChat: {
-    submit: (text) => ipcRenderer.invoke('quickchat:submit', text),
+    submit: (payload) => ipcRenderer.invoke('quickchat:submit', payload),
     close: () => ipcRenderer.send('quickchat:close'),
     onOpened: (cb) => {
       const h = () => cb()
@@ -398,7 +410,12 @@ const api: ConnectorBridge = {
   },
   messaging: {
     onQuickSend: (cb) => {
-      const h = (_e: unknown, text: string) => cb(text)
+      const h = (
+        _e: unknown,
+        payload:
+          | string
+          | { text: string; images?: Array<{ name: string; type: string; dataUrl: string }> },
+      ) => cb(payload)
       ipcRenderer.on('connector:quick-send', h)
       return () => ipcRenderer.removeListener('connector:quick-send', h)
     },
