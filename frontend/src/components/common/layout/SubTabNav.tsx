@@ -1,21 +1,23 @@
 'use client';
 
 /**
- * SubTabNav — horizontal pill nav (shadcn-backed).
+ * SubTabNav — horizontal sub-tab bar.
  *
- * Same prop API. Internally uses the same active-state visual as
- * shadcn's TabsTrigger (underline + accent bg) so the global tab
- * strip and the sub-tab strip feel like the same family.
+ * The tab group itself IS a SegmentedControl instance — the exact same
+ * component (and DOM structure) as inline toggles like the storage
+ * tab's workspace/all switch. SubTabNav only adds the bar chrome
+ * around it: bottom border, optional leading identity and trailing
+ * controls.
  */
 
 import { ReactNode } from 'react';
 import { LucideIcon } from 'lucide-react';
 import { cn } from './cn';
-import { SegmentButton } from './SegmentButton';
+import { SegmentedControl } from './SegmentedControl';
 
 export interface SubTabDef {
   id: string;
-  label: ReactNode;
+  label: string;
   icon?: LucideIcon;
   count?: number;
 }
@@ -41,23 +43,19 @@ export function SubTabNav({ tabs, active, onSelect, leading, trailing, className
         'flex items-center gap-0.5 px-2 md:px-3 h-9 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0 overflow-x-auto scrollbar-hide',
         className,
       )}
-      role="tablist"
     >
       {leading != null && (
         <div className="flex items-center min-w-0 shrink-0 pr-2 mr-1 border-r border-[hsl(var(--border))]">
           {leading}
         </div>
       )}
-      {tabs.map(({ id, label, icon, count }) => (
-        <SegmentButton
-          key={id}
-          label={label}
-          icon={icon}
-          count={count}
-          active={active === id}
-          onClick={() => onSelect(id)}
+      {tabs.length > 0 && (
+        <SegmentedControl
+          items={tabs}
+          value={active}
+          onChange={onSelect}
         />
-      ))}
+      )}
       {trailing != null && (
         <div className="flex items-center ml-auto pl-2 shrink-0">{trailing}</div>
       )}

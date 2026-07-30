@@ -21,6 +21,7 @@ export interface SegmentDef<T extends string = string> {
   /** Optional — convention is label-only segments; the interface stays
    *  open for surfaces that need the icon treatment. */
   icon?: LucideIcon;
+  count?: number;
   title?: string;
 }
 
@@ -45,11 +46,12 @@ export function SegmentedControl<T extends string = string>({
       aria-label={ariaLabel}
       className={cn('inline-flex items-center h-8 gap-0.5 shrink-0', className)}
     >
-      {items.map(({ id, label, icon, title }) => (
+      {items.map(({ id, label, icon, count, title }) => (
         <SegmentButton
           key={id}
           label={label}
           icon={icon}
+          count={count}
           title={title}
           active={id === value}
           onClick={() => onChange(id)}
