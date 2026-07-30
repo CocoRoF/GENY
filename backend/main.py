@@ -106,6 +106,7 @@ from ws.execute_stream import router as ws_execute_router
 from ws.chat_stream import router as ws_chat_router
 from ws.avatar_stream import router as ws_avatar_router
 from ws.connector_stream import router as ws_connector_router
+from ws.workspace_stream import router as ws_workspace_router
 from ws.voice_realtime_stream import router as ws_voice_realtime_router
 from service.config import get_config_manager
 from service.mcp_loader import MCPLoader, get_global_mcp_config
@@ -1015,6 +1016,7 @@ app.include_router(ws_execute_router)   # WebSocket: agent execution streaming
 app.include_router(ws_chat_router)      # WebSocket: chat room event streaming
 app.include_router(ws_avatar_router)    # WebSocket: avatar state streaming
 app.include_router(ws_connector_router) # WebSocket: connector capability bridge (inverse MCP)
+app.include_router(ws_workspace_router)  # WebSocket: workspace sync change notifications
 app.include_router(ws_voice_realtime_router)  # WebSocket: realtime voice conversation loop (additive)
 
 # Mount static files for Web UI Dashboard

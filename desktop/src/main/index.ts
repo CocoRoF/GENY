@@ -3,6 +3,8 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
+import { getSyncManager, initSyncManager, type SyncPairConfig } from './sync-manager'
+import { randomUUID } from 'crypto'
 import { browserCall, getBrowserControl } from './browser-control'
 import { getWinAutoHost, disposeWinAutoHost } from './winauto-host'
 
@@ -103,6 +105,11 @@ interface ConnectorConfig {
   /** Local MCP master switch — off hides every server from the agent without
    *  deleting the configs. Default true. */
   mcpEnabled?: boolean
+  /** Workspace sync pairings: agent session ↔ local folder (Drive-style
+   *  bidirectional replication). Managed in settings → Workspace. */
+  syncPairs?: SyncPairConfig[]
+  /** Stable replica identity for the sync protocol — generated once. */
+  deviceId?: string
 }
 interface WinBounds { x: number; y: number; width: number; height: number }
 /** Consent posture for an actuation capability group. */
@@ -1076,6 +1083,7 @@ app.on('before-quit', () => {
 })
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  try { getSyncManager()?.stopAll() } catch { /* ignore */ }
   try { void getMcpManager().closeAll() } catch { /* ignore */ }
   // Structured-control teardown: drop CDP sockets (the visible automation
   // browser stays — it's the user's), kill the PowerShell UIA/COM host.
@@ -1672,6 +1680,89 @@ function registerIpc(): void {
     getMcpManager().onStatusChange(() => broadcastMcpStatus())
   } catch { /* SDK missing */ }
 
+  // ── Workspace sync (Drive-style local↔agent-workspace replication) ──
+  const broadcastSyncStatus = (statuses: unknown): void => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send('sync:status-event', statuses) } catch { /* window gone */ }
+    }
+  }
+  const reconfigureSync = (): void => {
+    const cfg = loadConfig()
+    getSyncManager()?.configure(cfg.syncPairs ?? [])
+  }
+  ipcMain.handle('sync:list', () => ({
+    pairs: loadConfig().syncPairs ?? [],
+    statuses: getSyncManager()?.statuses() ?? [],
+  }))
+  ipcMain.handle('sync:pick-folder', async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Workspace 폴더 선택',
+    })
+    return res.canceled ? null : res.filePaths[0]
+  })
+  ipcMain.handle('sync:add-pair', (_e, pair: { sessionId: string; sessionLabel?: string; localPath: string }) => {
+    const list = loadConfig().syncPairs ?? []
+    // one pairing per (session, path) — replace duplicates
+    const filtered = list.filter(
+      (p) => !(p.sessionId === pair.sessionId && p.localPath === pair.localPath),
+    )
+    const id = `${pair.sessionId.slice(0, 8)}-${Date.now().toString(36)}`
+    const next = [...filtered, { id, ...pair }]
+    saveConfig({ syncPairs: next })
+    reconfigureSync()
+    return next
+  })
+  ipcMain.handle('sync:remove-pair', (_e, id: string) => {
+    const next = (loadConfig().syncPairs ?? []).filter((p) => p.id !== id)
+    saveConfig({ syncPairs: next })
+    reconfigureSync()
+    return next
+  })
+  ipcMain.handle('sync:set-paused', (_e, id: string, paused: boolean) => {
+    const next = (loadConfig().syncPairs ?? []).map((p) =>
+      p.id === id ? { ...p, paused: !!paused } : p,
+    )
+    saveConfig({ syncPairs: next })
+    reconfigureSync()
+    return next
+  })
+  ipcMain.handle('sync:sync-now', (_e, id: string) => getSyncManager()?.syncNow(id))
+  ipcMain.handle('sync:confirm-mass-delete', (_e, id: string, accept: boolean) => {
+    getSyncManager()?.confirmMassDelete(id, !!accept)
+    if (!accept) {
+      // refusal pauses the pair — persist that
+      const next = (loadConfig().syncPairs ?? []).map((p) =>
+        p.id === id ? { ...p, paused: true } : p,
+      )
+      saveConfig({ syncPairs: next })
+    }
+  })
+  ipcMain.handle('sync:open-folder', (_e, id: string) => {
+    const pair = (loadConfig().syncPairs ?? []).find((p) => p.id === id)
+    if (pair) void shell.openPath(pair.localPath)
+  })
+  // Agent list for the pairing picker (main process owns the token).
+  ipcMain.handle('sync:list-agents', async () => {
+    const cfg = loadConfig()
+    const token = await getStoredToken()
+    if (!cfg.serverUrl || !token) return []
+    try {
+      const res = await fetch(`${cfg.serverUrl.replace(/\/$/, '')}/api/agents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      const sessions = Array.isArray(data) ? data : (data?.sessions ?? data?.agents ?? [])
+      return (sessions as Array<Record<string, unknown>>).map((s) => ({
+        id: String(s.session_id ?? s.id ?? ''),
+        name: String(s.name ?? s.display_name ?? s.session_id ?? s.id ?? ''),
+      })).filter((s) => s.id)
+    } catch {
+      return []
+    }
+  })
+
   // Control panel picked a session → point the overlay at it.
   ipcMain.on('overlay:set-session', (_e, sessionId: string) => {
     saveConfig({ overlaySession: sessionId })
@@ -1781,6 +1872,28 @@ app.whenReady().then(() => {
   registerIpc()
   // Load the user's local MCP servers into the manager (lazy-connects on use).
   try { getMcpManager().configure(loadConfig().mcpServers) } catch { /* SDK missing */ }
+
+  // Workspace sync engine: one stable device id per install, engines per
+  // configured pairing. Started AFTER auth validation below (engines read
+  // the token lazily per request, so early start is also safe).
+  try {
+    if (!loadConfig().deviceId) saveConfig({ deviceId: randomUUID() })
+    const manager = initSyncManager({
+      indexDir: join(app.getPath('userData'), 'sync-index'),
+      serverUrl: () => loadConfig().serverUrl ?? '',
+      token: () => getStoredToken(),
+      deviceId: () => loadConfig().deviceId as string,
+      onStatus: (statuses) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          try { w.webContents.send('sync:status-event', statuses) } catch { /* window gone */ }
+        }
+      },
+      log: (msg) => console.log('[sync]', msg),
+    })
+    manager.configure(loadConfig().syncPairs ?? [])
+  } catch (e) {
+    console.error('[sync] init failed', e)
+  }
   // Reconcile the OS login item with the saved preference (default off) — keeps
   // the autostart entry in sync if the app moved or the setting changed offline.
   applyAutoLaunch(loadConfig().autoLaunch === true)

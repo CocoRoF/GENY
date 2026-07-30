@@ -678,6 +678,12 @@ export const agentApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+
+  /** Connector replicas currently syncing this workspace (Drive-style). */
+  syncDevices: (id: string) =>
+    apiCall<{ devices: Array<{ device_id: string; device_name: string; user: string }> }>(
+      `/api/agents/${id}/storage/sync-devices`,
+    ),
 };
 
 // ==================== Background Tasks API (PR-A.5.5) ===========

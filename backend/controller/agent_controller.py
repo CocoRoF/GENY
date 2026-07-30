@@ -1210,9 +1210,39 @@ async def list_storage_files(
     )
 
 
-#: Upload cap for user files placed into the agent workspace. Documents get
-#: the same generous bound as chat uploads.
-_WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+#: Per-file cap for workspace writes (browser upload AND sync PUT).
+#: Env-tunable so operators can raise/lower without a release; the
+#: connector reads the same limit from /storage/changes responses.
+def _workspace_max_file_bytes() -> int:
+    import os as _os
+
+    try:
+        return int(_os.environ.get("GENY_WORKSPACE_MAX_FILE_MB", "500")) * 1024 * 1024
+    except ValueError:
+        return 500 * 1024 * 1024
+
+
+_WORKSPACE_UPLOAD_MAX_BYTES = _workspace_max_file_bytes()
+
+
+async def _sync_touch(session_id: str, storage_path: str) -> int:
+    """After any workspace write: refresh the sync index (off-loop —
+    hashing/sqlite are blocking) and wake connected replicas. Returns the
+    new latest_seq. Never raises — sync bookkeeping must not fail the
+    user's operation."""
+    try:
+        from service.utils import workspace_sync
+        from ws.workspace_stream import notify_workspace_changed
+
+        stats = await asyncio.to_thread(
+            workspace_sync.refresh_index, storage_path, session_id, force=True
+        )
+        seq = int(stats.get("latest_seq", 0))
+        notify_workspace_changed(session_id, seq)
+        return seq
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[%s] sync index refresh failed: %s", session_id, exc)
+        return 0
 
 
 def _workspace_target(session_id: str, rel_path: str) -> "tuple":
@@ -1256,6 +1286,7 @@ async def storage_mkdir(
     if target.exists():
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=False)
+    await _sync_touch(session_id, str(root))
     return {"ok": True, "path": str(target.relative_to(root))}
 
 
@@ -1275,6 +1306,7 @@ async def storage_rename(
         raise HTTPException(status_code=409, detail="Destination already exists")
     dst.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dst)
+    await _sync_touch(session_id, str(root))
     return {"ok": True, "path": str(dst.relative_to(root))}
 
 
@@ -1282,6 +1314,11 @@ async def storage_rename(
 async def storage_delete(
     session_id: str = Path(..., description="Session ID"),
     path: str = Query(..., description="Path to delete (under workspace/)"),
+    base_sha: Optional[str] = Query(
+        None,
+        description="Sync guard: expected current sha256 of the file. "
+        "Mismatch → 409 (someone changed it since the replica last saw it).",
+    ),
     auth: dict = Depends(require_auth),
 ):
     """Delete a file or folder (recursive) inside the workspace."""
@@ -1293,10 +1330,20 @@ async def storage_delete(
         raise HTTPException(status_code=403, detail="Cannot delete the workspace root")
     if not target.exists():
         raise HTTPException(status_code=404, detail="Not found")
+    if base_sha and target.is_file():
+        from service.utils import workspace_sync
+
+        cur = await asyncio.to_thread(workspace_sync.hash_file, target)
+        if cur != base_sha:
+            raise HTTPException(
+                status_code=409,
+                detail={"conflict": "delete", "current_sha": cur},
+            )
     if target.is_dir():
         _shutil.rmtree(target)
     else:
         target.unlink()
+    await _sync_touch(session_id, str(_root))
     return {"ok": True}
 
 
@@ -1370,6 +1417,7 @@ async def upload_to_workspace(
         raise HTTPException(status_code=500, detail="upload write failed")
 
     rel = str(dest.relative_to(root))
+    await _sync_touch(session_id, str(root))
     return {
         "ok": True,
         "session_id": session_id,
@@ -1377,6 +1425,127 @@ async def upload_to_workspace(
         "workspace_path": str(dest.relative_to(ws)),
         "size": size,
     }
+
+
+@router.get("/{session_id}/storage/changes")
+async def storage_changes(
+    session_id: str = Path(..., description="Session ID"),
+    since: int = Query(0, ge=0, description="Cursor: last seq this replica applied (0 = bootstrap snapshot)"),
+    auth: dict = Depends(require_auth),
+):
+    """Sync read model: workspace changes after ``since``.
+
+    ``since=0`` returns every live entry (fresh replica bootstrap);
+    ``since>0`` returns adds/updates/tombstones with ``seq > since``.
+    A throttled incremental rescan runs first so agent-driven writes are
+    included without any executor hook.
+    """
+    _enforce_session_owner(session_id, auth)
+    from service.utils import workspace_sync
+
+    storage_path = _storage_root_live_or_dormant(session_id)
+    await asyncio.to_thread(workspace_sync.refresh_index, storage_path, session_id)
+    result = await asyncio.to_thread(workspace_sync.changes_since, storage_path, since)
+    result["max_file_bytes"] = _workspace_max_file_bytes()
+    return result
+
+
+@router.put("/{session_id}/storage/file")
+async def put_workspace_file(
+    request: Request,
+    session_id: str = Path(..., description="Session ID"),
+    path: str = Query(..., description="Exact destination (storage-root relative, under workspace/)"),
+    base_sha: str = Query(
+        "",
+        description="sha256 the replica believes the server currently has. "
+        "'' = replica thinks the file is new. Mismatch → 409 with the "
+        "server's current sha (conflict signal — resolve client-side).",
+    ),
+    device: str = Query("", description="Replica device id (telemetry only)"),
+    auth: dict = Depends(require_auth),
+):
+    """Sync write model: put raw bytes at an EXACT workspace path.
+
+    Unlike /storage/upload (browser multipart, name-defanged, no-clobber
+    suffixing) this is the replication primitive: the path is honoured
+    verbatim, writes are atomic (temp file → os.replace), and optimistic
+    concurrency runs on ``base_sha`` so two PCs can't silently clobber
+    each other.
+    """
+    import os as _os
+    import uuid as _uuid
+
+    _enforce_session_owner(session_id, auth)
+    from service.utils import workspace_sync
+
+    root, ws, target = _workspace_target(session_id, path)
+    if target == ws:
+        raise HTTPException(status_code=403, detail="path must name a file")
+
+    # Optimistic concurrency: compare against what's on disk right now.
+    if target.exists():
+        if target.is_dir():
+            raise HTTPException(status_code=409, detail={"conflict": "is_dir"})
+        cur = await asyncio.to_thread(workspace_sync.hash_file, target)
+        if cur != base_sha:
+            raise HTTPException(
+                status_code=409,
+                detail={"conflict": "modified", "current_sha": cur},
+            )
+    elif base_sha:
+        # Replica thinks it's updating, but the file is gone server-side
+        # (edit-vs-delete). Edit wins: accept the write (resurrect).
+        pass
+
+    max_bytes = _workspace_max_file_bytes()
+    tmp_dir = root / ".geny-sync-tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"put-{_uuid.uuid4().hex}"
+
+    import hashlib as _hashlib
+
+    h = _hashlib.sha256()
+    size = 0
+    try:
+        with tmp.open("wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds {max_bytes // (1024*1024)} MiB",
+                    )
+                h.update(chunk)
+                out.write(chunk)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _os.replace(tmp, target)
+    except HTTPException:
+        tmp.unlink(missing_ok=True)
+        raise
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="write failed")
+
+    latest = await _sync_touch(session_id, str(root))
+    return {
+        "ok": True,
+        "path": str(target.relative_to(root)),
+        "sha256": h.hexdigest(),
+        "size": size,
+        "latest_seq": latest,
+    }
+
+
+@router.get("/{session_id}/storage/sync-devices")
+async def storage_sync_devices(
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Replicas currently attached to this workspace (web UI chip)."""
+    _enforce_session_owner(session_id, auth)
+    from ws.workspace_stream import get_workspace_hub
+
+    return {"devices": get_workspace_hub().devices(session_id)}
 
 
 @router.get("/{session_id}/storage-raw/{file_path:path}")

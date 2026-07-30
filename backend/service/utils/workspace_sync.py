@@ -1,0 +1,353 @@
+"""Workspace sync index — the server-side half of the Drive-style
+local↔workspace synchronisation.
+
+The session workspace (``<storage>/<sid>/workspace``) is the single
+source of truth (agent working_dir = GAPT bind = sub-agent share = web
+explorer). Desktop connectors on any number of PCs hold replicas and
+converge through this module's three primitives:
+
+* a persisted **content index** (path, sha256, monotonically increasing
+  ``seq``, tombstones) in ``<storage>/.geny-sync/index.db`` — outside
+  workspace/ so it never syncs itself;
+* :func:`refresh_index` — incremental rescan: stat-walk the tree, hash
+  ONLY entries whose ``(mtime_ns, size)`` changed, tombstone the
+  vanished ones;
+* :func:`changes_since` — cursor read model: everything after a seq.
+
+Every function here does blocking file/SQLite IO — callers on the event
+loop MUST wrap them in ``asyncio.to_thread`` (see the Synapse loop-wedge
+incident: sqlite on the loop froze the pod).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import sqlite3
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from service.utils.file_storage import (
+    DEFAULT_IGNORE_PATTERNS,
+    load_gitignore_patterns,
+)
+
+logger = logging.getLogger(__name__)
+
+# Never index these (relative to workspace/). The explorer's preview
+# cache and our own machinery must not ping-pong between replicas.
+SYNC_EXTRA_IGNORES = [
+    ".geny-sync/",
+    ".geny-sync-tmp/",
+    ".canvas-preview/",
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    "*.crdownload",
+    "*.partial",
+    "*.tmp",
+    "~$*",           # Office lock files
+    ".~lock.*#",     # LibreOffice lock files
+]
+
+# Tombstones older than this are pruned — an offline replica that stayed
+# away longer must bootstrap from since=0 anyway.
+_TOMBSTONE_TTL_S = 30 * 24 * 3600
+
+# Minimum interval between full rescans of one workspace (refresh storms
+# from polling clients collapse into one scan).
+_SCAN_THROTTLE_S = 2.0
+
+_HASH_CHUNK = 1024 * 1024
+
+# per-storage-root serialization + throttle bookkeeping
+_LOCKS: Dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+_LAST_SCAN: Dict[str, float] = {}
+
+
+def _lock_for(key: str) -> threading.Lock:
+    with _LOCKS_GUARD:
+        lock = _LOCKS.get(key)
+        if lock is None:
+            lock = _LOCKS[key] = threading.Lock()
+        return lock
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _db_path(storage_path: str) -> Path:
+    return Path(storage_path) / ".geny-sync" / "index.db"
+
+
+def _connect(storage_path: str) -> sqlite3.Connection:
+    path = _db_path(storage_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS entries(
+               path TEXT PRIMARY KEY,
+               is_dir INTEGER NOT NULL DEFAULT 0,
+               size INTEGER NOT NULL DEFAULT 0,
+               mtime_ns INTEGER NOT NULL DEFAULT 0,
+               sha256 TEXT NOT NULL DEFAULT '',
+               seq INTEGER NOT NULL,
+               deleted INTEGER NOT NULL DEFAULT 0,
+               updated_at TEXT NOT NULL
+           )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_seq ON entries(seq)")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+    return conn
+
+
+def _next_seq(conn: sqlite3.Connection, bump: int = 1) -> int:
+    row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+    cur = int(row[0]) if row else 0
+    nxt = cur + bump
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES('seq', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(nxt),),
+    )
+    return nxt
+
+
+def latest_seq(storage_path: str) -> int:
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(_HASH_CHUNK)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _build_ignore_spec(storage_path: str, session_id: str = ""):
+    """One compiled matcher per refresh — pathspec if available."""
+    patterns = (
+        list(DEFAULT_IGNORE_PATTERNS)
+        + load_gitignore_patterns(storage_path, session_id)
+        + SYNC_EXTRA_IGNORES
+    )
+    try:
+        import pathspec
+
+        return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+    except Exception:  # pragma: no cover - fallback exercised only без pathspec
+        from service.utils.file_storage import should_ignore_path
+
+        class _Fallback:
+            def match_file(self, rel: str) -> bool:
+                return should_ignore_path(rel, patterns, session_id)
+
+        return _Fallback()
+
+
+def _walk_workspace(ws: Path, spec) -> Dict[str, Tuple[bool, int, int]]:
+    """Stat-walk → {rel_path: (is_dir, size, mtime_ns)}. Ignored dirs are
+    pruned from descent (never entered), symlinks skipped entirely."""
+    out: Dict[str, Tuple[bool, int, int]] = {}
+    for root, dirs, files in os.walk(ws, followlinks=False):
+        root_p = Path(root)
+        rel_root = "" if root_p == ws else str(root_p.relative_to(ws)).replace("\\", "/")
+        keep_dirs = []
+        for d in dirs:
+            rel = f"{rel_root}/{d}" if rel_root else d
+            if spec.match_file(rel) or spec.match_file(rel + "/"):
+                continue
+            if (root_p / d).is_symlink():
+                continue
+            keep_dirs.append(d)
+            try:
+                st = (root_p / d).stat()
+                out[rel] = (True, 0, st.st_mtime_ns)
+            except OSError:
+                continue
+        dirs[:] = keep_dirs
+        for f in files:
+            rel = f"{rel_root}/{f}" if rel_root else f
+            if spec.match_file(rel):
+                continue
+            fp = root_p / f
+            if fp.is_symlink():
+                continue
+            try:
+                st = fp.stat()
+            except OSError:
+                continue
+            out[rel] = (False, st.st_size, st.st_mtime_ns)
+    return out
+
+
+def refresh_index(
+    storage_path: str,
+    session_id: str = "",
+    *,
+    force: bool = False,
+) -> Dict[str, int]:
+    """Incremental rescan of ``<storage>/workspace`` into the index.
+
+    Cheap by construction: one stat-walk; sha256 recomputed ONLY for
+    entries whose (mtime_ns, size) moved. Returns
+    ``{latest_seq, added, updated, deleted, hashed}``.
+    Throttled to one scan per _SCAN_THROTTLE_S unless ``force``.
+    """
+    key = str(Path(storage_path).resolve())
+    lock = _lock_for(key)
+    with lock:
+        now = time.monotonic()
+        if not force and now - _LAST_SCAN.get(key, 0.0) < _SCAN_THROTTLE_S:
+            return {"latest_seq": latest_seq(storage_path), "added": 0,
+                    "updated": 0, "deleted": 0, "hashed": 0, "throttled": 1}
+        _LAST_SCAN[key] = now
+
+        ws = Path(storage_path) / "workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        spec = _build_ignore_spec(storage_path, session_id)
+        current = _walk_workspace(ws, spec)
+
+        conn = _connect(storage_path)
+        stats = {"added": 0, "updated": 0, "deleted": 0, "hashed": 0}
+        try:
+            rows = conn.execute(
+                "SELECT path, is_dir, size, mtime_ns, sha256, deleted FROM entries"
+            ).fetchall()
+            known: Dict[str, Tuple[int, int, int, str, int]] = {
+                r[0]: (r[1], r[2], r[3], r[4], r[5]) for r in rows
+            }
+
+            ts = _now_iso()
+            for rel, (is_dir, size, mtime_ns) in current.items():
+                old = known.get(rel)
+                if old is not None and not old[4]:  # live row
+                    o_dir, o_size, o_mtime, _o_sha, _ = old
+                    if bool(o_dir) == is_dir and o_size == size and o_mtime == mtime_ns:
+                        continue  # unchanged — no rehash, no seq
+                sha = ""
+                if not is_dir:
+                    try:
+                        sha = _sha256_file(ws / rel)
+                        stats["hashed"] += 1
+                    except OSError:
+                        continue
+                seq = _next_seq(conn)
+                conn.execute(
+                    """INSERT INTO entries(path, is_dir, size, mtime_ns, sha256,
+                                            seq, deleted, updated_at)
+                       VALUES(?,?,?,?,?,?,0,?)
+                       ON CONFLICT(path) DO UPDATE SET
+                         is_dir=excluded.is_dir, size=excluded.size,
+                         mtime_ns=excluded.mtime_ns, sha256=excluded.sha256,
+                         seq=excluded.seq, deleted=0, updated_at=excluded.updated_at""",
+                    (rel, 1 if is_dir else 0, size, mtime_ns, sha, seq, ts),
+                )
+                if old is None or old[4]:
+                    stats["added"] += 1
+                else:
+                    stats["updated"] += 1
+
+            # vanished → tombstone
+            for rel, (_d, _s, _m, _sha, deleted) in known.items():
+                if deleted or rel in current:
+                    continue
+                seq = _next_seq(conn)
+                conn.execute(
+                    "UPDATE entries SET deleted=1, seq=?, sha256='', size=0, "
+                    "updated_at=? WHERE path=?",
+                    (seq, ts, rel),
+                )
+                stats["deleted"] += 1
+
+            # prune ancient tombstones (replicas away longer re-bootstrap)
+            cutoff = datetime.now(timezone.utc).timestamp() - _TOMBSTONE_TTL_S
+            conn.execute(
+                "DELETE FROM entries WHERE deleted=1 AND updated_at < ?",
+                (datetime.fromtimestamp(cutoff, timezone.utc).isoformat(),),
+            )
+
+            conn.commit()
+            row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+            stats["latest_seq"] = int(row[0]) if row else 0
+            return stats
+        finally:
+            conn.close()
+
+
+def changes_since(storage_path: str, since: int) -> Dict:
+    """Cursor read model.
+
+    ``since=0`` → bootstrap snapshot: every LIVE entry (no tombstones —
+    a fresh replica has nothing to delete). ``since>0`` → every row
+    (including tombstones) with ``seq > since``.
+    """
+    conn = _connect(storage_path)
+    try:
+        if since <= 0:
+            rows = conn.execute(
+                "SELECT path, is_dir, size, mtime_ns, sha256, seq, deleted "
+                "FROM entries WHERE deleted=0 ORDER BY seq"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT path, is_dir, size, mtime_ns, sha256, seq, deleted "
+                "FROM entries WHERE seq > ? ORDER BY seq",
+                (since,),
+            ).fetchall()
+        meta = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+        return {
+            "latest_seq": int(meta[0]) if meta else 0,
+            "changes": [
+                {
+                    "path": r[0],
+                    "is_dir": bool(r[1]),
+                    "size": r[2],
+                    "mtime_ns": r[3],
+                    "sha256": r[4],
+                    "seq": r[5],
+                    "deleted": bool(r[6]),
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+def current_sha(storage_path: str, rel_ws_path: str) -> Optional[str]:
+    """Live sha for one workspace-relative path from the index; None if
+    the index has no live row (caller may fall back to hashing)."""
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute(
+            "SELECT sha256, deleted FROM entries WHERE path=?", (rel_ws_path,)
+        ).fetchone()
+        if row and not row[1]:
+            return row[0]
+        return None
+    finally:
+        conn.close()
+
+
+def hash_file(path: Path) -> str:
+    """Public streaming sha256 (used by the PUT endpoint for base_sha
+    verification when the index is stale)."""
+    return _sha256_file(path)

@@ -134,7 +134,24 @@ type CaptureSource = { id: string; name: string; display_id: string }
 const TOKEN_KEY = 'geny_auth_token'
 
 type StatusKind = 'idle' | 'working' | 'ok' | 'err'
-type Tab = 'account' | 'voice' | 'control' | 'mcp' | 'app'
+type Tab = 'account' | 'voice' | 'control' | 'workspace' | 'mcp' | 'app'
+
+interface SyncPairView {
+  id: string
+  sessionId: string
+  sessionLabel?: string
+  localPath: string
+  paused?: boolean
+}
+interface SyncStatusView {
+  id: string
+  state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'awaiting_confirmation'
+  connected: boolean
+  lastSyncAt: number | null
+  lastError: string | null
+  counts: { downloaded: number; uploaded: number; conflicts: number; skippedLarge: number }
+  pendingMassDelete: { count: number; total: number } | null
+}
 
 // ── inline icons — sized by CSS (.control-root svg{16px}); ALWAYS pass viewBox ──
 const Svg = (props: { children: ReactNode }) => (
@@ -149,6 +166,7 @@ const I = {
   mic: <Svg><rect x="9" y="2" width="6" height="11" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v4" /></Svg>,
   refresh: <Svg><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" /></Svg>,
   sliders: <Svg><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></Svg>,
+  folder: <Svg><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></Svg>,
   power: <Svg><path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04" /></Svg>,
   external: <Svg><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></Svg>,
   sun: <Svg><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></Svg>,
@@ -269,6 +287,12 @@ export function ControlApp() {
   // Local Computer Use consent (local bridge Phase 1) — persisted top-level in
   // the connector config, enforced natively in main (runActuation/capture gate).
   const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
+  // Workspace sync (Drive-style local↔agent-workspace replication)
+  const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
+  const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
+  const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
+  const [syncSel, setSyncSel] = useState('')
+  const [syncFolder, setSyncFolder] = useState('')
 
   useEffect(() => {
     window.connector?.serverConfig.get().then(async (c) => {
@@ -294,6 +318,34 @@ export function ControlApp() {
     window.addEventListener('focus', recheck)
     return () => window.removeEventListener('focus', recheck)
   }, [])
+
+  // ── workspace sync wiring ──
+  const refreshSync = async (): Promise<void> => {
+    const res = await window.connector?.sync?.list().catch(() => null)
+    if (!res) return
+    setSyncPairs(res.pairs as SyncPairView[])
+    setSyncStatuses(Object.fromEntries((res.statuses as SyncStatusView[]).map((s) => [s.id, s])))
+  }
+  useEffect(() => {
+    if (tab !== 'workspace') return
+    void refreshSync()
+    void window.connector?.sync?.listAgents().then((a) => {
+      setSyncAgents(a)
+      setSyncSel((cur) => cur || a[0]?.id || '')
+    }).catch(() => undefined)
+    const off = window.connector?.sync?.onStatus((statuses) => {
+      setSyncStatuses(Object.fromEntries((statuses as SyncStatusView[]).map((s) => [s.id, s])))
+    })
+    return () => off?.()
+  }, [tab])
+
+  const addSyncPair = async (): Promise<void> => {
+    if (!syncSel || !syncFolder) return
+    const label = syncAgents.find((a) => a.id === syncSel)?.name
+    await window.connector?.sync?.addPair({ sessionId: syncSel, sessionLabel: label, localPath: syncFolder })
+    setSyncFolder('')
+    await refreshSync()
+  }
 
   // Merge + persist a tuning change; sends the FULL object so main's shallow
   // config merge replaces overlayTuning cleanly.
@@ -563,6 +615,9 @@ export function ControlApp() {
           <button className={`gy-tab ${tab === 'control' ? 'is-active' : ''}`} onClick={() => setTab('control')}>
             {I.monitor} {t('tab.control')}
           </button>
+          <button className={`gy-tab ${tab === 'workspace' ? 'is-active' : ''}`} onClick={() => setTab('workspace')}>
+            {I.folder} {t('tab.workspace')}
+          </button>
           <button className={`gy-tab ${tab === 'mcp' ? 'is-active' : ''}`} onClick={() => setTab('mcp')}>
             {I.plug} {t('tab.mcp')}
           </button>
@@ -789,6 +844,123 @@ export function ControlApp() {
         )}
 
         {/* ─────────────── MCP (로컬 MCP 서버) ─────────────── */}
+        {/* ─────────────── Workspace (동기화) ─────────────── */}
+        {tab === 'workspace' && (
+          <>
+            <section className="gy-card">
+              <div className="gy-card-h">{I.folder} {t('sync.pairsCard')}</div>
+              <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('sync.pairsHint')}</p>
+
+              {syncPairs.length === 0 && (
+                <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('sync.empty')}</p>
+              )}
+              {syncPairs.map((p) => {
+                const st = syncStatuses[p.id]
+                const state = p.paused ? 'paused' : (st?.state ?? 'idle')
+                const dotColor =
+                  state === 'paused' ? 'var(--gy-muted, #888)'
+                  : state === 'error' ? '#e5534b'
+                  : state === 'awaiting_confirmation' ? '#e8a13c'
+                  : state === 'syncing' ? '#4f9cf7'
+                  : st?.connected ? '#2fbf71' : '#e8a13c'
+                const stateText = t(`sync.state.${state}` as never) || state
+                return (
+                  <div key={p.id} className="gy-card" style={{ marginBottom: 8, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span title={stateText} style={{ width: 8, height: 8, borderRadius: 4, background: dotColor, flexShrink: 0 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.sessionLabel || p.sessionId}
+                          </span>
+                          <span className="gy-hint">· {stateText}</span>
+                        </div>
+                        <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.localPath}>
+                          {p.localPath}
+                        </div>
+                        {st && (
+                          <div className="gy-hint">
+                            ↓{st.counts.downloaded} ↑{st.counts.uploaded}
+                            {st.counts.conflicts > 0 && ` · ${t('sync.conflicts', { count: st.counts.conflicts })}`}
+                            {st.counts.skippedLarge > 0 && ` · ${t('sync.skippedLarge', { count: st.counts.skippedLarge })}`}
+                            {st.lastSyncAt && ` · ${new Date(st.lastSyncAt).toLocaleTimeString()}`}
+                          </div>
+                        )}
+                        {st?.lastError && (
+                          <div className="gy-hint" style={{ marginTop: 4, color: '#e5534b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={st.lastError}>
+                            {st.lastError}
+                          </div>
+                        )}
+                        {st?.pendingMassDelete && (
+                          <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,161,60,0.12)', border: '1px solid rgba(232,161,60,0.45)' }}>
+                            <div style={{ fontSize: 12, marginBottom: 6 }}>
+                              {t('sync.massDeleteWarn', { count: st.pendingMassDelete.count })}
+                            </div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button className="gy-btn gy-btn--danger gy-btn--sm"
+                                onClick={() => window.connector?.sync?.confirmMassDelete(p.id, true).then(refreshSync)}>
+                                {t('sync.massDeleteApply')}
+                              </button>
+                              <button className="gy-btn gy-btn--ghost gy-btn--sm"
+                                onClick={() => window.connector?.sync?.confirmMassDelete(p.id, false).then(refreshSync)}>
+                                {t('sync.massDeletePause')}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+                        <button className="gy-btn gy-btn--ghost gy-btn--sm" title={t('sync.openFolder')}
+                          onClick={() => window.connector?.sync?.openFolder(p.id)}>
+                          {t('sync.openFolder')}
+                        </button>
+                        <button className="gy-btn gy-btn--ghost gy-btn--sm" title={t('sync.syncNow')}
+                          onClick={() => window.connector?.sync?.syncNow(p.id)}>
+                          {t('sync.syncNow')}
+                        </button>
+                        <button className="gy-btn gy-btn--ghost gy-btn--sm"
+                          onClick={() => window.connector?.sync?.setPaused(p.id, !p.paused).then(refreshSync)}>
+                          {p.paused ? t('sync.resume') : t('sync.pause')}
+                        </button>
+                        <button className="gy-btn gy-btn--danger gy-btn--sm"
+                          onClick={() => window.connector?.sync?.removePair(p.id).then(refreshSync)}>
+                          {t('sync.unlink')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.folder} {t('sync.addCard')}</div>
+              <label className="gy-field-label">{t('sync.agentLabel')}</label>
+              <select className="gy-input" value={syncSel} onChange={(e) => setSyncSel(e.target.value)}>
+                {syncAgents.length === 0 && <option value="">{t('sync.noAgents')}</option>}
+                {syncAgents.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+              <div style={{ height: 8 }} />
+              <label className="gy-field-label">{t('sync.folderLabel')}</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input className="gy-input" readOnly value={syncFolder} placeholder={t('sync.folderPlaceholder')} style={{ flex: 1 }} />
+                <button className="gy-btn gy-btn--ghost" onClick={() => {
+                  void window.connector?.sync?.pickFolder().then((p) => { if (p) setSyncFolder(p) })
+                }}>
+                  {t('sync.browse')}
+                </button>
+              </div>
+              <div style={{ height: 10 }} />
+              <button className="gy-btn" disabled={!syncSel || !syncFolder} onClick={() => void addSyncPair()}>
+                {t('sync.connect')}
+              </button>
+              <p className="gy-hint" style={{ marginTop: 10 }}>{t('sync.safetyHint')}</p>
+            </section>
+          </>
+        )}
+
         {tab === 'mcp' && (
           <>
             <section className="gy-card">

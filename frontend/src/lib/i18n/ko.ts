@@ -1071,6 +1071,7 @@ const ko: Translations = {
     tooLargePreview: '파일이 너무 커서 미리 볼 수 없습니다. 다운로드해서 확인하세요.',
     previewUnavailable: '미리보기를 사용할 수 없습니다',
     resizeHint: '드래그해서 크기 조절 · 더블클릭으로 초기화',
+    syncDevices: 'PC {count}대 동기화 중',
     scopeWorkspace: '워크스페이스',
     scopeAll: '전체',
     upload: '업로드',

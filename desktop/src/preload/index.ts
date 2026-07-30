@@ -267,6 +267,44 @@ export interface ConnectorBridge {
      *  changes. The overlay bridge re-advertises the catalog on this. */
     onStatus(cb: (status: MCPServerStatus[]) => void): () => void
   }
+
+  /** Workspace sync — Drive-style replication between a local folder and an
+   *  agent's server workspace (settings → Workspace tab). */
+  sync: {
+    list(): Promise<{ pairs: SyncPairConfig[]; statuses: SyncPairStatus[] }>
+    pickFolder(): Promise<string | null>
+    addPair(pair: { sessionId: string; sessionLabel?: string; localPath: string }): Promise<SyncPairConfig[]>
+    removePair(id: string): Promise<SyncPairConfig[]>
+    setPaused(id: string, paused: boolean): Promise<SyncPairConfig[]>
+    syncNow(id: string): Promise<void>
+    /** Answer the mass-delete safety valve. Refusing pauses the pair. */
+    confirmMassDelete(id: string, accept: boolean): Promise<void>
+    openFolder(id: string): Promise<void>
+    /** Sessions on the server for the pairing picker. */
+    listAgents(): Promise<Array<{ id: string; name: string }>>
+    onStatus(cb: (statuses: SyncPairStatus[]) => void): () => void
+  }
+}
+
+export interface SyncPairConfig {
+  id: string
+  sessionId: string
+  sessionLabel?: string
+  localPath: string
+  paused?: boolean
+}
+
+export interface SyncPairStatus {
+  id: string
+  sessionId: string
+  sessionLabel?: string
+  localPath: string
+  state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'awaiting_confirmation'
+  connected: boolean
+  lastSyncAt: number | null
+  lastError: string | null
+  counts: { downloaded: number; uploaded: number; conflicts: number; skippedLarge: number }
+  pendingMassDelete: { count: number; total: number } | null
 }
 
 export interface MCPServerStatus {
@@ -382,6 +420,22 @@ const api: ConnectorBridge = {
       const h = (_e: unknown, status: MCPServerStatus[]) => cb(status)
       ipcRenderer.on('mcp:status-event', h)
       return () => ipcRenderer.removeListener('mcp:status-event', h)
+    },
+  },
+  sync: {
+    list: () => ipcRenderer.invoke('sync:list'),
+    pickFolder: () => ipcRenderer.invoke('sync:pick-folder'),
+    addPair: (pair) => ipcRenderer.invoke('sync:add-pair', pair),
+    removePair: (id) => ipcRenderer.invoke('sync:remove-pair', id),
+    setPaused: (id, paused) => ipcRenderer.invoke('sync:set-paused', id, paused),
+    syncNow: (id) => ipcRenderer.invoke('sync:sync-now', id),
+    confirmMassDelete: (id, accept) => ipcRenderer.invoke('sync:confirm-mass-delete', id, accept),
+    openFolder: (id) => ipcRenderer.invoke('sync:open-folder', id),
+    listAgents: () => ipcRenderer.invoke('sync:list-agents'),
+    onStatus: (cb) => {
+      const h = (_e: unknown, statuses: SyncPairStatus[]) => cb(statuses)
+      ipcRenderer.on('sync:status-event', h)
+      return () => ipcRenderer.removeListener('sync:status-event', h)
     },
   },
   hotkeys: {

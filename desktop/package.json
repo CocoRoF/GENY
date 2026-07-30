@@ -29,11 +29,15 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",
     "@nut-tree-fork/nut-js": "^4.2.0",
+    "chokidar": "^5.0.0",
     "electron-updater": "^6.3.9",
     "keytar": "^7.9.0",
+    "picomatch": "^4.0.5",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.10",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.1",
@@ -41,8 +45,7 @@
     "electron-vite": "^3.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   }

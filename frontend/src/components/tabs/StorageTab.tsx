@@ -130,6 +130,7 @@ export default function StorageTab() {
   const [dragOver, setDragOver] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(340);
   const [resizing, setResizing] = useState(false);
+  const [syncDevices, setSyncDevices] = useState<Array<{ device_id: string; device_name: string }>>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -167,6 +168,20 @@ export default function StorageTab() {
     const timer = setTimeout(() => { void fetchFiles(); }, 1500);
     return () => clearTimeout(timer);
   }, [listError, fetchFiles]);
+
+  // Connector replicas syncing this workspace (chip in the breadcrumb bar).
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    let alive = true;
+    const load = () => {
+      agentApi.syncDevices(selectedSessionId)
+        .then((r) => { if (alive) setSyncDevices(r.devices || []); })
+        .catch(() => { if (alive) setSyncDevices([]); });
+    };
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [selectedSessionId]);
 
   // Close the context menu on any click / Esc.
   useEffect(() => {
@@ -441,6 +456,15 @@ export default function StorageTab() {
           {!canWrite && (
             <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
               {t('storageTab.readOnly')}
+            </span>
+          )}
+          {syncDevices.length > 0 && (
+            <span
+              className="ml-2 inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-[var(--accent-color)]/10 text-[var(--accent-color)]"
+              title={syncDevices.map((d) => d.device_name || d.device_id.slice(0, 8)).join(', ')}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-color)] animate-pulse" />
+              {t('storageTab.syncDevices', { count: syncDevices.length })}
             </span>
           )}
         </div>
