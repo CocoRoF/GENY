@@ -209,7 +209,7 @@ export function TasksTab() {
             <StatusBadge
               tone="info"
               uppercase
-              className="h-7"
+              className="h-8"
               title="Process-wide BackgroundTaskRunner load"
             >
               {capacity.in_flight ?? '?'} / {capacity.max ?? '∞'}

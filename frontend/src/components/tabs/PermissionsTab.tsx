@@ -238,7 +238,7 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
         disabled={savingMode}
       >
         <SelectTrigger
-          className="h-7 w-[110px] text-[0.75rem]"
+          className="h-8 w-[110px] text-[0.75rem]"
           title={RUNNER_MODE_HINT[runnerMode] ?? ''}
         >
           <SelectValue />
@@ -263,7 +263,7 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
         disabled={savingMode}
       >
         <SelectTrigger
-          className="h-7 w-[120px] text-[0.75rem]"
+          className="h-8 w-[120px] text-[0.75rem]"
           title={EXECUTOR_MODE_HINT[execMode] ?? ''}
         >
           <SelectValue />
@@ -283,7 +283,7 @@ export function PermissionsTab(_props: PermissionsTabProps = {}) {
           execMode as 'bypass' | 'auto' | 'dontAsk' | 'acceptEdits',
         ) && (
           <span
-            className="ml-1 inline-flex items-center h-7 px-2 rounded-md text-[0.65rem] font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+            className="ml-1 inline-flex items-center h-8 px-2 rounded-md text-[0.65rem] font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
             title={t('permissionsTab.downgradeBadgeTip')}
           >
             ⚠ → default

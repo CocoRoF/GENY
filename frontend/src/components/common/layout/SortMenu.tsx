@@ -50,14 +50,14 @@ export function SortMenu({
       <button
         type="button"
         onClick={toggleDirection}
-        className="inline-flex items-center justify-center w-7 h-7 rounded border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+        className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
         title={direction === 'asc' ? '오름차순' : '내림차순'}
         aria-label="Toggle sort direction"
       >
         <Icon className="w-3.5 h-3.5" />
       </button>
       <Select value={value} onValueChange={(v) => onChange(v, direction)}>
-        <SelectTrigger className="h-7 w-[140px] text-[0.75rem]">
+        <SelectTrigger className="h-8 w-[140px] text-[0.75rem]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
