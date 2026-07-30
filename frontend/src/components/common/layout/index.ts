@@ -42,6 +42,7 @@ export {
 export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './StatusBadge';
 export { ActionButton, type ActionButtonProps } from './ActionButton';
 export { IconButton, type IconButtonProps } from './IconButton';
+export { SegmentedControl, type SegmentedControlProps, type SegmentDef } from './SegmentedControl';
 export { SubTabNav, type SubTabNavProps, type SubTabDef } from './SubTabNav';
 export { NextSessionBanner, type NextSessionBannerProps } from './NextSessionBanner';
 

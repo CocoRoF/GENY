@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
-import { TabShell, IconButton, EmptyState } from '@/components/common/layout';
+import { TabShell, IconButton, EmptyState, SegmentedControl } from '@/components/common/layout';
 
 type Scope = 'workspace' | 'all';
 type SortKey = 'name' | 'size' | 'modified';
@@ -372,20 +372,16 @@ export default function StorageTab() {
       icon={HardDrive}
       actions={
         <>
-          <div className="flex items-center h-8 rounded-md border border-[var(--border-color)] overflow-hidden text-[12px] mr-1">
-            <button
-              className={`h-full px-2.5 ${scope === 'workspace' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
-              onClick={() => setScope('workspace')}
-            >
-              {t('storageTab.scopeWorkspace')}
-            </button>
-            <button
-              className={`h-full px-2.5 ${scope === 'all' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
-              onClick={() => setScope('all')}
-            >
-              {t('storageTab.scopeAll')}
-            </button>
-          </div>
+          <SegmentedControl
+            className="mr-1"
+            ariaLabel={t('storageTab.title')}
+            items={[
+              { id: 'workspace', label: t('storageTab.scopeWorkspace') },
+              { id: 'all', label: t('storageTab.scopeAll') },
+            ]}
+            value={scope}
+            onChange={(s) => setScope(s as Scope)}
+          />
           {canWrite && (
             <>
               <IconButton icon={FolderPlus} title={t('storageTab.newFolder')} onClick={() => void newFolder()} />
