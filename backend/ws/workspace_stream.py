@@ -42,7 +42,7 @@ _HEARTBEAT_S = 20.0
 _AGENT_SCAN_S = 3.0  # how often connected replicas force an index refresh
 
 
-@dataclass
+@dataclass(eq=False)  # identity hash — instances live in per-session sets
 class _Device:
     ws: WebSocket
     device_id: str
