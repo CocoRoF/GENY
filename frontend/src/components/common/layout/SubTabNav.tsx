@@ -11,6 +11,7 @@
 import { ReactNode } from 'react';
 import { LucideIcon } from 'lucide-react';
 import { cn } from './cn';
+import { SegmentButton } from './SegmentButton';
 
 export interface SubTabDef {
   id: string;
@@ -47,43 +48,16 @@ export function SubTabNav({ tabs, active, onSelect, leading, trailing, className
           {leading}
         </div>
       )}
-      {tabs.map(({ id, label, icon: Icon, count }) => {
-        const isActive = active === id;
-        return (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onSelect(id)}
-            className={cn(
-              'relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]',
-              isActive
-                ? 'text-[hsl(var(--foreground))] bg-[hsl(var(--accent))]'
-                : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))]',
-            )}
-          >
-            {Icon && (
-              <Icon
-                size={11}
-                className={
-                  isActive ? 'text-[hsl(var(--primary))]' : 'opacity-70'
-                }
-              />
-            )}
-            <span>{label}</span>
-            {count !== undefined && (
-              <span className="text-[hsl(var(--muted-foreground))] text-[0.625rem]">
-                ({count})
-              </span>
-            )}
-            {isActive && (
-              <span className="absolute -bottom-px left-2 right-2 h-0.5 rounded-sm bg-[hsl(var(--primary))]" />
-            )}
-          </button>
-        );
-      })}
+      {tabs.map(({ id, label, icon, count }) => (
+        <SegmentButton
+          key={id}
+          label={label}
+          icon={icon}
+          count={count}
+          active={active === id}
+          onClick={() => onSelect(id)}
+        />
+      ))}
       {trailing != null && (
         <div className="flex items-center ml-auto pl-2 shrink-0">{trailing}</div>
       )}

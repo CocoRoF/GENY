@@ -27,7 +27,6 @@ import {
   EmptyState,
 } from '@/components/common/layout';
 import { Folder, Bot, User } from 'lucide-react';
-import { SectionIcons } from '@/components/common/icons';
 import { useI18n } from '@/lib/i18n';
 import { SessionEnvTargetContext } from '@/components/session-env/sessionEnvTarget';
 import SubAgentPanel from '@/components/session-env/SubAgentPanel';
@@ -40,9 +39,9 @@ const SessionToolsTab = dynamic(() => import('@/components/tabs/SessionToolsTab'
 const WorkspaceTab = dynamic(() => import('@/components/tabs/WorkspaceTab'));
 
 const SUB_TABS: SubTabDef[] = [
-  { id: 'manifest', label: 'Manifest', icon: SectionIcons.manifest },
-  { id: 'tools', label: 'Tools', icon: SectionIcons.tools },
-  { id: 'workspace', label: 'Workspace', icon: SectionIcons.workspace },
+  { id: 'manifest', label: 'Manifest' },
+  { id: 'tools', label: 'Tools' },
+  { id: 'workspace', label: 'Workspace' },
 ];
 
 const SUB_TAB_COMPONENT: Record<string, React.ComponentType> = {
