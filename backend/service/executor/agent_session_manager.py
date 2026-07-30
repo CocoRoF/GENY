@@ -2383,6 +2383,26 @@ class AgentSessionManager:
                 jitter=self._idle_monitor_jitter,
             )
         )
+        # Media retention janitor: the screen-observation pipeline's own
+        # pruner only fires DURING live uploads, so dormant sessions kept
+        # accumulating frames forever (387 MB observed in prod). This sweep
+        # covers every session under the storage root — live or dormant —
+        # on a 6h cadence (age window + size budget; attachments opt-in).
+        async def _media_retention_tick() -> None:
+            import asyncio as _aio
+
+            from service.memory.media_retention import sweep_all_sessions
+
+            await _aio.to_thread(sweep_all_sessions)
+
+        self._idle_tick_engine.register(
+            TickSpec(
+                name="media_retention",
+                interval=6 * 3600,
+                handler=_media_retention_tick,
+                jitter=300,
+            )
+        )
         if self._owns_idle_tick_engine:
             await self._idle_tick_engine.start()
         self._idle_monitor_running = True
