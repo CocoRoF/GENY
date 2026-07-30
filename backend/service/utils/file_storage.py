@@ -222,8 +222,26 @@ def list_storage_files(
 
     files = []
     try:
-        # Recursively walk through all files
+        # Recursively walk through all entries. Directories are listed too —
+        # an explorer UI must show empty folders (a freshly created folder
+        # would otherwise be invisible until it gains a file).
         for item in target_path.rglob("*"):
+            if item.is_dir():
+                try:
+                    rel_path = str(item.relative_to(storage_path)).replace("\\", "/")
+                    if should_ignore_path(rel_path, ignore_patterns, session_id):
+                        continue
+                    stat = item.stat()
+                    files.append({
+                        "name": item.name,
+                        "path": rel_path,
+                        "is_dir": True,
+                        "size": None,
+                        "modified_at": datetime.fromtimestamp(stat.st_mtime),
+                    })
+                except (OSError, ValueError):
+                    continue
+                continue
             if item.is_file():
                 try:
                     rel_path = str(item.relative_to(storage_path))

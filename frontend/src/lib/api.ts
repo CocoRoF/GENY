@@ -596,10 +596,10 @@ export const agentApi = {
   listStorage: (id: string, scope: 'workspace' | 'all' = 'all') =>
     apiCall<StorageListResponse>(`/api/agents/${id}/storage?scope=${scope}`),
 
-  uploadToWorkspace: async (id: string, file: globalThis.File) => {
+  uploadToWorkspace: async (id: string, file: globalThis.File, subdir = 'uploads') => {
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch(`${getBackendUrl()}/api/agents/${id}/storage/upload?subdir=uploads`, {
+    const res = await fetch(`${getBackendUrl()}/api/agents/${id}/storage/upload?subdir=${encodeURIComponent(subdir)}`, {
       method: 'POST',
       headers: withAuthHeaders(), // no Content-Type → browser sets multipart boundary
       body: fd,
@@ -621,8 +621,49 @@ export const agentApi = {
     ),
 
   /** GET /api/agents/{id}/download-folder — download storage as ZIP */
-  downloadFolder: async (id: string) => {
-    const res = await fetch(`/api/agents/${id}/download-folder`);
+  mkdirStorage: (id: string, path: string) =>
+    apiCall<{ ok: boolean; path: string }>(
+      `/api/agents/${id}/storage/mkdir?path=${encodeURIComponent(path)}`,
+      { method: 'POST' },
+    ),
+
+  renameStorage: (id: string, src: string, dst: string) =>
+    apiCall<{ ok: boolean; path: string }>(`/api/agents/${id}/storage/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src, dst }),
+    }),
+
+  deleteStorageEntry: (id: string, path: string) =>
+    apiCall<{ ok: boolean }>(
+      `/api/agents/${id}/storage/entry?path=${encodeURIComponent(path)}`,
+      { method: 'DELETE' },
+    ),
+
+  /** Authed fetch of a raw storage file → object URL (caller revokes). */
+  fetchStorageBlobUrl: async (id: string, path: string) => {
+    const res = await fetch(
+      `${getBackendUrl()}/api/agents/${id}/storage-raw/${path.split('/').map(encodeURIComponent).join('/')}`,
+      { headers: withAuthHeaders() },
+    );
+    if (!res.ok) throw new Error(`storage-raw HTTP ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  },
+
+  downloadStorageFile: async (id: string, path: string, filename: string) => {
+    const url = await agentApi.fetchStorageBlobUrl(id, path);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  downloadFolder: async (id: string, path = '') => {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+    const res = await fetch(`/api/agents/${id}/download-folder${qs}`);
     if (!res.ok) {
       const body = await res.text();
       throw new Error(body || `HTTP ${res.status}`);
@@ -631,7 +672,7 @@ export const agentApi = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `session-${id.slice(0, 8)}.zip`;
+    a.download = path ? `${path.split('/').pop()}.zip` : `session-${id.slice(0, 8)}.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();

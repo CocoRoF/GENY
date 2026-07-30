@@ -1215,6 +1215,91 @@ async def list_storage_files(
 _WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 
 
+def _workspace_target(session_id: str, rel_path: str) -> "tuple":
+    """Resolve *rel_path* (storage-root-relative, e.g. 'workspace/uploads/x')
+    and enforce that it stays INSIDE the session's workspace/ — the only
+    place UI-driven writes are allowed. Internal state (memory/, transcripts/,
+    synapse.db, checkpoints/) is never reachable from these endpoints."""
+    from pathlib import Path as _P
+
+    storage_path = _storage_root_live_or_dormant(session_id)
+    root = _P(storage_path).resolve()
+    ws = (root / "workspace").resolve()
+    target = (root / (rel_path or "")).resolve()
+    try:
+        target.relative_to(ws)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail="Write operations are allowed only inside workspace/",
+        )
+    if target == ws and rel_path.rstrip("/") != "workspace":
+        # normalise edge: '' would resolve to root
+        pass
+    return root, ws, target
+
+
+class StorageRenameRequest(BaseModel):
+    src: str
+    dst: str
+
+
+@router.post("/{session_id}/storage/mkdir")
+async def storage_mkdir(
+    session_id: str = Path(..., description="Session ID"),
+    path: str = Query(..., description="New folder path (storage-root relative, under workspace/)"),
+    auth: dict = Depends(require_auth),
+):
+    """Create a folder inside the agent workspace (explorer 새 폴더)."""
+    _enforce_session_owner(session_id, auth)
+    root, _ws, target = _workspace_target(session_id, path)
+    if target.exists():
+        raise HTTPException(status_code=409, detail="Already exists")
+    target.mkdir(parents=True, exist_ok=False)
+    return {"ok": True, "path": str(target.relative_to(root))}
+
+
+@router.post("/{session_id}/storage/rename")
+async def storage_rename(
+    request: StorageRenameRequest,
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Rename/move a file or folder within the workspace."""
+    _enforce_session_owner(session_id, auth)
+    root, _ws, src = _workspace_target(session_id, request.src)
+    _root2, _ws2, dst = _workspace_target(session_id, request.dst)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Source not found")
+    if dst.exists():
+        raise HTTPException(status_code=409, detail="Destination already exists")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dst)
+    return {"ok": True, "path": str(dst.relative_to(root))}
+
+
+@router.delete("/{session_id}/storage/entry")
+async def storage_delete(
+    session_id: str = Path(..., description="Session ID"),
+    path: str = Query(..., description="Path to delete (under workspace/)"),
+    auth: dict = Depends(require_auth),
+):
+    """Delete a file or folder (recursive) inside the workspace."""
+    import shutil as _shutil
+
+    _enforce_session_owner(session_id, auth)
+    _root, ws, target = _workspace_target(session_id, path)
+    if target == ws:
+        raise HTTPException(status_code=403, detail="Cannot delete the workspace root")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    if target.is_dir():
+        _shutil.rmtree(target)
+    else:
+        target.unlink()
+    return {"ok": True}
+
+
 @router.post("/{session_id}/storage/upload")
 async def upload_to_workspace(
     session_id: str = Path(..., description="Session ID"),
@@ -1475,6 +1560,7 @@ async def read_storage_file(
 @router.get("/{session_id}/download-folder")
 async def download_storage_folder(
     session_id: str = Path(..., description="Session ID"),
+    path: str = Query("", description="Optional subfolder (storage-root relative) to zip instead of the whole storage"),
     auth: dict = Depends(require_auth),
 ):
     """
@@ -1502,6 +1588,16 @@ async def download_storage_folder(
                 status_code=404,
                 detail=f"Session not found or no storage path: {session_id}",
             )
+
+    if path:
+        from pathlib import Path as _P
+
+        sub = (_P(folder) / path).resolve()
+        try:
+            sub.relative_to(_P(folder).resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Path escapes session storage")
+        folder = str(sub)
 
     if not os.path.isdir(folder):
         raise HTTPException(

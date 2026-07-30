@@ -1,120 +1,142 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+// 세션 스토리지 — Finder-style file explorer over the agent workspace.
+//
+// Model: navigate INTO directories (breadcrumb + double-click), not a static
+// tree. Single click selects (right-hand preview); double click opens
+// (folder → enter, file → full overlay viewer). Write operations (new
+// folder / rename / delete / upload / drag-drop) exist ONLY in the
+// workspace scope — the '전체' scope is a read-only operator view of the
+// whole session dir, and the backend enforces the same boundary.
+
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
-import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
-import { ChevronDown, ChevronRight, FolderOpen, Download, RefreshCw, FileJson, FileText, FileCode, Globe, Palette, ScrollText, Settings, File, HardDrive } from 'lucide-react';
+import {
+  ChevronRight, Download, RefreshCw, FolderPlus, Upload, HardDrive,
+  Folder, FileJson, FileText, FileCode, Globe, Palette, ScrollText,
+  Settings, File as FileIcon, Image as ImageIcon, FileSpreadsheet,
+  Presentation, X, ArrowUp,
+} from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
 import { TabShell, ActionButton, EmptyState } from '@/components/common/layout';
 
-function cn(...classes: (string | boolean | undefined | null)[]) {
-  return twMerge(classes.filter(Boolean).join(' '));
+type Scope = 'workspace' | 'all';
+type SortKey = 'name' | 'size' | 'modified';
+
+interface Entry {
+  name: string;
+  path: string;        // scope-relative path
+  isDir: boolean;
+  size: number;
+  modified: string | null;
 }
 
-interface TreeNode {
-  children: Record<string, TreeNode>;
-  files: { name: string; path: string; size: number }[];
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
+const OFFICE_EXT = new Set(['docx', 'xlsx', 'pptx', 'pdf']);
+const TEXT_MAX_PREVIEW = 512 * 1024;
+
+function ext(name: string): string {
+  const i = name.lastIndexOf('.');
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
 }
 
-function buildFileTree(files: StorageFile[]): TreeNode {
-  const tree: TreeNode = { children: {}, files: [] };
-  for (const file of files) {
-    const parts = file.path.split('/').filter(Boolean);
-    let current = tree;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!current.children[parts[i]]) current.children[parts[i]] = { children: {}, files: [] };
-      current = current.children[parts[i]];
-    }
-    current.files.push({ name: parts[parts.length - 1], path: file.path, size: file.size || 0 });
-  }
-  return tree;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
+function formatSize(bytes: number): string {
+  if (!bytes) return '—';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function getFileIcon(name: string): React.ReactNode {
-  const ext = name.split('.').pop()?.toLowerCase();
+function formatDate(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+      ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function fileIcon(name: string, isDir: boolean, size = 15): React.ReactNode {
+  if (isDir) return <Folder size={size} className="text-[#4f9cf7] fill-[#4f9cf7]/25" />;
+  const e = ext(name);
+  if (IMAGE_EXT.has(e)) return <ImageIcon size={size} className="text-[#a855f7]" />;
   const map: Record<string, React.ReactNode> = {
-    json: <FileJson size={14} className="text-[#f59e0b]" />,
-    md: <FileText size={14} className="text-[#60a5fa]" />,
-    txt: <FileText size={14} className="text-[var(--text-muted)]" />,
-    py: <FileCode size={14} className="text-[#22c55e]" />,
-    js: <FileCode size={14} className="text-[#facc15]" />,
-    ts: <FileCode size={14} className="text-[#3b82f6]" />,
-    html: <Globe size={14} className="text-[#f97316]" />,
-    css: <Palette size={14} className="text-[#a855f7]" />,
-    log: <ScrollText size={14} className="text-[var(--text-muted)]" />,
-    yaml: <Settings size={14} className="text-[#6b7280]" />,
-    yml: <Settings size={14} className="text-[#6b7280]" />,
+    json: <FileJson size={size} className="text-[#f59e0b]" />,
+    md: <FileText size={size} className="text-[#60a5fa]" />,
+    txt: <FileText size={size} className="text-[var(--text-muted)]" />,
+    py: <FileCode size={size} className="text-[#22c55e]" />,
+    js: <FileCode size={size} className="text-[#facc15]" />,
+    ts: <FileCode size={size} className="text-[#3b82f6]" />,
+    tsx: <FileCode size={size} className="text-[#3b82f6]" />,
+    html: <Globe size={size} className="text-[#f97316]" />,
+    css: <Palette size={size} className="text-[#a855f7]" />,
+    log: <ScrollText size={size} className="text-[var(--text-muted)]" />,
+    yaml: <Settings size={size} className="text-[#6b7280]" />,
+    yml: <Settings size={size} className="text-[#6b7280]" />,
+    xlsx: <FileSpreadsheet size={size} className="text-[#22c55e]" />,
+    csv: <FileSpreadsheet size={size} className="text-[#22c55e]" />,
+    pptx: <Presentation size={size} className="text-[#f97316]" />,
+    docx: <FileText size={size} className="text-[#3b82f6]" />,
+    pdf: <FileText size={size} className="text-[#ef4444]" />,
   };
-  return map[ext || ''] || <File size={14} className="text-[var(--text-muted)]" />;
+  return map[e] || <FileIcon size={size} className="text-[var(--text-muted)]" />;
 }
 
-function FolderNode({ name, node, onSelect, activePath }: {
-  name: string; node: TreeNode; onSelect: (path: string) => void; activePath: string;
+/** Authed image that resolves through storage-raw (plain <img> can't send
+ *  the Authorization header). */
+function AuthedImage({ sessionId, path, className, alt }: {
+  sessionId: string; path: string; className?: string; alt?: string;
 }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="mb-1">
-      <div className="flex items-center gap-1.5 py-1.5 px-2 cursor-pointer text-[13px] font-medium text-[var(--text-primary)] rounded hover:bg-[var(--bg-hover)]"
-           onClick={() => setOpen(!open)}>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <FolderOpen size={14} className="text-[#f59e0b]" />
-        <span>{name}</span>
-      </div>
-      {open && (
-        <div className="pl-4 ml-2.5" style={{ borderLeft: '1px solid var(--border-color)' }}>
-          <TreeView node={node} onSelect={onSelect} activePath={activePath} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TreeView({ node, onSelect, activePath }: { node: TreeNode; onSelect: (path: string) => void; activePath: string }) {
-  return (
-    <div>
-      {Object.entries(node.children).map(([name, child]) => (
-        <FolderNode key={name} name={name} node={child} onSelect={onSelect} activePath={activePath} />
-      ))}
-      {node.files.map(f => (
-        <div key={f.path}
-            className={`flex items-center gap-2 py-1.5 px-2.5 cursor-pointer rounded text-[13px] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${activePath === f.path ? 'bg-[rgba(59,130,246,0.1)] text-[var(--primary-color)]' : 'text-[var(--text-secondary)]'}`}
-            onClick={() => onSelect(f.path)}>
-          <span className="text-[14px] flex items-center">{getFileIcon(f.name)}</span>
-          <span className="flex-1 truncate">{f.name}</span>
-          <span className="text-[var(--text-muted)] text-[11px]">{formatFileSize(f.size)}</span>
-        </div>
-      ))}
-    </div>
-  );
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let revoked: string | null = null;
+    let alive = true;
+    setUrl(null); setFailed(false);
+    agentApi.fetchStorageBlobUrl(sessionId, path)
+      .then((u) => { if (alive) { revoked = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; if (revoked) URL.revokeObjectURL(revoked); };
+  }, [sessionId, path]);
+  if (failed) return <div className="text-[12px] text-[var(--text-muted)] p-4">⚠ image load failed</div>;
+  if (!url) return <div className="animate-pulse bg-[var(--bg-tertiary)] rounded w-full h-40" />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} className={className} alt={alt || path} />;
 }
 
 export default function StorageTab() {
   const { selectedSessionId } = useAppStore();
   const { t } = useI18n();
+
   const [files, setFiles] = useState<StorageFile[]>([]);
-  const [activePath, setActivePath] = useState('');
-  const [previewContent, setPreviewContent] = useState('');
-  const [loading, setLoading] = useState(false);
-  // 'workspace' = the agent's working files (uploads/drafts/outputs) — the
-  // user-facing view. 'all' = the whole session dir incl. internal state
-  // (memory/, transcripts/, synapse.db) for operators.
-  const [scope, setScope] = useState<'workspace' | 'all'>('workspace');
-  // Distinguish "no files" from "the call failed" — the old silent catch
-  // rendered a misleading '스토리지가 비어 있습니다' while the session was
-  // still resuming, until a manual refresh.
+  const [scope, setScope] = useState<Scope>('workspace');
+  const [cwd, setCwd] = useState('');
+  const [selected, setSelected] = useState<Entry | null>(null);
   const [listError, setListError] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [menu, setMenu] = useState<{ x: number; y: number; target: Entry | null } | null>(null);
+  const [viewer, setViewer] = useState<Entry | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const canWrite = scope === 'workspace';
+  /** scope-relative → storage-root-relative (what the backend APIs expect). */
+  const rootPath = useCallback(
+    (p: string) => (scope === 'workspace' ? (p ? `workspace/${p}` : 'workspace') : p),
+    [scope],
+  );
 
   const fetchFiles = useCallback(async () => {
     if (!selectedSessionId) return;
@@ -128,21 +150,152 @@ export default function StorageTab() {
     }
   }, [selectedSessionId, scope]);
 
-  // A freshly-selected session may still be resuming (lazy re-hydration) when
-  // the tab first lists — one delayed retry absorbs that race instead of
-  // showing a false 'empty'.
+  useEffect(() => {
+    fetchFiles();
+    setCwd('');
+    setSelected(null);
+    setViewer(null);
+  }, [fetchFiles]);
+
+  // Session-still-resuming race: one delayed retry instead of a false empty.
   useEffect(() => {
     if (!listError) return;
     const timer = setTimeout(() => { void fetchFiles(); }, 1500);
     return () => clearTimeout(timer);
   }, [listError, fetchFiles]);
 
-  const handleUpload = useCallback(async (fileList: FileList | null) => {
-    if (!selectedSessionId || !fileList?.length) return;
+  // Close the context menu on any click / Esc.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, [menu]);
+
+  useEffect(() => {
+    if (renaming) setTimeout(() => renameInputRef.current?.focus(), 30);
+  }, [renaming]);
+
+  // ── Directory model: derive the current dir's entries from the flat list.
+  const entries = useMemo<Entry[]>(() => {
+    const prefix = cwd ? cwd + '/' : '';
+    const dirs = new Map<string, Entry>();
+    const out: Entry[] = [];
+    for (const f of files) {
+      const p = f.path;
+      if (!p.startsWith(prefix)) continue;
+      const rest = p.slice(prefix.length);
+      if (!rest) continue;
+      const slash = rest.indexOf('/');
+      const isDirEntry = f.is_dir ?? f.is_directory ?? false;
+      if (slash === -1) {
+        if (isDirEntry) {
+          if (!dirs.has(rest)) {
+            dirs.set(rest, { name: rest, path: p, isDir: true, size: 0, modified: f.modified_at ?? null });
+          }
+        } else {
+          out.push({
+            name: rest, path: p, isDir: false,
+            size: f.size || 0, modified: f.modified_at ?? null,
+          });
+        }
+      } else {
+        // deeper entry → implies a (possibly unlisted) child dir
+        const dirName = rest.slice(0, slash);
+        const existing = dirs.get(dirName);
+        if (!existing) {
+          dirs.set(dirName, { name: dirName, path: prefix + dirName, isDir: true, size: 0, modified: null });
+        }
+        if (!isDirEntry) {
+          const d = dirs.get(dirName)!;
+          d.size += f.size || 0;
+        }
+      }
+    }
+    const cmp = (a: Entry, b: Entry) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; // folders first
+      let r = 0;
+      if (sortKey === 'name') r = a.name.localeCompare(b.name, undefined, { numeric: true });
+      else if (sortKey === 'size') r = a.size - b.size;
+      else r = (a.modified || '').localeCompare(b.modified || '');
+      return sortAsc ? r : -r;
+    };
+    return [...dirs.values(), ...out].sort(cmp);
+  }, [files, cwd, sortKey, sortAsc]);
+
+  const crumbs = useMemo(() => (cwd ? cwd.split('/') : []), [cwd]);
+
+  // ── Actions ─────────────────────────────────────────────────────────
+  const openEntry = useCallback((entry: Entry) => {
+    if (entry.isDir) {
+      setCwd(entry.path);
+      setSelected(null);
+    } else {
+      setViewer(entry);
+    }
+  }, []);
+
+  const startRename = useCallback((entry: Entry) => {
+    if (!canWrite) return;
+    setRenaming(entry.path);
+    setRenameValue(entry.name);
+  }, [canWrite]);
+
+  const commitRename = useCallback(async () => {
+    if (!renaming || !selectedSessionId) { setRenaming(null); return; }
+    const entry = entries.find((e) => e.path === renaming);
+    const newName = renameValue.trim();
+    setRenaming(null);
+    if (!entry || !newName || newName === entry.name || newName.includes('/')) return;
+    const dst = (cwd ? cwd + '/' : '') + newName;
+    try {
+      await agentApi.renameStorage(selectedSessionId, rootPath(entry.path), rootPath(dst));
+      await fetchFiles();
+      setSelected(null);
+    } catch (e) {
+      alert(t('storageTab.renameError', { message: e instanceof Error ? e.message : String(e) }));
+    }
+  }, [renaming, renameValue, entries, cwd, selectedSessionId, rootPath, fetchFiles, t]);
+
+  const deleteEntry = useCallback(async (entry: Entry) => {
+    if (!canWrite || !selectedSessionId) return;
+    if (!window.confirm(t('storageTab.confirmDelete', { name: entry.name }))) return;
+    try {
+      await agentApi.deleteStorageEntry(selectedSessionId, rootPath(entry.path));
+      if (selected?.path === entry.path) setSelected(null);
+      await fetchFiles();
+    } catch (e) {
+      alert(t('storageTab.deleteError', { message: e instanceof Error ? e.message : String(e) }));
+    }
+  }, [canWrite, selectedSessionId, rootPath, fetchFiles, selected, t]);
+
+  const newFolder = useCallback(async () => {
+    if (!canWrite || !selectedSessionId) return;
+    const base = t('storageTab.newFolderName');
+    const names = new Set(entries.map((e) => e.name));
+    let name = base;
+    for (let i = 2; names.has(name); i++) name = `${base} ${i}`;
+    const p = (cwd ? cwd + '/' : '') + name;
+    try {
+      await agentApi.mkdirStorage(selectedSessionId, rootPath(p));
+      await fetchFiles();
+      setRenaming(p);
+      setRenameValue(name);
+    } catch (e) {
+      alert(t('storageTab.mkdirError', { message: e instanceof Error ? e.message : String(e) }));
+    }
+  }, [canWrite, selectedSessionId, entries, cwd, rootPath, fetchFiles, t]);
+
+  const uploadFiles = useCallback(async (fileList: FileList | File[] | null) => {
+    if (!canWrite || !selectedSessionId || !fileList?.length) return;
     setUploading(true);
     try {
+      // Upload lands in the CURRENT directory (root → uploads/ bucket).
+      const subdir = cwd || 'uploads';
       for (const f of Array.from(fileList)) {
-        await agentApi.uploadToWorkspace(selectedSessionId, f);
+        await agentApi.uploadToWorkspace(selectedSessionId, f, subdir);
       }
       await fetchFiles();
     } catch {
@@ -150,56 +303,30 @@ export default function StorageTab() {
     } finally {
       setUploading(false);
     }
-  }, [selectedSessionId, fetchFiles, t]);
+  }, [canWrite, selectedSessionId, cwd, fetchFiles, t]);
 
-  const [downloading, setDownloading] = useState(false);
-
-  const handleDownloadFolder = async () => {
-    if (!selectedSessionId) return;
-    setDownloading(true);
-    try {
-      await agentApi.downloadFolder(selectedSessionId);
-    } catch {
-      alert(t('storageTab.downloadFolderError'));
-    } finally {
-      setDownloading(false);
+  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (renaming) return;
+    if (e.key === 'Enter' && selected) { e.preventDefault(); openEntry(selected); }
+    else if (e.key === 'F2' && selected) { e.preventDefault(); startRename(selected); }
+    else if (e.key === 'Delete' && selected) { e.preventDefault(); void deleteEntry(selected); }
+    else if (e.key === 'Backspace' && cwd) {
+      e.preventDefault();
+      setCwd(crumbs.slice(0, -1).join('/'));
+      setSelected(null);
     }
-  };
+  }, [renaming, selected, openEntry, startRename, deleteEntry, cwd, crumbs]);
 
-  useEffect(() => {
-    fetchFiles();
-    setActivePath('');
-    setPreviewContent('');
-  }, [fetchFiles]);
-
-  const loadFile = async (path: string) => {
-    if (!selectedSessionId) return;
-    setActivePath(path);
-    setLoading(true);
-    try {
-      const cleanPath = path.startsWith('/') ? path.substring(1) : path;
-      const res = await agentApi.getStorageFile(selectedSessionId, cleanPath);
-      setPreviewContent(res.content || t('storageTab.emptyFile'));
-    } catch (e: any) {
-      setPreviewContent(t('storageTab.loadError', { message: e.message }));
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ── Early returns ───────────────────────────────────────────────────
   if (!selectedSessionId) {
     return (
       <TabShell title={t('storageTab.title')} icon={HardDrive}>
-        <EmptyState
-          title={t('storageTab.selectSession')}
-          description={t('storageTab.selectSessionDesc')}
-        />
+        <EmptyState title={t('storageTab.selectSession')} description={t('storageTab.selectSessionDesc')} />
       </TabShell>
     );
   }
 
-  const tree = buildFileTree(files);
-
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <TabShell
       title={t('storageTab.title')}
@@ -220,19 +347,28 @@ export default function StorageTab() {
               {t('storageTab.scopeAll')}
             </button>
           </div>
-          <label className="cursor-pointer">
-            <input
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => { void handleUpload(e.target.files); if (e.target) e.target.value = ''; }}
-            />
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--border-radius)] border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
-              {uploading ? t('common.loading') : t('storageTab.upload')}
-            </span>
-          </label>
-          <ActionButton icon={Download} onClick={handleDownloadFolder} disabled={downloading}>
-            {downloading ? t('common.loading') : t('storageTab.downloadFolder')}
+          {canWrite && (
+            <>
+              <ActionButton icon={FolderPlus} onClick={() => void newFolder()}>
+                {t('storageTab.newFolder')}
+              </ActionButton>
+              <label className="cursor-pointer">
+                <input
+                  type="file" multiple className="hidden"
+                  onChange={(e) => { void uploadFiles(e.target.files); if (e.target) e.target.value = ''; }}
+                />
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--border-radius)] border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
+                  <Upload size={13} />
+                  {uploading ? t('common.loading') : t('storageTab.upload')}
+                </span>
+              </label>
+            </>
+          )}
+          <ActionButton
+            icon={Download}
+            onClick={() => void agentApi.downloadFolder(selectedSessionId, rootPath(cwd)).catch(() => alert(t('storageTab.downloadFolderError')))}
+          >
+            {t('storageTab.downloadFolder')}
           </ActionButton>
           <ActionButton icon={RefreshCw} onClick={fetchFiles}>
             {t('common.refresh')}
@@ -240,45 +376,330 @@ export default function StorageTab() {
         </>
       }
     >
-      <div className="h-full p-3 md:p-6">
-      <div className="flex flex-col md:flex-row gap-3 md:gap-4 h-full min-h-0">
-        {/* File Tree */}
-        <div className="md:w-[280px] shrink-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] p-3 overflow-y-auto max-h-[200px] md:max-h-none">
-          {files.length === 0 ? (
-            <p className="text-[var(--text-muted)] text-[13px] text-center py-6 px-3">
-              {listError ? t('storageTab.loadRetrying') : t('storageTab.empty')}
-            </p>
-          ) : (
-            <TreeView node={tree} onSelect={loadFile} activePath={activePath} />
+      <div className="h-full flex flex-col p-3 md:p-4 gap-2 min-h-0">
+        {/* Breadcrumb bar */}
+        <div className="flex items-center gap-0.5 text-[13px] px-1 shrink-0 select-none">
+          {cwd && (
+            <button
+              className="p-1 mr-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]"
+              onClick={() => { setCwd(crumbs.slice(0, -1).join('/')); setSelected(null); }}
+              title={t('storageTab.goUp')}
+            >
+              <ArrowUp size={14} />
+            </button>
+          )}
+          <button
+            className={`px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] ${cwd ? 'text-[var(--text-secondary)]' : 'font-semibold text-[var(--text-primary)]'}`}
+            onClick={() => { setCwd(''); setSelected(null); }}
+          >
+            {scope === 'workspace' ? t('storageTab.scopeWorkspace') : t('storageTab.scopeAll')}
+          </button>
+          {crumbs.map((c, i) => (
+            <span key={i} className="flex items-center gap-0.5">
+              <ChevronRight size={13} className="text-[var(--text-muted)]" />
+              <button
+                className={`px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] ${i === crumbs.length - 1 ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
+                onClick={() => { setCwd(crumbs.slice(0, i + 1).join('/')); setSelected(null); }}
+              >
+                {c}
+              </button>
+            </span>
+          ))}
+          {!canWrite && (
+            <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
+              {t('storageTab.readOnly')}
+            </span>
           )}
         </div>
 
-        {/* Preview */}
-        {activePath && !loading && previewContent ? (
-          <FileViewer
-            content={previewContent}
-            fileName={activePath}
-            className="flex-1 min-w-0"
-          />
-        ) : (
-          <div className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] flex flex-col min-w-0">
-            <div className="py-2.5 px-3.5 bg-[var(--bg-tertiary)] border-b border-[var(--border-color)]" style={{ borderRadius: 'var(--border-radius) var(--border-radius) 0 0' }}>
-              <span className="text-[13px] font-medium text-[var(--text-secondary)]">{activePath || t('storageTab.noFile')}</span>
+        <div className="flex-1 flex gap-3 min-h-0">
+          {/* File list */}
+          <div
+            ref={listRef}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            className={`flex-1 min-w-0 flex flex-col bg-[var(--bg-secondary)] border rounded-[var(--border-radius)] overflow-hidden outline-none ${dragOver ? 'border-[var(--accent-color)] ring-2 ring-[var(--accent-color)]/30' : 'border-[var(--border-color)]'}`}
+            onDragOver={(e) => { if (canWrite && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragOver(true); } }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
+            onDrop={(e) => {
+              if (!canWrite) return;
+              e.preventDefault(); setDragOver(false);
+              void uploadFiles(e.dataTransfer.files);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, target: null });
+            }}
+          >
+            {/* Column header */}
+            <div className="flex items-center px-3 py-1.5 border-b border-[var(--border-color)] text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wide select-none shrink-0">
+              {([['name', t('storageTab.colName'), 'flex-1'], ['size', t('storageTab.colSize'), 'w-[84px] text-right'], ['modified', t('storageTab.colModified'), 'w-[130px] text-right pr-1']] as [SortKey, string, string][]).map(([key, label, cls]) => (
+                <button
+                  key={key}
+                  className={`${cls} hover:text-[var(--text-primary)] text-left ${key !== 'name' ? 'text-right' : ''}`}
+                  onClick={() => {
+                    if (sortKey === key) setSortAsc(!sortAsc);
+                    else { setSortKey(key); setSortAsc(true); }
+                  }}
+                >
+                  {label}{sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : ''}
+                </button>
+              ))}
             </div>
-            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-[13px] py-12">
-              {loading ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-[var(--primary-color)] border-t-transparent rounded-full animate-spin" />
-                  {t('common.loading')}
+
+            {/* Rows */}
+            <div className="flex-1 overflow-y-auto py-1">
+              {entries.length === 0 ? (
+                <p className="text-[var(--text-muted)] text-[13px] text-center py-10">
+                  {listError ? t('storageTab.loadRetrying')
+                    : dragOver ? t('storageTab.dropToUpload')
+                    : t('storageTab.emptyDir')}
+                </p>
+              ) : entries.map((entry) => (
+                <div
+                  key={entry.path}
+                  className={`flex items-center gap-2.5 mx-1.5 px-2 py-[7px] rounded-lg cursor-default text-[13px] transition-colors ${selected?.path === entry.path ? 'bg-[var(--accent-color)]/12 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                  onClick={() => setSelected(entry)}
+                  onDoubleClick={() => openEntry(entry)}
+                  onContextMenu={(e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    setSelected(entry);
+                    setMenu({ x: e.clientX, y: e.clientY, target: entry });
+                  }}
+                >
+                  <span className="shrink-0">{fileIcon(entry.name, entry.isDir)}</span>
+                  {renaming === entry.path ? (
+                    <input
+                      ref={renameInputRef}
+                      className="flex-1 min-w-0 bg-[var(--bg-primary)] border border-[var(--accent-color)] rounded px-1.5 py-0.5 text-[13px] outline-none"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') void commitRename();
+                        else if (e.key === 'Escape') setRenaming(null);
+                      }}
+                      onBlur={() => void commitRename()}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="flex-1 min-w-0 truncate">{entry.name}</span>
+                  )}
+                  <span className="w-[84px] text-right text-[12px] text-[var(--text-muted)] tabular-nums shrink-0">
+                    {entry.isDir ? '—' : formatSize(entry.size)}
+                  </span>
+                  <span className="w-[130px] text-right text-[12px] text-[var(--text-muted)] tabular-nums shrink-0 pr-1">
+                    {formatDate(entry.modified)}
+                  </span>
                 </div>
-              ) : (
-                t('storageTab.selectFile')
-              )}
+              ))}
             </div>
           </div>
-        )}
+
+          {/* Preview panel */}
+          {selected && !selected.isDir && (
+            <div className="hidden lg:flex w-[340px] shrink-0 flex-col bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-color)] shrink-0">
+                {fileIcon(selected.name, false, 14)}
+                <span className="flex-1 truncate text-[13px] font-medium">{selected.name}</span>
+                <button className="p-1 rounded hover:bg-[var(--bg-hover)]" onClick={() => setSelected(null)}>
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto p-3">
+                <QuickPreview sessionId={selectedSessionId} entry={selected} rootPath={rootPath} t={t} />
+              </div>
+              <div className="border-t border-[var(--border-color)] px-3 py-2 text-[11px] text-[var(--text-muted)] flex justify-between shrink-0">
+                <span>{formatSize(selected.size)}</span>
+                <span>{formatDate(selected.modified)}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      </div>
+
+      {/* Context menu */}
+      {menu && (
+        <div
+          className="fixed z-[300] min-w-[170px] py-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl text-[13px]"
+          style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 220) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {menu.target ? (
+            <>
+              <MenuItem label={t('storageTab.open')} onClick={() => { openEntry(menu.target!); setMenu(null); }} />
+              {!menu.target.isDir && (
+                <MenuItem
+                  label={t('storageTab.download')}
+                  onClick={() => {
+                    void agentApi.downloadStorageFile(selectedSessionId, rootPath(menu.target!.path), menu.target!.name);
+                    setMenu(null);
+                  }}
+                />
+              )}
+              {menu.target.isDir && (
+                <MenuItem
+                  label={t('storageTab.downloadZip')}
+                  onClick={() => {
+                    void agentApi.downloadFolder(selectedSessionId, rootPath(menu.target!.path)).catch(() => alert(t('storageTab.downloadFolderError')));
+                    setMenu(null);
+                  }}
+                />
+              )}
+              {canWrite && (
+                <>
+                  <div className="h-px my-1 bg-[var(--border-color)]" />
+                  <MenuItem label={t('storageTab.rename')} onClick={() => { startRename(menu.target!); setMenu(null); }} />
+                  <MenuItem danger label={t('storageTab.delete')} onClick={() => { void deleteEntry(menu.target!); setMenu(null); }} />
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {canWrite && <MenuItem label={t('storageTab.newFolder')} onClick={() => { void newFolder(); setMenu(null); }} />}
+              <MenuItem label={t('common.refresh')} onClick={() => { void fetchFiles(); setMenu(null); }} />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Full overlay viewer (double-click open) */}
+      {viewer && (
+        <div
+          className="fixed inset-0 z-[280] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={() => setViewer(null)}
+        >
+          <div
+            className="w-full max-w-5xl max-h-[88vh] flex flex-col bg-[var(--bg-primary)] rounded-2xl border border-[var(--border-color)] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[var(--border-color)] shrink-0">
+              {fileIcon(viewer.name, false, 16)}
+              <span className="flex-1 truncate text-[14px] font-semibold">{viewer.name}</span>
+              <button
+                className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                onClick={() => void agentApi.downloadStorageFile(selectedSessionId, rootPath(viewer.path), viewer.name)}
+              >
+                {t('storageTab.download')}
+              </button>
+              <button className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)]" onClick={() => setViewer(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto min-h-[300px]">
+              <FullPreview sessionId={selectedSessionId} entry={viewer} rootPath={rootPath} t={t} />
+            </div>
+          </div>
+        </div>
+      )}
     </TabShell>
+  );
+}
+
+function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      className={`w-full text-left px-3.5 py-1.5 hover:bg-[var(--bg-hover)] ${danger ? 'text-[var(--danger-color,#ef4444)]' : 'text-[var(--text-primary)]'}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Small right-panel preview: image thumbnail / text head / office hint. */
+function QuickPreview({ sessionId, entry, rootPath, t }: {
+  sessionId: string; entry: Entry; rootPath: (p: string) => string;
+  t: (k: string, v?: Record<string, string | number>) => string;
+}) {
+  const e = ext(entry.name);
+  if (IMAGE_EXT.has(e)) {
+    return <AuthedImage sessionId={sessionId} path={rootPath(entry.path)} className="max-w-full rounded-lg" alt={entry.name} />;
+  }
+  if (OFFICE_EXT.has(e)) {
+    return <OfficePreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} compact />;
+  }
+  return <TextPreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} compact />;
+}
+
+function FullPreview({ sessionId, entry, rootPath, t }: {
+  sessionId: string; entry: Entry; rootPath: (p: string) => string;
+  t: (k: string, v?: Record<string, string | number>) => string;
+}) {
+  const e = ext(entry.name);
+  if (IMAGE_EXT.has(e)) {
+    return (
+      <div className="flex items-center justify-center p-6 h-full">
+        <AuthedImage sessionId={sessionId} path={rootPath(entry.path)} className="max-w-full max-h-[74vh] rounded-lg object-contain" alt={entry.name} />
+      </div>
+    );
+  }
+  if (OFFICE_EXT.has(e)) {
+    return <OfficePreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} />;
+  }
+  return <TextPreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} />;
+}
+
+function TextPreview({ sessionId, entry, rootPath, t, compact }: {
+  sessionId: string; entry: Entry; rootPath: (p: string) => string;
+  t: (k: string, v?: Record<string, string | number>) => string; compact?: boolean;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setContent(null); setError(null);
+    if (entry.size > TEXT_MAX_PREVIEW) {
+      setError(t('storageTab.tooLargePreview'));
+      return;
+    }
+    agentApi.getStorageFile(sessionId, rootPath(entry.path))
+      .then((r) => { if (alive) setContent(r.content ?? ''); })
+      .catch((err) => { if (alive) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { alive = false; };
+  }, [sessionId, entry.path, entry.size, rootPath, t]);
+
+  if (error) return <p className="text-[12px] text-[var(--text-muted)] p-4">{error}</p>;
+  if (content === null) return <div className="animate-pulse bg-[var(--bg-tertiary)] rounded h-32 m-4" />;
+  if (!content) return <p className="text-[12px] text-[var(--text-muted)] p-4">{t('storageTab.emptyFile')}</p>;
+  return (
+    <FileViewer
+      content={compact ? content.slice(0, 4000) : content}
+      fileName={entry.name}
+      showHeader={!compact}
+      className={compact ? 'text-[11px]' : ''}
+    />
+  );
+}
+
+/** Office/PDF preview via the doc-preview render cache (SVG/PNG pages). */
+function OfficePreview({ sessionId, entry, rootPath, t, compact }: {
+  sessionId: string; entry: Entry; rootPath: (p: string) => string;
+  t: (k: string, v?: Record<string, string | number>) => string; compact?: boolean;
+}) {
+  const [pages, setPages] = useState<string[] | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setPages(null); setError(false);
+    agentApi.docPreview(sessionId, rootPath(entry.path))
+      .then((r: { pages?: string[] }) => { if (alive) setPages(r.pages || []); })
+      .catch(() => { if (alive) setError(true); });
+    return () => { alive = false; };
+  }, [sessionId, entry.path, rootPath]);
+
+  if (error) return <p className="text-[12px] text-[var(--text-muted)] p-4">{t('storageTab.previewUnavailable')}</p>;
+  if (pages === null) return <div className="animate-pulse bg-[var(--bg-tertiary)] rounded h-40 m-4" />;
+  if (!pages.length) return <p className="text-[12px] text-[var(--text-muted)] p-4">{t('storageTab.previewUnavailable')}</p>;
+  const shown = compact ? pages.slice(0, 1) : pages;
+  return (
+    <div className="flex flex-col gap-3 p-3 items-center">
+      {shown.map((p) => (
+        <AuthedImage key={p} sessionId={sessionId} path={p} className="max-w-full rounded shadow" alt={entry.name} />
+      ))}
+      {compact && pages.length > 1 && (
+        <p className="text-[11px] text-[var(--text-muted)]">+{pages.length - 1} pages</p>
+      )}
+    </div>
   );
 }
