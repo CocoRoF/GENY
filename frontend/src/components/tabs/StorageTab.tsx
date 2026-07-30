@@ -370,18 +370,19 @@ export default function StorageTab() {
     <TabShell
       title={t('storageTab.title')}
       icon={HardDrive}
+      titleExtra={
+        <SegmentedControl
+          ariaLabel={t('storageTab.title')}
+          items={[
+            { id: 'workspace', label: t('storageTab.scopeWorkspace') },
+            { id: 'all', label: t('storageTab.scopeAll') },
+          ]}
+          value={scope}
+          onChange={(s) => setScope(s as Scope)}
+        />
+      }
       actions={
         <>
-          <SegmentedControl
-            className="mr-1"
-            ariaLabel={t('storageTab.title')}
-            items={[
-              { id: 'workspace', label: t('storageTab.scopeWorkspace') },
-              { id: 'all', label: t('storageTab.scopeAll') },
-            ]}
-            value={scope}
-            onChange={(s) => setScope(s as Scope)}
-          />
           {canWrite && (
             <>
               <IconButton icon={FolderPlus} title={t('storageTab.newFolder')} onClick={() => void newFolder()} />

@@ -21,6 +21,10 @@ export interface TabShellProps {
   title: string;
   subtitle?: ReactNode;
   icon?: LucideIcon;
+  /** Rendered inline right after the title (e.g. a SegmentedControl view
+   *  switch) — keeps mode toggles visually tied to what they scope while
+   *  `actions` stays a stable right-aligned button cluster. */
+  titleExtra?: ReactNode;
   actions?: ReactNode;
   error?: string | null;
   onDismissError?: () => void;
@@ -44,6 +48,7 @@ export function TabShell({
   title,
   subtitle,
   icon: Icon,
+  titleExtra,
   actions,
   error,
   onDismissError,
@@ -66,16 +71,19 @@ export function TabShell({
       {/* ── Header ── */}
       <header className="px-4 py-2.5 border-b border-[hsl(var(--border))] flex items-center justify-between gap-3 shrink-0 bg-[hsl(var(--card))]">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold tracking-tight flex items-center gap-1.5 truncate">
-            {Icon && (
-              <Icon
-                size={14}
-                strokeWidth={2.25}
-                className="text-[hsl(var(--primary))] shrink-0"
-              />
-            )}
-            <span className="truncate">{title}</span>
-          </h2>
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="text-sm font-semibold tracking-tight flex items-center gap-1.5 truncate">
+              {Icon && (
+                <Icon
+                  size={14}
+                  strokeWidth={2.25}
+                  className="text-[hsl(var(--primary))] shrink-0"
+                />
+              )}
+              <span className="truncate">{title}</span>
+            </h2>
+            {titleExtra}
+          </div>
           {subtitle && (
             <div className="text-[0.7rem] text-[hsl(var(--muted-foreground))] mt-1 truncate">
               {subtitle}
