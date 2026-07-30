@@ -128,8 +128,11 @@ export default function StorageTab() {
   const [menu, setMenu] = useState<{ x: number; y: number; target: Entry | null } | null>(null);
   const [viewer, setViewer] = useState<Entry | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [previewWidth, setPreviewWidth] = useState(340);
+  const [resizing, setResizing] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
 
   const canWrite = scope === 'workspace';
   /** scope-relative → storage-root-relative (what the backend APIs expect). */
@@ -177,6 +180,41 @@ export default function StorageTab() {
   useEffect(() => {
     if (renaming) setTimeout(() => renameInputRef.current?.focus(), 30);
   }, [renaming]);
+
+  // Restore the user's preferred preview width once on mount.
+  useEffect(() => {
+    const saved = Number(localStorage.getItem('geny.storage.previewWidth'));
+    if (saved >= 240) setPreviewWidth(saved);
+  }, []);
+
+  // Splitter drag: preview width = distance from cursor to the split
+  // container's right edge, clamped so neither pane can collapse.
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      const box = splitRef.current?.getBoundingClientRect();
+      if (!box) return;
+      const max = Math.max(260, box.width * 0.7);
+      const w = Math.min(max, Math.max(240, box.right - e.clientX - 6));
+      setPreviewWidth(w);
+      e.preventDefault();
+    };
+    const onUp = () => setResizing(false);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing]);
+
+  useEffect(() => {
+    if (!resizing) localStorage.setItem('geny.storage.previewWidth', String(Math.round(previewWidth)));
+  }, [resizing, previewWidth]);
 
   // ── Directory model: derive the current dir's entries from the flat list.
   const entries = useMemo<Entry[]>(() => {
@@ -412,7 +450,7 @@ export default function StorageTab() {
           )}
         </div>
 
-        <div className="flex-1 flex gap-3 min-h-0">
+        <div ref={splitRef} className="flex-1 flex min-h-0">
           {/* File list */}
           <div
             ref={listRef}
@@ -496,9 +534,30 @@ export default function StorageTab() {
             </div>
           </div>
 
+          {/* Splitter — the gap between the panes doubles as a resize
+              handle: invisible at rest, a soft accent bar on hover, solid
+              while dragging. Double-click resets to the default width. */}
+          {selected && !selected.isDir && (
+            <div
+              className="hidden lg:flex w-3 shrink-0 items-stretch justify-center cursor-col-resize select-none group"
+              onMouseDown={(e) => { e.preventDefault(); setResizing(true); }}
+              onDoubleClick={() => setPreviewWidth(340)}
+              role="separator"
+              aria-orientation="vertical"
+              title={t('storageTab.resizeHint')}
+            >
+              <div
+                className={`w-[3px] my-3 rounded-full transition-colors duration-150 ${resizing ? 'bg-[var(--accent-color)]' : 'bg-transparent group-hover:bg-[var(--accent-color)]/45'}`}
+              />
+            </div>
+          )}
+
           {/* Preview panel */}
           {selected && !selected.isDir && (
-            <div className="hidden lg:flex w-[340px] shrink-0 flex-col bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden">
+            <div
+              className="hidden lg:flex shrink-0 flex-col bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] overflow-hidden"
+              style={{ width: previewWidth }}
+            >
               <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-color)] shrink-0">
                 {fileIcon(selected.name, false, 14)}
                 <span className="flex-1 truncate text-[13px] font-medium">{selected.name}</span>

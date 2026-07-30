@@ -1073,6 +1073,7 @@ const en = {
     mkdirError: 'Failed to create folder: {message}',
     tooLargePreview: 'File is too large to preview. Download it instead.',
     previewUnavailable: 'Preview unavailable',
+    resizeHint: 'Drag to resize · double-click to reset',
     scopeWorkspace: 'Workspace',
     scopeAll: 'All',
     upload: 'Upload',
