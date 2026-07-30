@@ -593,7 +593,20 @@ export const agentApi = {
     }),
 
   /** GET /api/agents/{id}/storage — list storage files */
-  listStorage: (id: string) => apiCall<StorageListResponse>(`/api/agents/${id}/storage`),
+  listStorage: (id: string, scope: 'workspace' | 'all' = 'all') =>
+    apiCall<StorageListResponse>(`/api/agents/${id}/storage?scope=${scope}`),
+
+  uploadToWorkspace: async (id: string, file: globalThis.File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${getBackendUrl()}/api/agents/${id}/storage/upload?subdir=uploads`, {
+      method: 'POST',
+      headers: withAuthHeaders(), // no Content-Type → browser sets multipart boundary
+      body: fd,
+    });
+    if (!res.ok) throw new Error(`upload HTTP ${res.status}`);
+    return res.json() as Promise<{ ok: boolean; path: string; workspace_path: string; size: number }>;
+  },
 
   /** GET /api/agents/{id}/storage/{path} — read file from storage */
   getStorageFile: (id: string, path: string) =>

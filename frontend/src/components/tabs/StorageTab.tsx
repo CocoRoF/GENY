@@ -106,14 +106,51 @@ export default function StorageTab() {
   const [activePath, setActivePath] = useState('');
   const [previewContent, setPreviewContent] = useState('');
   const [loading, setLoading] = useState(false);
+  // 'workspace' = the agent's working files (uploads/drafts/outputs) — the
+  // user-facing view. 'all' = the whole session dir incl. internal state
+  // (memory/, transcripts/, synapse.db) for operators.
+  const [scope, setScope] = useState<'workspace' | 'all'>('workspace');
+  // Distinguish "no files" from "the call failed" — the old silent catch
+  // rendered a misleading '스토리지가 비어 있습니다' while the session was
+  // still resuming, until a manual refresh.
+  const [listError, setListError] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const fetchFiles = useCallback(async () => {
     if (!selectedSessionId) return;
     try {
-      const res = await agentApi.listStorage(selectedSessionId);
+      const res = await agentApi.listStorage(selectedSessionId, scope);
       setFiles(res.files || []);
-    } catch { setFiles([]); }
-  }, [selectedSessionId]);
+      setListError(false);
+    } catch {
+      setFiles([]);
+      setListError(true);
+    }
+  }, [selectedSessionId, scope]);
+
+  // A freshly-selected session may still be resuming (lazy re-hydration) when
+  // the tab first lists — one delayed retry absorbs that race instead of
+  // showing a false 'empty'.
+  useEffect(() => {
+    if (!listError) return;
+    const timer = setTimeout(() => { void fetchFiles(); }, 1500);
+    return () => clearTimeout(timer);
+  }, [listError, fetchFiles]);
+
+  const handleUpload = useCallback(async (fileList: FileList | null) => {
+    if (!selectedSessionId || !fileList?.length) return;
+    setUploading(true);
+    try {
+      for (const f of Array.from(fileList)) {
+        await agentApi.uploadToWorkspace(selectedSessionId, f);
+      }
+      await fetchFiles();
+    } catch {
+      alert(t('storageTab.uploadError'));
+    } finally {
+      setUploading(false);
+    }
+  }, [selectedSessionId, fetchFiles, t]);
 
   const [downloading, setDownloading] = useState(false);
 
@@ -169,6 +206,31 @@ export default function StorageTab() {
       icon={HardDrive}
       actions={
         <>
+          <div className="flex items-center rounded-[var(--border-radius)] border border-[var(--border-color)] overflow-hidden text-[12px] mr-1">
+            <button
+              className={`px-2.5 py-1.5 ${scope === 'workspace' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
+              onClick={() => setScope('workspace')}
+            >
+              {t('storageTab.scopeWorkspace')}
+            </button>
+            <button
+              className={`px-2.5 py-1.5 ${scope === 'all' ? 'bg-[var(--accent-color)] text-white' : 'bg-transparent text-[var(--text-secondary)]'}`}
+              onClick={() => setScope('all')}
+            >
+              {t('storageTab.scopeAll')}
+            </button>
+          </div>
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => { void handleUpload(e.target.files); if (e.target) e.target.value = ''; }}
+            />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--border-radius)] border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
+              {uploading ? t('common.loading') : t('storageTab.upload')}
+            </span>
+          </label>
           <ActionButton icon={Download} onClick={handleDownloadFolder} disabled={downloading}>
             {downloading ? t('common.loading') : t('storageTab.downloadFolder')}
           </ActionButton>
@@ -183,7 +245,9 @@ export default function StorageTab() {
         {/* File Tree */}
         <div className="md:w-[280px] shrink-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-[var(--border-radius)] p-3 overflow-y-auto max-h-[200px] md:max-h-none">
           {files.length === 0 ? (
-            <p className="text-[var(--text-muted)] text-[13px] text-center py-6 px-3">{t('storageTab.empty')}</p>
+            <p className="text-[var(--text-muted)] text-[13px] text-center py-6 px-3">
+              {listError ? t('storageTab.loadRetrying') : t('storageTab.empty')}
+            </p>
           ) : (
             <TreeView node={tree} onSelect={loadFile} activePath={activePath} />
           )}

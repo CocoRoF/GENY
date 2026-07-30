@@ -2508,7 +2508,26 @@ class AgentSession:
         # optional and the property exposes ``None`` for those envs;
         # no production code path requires it at session-build time.
 
-        working_dir = self._working_dir or self.storage_path or ""
+        # ── The ONE workspace ────────────────────────────────────────
+        # The agent's file tools work in <storage>/workspace — the SAME dir
+        # the GAPT sandbox bind-mounts at /workspace, where user uploads are
+        # staged (workspace/uploads) and outbound files are delivered from
+        # (workspace/outputs). Before this scoping, working_dir fell back to
+        # the storage ROOT, one level ABOVE the bind: host-side Read/Write/
+        # Bash/Doc* resolved next to (and could overwrite) memory/,
+        # transcripts/, synapse.db — and a document "saved" by a Doc tool
+        # landed outside the container mount, invisible to sandboxed Bash.
+        # An explicit CreateSessionRequest.working_dir still wins (power use).
+        if self._working_dir:
+            working_dir = self._working_dir
+        elif self.storage_path:
+            working_dir = str(Path(self.storage_path) / "workspace")
+            try:
+                os.makedirs(working_dir, exist_ok=True)
+            except Exception:  # noqa: BLE001 — fall back to the root
+                working_dir = self.storage_path
+        else:
+            working_dir = ""
         is_vtuber = self._role == SessionRole.VTUBER
 
         # Persona text — preserve legacy GenyPresets.* behavior. The
@@ -2990,6 +3009,16 @@ class AgentSession:
                 session_id=self._session_id,
                 working_dir=working_dir,
                 storage_path=self.storage_path,
+                # Host-side fs/Doc tools are path-guarded INTO the workspace:
+                # without this, a relative-or-absolute path could read or
+                # overwrite the session's own persistence tree (memory/,
+                # transcripts/, synapse.db, checkpoints/) sitting one level
+                # up. Sandboxed tools are already confined to /workspace by
+                # the GAPT bind; this closes the host-side half. (Host Bash
+                # runs a real shell and cannot be path-guarded — its cwd
+                # moves into the workspace, and true containment for it is
+                # the sandbox.)
+                allowed_paths=[working_dir] if working_dir else None,
                 extras=_tool_extras,
             ),
             # Intentionally NOT passing ``llm_client`` here.

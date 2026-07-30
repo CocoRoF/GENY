@@ -10,7 +10,7 @@ import json
 import time
 from logging import getLogger
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile
 from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -1177,15 +1177,26 @@ def _storage_root_live_or_dormant(session_id: str) -> str:
 async def list_storage_files(
     session_id: str = Path(..., description="Session ID"),
     path: str = Query("", description="Subdirectory path"),
+    scope: str = Query(
+        "all",
+        description="'workspace' roots the listing at the agent's workspace/ "
+                    "(the user-facing files); 'all' shows the whole session "
+                    "dir including internal state (memory, transcripts, db).",
+    ),
     auth: dict = Depends(require_auth),
 ):
     """
     List session storage files. Works for dormant sessions too.
     """
     _enforce_session_owner(session_id, auth)  # audit S6
+    import os as _os
+
     from service.utils import file_storage as storage_utils
 
     storage_path = _storage_root_live_or_dormant(session_id)
+    if scope == "workspace":
+        storage_path = _os.path.join(storage_path, "workspace")
+        _os.makedirs(storage_path, exist_ok=True)
 
     files_data = storage_utils.list_storage_files(
         storage_path, subpath=path, session_id=session_id
@@ -1197,6 +1208,90 @@ async def list_storage_files(
         storage_path=storage_path,
         files=files
     )
+
+
+#: Upload cap for user files placed into the agent workspace. Documents get
+#: the same generous bound as chat uploads.
+_WORKSPACE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+@router.post("/{session_id}/storage/upload")
+async def upload_to_workspace(
+    session_id: str = Path(..., description="Session ID"),
+    subdir: str = Query(
+        "uploads",
+        description="Destination under workspace/ (default: uploads).",
+    ),
+    file: UploadFile = File(...),
+    auth: dict = Depends(require_auth),
+):
+    """Upload a user file INTO the agent's workspace.
+
+    Lands under ``<storage>/workspace/<subdir>/`` — the same directory the
+    GAPT sandbox bind-mounts at ``/workspace`` and the agent's file tools work
+    in, so the agent (and its sub-agents) can immediately Read/process the
+    file. This is the missing half of the workspace story: SendUserFile
+    already delivers agent→user via workspace/outputs; this is user→agent.
+    """
+    _enforce_session_owner(session_id, auth)  # audit S6
+    import os as _os
+    import re as _re
+    from pathlib import Path as _P
+
+    storage_path = _storage_root_live_or_dormant(session_id)
+    root = _P(storage_path).resolve()
+    ws = (root / "workspace").resolve()
+
+    # Destination guard: subdir must stay inside workspace/.
+    sub = (ws / (subdir or "uploads")).resolve()
+    try:
+        sub.relative_to(ws)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="subdir escapes workspace")
+    sub.mkdir(parents=True, exist_ok=True)
+
+    # Filename: keep the user's name, defanged (no separators/controls).
+    raw_name = _os.path.basename(file.filename or "upload.bin")
+    name = _re.sub(r"[^\w.\-\uAC00-\uD7A3\u3131-\u318E ()\[\]]", "_", raw_name).strip() or "upload.bin"
+    dest = sub / name
+    # No silent overwrite: suffix duplicates.
+    if dest.exists():
+        stem, dot, ext = name.partition(".")
+        for i in range(1, 1000):
+            cand = sub / (f"{stem}({i}){dot}{ext}" if dot else f"{stem}({i})")
+            if not cand.exists():
+                dest = cand
+                break
+
+    size = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > _WORKSPACE_UPLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds {_WORKSPACE_UPLOAD_MAX_BYTES // (1024*1024)} MiB",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="upload write failed")
+
+    rel = str(dest.relative_to(root))
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "path": rel,
+        "workspace_path": str(dest.relative_to(ws)),
+        "size": size,
+    }
 
 
 @router.get("/{session_id}/storage-raw/{file_path:path}")

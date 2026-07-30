@@ -50,6 +50,7 @@ class SubagentRegistryBuilder:
         env_overrides: Optional[List[Any]] = None,
         adhoc_providers: Any = (),
         extra_external_tools: Any = (),
+        workspace_ctx: Any = None,
     ) -> None:
         self._extra = list(extra or [])
         self._env_overrides = [
@@ -62,6 +63,7 @@ class SubagentRegistryBuilder:
         # tools + skills, not just framework built-ins. Built once per session
         # by the session manager and shared with the parent pipeline.
         self._adhoc_providers = tuple(adhoc_providers or ())
+        self._workspace_ctx = workspace_ctx
         # Tool names unioned into EVERY sub-worker's manifest.tools.external on
         # top of its own allowed_tools — e.g. the connector Computer Use tools,
         # so a VTuber can delegate a desktop task to a sub-worker (which then
@@ -95,6 +97,7 @@ class SubagentRegistryBuilder:
                 sub_factory = make_subagent_factory(
                     self._adhoc_providers,
                     extra_external_tools=self._extra_external_tools,
+                    workspace_ctx=self._workspace_ctx,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("subagent factory build skipped: %s", exc)

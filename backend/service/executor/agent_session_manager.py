@@ -775,6 +775,30 @@ class AgentSessionManager:
     # AgentSession Creation
     # ========================================================================
 
+    def _subagent_workspace_ctx(self, session_id: str) -> dict:
+        """Workspace context handed to sub-agent factories at delegation time:
+        the parent's <storage>/workspace as working_dir (+ path guard) and the
+        LIVE GAPT sandbox handle so sub-agents share the exact same
+        filesystem — host-side AND container-side."""
+        import os as _os
+        from pathlib import Path as _Path
+
+        from service.utils.platform import DEFAULT_STORAGE_ROOT
+
+        storage = str(_Path(DEFAULT_STORAGE_ROOT) / session_id)
+        workspace = _os.path.join(storage, "workspace")
+        try:
+            _os.makedirs(workspace, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+        agent = self._local_agents.get(session_id)
+        return {
+            "session_id": session_id,
+            "storage_path": storage,
+            "working_dir": workspace,
+            "sandbox": getattr(agent, "_gapt_sandbox", None) if agent else None,
+        }
+
     async def create_agent_session(
         self,
         request: CreateSessionRequest,
@@ -1263,6 +1287,10 @@ class AgentSessionManager:
             env_overrides=self._env_subworker_types(env_id),
             adhoc_providers=adhoc_providers,
             extra_external_tools=computer_use_tools,
+            # Lazy: resolved at DELEGATION time so the sub-agent picks up the
+            # live GAPT sandbox handle (bound after registry construction on
+            # some paths) and the parent's workspace dir.
+            workspace_ctx=lambda sid=session_id: self._subagent_workspace_ctx(sid),
         ).build()
 
         # Sandbox-tool lifecycle toolset — guarantee EVERY env (incl. lean VTuber

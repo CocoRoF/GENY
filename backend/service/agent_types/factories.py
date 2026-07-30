@@ -120,7 +120,8 @@ def _build_sub_manifest(
     return m
 
 
-def make_subagent_factory(adhoc_providers: Any = (), *, extra_external_tools: Any = ()):
+def make_subagent_factory(adhoc_providers: Any = (), *, extra_external_tools: Any = (),
+                          workspace_ctx: Any = None):
     """Build an async :data:`PipelineFactory` that provisions a sub-worker
     WITH the given adhoc providers passed through to its sub-pipeline.
 
@@ -138,6 +139,7 @@ def make_subagent_factory(adhoc_providers: Any = (), *, extra_external_tools: An
     """
     _providers = tuple(adhoc_providers or ())
     _extra_external_tools = tuple(extra_external_tools or ())
+    _workspace_ctx = workspace_ctx
 
     async def _factory(ctx: Any) -> Any:
         from geny_executor.llm_client.credentials import ConfigError
@@ -179,6 +181,36 @@ def make_subagent_factory(adhoc_providers: Any = (), *, extra_external_tools: An
                 desc.agent_type, provider,
             )
             raise
+
+        # ── One-workspace coherence ──────────────────────────────────
+        # A sub-agent works in the SAME workspace as its parent: same
+        # working_dir (<storage>/workspace), same path guard, and the
+        # parent's GAPT sandbox handle so sandboxed tools land in the same
+        # container /workspace. Without this the sub-pipeline ran host-side
+        # with a default cwd — a separate filesystem from the parent.
+        if _workspace_ctx is not None:
+            try:
+                ws = _workspace_ctx() or {}
+                attach: dict = {}
+                wd = ws.get("working_dir")
+                if wd:
+                    from geny_executor.tools.base import ToolContext
+
+                    attach["tool_context"] = ToolContext(
+                        session_id=str(ws.get("session_id") or ""),
+                        working_dir=str(wd),
+                        storage_path=ws.get("storage_path"),
+                        allowed_paths=[str(wd)],
+                    )
+                if ws.get("sandbox") is not None:
+                    attach["sandbox"] = ws["sandbox"]
+                if attach:
+                    sub_pipeline.attach_runtime(**attach)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "subagent factory: workspace attach failed for %s",
+                    desc.agent_type, exc_info=True,
+                )
 
         # Per-type system prompt (executor 2.7.1) — when the descriptor
         # declares one (env editor's Sub-Agent panel), override the
