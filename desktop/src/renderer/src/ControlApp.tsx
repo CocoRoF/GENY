@@ -939,7 +939,9 @@ export function ControlApp() {
               <select className="gy-input" value={syncSel} onChange={(e) => setSyncSel(e.target.value)}>
                 {syncAgents.length === 0 && <option value="">{t('sync.noAgents')}</option>}
                 {syncAgents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
+                  <option key={a.id} value={a.id}>
+                    {a.name !== a.id ? `${a.name} (${a.id.slice(0, 8)})` : a.id}
+                  </option>
                 ))}
               </select>
               <div style={{ height: 8 }} />

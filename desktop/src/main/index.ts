@@ -1756,7 +1756,8 @@ function registerIpc(): void {
       const sessions = Array.isArray(data) ? data : (data?.sessions ?? data?.agents ?? [])
       return (sessions as Array<Record<string, unknown>>).map((s) => ({
         id: String(s.session_id ?? s.id ?? ''),
-        name: String(s.name ?? s.display_name ?? s.session_id ?? s.id ?? ''),
+        // Geny's SessionInfo carries the human label as `session_name`.
+        name: String(s.session_name ?? s.name ?? s.display_name ?? s.session_id ?? s.id ?? ''),
       })).filter((s) => s.id)
     } catch {
       return []
