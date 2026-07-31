@@ -261,16 +261,23 @@ export class WorkspaceWsClient {
     ws.on('open', () => {
       this.retryMs = 2000
       this.onState(true)
-      ws.send(
-        JSON.stringify({
-          type: 'hello',
-          data: { device_id: this.auth.deviceId, device_name: this.deviceName },
-        }),
-      )
+      // Defensive: a send failure must degrade to a reconnect, never an
+      // uncaught main-process exception (error dialog).
+      const safeSend = (payload: unknown): void => {
+        try {
+          ws.send(JSON.stringify(payload))
+        } catch {
+          try { ws.close() } catch { /* already gone */ }
+        }
+      }
+      safeSend({
+        type: 'hello',
+        data: { device_id: this.auth.deviceId, device_name: this.deviceName },
+      })
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'heartbeat', ts: Date.now() }))
+          safeSend({ type: 'heartbeat', ts: Date.now() })
         }
       }, 25_000)
     })

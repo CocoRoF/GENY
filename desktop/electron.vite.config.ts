@@ -16,7 +16,15 @@ export default defineConfig({
         // Native addons (keytar, nut.js) + electron-updater + the MCP SDK stay
         // external so they resolve from node_modules at runtime (packaged by
         // electron-builder). The MCP SDK is ESM + spawns stdio children.
-        external: ['keytar', 'electron-updater', '@nut-tree-fork/nut-js', '@modelcontextprotocol/sdk'],
+        // `ws` (+ its optional native accelerators) must NOT be bundled:
+        // rollup inlines the lazy bufferutil/utf-8-validate requires and
+        // leaves broken stubs → "bufferUtil$1.mask is not a function" at
+        // Sender.frame when the sync WS sends its first frame.
+        external: [
+          'keytar', 'electron-updater', '@nut-tree-fork/nut-js',
+          '@modelcontextprotocol/sdk',
+          'ws', 'bufferutil', 'utf-8-validate',
+        ],
       },
     },
   },
