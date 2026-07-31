@@ -273,7 +273,7 @@ export interface ConnectorBridge {
   sync: {
     list(): Promise<{ pairs: SyncPairConfig[]; statuses: SyncPairStatus[] }>
     pickFolder(): Promise<string | null>
-    addPair(pair: { sessionId: string; sessionLabel?: string; localPath: string }): Promise<SyncPairConfig[]>
+    addPair(pair: { sessionId: string; sessionLabel?: string; localPath: string }): Promise<SyncPairConfig[] | { error: string; conflictWith?: string }>
     removePair(id: string): Promise<SyncPairConfig[]>
     setPaused(id: string, paused: boolean): Promise<SyncPairConfig[]>
     syncNow(id: string): Promise<void>

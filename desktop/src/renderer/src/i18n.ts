@@ -157,6 +157,7 @@ export const messages: Record<string, Entry> = {
   'sync.massDeleteWarn': { ko: '서버에서 {count}개 항목이 삭제되었습니다. 이 PC에도 삭제를 적용할까요?', en: '{count} entries were deleted on the server. Apply the deletion on this PC too?' },
   'sync.massDeleteApply': { ko: '삭제 적용', en: 'Apply deletion' },
   'sync.massDeletePause': { ko: '동기화 일시정지', en: 'Pause sync' },
+  'sync.overlapError': { ko: '이 폴더는 이미 다른 연결({agent})과 겹칩니다. 같은 폴더(또는 상위/하위 폴더)를 두 에이전트에 연결할 수 없습니다.', en: 'This folder overlaps an existing pairing ({agent}). The same folder (or a parent/child of it) cannot feed two agents.' },
   'sync.safetyHint': { ko: '충돌 시 데이터는 절대 사라지지 않습니다 — 서버 버전이 원래 이름을 유지하고, 이 PC의 버전은 \'(충돌-PC이름 시각)\' 사본으로 보존됩니다. node_modules 등 라이브러리 폴더는 자동 제외되며, 파일당 500MiB까지 동기화됩니다.', en: 'Conflicts never lose data — the server version keeps the name and the local version is preserved as a \'(conflict)\' copy. Library folders like node_modules are excluded automatically; files sync up to 500MiB each.' },
   'mcp.testing': { ko: '테스트 중…', en: 'Testing…' },
   'mcp.testOk': { ko: '연결됨 · 도구 {count}개', en: 'Connected · {count} tools' },

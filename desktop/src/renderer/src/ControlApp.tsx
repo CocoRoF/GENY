@@ -342,7 +342,11 @@ export function ControlApp() {
   const addSyncPair = async (): Promise<void> => {
     if (!syncSel || !syncFolder) return
     const label = syncAgents.find((a) => a.id === syncSel)?.name
-    await window.connector?.sync?.addPair({ sessionId: syncSel, sessionLabel: label, localPath: syncFolder })
+    const res = await window.connector?.sync?.addPair({ sessionId: syncSel, sessionLabel: label, localPath: syncFolder })
+    if (res && !Array.isArray(res) && (res as { error?: string }).error === 'overlap') {
+      alert(t('sync.overlapError', { agent: String((res as { conflictWith?: string }).conflictWith ?? '') }))
+      return
+    }
     setSyncFolder('')
     await refreshSync()
   }

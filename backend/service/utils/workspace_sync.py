@@ -199,11 +199,23 @@ def _walk_workspace(ws: Path, spec) -> Dict[str, Tuple[bool, int, int]]:
     return out
 
 
+def _reset_index(storage_path: str) -> None:
+    """Drop a corrupt index — it is DERIVED state and rebuilds on the
+    next scan. Cost of the reset: tombstones are lost, so replicas that
+    were offline may resurrect recently-deleted files (data-preserving
+    degradation, never data loss)."""
+    base = _db_path(storage_path)
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(base) + suffix).unlink(missing_ok=True)
+    logger.warning("workspace sync index reset (corruption): %s", base)
+
+
 def refresh_index(
     storage_path: str,
     session_id: str = "",
     *,
     force: bool = False,
+    _retried: bool = False,
 ) -> Dict[str, int]:
     """Incremental rescan of ``<storage>/workspace`` into the index.
 
@@ -211,7 +223,23 @@ def refresh_index(
     entries whose (mtime_ns, size) moved. Returns
     ``{latest_seq, added, updated, deleted, hashed}``.
     Throttled to one scan per _SCAN_THROTTLE_S unless ``force``.
+    Self-heals: a corrupt SQLite file is deleted and rebuilt once.
     """
+    try:
+        return _refresh_index_inner(storage_path, session_id, force=force)
+    except sqlite3.DatabaseError:
+        if _retried:
+            raise
+        _reset_index(storage_path)
+        return refresh_index(storage_path, session_id, force=True, _retried=True)
+
+
+def _refresh_index_inner(
+    storage_path: str,
+    session_id: str = "",
+    *,
+    force: bool = False,
+) -> Dict[str, int]:
     key = str(Path(storage_path).resolve())
     lock = _lock_for(key)
     with lock:
@@ -407,3 +435,31 @@ def hash_file(path: Path) -> str:
     """Public streaming sha256 (used by the PUT endpoint for base_sha
     verification when the index is stale)."""
     return _sha256_file(path)
+
+
+def commit_file(storage_path: str, tmp: Path, target: Path, base_sha: str) -> Optional[str]:
+    """Atomically place *tmp* at *target* IFF the target still matches
+    *base_sha* — the last line of defence against the streaming race:
+
+        replica A: check sha ─ stream (seconds…) ─ replace
+        replica B:      check sha ─ stream ─ replace   ← would silently win
+
+    The pre-check both replicas passed is stale by replace time; this
+    re-verifies UNDER the per-storage lock so concurrent PUTs serialize.
+    Returns None on success, or the target's CURRENT sha on conflict
+    (caller answers 409; tmp is removed either way on conflict).
+    Blocking — call via asyncio.to_thread.
+    """
+    lock = _lock_for(str(Path(storage_path).resolve()))
+    with lock:
+        if target.exists():
+            if target.is_dir():
+                tmp.unlink(missing_ok=True)
+                return "__is_dir__"
+            cur = _sha256_file(target)
+            if cur != base_sha:
+                tmp.unlink(missing_ok=True)
+                return cur
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(tmp, target)
+        return None

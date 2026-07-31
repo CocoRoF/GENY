@@ -1547,8 +1547,20 @@ async def put_workspace_file(
                     )
                 h.update(chunk)
                 out.write(chunk)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _os.replace(tmp, target)
+        # Final re-verify + replace under the storage lock: the pre-check
+        # above is stale after seconds of streaming — two PCs racing the
+        # same path must produce a 409 (conflict flow), never a silent
+        # last-writer-wins.
+        clash = await asyncio.to_thread(
+            workspace_sync.commit_file, str(root), tmp, target, base_sha
+        )
+        if clash == "__is_dir__":
+            raise HTTPException(status_code=409, detail={"conflict": "is_dir"})
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"conflict": "modified", "current_sha": clash},
+            )
     except HTTPException:
         tmp.unlink(missing_ok=True)
         raise
@@ -1693,17 +1705,20 @@ async def chunk_upload_commit(
         raise HTTPException(status_code=422, detail="content hash mismatch — restart upload")
 
     _root2, ws, target = _workspace_target(session_id, info["path"])
-    if target.exists():
-        if target.is_dir():
-            raise HTTPException(status_code=409, detail={"conflict": "is_dir"})
-        cur = await asyncio.to_thread(workspace_sync.hash_file, target)
-        if cur != base_sha:
-            raise HTTPException(
-                status_code=409, detail={"conflict": "modified", "current_sha": cur}
-            )
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _os.replace(part, target)
+    # Atomic verify+replace under the storage lock (same anti-race
+    # contract as PUT). On conflict the staged part is dropped — the
+    # replica re-uploads after resolving.
+    clash = await asyncio.to_thread(
+        workspace_sync.commit_file, str(root), part, target, base_sha
+    )
+    if clash == "__is_dir__":
+        meta.unlink(missing_ok=True)
+        raise HTTPException(status_code=409, detail={"conflict": "is_dir"})
+    if clash is not None:
+        meta.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=409, detail={"conflict": "modified", "current_sha": clash}
+        )
     meta.unlink(missing_ok=True)
 
     latest = await _sync_touch(session_id, str(root))

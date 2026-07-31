@@ -201,3 +201,50 @@ def test_10k_files_incremental_rescan_fast(tmp_path):
     assert second["hashed"] == 0
     assert steady_s < 1.0, f"steady-state rescan too slow: {steady_s:.2f}s"
     print(f"\n10k files: first scan {first_s:.2f}s, steady-state {steady_s*1000:.0f}ms")
+
+
+# ── streaming-race + self-heal (multi-PC audit) ───────────────────────
+
+
+def test_put_race_during_stream_rejected(tmp_path):
+    """EFFECT PROOF: the target changes WHILE a PUT is streaming (another
+    PC won the race). The pre-check passed, but the final locked
+    re-verify must 409 — never a silent last-writer-wins."""
+    target = tmp_path / "workspace" / "raced.txt"
+    target.write_bytes(b"v1")
+    v1_sha = hashlib.sha256(b"v1").hexdigest()
+
+    class _RacingReq:
+        headers = {"content-length": "20"}
+
+        async def stream(self):
+            yield b"replica-A-part1 "
+            # replica B lands its write mid-stream
+            target.write_bytes(b"replica-B-won")
+            yield b"tail"
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(ac.put_workspace_file(
+            _RacingReq(), session_id="s", path="workspace/raced.txt",
+            base_sha=v1_sha, device="", auth={}))
+    assert e.value.status_code == 409
+    assert e.value.detail["current_sha"] == hashlib.sha256(b"replica-B-won").hexdigest()
+    # B's content intact, A's partial upload not applied, no temp leak
+    assert target.read_bytes() == b"replica-B-won"
+    assert not list((tmp_path / ".geny-sync-tmp").glob("put-*"))
+
+
+def test_index_corruption_self_heals(tmp_path):
+    """EFFECT PROOF: a corrupt index db is dropped and rebuilt — the
+    protocol keeps working (derived state, tombstones sacrificed)."""
+    (tmp_path / "workspace" / "keep.txt").write_bytes(b"k")
+    wsync.refresh_index(str(tmp_path), force=True)
+    db = tmp_path / ".geny-sync" / "index.db"
+    db.write_bytes(b"THIS IS NOT SQLITE" * 100)
+    for suffix in ("-wal", "-shm"):
+        (tmp_path / ".geny-sync" / f"index.db{suffix}").unlink(missing_ok=True)
+
+    stats = wsync.refresh_index(str(tmp_path), force=True)
+    assert stats["latest_seq"] > 0
+    paths = {c["path"] for c in wsync.changes_since(str(tmp_path), 0)["changes"]}
+    assert "keep.txt" in paths

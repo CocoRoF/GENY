@@ -66,13 +66,22 @@ export interface LocalFs {
   scan(): Promise<Map<string, LocalStat>>
   hash(path: string): Promise<string>
   absPath(path: string): string
-  /** Atomic apply: caller downloads to temp inside, then rename. */
   removeFile(path: string): Promise<void>
   removeDirIfEmpty(path: string): Promise<boolean>
   mkdir(path: string): Promise<void>
   /** Rename `path` to a conflict-preserving sibling; returns its rel path. */
   renameToConflict(path: string, deviceName: string): Promise<string>
   stat(path: string): Promise<LocalStat | null>
+  /** Guarded atomic apply of a downloaded temp file: place tmpRel at
+   *  `path` ONLY IF the path still matches `expected` (the stat captured
+   *  at scan time; null = must not exist). Returns false — and drops the
+   *  temp — when the user touched the file mid-round, so a fresh local
+   *  edit is never clobbered by a stale download. */
+  finalizeDownload(tmpRel: string, path: string, expected: LocalStat | null): Promise<boolean>
+  /** True on case-insensitive filesystems (Windows/macOS default) —
+   *  lets the engine skip case-colliding server paths instead of
+   *  flip-flopping one local file between two server entries. */
+  isCaseInsensitive?(): Promise<boolean>
 }
 
 export interface IndexEntry {
@@ -95,6 +104,9 @@ export interface SyncStats {
   deletedRemote: number
   conflicts: number
   skippedLarge: number
+  /** Actions postponed because the local file moved mid-round (fresh
+   *  edits are never clobbered — the next round resolves them). */
+  deferred: number
   errors: string[]
 }
 
@@ -132,17 +144,42 @@ export async function syncOnce(
 ): Promise<{ index: SyncIndex; stats: SyncStats }> {
   const stats: SyncStats = {
     downloaded: 0, uploaded: 0, deletedLocal: 0, deletedRemote: 0,
-    conflicts: 0, skippedLarge: 0, errors: [],
+    conflicts: 0, skippedLarge: 0, deferred: 0, errors: [],
   }
   const now = opts.now ?? (() => Date.now())
 
   // ── 1. gather both sides ────────────────────────────────────────────
-  const remote = await transport.changes(index.cursor)
+  let remote = await transport.changes(index.cursor)
+  if (remote.latest_seq < index.cursor) {
+    // The server's journal restarted (index rebuilt / session recreated):
+    // our cursor points past its history and new files would never
+    // arrive. Re-bootstrap — the 3-way merge absorbs the full snapshot.
+    index.cursor = 0
+    remote = await transport.changes(0)
+  }
   const maxBytes = remote.max_file_bytes && remote.max_file_bytes > 0
     ? Math.min(remote.max_file_bytes, opts.maxFileBytes)
     : opts.maxFileBytes
   const remoteByPath = new Map<string, RemoteChange>()
   for (const c of remote.changes) remoteByPath.set(c.path, c) // later seq wins (ordered)
+
+  // Case-insensitive filesystems can hold only ONE of "A.txt"/"a.txt".
+  // Keep the first server path per casefold key; skip the rest loudly —
+  // otherwise a single local file flip-flops between two server entries.
+  if ((await fs.isCaseInsensitive?.()) ?? false) {
+    const seen = new Map<string, string>()
+    for (const [p, c] of [...remoteByPath]) {
+      if (c.deleted) continue
+      const key = p.toLowerCase()
+      const first = seen.get(key)
+      if (first === undefined) {
+        seen.set(key, p)
+      } else if (first !== p) {
+        remoteByPath.delete(p)
+        stats.errors.push(`case-collision skipped: ${p} (vs ${first})`)
+      }
+    }
+  }
 
   const local = await fs.scan()
 
@@ -175,12 +212,13 @@ export async function syncOnce(
   ])
 
   type Action =
-    | { kind: 'download'; path: string; sha: string; isDir: boolean }
-    | { kind: 'deleteLocal'; path: string; isDir: boolean }
+    | { kind: 'download'; path: string; sha: string; isDir: boolean; expected: LocalStat | null }
+    | { kind: 'deleteLocal'; path: string; isDir: boolean; expected: LocalStat | null }
     | { kind: 'upload'; path: string; baseSha: string }
-    | { kind: 'deleteRemote'; path: string; baseSha: string; isDir: boolean }
+    | { kind: 'deleteRemote'; path: string; baseSha: string; isDir: boolean; expected: LocalStat | null }
     | { kind: 'mkdirRemote'; path: string }
     | { kind: 'conflict'; path: string; serverSha: string }
+    | { kind: 'dirOverFile'; path: string } // server dir now occupies a local file's path
     | { kind: 'settle'; path: string; sha: string } // both ended up identical
 
   const plan: Action[] = []
@@ -214,14 +252,19 @@ export async function syncOnce(
 
     // ── directories ───────────────────────────────────────────────────
     if ((rc?.is_dir ?? st?.isDir ?? idx?.isDir) === true) {
-      if (serverChanged && !serverDeleted && !localExists) {
-        plan.push({ kind: 'download', path: p, sha: '', isDir: true }) // mkdir local
+      if (rc && rc.is_dir && !serverDeleted && st && !st.isDir) {
+        // Type clash: the server path became a DIRECTORY but a local
+        // FILE occupies it. Preserve the file as a conflict copy, then
+        // materialise the dir.
+        plan.push({ kind: 'dirOverFile', path: p })
+      } else if (serverChanged && !serverDeleted && !localExists) {
+        plan.push({ kind: 'download', path: p, sha: '', isDir: true, expected: null }) // mkdir local
       } else if (serverDeleted && localExists && !localChanged) {
-        plan.push({ kind: 'deleteLocal', path: p, isDir: true })
+        plan.push({ kind: 'deleteLocal', path: p, isDir: true, expected: st })
       } else if (localNew && rc === undefined) {
         plan.push({ kind: 'mkdirRemote', path: p })
       } else if (localDeleted && !serverChanged) {
-        plan.push({ kind: 'deleteRemote', path: p, baseSha: '', isDir: true })
+        plan.push({ kind: 'deleteRemote', path: p, baseSha: '', isDir: true, expected: null })
       } else if (serverDeleted && localDeleted) {
         delete index.entries[p]
       } else if (localExists && rc && !serverDeleted) {
@@ -240,19 +283,19 @@ export async function syncOnce(
 
     if (serverChanged && !localChanged) {
       if (serverDeleted) {
-        if (localExists) plan.push({ kind: 'deleteLocal', path: p, isDir: false })
+        if (localExists) plan.push({ kind: 'deleteLocal', path: p, isDir: false, expected: st })
         else delete index.entries[p]
       } else if (rc!.sha256 === lsha && localExists) {
         plan.push({ kind: 'settle', path: p, sha: lsha }) // converged already
       } else {
-        plan.push({ kind: 'download', path: p, sha: rc!.sha256, isDir: false })
+        plan.push({ kind: 'download', path: p, sha: rc!.sha256, isDir: false, expected: st })
       }
       continue
     }
 
     if (localChanged && !serverChanged) {
       if (localDeleted) {
-        plan.push({ kind: 'deleteRemote', path: p, baseSha: base, isDir: false })
+        plan.push({ kind: 'deleteRemote', path: p, baseSha: base, isDir: false, expected: null })
       } else {
         plan.push({ kind: 'upload', path: p, baseSha: localNew ? '' : base })
       }
@@ -267,7 +310,7 @@ export async function syncOnce(
       plan.push({ kind: 'upload', path: p, baseSha: base })
     } else if (localDeleted && !serverDeleted) {
       // server edited what we deleted → edit wins, bring it back
-      plan.push({ kind: 'download', path: p, sha: rc!.sha256, isDir: false })
+      plan.push({ kind: 'download', path: p, sha: rc!.sha256, isDir: false, expected: null })
     } else if (rc!.sha256 === lsha) {
       plan.push({ kind: 'settle', path: p, sha: lsha }) // identical edits
     } else {
@@ -333,24 +376,33 @@ async function applyAction(
         await fs.mkdir(p)
         index.entries[p] = { isDir: true, size: 0, mtimeMs: 0, sha: '', lastSyncedSha: '' }
       } else {
-        await transport.download(p, fs.absPath(p))
-        const st = await fs.stat(p)
-        index.entries[p] = {
-          isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
-          sha: action.sha, lastSyncedSha: action.sha,
-        }
-        stats.downloaded += 1
+        const applied = await guardedDownload(p, action.sha, action.expected, transport, fs, index)
+        if (applied) stats.downloaded += 1
+        else stats.deferred += 1 // user touched it mid-round → next round
       }
       break
     }
     case 'deleteLocal': {
       if (action.isDir) {
-        await fs.removeDirIfEmpty(p)
+        const removed = await fs.removeDirIfEmpty(p)
+        if (removed || (await fs.stat(p)) === null) {
+          delete index.entries[p]
+        }
+        // else: untracked junk still inside — KEEP the index entry so the
+        // dir doesn't look locally-new next round and resurrect the
+        // server-side deletion (ping-pong guard). It stays local-only.
       } else {
-        await fs.removeFile(p)
-        stats.deletedLocal += 1
+        // Never clobber a fresh edit: only delete if the file still
+        // matches what the scan saw.
+        const cur = await fs.stat(p)
+        if (statsEqual(cur, action.expected)) {
+          await fs.removeFile(p)
+          stats.deletedLocal += 1
+          delete index.entries[p]
+        } else {
+          stats.deferred += 1
+        }
       }
-      delete index.entries[p]
       break
     }
     case 'mkdirRemote': {
@@ -370,14 +422,11 @@ async function applyAction(
       } catch (e) {
         if (e instanceof SyncConflictError) {
           // server changed it since → edit wins: pull the server version
-          await transport.download(p, fs.absPath(p))
-          const st = await fs.stat(p)
-          const sha = e.currentSha ?? (await fs.hash(p))
-          index.entries[p] = {
-            isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
-            sha, lastSyncedSha: sha,
-          }
-          stats.downloaded += 1
+          const applied = await guardedDownload(
+            p, e.currentSha ?? '', action.expected, transport, fs, index,
+          )
+          if (applied) stats.downloaded += 1
+          else stats.deferred += 1
         } else if ((e as any)?.status === 404) {
           delete index.entries[p] // already gone server-side
         } else {
@@ -397,8 +446,19 @@ async function applyAction(
         stats.uploaded += 1
       } catch (e) {
         if (e instanceof SyncConflictError) {
-          // raced with another replica → full conflict flow
-          await resolveConflict(p, e.currentSha ?? '', transport, fs, index, stats, opts)
+          // Raced with another replica. If the server already holds OUR
+          // content (crash-recovered index, duplicate upload), settle
+          // silently — no junk conflict copies.
+          const localSha = await fs.hash(p).catch(() => '')
+          if (e.currentSha && localSha === e.currentSha) {
+            const st = await fs.stat(p)
+            index.entries[p] = {
+              isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
+              sha: localSha, lastSyncedSha: localSha,
+            }
+          } else {
+            await resolveConflict(p, e.currentSha ?? '', transport, fs, index, stats, opts)
+          }
         } else {
           throw e
         }
@@ -406,10 +466,71 @@ async function applyAction(
       break
     }
     case 'conflict': {
-      await resolveConflict(p, action.serverSha, transport, fs, index, stats, opts)
+      // Identical edits masquerading as a conflict (e.g. the index was
+      // lost and both sides already hold the same bytes) → settle.
+      const localSha = await fs.hash(p).catch(() => '')
+      if (localSha && localSha === action.serverSha) {
+        const st = await fs.stat(p)
+        index.entries[p] = {
+          isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
+          sha: localSha, lastSyncedSha: localSha,
+        }
+      } else {
+        await resolveConflict(p, action.serverSha, transport, fs, index, stats, opts)
+      }
+      break
+    }
+    case 'dirOverFile': {
+      // Server made this path a directory; a local file sits there.
+      // Preserve the file as a conflict copy (and push it), then mkdir.
+      const conflictPath = await fs.renameToConflict(p, opts.deviceName)
+      try {
+        const res = await transport.put(conflictPath, fs.absPath(conflictPath), '')
+        const cst = await fs.stat(conflictPath)
+        index.entries[conflictPath] = {
+          isDir: false, size: cst?.size ?? 0, mtimeMs: cst?.mtimeMs ?? 0,
+          sha: res.sha256, lastSyncedSha: res.sha256,
+        }
+        stats.uploaded += 1
+      } catch (e: any) {
+        stats.errors.push(`dir-over-file copy upload ${conflictPath}: ${e?.message ?? e}`)
+      }
+      await fs.mkdir(p)
+      index.entries[p] = { isDir: true, size: 0, mtimeMs: 0, sha: '', lastSyncedSha: '' }
+      stats.conflicts += 1
       break
     }
   }
+}
+
+function statsEqual(a: { isDir: boolean; size: number; mtimeMs: number } | null,
+                    b: { isDir: boolean; size: number; mtimeMs: number } | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.isDir === b.isDir && a.size === b.size && a.mtimeMs === b.mtimeMs
+}
+
+/** Download to a temp inside the replica, then atomically finalize ONLY
+ *  if the local path still matches the scan-time stat. Returns whether
+ *  the download was applied (false = deferred to the next round). */
+async function guardedDownload(
+  p: string,
+  sha: string,
+  expected: LocalStat | null,
+  transport: Transport,
+  fs: LocalFs,
+  index: SyncIndex,
+): Promise<boolean> {
+  const tmpRel = `.geny-sync-tmp/apply-${Math.random().toString(36).slice(2)}`
+  await transport.download(p, fs.absPath(tmpRel))
+  const applied = await fs.finalizeDownload(tmpRel, p, expected)
+  if (applied) {
+    const st = await fs.stat(p)
+    index.entries[p] = {
+      isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
+      sha, lastSyncedSha: sha,
+    }
+  }
+  return applied
 }
 
 /** Both sides edited: server keeps the path; the local version survives
@@ -424,14 +545,21 @@ async function resolveConflict(
   opts: SyncOptions,
 ): Promise<void> {
   const conflictPath = await fs.renameToConflict(p, opts.deviceName)
-  await transport.download(p, fs.absPath(p))
-  const st = await fs.stat(p)
-  const sha = serverSha || (await fs.hash(p))
-  index.entries[p] = {
-    isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
-    sha, lastSyncedSha: sha,
+  const applied = await guardedDownload(p, serverSha, null, transport, fs, index)
+  if (applied) {
+    stats.downloaded += 1
+    if (!serverSha) {
+      // sha unknown (409 without current_sha) — record the real one
+      const sha = await fs.hash(p).catch(() => '')
+      const st = await fs.stat(p)
+      index.entries[p] = {
+        isDir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0,
+        sha, lastSyncedSha: sha,
+      }
+    }
+  } else {
+    stats.deferred += 1
   }
-  stats.downloaded += 1
   try {
     const res = await transport.put(conflictPath, fs.absPath(conflictPath), '')
     const cst = await fs.stat(conflictPath)

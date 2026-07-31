@@ -8,8 +8,8 @@
 
 import { createHash } from 'crypto'
 import { createReadStream } from 'fs'
-import { lstat, mkdir, readdir, rename, rm, rmdir, stat } from 'fs/promises'
-import { join, resolve, sep } from 'path'
+import { lstat, mkdir, readdir, rename, rm, rmdir, stat, writeFile } from 'fs/promises'
+import { dirname, join, resolve, sep } from 'path'
 import picomatch from 'picomatch'
 import { conflictName, LocalFs, LocalStat } from './sync-core'
 
@@ -43,11 +43,59 @@ export class ReplicaFs implements LocalFs {
   }
 
   absPath(rel: string): string {
-    const abs = resolve(this.root, rel)
+    // NFC-normalize so macOS (NFD on disk) and the server (NFC) agree on
+    // one spelling of every Korean/accented path.
+    const abs = resolve(this.root, rel.normalize('NFC'))
     if (abs !== this.root && !abs.startsWith(this.root + sep)) {
       throw new Error(`path escapes replica root: ${rel}`)
     }
     return abs
+  }
+
+  /** Case-insensitive fs detection (Windows/macOS default) — probed once
+   *  with a marker file in the sync temp dir. */
+  private _caseInsensitive: boolean | null = null
+
+  async isCaseInsensitive(): Promise<boolean> {
+    if (this._caseInsensitive !== null) return this._caseInsensitive
+    try {
+      const probeDir = join(this.root, '.geny-sync-tmp')
+      await mkdir(probeDir, { recursive: true })
+      const probe = join(probeDir, 'CaseProbe.tmp')
+      await writeFile(probe, 'x')
+      let insensitive = false
+      try {
+        await lstat(join(probeDir, 'caseprobe.tmp'))
+        insensitive = true
+      } catch {
+        insensitive = false
+      }
+      await rm(probe, { force: true })
+      this._caseInsensitive = insensitive
+    } catch {
+      this._caseInsensitive = false
+    }
+    return this._caseInsensitive
+  }
+
+  /** Guarded atomic apply of a downloaded temp: place only if the target
+   *  still matches the scan-time stat (fresh local edits win). */
+  async finalizeDownload(tmpRel: string, rel: string, expected: LocalStat | null): Promise<boolean> {
+    const tmpAbs = this.absPath(tmpRel)
+    const targetAbs = this.absPath(rel)
+    const cur = await this.stat(rel)
+    const matches =
+      (cur === null && expected === null) ||
+      (cur !== null && expected !== null &&
+        cur.isDir === expected.isDir && cur.size === expected.size &&
+        cur.mtimeMs === expected.mtimeMs)
+    if (!matches) {
+      await rm(tmpAbs, { force: true })
+      return false
+    }
+    await mkdir(dirname(targetAbs), { recursive: true })
+    await rename(tmpAbs, targetAbs)
+    return true
   }
 
   private ignoredName(name: string): boolean {
@@ -64,7 +112,9 @@ export class ReplicaFs implements LocalFs {
         return
       }
       for (const ent of entries) {
-        const rel = relPrefix ? `${relPrefix}/${ent.name}` : ent.name
+        // NFC-normalize names so macOS NFD spellings match server NFC paths
+        const name = ent.name.normalize('NFC')
+        const rel = relPrefix ? `${relPrefix}/${name}` : name
         if (this.ignoredName(ent.name) || this.isIgnoredGlob(rel)) continue
         if (ent.isSymbolicLink()) continue
         const abs = join(dirAbs, ent.name)

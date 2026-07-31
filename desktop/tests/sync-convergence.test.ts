@@ -305,6 +305,98 @@ async function main(): Promise<void> {
   assert.ok(s.deletedLocal >= 60, 'confirmed mass delete applies')
   console.log('11) mass-delete safety valve OK')
 
+  // 12) crash recovery: A loses its ENTIRE index (crash before save) —
+  //     resync must settle silently, zero junk conflict copies.
+  await A.sync({ confirmMassDelete: async () => true }) // converge A first
+  const before = A.tree()
+  A.index = { cursor: 0, entries: {} }
+  s = await A.sync()
+  assert.strictEqual(s.conflicts, 0, `no junk conflicts after index loss (${JSON.stringify(s)})`)
+  assert.strictEqual(s.uploaded, 0, 'nothing re-uploaded — content identical')
+  assert.deepStrictEqual(A.tree(), before, 'tree untouched by recovery')
+  console.log('12) index-loss crash recovery OK (settled, no junk copies)')
+
+  // 13) server journal reset: B's cursor is far ahead of a rebuilt hub —
+  //     the engine must detect it and re-bootstrap, not go blind.
+  hub.agentWrite('재빌드후파일.txt', '커서 리셋 후 생긴 파일')
+  B.index.cursor = hub.seq + 1_000_000
+  s = await B.sync()
+  assert.strictEqual(B.read('재빌드후파일.txt'), '커서 리셋 후 생긴 파일', 'cursor reset re-bootstrap')
+  assert.ok(B.index.cursor <= hub.seq, 'cursor healed')
+  console.log('13) cursor-ahead-of-server re-bootstrap OK')
+  await A.sync()
+
+  // 14) mid-round edit protection: the user edits a file WHILE the
+  //     engine is downloading the server version → the fresh edit must
+  //     NOT be clobbered; it resolves as a conflict next round.
+  A.write('보호대상.txt', '공통 v1')
+  await A.sync(); await B.sync()
+  hub.agentWrite('보호대상.txt', '서버 v2')
+  const origDownload = hub.transport().download
+  const racingTransport = { ...hub.transport() }
+  racingTransport.download = async (p: string, toAbs: string) => {
+    if (p === '보호대상.txt') B.write('보호대상.txt', '다운로드 중 사용자가 씀!')
+    return origDownload(p, toAbs)
+  }
+  const r14 = await syncOnce(racingTransport as any, B.fs, B.index, {
+    deviceName: 'PC-B', maxFileBytes: 500 * 1024 * 1024, stabilityMs: 500,
+  })
+  B.index = r14.index
+  assert.strictEqual(B.read('보호대상.txt'), '다운로드 중 사용자가 씀!', 'fresh edit NOT clobbered')
+  assert.ok(r14.stats.deferred >= 1, `deferred (${JSON.stringify(r14.stats)})`)
+  s = await B.sync() // next round: both-changed → conflict, nothing lost
+  assert.strictEqual(B.read('보호대상.txt'), '서버 v2')
+  const guarded = B.tree().find((p) => p.includes('충돌-PC-B') && p.startsWith('보호대상'))
+  assert.ok(guarded && B.read(guarded).includes('사용자가 씀'), 'edit preserved as conflict copy')
+  await A.sync()
+  console.log('14) mid-round edit protection OK (deferred → conflict copy, no loss)')
+
+  // 15) deleted-dir resurrection guard: server deletes a dir; the local
+  //     copy still holds IGNORED junk so rmdir fails — the dir must NOT
+  //     be pushed back to the server (ping-pong guard).
+  A.write('legacy/문서.txt', 'doc')
+  await A.sync(); await B.sync()
+  B.write('legacy/node_modules/junk.js', 'x') // ignored junk inside
+  A.delete('legacy')
+  await A.sync()
+  await B.sync() // deletes 문서.txt; rmdir legacy fails (junk)
+  await B.sync() // second round must NOT resurrect it
+  const legacyOnHub = [...hub.entries.entries()].some(([p, e]) => !e.deleted && p.startsWith('legacy'))
+  assert.ok(!legacyOnHub, 'deleted dir NOT resurrected on server')
+  assert.ok(!B.has('legacy/문서.txt'), 'tracked file inside removed')
+  // user clears the junk by hand → the leftover unwinds cleanly (404 path)
+  B.delete('legacy')
+  await B.sync()
+  console.log('15) deleted-dir resurrection guard OK')
+
+  // 16) case-insensitive fs: two server paths differing only by case →
+  //     one is skipped loudly, no flip-flop uploads.
+  hub.agentWrite('Case.txt', 'UPPER')
+  hub.agentWrite('case.txt', 'lower')
+  const ciFs = B.fs as any
+  const origCi = ciFs.isCaseInsensitive?.bind(ciFs)
+  ciFs.isCaseInsensitive = async () => true
+  const r16 = await B.sync()
+  assert.ok(r16.errors.some((e) => e.includes('case-collision')), 'collision reported')
+  const r16b = await B.sync()
+  assert.strictEqual(r16b.uploaded, 0, 'no flip-flop upload on second round')
+  ciFs.isCaseInsensitive = origCi
+  hub.agentDelete('Case.txt'); hub.agentDelete('case.txt')
+  await A.sync(); await B.sync()
+
+  // 17) server dir over local file: path becomes a dir server-side while
+  //     a local file occupies it → file preserved, dir materialised.
+  B.write('thing', '나는 파일이었다')
+  await B.sync()
+  hub.agentDelete('thing')
+  hub.agentWrite('thing/안의파일.txt', '이제 폴더다')
+  s = await A.sync() // A: gets dir (no local file) — fine
+  const r17 = await B.sync()
+  assert.ok(B.has('thing/안의파일.txt'), 'dir materialised over former file')
+  const saved = B.tree().find((p) => p.includes('충돌-PC-B') && p.startsWith('thing'))
+  assert.ok(saved && B.read(saved) === '나는 파일이었다', `file preserved (${JSON.stringify(r17)})`)
+  await A.sync(); await B.sync(); await A.sync()
+
   // final: full convergence
   await A.sync({ confirmMassDelete: async () => true })
   await B.sync()

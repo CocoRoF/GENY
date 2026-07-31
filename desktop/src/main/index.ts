@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray } from 'electron'
-import { join } from 'path'
+import { join, sep } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
@@ -1703,9 +1703,20 @@ function registerIpc(): void {
   })
   ipcMain.handle('sync:add-pair', (_e, pair: { sessionId: string; sessionLabel?: string; localPath: string }) => {
     const list = loadConfig().syncPairs ?? []
+    // Overlap guard: the same folder (or a nested one) feeding TWO hubs
+    // would ping-pong files between agents through the shared disk.
+    const norm = (p: string): string => p.replace(/[\\/]+$/, '')
+    const newPath = norm(pair.localPath)
+    for (const existing of list) {
+      if (existing.sessionId === pair.sessionId && norm(existing.localPath) === newPath) continue // replaced below
+      const ex = norm(existing.localPath)
+      if (ex === newPath || ex.startsWith(newPath + sep) || newPath.startsWith(ex + sep)) {
+        return { error: 'overlap', conflictWith: existing.sessionLabel || existing.sessionId }
+      }
+    }
     // one pairing per (session, path) — replace duplicates
     const filtered = list.filter(
-      (p) => !(p.sessionId === pair.sessionId && p.localPath === pair.localPath),
+      (p) => !(p.sessionId === pair.sessionId && norm(p.localPath) === newPath),
     )
     const id = `${pair.sessionId.slice(0, 8)}-${Date.now().toString(36)}`
     const next = [...filtered, { id, ...pair }]
@@ -1890,6 +1901,13 @@ app.whenReady().then(() => {
         }
       },
       log: (msg) => console.log('[sync]', msg),
+      onAutoPause: (id) => {
+        // persist the auto-pause so a restart doesn't resume the storm
+        const next = (loadConfig().syncPairs ?? []).map((p) =>
+          p.id === id ? { ...p, paused: true } : p,
+        )
+        saveConfig({ syncPairs: next })
+      },
     })
     manager.configure(loadConfig().syncPairs ?? [])
   } catch (e) {

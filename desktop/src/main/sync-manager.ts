@@ -55,6 +55,9 @@ interface ManagerDeps {
   deviceId: () => string
   onStatus: (statuses: SyncPairStatus[]) => void
   log: (msg: string) => void
+  /** The engine auto-paused a pair (e.g. quota storm) — persist paused
+   *  in the config so it survives restarts. */
+  onAutoPause?: (id: string, reason: string) => void
   /** Patched by SyncManager: engines bubble single-status changes up. */
   onStatusOne?: () => void
 }
@@ -236,6 +239,15 @@ class PairEngine {
       this.status.lastSyncAt = Date.now()
       this.status.lastError = stats.errors.length ? stats.errors[0] : null
       this.status.state = this.status.connected ? 'idle' : 'offline'
+      // Quota storm guard: every retry would fail the same way each
+      // round (watcher + 60s timer) — pause instead of hammering.
+      const quotaErrors = stats.errors.filter((e) => e.includes('507')).length
+      if (quotaErrors > 0 && quotaErrors >= Math.max(1, Math.floor(stats.errors.length / 2))) {
+        this.cfg.paused = true
+        this.status.state = 'paused'
+        this.status.lastError = 'workspace quota exceeded — sync paused'
+        this.deps.onAutoPause?.(this.cfg.id, 'quota')
+      }
       if (stats.downloaded || stats.uploaded || stats.deletedLocal || stats.deletedRemote) {
         this.deps.log(
           `sync[${this.cfg.sessionId.slice(0, 8)}] ↓${stats.downloaded} ↑${stats.uploaded} ` +
