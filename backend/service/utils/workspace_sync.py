@@ -87,9 +87,31 @@ def _db_path(storage_path: str) -> Path:
     return Path(storage_path) / ".geny-sync" / "index.db"
 
 
+def _hwm_path(storage_path: str) -> Path:
+    return Path(storage_path) / ".geny-sync" / "seq.hwm"
+
+
+def _read_hwm(storage_path: str) -> int:
+    try:
+        return int(_hwm_path(storage_path).read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_hwm(storage_path: str, seq: int) -> None:
+    """Seq high-water mark OUTSIDE the sqlite file — survives an index
+    rebuild so seq never regresses (a regressed journal would strand
+    every replica whose cursor is past the new latest)."""
+    try:
+        _hwm_path(storage_path).write_text(str(seq))
+    except OSError:
+        pass
+
+
 def _connect(storage_path: str) -> sqlite3.Connection:
     path = _db_path(storage_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not path.exists()
     conn = sqlite3.connect(str(path), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -107,6 +129,23 @@ def _connect(storage_path: str) -> sqlite3.Connection:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_seq ON entries(seq)")
     conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+    if fresh:
+        # Rebuilt (or first-ever) index: seed seq from the high-water mark
+        # so it stays monotonic across rebuilds. Also mark every cursor
+        # older than this point stale — tombstones did not survive.
+        hwm = _read_hwm(storage_path)
+        if hwm > 0:
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES('seq', ?) "
+                "ON CONFLICT(key) DO NOTHING",
+                (str(hwm),),
+            )
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES('prune_watermark', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(hwm),),
+            )
+            conn.commit()
     return conn
 
 
@@ -306,16 +345,37 @@ def _refresh_index_inner(
                 )
                 stats["deleted"] += 1
 
-            # prune ancient tombstones (replicas away longer re-bootstrap)
-            cutoff = datetime.now(timezone.utc).timestamp() - _TOMBSTONE_TTL_S
-            conn.execute(
-                "DELETE FROM entries WHERE deleted=1 AND updated_at < ?",
-                (datetime.fromtimestamp(cutoff, timezone.utc).isoformat(),),
-            )
+            # Prune ancient tombstones — and RECORD the highest pruned seq
+            # as the stale-cursor watermark: a replica whose cursor is
+            # older than a pruned delete can no longer converge from a
+            # delta and must re-bootstrap (changes_since signals it).
+            cutoff_iso = datetime.fromtimestamp(
+                datetime.now(timezone.utc).timestamp() - _TOMBSTONE_TTL_S,
+                timezone.utc,
+            ).isoformat()
+            pruned = conn.execute(
+                "SELECT MAX(seq) FROM entries WHERE deleted=1 AND updated_at < ?",
+                (cutoff_iso,),
+            ).fetchone()
+            if pruned and pruned[0]:
+                wm_row = conn.execute(
+                    "SELECT value FROM meta WHERE key='prune_watermark'"
+                ).fetchone()
+                wm = max(int(wm_row[0]) if wm_row else 0, int(pruned[0]))
+                conn.execute(
+                    "INSERT INTO meta(key, value) VALUES('prune_watermark', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(wm),),
+                )
+                conn.execute(
+                    "DELETE FROM entries WHERE deleted=1 AND updated_at < ?",
+                    (cutoff_iso,),
+                )
 
             conn.commit()
             row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
             stats["latest_seq"] = int(row[0]) if row else 0
+            _write_hwm(storage_path, stats["latest_seq"])
             return stats
         finally:
             conn.close()
@@ -342,8 +402,16 @@ def changes_since(storage_path: str, since: int) -> Dict:
                 (since,),
             ).fetchall()
         meta = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
+        wm_row = conn.execute(
+            "SELECT value FROM meta WHERE key='prune_watermark'"
+        ).fetchone()
+        watermark = int(wm_row[0]) if wm_row else 0
         return {
             "latest_seq": int(meta[0]) if meta else 0,
+            # Cursor no longer usable: tombstones up to `watermark` were
+            # pruned (or the index was rebuilt) — deltas from an older
+            # cursor would silently miss deletions. Replicas re-bootstrap.
+            "stale_cursor": bool(0 < since < watermark),
             "changes": [
                 {
                     "path": r[0],
@@ -435,6 +503,46 @@ def hash_file(path: Path) -> str:
     """Public streaming sha256 (used by the PUT endpoint for base_sha
     verification when the index is stale)."""
     return _sha256_file(path)
+
+
+def locked_delete(storage_path: str, target: Path, base_sha: Optional[str]) -> Optional[str]:
+    """Verify-and-delete under the per-storage lock (same anti-race
+    contract as commit_file — a guarded delete must not destroy a write
+    that landed after the caller's pre-check). Returns None on success,
+    the current sha on base_sha conflict. Raises FileNotFoundError when
+    the target is already gone. Blocking — call via asyncio.to_thread."""
+    import shutil
+
+    lock = _lock_for(str(Path(storage_path).resolve()))
+    with lock:
+        if not target.exists():
+            raise FileNotFoundError(str(target))
+        if base_sha and target.is_file():
+            cur = _sha256_file(target)
+            if cur != base_sha:
+                return cur
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        return None
+
+
+def locked_rename(storage_path: str, src: Path, dst: Path) -> Optional[str]:
+    """Rename under the per-storage lock with a no-clobber guarantee —
+    ``os.rename`` silently replaces an existing dst on POSIX, so the
+    exists-check must be atomic with the rename against every other
+    lock-holding writer. Returns None on success, 'src_missing' or
+    'dst_exists' on refusal. Blocking — call via asyncio.to_thread."""
+    lock = _lock_for(str(Path(storage_path).resolve()))
+    with lock:
+        if not src.exists():
+            return "src_missing"
+        if dst.exists():
+            return "dst_exists"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+        return None
 
 
 def commit_file(storage_path: str, tmp: Path, target: Path, base_sha: str) -> Optional[str]:

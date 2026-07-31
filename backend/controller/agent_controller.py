@@ -1222,7 +1222,6 @@ def _workspace_max_file_bytes() -> int:
         return 500 * 1024 * 1024
 
 
-_WORKSPACE_UPLOAD_MAX_BYTES = _workspace_max_file_bytes()
 
 
 async def _sync_touch(session_id: str, storage_path: str) -> int:
@@ -1298,14 +1297,20 @@ async def storage_rename(
 ):
     """Rename/move a file or folder within the workspace."""
     _enforce_session_owner(session_id, auth)
-    root, _ws, src = _workspace_target(session_id, request.src)
+    from service.utils import workspace_sync
+
+    root, ws, src = _workspace_target(session_id, request.src)
     _root2, _ws2, dst = _workspace_target(session_id, request.dst)
-    if not src.exists():
+    if src == ws or dst == ws:
+        raise HTTPException(status_code=403, detail="Cannot rename the workspace root")
+    # Locked no-clobber rename: os.rename silently replaces an existing
+    # dst on POSIX, so the exists-check must be atomic with the rename
+    # against concurrent PUT/chunk commits.
+    outcome = await asyncio.to_thread(workspace_sync.locked_rename, str(root), src, dst)
+    if outcome == "src_missing":
         raise HTTPException(status_code=404, detail="Source not found")
-    if dst.exists():
+    if outcome == "dst_exists":
         raise HTTPException(status_code=409, detail="Destination already exists")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    src.rename(dst)
     await _sync_touch(session_id, str(root))
     return {"ok": True, "path": str(dst.relative_to(root))}
 
@@ -1322,27 +1327,26 @@ async def storage_delete(
     auth: dict = Depends(require_auth),
 ):
     """Delete a file or folder (recursive) inside the workspace."""
-    import shutil as _shutil
-
     _enforce_session_owner(session_id, auth)
+    from service.utils import workspace_sync
+
     _root, ws, target = _workspace_target(session_id, path)
     if target == ws:
         raise HTTPException(status_code=403, detail="Cannot delete the workspace root")
-    if not target.exists():
+    # Verify+delete under the storage lock (off-loop — rmtree of a big
+    # tree must never stall the event loop), so a guarded delete can't
+    # destroy a PUT that committed after the caller's pre-check.
+    try:
+        clash = await asyncio.to_thread(
+            workspace_sync.locked_delete, str(_root), target, base_sha
+        )
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Not found")
-    if base_sha and target.is_file():
-        from service.utils import workspace_sync
-
-        cur = await asyncio.to_thread(workspace_sync.hash_file, target)
-        if cur != base_sha:
-            raise HTTPException(
-                status_code=409,
-                detail={"conflict": "delete", "current_sha": cur},
-            )
-    if target.is_dir():
-        _shutil.rmtree(target)
-    else:
-        target.unlink()
+    if clash is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"conflict": "delete", "current_sha": clash},
+        )
     await _sync_touch(session_id, str(_root))
     return {"ok": True}
 
@@ -1396,25 +1400,35 @@ async def upload_to_workspace(
                 dest = cand
                 break
 
+    # Atomic: stage in .geny-sync-tmp then os.replace — a half-written
+    # file must never be visible at its final name (the agent's GAPT
+    # bind and sync replicas would pick up the partial bytes).
+    import uuid as _uuid
+
+    max_bytes = _workspace_max_file_bytes()
+    tmp_dir = root / ".geny-sync-tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_dir / f"upload-{_uuid.uuid4().hex}"
     size = 0
     try:
-        with dest.open("wb") as out:
+        with tmp.open("wb") as out:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
                 size += len(chunk)
-                if size > _WORKSPACE_UPLOAD_MAX_BYTES:
+                if size > max_bytes:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"file exceeds {_WORKSPACE_UPLOAD_MAX_BYTES // (1024*1024)} MiB",
+                        detail=f"file exceeds {max_bytes // (1024*1024)} MiB",
                     )
                 out.write(chunk)
+        _os.replace(tmp, dest)
     except HTTPException:
-        dest.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise
     except Exception:
-        dest.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="upload write failed")
 
     rel = str(dest.relative_to(root))
@@ -1705,6 +1719,10 @@ async def chunk_upload_commit(
         raise HTTPException(status_code=422, detail="content hash mismatch — restart upload")
 
     _root2, ws, target = _workspace_target(session_id, info["path"])
+    # Quota re-check at commit: the start-time check can be stale after
+    # other uploads landed in between.
+    if not target.exists():
+        await _enforce_workspace_quota(str(root), received)
     # Atomic verify+replace under the storage lock (same anti-race
     # contract as PUT). On conflict the staged part is dropped — the
     # replica re-uploads after resolving.

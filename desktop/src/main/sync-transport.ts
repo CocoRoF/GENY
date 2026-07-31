@@ -141,12 +141,14 @@ export class HttpSyncTransport implements Transport {
 
     let offset = 0
     let attempts = 0
+    let stalls = 0
     const fd = await open(fromAbs, 'r')
     try {
       while (offset < size) {
         const len = Math.min(CHUNK_SIZE, size - offset)
         const buf = Buffer.alloc(len)
-        await fd.read(buf, 0, len, offset)
+        const { bytesRead } = await fd.read(buf, 0, len, offset)
+        if (bytesRead <= 0) throw new Error('local file shrank during chunked upload')
         try {
           const res = await fetch(
             this.url(`/storage/file/chunks/${uploadId}`, { offset }),
@@ -156,13 +158,21 @@ export class HttpSyncTransport implements Transport {
                 ...(await authHeaders(this.auth)),
                 'Content-Type': 'application/octet-stream',
               },
-              body: buf as unknown as BodyInit,
+              body: buf.subarray(0, bytesRead) as unknown as BodyInit,
             },
           )
           if (res.status === 409) {
-            // out-of-sync — server tells us the true resume point
+            // out-of-sync — server tells us the true resume point.
+            // Progress guard: a resume point that never advances would
+            // otherwise hammer the server in a tight loop.
             const body = (await res.json().catch(() => ({}))) as any
-            offset = Number(body?.detail?.received ?? 0)
+            const resume = Number(body?.detail?.received ?? 0)
+            if (resume <= offset) {
+              if (++stalls > 3) throw new Error('chunked upload stalled (no resume progress)')
+            } else {
+              stalls = 0
+            }
+            offset = resume
             continue
           }
           if (!res.ok) throw Object.assign(new Error(`chunk HTTP ${res.status}`), { status: res.status })
@@ -252,14 +262,28 @@ export class WorkspaceWsClient {
 
   private async connect(): Promise<void> {
     if (this.closed) return
-    const base = this.auth.baseUrl.replace(/^http/, 'ws')
-    const token = await this.auth.token()
-    const url = `${base}/ws/workspace/${encodeURIComponent(this.auth.sessionId)}`
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } })
+    let ws: WebSocket
+    try {
+      const base = this.auth.baseUrl.replace(/^http/, 'ws')
+      const token = await this.auth.token()
+      const url = `${base}/ws/workspace/${encodeURIComponent(this.auth.sessionId)}`
+      ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } })
+    } catch {
+      // token/keychain hiccup must not kill reconnection forever
+      this.onState(false)
+      const delay = this.retryMs
+      this.retryMs = Math.min(this.retryMs * 2, 60_000)
+      setTimeout(() => void this.connect(), delay)
+      return
+    }
     this.ws = ws
 
     ws.on('open', () => {
-      this.retryMs = 2000
+      // Reset backoff only once the connection SURVIVES a few seconds —
+      // an accept-then-close server (expired auth) must keep backing off.
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) this.retryMs = 2000
+      }, 5000)
       this.onState(true)
       // Defensive: a send failure must degrade to a reconnect, never an
       // uncaught main-process exception (error dialog).

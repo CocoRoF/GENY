@@ -385,17 +385,74 @@ async function main(): Promise<void> {
   await A.sync(); await B.sync()
 
   // 17) server dir over local file: path becomes a dir server-side while
-  //     a local file occupies it → file preserved, dir materialised.
+  //     a LOCALLY-EDITED file occupies it → edit preserved as conflict
+  //     copy, dir materialised. (An unedited local copy is dropped —
+  //     same semantics as plain delete propagation.)
   B.write('thing', '나는 파일이었다')
   await B.sync()
   hub.agentDelete('thing')
   hub.agentWrite('thing/안의파일.txt', '이제 폴더다')
+  B.write('thing', '로컬에서 더 수정함') // fresh edit → must survive
   s = await A.sync() // A: gets dir (no local file) — fine
   const r17 = await B.sync()
   assert.ok(B.has('thing/안의파일.txt'), 'dir materialised over former file')
   const saved = B.tree().find((p) => p.includes('충돌-PC-B') && p.startsWith('thing'))
-  assert.ok(saved && B.read(saved) === '나는 파일이었다', `file preserved (${JSON.stringify(r17)})`)
+  assert.ok(saved && B.read(saved) === '로컬에서 더 수정함', `edit preserved (${JSON.stringify(r17)})`)
   await A.sync(); await B.sync(); await A.sync()
+
+  // 18) fail-closed replica: an empty scan over a tracked tree (unmounted
+  //     share / renamed root) must ABORT, not wipe the server workspace.
+  const realScan = B.fs.scan.bind(B.fs)
+  ;(B.fs as any).scan = async () => new Map()
+  const hubLiveBefore = [...hub.entries.values()].filter((e) => !e.deleted).length
+  let aborted = false
+  try {
+    await B.sync()
+  } catch (e) {
+    aborted = String((e as Error).message).includes('unavailable')
+  }
+  ;(B.fs as any).scan = realScan
+  const hubLiveAfter = [...hub.entries.values()].filter((e) => !e.deleted).length
+  assert.ok(aborted, 'empty-scan round aborted')
+  assert.strictEqual(hubLiveAfter, hubLiveBefore, 'server workspace untouched')
+  await B.sync() // healthy round resumes normally
+  console.log('18) fail-closed empty-scan guard OK (server not wiped)')
+
+  // 19) cursor holdback: a failed download must be redelivered next
+  //     round — never silently skipped past.
+  hub.agentWrite('한번은실패.txt', '결국 도착해야 함')
+  const okDownload = hub.transport().download
+  let failedOnce = false
+  const flakyTransport = { ...hub.transport() }
+  flakyTransport.download = async (p: string, toAbs: string) => {
+    if (p === '한번은실패.txt' && !failedOnce) {
+      failedOnce = true
+      throw Object.assign(new Error('transient 500'), { status: 500 })
+    }
+    return okDownload(p, toAbs)
+  }
+  const r19 = await syncOnce(flakyTransport as any, A.fs, A.index, {
+    deviceName: 'PC-A', maxFileBytes: 500 * 1024 * 1024, stabilityMs: 500,
+  })
+  A.index = r19.index
+  assert.ok(r19.stats.errors.length === 1 && !A.has('한번은실패.txt'), 'first round failed')
+  s = await A.sync() // cursor was held back → change redelivered
+  assert.strictEqual(A.read('한번은실패.txt'), '결국 도착해야 함', 'failed download redelivered')
+  await B.sync()
+  console.log('19) cursor holdback on failure OK (no permanent miss)')
+
+  // 20) ignore asymmetry: agent-side build junk in the feed is neither
+  //     downloaded NOR remote-deleted by replicas that don't scan it.
+  hub.agentWrite('.gradle/caches/blob.bin', 'agent build state')
+  await B.sync()
+  await B.sync() // second round: must not turn "not scanned" into deleteRemote
+  const gradleAlive = [...hub.entries.entries()].some(
+    ([p, e]) => p.startsWith('.gradle') && !e.deleted && !e.is_dir,
+  )
+  assert.ok(gradleAlive, 'agent-side ignored file NOT deleted from server')
+  assert.ok(!B.has('.gradle/caches/blob.bin'), 'and not downloaded either')
+  hub.agentDelete('.gradle')
+  console.log('20) ignore-asymmetry protection OK')
 
   // final: full convergence
   await A.sync({ confirmMassDelete: async () => true })

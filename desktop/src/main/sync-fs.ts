@@ -102,6 +102,14 @@ export class ReplicaFs implements LocalFs {
     return DEFAULT_IGNORES.includes(name)
   }
 
+  /** Same rules the scan applies — exposed so the engine can filter
+   *  REMOTE paths too (ignore-asymmetry must never delete server files
+   *  the client simply doesn't scan). */
+  isIgnored(rel: string): boolean {
+    const parts = rel.split('/')
+    return parts.some((seg) => this.ignoredName(seg)) || this.isIgnoredGlob(rel)
+  }
+
   async scan(): Promise<Map<string, LocalStat>> {
     const out = new Map<string, LocalStat>()
     const walk = async (dirAbs: string, relPrefix: string): Promise<void> => {

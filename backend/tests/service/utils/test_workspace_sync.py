@@ -156,3 +156,78 @@ def test_throttle_collapses_scan_storms(tmp_path, monkeypatch):
     assert first.get("throttled") != 1
     second = wsync.refresh_index(str(tmp_path))
     assert second.get("throttled") == 1
+
+
+# ── final audit round: cursor safety across prune/rebuild + locked ops ─
+
+
+def test_ttl_prune_flags_stale_cursors(tmp_path, monkeypatch):
+    """EFFECT PROOF: once a tombstone is pruned, any cursor older than it
+    is flagged stale so the replica re-bootstraps instead of silently
+    keeping the deleted file forever."""
+    _mk(tmp_path, "keep.txt", b"k")
+    _mk(tmp_path, "doomed.txt", b"x")
+    s1 = wsync.refresh_index(str(tmp_path), force=True)
+    old_cursor = s1["latest_seq"]  # replica fully synced BEFORE the delete
+
+    (tmp_path / "workspace" / "doomed.txt").unlink()
+    wsync.refresh_index(str(tmp_path), force=True)
+
+    # age the tombstone past the TTL, then prune
+    monkeypatch.setattr(wsync, "_TOMBSTONE_TTL_S", 0)
+    import time as _t
+    _t.sleep(0.01)
+    wsync.refresh_index(str(tmp_path), force=True)
+
+    res = wsync.changes_since(str(tmp_path), old_cursor)
+    assert res["stale_cursor"] is True, "old cursor must be told to re-bootstrap"
+    # a cursor at latest is fine
+    assert wsync.changes_since(str(tmp_path), res["latest_seq"])["stale_cursor"] is False
+
+
+def test_rebuild_keeps_seq_monotonic_and_flags_cursors(tmp_path):
+    """EFFECT PROOF: after an index rebuild (corruption), seq continues
+    from the high-water mark (never regresses) and pre-rebuild cursors
+    are stale-flagged — no replica can be stranded past the journal."""
+    for i in range(5):
+        _mk(tmp_path, f"f{i}.txt", str(i).encode())
+    s1 = wsync.refresh_index(str(tmp_path), force=True)
+    pre = s1["latest_seq"]
+
+    # corrupt + rebuild
+    db = tmp_path / ".geny-sync" / "index.db"
+    db.write_bytes(b"garbage" * 100)
+    for suf in ("-wal", "-shm"):
+        (tmp_path / ".geny-sync" / f"index.db{suf}").unlink(missing_ok=True)
+    s2 = wsync.refresh_index(str(tmp_path), force=True)
+
+    assert s2["latest_seq"] > pre, "seq must continue past the high-water mark"
+    res = wsync.changes_since(str(tmp_path), pre - 1)
+    assert res["stale_cursor"] is True, "pre-rebuild cursor must re-bootstrap"
+    # and the snapshot bootstrap still sees everything
+    boot = wsync.changes_since(str(tmp_path), 0)
+    assert len([c for c in boot["changes"] if not c["is_dir"]]) == 5
+
+
+def test_locked_delete_verifies_under_lock(tmp_path):
+    p = _mk(tmp_path, "guard.txt", b"current")
+    import hashlib
+    cur = hashlib.sha256(b"current").hexdigest()
+    clash = wsync.locked_delete(str(tmp_path), p, "stale-sha")
+    assert clash == cur and p.exists(), "stale base_sha refused, file intact"
+    assert wsync.locked_delete(str(tmp_path), p, cur) is None
+    assert not p.exists()
+    import pytest as _pytest
+    with _pytest.raises(FileNotFoundError):
+        wsync.locked_delete(str(tmp_path), p, None)
+
+
+def test_locked_rename_no_clobber(tmp_path):
+    a = _mk(tmp_path, "a.txt", b"A")
+    b = _mk(tmp_path, "b.txt", "B must survive".encode())
+    assert wsync.locked_rename(str(tmp_path), a, b) == "dst_exists"
+    assert b.read_bytes() == "B must survive".encode(), "os.rename clobber prevented"
+    b.unlink()
+    assert wsync.locked_rename(str(tmp_path), a, b) is None
+    assert b.read_bytes() == b"A"
+    assert wsync.locked_rename(str(tmp_path), a, b) == "src_missing"

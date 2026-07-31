@@ -1902,11 +1902,13 @@ app.whenReady().then(() => {
       },
       log: (msg) => console.log('[sync]', msg),
       onAutoPause: (id) => {
-        // persist the auto-pause so a restart doesn't resume the storm
+        // persist the auto-pause AND tear the engine down (watcher/WS
+        // must not keep running on an inert pair)
         const next = (loadConfig().syncPairs ?? []).map((p) =>
           p.id === id ? { ...p, paused: true } : p,
         )
         saveConfig({ syncPairs: next })
+        setTimeout(() => getSyncManager()?.configure(next), 0)
       },
     })
     manager.configure(loadConfig().syncPairs ?? [])

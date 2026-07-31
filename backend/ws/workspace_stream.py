@@ -79,6 +79,10 @@ class WorkspaceHub:
             if not devs:
                 self._devices.pop(session_id, None)
                 self._stop_watch(session_id)
+                # unbounded-growth guard: these dicts gain one entry per
+                # session ever synced — drop them with the last replica
+                self._events.pop(session_id, None)
+                self._latest.pop(session_id, None)
 
     # ── inotify watch (watchfiles) — real-time agent-write detection ──
     #
@@ -121,8 +125,13 @@ class WorkspaceHub:
             async for _changes in awatch(
                 ws_dir, stop_event=stop, debounce=400, step=100,
             ):
+                # force=True: an inotify batch is a REAL change signal; the
+                # 2s scan throttle would swallow it (one-shot event, no
+                # re-fire) and real-time detection would fall back to the
+                # 30s poll. awatch's own 400ms debounce bounds the rate.
                 stats = await asyncio.to_thread(
-                    workspace_sync.refresh_index, storage_path, session_id
+                    workspace_sync.refresh_index, storage_path, session_id,
+                    force=True,
                 )
                 seq = int(stats.get("latest_seq", 0))
                 if seq > (self._latest.get(session_id) or 0):
@@ -188,10 +197,21 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
         await websocket.close(code=4401)
         return
 
+    # Same ownership posture as every REST sync endpoint — this socket
+    # exposes activity telemetry + the owner's device list.
+    from controller.agent_controller import (
+        _enforce_session_owner,
+        _storage_root_live_or_dormant,
+    )
+
+    try:
+        _enforce_session_owner(session_id, auth.payload or {})
+    except Exception:
+        await websocket.close(code=4403)
+        return
+
     # Resolve the storage root (live or dormant) up front — 4404 if the
     # session doesn't exist.
-    from controller.agent_controller import _storage_root_live_or_dormant
-
     try:
         storage_path = _storage_root_live_or_dormant(session_id)
     except Exception:
@@ -260,6 +280,15 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
                     await _send(websocket, "changed", {"latest_seq": latest})
                     last_beat = time.monotonic()
                 except asyncio.TimeoutError:
+                    # Shared-event race: a sibling replica may have cleared
+                    # the event while we were mid-send — recheck the hub's
+                    # latest so no replica silently lags a notify.
+                    hub_latest = _hub.latest(session_id) or 0
+                    if hub_latest > latest:
+                        latest = hub_latest
+                        await _send(websocket, "changed", {"latest_seq": latest})
+                        last_beat = time.monotonic()
+                        continue
                     # Poll for agent-driven writes the watcher might miss.
                     if time.monotonic() - last_scan >= scan_interval:
                         last_scan = time.monotonic()

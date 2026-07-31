@@ -138,11 +138,26 @@ class PairEngine {
   start(): void {
     if (this.cfg.paused) return
     this.stopped = false
+    // Crash hygiene: drop orphaned download temps from prior runs.
+    void import('fs/promises').then(({ readdir, rm }) => {
+      const tmp = join(this.cfg.localPath, '.geny-sync-tmp')
+      readdir(tmp).then((names) => {
+        for (const n of names) {
+          if (n.startsWith('apply-') || n.startsWith('dl-')) {
+            void rm(join(tmp, n), { force: true })
+          }
+        }
+      }).catch(() => {})
+    })
     // 1) file watcher — trigger only; the loop re-derives truth
-    this.watcher = watch(this.cfg.localPath, {
+    const rootAbs = this.cfg.localPath
+    this.watcher = watch(rootAbs, {
       ignoreInitial: true,
       ignored: (p: string) => {
-        const parts = p.split(/[\\/]/)
+        // segment-match RELATIVE to the root: a replica living under a
+        // folder named 'build'/'out' must not disable the whole watcher
+        const rel = p.startsWith(rootAbs) ? p.slice(rootAbs.length) : p
+        const parts = rel.split(/[\\/]/).filter(Boolean)
         return parts.some((seg) => DEFAULT_IGNORES.includes(seg))
       },
       awaitWriteFinish: { stabilityThreshold: 800, pollInterval: 200 },
@@ -173,7 +188,9 @@ class PairEngine {
     void this.ws.start()
 
     // 3) safety net
-    this.timer = setInterval(() => this.schedule(), PERIODIC_MS)
+    // Safety net runs DIRECTLY: sustained watcher churn resets the
+    // debounce forever; run() has its own mutex so this is always safe.
+    this.timer = setInterval(() => void this.run(), PERIODIC_MS)
     this.schedule()
   }
 
@@ -241,7 +258,7 @@ class PairEngine {
       this.status.state = this.status.connected ? 'idle' : 'offline'
       // Quota storm guard: every retry would fail the same way each
       // round (watcher + 60s timer) — pause instead of hammering.
-      const quotaErrors = stats.errors.filter((e) => e.includes('507')).length
+      const quotaErrors = stats.errors.filter((e) => e.includes('[507]')).length
       if (quotaErrors > 0 && quotaErrors >= Math.max(1, Math.floor(stats.errors.length / 2))) {
         this.cfg.paused = true
         this.status.state = 'paused'
@@ -297,6 +314,13 @@ export class SyncManager {
       if (changed) {
         engine.stop()
         this.engines.delete(id)
+        if (!next) {
+          // pairing removed → its index file is dead weight (ids are
+          // minted fresh on re-pair, so this can never be reused)
+          void import('fs/promises').then(({ rm }) =>
+            rm(join(this.deps.indexDir, `${id}.json`), { force: true }).catch(() => {}),
+          )
+        }
       }
     }
     // start new ones
