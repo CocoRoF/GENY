@@ -30,6 +30,7 @@ class _Req:
     def __init__(self, body: bytes, chunk: int = 4):
         self._body = body
         self._chunk = chunk
+        self.headers = {"content-length": str(len(body))}
 
     async def stream(self):
         for i in range(0, len(self._body), self._chunk):

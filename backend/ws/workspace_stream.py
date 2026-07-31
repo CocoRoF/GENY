@@ -59,6 +59,7 @@ class WorkspaceHub:
         self._devices: Dict[str, Set[_Device]] = {}
         self._events: Dict[str, asyncio.Event] = {}
         self._latest: Dict[str, int] = {}
+        self._watches: Dict[str, tuple] = {}
 
     def event_for(self, session_id: str) -> asyncio.Event:
         ev = self._events.get(session_id)
@@ -66,8 +67,10 @@ class WorkspaceHub:
             ev = self._events[session_id] = asyncio.Event()
         return ev
 
-    def add(self, session_id: str, dev: _Device) -> None:
+    def add(self, session_id: str, dev: _Device, storage_path: str = "") -> None:
         self._devices.setdefault(session_id, set()).add(dev)
+        if storage_path:
+            self._ensure_watch(session_id, storage_path)
 
     def remove(self, session_id: str, dev: _Device) -> None:
         devs = self._devices.get(session_id)
@@ -75,6 +78,60 @@ class WorkspaceHub:
             devs.discard(dev)
             if not devs:
                 self._devices.pop(session_id, None)
+                self._stop_watch(session_id)
+
+    # ── inotify watch (watchfiles) — real-time agent-write detection ──
+    #
+    # One watcher task per session while ANY replica is connected. Events
+    # trigger the throttled incremental rescan; seq movement → notify.
+    # watchfiles unavailable → the connection loop's slow poll covers it.
+
+    def _ensure_watch(self, session_id: str, storage_path: str) -> None:
+        if session_id in self._watches:
+            return
+        try:
+            from watchfiles import awatch  # noqa: F401
+        except ImportError:
+            return
+        stop = asyncio.Event()
+        task = asyncio.create_task(self._watch_loop(session_id, storage_path, stop))
+        self._watches[session_id] = (task, stop)
+
+    def _stop_watch(self, session_id: str) -> None:
+        entry = self._watches.pop(session_id, None)
+        if entry:
+            task, stop = entry
+            stop.set()
+            task.cancel()
+
+    def watch_active(self, session_id: str) -> bool:
+        return session_id in self._watches
+
+    async def _watch_loop(self, session_id: str, storage_path: str,
+                          stop: asyncio.Event) -> None:
+        from pathlib import Path
+
+        from watchfiles import awatch
+
+        from service.utils import workspace_sync
+
+        ws_dir = Path(storage_path) / "workspace"
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            async for _changes in awatch(
+                ws_dir, stop_event=stop, debounce=400, step=100,
+            ):
+                stats = await asyncio.to_thread(
+                    workspace_sync.refresh_index, storage_path, session_id
+                )
+                seq = int(stats.get("latest_seq", 0))
+                if seq > (self._latest.get(session_id) or 0):
+                    self.notify(session_id, seq)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.info("[WorkspaceWS:%s] watch loop ended: %s", session_id[:8], exc)
+            self._watches.pop(session_id, None)
 
     def devices(self, session_id: str) -> List[dict]:
         return [
@@ -156,7 +213,7 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
         device_name=str(data.get("device_name") or "")[:64],
         user=str(user),
     )
-    _hub.add(session_id, dev)
+    _hub.add(session_id, dev, storage_path)
     event = _hub.event_for(session_id)
     logger.info("[WorkspaceWS:%s] replica %s (%s) connected",
                 session_id[:8], dev.device_id[:8], dev.device_name)
@@ -193,16 +250,18 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
                 if reader.done():
                     reader.result()  # surface disconnect
                     break
-                timeout = _AGENT_SCAN_S
+                # Primary agent-write signal is the inotify watcher; the
+                # poll is a slow belt-and-braces (fast only as fallback).
+                scan_interval = 30.0 if _hub.watch_active(session_id) else _AGENT_SCAN_S
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=timeout)
+                    await asyncio.wait_for(event.wait(), timeout=min(scan_interval, _AGENT_SCAN_S))
                     event.clear()
                     latest = _hub.latest(session_id) or await _refresh()
                     await _send(websocket, "changed", {"latest_seq": latest})
                     last_beat = time.monotonic()
                 except asyncio.TimeoutError:
-                    # Poll for agent-driven writes the endpoints can't see.
-                    if time.monotonic() - last_scan >= _AGENT_SCAN_S:
+                    # Poll for agent-driven writes the watcher might miss.
+                    if time.monotonic() - last_scan >= scan_interval:
                         last_scan = time.monotonic()
                         new_latest = await _refresh()
                         if new_latest > latest:

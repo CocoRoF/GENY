@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -330,6 +331,61 @@ def changes_since(storage_path: str, since: int) -> Dict:
         }
     finally:
         conn.close()
+
+
+def quota_bytes() -> int:
+    """Workspace total-size quota (env-tunable; 0 disables)."""
+    try:
+        return int(os.environ.get("GENY_WORKSPACE_QUOTA_MB", "10240")) * 1024 * 1024
+    except ValueError:
+        return 10240 * 1024 * 1024
+
+
+def used_bytes(storage_path: str) -> int:
+    """Total live file bytes per the index (cheap SQL, no walk)."""
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(size), 0) FROM entries WHERE deleted=0 AND is_dir=0"
+        ).fetchone()
+        return int(row[0] or 0)
+    finally:
+        conn.close()
+
+
+# ── chunked/resumable upload staging ─────────────────────────────────
+#
+# Large files (connector-side threshold) arrive as sequential chunks into
+# <storage>/.geny-sync-tmp/chunks/<upload_id>.part with a .meta sidecar,
+# then commit atomically with the same base_sha conflict dance as PUT.
+
+_CHUNK_TTL_S = 24 * 3600
+_UPLOAD_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+
+
+def chunk_dir(storage_path: str) -> Path:
+    return Path(storage_path) / ".geny-sync-tmp" / "chunks"
+
+
+def valid_upload_id(upload_id: str) -> bool:
+    return bool(_UPLOAD_ID_RE.match(upload_id or ""))
+
+
+def gc_stale_uploads(storage_path: str) -> int:
+    """Drop chunk staging older than the TTL. Returns files removed."""
+    d = chunk_dir(storage_path)
+    if not d.is_dir():
+        return 0
+    cutoff = time.time() - _CHUNK_TTL_S
+    removed = 0
+    for p in d.iterdir():
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def current_sha(storage_path: str, rel_ws_path: str) -> Optional[str]:

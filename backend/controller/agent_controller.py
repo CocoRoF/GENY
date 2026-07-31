@@ -1381,6 +1381,7 @@ async def upload_to_workspace(
     except ValueError:
         raise HTTPException(status_code=403, detail="subdir escapes workspace")
     sub.mkdir(parents=True, exist_ok=True)
+    await _enforce_workspace_quota(str(root), 0)
 
     # Filename: keep the user's name, defanged (no separators/controls).
     raw_name = _os.path.basename(file.filename or "upload.bin")
@@ -1447,7 +1448,28 @@ async def storage_changes(
     await asyncio.to_thread(workspace_sync.refresh_index, storage_path, session_id)
     result = await asyncio.to_thread(workspace_sync.changes_since, storage_path, since)
     result["max_file_bytes"] = _workspace_max_file_bytes()
+    result["quota_bytes"] = workspace_sync.quota_bytes()
+    result["used_bytes"] = await asyncio.to_thread(workspace_sync.used_bytes, storage_path)
     return result
+
+
+async def _enforce_workspace_quota(storage_path: str, incoming: int) -> None:
+    """507 when the workspace total would exceed the quota (0 disables)."""
+    from service.utils import workspace_sync as _wsync
+
+    quota = _wsync.quota_bytes()
+    if quota <= 0:
+        return
+    used = await asyncio.to_thread(_wsync.used_bytes, storage_path)
+    if used + max(0, incoming) > quota:
+        raise HTTPException(
+            status_code=507,
+            detail={
+                "error": "workspace quota exceeded",
+                "quota_bytes": quota,
+                "used_bytes": used,
+            },
+        )
 
 
 @router.put("/{session_id}/storage/file")
@@ -1497,6 +1519,14 @@ async def put_workspace_file(
         # (edit-vs-delete). Edit wins: accept the write (resurrect).
         pass
 
+    # Quota: use Content-Length when the client sends one; the streaming
+    # cap below still enforces the hard per-file limit either way.
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    await _enforce_workspace_quota(str(root), declared)
+
     max_bytes = _workspace_max_file_bytes()
     tmp_dir = root / ".geny-sync-tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -1532,6 +1562,156 @@ async def put_workspace_file(
         "path": str(target.relative_to(root)),
         "sha256": h.hexdigest(),
         "size": size,
+        "latest_seq": latest,
+    }
+
+
+# ── chunked / resumable upload (files above the connector's single-PUT
+#    threshold). Sequential parts into .geny-sync-tmp/chunks/<id>.part,
+#    then an atomic commit with the same base_sha conflict dance. ──────
+
+
+@router.post("/{session_id}/storage/file/chunks/start")
+async def chunk_upload_start(
+    session_id: str = Path(..., description="Session ID"),
+    path: str = Query(..., description="Final destination (storage-root relative, under workspace/)"),
+    size: int = Query(..., ge=1, description="Total file size in bytes"),
+    sha256: str = Query(..., min_length=64, max_length=64, description="sha256 of the full file"),
+    auth: dict = Depends(require_auth),
+):
+    import json as _json
+    import uuid as _uuid
+
+    _enforce_session_owner(session_id, auth)
+    from service.utils import workspace_sync
+
+    root, ws, target = _workspace_target(session_id, path)
+    if target == ws:
+        raise HTTPException(status_code=403, detail="path must name a file")
+    if size > _workspace_max_file_bytes():
+        raise HTTPException(
+            status_code=413,
+            detail=f"file exceeds {_workspace_max_file_bytes() // (1024*1024)} MiB",
+        )
+    await _enforce_workspace_quota(str(root), size)
+
+    cdir = workspace_sync.chunk_dir(str(root))
+    cdir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(workspace_sync.gc_stale_uploads, str(root))
+
+    upload_id = _uuid.uuid4().hex
+    (cdir / f"{upload_id}.part").touch()
+    (cdir / f"{upload_id}.meta").write_text(
+        _json.dumps({"path": path, "size": size, "sha256": sha256}),
+        encoding="utf-8",
+    )
+    return {"upload_id": upload_id, "received": 0}
+
+
+def _chunk_paths(session_id: str, upload_id: str):
+    from pathlib import Path as _P
+
+    from service.utils import workspace_sync
+
+    if not workspace_sync.valid_upload_id(upload_id):
+        raise HTTPException(status_code=400, detail="bad upload id")
+    root = _P(_storage_root_live_or_dormant(session_id)).resolve()
+    cdir = workspace_sync.chunk_dir(str(root))
+    part = cdir / f"{upload_id}.part"
+    meta = cdir / f"{upload_id}.meta"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="unknown upload (expired?)")
+    return root, part, meta
+
+
+@router.get("/{session_id}/storage/file/chunks/{upload_id}")
+async def chunk_upload_state(
+    session_id: str = Path(...),
+    upload_id: str = Path(...),
+    auth: dict = Depends(require_auth),
+):
+    """Resume point: how many bytes the server already holds."""
+    _enforce_session_owner(session_id, auth)
+    _root, part, _meta = _chunk_paths(session_id, upload_id)
+    return {"received": part.stat().st_size if part.exists() else 0}
+
+
+@router.put("/{session_id}/storage/file/chunks/{upload_id}")
+async def chunk_upload_part(
+    request: Request,
+    session_id: str = Path(...),
+    upload_id: str = Path(...),
+    offset: int = Query(..., ge=0, description="Byte offset — must equal bytes already received (sequential)"),
+    auth: dict = Depends(require_auth),
+):
+    import json as _json
+
+    _enforce_session_owner(session_id, auth)
+    _root, part, meta = _chunk_paths(session_id, upload_id)
+    info = _json.loads(meta.read_text(encoding="utf-8"))
+    received = part.stat().st_size if part.exists() else 0
+    if offset != received:
+        # Out-of-order / duplicate part → tell the client where to resume.
+        raise HTTPException(status_code=409, detail={"received": received})
+
+    total = int(info["size"])
+    written = 0
+    with part.open("ab") as out:
+        async for chunk in request.stream():
+            written += len(chunk)
+            if received + written > total:
+                raise HTTPException(status_code=413, detail="exceeds declared size")
+            out.write(chunk)
+    return {"received": received + written}
+
+
+@router.post("/{session_id}/storage/file/chunks/{upload_id}/commit")
+async def chunk_upload_commit(
+    session_id: str = Path(...),
+    upload_id: str = Path(...),
+    base_sha: str = Query("", description="Same conflict contract as PUT /storage/file"),
+    auth: dict = Depends(require_auth),
+):
+    import json as _json
+    import os as _os
+
+    _enforce_session_owner(session_id, auth)
+    from service.utils import workspace_sync
+
+    root, part, meta = _chunk_paths(session_id, upload_id)
+    info = _json.loads(meta.read_text(encoding="utf-8"))
+
+    received = part.stat().st_size if part.exists() else 0
+    if received != int(info["size"]):
+        raise HTTPException(
+            status_code=409, detail={"received": received, "expected": int(info["size"])}
+        )
+    actual_sha = await asyncio.to_thread(workspace_sync.hash_file, part)
+    if actual_sha != info["sha256"]:
+        part.unlink(missing_ok=True)
+        meta.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="content hash mismatch — restart upload")
+
+    _root2, ws, target = _workspace_target(session_id, info["path"])
+    if target.exists():
+        if target.is_dir():
+            raise HTTPException(status_code=409, detail={"conflict": "is_dir"})
+        cur = await asyncio.to_thread(workspace_sync.hash_file, target)
+        if cur != base_sha:
+            raise HTTPException(
+                status_code=409, detail={"conflict": "modified", "current_sha": cur}
+            )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _os.replace(part, target)
+    meta.unlink(missing_ok=True)
+
+    latest = await _sync_touch(session_id, str(root))
+    return {
+        "ok": True,
+        "path": str(target.relative_to(root)),
+        "sha256": actual_sha,
+        "size": received,
         "latest_seq": latest,
     }
 

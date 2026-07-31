@@ -8,7 +8,8 @@
  */
 
 import { createReadStream, createWriteStream } from 'fs'
-import { mkdir, rename, rm, stat } from 'fs/promises'
+import { createHash } from 'crypto'
+import { mkdir, open, rename, rm, stat } from 'fs/promises'
 import { dirname, join } from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
@@ -34,11 +35,20 @@ async function authHeaders(auth: TransportAuth): Promise<Record<string, string>>
   return { Authorization: `Bearer ${await auth.token()}` }
 }
 
+/** Files above this go through the chunked/resumable path. */
+const CHUNK_THRESHOLD_DEFAULT = 64 * 1024 * 1024
+const CHUNK_SIZE = 8 * 1024 * 1024
+
 export class HttpSyncTransport implements Transport {
+  private chunkThreshold: number
+
   constructor(
     private auth: TransportAuth,
     private tmpDir: string,
-  ) {}
+    opts: { chunkThresholdBytes?: number } = {},
+  ) {
+    this.chunkThreshold = opts.chunkThresholdBytes ?? CHUNK_THRESHOLD_DEFAULT
+  }
 
   private url(path: string, qs: Record<string, string | number | undefined> = {}): string {
     const u = new URL(
@@ -79,6 +89,9 @@ export class HttpSyncTransport implements Transport {
 
   async put(path: string, fromAbs: string, baseSha: string): Promise<{ sha256: string }> {
     const size = (await stat(fromAbs)).size
+    if (size > this.chunkThreshold) {
+      return this.putChunked(path, fromAbs, baseSha, size)
+    }
     const res = await fetch(
       this.url('/storage/file', {
         path: wsPath(path),
@@ -105,6 +118,85 @@ export class HttpSyncTransport implements Transport {
     if (!res.ok) throw Object.assign(new Error(`put HTTP ${res.status}`), { status: res.status })
     const data = (await res.json()) as { sha256: string }
     return { sha256: data.sha256 }
+  }
+
+  /** Chunked/resumable upload for large files: start → sequential 8MiB
+   *  parts (resuming from the server's byte count after any hiccup) →
+   *  atomic commit with the same base_sha conflict contract as PUT. */
+  private async putChunked(
+    path: string,
+    fromAbs: string,
+    baseSha: string,
+    size: number,
+  ): Promise<{ sha256: string }> {
+    const sha = await hashFileSha256(fromAbs)
+    const startRes = await fetch(
+      this.url('/storage/file/chunks/start', { path: wsPath(path), size, sha256: sha }),
+      { method: 'POST', headers: await authHeaders(this.auth) },
+    )
+    if (!startRes.ok) {
+      throw Object.assign(new Error(`chunk start HTTP ${startRes.status}`), { status: startRes.status })
+    }
+    const { upload_id: uploadId } = (await startRes.json()) as { upload_id: string }
+
+    let offset = 0
+    let attempts = 0
+    const fd = await open(fromAbs, 'r')
+    try {
+      while (offset < size) {
+        const len = Math.min(CHUNK_SIZE, size - offset)
+        const buf = Buffer.alloc(len)
+        await fd.read(buf, 0, len, offset)
+        try {
+          const res = await fetch(
+            this.url(`/storage/file/chunks/${uploadId}`, { offset }),
+            {
+              method: 'PUT',
+              headers: {
+                ...(await authHeaders(this.auth)),
+                'Content-Type': 'application/octet-stream',
+              },
+              body: buf as unknown as BodyInit,
+            },
+          )
+          if (res.status === 409) {
+            // out-of-sync — server tells us the true resume point
+            const body = (await res.json().catch(() => ({}))) as any
+            offset = Number(body?.detail?.received ?? 0)
+            continue
+          }
+          if (!res.ok) throw Object.assign(new Error(`chunk HTTP ${res.status}`), { status: res.status })
+          const data = (await res.json()) as { received: number }
+          offset = data.received
+          attempts = 0
+        } catch (e) {
+          if ((e as any)?.status) throw e // HTTP-level error: don't loop
+          // network hiccup → ask the server where to resume
+          if (++attempts > 5) throw e
+          await new Promise((r) => setTimeout(r, 1000 * attempts))
+          const st = await fetch(this.url(`/storage/file/chunks/${uploadId}`), {
+            headers: await authHeaders(this.auth),
+          })
+          if (st.ok) offset = Number(((await st.json()) as any).received ?? offset)
+        }
+      }
+    } finally {
+      await fd.close()
+    }
+
+    const commit = await fetch(
+      this.url(`/storage/file/chunks/${uploadId}/commit`, { base_sha: baseSha }),
+      { method: 'POST', headers: await authHeaders(this.auth) },
+    )
+    if (commit.status === 409) {
+      const body = (await commit.json().catch(() => ({}))) as any
+      throw new SyncConflictError(body?.detail?.current_sha)
+    }
+    if (!commit.ok) {
+      throw Object.assign(new Error(`chunk commit HTTP ${commit.status}`), { status: commit.status })
+    }
+    const done = (await commit.json()) as { sha256: string }
+    return { sha256: done.sha256 }
   }
 
   async del(path: string, baseSha?: string): Promise<void> {
@@ -204,4 +296,15 @@ export class WorkspaceWsClient {
     ws.on('close', scheduleRetry)
     ws.on('error', () => ws.close())
   }
+}
+
+/** Streaming sha256 of a local file (chunked-upload manifest). */
+export function hashFileSha256(absPath: string): Promise<string> {
+  return new Promise((res, rej) => {
+    const h = createHash('sha256')
+    createReadStream(absPath)
+      .on('data', (c) => h.update(c))
+      .on('end', () => res(h.digest('hex')))
+      .on('error', rej)
+  })
 }
