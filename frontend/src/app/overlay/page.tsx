@@ -301,8 +301,16 @@ export default function OverlayPage() {
       {/* The bar is the MOVE handle: drag its background → move the whole window.
           Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
+        /* Locked keeps the ESSENTIAL trio: open chat · settings · unlock —
+           voice/screen toggles stay behind the unlock. */
         <div style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
-          <button type="button" onClick={() => setLocked(false)} style={ICON_BTN}>
+          <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
+            <ChatIcon />
+          </button>
+          <button type="button" onClick={() => window.connector?.windowControl.openSettings()} title="설정 창 열기" style={ICON_BTN}>
+            <GearIcon />
+          </button>
+          <button type="button" onClick={() => setLocked(false)} title="잠금 해제" style={ICON_BTN}>
             <LockIcon open={false} />
           </button>
         </div>
@@ -557,12 +565,15 @@ const BAR: CSSProperties = {
 const LOCK_ONLY: CSSProperties = {
   alignSelf: 'center',
   margin: '0 auto 10px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 2,
   borderRadius: 999,
   background: 'rgba(18,18,24,0.7)',
   backdropFilter: 'blur(8px)',
   boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
   color: '#cfd0e0',
-  padding: 2,
+  padding: '2px 4px',
 };
 
 const ICON_BTN: CSSProperties = {
