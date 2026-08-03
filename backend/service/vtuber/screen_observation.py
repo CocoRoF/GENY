@@ -946,6 +946,14 @@ async def save_observation(
         force=force,
     )
     # Best-effort hygiene — the ambient buffer ages out wholesale; frames
-    # that mattered were promoted into the conversation record.
-    await _prune_old_observations(session_id, storage_root)
+    # that mattered were promoted into the conversation record. Runs in the
+    # BACKGROUND: awaiting it inside the upload request once wedged the
+    # event loop for tens of seconds (each deleted note rebuilt the
+    # full-vault index sidecars inline — watchdog-restarted the process
+    # mid-sweep on a 6k-note vault). The sidecar rebuild is coalesced +
+    # off-loop since executor 2.64.3; the sweep still must not hold the
+    # upload hostage. The hourly throttle inside the sweep is unchanged.
+    task = asyncio.create_task(_prune_old_observations(session_id, storage_root))
+    _prune_tasks.add(task)
+    task.add_done_callback(_prune_tasks.discard)
     return result
