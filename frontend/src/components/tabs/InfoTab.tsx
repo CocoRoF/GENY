@@ -194,9 +194,24 @@ export default function InfoTab() {
     { label: t('info.fields.sessionId'), value: data.session_id },
     { label: t('info.fields.name'), value: data.session_name || t('info.unnamed') },
     { label: t('info.fields.status'), value: isDeleted ? t('info.deleted') : (data.status || t('info.unknown')) },
-    { label: t('info.fields.model'), value: data.model || t('info.default') },
+    {
+      label: t('info.fields.model'),
+      // Provider-qualified: "openai · gpt-5.2" — the env's Stage-6 provider is
+      // what actually serves the session, so never show a bare claude-* default
+      // for a non-Anthropic environment.
+      value: data.model
+        ? data.model_provider
+          ? `${data.model_provider} · ${data.model}`
+          : data.model
+        : t('info.default'),
+    },
     { label: t('info.fields.role'), value: data.role || t('info.worker') },
-    { label: t('info.fields.graphName'), value: data.graph_name || '—' },
+    // For env-backed sessions graph_name is the redundant "env:<id>" — the
+    // 환경 row below already carries that (with the readable name). Keep the
+    // row only for legacy/preset graphs where it says something real.
+    ...(data.graph_name && !data.graph_name.startsWith('env:')
+      ? [{ label: t('info.fields.graphName'), value: data.graph_name }]
+      : []),
     { label: t('info.fields.workflowId'), value: data.workflow_id || '—' },
     { label: t('info.fields.maxTurns'), value: data.max_turns ?? '—' },
     { label: t('info.fields.timeout'), value: data.timeout ? `${data.timeout}s` : '—' },
@@ -208,13 +223,15 @@ export default function InfoTab() {
     { label: t('info.fields.totalCost'), value: data.total_cost != null && data.total_cost > 0 ? `$${data.total_cost.toFixed(6)}` : '$0.000000' },
     {
       label: t('info.fields.environment'),
-      value: data.env_id || t('info.environmentNone'),
+      // Human name first; the id stays reachable through the drawer link.
+      value: data.env_name || data.env_id || t('info.environmentNone'),
       onClick: data.env_id ? () => setEnvDrawerId(data.env_id) : undefined,
     },
     { label: t('info.fields.memoryProvider'), value: formatMemoryConfig(data.memory_config) },
     ...(data.session_type ? [{ label: t('info.fields.sessionType'), value: data.session_type }] : []),
     ...(data.linked_session_id ? [{ label: t('info.fields.linkedSession'), value: data.linked_session_id }] : []),
-    ...(data.chat_room_id ? [{ label: t('info.fields.chatRoom'), value: data.chat_room_id }] : []),
+    // chat_room_id stays in the API (the chat panel + connector broadcast run
+    // on it) but is plumbing, not session metadata — dropped from this view.
     ...(isDeleted ? [{ label: t('info.fields.deletedAt'), value: data.deleted_at ? formatTimestamp(data.deleted_at) : '—' }] : []),
   ];
 

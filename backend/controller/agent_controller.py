@@ -203,6 +203,40 @@ async def create_agent_session(request: CreateAgentRequest, auth: dict = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _enrich_env_fields(data: dict) -> None:
+    """Resolve model / provider / env name from the ENVIRONMENT manifest for
+    store-backed (dormant) records — mirrors AgentSession.get_info: the
+    manifest is what actually runs, so a stored legacy claude-* model must
+    not shadow a non-Anthropic environment."""
+    env_id = data.get("env_id")
+    if not env_id:
+        return
+    try:
+        from service.environment import get_environment_service
+
+        svc = get_environment_service()
+        manifest = svc.load_manifest(env_id) if svc else None
+        if manifest is None:
+            return
+        if not data.get("env_name"):
+            data["env_name"] = (manifest.metadata.name or "").strip() or None
+        env_model = ((manifest.model or {}).get("model") or "").strip() or None
+        if env_model:
+            data["model"] = env_model
+        for entry in manifest.stage_entries():
+            if entry.order != 6 or entry.name != "api":
+                continue
+            if entry.active:
+                data["model_provider"] = str(
+                    (entry.config or {}).get("provider")
+                    or (entry.strategies or {}).get("provider")
+                    or ""
+                ).strip() or None
+            break
+    except Exception:  # noqa: BLE001 — enrichment must never break listing
+        logger.debug("dormant env enrichment failed", exc_info=True)
+
+
 def _dormant_session_info(rec: dict) -> Optional[SessionInfo]:
     """Build a ``SessionInfo`` for a session that exists in the persistent
     store but is not currently live in memory (dormant after a restart).
@@ -219,6 +253,7 @@ def _dormant_session_info(rec: dict) -> Optional[SessionInfo]:
             return None
         stored = str(rec.get("status") or "stopped")
         data["status"] = "error" if stored == "error" else "stopped"
+        _enrich_env_fields(data)
         return SessionInfo.model_validate(data)
     except Exception as e:  # noqa: BLE001 — never let one bad record break the list
         logger.debug(f"Skipping dormant session record: {e}")

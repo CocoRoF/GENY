@@ -263,8 +263,17 @@ class SessionInfo(BaseModel):
     # (``executor.<code>``) and Sentry / log grouping.
     error_code: Optional[str] = None
 
-    # Claude-related information
+    # Model information. ``model`` is resolved from the session's ENVIRONMENT
+    # manifest when available (the manifest is what actually runs), with the
+    # legacy session-level value as fallback only. ``model_provider`` is the
+    # env's active Stage-6 provider ("anthropic" | "openai" | "custom" | …) so
+    # the UI never paints a non-Anthropic session with a claude-* default.
     model: Optional[str] = None
+    model_provider: Optional[str] = None
+
+    # Human name of the session's environment (manifest metadata.name) — the
+    # UI shows this instead of the bare env id.
+    env_name: Optional[str] = None
 
     # Session execution settings (preserved from creation)
     max_turns: Optional[int] = Field(

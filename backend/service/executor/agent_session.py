@@ -5214,8 +5214,41 @@ class AgentSession:
         except Exception:
             pass
 
-        # Resolve effective model name
-        effective_model = self._model_name
+        # Resolve model + provider + environment name from the session's
+        # ENVIRONMENT — the manifest is the single source of truth for what
+        # actually runs (stage-6 provider, manifest.model). The old chain fell
+        # straight to Anthropic globals, so sessions on other providers were
+        # displayed with a claude-* model they never use.
+        env_name: Optional[str] = None
+        model_provider: Optional[str] = None
+        env_model: Optional[str] = None
+        if self._env_id:
+            try:
+                from service.environment import get_environment_service
+
+                env_svc = get_environment_service()
+                manifest = env_svc.load_manifest(self._env_id) if env_svc else None
+                if manifest is not None:
+                    env_name = (manifest.metadata.name or "").strip() or None
+                    env_model = ((manifest.model or {}).get("model") or "").strip() or None
+                    for entry in manifest.stage_entries():
+                        if entry.order != 6 or entry.name != "api":
+                            continue
+                        if entry.active:
+                            model_provider = str(
+                                (entry.config or {}).get("provider")
+                                or (entry.strategies or {}).get("provider")
+                                or ""
+                            ).strip() or None
+                        break
+            except Exception:
+                logger.debug(
+                    f"[{self._session_id}] env enrichment for get_info failed",
+                    exc_info=True,
+                )
+
+        # Environment model wins; session override next; global defaults last.
+        effective_model = env_model or self._model_name
         if not effective_model:
             effective_model = os.environ.get('ANTHROPIC_MODEL')
         if not effective_model:
@@ -5240,6 +5273,8 @@ class AgentSession:
             error_message=self._error_message,
             error_code=self._error_code,
             model=effective_model,
+            model_provider=model_provider,
+            env_name=env_name,
             max_turns=self._max_turns,
             timeout=self._timeout,
             max_iterations=self._max_iterations,

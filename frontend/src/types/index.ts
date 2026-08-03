@@ -26,6 +26,10 @@ export interface SessionInfo {
   tool_preset_id: string | null;
   total_cost: number | null;
   env_id?: string | null;
+  /** Human name of the session's environment (manifest metadata.name). */
+  env_name?: string | null;
+  /** Active Stage-6 provider of the environment ("anthropic" | "openai" | …). */
+  model_provider?: string | null;
   memory_config?: Record<string, unknown> | null;
   is_deleted?: boolean;
   deleted_at?: string | null;
