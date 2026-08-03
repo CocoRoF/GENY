@@ -61,6 +61,11 @@ mac:
   category: public.app-category.utilities
 
 deb:
+  # Ubuntu 24.04 fix: the stock postinst probes userns AS ROOT and leaves
+  # chrome-sandbox at 0755, but apparmor_restrict_unprivileged_userns=1
+  # blocks userns for the real user at runtime → SIGTRAP on launch. The
+  # custom script chmods the helper 4755 unconditionally.
+  afterInstall: build/linux-after-install.tpl
   # NOTE: overriding `depends` replaces electron-builder's defaults — the
   # full default list is repeated here, plus the appindicator lib so the
   # tray (the app's only persistent UI surface) actually appears.

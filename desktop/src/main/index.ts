@@ -44,6 +44,9 @@ const isDev = !app.isPackaged
 // Linux/Wayland: desktopCapturer needs the PipeWire portal capturer —
 // without it a Wayland session captures a black/empty XWayland root.
 // Harmless on X11 (feature simply unused).
+// (Ubuntu 24.04 sandbox handling — userns restriction vs SUID helper — lives
+// in the launcher shim written by build/afterPack.cjs: the zygote's sandbox
+// check runs before any app JS, so it cannot be handled here.)
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
 }
@@ -216,7 +219,10 @@ function applyAutoLaunch(enabled: boolean): boolean {
       if (enabled) {
         mkdirSync(join(app.getPath('home'), '.config', 'autostart'), { recursive: true })
         // AppImage relaunches via $APPIMAGE; packaged builds via the exe path.
-        const exec = process.env.APPIMAGE || process.execPath
+        // process.execPath is the REAL binary (<name>.bin behind the sandbox
+        // shim, see build/afterPack.cjs) — autostart must go through the shim
+        // so the sandbox decision is re-made on every boot.
+        const exec = process.env.APPIMAGE || process.execPath.replace(/\.bin$/, '')
         // extract-and-run / FUSE-less launches leave APPIMAGE unset and
         // execPath inside an EPHEMERAL /tmp mount — an autostart entry
         // pointing there is dead at next boot. Refuse rather than break.
@@ -1148,6 +1154,16 @@ let appQuitting = false
 app.on('before-quit', () => {
   appQuitting = true
 })
+
+// Relaunch via the sandbox shim / AppImage runtime. process.execPath is the
+// REAL binary (<name>.bin behind the shim, build/afterPack.cjs) — relaunching
+// it directly would skip the sandbox decision, and an AppImage's FUSE mount
+// dies with this process, so the relaunch must go through $APPIMAGE.
+function relaunchSelf(): void {
+  appQuitting = true
+  app.relaunch({ execPath: process.env.APPIMAGE || process.execPath.replace(/\.bin$/, '') })
+  app.quit()
+}
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   try { getSyncManager()?.stopAll() } catch { /* ignore */ }
@@ -1213,11 +1229,7 @@ function rebuildTrayMenu(): void {
     { label: nt('tray.logout'), click: () => void logout() },
     {
       label: nt('tray.restart'),
-      click: () => {
-        appQuitting = true
-        app.relaunch()
-        app.quit()
-      },
+      click: () => relaunchSelf(),
     },
     {
       label: nt('tray.quit'),
@@ -1536,11 +1548,7 @@ function registerIpc(): void {
   ipcMain.on('app:reload-control', () => { void applyControlContent() })
 
   // Restart the whole connector (reloads the remote overlay/panel + native code).
-  ipcMain.on('app:restart', () => {
-    appQuitting = true
-    app.relaunch()
-    app.quit()
-  })
+  ipcMain.on('app:restart', () => relaunchSelf())
 
   // Global push-to-talk hotkey config. Persist the candidate, re-bind both
   // hotkeys, and roll back if it failed to register (conflict with another app).
@@ -1934,7 +1942,7 @@ function buildAppMenu(): void {
         { label: nt('menu.control'), click: () => showControl() },
         { label: nt('menu.checkUpdate'), click: () => void checkForUpdatesManually() },
         { type: 'separator' },
-        { label: nt('menu.restart'), click: () => { appQuitting = true; app.relaunch(); app.quit() } },
+        { label: nt('menu.restart'), click: () => relaunchSelf() },
         { label: nt('menu.logout'), click: () => void logout() },
         { role: 'quit', label: nt('menu.quit') },
       ],
