@@ -14,7 +14,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // decks with images routinely pass 10 MiB.
 const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 // audio rides the 50MB document cap (voice memos/meetings run long)
-const DOCUMENT_EXT_RE = /\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i;
+const DOCUMENT_EXT_RE = /\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|oga|webm|flac)$/i;
 const maxBytesFor = (f: File) =>
   DOCUMENT_EXT_RE.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES;
 

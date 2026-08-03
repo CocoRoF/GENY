@@ -3590,7 +3590,10 @@ class AgentSession:
                         stt_on = False
 
                     def _hint(entry: dict) -> str:
+                        # doc_* tools address from the STORAGE ROOT
                         rel = entry.get("rel_path") or entry["abs_path"]
+                        # executor built-ins (Audio*) address from working_dir
+                        ws_rel = entry.get("ws_rel_path") or rel
                         name_l = str(entry["name"]).lower()
                         if name_l.endswith(office_exts):
                             return (
@@ -3605,13 +3608,13 @@ class AgentSession:
                             if stt_on:
                                 return (
                                     f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
-                                    f"{rel} — AUDIO FILE: do NOT Read it (binary). "
-                                    f"Use AudioTranscribe('{rel}') to get the transcript "
+                                    f"{ws_rel} — AUDIO FILE: do NOT Read it (binary). "
+                                    f"Use AudioTranscribe('{ws_rel}') to get the transcript "
                                     f"(cached as {entry['name']}.transcript.json for later turns)."
                                 )
                             return (
                                 f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
-                                f"{rel} — AUDIO FILE (binary; no STT model is configured, "
+                                f"{ws_rel} — AUDIO FILE (binary; no STT model is configured, "
                                 f"so it cannot be transcribed — tell the user if they ask)."
                             )
                         return (
@@ -3671,11 +3674,53 @@ class AgentSession:
                     if att.get("source") == "screen_observation":
                         continue
                     name = _safe_filename(att.get("name") or "attachment")
+                    # Audio without a recognizable extension would draw an
+                    # AudioTranscribe hint the tool then rejects (suffix-
+                    # gated) — backfill from the MIME type.
+                    _mime0 = str(att.get("mime_type") or "")
+                    if _mime0.startswith(("audio/", "video/webm")):
+                        _audio_ext_map = {
+                            "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
+                            "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
+                            "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a",
+                            "audio/ogg": ".ogg", "audio/webm": ".webm", "video/webm": ".webm",
+                            "audio/flac": ".flac", "audio/x-flac": ".flac",
+                        }
+                        _known = (".wav", ".mp3", ".m4a", ".ogg", ".oga", ".webm", ".flac")
+                        if not name.lower().endswith(_known):
+                            name += _audio_ext_map.get(_mime0, ".webm")
                     url = att.get("url") or ""
                     src: Optional[FilePath] = None
                     if url.startswith("file://"):
                         src = FilePath(unquote(urlparse(url).path))
                     dest = uploads_dir / name
+                    # Same-name handling: reuse ONLY when the bytes match
+                    # (upload store's content sha when present, else size);
+                    # otherwise pick a unique name — silently serving an
+                    # older file (or clobbering an earlier turn's) breaks
+                    # the "files remain at the same paths" promise.
+                    att_sha = str(att.get("sha256") or att.get("attachment_id") or "")
+                    if dest.exists():
+                        same = dest.stat().st_size == (
+                            src.stat().st_size if (src is not None and src.is_file())
+                            else len(base64.b64decode(att["data"], validate=False)) if att.get("data")
+                            else -1
+                        )
+                        if same and len(att_sha) == 64:
+                            import hashlib as _hl
+                            _h = _hl.sha256()
+                            with dest.open("rb") as _fh:
+                                for _chunk in iter(lambda: _fh.read(1 << 20), b""):
+                                    _h.update(_chunk)
+                            same = _h.hexdigest() == att_sha
+                        if not same:
+                            stem, dot, ext2 = name.partition(".")
+                            for _i in range(2, 100):
+                                cand = f"{stem} ({_i}){dot}{ext2}" if dot else f"{stem} ({_i})"
+                                if not (uploads_dir / cand).exists():
+                                    name = cand
+                                    dest = uploads_dir / name
+                                    break
                     if src is not None and src.is_file():
                         if not (dest.exists() and dest.stat().st_size == src.stat().st_size):
                             uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -3692,7 +3737,17 @@ class AgentSession:
                         "mime": att.get("mime_type") or "application/octet-stream",
                         "size": dest.stat().st_size,
                         "abs_path": str(dest),
+                        # TWO bases on purpose — the tool families resolve
+                        # relative paths differently:
+                        #   * rel_path (storage-root): Geny's doc_* tools
+                        #     join against the STORAGE ROOT and document
+                        #     'workspace/uploads/…' addressing.
+                        #   * ws_rel_path (workspace): the executor's
+                        #     built-ins (Audio*, Read) resolve against
+                        #     working_dir = <storage>/workspace.
+                        # A single string breaks one family or the other.
                         "rel_path": f"workspace/uploads/{name}",
+                        "ws_rel_path": f"uploads/{name}",
                     })
                 except Exception:  # noqa: BLE001 — one bad attachment ≠ broken turn
                     logger.warning(

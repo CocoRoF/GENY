@@ -78,7 +78,6 @@ ALLOWED_AUDIO_MIMES = frozenset(
         "audio/mp4",
         "audio/x-m4a",
         "audio/m4a",
-        "audio/aac",
         "audio/ogg",
         "audio/webm",
         "audio/flac",

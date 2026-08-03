@@ -366,7 +366,7 @@ class BroadcastAttachment(BaseModel):
     accepted for tiny pasted images that bypass the upload step.
     """
 
-    kind: str = Field(..., description="image | file")
+    kind: str = Field(..., description="image | audio | file")
     name: Optional[str] = None
     mime_type: Optional[str] = None
     size: Optional[int] = None

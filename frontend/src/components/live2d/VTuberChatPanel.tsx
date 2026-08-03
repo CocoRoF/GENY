@@ -579,7 +579,7 @@ export default function VTuberChatPanel({
       // files pass through untouched (resizeImageIfNeeded is a no-op).
       const prepared = await Promise.all(
         accepted.map(async (f) => {
-          if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES) && !isImageFile(f)) {
+          if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|oga|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES) && !isImageFile(f)) {
             throw new Error(`${f.name}: file too large (>10 MiB)`);
           }
           return isImageFile(f) ? resizeImageIfNeeded(f) : f;
@@ -587,7 +587,7 @@ export default function VTuberChatPanel({
       );
       // Final guard after resize.
       for (const f of prepared) {
-        if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES)) {
+        if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|oga|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES)) {
           throw new Error(`${f.name}: still too large after resize`);
         }
       }
@@ -787,6 +787,13 @@ export default function VTuberChatPanel({
                             />
                           </a>
                         )
+                      ) : att.kind === 'audio' && att.url && !attApiPath ? (
+                        // inline player for public-store audio (parity with
+                        // the messenger); auth-gated URLs use the chip below
+                        <div key={`${att.attachment_id ?? att.url ?? i}`} className="max-w-[240px]">
+                          <audio src={att.url} controls className="w-full h-8" />
+                          <div className="text-[0.65rem] text-[var(--text-muted)] truncate mt-0.5">{att.name}</div>
+                        </div>
                       ) : (
                         <div
                           key={`${att.attachment_id ?? att.url ?? i}`}

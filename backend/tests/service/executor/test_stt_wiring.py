@@ -116,3 +116,92 @@ def test_audio_mimes_accepted_with_document_cap():
     assert e.value.status_code == 415
 
     assert MAX_DOCUMENT_BYTES == 50 * 1024 * 1024 > MAX_UPLOAD_BYTES
+
+
+# ── staging + hint path resolution (the two-bases contract) ──────────
+
+
+def _stage(tmp_path, attachments):
+    """Drive the real staging helper on a minimal session stand-in."""
+    import types
+
+    from service.executor.agent_session import AgentSession
+
+    fake = types.SimpleNamespace(storage_path=str(tmp_path), _session_id="t")
+    return AgentSession._stage_attachments_to_workspace(fake, attachments)
+
+
+def _make_upload(tmp_path, name, data: bytes):
+    src = tmp_path / "store" / name
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(data)
+    return f"file://{src}"
+
+
+def test_staged_paths_resolve_in_both_tool_families(tmp_path):
+    """EFFECT PROOF (the rel_path P0): the audio hint's path must open
+    through the EXECUTOR resolver (working_dir = workspace), and the
+    office hint's path through GENY's doc-tool base (storage root).
+    One shared string cannot satisfy both — the entry carries two."""
+    url = _make_upload(tmp_path, "회의.mp3", b"ID3fakemp3")
+    staged = _stage(tmp_path, [{"name": "회의.mp3", "mime_type": "audio/mpeg", "url": url}])
+    assert len(staged) == 1
+    entry = staged[0]
+    assert entry["rel_path"] == "workspace/uploads/회의.mp3"
+    assert entry["ws_rel_path"] == "uploads/회의.mp3"
+
+    # executor family base: working_dir = <storage>/workspace
+    try:
+        from geny_executor.tools.built_in._path_guard import resolve_and_validate
+    except ImportError:
+        pytest.skip("geny-executor unavailable")
+    ws = str(tmp_path / "workspace")
+    resolved = resolve_and_validate(entry["ws_rel_path"], ws, [ws])
+    assert resolved.exists(), "AudioTranscribe hint path must resolve"
+
+    # Geny doc family base: storage root
+    assert (tmp_path / entry["rel_path"]).exists(), "doc_analyze hint path must resolve"
+
+
+def test_extensionless_audio_gets_mime_extension(tmp_path):
+    """An audio upload without a usable extension would draw a hint the
+    suffix-gated tool rejects — staging backfills from the MIME."""
+    url = _make_upload(tmp_path, "voicememo", b"opusdata")
+    staged = _stage(tmp_path, [{"name": "voicememo", "mime_type": "audio/webm", "url": url}])
+    assert staged[0]["name"].endswith(".webm")
+    assert staged[0]["ws_rel_path"].endswith(".webm")
+
+
+def test_same_name_different_bytes_gets_unique_path(tmp_path):
+    """EFFECT PROOF: a second upload with the same name but different
+    content must NOT silently reuse/clobber — it lands at a unique name
+    (the hint always shows the final name)."""
+    import hashlib as _h
+
+    a = b"first version bytes"
+    b = b"second DIFFERENT bytes!"  # different size → collision branch
+    url1 = _make_upload(tmp_path, "메모.mp3", a)
+    s1 = _stage(tmp_path, [{"name": "메모.mp3", "mime_type": "audio/mpeg", "url": url1,
+                            "sha256": _h.sha256(a).hexdigest()}])
+    url2 = _make_upload(tmp_path, "메모2.mp3", b)
+    s2 = _stage(tmp_path, [{"name": "메모.mp3", "mime_type": "audio/mpeg", "url": url2,
+                            "sha256": _h.sha256(b).hexdigest()}])
+    assert s1[0]["name"] == "메모.mp3"
+    assert s2[0]["name"] != "메모.mp3", "collision must uniquify, not reuse stale bytes"
+    ws = tmp_path / "workspace" / "uploads"
+    assert (ws / s1[0]["name"]).read_bytes() == a
+    assert (ws / s2[0]["name"]).read_bytes() == b
+
+    # identical re-upload (same sha) reuses the existing path
+    s3 = _stage(tmp_path, [{"name": "메모.mp3", "mime_type": "audio/mpeg", "url": url1,
+                            "sha256": _h.sha256(a).hexdigest()}])
+    assert s3[0]["name"] == "메모.mp3"
+
+
+def test_aac_no_longer_promised():
+    from controller.upload_controller import ALLOWED_AUDIO_MIMES
+
+    assert "audio/aac" not in ALLOWED_AUDIO_MIMES, (
+        "the executor's Audio* family rejects .aac — accepting the MIME "
+        "creates a hint the tool can only refuse (ghost-promise)"
+    )
