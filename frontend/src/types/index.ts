@@ -212,7 +212,7 @@ export interface ChatRoomMessage {
  * the broadcast endpoint.
  */
 export interface ChatAttachment {
-  kind: 'image' | 'file';
+  kind: 'image' | 'audio' | 'file';
   name?: string;
   mime_type?: string;
   size?: number;

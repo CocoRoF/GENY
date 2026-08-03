@@ -579,7 +579,7 @@ export default function VTuberChatPanel({
       // files pass through untouched (resizeImageIfNeeded is a no-op).
       const prepared = await Promise.all(
         accepted.map(async (f) => {
-          if (f.size > (/\.(docx|xlsx|pptx|pdf)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES) && !isImageFile(f)) {
+          if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES) && !isImageFile(f)) {
             throw new Error(`${f.name}: file too large (>10 MiB)`);
           }
           return isImageFile(f) ? resizeImageIfNeeded(f) : f;
@@ -587,7 +587,7 @@ export default function VTuberChatPanel({
       );
       // Final guard after resize.
       for (const f of prepared) {
-        if (f.size > (/\.(docx|xlsx|pptx|pdf)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES)) {
+        if (f.size > (/\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES)) {
           throw new Error(`${f.name}: still too large after resize`);
         }
       }
@@ -927,7 +927,7 @@ export default function VTuberChatPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip"
+            accept="image/*,audio/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip,.wav,.mp3,.m4a,.ogg,.webm,.flac"
             multiple
             className="hidden"
             onChange={handleFileInputChange}

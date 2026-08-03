@@ -195,6 +195,20 @@ def compute_satisfied_config(env_tool_settings: Optional[dict] = None) -> Set[st
     except Exception:  # noqa: BLE001
         pass
 
+    # (9) STT — the Audio* family (AudioTranscribe/AudioListFiles/AudioInfo)
+    # needs a wired transcription endpoint. Enabled + api_url on the Whisper
+    # config is the readiness signal (same posture as SSH: config validity,
+    # not a live probe — the tool reports runtime failures actionably).
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.stt.whisper_config import WhisperConfig
+
+        _stt = get_config_manager().load_config(WhisperConfig)
+        if getattr(_stt, "enabled", False) and getattr(_stt, "api_url", ""):
+            satisfied.add("feature:stt_enabled")
+    except Exception:  # noqa: BLE001
+        pass
+
     return satisfied
 
 

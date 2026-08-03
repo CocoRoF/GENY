@@ -13,7 +13,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // Office documents / PDFs get the backend's larger document cap —
 // decks with images routinely pass 10 MiB.
 const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
-const DOCUMENT_EXT_RE = /\.(docx|xlsx|pptx|pdf)$/i;
+// audio rides the 50MB document cap (voice memos/meetings run long)
+const DOCUMENT_EXT_RE = /\.(docx|xlsx|pptx|pdf|wav|mp3|m4a|ogg|webm|flac)$/i;
 const maxBytesFor = (f: File) =>
   DOCUMENT_EXT_RE.test(f.name) ? MAX_DOCUMENT_BYTES : MAX_FILE_BYTES;
 
@@ -207,7 +208,7 @@ export default function MessageInput() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip"
+          accept="image/*,audio/*,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt,.json,.zip,.wav,.mp3,.m4a,.ogg,.webm,.flac"
           multiple
           className="hidden"
           onChange={handleFileInputChange}

@@ -2939,6 +2939,28 @@ class AgentSession:
         except Exception:  # noqa: BLE001 — never block session build on this
             pass
 
+        # STT provider for the native Audio* tools (executor 2.64.0) — the
+        # Whisper endpoint config becomes the serializable provider spec the
+        # executor's openai_compatible client consumes. Gated out via
+        # feature:stt_enabled unless enabled+configured, so injecting here is
+        # harmless when STT is unused.
+        try:
+            from service.config import get_config_manager as _gcm_stt
+            from service.config.sub_config.stt.whisper_config import WhisperConfig
+
+            _stt_cfg = _gcm_stt().load_config(WhisperConfig)
+            if getattr(_stt_cfg, "enabled", False) and getattr(_stt_cfg, "api_url", ""):
+                _tool_extras["stt"] = {
+                    "provider": "openai_compatible",
+                    "api_url": _stt_cfg.api_url,
+                    "model": _stt_cfg.model,
+                    "language": getattr(_stt_cfg, "language", None) or None,
+                    "timeout": float(getattr(_stt_cfg, "timeout_seconds", 300) or 300),
+                    "temperature": float(getattr(_stt_cfg, "temperature", 0.0) or 0.0),
+                }
+        except Exception:  # noqa: BLE001 — never block session build on this
+            pass
+
         if _workspace_stack is not None:
             _tool_extras["workspace_stack"] = _workspace_stack
 
@@ -3551,10 +3573,26 @@ class AgentSession:
                 non_image = [s for s in staged if not s["mime"].startswith("image/")]
                 if non_image:
                     office_exts = (".docx", ".xlsx", ".pptx")
+                    audio_exts = (".wav", ".mp3", ".m4a", ".ogg", ".oga", ".webm", ".flac")
+                    # Never promise a gated-out tool (ghost-tool lesson):
+                    # the AudioTranscribe hint appears only when the same
+                    # condition that satisfies feature:stt_enabled holds.
+                    stt_on = False
+                    try:
+                        from service.config import get_config_manager as _gcm_h
+                        from service.config.sub_config.stt.whisper_config import (
+                            WhisperConfig as _WC_h,
+                        )
+
+                        _c = _gcm_h().load_config(_WC_h)
+                        stt_on = bool(getattr(_c, "enabled", False) and getattr(_c, "api_url", ""))
+                    except Exception:  # noqa: BLE001
+                        stt_on = False
 
                     def _hint(entry: dict) -> str:
                         rel = entry.get("rel_path") or entry["abs_path"]
-                        if str(entry["name"]).lower().endswith(office_exts):
+                        name_l = str(entry["name"]).lower()
+                        if name_l.endswith(office_exts):
                             return (
                                 f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
                                 f"{rel} — OFFICE DOCUMENT: do NOT Read it (binary). "
@@ -3562,6 +3600,19 @@ class AgentSession:
                                 f"then doc_edit for precise changes (the user sees the "
                                 f"updated preview in the Canvas tab), doc_convert for "
                                 f"pdf/png/text, doc_generate for new documents."
+                            )
+                        if name_l.endswith(audio_exts) or str(entry["mime"]).startswith("audio/"):
+                            if stt_on:
+                                return (
+                                    f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
+                                    f"{rel} — AUDIO FILE: do NOT Read it (binary). "
+                                    f"Use AudioTranscribe('{rel}') to get the transcript "
+                                    f"(cached as {entry['name']}.transcript.json for later turns)."
+                                )
+                            return (
+                                f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "
+                                f"{rel} — AUDIO FILE (binary; no STT model is configured, "
+                                f"so it cannot be transcribed — tell the user if they ask)."
                             )
                         return (
                             f"- {entry['name']} ({entry['mime']}, {entry['size']} bytes): "

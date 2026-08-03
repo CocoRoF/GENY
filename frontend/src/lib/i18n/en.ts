@@ -1074,6 +1074,7 @@ const en = {
     tooLargePreview: 'File is too large to preview. Download it instead.',
     previewUnavailable: 'Preview unavailable',
     resizeHint: 'Drag to resize · double-click to reset',
+    transcript: 'Transcript (STT)',
     syncDevices: '{count} PCs syncing',
     scopeWorkspace: 'Workspace',
     scopeAll: 'All',

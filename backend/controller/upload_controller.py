@@ -65,6 +65,28 @@ ALLOWED_IMAGE_MIMES = frozenset(
     }
 )
 
+# Audio attachments (STT framework) — matches the executor's Audio* tool
+# formats (librosa-decodable) and the whisper endpoint's accepted types.
+# Audio gets the document-sized cap (voice memos/meetings run long).
+ALLOWED_AUDIO_MIMES = frozenset(
+    {
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/m4a",
+        "audio/aac",
+        "audio/ogg",
+        "audio/webm",
+        "audio/flac",
+        "audio/x-flac",
+        "video/webm",  # browser MediaRecorder default container
+    }
+)
+
 # 파일 처리는 P1 스코프에선 모양만 잡아둔다 (TODO). 일단 image 외 타입도
 # 업로드 자체는 허용하되 클라이언트가 ``kind=file`` 로 라우팅한다.
 ALLOWED_FILE_MIMES = frozenset(
@@ -127,11 +149,19 @@ def _ext_for(mime: str, original_name: str) -> str:
 def _classify(mime: str) -> str:
     if mime in ALLOWED_IMAGE_MIMES:
         return "image"
+    if mime in ALLOWED_AUDIO_MIMES:
+        return "audio"
     return "file"
 
 
 def _validate_mime(mime: str) -> None:
     if mime in ALLOWED_IMAGE_MIMES:
+        return
+    if mime in ALLOWED_AUDIO_MIMES:
+        # Audio rides the attachment store like any file; the agent-side
+        # value comes from the workspace intake (agent_session copies audio
+        # attachments into workspace/uploads/ where AudioTranscribe reaches
+        # them).
         return
     if mime in ALLOWED_FILE_MIMES:
         # TODO: 본격적인 파일 파이프라인 구현 (텍스트 추출, OCR, chunking).
@@ -150,7 +180,11 @@ async def _store_one(upload: UploadFile) -> UploadedFile:
 
     mime = upload.content_type or mimetypes.guess_type(upload.filename)[0] or "application/octet-stream"
     _validate_mime(mime)
-    max_bytes = MAX_DOCUMENT_BYTES if mime in DOCUMENT_MIMES else MAX_UPLOAD_BYTES
+    max_bytes = (
+        MAX_DOCUMENT_BYTES
+        if (mime in DOCUMENT_MIMES or mime in ALLOWED_AUDIO_MIMES)
+        else MAX_UPLOAD_BYTES
+    )
 
     # Hash + size in a single streaming pass — never load > MAX bytes into RAM.
     hasher = hashlib.sha256()

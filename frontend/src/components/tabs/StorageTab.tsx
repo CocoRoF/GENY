@@ -17,7 +17,7 @@ import {
   ChevronRight, Download, RefreshCw, FolderPlus, Upload, HardDrive,
   Folder, FileJson, FileText, FileCode, Globe, Palette, ScrollText,
   Settings, File as FileIcon, Image as ImageIcon, FileSpreadsheet,
-  Presentation, X, ArrowUp,
+  Presentation, X, ArrowUp, Music,
 } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
@@ -36,6 +36,7 @@ interface Entry {
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
 const OFFICE_EXT = new Set(['docx', 'xlsx', 'pptx', 'pdf']);
+const AUDIO_EXT = new Set(['wav', 'mp3', 'm4a', 'ogg', 'oga', 'webm', 'flac']);
 const TEXT_MAX_PREVIEW = 512 * 1024;
 
 function ext(name: string): string {
@@ -67,6 +68,7 @@ function fileIcon(name: string, isDir: boolean, size = 15): React.ReactNode {
   if (isDir) return <Folder size={size} className="text-[#4f9cf7] fill-[#4f9cf7]/25" />;
   const e = ext(name);
   if (IMAGE_EXT.has(e)) return <ImageIcon size={size} className="text-[#a855f7]" />;
+  if (AUDIO_EXT.has(e)) return <Music size={size} className="text-[#ec4899]" />;
   const map: Record<string, React.ReactNode> = {
     json: <FileJson size={size} className="text-[#f59e0b]" />,
     md: <FileText size={size} className="text-[#60a5fa]" />,
@@ -109,6 +111,25 @@ function AuthedImage({ sessionId, path, className, alt }: {
   if (!url) return <div className="animate-pulse bg-[var(--bg-tertiary)] rounded w-full h-40" />;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={url} className={className} alt={alt || path} />;
+}
+
+/** Authed audio player — storage-raw needs the Authorization header,
+ *  so the bytes come through a blob URL like images do. */
+function AuthedAudio({ sessionId, path }: { sessionId: string; path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let revoked: string | null = null;
+    let alive = true;
+    setUrl(null); setFailed(false);
+    agentApi.fetchStorageBlobUrl(sessionId, path)
+      .then((u) => { if (alive) { revoked = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; if (revoked) URL.revokeObjectURL(revoked); };
+  }, [sessionId, path]);
+  if (failed) return <div className="text-[12px] text-[var(--text-muted)] p-4">⚠ audio load failed</div>;
+  if (!url) return <div className="animate-pulse bg-[var(--bg-tertiary)] rounded h-12 w-full" />;
+  return <audio src={url} controls className="w-full" />;
 }
 
 export default function StorageTab() {
@@ -694,6 +715,9 @@ function QuickPreview({ sessionId, entry, rootPath, t }: {
   if (IMAGE_EXT.has(e)) {
     return <AuthedImage sessionId={sessionId} path={rootPath(entry.path)} className="max-w-full rounded-lg" alt={entry.name} />;
   }
+  if (AUDIO_EXT.has(e)) {
+    return <AudioPreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} />;
+  }
   if (OFFICE_EXT.has(e)) {
     return <OfficePreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} compact />;
   }
@@ -709,6 +733,13 @@ function FullPreview({ sessionId, entry, rootPath, t }: {
     return (
       <div className="flex items-center justify-center p-6 h-full">
         <AuthedImage sessionId={sessionId} path={rootPath(entry.path)} className="max-w-full max-h-[74vh] rounded-lg object-contain" alt={entry.name} />
+      </div>
+    );
+  }
+  if (AUDIO_EXT.has(e)) {
+    return (
+      <div className="p-6">
+        <AudioPreview sessionId={sessionId} entry={entry} rootPath={rootPath} t={t} />
       </div>
     );
   }
@@ -777,6 +808,39 @@ function OfficePreview({ sessionId, entry, rootPath, t, compact }: {
       ))}
       {compact && pages.length > 1 && (
         <p className="text-[11px] text-[var(--text-muted)]">+{pages.length - 1} pages</p>
+      )}
+    </div>
+  );
+}
+
+/** Audio preview: native player + the STT transcript sidecar when the
+ *  agent has already transcribed this file (framework contract). */
+function AudioPreview({ sessionId, entry, rootPath, t }: {
+  sessionId: string; entry: Entry; rootPath: (p: string) => string;
+  t: (k: string, v?: Record<string, string | number>) => string;
+}) {
+  const [transcript, setTranscript] = useState<{ text?: string; language?: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setTranscript(null);
+    agentApi.getStorageFile(sessionId, rootPath(entry.path) + '.transcript.json')
+      .then((r) => {
+        if (!alive) return;
+        try { setTranscript(JSON.parse(r.content ?? '')); } catch { /* not json */ }
+      })
+      .catch(() => { /* no transcript yet — fine */ });
+    return () => { alive = false; };
+  }, [sessionId, entry.path, rootPath]);
+  return (
+    <div className="flex flex-col gap-3">
+      <AuthedAudio sessionId={sessionId} path={rootPath(entry.path)} />
+      {transcript?.text && (
+        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)]/50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-1.5">
+            {t('storageTab.transcript')}{transcript.language ? ` · ${transcript.language}` : ''}
+          </div>
+          <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap">{transcript.text}</p>
+        </div>
       )}
     </div>
   );

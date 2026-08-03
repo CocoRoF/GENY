@@ -76,6 +76,17 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
           );
         }
 
+        // Audio attachments from the public upload store get an inline
+        // player (auth-gated storage paths fall through to the chip+link).
+        if (att.kind === 'audio' && href && !apiPath) {
+          return (
+            <div key={key} className="max-w-[260px]">
+              <audio src={href} controls className="w-full h-9" />
+              <div className="text-[0.7rem] text-[var(--text-muted)] truncate mt-0.5">{att.name}</div>
+            </div>
+          );
+        }
+
         const inner = (
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[0.75rem] text-[var(--text-secondary)] max-w-[240px]">
             <Paperclip size={12} className="text-[var(--text-muted)] shrink-0" />
