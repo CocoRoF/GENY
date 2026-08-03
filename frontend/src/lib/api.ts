@@ -30,7 +30,13 @@ async function apiCall<T = unknown>(endpoint: string, options: RequestInit = {})
       const raw = json.detail || json.message || json.error;
       message = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : `HTTP ${res.status}`;
     } catch {
-      message = body || `HTTP ${res.status}`;
+      // Non-JSON error body. A gateway error page (Cloudflare/nginx 502
+      // during a backend restart) is a full HTML document — dumping it
+      // verbatim into error UI is noise, not information.
+      message =
+        body.trimStart().startsWith('<') || body.length > 500
+          ? `서버가 응답하지 않습니다 (HTTP ${res.status}) — 잠시 후 다시 시도해 주세요.`
+          : body || `HTTP ${res.status}`;
     }
     throw new Error(message);
   }
