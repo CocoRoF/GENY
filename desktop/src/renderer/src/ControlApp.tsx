@@ -568,7 +568,14 @@ export function ControlApp() {
         return
       }
       const j = await r.json()
-      await window.connector?.secureStore.set(TOKEN_KEY, j.access_token)
+      const saved = await window.connector?.secureStore.set(TOKEN_KEY, j.access_token)
+      if (saved === false) {
+        // Linux without a Secret Service (gnome-keyring/kwallet): the token
+        // cannot persist — saying "성공" here produced an invisible
+        // login-loop. Tell the user what to install instead.
+        stat(t('status.keychainUnavailable'), 'err')
+        return
+      }
       setHasToken(true)
       setPassword('')
       stat(t('status.loginOk', { username: j.username }), 'ok')

@@ -38,6 +38,7 @@ export const messages: Record<string, Entry> = {
   'status.loggingIn': { ko: '로그인하는 중…', en: 'Signing in…' },
   'status.loginFailedHttp': { ko: '로그인 실패 — HTTP {code}', en: 'Sign-in failed — HTTP {code}' },
   'status.loginOk': { ko: '{username} 님으로 로그인됨 — 아바타를 불러옵니다', en: 'Signed in as {username} — loading the avatar' },
+  'status.keychainUnavailable': { ko: '로그인은 성공했지만 OS 키체인에 저장할 수 없습니다. Linux에서는 gnome-keyring(또는 kwallet)과 libsecret이 필요합니다 — 설치 후 다시 시도하세요.', en: 'Login succeeded but the OS keychain is unavailable. On Linux install gnome-keyring (or kwallet) + libsecret, then retry.' },
   'status.loginError': { ko: '오류 — {msg}', en: 'Error — {msg}' },
   'status.loggedOut': { ko: '로그아웃되었습니다', en: 'Signed out' },
 

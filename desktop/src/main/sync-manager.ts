@@ -163,7 +163,15 @@ class PairEngine {
       awaitWriteFinish: { stabilityThreshold: 800, pollInterval: 200 },
     })
     this.watcher.on('all', () => this.schedule())
-    this.watcher.on('error', () => {/* watcher hiccups are non-fatal */})
+    this.watcher.on('error', (err: unknown) => {
+      // inotify exhaustion is the one watcher error a user must SEE:
+      // live sync silently degrades to the 60s poll otherwise.
+      if (String((err as NodeJS.ErrnoException)?.code) === 'ENOSPC') {
+        this.status.lastError =
+          'inotify watch limit reached — raise fs.inotify.max_user_watches (sync falls back to 60s polling)'
+        this.pushStatus()
+      }
+    })
 
     // 2) server change notify
     this.ws = new WorkspaceWsClient(

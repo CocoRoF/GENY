@@ -238,7 +238,7 @@ export interface ConnectorBridge {
   /** Phase 7 — structured Windows app control (UIA) + live Office documents
    *  (COM), hosted in a persistent PowerShell STA process. Windows-only.
    *  Ops: windows|win_snapshot|el_act|win_focus|win_read|office_status|office_read|office_act. */
-  winauto: {
+  winauto?: {
     call(op: string, args: Record<string, unknown>): Promise<GatedCallResult>
   }
 
@@ -402,9 +402,16 @@ const api: ConnectorBridge = {
   browser: {
     call: (op, args) => ipcRenderer.invoke('browser:call', op, args),
   },
-  winauto: {
-    call: (op, args) => ipcRenderer.invoke('winauto:call', op, args),
-  },
+  // Windows-only UIA/COM control: expose the surface ONLY on win32 — the
+  // server advertises app_*/office_* tools purely on this key's presence,
+  // and a Linux/mac connector must not promise tools that can only error.
+  ...(process.platform === 'win32'
+    ? {
+        winauto: {
+          call: (op: string, args?: unknown) => ipcRenderer.invoke('winauto:call', op, args),
+        },
+      }
+    : {}),
   mcp: {
     listServers: () => ipcRenderer.invoke('mcp:list-servers'),
     advertise: () => ipcRenderer.invoke('mcp:advertise'),

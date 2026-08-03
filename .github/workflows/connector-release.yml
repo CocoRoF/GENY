@@ -32,6 +32,7 @@ jobs:
             glob: |
               desktop/dist/*.AppImage
               desktop/dist/*.deb
+              desktop/dist/*.blockmap
               desktop/dist/latest-linux.yml
           - os: windows-latest
             flag: --win
@@ -104,7 +105,7 @@ jobs:
             |---|---|---|
             | Windows | `Geny-Setup-*.exe` | Run it → if SmartScreen appears, **More info → Run anyway** |
             | macOS | `Geny-*.dmg` | Open it, drag `Geny.app` to **Applications** → on first launch **right-click → Open** (or System Settings → Privacy & Security → **Open Anyway**) |
-            | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` then run / deb: `sudo dpkg -i` |
+            | Linux | `Geny-*.AppImage` / `*.deb` | AppImage: `chmod +x` 후 실행 (Ubuntu 22.04+는 `sudo apt install libfuse2` 필요) / deb: `sudo dpkg -i` · 키체인은 gnome-keyring/kwallet 필요 |
 
             > **If macOS says "damaged / move to Trash"** (from an older build, or when right-click → Open won't work):
             > run `xattr -dr com.apple.quarantine "/Applications/Geny.app"` in Terminal, then open it again. (Works regardless of signing.)

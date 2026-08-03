@@ -29,6 +29,10 @@ asarUnpack:
 # prompt until Developer ID + @electron/notarize land. Windows is still unsigned
 # (SmartScreen "More info → Run anyway") pending an EV/OV cert.
 linux:
+  # StartupWMClass groups running windows with the launcher icon on GNOME/KDE.
+  desktop:
+    entry:
+      StartupWMClass: geny-connector
   target:
     - AppImage
     - deb
@@ -53,3 +57,19 @@ mac:
   target:
     - dmg
   category: public.app-category.utilities
+
+deb:
+  # NOTE: overriding `depends` replaces electron-builder's defaults — the
+  # full default list is repeated here, plus the appindicator lib so the
+  # tray (the app's only persistent UI surface) actually appears.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libayatana-appindicator3-1 | libappindicator3-1

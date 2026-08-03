@@ -41,6 +41,13 @@ const isDev = !app.isPackaged
 // Command-line switches must be set at module load, before app `ready`.
 // (Zero-Hz WGC is intentionally NOT enabled: it suppresses frames when the
 // screen is static, which would starve our on-demand single-frame grabs.)
+// Linux/Wayland: desktopCapturer needs the PipeWire portal capturer —
+// without it a Wayland session captures a black/empty XWayland root.
+// Harmless on X11 (feature simply unused).
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+}
+
 if (process.platform === 'win32') {
   app.commandLine.appendSwitch(
     'enable-features',
@@ -203,9 +210,18 @@ function applyAutoLaunch(enabled: boolean): void {
         mkdirSync(join(app.getPath('home'), '.config', 'autostart'), { recursive: true })
         // AppImage relaunches via $APPIMAGE; packaged builds via the exe path.
         const exec = process.env.APPIMAGE || process.execPath
+        // extract-and-run / FUSE-less launches leave APPIMAGE unset and
+        // execPath inside an EPHEMERAL /tmp mount — an autostart entry
+        // pointing there is dead at next boot. Refuse rather than break.
+        if (/\/tmp\/(\.mount_|appimage_extracted)/.test(exec)) {
+          console.warn('autoLaunch skipped: ephemeral AppImage mount path', exec)
+          return
+        }
+        // Desktop Entry field codes: literal % must be doubled.
+        const execEsc = exec.replace(/%/g, '%%')
         writeFileSync(
           p,
-          `[Desktop Entry]\nType=Application\nName=Geny\nExec="${exec}" --hidden\nX-GNOME-Autostart-enabled=true\nTerminal=false\nNoDisplay=false\n`,
+          `[Desktop Entry]\nType=Application\nName=Geny\nExec="${execEsc}" --hidden\nX-GNOME-Autostart-enabled=true\nTerminal=false\nNoDisplay=false\n`,
         )
       } else if (existsSync(p)) {
         unlinkSync(p)
@@ -238,6 +254,7 @@ const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
   'tray.hideAvatar': { ko: '아바타 숨기기', en: 'Hide avatar' },
   'tray.showAvatar': { ko: '아바타 보이기', en: 'Show avatar' },
   'tray.allowComputerUse': { ko: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)', en: 'Allow Local Computer Use (screen · input — details in settings)' },
+  'tray.clickThrough': { ko: '아바타 클릭 통과 (켜면 클릭이 뒤로 통과 — 끄면 아바타 조작 가능)', en: 'Avatar click-through (on: clicks pass behind — off: avatar is interactive)' },
   'tray.autoUpdate': { ko: '자동 업데이트', en: 'Auto-update' },
   'tray.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
   'tray.version': { ko: '버전 v{version}', en: 'Version v{version}' },
@@ -765,7 +782,7 @@ function createQuickChat(): void {
   // and then stays put; the renderer paints nothing until summoned. showInactive()
   // so we don't steal focus from whatever the user is doing at launch.
   positionQuickChat()
-  quickchat.setIgnoreMouseEvents(true, { forward: true })
+  quickchat.setIgnoreMouseEvents(!IS_LINUX, IS_LINUX ? undefined : { forward: true })
   quickchat.showInactive()
 }
 
@@ -778,7 +795,7 @@ function createQuickChat(): void {
 function dismissQuickChat(): void {
   if (!quickchat) return
   quickChatOpen = false
-  quickchat.setIgnoreMouseEvents(true, { forward: true })
+  quickchat.setIgnoreMouseEvents(!IS_LINUX, IS_LINUX ? undefined : { forward: true })
   quickchat.webContents.send('quickchat:dismissed')
 }
 
@@ -924,9 +941,18 @@ async function deliverQuickChat(
 
 // Re-evaluate everything after login/logout/url-change: window content + which
 // window is visible.
+// Autostart launches pass --hidden (written by applyAutoLaunch /
+// setLoginItemSettings): start in the tray without popping any window.
+// Consumed once — later explicit refreshes behave normally.
+let startHidden = process.argv.includes('--hidden')
+
 async function refreshAll(): Promise<void> {
   await applyOverlayContent()
   await applyControlContent()
+  if (startHidden) {
+    startHidden = false
+    return
+  }
   const token = await getStoredToken()
   if (token) {
     settings?.hide()
@@ -1063,7 +1089,11 @@ async function applyOverlayContent(): Promise<void> {
     // Locked by default: the avatar is click-through (clicks reach the desktop),
     // and only the /overlay control bar re-enables input on hover via
     // windowControl.setClickThrough. The page owns -webkit-app-region (drag).
-    overlay.setIgnoreMouseEvents(true, { forward: true })
+    if (IS_LINUX && !linuxClickThroughOptIn) {
+      overlay.setIgnoreMouseEvents(false) // Linux: interactive unless opted in
+    } else {
+      overlay.setIgnoreMouseEvents(true, IS_LINUX ? undefined : { forward: true })
+    }
     try {
       await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
       overlay.webContents.insertCSS('html,body{background:transparent !important;}')
@@ -1076,6 +1106,16 @@ async function applyOverlayContent(): Promise<void> {
     loadRoute(overlay, 'overlay')
   }
 }
+
+
+// ── Linux platform notes ──────────────────────────────────────────────
+// setIgnoreMouseEvents' {forward:true} is darwin/win32-only: on Linux a
+// click-through window receives NO mouse events, so the overlay page's
+// hover-based unlock can never fire. Main therefore stays authoritative
+// on Linux: click-through is an explicit tray opt-in, and renderer
+// requests to enable it are ignored unless the user opted in.
+let linuxClickThroughOptIn = false
+const IS_LINUX = process.platform === 'linux'
 
 let appQuitting = false
 app.on('before-quit', () => {
@@ -1111,11 +1151,23 @@ function rebuildTrayMenu(): void {
       },
     },
     { type: 'separator' },
+    ...(IS_LINUX
+      ? [{
+          label: nt('tray.clickThrough'),
+          type: 'checkbox' as const,
+          checked: linuxClickThroughOptIn,
+          click: (item: Electron.MenuItem) => {
+            linuxClickThroughOptIn = item.checked
+            overlay?.setIgnoreMouseEvents(linuxClickThroughOptIn)
+            rebuildTrayMenu()
+          },
+        }]
+      : []),
     {
       label: nt('tray.allowComputerUse'),
       type: 'checkbox',
       checked: loadConfig().computerUse?.enabled === true,
-      click: (item) => patchComputerUse({ enabled: item.checked }),
+      click: (item) => { patchComputerUse({ enabled: item.checked }); rebuildTrayMenu() },
     },
     { type: 'separator' },
     {
@@ -1150,12 +1202,22 @@ function rebuildTrayMenu(): void {
   tray.setContextMenu(menu)
 }
 function createTray(): void {
-  const icon = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_B64}`)
-  tray = new Tray(icon)
-  tray.setToolTip('Geny')
-  rebuildTrayMenu()
-  // Left-click the tray toggles the control window (Windows/Linux convention).
-  tray.on('click', () => showControl())
+  try {
+    const icon = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_B64}`)
+    tray = new Tray(icon)
+    tray.setToolTip('Geny')
+    rebuildTrayMenu()
+    // Left-click the tray toggles the control window (Windows/Linux convention).
+    // Note: many Linux StatusNotifier hosts never emit 'click' — the context
+    // menu is the reliable path there.
+    tray.on('click', () => showControl())
+  } catch (e) {
+    // No StatusNotifier host (e.g. plain GNOME without the AppIndicator
+    // extension). Keep the control window reachable: without a tray it is
+    // the only remaining UI surface.
+    console.error('[tray] unavailable:', (e as Error)?.message)
+    tray = null
+  }
 }
 
 function showControl(): void {
@@ -1341,7 +1403,12 @@ function registerIpc(): void {
 
   // Click-through toggle from the renderer's hit-test loop.
   ipcMain.on('overlay:set-ignore-mouse', (_e, ignore: boolean) => {
-    overlay?.setIgnoreMouseEvents(ignore, { forward: true })
+    if (IS_LINUX) {
+      // renderer hover-logic can't work here (no forward) — main decides
+      overlay?.setIgnoreMouseEvents(linuxClickThroughOptIn && ignore)
+    } else {
+      overlay?.setIgnoreMouseEvents(ignore, { forward: true })
+    }
   })
 
   // Move the overlay by a pointer delta (dock-handle drag).
@@ -1805,7 +1872,11 @@ function registerIpc(): void {
       const keytar = await import('keytar')
       await keytar.default.setPassword('geny-connector', key, value)
       return true
-    } catch {
+    } catch (e) {
+      // Linux: keytar needs libsecret + a running Secret Service
+      // (gnome-keyring/kwallet). Surface the reason — a silent false
+      // here used to produce "login succeeded but nothing happened".
+      console.error('[keychain] setPassword failed:', (e as Error)?.message)
       return false
     }
   })
