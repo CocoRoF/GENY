@@ -5240,6 +5240,14 @@ class AgentSession:
                                 or (entry.strategies or {}).get("provider")
                                 or ""
                             ).strip() or None
+                            # Stage-6 커스텀 model override BEATS the pipeline-
+                            # wide model at runtime (PipelineMutator
+                            # set_stage_model) — the display must match.
+                            override_model = (
+                                (entry.model_override or {}).get("model") or ""
+                            ).strip() or None
+                            if override_model:
+                                env_model = override_model
                         break
             except Exception:
                 logger.debug(

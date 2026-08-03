@@ -221,8 +221,6 @@ def _enrich_env_fields(data: dict) -> None:
         if not data.get("env_name"):
             data["env_name"] = (manifest.metadata.name or "").strip() or None
         env_model = ((manifest.model or {}).get("model") or "").strip() or None
-        if env_model:
-            data["model"] = env_model
         for entry in manifest.stage_entries():
             if entry.order != 6 or entry.name != "api":
                 continue
@@ -232,7 +230,16 @@ def _enrich_env_fields(data: dict) -> None:
                     or (entry.strategies or {}).get("provider")
                     or ""
                 ).strip() or None
+                # Stage-6 커스텀 model override beats the pipeline-wide model
+                # at runtime — mirror that priority in the display.
+                override_model = (
+                    (entry.model_override or {}).get("model") or ""
+                ).strip() or None
+                if override_model:
+                    env_model = override_model
             break
+        if env_model:
+            data["model"] = env_model
     except Exception:  # noqa: BLE001 — enrichment must never break listing
         logger.debug("dormant env enrichment failed", exc_info=True)
 
