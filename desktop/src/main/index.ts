@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray } from 'electron'
+import { spawn } from 'child_process'
 import { join, sep } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -174,16 +175,36 @@ function configPath(): string {
   mkdirSync(dir, { recursive: true })
   return join(dir, 'connector.json')
 }
+// Canonicalize a user-typed server address ONCE, at the config boundary:
+// every consumer (fetch bases, overlay loadURL, sync transport, quick-chat)
+// assumes a scheme-qualified URL with no trailing slash. Users type bare
+// hosts ("geny.example.com") — default them to https, except obviously-local
+// targets where a dev Geny runs plain http.
+function normalizeServerUrl(raw: string | undefined): string {
+  let s = (raw ?? '').trim()
+  if (!s) return ''
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) {
+    const host = s.split('/')[0].split(':')[0]
+    const local =
+      host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.endsWith('.local')
+    s = (local ? 'http://' : 'https://') + s
+  }
+  return s.replace(/\/+$/, '')
+}
 function loadConfig(): ConnectorConfig {
   try {
-    return JSON.parse(readFileSync(configPath(), 'utf-8'))
+    const cfg = JSON.parse(readFileSync(configPath(), 'utf-8')) as ConnectorConfig
+    // Migrate configs written before write-time normalization existed.
+    if (cfg.serverUrl) cfg.serverUrl = normalizeServerUrl(cfg.serverUrl)
+    return cfg
   } catch {
     // No personal default — the user enters their own Geny server on first run.
     // GENY_SERVER_URL lets a deployment pre-seed it without editing code.
-    return { serverUrl: process.env.GENY_SERVER_URL || '' }
+    return { serverUrl: normalizeServerUrl(process.env.GENY_SERVER_URL) }
   }
 }
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
+  if ('serverUrl' in patch) patch = { ...patch, serverUrl: normalizeServerUrl(patch.serverUrl) }
   const prevLang = loadConfig().lang
   const next = { ...loadConfig(), ...patch }
   writeFileSync(configPath(), JSON.stringify(next, null, 2))
@@ -1159,9 +1180,31 @@ app.on('before-quit', () => {
 // REAL binary (<name>.bin behind the shim, build/afterPack.cjs) — relaunching
 // it directly would skip the sandbox decision, and an AppImage's FUSE mount
 // dies with this process, so the relaunch must go through $APPIMAGE.
+//
+// Linux does NOT use app.relaunch(): it relays through a '--type=relauncher'
+// helper whose content-sandbox init sets NoNewPrivs, which the relaunched
+// browser inherits (NNP is irreversible across fork/exec). Under NNP the SUID
+// chrome-sandbox cannot elevate, and on userns-restricted kernels (Ubuntu
+// 23.10+/24.04) that leaves NO working sandbox → zygote dies → SIGTRAP at
+// boot (verified via /proc/<pid>/status NoNewPrivs=1 on the relaunched main).
+// This process has NNP=0, so spawn the successor ourselves.
 function relaunchSelf(): void {
   appQuitting = true
-  app.relaunch({ execPath: process.env.APPIMAGE || process.execPath.replace(/\.bin$/, '') })
+  const exe = process.env.APPIMAGE || process.execPath.replace(/\.bin$/, '')
+  if (process.platform === 'linux') {
+    // Strip a shim-injected --no-sandbox so the new shim run re-decides.
+    const args = process.argv.slice(1).filter((a) => a !== '--no-sandbox')
+    // sh sleeps past our exit (old instance fully gone: tray, shortcuts,
+    // FUSE mount), then execs the shim/AppImage. detached + unref → survives.
+    const child = spawn('/bin/sh', ['-c', 'sleep 1; exec "$@"', 'geny-relaunch', exe, ...args], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    child.unref()
+    app.quit()
+    return
+  }
+  app.relaunch({ execPath: exe })
   app.quit()
 }
 app.on('will-quit', () => {

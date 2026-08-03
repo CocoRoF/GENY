@@ -1,4 +1,5 @@
 import { app, dialog, shell, Notification } from 'electron'
+import { spawn } from 'child_process'
 import electronUpdater from 'electron-updater'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,7 +84,28 @@ export function initAutoUpdate(enabledGetter: () => boolean, langGetter?: () => 
     })
     // isForceRunAfter=true → guarantee the app relaunches after install, so the
     // user doesn't have to start it manually post-update.
-    if (response === 0) autoUpdater.quitAndInstall(false, true)
+    if (response === 0) {
+      if (process.platform === 'linux' && !process.env.APPIMAGE) {
+        // deb: DebUpdater's isForceRunAfter uses app.relaunch(), whose Linux
+        // '--type=relauncher' helper passes NoNewPrivs down to the new main —
+        // the SUID chrome-sandbox then can't elevate and the app SIGTRAPs on
+        // userns-restricted kernels (Ubuntu 24.04). Install WITHOUT force-run
+        // and respawn through the launcher shim ourselves (this process has
+        // NNP=0). Hooked on before-quit-for-update so a FAILED install (no
+        // quit) never spawns a duplicate instance. The AppImage updater is
+        // fine: it spawns the new AppImage directly.
+        app.once('before-quit-for-update' as 'before-quit', () => {
+          const shim = process.execPath.replace(/\.bin$/, '')
+          spawn('/bin/sh', ['-c', 'sleep 3; exec "$0"', shim], {
+            detached: true,
+            stdio: 'ignore',
+          }).unref()
+        })
+        autoUpdater.quitAndInstall(false, false)
+      } else {
+        autoUpdater.quitAndInstall(false, true)
+      }
+    }
   })
 
   autoUpdater.on('error', (err) => console.error('[updater]', err?.message ?? err))

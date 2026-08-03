@@ -531,13 +531,21 @@ export function ControlApp() {
     setQuickChatMsg(ok ? t('hotkey.registered') : t('hotkey.conflict'))
   }
 
+  // Persist the typed address and get back MAIN's canonical form (scheme
+  // added when missing, trailing slashes stripped — see normalizeServerUrl in
+  // main). One authority: the renderer never re-implements the rules, it just
+  // reflects what the config actually stored.
+  const saveServerUrl = async (): Promise<string> => {
+    const saved = await window.connector?.serverConfig.set({ serverUrl })
+    const base = saved?.serverUrl ?? serverUrl.trim().replace(/\/+$/, '')
+    if (base && base !== serverUrl) setServerUrl(base)
+    return base
+  }
+
   const checkStatus = async () => {
     setBusy(true)
     stat(t('status.connecting'), 'working')
-    // Strip trailing slash(es): the server (Caddy) doesn't collapse `//`, so a
-    // serverUrl like "https://host/" would build "//api/auth/..." → HTTP 404.
-    const base = serverUrl.trim().replace(/\/+$/, '')
-    await window.connector?.serverConfig.set({ serverUrl: base })
+    const base = await saveServerUrl()
     try {
       // Send the stored JWT so the status reflects THIS connector's session — an
       // unauthenticated /status always reads "로그인 필요" even when we're logged in.
@@ -563,8 +571,11 @@ export function ControlApp() {
   const login = async () => {
     setBusy(true)
     stat(t('status.loggingIn'), 'working')
-    // Normalize the same way as checkStatus — a trailing slash → "//api/..." 404.
-    const base = serverUrl.trim().replace(/\/+$/, '')
+    // PERSIST the address as part of login — logging in without pressing
+    // 연결 확인 first used to leave config.serverUrl empty, so main's
+    // applyOverlayContent never loaded the avatar ("logged in but nothing
+    // happened"). Login must be self-sufficient.
+    const base = await saveServerUrl()
     try {
       const r = await fetch(`${base}/api/auth/login`, {
         method: 'POST',
@@ -674,7 +685,11 @@ export function ControlApp() {
                   <div className="gy-spacer" />
                   <button
                     className="gy-btn gy-btn--ghost gy-btn--block gy-btn--sm"
-                    onClick={() => window.connector?.windowControl.openExternal(serverUrl.trim())}
+                    onClick={() => {
+                      const u = serverUrl.trim()
+                      // Bare hosts need a scheme for the OS browser handoff.
+                      window.connector?.windowControl.openExternal(/^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? u : `https://${u}`)
+                    }}
                   >
                     {I.external} {t('account.openInBrowser')}
                   </button>
