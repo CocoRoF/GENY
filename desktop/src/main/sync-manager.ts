@@ -25,6 +25,10 @@ export interface SyncPairConfig {
   sessionLabel?: string
   localPath: string
   paused?: boolean
+  /** Why the pair was auto-paused ('quota' | 'session_gone') — surfaces a
+   *  human explanation instead of a bare "일시정지" after the engine that
+   *  detected the condition has been torn down. */
+  pausedReason?: string
 }
 
 export type SyncState =
@@ -33,7 +37,15 @@ export type SyncState =
   | 'paused'
   | 'offline'
   | 'error'
+  | 'session_gone'
   | 'awaiting_confirmation'
+
+/** Human messages for persisted auto-pause reasons (shown on engine boot). */
+const PAUSE_REASON_MESSAGES: Record<string, string> = {
+  quota: 'workspace quota exceeded — sync paused',
+  session_gone:
+    '에이전트 세션이 서버에서 삭제되었습니다 — 이 연결을 해제하고 다른 에이전트에 다시 연결하세요.',
+}
 
 export interface SyncPairStatus {
   id: string
@@ -97,7 +109,9 @@ class PairEngine {
       state: cfg.paused ? 'paused' : 'idle',
       connected: false,
       lastSyncAt: null,
-      lastError: null,
+      lastError: cfg.paused && cfg.pausedReason
+        ? (PAUSE_REASON_MESSAGES[cfg.pausedReason] ?? cfg.pausedReason)
+        : null,
       counts: { downloaded: 0, uploaded: 0, conflicts: 0, skippedLarge: 0 },
       pendingMassDelete: null,
     }
@@ -290,6 +304,18 @@ class PairEngine {
       if (e instanceof MassDeletePending) {
         this.status.state = 'awaiting_confirmation'
         this.status.pendingMassDelete = { count: e.count, total: e.total }
+      } else if ((e as { status?: number })?.status === 404 || (e as { status?: number })?.status === 410) {
+        // The server says the SESSION no longer exists (deleted in the web
+        // UI). That is terminal, not transient — hammering /changes every
+        // 60s forever with "changes HTTP 404" helps nobody. Auto-pause the
+        // pair with a human explanation; the user re-binds or disconnects.
+        this.status.state = 'session_gone'
+        this.status.lastError = PAUSE_REASON_MESSAGES.session_gone
+        this.cfg.paused = true
+        this.deps.log(
+          `sync[${this.cfg.sessionId.slice(0, 8)}] session gone (HTTP ${(e as { status?: number }).status}) — auto-pausing pair`,
+        )
+        this.deps.onAutoPause?.(this.cfg.id, 'session_gone')
       } else {
         this.status.state = 'error'
         this.status.lastError = (e as Error)?.message ?? String(e)

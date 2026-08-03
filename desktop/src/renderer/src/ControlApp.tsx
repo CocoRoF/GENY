@@ -145,7 +145,7 @@ interface SyncPairView {
 }
 interface SyncStatusView {
   id: string
-  state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'awaiting_confirmation'
+  state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'session_gone' | 'awaiting_confirmation'
   connected: boolean
   lastSyncAt: number | null
   lastError: string | null
@@ -902,7 +902,7 @@ export function ControlApp() {
                 const state = p.paused ? 'paused' : (st?.state ?? 'idle')
                 const dotColor =
                   state === 'paused' ? 'var(--gy-muted, #888)'
-                  : state === 'error' ? '#e5534b'
+                  : state === 'error' || state === 'session_gone' ? '#e5534b'
                   : state === 'awaiting_confirmation' ? '#e8a13c'
                   : state === 'syncing' ? '#4f9cf7'
                   : st?.connected ? '#2fbf71' : '#e8a13c'

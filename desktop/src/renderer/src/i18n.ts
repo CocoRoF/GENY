@@ -155,6 +155,7 @@ export const messages: Record<string, Entry> = {
   'sync.state.offline': { ko: '오프라인 (재연결 대기)', en: 'Offline (reconnecting)' },
   'sync.state.error': { ko: '오류', en: 'Error' },
   'sync.state.awaiting_confirmation': { ko: '확인 필요', en: 'Needs confirmation' },
+  'sync.state.session_gone': { ko: '세션 삭제됨', en: 'Session deleted' },
   'sync.massDeleteWarn': { ko: '서버에서 {count}개 항목이 삭제되었습니다. 이 PC에도 삭제를 적용할까요?', en: '{count} entries were deleted on the server. Apply the deletion on this PC too?' },
   'sync.massDeleteApply': { ko: '삭제 적용', en: 'Apply deletion' },
   'sync.massDeletePause': { ko: '동기화 일시정지', en: 'Pause sync' },

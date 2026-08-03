@@ -1977,7 +1977,9 @@ function registerIpc(): void {
   })
   ipcMain.handle('sync:set-paused', (_e, id: string, paused: boolean) => {
     const next = (loadConfig().syncPairs ?? []).map((p) =>
-      p.id === id ? { ...p, paused: !!paused } : p,
+      // Manual resume clears a stale auto-pause reason — the user is
+      // explicitly asking to try again, so the explanation resets with it.
+      p.id === id ? { ...p, paused: !!paused, ...(paused ? {} : { pausedReason: undefined }) } : p,
     )
     saveConfig({ syncPairs: next })
     reconfigureSync()
@@ -2138,12 +2140,13 @@ app.whenReady().then(() => {
           try { w.webContents.send('sync:status-event', statuses) } catch { /* window gone */ }
         }
       },
-      log: (msg) => console.log('[sync]', msg),
-      onAutoPause: (id) => {
-        // persist the auto-pause AND tear the engine down (watcher/WS
-        // must not keep running on an inert pair)
+      log: (msg) => dlog('sync', msg),
+      onAutoPause: (id, reason) => {
+        // persist the auto-pause (WITH its reason, so the explanation
+        // survives the engine teardown) AND tear the engine down
+        // (watcher/WS must not keep running on an inert pair)
         const next = (loadConfig().syncPairs ?? []).map((p) =>
-          p.id === id ? { ...p, paused: true } : p,
+          p.id === id ? { ...p, paused: true, pausedReason: reason } : p,
         )
         saveConfig({ syncPairs: next })
         setTimeout(() => getSyncManager()?.configure(next), 0)
