@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, safeStorage, screen, session, shell, Tray } from 'electron'
 import { spawn } from 'child_process'
 import { join, sep } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
@@ -1067,30 +1067,74 @@ function attachContentResilience(win: BrowserWindow, reload: () => void): void {
   wc.on('destroyed', clearRetry)
 }
 
-// Read the account JWT the control window stored in the OS keychain.
-async function getStoredToken(): Promise<string | null> {
+// ── secure secret store (Electron safeStorage; replaces keytar) ─────────────
+// keytar was a native-ABI landmine: a wrong-platform keytar.node, a missing
+// Secret Service, or a locked keyring made set/getPassword fail — and login
+// could then never persist (observed in the field: "login succeeds, nothing
+// happens / logged out after restart"). safeStorage is built into Electron
+// (win32 DPAPI · macOS Keychain · Linux kwallet/gnome-keyring with a
+// basic_text fallback): no native module, no ABI, and it ALWAYS has a
+// working backend. Secrets live encrypted in userData/secure-store.json
+// (0600); a value the OS can no longer decrypt just reads as null → re-login.
+const TOKEN_KEY = 'geny_auth_token'
+function secretsPath(): string {
+  return join(app.getPath('userData'), 'secure-store.json')
+}
+function readSecretsFile(): Record<string, string> {
   try {
-    const keytar = await import('keytar')
-    return await keytar.default.getPassword('geny-connector', 'geny_auth_token')
+    return JSON.parse(readFileSync(secretsPath(), 'utf-8'))
   } catch {
+    return {}
+  }
+}
+function secureSet(key: string, value: string): boolean {
+  try {
+    const payload = safeStorage.isEncryptionAvailable()
+      ? `enc:${safeStorage.encryptString(value).toString('base64')}`
+      : // Never brick login over missing encryption (exotic Linux setups):
+        // an obfuscated-plaintext token beats a connector nobody can log into.
+        `raw:${Buffer.from(value, 'utf-8').toString('base64')}`
+    const all = readSecretsFile()
+    all[key] = payload
+    writeFileSync(secretsPath(), JSON.stringify(all), { mode: 0o600 })
+    return true
+  } catch (e) {
+    console.error('[secure-store] set failed:', (e as Error)?.message)
+    return false
+  }
+}
+function secureGet(key: string): string | null {
+  try {
+    const v = readSecretsFile()[key]
+    if (!v) return null
+    if (v.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(v.slice(4), 'base64'))
+    if (v.startsWith('raw:')) return Buffer.from(v.slice(4), 'base64').toString('utf-8')
+    return null
+  } catch (e) {
+    console.error('[secure-store] get failed:', (e as Error)?.message)
     return null
   }
 }
-async function storeToken(token: string): Promise<void> {
+function secureDelete(key: string): boolean {
   try {
-    const keytar = await import('keytar')
-    await keytar.default.setPassword('geny-connector', 'geny_auth_token', token)
+    const all = readSecretsFile()
+    delete all[key]
+    writeFileSync(secretsPath(), JSON.stringify(all), { mode: 0o600 })
+    return true
   } catch {
-    /* keychain unavailable — ignore */
+    return false
   }
 }
+
+// Read the account JWT the control window stored.
+async function getStoredToken(): Promise<string | null> {
+  return secureGet(TOKEN_KEY)
+}
+async function storeToken(token: string): Promise<void> {
+  secureSet(TOKEN_KEY, token)
+}
 async function clearStoredToken(): Promise<void> {
-  try {
-    const keytar = await import('keytar')
-    await keytar.default.deletePassword('geny-connector', 'geny_auth_token')
-  } catch {
-    /* ignore */
-  }
+  secureDelete(TOKEN_KEY)
 }
 
 // Keep the connector logged in across restarts. The stored JWT is reused on
@@ -1314,12 +1358,7 @@ function showControl(): void {
 
 // Clear the stored JWT and send both windows back to their logged-out state.
 async function logout(): Promise<void> {
-  try {
-    const keytar = await import('keytar')
-    await keytar.default.deletePassword('geny-connector', 'geny_auth_token')
-  } catch {
-    /* ignore */
-  }
+  await clearStoredToken()
   await refreshAll() // logged out → hides panel, shows settings/login
 }
 
@@ -1480,10 +1519,15 @@ async function mapImageToScreen(nut: any, x: number, y: number): Promise<{ x: nu
 function registerIpc(): void {
   ipcMain.handle('config:get', () => loadConfig())
   ipcMain.handle('config:set', (_e, patch: Partial<ConnectorConfig>) => {
+    const prevServer = loadConfig().serverUrl
     const next = saveConfig(patch)
     // Push the merged config to the avatar overlay so its capability drivers
     // (TTS/STT/screen) apply overlayTuning changes live — no reload.
     overlay?.webContents.send('config:changed', next)
+    // Server address changed → re-derive every window's content NOW. Before
+    // this, a URL saved via 연결확인 only took effect at the next login or
+    // restart — the overlay sat on the logged-out placeholder forever.
+    if ('serverUrl' in patch && next.serverUrl !== prevServer) void refreshAll()
     return next
   })
 
@@ -1941,37 +1985,11 @@ function registerIpc(): void {
   })
   ipcMain.on('updater:check', () => checkForUpdatesManually())
 
-  // Secure token storage via the OS keychain (keytar). Falls back to the JSON
-  // config only if keytar is unavailable (logged), so dev still works.
-  ipcMain.handle('secure:get', async (_e, key: string) => {
-    try {
-      const keytar = await import('keytar')
-      return await keytar.default.getPassword('geny-connector', key)
-    } catch {
-      return null
-    }
-  })
-  ipcMain.handle('secure:set', async (_e, key: string, value: string) => {
-    try {
-      const keytar = await import('keytar')
-      await keytar.default.setPassword('geny-connector', key, value)
-      return true
-    } catch (e) {
-      // Linux: keytar needs libsecret + a running Secret Service
-      // (gnome-keyring/kwallet). Surface the reason — a silent false
-      // here used to produce "login succeeded but nothing happened".
-      console.error('[keychain] setPassword failed:', (e as Error)?.message)
-      return false
-    }
-  })
-  ipcMain.handle('secure:delete', async (_e, key: string) => {
-    try {
-      const keytar = await import('keytar')
-      return await keytar.default.deletePassword('geny-connector', key)
-    } catch {
-      return false
-    }
-  })
+  // Secure token storage via Electron safeStorage (see secureSet/secureGet —
+  // the keytar native module it replaced could silently fail and strand login).
+  ipcMain.handle('secure:get', async (_e, key: string) => secureGet(key))
+  ipcMain.handle('secure:set', async (_e, key: string, value: string) => secureSet(key, value))
+  ipcMain.handle('secure:delete', async (_e, key: string) => secureDelete(key))
 }
 
 // Native application menu — keeps copy/paste accelerators (chat input) and

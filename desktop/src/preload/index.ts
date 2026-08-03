@@ -99,7 +99,7 @@ export interface ConnectorBridge {
     onChange(cb: (cfg: ConnectorConfig) => void): () => void
   }
 
-  /** OS keychain (keytar) — stores the account JWT, not the password. */
+  /** Encrypted secret store (Electron safeStorage) — the account JWT, not the password. */
   secureStore: {
     get(key: string): Promise<string | null>
     set(key: string, value: string): Promise<boolean>

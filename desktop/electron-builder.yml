@@ -23,7 +23,6 @@ files:
 asarUnpack:
   - '**/*.node'
   - '**/node_modules/@nut-tree-fork/**'
-  - '**/node_modules/keytar/**'
 # macOS is ad-hoc signed (afterPack above) — runs on Apple Silicon without the
 # "damaged" hard block, but still shows the bypassable "unidentified developer"
 # prompt until Developer ID + @electron/notarize land. Windows is still unsigned
