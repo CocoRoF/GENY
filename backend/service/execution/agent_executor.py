@@ -32,6 +32,15 @@ from service.logging.session_logger import LogLevel
 
 logger = getLogger(__name__)
 
+# Appended to a turn's prompt when the session's long-term-memory warm-up is
+# still running past the bounded wait (see execute_command step 1a): partial
+# retrieval must read as "still loading", never as "no record exists".
+MEMORY_WARMUP_NOTICE = (
+    "\n\n[system] 장기기억 워밍업이 아직 진행 중입니다. 기억 조회 결과가 비거나 얕더라도 "
+    "'기록이 없다'고 단정하지 마세요 — memory_search로 재확인하거나, 잠시 뒤 다시 조회하면 "
+    "전체 기억이 보입니다."
+)
+
 
 # ============================================================================
 # Exceptions
@@ -1169,6 +1178,25 @@ async def execute_command(
     # 1. Resolve & revive
     agent = await _resolve_agent(session_id)
     logger.debug("[Executor:%s] agent resolved, alive=%s", session_id[:8], agent.is_alive())
+
+    # 1a. Memory-readiness (bounded). A just-rehydrated session's long-term
+    # layers warm in the background; a turn that races them retrieves PARTIAL
+    # memory and the persona asserts "no record" of things it knows. Small
+    # vaults are ready instantly; a 6k-note vault takes ~7s — so a short wait
+    # makes almost every turn fully-informed. Past the cap we proceed (never
+    # hold a user hostage) but tell the persona memory is still loading so it
+    # re-checks instead of asserting absence.
+    try:
+        if hasattr(agent, "wait_memory_ready") and not await agent.wait_memory_ready(
+            timeout=8.0
+        ):
+            logger.info(
+                "[Executor:%s] memory warm-up still running — turn proceeds "
+                "with warm-up notice", session_id[:8],
+            )
+            prompt = prompt + MEMORY_WARMUP_NOTICE
+    except Exception:  # noqa: BLE001 — readiness must never break a turn
+        pass
 
     # 1b. Record activity for VTuber thinking trigger
     #     Skip for trigger executions (would break adaptive backoff)

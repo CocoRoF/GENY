@@ -605,6 +605,15 @@ class AgentSession:
 
         # Memory manager (initialized lazily once storage_path is available)
         self._memory_manager: Optional["SessionMemoryManager"] = None
+        # Long-term-memory readiness. Set when the background vector warm-up
+        # (which also forces the notes-store / synapse vault load) finishes —
+        # or immediately when there is nothing to warm. Consumers:
+        #   • ThinkingTrigger defers self-initiated speech until ready (a
+        #     just-rehydrated persona greeting its owner like a stranger),
+        #   • execute_command bounded-waits + injects a warm-up notice so an
+        #     early user turn never asserts "no record" from partial memory.
+        self._memory_ready: asyncio.Event = asyncio.Event()
+        self._vector_init_task: Optional[asyncio.Task] = None
         # geny-executor MemoryProvider — built from LTMConfig + storage_path.
         # Single source of truth for vault layout and vector indexing
         # going forward. The legacy SessionMemoryManager stays around for
@@ -1812,6 +1821,7 @@ class AgentSession:
             if self._memory_manager:
                 mm = self._memory_manager
                 sid = self._session_id
+                ready_evt = self._memory_ready
 
                 async def _vector_warmup() -> None:
                     try:
@@ -1821,10 +1831,16 @@ class AgentSession:
                         raise
                     except Exception as ve:  # noqa: BLE001
                         logger.debug(f"[{sid}] Vector memory init skipped: {ve}")
+                    finally:
+                        # Ready even on failure/cancel: "as loaded as it will
+                        # get" — waiters must never hang on a dead warm-up.
+                        ready_evt.set()
 
                 self._vector_init_task = asyncio.create_task(
                     _vector_warmup(), name=f"vector-warmup-{sid}"
                 )
+            else:
+                self._memory_ready.set()
 
             # 2. Build geny-executor Pipeline (no subprocess)
             self._build_graph()
@@ -5070,6 +5086,8 @@ class AgentSession:
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
             self._vector_init_task = None
+        # Release anyone still blocked on readiness — this session is over.
+        self._memory_ready.set()
 
         # Stop the skill hot-reload watcher's polling thread (audit L1).
         watcher = getattr(self, "_skill_watcher", None)
@@ -5158,6 +5176,20 @@ class AgentSession:
         """
         return self._initialized and self._pipeline is not None
 
+    def memory_ready(self) -> bool:
+        """Whether the long-term-memory warm-up has finished (see __init__)."""
+        return self._memory_ready.is_set()
+
+    async def wait_memory_ready(self, timeout: float = 8.0) -> bool:
+        """Bounded wait for the memory warm-up; True when ready in time."""
+        if self._memory_ready.is_set():
+            return True
+        try:
+            await asyncio.wait_for(self._memory_ready.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
     # ========================================================================
     # SessionInfo Compatibility
     # ========================================================================
@@ -5220,6 +5252,7 @@ class AgentSession:
             graph_name=self._preset_name,
             tool_preset_id=self._tool_preset_id,
             system_prompt=self._system_prompt,
+            memory_ready=self.memory_ready(),
             total_cost=_total_cost,
             linked_session_id=self._linked_session_id,
             session_type=self._session_type,

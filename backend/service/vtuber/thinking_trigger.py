@@ -174,6 +174,10 @@ class ThinkingTriggerService:
         self._evergreen_min_interval_s: float = 1800.0
         # session_id → category_id → last fire epoch (cooldown gate).
         self._last_category_fire: Dict[str, Dict[str, float]] = {}
+        # Sessions currently in the warm-then-fire detour (memory-readiness
+        # gate). Membership both de-dupes concurrent warms AND lets the
+        # deferred re-entry bypass the gate after the readiness wait capped.
+        self._warming: Set[str] = set()
         # session_id → preset_id (None = use bundled defaults)
         self._session_preset_id: Dict[str, Optional[str]] = {}
         # preset_id → (version_observed, cached manifest).
@@ -449,6 +453,34 @@ class ThinkingTriggerService:
                 "memory compaction kick failed for %s", session_id, exc_info=True
             )
 
+    async def _warm_then_fire(self, session_id: str) -> None:
+        """Rehydrate + wait for the memory warm-up, then fire the deferred
+        trigger immediately (no extra tick latency). The 300s cap means a
+        pathologically slow warm-up still speaks eventually — the
+        execute-side warm-up notice keeps that turn honest about it.
+        """
+        if session_id in self._warming:
+            return
+        self._warming.add(session_id)
+        try:
+            from service.executor.agent_session_manager import (
+                get_agent_session_manager,
+            )
+
+            agent = await get_agent_session_manager().ensure_session_live(session_id)
+            if agent is None:
+                return
+            ready = await agent.wait_memory_ready(timeout=300.0)
+            logger.info(
+                "warm_then_fire: %s memory %s — firing deferred trigger",
+                session_id, "ready" if ready else "warm-up capped",
+            )
+            await self._fire_trigger(session_id)
+        except Exception:  # noqa: BLE001 — deferred fire is best-effort
+            logger.debug("warm_then_fire failed for %s", session_id, exc_info=True)
+        finally:
+            self._warming.discard(session_id)
+
     async def _fire_trigger(self, session_id: str) -> None:
         try:
             from service.execution.agent_executor import (
@@ -466,6 +498,32 @@ class ThinkingTriggerService:
                 )
                 await self._kick_inbox_drain(session_id)
                 return
+
+            # Memory-readiness gate (2026-08-03): firing on a cold session
+            # rehydrates it and SPEAKS before the long-term layers finish
+            # warming — the persona then greets its owner like a stranger
+            # ("친밀도 초기화"). Warm first, speak after: detour through
+            # _warm_then_fire, which rehydrates, waits for memory_ready,
+            # and re-enters here (bypassing this gate via _warming).
+            if session_id not in self._warming:
+                try:
+                    from service.executor.agent_session_manager import (
+                        get_agent_session_manager,
+                    )
+
+                    live = get_agent_session_manager().get_agent(session_id)
+                    if live is None or not live.memory_ready():
+                        logger.info(
+                            "thinking trigger deferred — warming memory for %s "
+                            "(live=%s)", session_id, live is not None,
+                        )
+                        asyncio.create_task(self._warm_then_fire(session_id))
+                        return
+                except Exception:  # noqa: BLE001 — gate fails OPEN
+                    logger.debug(
+                        "memory-readiness gate failed open for %s",
+                        session_id, exc_info=True,
+                    )
 
             picked = self._pick_category_and_prompt(session_id, is_executing)
             if picked is None:

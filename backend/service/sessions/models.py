@@ -332,6 +332,14 @@ class SessionInfo(BaseModel):
         description="System prompt applied to every execution in this session"
     )
 
+    # Long-term-memory warm-up state (2026-08-03). False while a freshly
+    # (re)hydrated session's background vector/notes warm-up is running —
+    # the UI can show "기억 불러오는 중"; None for offline/stored sessions.
+    memory_ready: Optional[bool] = Field(
+        default=None,
+        description="Whether the session's long-term-memory warm-up finished"
+    )
+
     # Cost tracking
     total_cost: Optional[float] = Field(
         default=0.0,
