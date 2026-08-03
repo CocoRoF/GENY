@@ -246,6 +246,11 @@ export const messages: Record<string, Entry> = {
   'app.autostartToggle': { ko: '시스템 시작 시 자동 실행', en: 'Launch on system startup' },
   'app.autostartHint': { ko: '컴퓨터에 로그인하면 Geny 접속기가 자동으로 실행됩니다.', en: 'Geny connector launches automatically when you log in to your computer.' },
   'app.autostartFailed': { ko: '자동 실행을 등록하지 못했습니다. AppImage를 임시 폴더가 아닌 고정된 위치(예: 홈 폴더)에 두고 실행한 뒤 다시 켜 보세요.', en: 'Could not register autostart. If you run the AppImage, move it to a permanent location (e.g. your home folder), launch it from there, then try again.' },
+  'app.debugCard': { ko: '디버그 로그', en: 'Debug log' },
+  'app.debugHint': { ko: '로그인·아바타·연결 문제를 진단하는 내부 로그입니다. 문제가 나면 [새로고침] 후 [복사]해서 전달해 주세요. 토큰 등 비밀 값은 기록되지 않습니다.', en: 'Internal log for diagnosing login/avatar/connection issues. On a problem, press Refresh then Copy and share it. Secrets are never logged.' },
+  'app.debugRefresh': { ko: '새로고침', en: 'Refresh' },
+  'app.debugCopy': { ko: '복사', en: 'Copy' },
+  'app.debugCopied': { ko: '복사됨 ✓', en: 'Copied ✓' },
 
   // ── app tab: window/avatar positions ──
   'app.positionsCard': { ko: '창 · 아바타 위치', en: 'Window · Avatar positions' },

@@ -31,6 +31,24 @@ const TRAY_ICON_B64 =
 
 const isDev = !app.isPackaged
 
+// ── in-app debug log ─────────────────────────────────────────────────────────
+// Ring buffer surfaced in the settings window (앱 탭 → 디버그 로그) so field
+// failures are copyable by the user instead of dying in an invisible console.
+// Never log secrets — use redactTok() for tokens.
+const debugLines: string[] = []
+function dlog(tag: string, ...parts: unknown[]): void {
+  const line = `${new Date().toISOString()} [${tag}] ${parts
+    .map((p) => (typeof p === 'string' ? p : JSON.stringify(p)))
+    .join(' ')}`
+  debugLines.push(line)
+  if (debugLines.length > 600) debugLines.splice(0, debugLines.length - 600)
+  console.log('[dbg]', line)
+}
+function redactTok(t: string | null | undefined): string {
+  if (!t) return '(none)'
+  return `tok(len=${t.length},head=${t.slice(0, 8)}…)`
+}
+
 // ── Windows screen-capture fix ───────────────────────────────────────────────
 // The legacy desktop capturer (DXGI/GDI) renders hardware-accelerated app
 // windows — Chrome, Edge, VS Code, Teams, video players, … — as BLACK,
@@ -704,7 +722,13 @@ async function applyControlContent(): Promise<void> {
     const themeQ = `&theme=${encodeURIComponent(theme || 'system')}`
     // Swallow the rejection — a failed load is recovered by the did-fail-load
     // resilience handler (attachContentResilience), which retries with backoff.
-    await control.loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}${themeQ}`).catch(() => undefined)
+    dlog('control', `loadURL ${base}/connector ${redactTok(token)}`)
+    await control
+      .loadURL(`${base}/connector?token=${encodeURIComponent(token)}${sessQ}${themeQ}`)
+      .then(() => dlog('control', 'loadURL ok'))
+      .catch((e) => dlog('control', `loadURL FAILED: ${(e as Error)?.message}`))
+  } else {
+    dlog('control', `skipped (token=${token ? 'yes' : 'no'} serverUrl=${serverUrl || '(empty)'})`)
   }
   // No token → the panel stays hidden; the Settings window handles login.
 }
@@ -1001,13 +1025,16 @@ async function deliverQuickChat(
 let startHidden = process.argv.includes('--hidden')
 
 async function refreshAll(): Promise<void> {
+  dlog('refresh', `begin serverUrl=${loadConfig().serverUrl || '(empty)'}`)
   await applyOverlayContent()
   await applyControlContent()
   if (startHidden) {
     startHidden = false
+    dlog('refresh', 'startHidden → staying in tray')
     return
   }
   const token = await getStoredToken()
+  dlog('refresh', `windows: token=${token ? 'yes' : 'no'} → ${token ? 'control' : 'settings'}`)
   if (token) {
     settings?.hide()
     control?.show()
@@ -1047,19 +1074,23 @@ function attachContentResilience(win: BrowserWindow, reload: () => void): void {
   const clearRetry = () => {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
   }
-  wc.on('did-finish-load', () => { retries = 0; clearRetry() })
-  wc.on('did-fail-load', (_e, errorCode, errorDesc, _url, isMainFrame) => {
+  wc.on('did-finish-load', () => {
+    retries = 0
+    clearRetry()
+    dlog('load', `${win.getTitle() || 'win'} finished ${wc.getURL().replace(/token=[^&]+/, 'token=…')}`)
+  })
+  wc.on('did-fail-load', (_e, errorCode, errorDesc, url, isMainFrame) => {
     if (!isMainFrame) return        // ignore subresource failures
     if (errorCode === -3) return    // ERR_ABORTED — a superseding navigation, not a failure
     clearRetry()
     const delay = Math.min(2000 * Math.pow(1.6, retries), 20000) // 2s → cap 20s
     retries = Math.min(retries + 1, 10)
-    console.warn(`[connector] content load failed (${errorCode} ${errorDesc}); retry in ${Math.round(delay)}ms`)
+    dlog('load', `${win.getTitle() || 'win'} FAILED ${errorCode} ${errorDesc} url=${url.replace(/token=[^&]+/, 'token=…')} retry in ${Math.round(delay)}ms`)
     retryTimer = setTimeout(() => { if (!win.isDestroyed()) reload() }, delay)
   })
   wc.on('render-process-gone', (_e, details) => {
     if (details.reason === 'clean-exit') return
-    console.warn(`[connector] renderer gone (${details.reason}); reloading`)
+    dlog('load', `renderer gone (${details.reason}); reloading`)
     clearRetry()
     retries = 0
     if (!win.isDestroyed()) reload()
@@ -1089,7 +1120,8 @@ function readSecretsFile(): Record<string, string> {
 }
 function secureSet(key: string, value: string): boolean {
   try {
-    const payload = safeStorage.isEncryptionAvailable()
+    const enc = safeStorage.isEncryptionAvailable()
+    const payload = enc
       ? `enc:${safeStorage.encryptString(value).toString('base64')}`
       : // Never brick login over missing encryption (exotic Linux setups):
         // an obfuscated-plaintext token beats a connector nobody can log into.
@@ -1097,23 +1129,30 @@ function secureSet(key: string, value: string): boolean {
     const all = readSecretsFile()
     all[key] = payload
     writeFileSync(secretsPath(), JSON.stringify(all), { mode: 0o600 })
+    dlog('secure', `set ${key} ok (backend=${enc ? 'safeStorage' : 'raw-fallback'})`)
     return true
   } catch (e) {
-    console.error('[secure-store] set failed:', (e as Error)?.message)
+    dlog('secure', `set ${key} FAILED: ${(e as Error)?.message}`)
     return false
   }
 }
+// Log reads only when the outcome CHANGES (sync polls this often).
+const lastGetOutcome = new Map<string, boolean>()
 function secureGet(key: string): string | null {
+  let out: string | null = null
   try {
     const v = readSecretsFile()[key]
-    if (!v) return null
-    if (v.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(v.slice(4), 'base64'))
-    if (v.startsWith('raw:')) return Buffer.from(v.slice(4), 'base64').toString('utf-8')
-    return null
+    if (v?.startsWith('enc:')) out = safeStorage.decryptString(Buffer.from(v.slice(4), 'base64'))
+    else if (v?.startsWith('raw:')) out = Buffer.from(v.slice(4), 'base64').toString('utf-8')
   } catch (e) {
-    console.error('[secure-store] get failed:', (e as Error)?.message)
+    dlog('secure', `get ${key} FAILED: ${(e as Error)?.message}`)
     return null
   }
+  if (lastGetOutcome.get(key) !== !!out) {
+    lastGetOutcome.set(key, !!out)
+    dlog('secure', `get ${key} → ${redactTok(out)}`)
+  }
+  return out
 }
 function secureDelete(key: string): boolean {
   try {
@@ -1149,7 +1188,10 @@ async function clearStoredToken(): Promise<void> {
 async function validateAndRefreshAuth(): Promise<boolean> {
   const token = await getStoredToken()
   const { serverUrl } = loadConfig()
-  if (!token || !serverUrl) return false
+  if (!token || !serverUrl) {
+    dlog('auth', `refresh skipped (token=${token ? 'yes' : 'no'} serverUrl=${serverUrl || '(empty)'})`)
+    return false
+  }
   const base = serverUrl.replace(/\/+$/, '')
   try {
     const r = await fetch(`${base}/api/auth/refresh`, {
@@ -1159,14 +1201,18 @@ async function validateAndRefreshAuth(): Promise<boolean> {
     if (r.ok) {
       const j = await r.json().catch(() => null)
       if (j?.access_token) await storeToken(j.access_token)
+      dlog('auth', `refresh ok (rotated=${j?.access_token ? 'yes' : 'no'})`)
       return true
     }
     if (r.status === 401 || r.status === 403) {
+      dlog('auth', `refresh ${r.status} → clearing stored token (server rejected it)`)
       await clearStoredToken()
       return false
     }
+    dlog('auth', `refresh HTTP ${r.status} → keeping token (transient)`)
     return true // transient server error — assume still logged in
-  } catch {
+  } catch (e) {
+    dlog('auth', `refresh unreachable (${(e as Error)?.message}) → keeping token`)
     return true // offline / unreachable — keep the token, retry later
   }
 }
@@ -1193,13 +1239,17 @@ async function applyOverlayContent(): Promise<void> {
       overlay.setIgnoreMouseEvents(true, IS_LINUX ? undefined : { forward: true })
     }
     try {
+      dlog('overlay', `loadURL ${base}/overlay ${redactTok(token)}`)
       await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
       overlay.webContents.insertCSS('html,body{background:transparent !important;}')
-    } catch {
+      dlog('overlay', 'loadURL ok')
+    } catch (e) {
       // Load failed (server/network) — attachContentResilience retries with backoff.
+      dlog('overlay', `loadURL FAILED: ${(e as Error)?.message}`)
     }
   } else {
     // Logged-out placeholder needs its dock handle clickable.
+    dlog('overlay', `placeholder (token=${token ? 'yes' : 'no'} serverUrl=${serverUrl || '(empty)'})`)
     overlay.setIgnoreMouseEvents(false)
     loadRoute(overlay, 'overlay')
   }
@@ -1990,6 +2040,13 @@ function registerIpc(): void {
   ipcMain.handle('secure:get', async (_e, key: string) => secureGet(key))
   ipcMain.handle('secure:set', async (_e, key: string, value: string) => secureSet(key, value))
   ipcMain.handle('secure:delete', async (_e, key: string) => secureDelete(key))
+
+  // In-app debug log: renderers append their side of a flow (login steps),
+  // the settings window reads the merged buffer for copy-paste bug reports.
+  ipcMain.on('debug:log', (_e, line: string) => {
+    if (typeof line === 'string') dlog('ui', line.slice(0, 500))
+  })
+  ipcMain.handle('debug:get', () => debugLines.join('\n'))
 }
 
 // Native application menu — keeps copy/paste accelerators (chat input) and
@@ -2036,6 +2093,14 @@ function buildAppMenu(): void {
 }
 
 app.whenReady().then(() => {
+  dlog(
+    'boot',
+    `v${app.getVersion()} ${process.platform}/${process.arch} exec=${process.execPath}` +
+      `${process.env.APPIMAGE ? ` appimage=${process.env.APPIMAGE}` : ''}` +
+      ` argv=[${process.argv.slice(1).join(' ')}]` +
+      ` encAvail=${safeStorage.isEncryptionAvailable()}` +
+      (process.platform === 'linux' ? ` encBackend=${safeStorage.getSelectedStorageBackend()}` : ''),
+  )
   // Screen-observation uses getDisplayMedia, which in Electron needs the app to
   // satisfy the display-media request (unlike a browser's built-in picker).
   // Prefer the OS picker where available; fall back to the primary screen.

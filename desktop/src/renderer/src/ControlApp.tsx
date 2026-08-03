@@ -277,6 +277,8 @@ export function ControlApp() {
   const [quickChatHotkey, setQuickChatHotkey] = useState('CommandOrControl+Shift+Enter')
   const [quickChatMsg, setQuickChatMsg] = useState('')
   const [resetDone, setResetDone] = useState(false)
+  const [debugText, setDebugText] = useState('')
+  const [debugCopied, setDebugCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState('')
   const [theme, setThemeState] = useState<ThemeMode>('system')
@@ -531,6 +533,9 @@ export function ControlApp() {
     setQuickChatMsg(ok ? t('hotkey.registered') : t('hotkey.conflict'))
   }
 
+  // Feed the in-app debug log (앱 탭) — main merges it with its own entries.
+  const dbg = (line: string) => window.connector?.debug?.log(line)
+
   // Persist the typed address and get back MAIN's canonical form (scheme
   // added when missing, trailing slashes stripped — see normalizeServerUrl in
   // main). One authority: the renderer never re-implements the rules, it just
@@ -538,6 +543,7 @@ export function ControlApp() {
   const saveServerUrl = async (): Promise<string> => {
     const saved = await window.connector?.serverConfig.set({ serverUrl })
     const base = saved?.serverUrl ?? serverUrl.trim().replace(/\/+$/, '')
+    dbg(`saveServerUrl typed="${serverUrl.trim()}" canonical="${base}"`)
     if (base && base !== serverUrl) setServerUrl(base)
     return base
   }
@@ -552,6 +558,7 @@ export function ControlApp() {
       const token = await window.connector?.secureStore.get(TOKEN_KEY)
       const r = await fetch(`${base}/api/auth/status`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined)
       const j = await r.json()
+      dbg(`checkStatus HTTP ${r.status} storedToken=${token ? 'yes' : 'no'} is_authenticated=${String(j?.is_authenticated)}`)
       if (token && !j.is_authenticated) {
         // Stored token is dead — drop it so the UI shows a clean login prompt
         // instead of the confusing "토큰이 저장됨" + "로그인 필요" combination.
@@ -587,11 +594,12 @@ export function ControlApp() {
         return
       }
       const j = await r.json()
+      dbg(`login HTTP ${r.status} user=${j?.username ?? '?'} tokenLen=${j?.access_token?.length ?? 0}`)
       const saved = await window.connector?.secureStore.set(TOKEN_KEY, j.access_token)
+      dbg(`login token saved=${String(saved)}`)
       if (saved === false) {
-        // Linux without a Secret Service (gnome-keyring/kwallet): the token
-        // cannot persist — saying "성공" here produced an invisible
-        // login-loop. Tell the user what to install instead.
+        // Token could not persist (secure-store write failed) — saying "성공"
+        // here produced an invisible login-loop. Surface it instead.
         stat(t('status.keychainUnavailable'), 'err')
         return
       }
@@ -600,6 +608,7 @@ export function ControlApp() {
       stat(t('status.loginOk', { username: j.username }), 'ok')
       window.connector?.windowControl.refresh()
     } catch (e) {
+      dbg(`login ERROR ${(e as Error).message}`)
       stat(t('status.loginError', { msg: (e as Error).message }), 'err')
     } finally {
       setBusy(false)
@@ -1246,6 +1255,46 @@ export function ControlApp() {
               </button>
               {resetDone && (
                 <p className="gy-hint" style={{ margin: '8px 0 0' }}>{t('app.positionsResetDone')}</p>
+              )}
+            </section>
+
+            <section className="gy-card">
+              <div className="gy-card-h">{I.refresh} {t('app.debugCard')}</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>{t('app.debugHint')}</p>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <button
+                  className="gy-btn gy-btn--ghost gy-btn--sm"
+                  onClick={async () => setDebugText((await window.connector?.debug?.get()) ?? '(no bridge)')}
+                >
+                  {t('app.debugRefresh')}
+                </button>
+                <button
+                  className="gy-btn gy-btn--ghost gy-btn--sm"
+                  disabled={!debugText}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(debugText)
+                      setDebugCopied(true)
+                      setTimeout(() => setDebugCopied(false), 2000)
+                    } catch {
+                      /* clipboard denied — text stays selectable below */
+                    }
+                  }}
+                >
+                  {debugCopied ? t('app.debugCopied') : t('app.debugCopy')}
+                </button>
+              </div>
+              {debugText && (
+                <pre
+                  style={{
+                    margin: 0, padding: 10, maxHeight: 260, overflow: 'auto',
+                    fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all', userSelect: 'text',
+                    background: 'var(--gy-bg-sunken, rgba(0,0,0,0.25))', borderRadius: 8,
+                  }}
+                >
+                  {debugText}
+                </pre>
               )}
             </section>
 

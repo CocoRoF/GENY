@@ -87,6 +87,13 @@ export interface ConnectorBridge {
   /** Connector app version (package.json), for the settings window. */
   appVersion(): Promise<string>
 
+  /** In-app debug log — renderers append flow steps, settings reads the
+   *  merged main-process buffer for copyable bug reports. */
+  debug: {
+    log(line: string): void
+    get(): Promise<string>
+  }
+
   /** OS-derived default UI language ('ko' if the OS locale starts with "ko",
    *  else 'en'). The settings window uses this when config.lang is unset. */
   appDefaultLang(): Promise<'ko' | 'en'>
@@ -344,6 +351,10 @@ const api: ConnectorBridge = {
     : _wk === 'quickchat' ? 'quickchat'
     : 'overlay',
   appVersion: () => ipcRenderer.invoke('app:version'),
+  debug: {
+    log: (line) => ipcRenderer.send('debug:log', line),
+    get: () => ipcRenderer.invoke('debug:get'),
+  },
   appDefaultLang: () => ipcRenderer.invoke('i18n:default-lang'),
   serverConfig: {
     get: () => ipcRenderer.invoke('config:get'),
