@@ -1802,14 +1802,29 @@ class AgentSession:
             # config shape.
             await self._init_memory_provider()
 
-            # 1b. Initialize vector memory layer (async, non-blocking)
+            # 1b. Vector memory warm-up — genuinely in the background. This
+            # was awaited inline, which meant a large vault (observed: 6.2k
+            # notes ≈ 19s full scan + re-index) held EVERY resume hostage;
+            # combined with the pre-2.64.2 on-loop scan it also froze /health
+            # and got the process watchdog-killed mid-start. The session goes
+            # live immediately; memory_search serves whatever is indexed so
+            # far (keyword fallback covers the gap) until the warm-up lands.
             if self._memory_manager:
-                try:
-                    await self._memory_manager.initialize_vector_memory()
-                except Exception as ve:
-                    logger.debug(
-                        f"[{self._session_id}] Vector memory init skipped: {ve}"
-                    )
+                mm = self._memory_manager
+                sid = self._session_id
+
+                async def _vector_warmup() -> None:
+                    try:
+                        ok = await mm.initialize_vector_memory()
+                        logger.info(f"[{sid}] vector memory warm-up done (ok={ok})")
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as ve:  # noqa: BLE001
+                        logger.debug(f"[{sid}] Vector memory init skipped: {ve}")
+
+                self._vector_init_task = asyncio.create_task(
+                    _vector_warmup(), name=f"vector-warmup-{sid}"
+                )
 
             # 2. Build geny-executor Pipeline (no subprocess)
             self._build_graph()
@@ -5042,6 +5057,19 @@ class AgentSession:
         isn't stalled by an up-to-20s compaction.
         """
         logger.info(f"[{self._session_id}] Cleaning up AgentSession (flush=%s)...", flush)
+
+        # Stop a still-running vector warm-up first — it must not keep
+        # indexing into a provider we are about to close (or an evicted
+        # session's RAM alive).
+        warmup = getattr(self, "_vector_init_task", None)
+        if warmup is not None:
+            if not warmup.done():
+                warmup.cancel()
+                try:
+                    await warmup
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
+            self._vector_init_task = None
 
         # Stop the skill hot-reload watcher's polling thread (audit L1).
         watcher = getattr(self, "_skill_watcher", None)
