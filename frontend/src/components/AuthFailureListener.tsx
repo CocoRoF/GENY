@@ -18,19 +18,40 @@
 
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { setToken } from '@/lib/authApi';
 
 const TOKEN_KEY = 'geny_auth_token';
 
 export default function AuthFailureListener() {
   useEffect(() => {
     let handling = false; // de-dupe a burst of 401s into one re-login
-    const onAuthFailed = () => {
+    const onAuthFailed = async () => {
       if (handling) return;
       handling = true;
       const conn = window.connector;
       if (conn?.secureStore && conn?.windowControl) {
-        // Connector: clear the keychain JWT, then reload — refreshAll() shows
-        // the settings/login window when no token is present.
+        // The 401 may have come from a request armed with an OLDER token
+        // (boot-time race, stale singleton) — api.ts already cleared
+        // localStorage before dispatching. Before logging the user out,
+        // check whether the CONNECTOR KEYCHAIN token is still alive; if so,
+        // re-adopt it and heal in place. Wiping the keychain on a false
+        // alarm turned one stray 401 into a full logout loop.
+        try {
+          const kc = await conn.secureStore.get(TOKEN_KEY);
+          if (kc) {
+            const r = await fetch('/api/auth/status', { headers: { Authorization: `Bearer ${kc}` } });
+            const j = await r.json().catch(() => null);
+            if (j?.is_authenticated) {
+              setToken(kc);
+              handling = false;
+              return; // keychain token is valid — stale failure, stay logged in
+            }
+          }
+        } catch {
+          /* verification unreachable — fall through to the logout path */
+        }
+        // Keychain token truly dead: clear it, then reload — refreshAll()
+        // shows the settings/login window when no token is present.
         conn.secureStore
           .delete(TOKEN_KEY)
           .catch(() => undefined)

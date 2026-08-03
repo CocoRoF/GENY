@@ -26,6 +26,23 @@ export interface AuthMessageResponse {
 
 const TOKEN_KEY = 'geny_auth_token';
 
+// Adopt a `?token=` URL credential at MODULE LOAD — before any component,
+// store, or singleton can fire an API call. The connector opens
+// /overlay|/connector with a fresh JWT in the URL; adopting it in a mount
+// effect (the old way) left a window where an early request still used a
+// STALE localStorage token from a previous session → 401 →
+// `geny:auth-failed` → AuthFailureListener wiped the connector's keychain
+// token too, logging the user straight back out ("로그인해도 아무것도 안 됨").
+// Module init precedes all of that by construction.
+if (typeof window !== 'undefined') {
+  try {
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken) localStorage.setItem(TOKEN_KEY, urlToken);
+  } catch {
+    /* no URL access (very old browser) — mount effects still adopt it */
+  }
+}
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
