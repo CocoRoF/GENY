@@ -245,6 +245,7 @@ export const messages: Record<string, Entry> = {
   'app.autostartCard': { ko: '시작 프로그램', en: 'Startup' },
   'app.autostartToggle': { ko: '시스템 시작 시 자동 실행', en: 'Launch on system startup' },
   'app.autostartHint': { ko: '컴퓨터에 로그인하면 Geny 접속기가 자동으로 실행됩니다.', en: 'Geny connector launches automatically when you log in to your computer.' },
+  'app.autostartFailed': { ko: '자동 실행을 등록하지 못했습니다. AppImage를 임시 폴더가 아닌 고정된 위치(예: 홈 폴더)에 두고 실행한 뒤 다시 켜 보세요.', en: 'Could not register autostart. If you run the AppImage, move it to a permanent location (e.g. your home folder), launch it from there, then try again.' },
 
   // ── app tab: window/avatar positions ──
   'app.positionsCard': { ko: '창 · 아바타 위치', en: 'Window · Avatar positions' },

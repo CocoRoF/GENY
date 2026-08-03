@@ -80,6 +80,10 @@ class PairEngine {
   private rerun = false
   private stopped = false
   private confirmedMassDelete = false
+  // Sticky watcher-degradation notice (e.g. inotify ENOSPC). Kept OUTSIDE
+  // status.lastError because every successful cycle rewrites lastError —
+  // and the whole point of ENOSPC is that the 60s poll keeps succeeding.
+  private watchDegraded: string | null = null
 
   constructor(
     public cfg: SyncPairConfig,
@@ -167,8 +171,9 @@ class PairEngine {
       // inotify exhaustion is the one watcher error a user must SEE:
       // live sync silently degrades to the 60s poll otherwise.
       if (String((err as NodeJS.ErrnoException)?.code) === 'ENOSPC') {
-        this.status.lastError =
+        this.watchDegraded =
           'inotify watch limit reached — raise fs.inotify.max_user_watches (sync falls back to 60s polling)'
+        this.status.lastError = this.watchDegraded
         this.pushStatus()
       }
     })
@@ -262,7 +267,9 @@ class PairEngine {
       this.status.counts.conflicts += stats.conflicts
       this.status.counts.skippedLarge = stats.skippedLarge
       this.status.lastSyncAt = Date.now()
-      this.status.lastError = stats.errors.length ? stats.errors[0] : null
+      // Real cycle errors win; otherwise the sticky watcher notice persists
+      // (a clean cycle must NOT wipe it — polling succeeding IS the symptom).
+      this.status.lastError = stats.errors.length ? stats.errors[0] : this.watchDegraded
       this.status.state = this.status.connected ? 'idle' : 'offline'
       // Quota storm guard: every retry would fail the same way each
       // round (watcher + 60s timer) — pause instead of hammering.

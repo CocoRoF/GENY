@@ -27,12 +27,15 @@ jobs:
         include:
           # latest*.yml + blockmaps are the electron-updater feed — upload them
           # alongside the installers so auto-update can find new releases.
+          # Linux has NO *.blockmap sidecar: the AppImage blockmap is embedded
+          # in the file itself (electron-updater uses
+          # FileWithEmbeddedBlockMapDifferentialDownloader), and deb never has
+          # one — differential updates need no extra asset here.
           - os: ubuntu-latest
             flag: --linux
             glob: |
               desktop/dist/*.AppImage
               desktop/dist/*.deb
-              desktop/dist/*.blockmap
               desktop/dist/latest-linux.yml
           - os: windows-latest
             flag: --win

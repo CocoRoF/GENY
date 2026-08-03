@@ -81,6 +81,10 @@ interface ConnectorConfig {
   /** Last position of the draggable quick-chat bar (remembered between summons).
    *  Absent → it opens centered near the top of the active display. */
   quickChatBar?: { x: number; y: number }
+  /** Linux-only: avatar overlay click-through opt-in (tray toggle). Persisted
+   *  so the user's choice survives restarts — {forward:true} hover-unlock does
+   *  not exist on Linux, so this is a deliberate all-or-nothing switch. */
+  linuxClickThrough?: boolean
   /** Allow the agent to capture the screen (Phase 4). Default true.
    *  Legacy — superseded by computerUse.screen when computerUse is present. */
   captureArmed?: boolean
@@ -202,7 +206,10 @@ function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
 function autostartDesktopPath(): string {
   return join(app.getPath('home'), '.config', 'autostart', 'geny-connector.desktop')
 }
-function applyAutoLaunch(enabled: boolean): void {
+// Returns whether the requested state was actually applied — a refusal (e.g.
+// ephemeral AppImage mount) must reach the settings UI, not just the console:
+// a toggle that shows "on" while nothing was written is a silent lie.
+function applyAutoLaunch(enabled: boolean): boolean {
   try {
     if (process.platform === 'linux') {
       const p = autostartDesktopPath()
@@ -215,7 +222,7 @@ function applyAutoLaunch(enabled: boolean): void {
         // pointing there is dead at next boot. Refuse rather than break.
         if (/\/tmp\/(\.mount_|appimage_extracted)/.test(exec)) {
           console.warn('autoLaunch skipped: ephemeral AppImage mount path', exec)
-          return
+          return false
         }
         // Desktop Entry field codes: literal % must be doubled.
         const execEsc = exec.replace(/%/g, '%%')
@@ -230,8 +237,10 @@ function applyAutoLaunch(enabled: boolean): void {
       // openAsHidden is honored on macOS; args flag the autostart launch.
       app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: enabled, args: ['--hidden'] })
     }
+    return true
   } catch (e) {
     console.warn('autoLaunch apply failed:', (e as Error).message)
+    return false
   }
 }
 
@@ -642,7 +651,14 @@ function createControl(): void {
   applyControlContent()
   control.on('close', (e) => {
     // Hide instead of destroy so the single renderer process persists.
+    // If the tray failed to appear there is no way to re-open a hidden
+    // window (and no single-instance lock to piggyback on) — closing the
+    // LAST visible UI surface must quit instead of stranding a zombie app.
     if (!appQuitting) {
+      if (!tray && !settings?.isVisible()) {
+        app.quit()
+        return
+      }
       e.preventDefault()
       control?.hide()
     }
@@ -694,7 +710,13 @@ function createSettings(): void {
   attachBoundsPersistence(settings, 'settings')
   loadRoute(settings, 'settings')
   settings.on('close', (e) => {
+    // Same tray-less rule as the control window: closing the last visible
+    // UI surface with no tray to summon it back means quit, not zombie.
     if (!appQuitting) {
+      if (!tray && !control?.isVisible()) {
+        app.quit()
+        return
+      }
       e.preventDefault()
       settings?.hide()
     }
@@ -782,7 +804,11 @@ function createQuickChat(): void {
   // and then stays put; the renderer paints nothing until summoned. showInactive()
   // so we don't steal focus from whatever the user is doing at launch.
   positionQuickChat()
-  quickchat.setIgnoreMouseEvents(!IS_LINUX, IS_LINUX ? undefined : { forward: true })
+  // Dismissed = click-through on EVERY platform. Unlike the avatar overlay,
+  // quick-chat needs no hover unlock — the hotkey summon path flips it
+  // interactive explicitly — so Linux can stay click-through too (an
+  // interactive invisible bar would silently eat a 640×188 hole of clicks).
+  quickchat.setIgnoreMouseEvents(true, IS_LINUX ? undefined : { forward: true })
   quickchat.showInactive()
 }
 
@@ -795,7 +821,8 @@ function createQuickChat(): void {
 function dismissQuickChat(): void {
   if (!quickchat) return
   quickChatOpen = false
-  quickchat.setIgnoreMouseEvents(!IS_LINUX, IS_LINUX ? undefined : { forward: true })
+  // Click-through on Linux as well — see createQuickChat.
+  quickchat.setIgnoreMouseEvents(true, IS_LINUX ? undefined : { forward: true })
   quickchat.webContents.send('quickchat:dismissed')
 }
 
@@ -1158,6 +1185,7 @@ function rebuildTrayMenu(): void {
           checked: linuxClickThroughOptIn,
           click: (item: Electron.MenuItem) => {
             linuxClickThroughOptIn = item.checked
+            saveConfig({ linuxClickThrough: item.checked })
             overlay?.setIgnoreMouseEvents(linuxClickThroughOptIn)
             rebuildTrayMenu()
           },
@@ -1213,10 +1241,13 @@ function createTray(): void {
     tray.on('click', () => showControl())
   } catch (e) {
     // No StatusNotifier host (e.g. plain GNOME without the AppIndicator
-    // extension). Keep the control window reachable: without a tray it is
-    // the only remaining UI surface.
+    // extension). Without a tray the control window is the only remaining
+    // UI surface, so make sure one actually appears: cancel a pending
+    // --hidden start (refreshAll runs after createTray and would otherwise
+    // leave the app running with no reachable UI at all).
     console.error('[tray] unavailable:', (e as Error)?.message)
     tray = null
+    startHidden = false
   }
 }
 
@@ -1624,12 +1655,14 @@ function registerIpc(): void {
       return `clicked image(${x},${y}) → screen(${p.x},${p.y})`
     }),
   )
-  // Launch-on-login toggle.
+  // Launch-on-login toggle. Returns the EFFECTIVE state: enabling can be
+  // refused (ephemeral AppImage mount, write failure) — then the config is
+  // rolled back and the renderer shows why instead of a lying "on" toggle.
   ipcMain.handle('autostart:get', () => loadConfig().autoLaunch === true)
   ipcMain.handle('autostart:set', (_e, enabled: boolean) => {
-    saveConfig({ autoLaunch: !!enabled })
-    applyAutoLaunch(!!enabled)
-    return !!enabled
+    const effective = applyAutoLaunch(!!enabled) && !!enabled
+    saveConfig({ autoLaunch: effective })
+    return effective
   })
 
   // desktop_screenshot geometry: the primary display id (so the renderer captures
@@ -1989,6 +2022,9 @@ app.whenReady().then(() => {
   // Reconcile the OS login item with the saved preference (default off) — keeps
   // the autostart entry in sync if the app moved or the setting changed offline.
   applyAutoLaunch(loadConfig().autoLaunch === true)
+  // Restore the Linux click-through opt-in BEFORE the overlay first applies
+  // its mouse policy (applyOverlayContent reads this flag).
+  linuxClickThroughOptIn = loadConfig().linuxClickThrough === true
   buildAppMenu()
   createOverlay()
   createControl()

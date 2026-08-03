@@ -271,6 +271,7 @@ export function ControlApp() {
   const [hasToken, setHasToken] = useState(false)
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [autoStart, setAutoStart] = useState(false)
+  const [autoStartErr, setAutoStartErr] = useState(false)
   const [pttHotkey, setPttHotkey] = useState('CommandOrControl+Shift+Space')
   const [pttMsg, setPttMsg] = useState('')
   const [quickChatHotkey, setQuickChatHotkey] = useState('CommandOrControl+Shift+Enter')
@@ -508,7 +509,14 @@ export function ControlApp() {
 
   const toggleAutoStart = async (next: boolean) => {
     setAutoStart(next)
-    await window.connector?.autostart?.set(next)
+    setAutoStartErr(false)
+    const effective = await window.connector?.autostart?.set(next)
+    // Main can refuse to enable (ephemeral AppImage mount / write failure) —
+    // reflect the real state and say why, never a lying "on" toggle.
+    if (typeof effective === 'boolean' && effective !== next) {
+      setAutoStart(effective)
+      if (next) setAutoStartErr(true)
+    }
   }
 
   const savePtt = async (acc: string) => {
@@ -1199,6 +1207,11 @@ export function ControlApp() {
               <div className="gy-card-h">{I.power} {t('app.autostartCard')}</div>
               <ToggleLine label={t('app.autostartToggle')} checked={autoStart} onChange={toggleAutoStart} />
               <p className="gy-hint" style={{ margin: '8px 0 0' }}>{t('app.autostartHint')}</p>
+              {autoStartErr && (
+                <p className="gy-hint" style={{ margin: '8px 0 0', color: 'var(--gy-danger, #e5484d)' }}>
+                  {t('app.autostartFailed')}
+                </p>
+              )}
             </section>
 
             <section className="gy-card">

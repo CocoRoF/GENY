@@ -199,7 +199,9 @@ export interface ConnectorBridge {
     check(): void
   }
 
-  /** Launch-on-login (start when the user signs into the OS). */
+  /** Launch-on-login (start when the user signs into the OS). `set` returns
+   *  the EFFECTIVE state — enabling can be refused (e.g. AppImage running
+   *  from an ephemeral /tmp mount), in which case it returns false. */
   autostart: {
     get(): Promise<boolean>
     set(enabled: boolean): Promise<boolean>

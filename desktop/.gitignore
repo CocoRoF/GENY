@@ -1,5 +1,7 @@
 node_modules/
 out/
 dist/
+# AppImage --appimage-extract dumps its payload here — never repo content.
+squashfs-root/
 *.log
 .DS_Store

@@ -30,9 +30,11 @@ asarUnpack:
 # (SmartScreen "More info → Run anyway") pending an EV/OV cert.
 linux:
   # StartupWMClass groups running windows with the launcher icon on GNOME/KDE.
+  # electron-builder 25 spreads `desktop` keys FLAT into the .desktop entry —
+  # the nested `desktop.entry` form is the v26 schema and would emit a junk
+  # `entry=[object Object]` line while leaving the default StartupWMClass=Geny.
   desktop:
-    entry:
-      StartupWMClass: geny-connector
+    StartupWMClass: geny-connector
   target:
     - AppImage
     - deb
