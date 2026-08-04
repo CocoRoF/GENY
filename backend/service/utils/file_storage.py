@@ -4,6 +4,7 @@ Storage Utilities
 Utilities for managing session storage, including gitignore pattern filtering.
 """
 import fnmatch
+from functools import lru_cache
 from logging import getLogger
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -137,6 +138,21 @@ def load_gitignore_patterns(storage_path: str, session_id: str = "") -> List[str
     return patterns
 
 
+@lru_cache(maxsize=64)
+def _compiled_spec(patterns: tuple):
+    """Compile-once cache for ignore specs.
+
+    should_ignore_path used to call PathSpec.from_lines PER PATH — ~3 ms a
+    compile × every entry of every listing. With scope=all walking the
+    whole storage root (observed: 8,005 entries, the memory vault alone is
+    ~7,800) one listing burned ~24 s — synchronously, on the event loop —
+    and the web UI polls it every few seconds, so the loop was effectively
+    permanently seized (storage/changes timed out, every sync engine hung
+    in 'syncing'). The pattern list is stable per (defaults + session
+    .gitignore), so 64 cached compilations cover every live session."""
+    return pathspec.PathSpec.from_lines('gitwildmatch', list(patterns))
+
+
 def should_ignore_path(rel_path: str, ignore_patterns: List[str], session_id: str = "") -> bool:
     """
     Check if a path should be ignored based on ignore patterns.
@@ -152,7 +168,7 @@ def should_ignore_path(rel_path: str, ignore_patterns: List[str], session_id: st
     if PATHSPEC_AVAILABLE:
         # Use pathspec for accurate gitignore matching
         try:
-            spec = pathspec.PathSpec.from_lines('gitwildmatch', ignore_patterns)
+            spec = _compiled_spec(tuple(ignore_patterns))
             return spec.match_file(rel_path)
         except Exception as e:
             log_prefix = f"[{session_id}] " if session_id else ""

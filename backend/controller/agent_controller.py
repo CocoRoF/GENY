@@ -1284,8 +1284,13 @@ async def list_storage_files(
         storage_path = _os.path.join(storage_path, "workspace")
         _os.makedirs(storage_path, exist_ok=True)
 
-    files_data = storage_utils.list_storage_files(
-        storage_path, subpath=path, session_id=session_id
+    # OFF-LOOP: this walks the whole scope (scope=all includes the memory
+    # vault — thousands of entries) and the UI polls it. Run synchronously
+    # it seizes the event loop and starves every other endpoint (observed:
+    # storage/changes timing out, all sync engines wedged in 'syncing').
+    files_data = await asyncio.to_thread(
+        storage_utils.list_storage_files,
+        storage_path, subpath=path, session_id=session_id,
     )
     files = [StorageFile(**f) for f in files_data]
 
