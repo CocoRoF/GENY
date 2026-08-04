@@ -143,6 +143,21 @@ def _wsgi_env_fixups(app):
         if fwd:
             environ["wsgi.url_scheme"] = fwd.split(",")[0].strip() or environ["wsgi.url_scheme"]
 
+        # Belt-and-braces for ANY proxy chain that misreports the scheme
+        # (observed: cloudflared → nginx-over-http rewrote XFP to "http"
+        # while clients naturally send https:// Destinations): identity of
+        # a copy/move destination is HOST + PATH — the scheme carries no
+        # information here, so align it with what this stack believes and
+        # let wsgidav's own host validation do the real check.
+        dest = environ.get("HTTP_DESTINATION")
+        if dest:
+            for prefix in ("https://", "http://"):
+                if dest.lower().startswith(prefix):
+                    environ["HTTP_DESTINATION"] = (
+                        environ["wsgi.url_scheme"] + "://" + dest[len(prefix):]
+                    )
+                    break
+
         def sr(status, headers, exc_info=None):
             if environ.get("REQUEST_METHOD", "").upper() == "LOCK":
                 headers = [
