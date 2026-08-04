@@ -134,6 +134,13 @@ export const messages: Record<string, Entry> = {
   // ── Workspace sync ──
   'drive.card': { ko: 'Geny 드라이브', en: 'Geny Drive' },
   'drive.hint': { ko: '연결한 에이전트마다 드라이브 안에 폴더가 하나씩 생기고, 서버 작업공간과 실시간으로 동기화됩니다. 여러 에이전트를 동시에 연결할 수 있어요.', en: 'Each connected agent gets its own folder inside the drive, synced live with its server workspace. Connect as many agents as you like.' },
+  'dav.card': { ko: 'WebDAV 접속 (외부 프로그램)', en: 'WebDAV Access (external apps)' },
+  'dav.hint': { ko: 'RaiDrive·rclone·Finder 같은 프로그램으로 에이전트 저장소를 드라이브처럼 연결할 수 있습니다. 아래 주소와 앱 패스워드를 사용하세요 (계정 비밀번호가 아닙니다).', en: 'Mount your agents as a drive with RaiDrive, rclone, Finder, and more. Use the address below with an app password (not your account password).' },
+  'dav.copy': { ko: '복사', en: 'Copy' },
+  'dav.issue': { ko: '앱 패스워드 발급', en: 'Issue app password' },
+  'dav.secretOnce': { ko: '이 비밀번호는 지금 한 번만 표시됩니다. 안전한 곳에 복사해 두세요.', en: 'This password is shown only once. Copy it somewhere safe now.' },
+  'dav.dismiss': { ko: '닫기', en: 'Dismiss' },
+  'dav.revoke': { ko: '폐기', en: 'Revoke' },
   'drive.cloudToggle': { ko: 'Geny 클라우드 사용', en: 'Use Geny Cloud' },
   'drive.cloudOff': { ko: '클라우드를 껐습니다. 연결해 둔 에이전트 목록은 그대로 기억되며, 다시 켜면 내려받기 없이 이어서 동기화됩니다.', en: 'Cloud is off. Your connected agents are remembered — turning it back on resumes without re-downloading.' },
   'drive.rootLabel': { ko: '드라이브 위치', en: 'Drive location' },

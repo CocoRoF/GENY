@@ -2140,6 +2140,44 @@ function registerIpc(): void {
     }),
   )
 
+  // ── WebDAV (universal protocol surface) ─────────────────────────
+  // The card shows the mount URL and manages per-device app passwords.
+  // Secrets transit main-process IPC once (issue response) and are never
+  // stored anywhere in the connector — the server keeps only hashes.
+  const davFetch = async (method: string, path: string, body?: unknown) => {
+    const cfg = loadConfig()
+    const token = await getStoredToken()
+    if (!cfg.serverUrl || !token) return { error: 'not signed in' }
+    try {
+      const res = await fetch(`${cfg.serverUrl.replace(/\/$/, '')}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+      if (!res.ok) return { error: `HTTP ${res.status}` }
+      return await res.json()
+    } catch (e) {
+      return { error: (e as Error)?.message ?? String(e) }
+    }
+  }
+
+  ipcMain.handle('dav:info', async () => {
+    const cfg = loadConfig()
+    return {
+      url: cfg.serverUrl ? `${cfg.serverUrl.replace(/\/$/, '')}/dav` : '',
+    }
+  })
+  ipcMain.handle('dav:list-passwords', () => davFetch('GET', '/api/auth/app-passwords'))
+  ipcMain.handle('dav:create-password', (_e, label: string) =>
+    davFetch('POST', '/api/auth/app-passwords', { label: String(label || '').slice(0, 200) }),
+  )
+  ipcMain.handle('dav:revoke-password', (_e, id: number) =>
+    davFetch('DELETE', `/api/auth/app-passwords/${Number(id)}`),
+  )
+
   ipcMain.handle('drive:pick-root', async () => {
     const res = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
