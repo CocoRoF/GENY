@@ -437,6 +437,20 @@ def quota_bytes() -> int:
         return 10240 * 1024 * 1024
 
 
+def used_bytes_if_indexed(storage_path: str) -> Optional[int]:
+    """used_bytes, but STRICTLY read-only: None when no index exists yet.
+
+    The storage summary endpoint calls this for every owned session — a GET
+    must not mkdir + create a SQLite index inside sessions that never used
+    the storage API (observed side effect), and an empty fresh index would
+    report a misleading 0 B for workspaces that hold files written by agent
+    tools. None lets the UI show "not indexed" instead of a false zero.
+    """
+    if not _db_path(storage_path).exists():
+        return None
+    return used_bytes(storage_path)
+
+
 def used_bytes(storage_path: str) -> int:
     """Total live file bytes per the index (cheap SQL, no walk)."""
     conn = _connect(storage_path)

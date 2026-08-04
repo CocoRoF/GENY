@@ -2061,6 +2061,22 @@ function registerIpc(): void {
   // live on the drive, never where each one goes. Drive-owned pairs carry
   // managed:'drive'; classic hand-made pairs are untouched and keep working.
 
+  // Drive mutations are serialized: drive:set-root quiesces engines and then
+  // moves directories (seconds of awaited work), and the main process keeps
+  // servicing IPC during those awaits — a cloud/agent toggle landing in that
+  // window would applyDriveConfig() against the OLD root and start engines
+  // watching the very directories the move is about to rename. One chain,
+  // every mutation queues behind the previous one.
+  let driveOpChain: Promise<unknown> = Promise.resolve()
+  const driveExclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = driveOpChain.then(fn, fn)
+    driveOpChain = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
   ipcMain.handle('drive:get', async () => {
     const cfg = loadConfig()
     return {
@@ -2097,28 +2113,32 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('drive:set-agent', async (_e, sessionId: string, enabled: boolean, label?: string) => {
-    // Guard the key: an empty/garbage id would mint a folder and a pair that
-    // can only ever resolve to session_gone (observed when a caller passed a
-    // failed create-session response through).
-    if (!sessionId || !/^[A-Za-z0-9_-]{4,128}$/.test(sessionId)) {
-      return { error: 'invalid session id', root: driveRoot(), agents: loadConfig().driveAgents ?? {} }
-    }
-    const cfg = loadConfig()
-    const agents = { ...(cfg.driveAgents ?? {}) }
-    const prev = agents[sessionId]
-    const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
-    agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
-    saveConfig({ driveAgents: agents })
-    applyDriveConfig()
-    return { root: driveRoot(), agents }
-  })
+  ipcMain.handle('drive:set-agent', (_e, sessionId: string, enabled: boolean, label?: string) =>
+    driveExclusive(async () => {
+      // Guard the key: an empty/garbage id would mint a folder and a pair that
+      // can only ever resolve to session_gone (observed when a caller passed a
+      // failed create-session response through).
+      if (!sessionId || !/^[A-Za-z0-9_-]{4,128}$/.test(sessionId)) {
+        return { error: 'invalid session id', root: driveRoot(), agents: loadConfig().driveAgents ?? {} }
+      }
+      const cfg = loadConfig()
+      const agents = { ...(cfg.driveAgents ?? {}) }
+      const prev = agents[sessionId]
+      const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
+      agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
+      saveConfig({ driveAgents: agents })
+      applyDriveConfig()
+      return { root: driveRoot(), agents }
+    }),
+  )
 
-  ipcMain.handle('drive:set-cloud', async (_e, enabled: boolean) => {
-    saveConfig({ cloudOptIn: !!enabled })
-    applyDriveConfig()
-    return { cloudOptIn: !!enabled }
-  })
+  ipcMain.handle('drive:set-cloud', (_e, enabled: boolean) =>
+    driveExclusive(async () => {
+      saveConfig({ cloudOptIn: !!enabled })
+      applyDriveConfig()
+      return { cloudOptIn: !!enabled }
+    }),
+  )
 
   ipcMain.handle('drive:pick-root', async () => {
     const res = await dialog.showOpenDialog({
@@ -2133,7 +2153,8 @@ function registerIpc(): void {
   // re-point the pairs. Sync engines are stopped first so nothing writes into
   // a directory being moved, and per-pair indexes are preserved (they are
   // keyed by pair id, not path) so a relocation costs zero re-download.
-  ipcMain.handle('drive:set-root', async (_e, newRoot: string) => {
+  ipcMain.handle('drive:set-root', (_e, newRoot: string) =>
+    driveExclusive(async () => {
     const target = String(newRoot || '').trim()
     if (!target) return { ok: false, error: 'empty path' }
     const current = driveRoot()
@@ -2175,7 +2196,8 @@ function registerIpc(): void {
     applyDriveConfig()
     dlog('drive', `root moved ${current} → ${target} (${moved} folder(s))`)
     return { ok: true, root: target, moved }
-  })
+    }),
+  )
   ipcMain.handle('sync:list', () => ({
     pairs: loadConfig().syncPairs ?? [],
     statuses: getSyncManager()?.statuses() ?? [],

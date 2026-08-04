@@ -412,8 +412,9 @@ async def storage_summary(auth: dict = Depends(require_auth)):
 
     The Drive UI shows a usage bar per connected agent; without this it
     would issue one /storage/changes per agent just to read used_bytes.
-    Sizes are computed off-loop (directory walks) and failures degrade to
-    a null size rather than failing the whole listing.
+    Sizes come from the sync index (cheap SQL, computed off-loop); sessions
+    with no index yet report null — a GET must neither create index files
+    in untouched sessions nor claim "0 B" for workspaces it never scanned.
     """
     from service.utils import workspace_sync
 
@@ -435,7 +436,7 @@ async def storage_summary(auth: dict = Depends(require_auth)):
             continue  # not the caller's session — omit silently
         try:
             storage_path = _storage_root_live_or_dormant(sid)
-            used = await asyncio.to_thread(workspace_sync.used_bytes, storage_path)
+            used = await asyncio.to_thread(workspace_sync.used_bytes_if_indexed, storage_path)
         except Exception:  # noqa: BLE001
             used = None
         out.append(

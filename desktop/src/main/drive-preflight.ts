@@ -18,6 +18,7 @@
 
 import { accessSync, constants, existsSync } from 'fs'
 import { release } from 'os'
+import { delimiter, join } from 'path'
 
 export interface DriveCapabilities {
   /** Mirror mode (the shipped Drive): always available. */
@@ -34,11 +35,17 @@ export interface DriveCapabilities {
 
 /** Linux: FUSE 3 userspace helper + the kernel device. */
 function probeFuse(): DriveCapabilities {
-  const helper = [
-    '/usr/bin/fusermount3',
-    '/bin/fusermount3',
-    '/usr/local/bin/fusermount3',
-  ].some((p) => existsSync(p))
+  // Fixed prefixes cover FHS distros; the PATH scan covers everything else
+  // (NixOS, Guix, /opt installs) — a machine with a working fusermount3 must
+  // never be told to install it.
+  const helper =
+    ['/usr/bin/fusermount3', '/bin/fusermount3', '/usr/local/bin/fusermount3'].some((p) =>
+      existsSync(p),
+    ) ||
+    (process.env.PATH ?? '')
+      .split(delimiter)
+      .filter(Boolean)
+      .some((dir) => existsSync(join(dir, 'fusermount3')))
   const dev = existsSync('/dev/fuse')
   if (helper && dev) {
     // Readable/writable /dev/fuse is what actually gates a user mount;
@@ -53,7 +60,7 @@ function probeFuse(): DriveCapabilities {
         mechanism: 'fuse',
         code: 'fuse-perm',
         missing:
-          '/dev/fuse 에 접근할 수 없습니다. 사용자를 fuse 그룹에 추가하거나 컨테이너에 --device /dev/fuse 를 부여한 뒤 다시 로그인하세요.',
+          '/dev/fuse 에 접근할 수 없습니다. 컨테이너라면 --device /dev/fuse 를 부여하고, 일반 데스크톱이라면 관리자가 /dev/fuse 권한을 제한하지 않았는지 확인하세요. 미러 모드(폴더 동기화)는 정상 동작합니다.',
       }
     }
   }

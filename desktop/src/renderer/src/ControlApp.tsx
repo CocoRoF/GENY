@@ -957,6 +957,7 @@ export function ControlApp() {
               <ToggleLine
                 label={t('drive.cloudToggle')}
                 checked={driveCloud}
+                disabled={!!driveBusy}
                 onChange={async (next) => {
                   setDriveCloud(next)
                   await window.connector?.drive?.setCloud(next)
@@ -1039,6 +1040,7 @@ export function ControlApp() {
                     <ToggleLine
                       label=""
                       checked={on}
+                      disabled={!!driveBusy}
                       onChange={(next) => void toggleDriveAgent(a.id, a.name, next)}
                     />
                   </div>
@@ -1496,14 +1498,14 @@ function TuneSlider({ label, value, min, max, step, display, onChange }: {
   )
 }
 
-function ToggleLine({ label, checked, onChange }: {
-  label: string; checked: boolean; onChange: (c: boolean) => void;
+function ToggleLine({ label, checked, onChange, disabled }: {
+  label: string; checked: boolean; onChange: (c: boolean) => void; disabled?: boolean;
 }) {
   return (
-    <div className="gy-toggle-line">
+    <div className="gy-toggle-line" style={disabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
       <span className="label">{label}</span>
       <label className="gy-switch">
-        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
         <span className="track" />
         <span className="thumb" />
       </label>

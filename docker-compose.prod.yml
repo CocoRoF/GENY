@@ -87,7 +87,9 @@ services:
       # Per-agent workspace quota and per-file cap. Declared explicitly so
       # the deployed limits are visible/tunable here instead of living as
       # hidden code defaults — nginx's storage location caps the request
-      # body at 512m, so keep MAX_FILE_MB at or below that.
+      # body at 512m; keep MAX_FILE_MB strictly below that (multipart
+      # framing adds overhead, so a file at exactly the nginx cap 413s
+      # before the backend ever sees it — 500 leaves 12m of headroom).
       - GENY_WORKSPACE_QUOTA_MB=${GENY_WORKSPACE_QUOTA_MB:-10240}
       - GENY_WORKSPACE_MAX_FILE_MB=${GENY_WORKSPACE_MAX_FILE_MB:-500}
       # Knowledge repository vector store

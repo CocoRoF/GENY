@@ -363,9 +363,17 @@ export class SyncManager {
       if (changed) {
         engine.stop()
         this.engines.delete(id)
-        if (!next) {
-          // pairing removed → its index file is dead weight (ids are
-          // minted fresh on re-pair, so this can never be reused)
+        if (!next && engine.cfg.managed !== 'drive') {
+          // MANUAL pairing removed → its index file is dead weight (manual
+          // ids are minted fresh on re-pair, so it can never be reused).
+          // Drive pairs are the OPPOSITE: their id is the stable
+          // drive:<sessionId>, and the index is the sync baseline — deleting
+          // it would turn every cloud-off/agent-off toggle into a full
+          // re-download on re-enable, and (worse) losing the baseline makes
+          // "deleted on the other side while parked" indistinguishable from
+          // "never seen", resurrecting deleted files. Drive indexes are only
+          // removed when the AGENT SESSION itself is gone (session_gone) —
+          // never on a toggle.
           void import('fs/promises').then(({ rm }) =>
             rm(join(this.deps.indexDir, `${id}.json`), { force: true }).catch(() => {}),
           )
