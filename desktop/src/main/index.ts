@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, safeStorage, screen, session, shell, Tray } from 'electron'
 import { spawn } from 'child_process'
 import { join, sep } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, renameSync, cpSync, rmSync, readdirSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
 import { getSyncManager, initSyncManager, type SyncPairConfig } from './sync-manager'
@@ -107,6 +107,14 @@ interface ConnectorConfig {
    *  so the user's choice survives restarts — {forward:true} hover-unlock does
    *  not exist on Linux, so this is a deliberate all-or-nothing switch. */
   linuxClickThrough?: boolean
+  /** Geny Drive — Google-Drive-style single root: every connected agent gets
+   *  `<driveRoot>/<folder>/` synced with its server workspace. Absent →
+   *  defaults to ~/GenyDrive on first use. */
+  driveRoot?: string
+  /** Per-agent Drive membership. `folder` is allocated once (safe name from
+   *  the session label) and kept stable across session renames so local
+   *  paths never churn. Disabling keeps the local folder on disk. */
+  driveAgents?: Record<string, { enabled: boolean; folder: string; label?: string }>
   /** Allow the agent to capture the screen (Phase 4). Default true.
    *  Legacy — superseded by computerUse.screen when computerUse is present. */
   captureArmed?: boolean
@@ -1270,6 +1278,75 @@ app.on('before-quit', () => {
   appQuitting = true
 })
 
+// ── Geny Drive helpers ───────────────────────────────────────────────────
+// The drive is a single local root whose immediate children are agent
+// folders. Membership (which agent) is the only user decision; placement is
+// derived. Drive-owned sync pairs are marked managed:'drive' so the classic
+// hand-paired workflow keeps working side by side.
+
+function driveRoot(): string {
+  return loadConfig().driveRoot || join(app.getPath('home'), 'GenyDrive')
+}
+
+/** Filesystem-safe, human-recognizable folder name for an agent, unique
+ *  within the drive. Allocated ONCE per agent and then frozen — renaming a
+ *  session must not churn local paths (and break open files/shortcuts). */
+function allocateDriveFolder(
+  label: string,
+  agents: Record<string, { folder: string }>,
+  sessionId: string,
+): string {
+  const taken = new Set(
+    Object.entries(agents)
+      .filter(([sid]) => sid !== sessionId)
+      .map(([, a]) => a.folder.toLowerCase()),
+  )
+  const base =
+    (label || sessionId)
+      .normalize('NFC')
+      // Reserved on Windows + path separators; keep letters/digits/spaces.
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/, '') // Windows forbids trailing dot/space
+      .slice(0, 48) || sessionId.slice(0, 8)
+  let name = base
+  let n = 2
+  while (taken.has(name.toLowerCase())) name = `${base}-${n++}`
+  return name
+}
+
+/** Reconcile sync pairs with the drive config: one managed pair per enabled
+ *  agent at `<root>/<folder>`, none for disabled ones. Idempotent — safe to
+ *  call after any config change. */
+function applyDriveConfig(): void {
+  const cfg = loadConfig()
+  const root = driveRoot()
+  const agents = cfg.driveAgents ?? {}
+  const others = (cfg.syncPairs ?? []).filter((p) => p.managed !== 'drive')
+  const managed = Object.entries(agents)
+    .filter(([, a]) => a.enabled)
+    .map(([sessionId, a]) => {
+      const localPath = join(root, a.folder)
+      try {
+        mkdirSync(localPath, { recursive: true })
+      } catch {
+        /* surfaced by the engine's own error state */
+      }
+      return {
+        // Stable id per agent so the sync index survives toggles/relocations.
+        id: `drive:${sessionId}`,
+        sessionId,
+        sessionLabel: a.label,
+        localPath,
+        managed: 'drive' as const,
+      }
+    })
+  const next = [...others, ...managed]
+  saveConfig({ syncPairs: next })
+  getSyncManager()?.configure(next)
+}
+
 // Relaunch via the sandbox shim / AppImage runtime. process.execPath is the
 // REAL binary (<name>.bin behind the shim, build/afterPack.cjs) — relaunching
 // it directly would skip the sandbox decision, and an AppImage's FUSE mount
@@ -1935,6 +2012,95 @@ function registerIpc(): void {
     const cfg = loadConfig()
     getSyncManager()?.configure(cfg.syncPairs ?? [])
   }
+
+  // ── Geny Drive ────────────────────────────────────────────────────────
+  // One root, one folder per connected agent — the user picks WHICH agents
+  // live on the drive, never where each one goes. Drive-owned pairs carry
+  // managed:'drive'; classic hand-made pairs are untouched and keep working.
+
+  ipcMain.handle('drive:get', async () => {
+    const cfg = loadConfig()
+    return {
+      root: driveRoot(),
+      agents: cfg.driveAgents ?? {},
+      // Reported per agent so the UI can show live sync state + usage.
+      statuses: getSyncManager()?.statuses() ?? [],
+    }
+  })
+
+  ipcMain.handle('drive:set-agent', async (_e, sessionId: string, enabled: boolean, label?: string) => {
+    // Guard the key: an empty/garbage id would mint a folder and a pair that
+    // can only ever resolve to session_gone (observed when a caller passed a
+    // failed create-session response through).
+    if (!sessionId || !/^[A-Za-z0-9_-]{4,128}$/.test(sessionId)) {
+      return { error: 'invalid session id', root: driveRoot(), agents: loadConfig().driveAgents ?? {} }
+    }
+    const cfg = loadConfig()
+    const agents = { ...(cfg.driveAgents ?? {}) }
+    const prev = agents[sessionId]
+    const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
+    agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
+    saveConfig({ driveAgents: agents })
+    applyDriveConfig()
+    return { root: driveRoot(), agents }
+  })
+
+  ipcMain.handle('drive:pick-root', async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: driveRoot(),
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+    return res.filePaths[0]
+  })
+
+  // Relocate the whole drive: MOVE every managed folder to the new root, then
+  // re-point the pairs. Sync engines are stopped first so nothing writes into
+  // a directory being moved, and per-pair indexes are preserved (they are
+  // keyed by pair id, not path) so a relocation costs zero re-download.
+  ipcMain.handle('drive:set-root', async (_e, newRoot: string) => {
+    const target = String(newRoot || '').trim()
+    if (!target) return { ok: false, error: 'empty path' }
+    const current = driveRoot()
+    if (target === current) return { ok: true, root: current, moved: 0 }
+    const cfg = loadConfig()
+    const agents = cfg.driveAgents ?? {}
+    // Stop engines and WAIT for in-flight rounds — `configure([])` would also
+    // delete the per-pair indexes (forcing a full re-bootstrap), and a live
+    // watcher would recreate the very directory we are moving.
+    await getSyncManager()?.quiesce()
+    let moved = 0
+    try {
+      mkdirSync(target, { recursive: true })
+      for (const entry of Object.values(agents)) {
+        const from = join(current, entry.folder)
+        const to = join(target, entry.folder)
+        if (!existsSync(from) || existsSync(to)) continue
+        try {
+          renameSync(from, to) // same volume: instant
+        } catch {
+          // Cross-volume (EXDEV) or locked: copy then remove the source.
+          cpSync(from, to, { recursive: true })
+          rmSync(from, { recursive: true, force: true })
+        }
+        moved++
+        // A late watcher event can leave an EMPTY husk behind; never remove a
+        // source that still holds data.
+        try {
+          if (existsSync(from) && readdirSync(from).length === 0) rmSync(from, { recursive: true })
+        } catch {
+          /* leftover husk is harmless */
+        }
+      }
+    } catch (e) {
+      applyDriveConfig() // restart engines on the OLD root — never leave them dead
+      return { ok: false, error: (e as Error)?.message ?? String(e) }
+    }
+    saveConfig({ driveRoot: target })
+    applyDriveConfig()
+    dlog('drive', `root moved ${current} → ${target} (${moved} folder(s))`)
+    return { ok: true, root: target, moved }
+  })
   ipcMain.handle('sync:list', () => ({
     pairs: loadConfig().syncPairs ?? [],
     statuses: getSyncManager()?.statuses() ?? [],
@@ -2152,7 +2318,13 @@ app.whenReady().then(() => {
         setTimeout(() => getSyncManager()?.configure(next), 0)
       },
     })
-    manager.configure(loadConfig().syncPairs ?? [])
+    // Reconcile Geny Drive first (creates/moves managed pairs), which also
+    // configures the manager; falls back to raw pairs if the drive is unset.
+    try {
+      applyDriveConfig()
+    } catch {
+      manager.configure(loadConfig().syncPairs ?? [])
+    }
   } catch (e) {
     console.error('[sync] init failed', e)
   }

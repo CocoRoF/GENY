@@ -29,6 +29,10 @@ export interface SyncPairConfig {
    *  human explanation instead of a bare "일시정지" after the engine that
    *  detected the condition has been torn down. */
   pausedReason?: string
+  /** 'drive' → this pair is OWNED by the Geny Drive orchestrator (single
+   *  root, per-agent toggle): created/moved/removed by drive config, hidden
+   *  from the manual-pair editor. Undefined = classic user-managed pair. */
+  managed?: 'drive'
 }
 
 export type SyncState =
@@ -221,6 +225,10 @@ class PairEngine {
     this.schedule()
   }
 
+  isRunning(): boolean {
+    return this.running
+  }
+
   stop(): void {
     this.stopped = true
     this.watcher?.close().catch(() => {})
@@ -393,6 +401,21 @@ export class SyncManager {
   stopAll(): void {
     for (const e of this.engines.values()) e.stop()
     this.engines.clear()
+  }
+
+  /** Stop every engine and WAIT until no sync round is still writing, WITHOUT
+   *  deleting per-pair indexes (unlike `configure([])`, which treats a missing
+   *  pair as unpaired and drops its index — that would force a full
+   *  re-bootstrap). Used by drive relocation: the bytes are about to move on
+   *  disk, so nothing may hold or recreate the old paths. */
+  async quiesce(timeoutMs = 10_000): Promise<void> {
+    const engines = [...this.engines.values()]
+    for (const e of engines) e.stop()
+    this.engines.clear()
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline && engines.some((e) => e.isRunning())) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
   }
 
   private broadcast(): void {

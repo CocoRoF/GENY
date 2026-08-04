@@ -406,6 +406,49 @@ async def get_stored_session_info(
 # ============================================================================
 
 
+@router.get("/storage/summary")
+async def storage_summary(auth: dict = Depends(require_auth)):
+    """Per-agent workspace usage for every session the caller owns.
+
+    The Drive UI shows a usage bar per connected agent; without this it
+    would issue one /storage/changes per agent just to read used_bytes.
+    Sizes are computed off-loop (directory walks) and failures degrade to
+    a null size rather than failing the whole listing.
+    """
+    from service.utils import workspace_sync
+
+    out: List[Dict[str, Any]] = []
+    quota = workspace_sync.quota_bytes()
+    try:
+        records = get_session_store().list_all() or []
+    except Exception:  # noqa: BLE001
+        records = []
+    seen: set = set()
+    for rec in records:
+        sid = str(rec.get("session_id") or "")
+        if not sid or sid in seen or rec.get("is_deleted"):
+            continue
+        seen.add(sid)
+        try:
+            _enforce_session_owner(sid, auth)
+        except HTTPException:
+            continue  # not the caller's session — omit silently
+        try:
+            storage_path = _storage_root_live_or_dormant(sid)
+            used = await asyncio.to_thread(workspace_sync.used_bytes, storage_path)
+        except Exception:  # noqa: BLE001
+            used = None
+        out.append(
+            {
+                "session_id": sid,
+                "session_name": rec.get("session_name"),
+                "used_bytes": used,
+                "quota_bytes": quota,
+            }
+        )
+    return {"agents": out, "quota_bytes": quota}
+
+
 @router.get("/{session_id}", response_model=SessionInfo)
 async def get_agent_session(
     session_id: str = Path(..., description="Session ID"),

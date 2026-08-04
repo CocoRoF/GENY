@@ -132,6 +132,14 @@ export const messages: Record<string, Entry> = {
   'mcp.remove': { ko: '삭제', en: 'Remove' },
 
   // ── Workspace sync ──
+  'drive.card': { ko: 'Geny 드라이브', en: 'Geny Drive' },
+  'drive.hint': { ko: '연결한 에이전트마다 드라이브 안에 폴더가 하나씩 생기고, 서버 작업공간과 실시간으로 동기화됩니다. 여러 에이전트를 동시에 연결할 수 있어요.', en: 'Each connected agent gets its own folder inside the drive, synced live with its server workspace. Connect as many agents as you like.' },
+  'drive.rootLabel': { ko: '드라이브 위치', en: 'Drive location' },
+  'drive.rootHint': { ko: '위치를 바꾸면 연결된 폴더가 모두 새 위치로 이동합니다 (다시 내려받지 않습니다).', en: 'Changing the location MOVES every connected folder there — nothing is re-downloaded.' },
+  'drive.changeRoot': { ko: '위치 변경…', en: 'Change…' },
+  'drive.moving': { ko: '이동 중…', en: 'Moving…' },
+  'drive.moved': { ko: '드라이브를 옮겼습니다 (폴더 {count}개).', en: 'Drive moved ({count} folder(s)).' },
+  'drive.moveFailed': { ko: '이동 실패 — {msg}', en: 'Move failed — {msg}' },
   'sync.pairsCard': { ko: '공유 작업 공간', en: 'Shared workspaces' },
   'sync.pairsHint': { ko: '에이전트의 서버 작업공간과 이 PC의 폴더를 실시간 양방향 동기화합니다. 여러 PC를 같은 에이전트에 연결하면 모두 함께 공유됩니다.', en: 'Bidirectional real-time sync between an agent\'s server workspace and a folder on this PC. Connect several PCs to the same agent and they all share it.' },
   'sync.empty': { ko: '연결된 작업 공간이 없습니다. 아래에서 에이전트와 폴더를 연결하세요.', en: 'No workspace connected yet. Pair an agent with a folder below.' },

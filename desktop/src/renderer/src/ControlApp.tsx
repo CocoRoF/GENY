@@ -291,6 +291,10 @@ export function ControlApp() {
   // the connector config, enforced natively in main (runActuation/capture gate).
   const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
   // Workspace sync (Drive-style local↔agent-workspace replication)
+  const [driveRoot, setDriveRoot] = useState('')
+  const [driveAgents, setDriveAgents] = useState<Record<string, { enabled: boolean; folder: string; label?: string }>>({})
+  const [driveBusy, setDriveBusy] = useState('')
+  const [driveMsg, setDriveMsg] = useState('')
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
   const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
@@ -332,6 +336,7 @@ export function ControlApp() {
   useEffect(() => {
     if (tab !== 'workspace') return
     void refreshSync()
+    void refreshDrive()
     void window.connector?.sync?.listAgents().then((a) => {
       setSyncAgents(a)
       setSyncSel((cur) => cur || a[0]?.id || '')
@@ -341,6 +346,45 @@ export function ControlApp() {
     })
     return () => off?.()
   }, [tab])
+
+  const refreshDrive = async (): Promise<void> => {
+    const d = await window.connector?.drive?.get().catch(() => null)
+    if (!d) return
+    setDriveRoot(d.root)
+    setDriveAgents(d.agents ?? {})
+  }
+
+  const toggleDriveAgent = async (sessionId: string, label: string, enabled: boolean): Promise<void> => {
+    setDriveBusy(sessionId)
+    setDriveMsg('')
+    try {
+      const r = await window.connector?.drive?.setAgent(sessionId, enabled, label)
+      if (r) { setDriveRoot(r.root); setDriveAgents(r.agents ?? {}) }
+      await refreshSync()
+    } finally {
+      setDriveBusy('')
+    }
+  }
+
+  const changeDriveRoot = async (): Promise<void> => {
+    const picked = await window.connector?.drive?.pickRoot()
+    if (!picked) return
+    setDriveBusy('__root__')
+    setDriveMsg('')
+    try {
+      const r = await window.connector?.drive?.setRoot(picked)
+      if (r?.ok) {
+        setDriveRoot(r.root ?? picked)
+        setDriveMsg(t('drive.moved', { count: r.moved ?? 0 }))
+        await refreshDrive()
+        await refreshSync()
+      } else {
+        setDriveMsg(t('drive.moveFailed', { msg: r?.error ?? '?' }))
+      }
+    } finally {
+      setDriveBusy('')
+    }
+  }
 
   const addSyncPair = async (): Promise<void> => {
     if (!syncSel || !syncFolder) return
@@ -890,6 +934,79 @@ export function ControlApp() {
         {/* ─────────────── Workspace (동기화) ─────────────── */}
         {tab === 'workspace' && (
           <>
+            {/* ── Geny Drive: one root, one folder per connected agent ── */}
+            <section className="gy-card">
+              <div className="gy-card-h">{I.folder} {t('drive.card')}</div>
+              <p className="gy-hint" style={{ margin: '0 0 10px' }}>{t('drive.hint')}</p>
+
+              <label className="gy-field-label">{t('drive.rootLabel')}</label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <input className="gy-input" readOnly value={driveRoot} style={{ flex: 1, minWidth: 0 }} />
+                <button
+                  className="gy-btn gy-btn--ghost gy-btn--sm"
+                  disabled={driveBusy === '__root__'}
+                  onClick={changeDriveRoot}
+                >
+                  {driveBusy === '__root__' ? t('drive.moving') : t('drive.changeRoot')}
+                </button>
+              </div>
+              <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('drive.rootHint')}</p>
+              {driveMsg && (
+                <p className="gy-hint" style={{ margin: '0 0 12px' }}>{driveMsg}</p>
+              )}
+
+              {syncAgents.length === 0 && (
+                <p className="gy-hint" style={{ margin: 0, opacity: 0.7 }}>{t('sync.noAgents')}</p>
+              )}
+              {syncAgents.map((a) => {
+                const entry = driveAgents[a.id]
+                const on = !!entry?.enabled
+                const st = syncStatuses[`drive:${a.id}`]
+                const state = st?.state ?? (on ? 'idle' : undefined)
+                const dot =
+                  !on ? 'var(--gy-muted, #888)'
+                  : state === 'error' || state === 'session_gone' ? '#e5534b'
+                  : state === 'syncing' ? '#4f9cf7'
+                  : st?.connected ? '#2fbf71' : '#e8a13c'
+                return (
+                  <div
+                    key={a.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 0', borderTop: '1px solid var(--gy-border, rgba(128,128,128,0.2))',
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: 4, background: dot, flexShrink: 0 }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {a.name}
+                      </div>
+                      {on && (
+                        <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {entry?.folder}
+                          {st && ` · ↓${st.counts.downloaded} ↑${st.counts.uploaded}`}
+                          {st?.lastError && ` · ${st.lastError}`}
+                        </div>
+                      )}
+                    </div>
+                    {on && (
+                      <button
+                        className="gy-btn gy-btn--ghost gy-btn--sm"
+                        onClick={() => window.connector?.sync?.openFolder(`drive:${a.id}`)}
+                      >
+                        {t('sync.openFolder')}
+                      </button>
+                    )}
+                    <ToggleLine
+                      label=""
+                      checked={on}
+                      onChange={(next) => void toggleDriveAgent(a.id, a.name, next)}
+                    />
+                  </div>
+                )
+              })}
+            </section>
+
             <section className="gy-card">
               <div className="gy-card-h">{I.folder} {t('sync.pairsCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('sync.pairsHint')}</p>

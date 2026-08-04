@@ -293,6 +293,26 @@ export interface ConnectorBridge {
     listAgents(): Promise<Array<{ id: string; name: string }>>
     onStatus(cb: (statuses: SyncPairStatus[]) => void): () => void
   }
+
+  /** Geny Drive — one local root, one folder per connected agent. The user
+   *  chooses WHICH agents live on the drive (and where the root is); every
+   *  folder placement is derived. */
+  drive: {
+    get(): Promise<{
+      root: string
+      agents: Record<string, { enabled: boolean; folder: string; label?: string }>
+      statuses: SyncPairStatus[]
+    }>
+    /** Connect/disconnect one agent. Disabling keeps the local folder. */
+    setAgent(sessionId: string, enabled: boolean, label?: string): Promise<{
+      root: string
+      agents: Record<string, { enabled: boolean; folder: string; label?: string }>
+    }>
+    /** Native folder picker for the drive root (returns null on cancel). */
+    pickRoot(): Promise<string | null>
+    /** Relocate the drive: MOVES every managed folder, keeps sync indexes. */
+    setRoot(root: string): Promise<{ ok: boolean; root?: string; moved?: number; error?: string }>
+  }
 }
 
 export interface SyncPairConfig {
@@ -457,6 +477,13 @@ const api: ConnectorBridge = {
       ipcRenderer.on('sync:status-event', h)
       return () => ipcRenderer.removeListener('sync:status-event', h)
     },
+  },
+  drive: {
+    get: () => ipcRenderer.invoke('drive:get'),
+    setAgent: (sessionId, enabled, label) =>
+      ipcRenderer.invoke('drive:set-agent', sessionId, enabled, label),
+    pickRoot: () => ipcRenderer.invoke('drive:pick-root'),
+    setRoot: (root) => ipcRenderer.invoke('drive:set-root', root),
   },
   hotkeys: {
     getPushToTalk: () => ipcRenderer.invoke('hotkey:get-ptt'),
