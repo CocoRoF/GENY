@@ -48,18 +48,32 @@ win:
   # 404s on download. A hyphenated name is identical everywhere.
   artifactName: ${productName}-Setup-${version}.${ext}
 nsis:
-  # Localize the installer's (minimal, one-click) UI — NSIS auto-selects by the
-  # OS language among these; English + Korean both shipped.
+  # Localize the installer UI — NSIS auto-selects by the OS language among
+  # these; English + Korean both shipped.
   installerLanguages:
     - en_US
     - ko_KR
   unicode: true
+  # Assisted (not one-click) so the installer can ask ONE question: whether
+  # this machine uses Geny Cloud (default: yes). build/installer.nsh adds the
+  # page and writes the answer as a one-shot flag the app consumes on first
+  # run. Nothing else is asked — the install directory stays fixed.
+  oneClick: false
+  allowToChangeInstallationDirectory: false
+  perMachine: false
+  include: build/installer.nsh
 mac:
   target:
     - dmg
   category: public.app-category.utilities
 
 deb:
+  # Geny Drive streaming mode (roadmap) mounts through FUSE 3. Recommends —
+  # NOT Depends — so `dpkg -i` never fails on a machine without it: mirror
+  # mode works regardless, and the app probes at runtime
+  # (drive-preflight.ts) and tells the user exactly what to install.
+  recommends:
+    - fuse3
   # Ubuntu 24.04 fix: the stock postinst probes userns AS ROOT and leaves
   # chrome-sandbox at 0755, but apparmor_restrict_unprivileged_userns=1
   # blocks userns for the real user at runtime → SIGTRAP on launch. The

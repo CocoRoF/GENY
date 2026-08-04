@@ -302,7 +302,22 @@ export interface ConnectorBridge {
       root: string
       agents: Record<string, { enabled: boolean; folder: string; label?: string }>
       statuses: SyncPairStatus[]
+      /** Install-time (or in-app) "use Geny Cloud" choice; default true. */
+      cloudOptIn: boolean
+      /** Probed per-OS readiness — mirror always works; streaming needs FUSE
+       *  (Linux) / Windows 10 1709+ (CfAPI) / mount_webdav (macOS). */
+      capabilities: {
+        mirror: true
+        streaming: boolean
+        mechanism: 'fuse' | 'cfapi' | 'webdav' | 'none'
+        missing: string
+        code: string
+      }
     }>
+    /** Master switch: off parks the whole drive (membership is remembered). */
+    setCloud(enabled: boolean): Promise<{ cloudOptIn: boolean }>
+    /** Per-agent used/quota bytes in one round trip. */
+    usage(): Promise<Record<string, { used: number | null; quota: number }>>
     /** Connect/disconnect one agent. Disabling keeps the local folder. */
     setAgent(sessionId: string, enabled: boolean, label?: string): Promise<{
       root: string
@@ -482,6 +497,8 @@ const api: ConnectorBridge = {
     get: () => ipcRenderer.invoke('drive:get'),
     setAgent: (sessionId, enabled, label) =>
       ipcRenderer.invoke('drive:set-agent', sessionId, enabled, label),
+    setCloud: (enabled) => ipcRenderer.invoke('drive:set-cloud', enabled),
+    usage: () => ipcRenderer.invoke('drive:usage'),
     pickRoot: () => ipcRenderer.invoke('drive:pick-root'),
     setRoot: (root) => ipcRenderer.invoke('drive:set-root', root),
   },

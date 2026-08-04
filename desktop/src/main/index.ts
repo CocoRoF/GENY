@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, renameS
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
 import { getMcpManager, type MCPServerConfig } from './mcp-manager'
 import { getSyncManager, initSyncManager, type SyncPairConfig } from './sync-manager'
+import { driveCapabilities } from './drive-preflight'
 import { randomUUID } from 'crypto'
 import { browserCall, getBrowserControl } from './browser-control'
 import { getWinAutoHost, disposeWinAutoHost } from './winauto-host'
@@ -111,6 +112,10 @@ interface ConnectorConfig {
    *  `<driveRoot>/<folder>/` synced with its server workspace. Absent →
    *  defaults to ~/GenyDrive on first use. */
   driveRoot?: string
+  /** Install-time "Geny 클라우드 사용" choice (NSIS option / deb default).
+   *  Undefined is treated as TRUE — the drive is the intended default and a
+   *  config written before this field existed must not silently opt out. */
+  cloudOptIn?: boolean
   /** Per-agent Drive membership. `folder` is allocated once (safe name from
    *  the session label) and kept stable across session renames so local
    *  paths never churn. Disabling keeps the local folder on disk. */
@@ -1284,6 +1289,30 @@ app.on('before-quit', () => {
 // derived. Drive-owned sync pairs are marked managed:'drive' so the classic
 // hand-paired workflow keeps working side by side.
 
+/** Consume the installer's one-shot choice file, if present.
+ *
+ * The Windows installer (build/installer.nsh) records the "Geny 클라우드 사용"
+ * answer as %APPDATA%\geny-connector\install-flags.json. We fold it into the
+ * config ONCE and delete it, so a later change made in the app is never
+ * re-overwritten by a stale install artifact. Absent file = keep whatever the
+ * config already says (and the config's own default is opt-IN).
+ */
+function consumeInstallFlags(): void {
+  const flagPath = join(app.getPath('appData'), 'geny-connector', 'install-flags.json')
+  try {
+    if (!existsSync(flagPath)) return
+    const flags = JSON.parse(readFileSync(flagPath, 'utf-8'))
+    if (typeof flags?.cloudOptIn === 'boolean') {
+      saveConfig({ cloudOptIn: flags.cloudOptIn })
+      dlog('drive', `install flag consumed: cloudOptIn=${flags.cloudOptIn}`)
+    }
+  } catch (e) {
+    dlog('drive', `install flag read failed: ${(e as Error)?.message}`)
+  } finally {
+    try { unlinkSync(flagPath) } catch { /* already gone */ }
+  }
+}
+
 function driveRoot(): string {
   return loadConfig().driveRoot || join(app.getPath('home'), 'GenyDrive')
 }
@@ -1324,8 +1353,13 @@ function applyDriveConfig(): void {
   const root = driveRoot()
   const agents = cfg.driveAgents ?? {}
   const others = (cfg.syncPairs ?? []).filter((p) => p.managed !== 'drive')
+  // Opting out of Geny Cloud (installer answer or the in-app switch) parks
+  // the whole drive: no managed pairs run. Per-agent membership is kept so
+  // opting back in restores exactly the previous set — and, because folders
+  // and pair ids are stable, without re-downloading anything.
+  const cloudOn = cfg.cloudOptIn !== false
   const managed = Object.entries(agents)
-    .filter(([, a]) => a.enabled)
+    .filter(([, a]) => cloudOn && a.enabled)
     .map(([sessionId, a]) => {
       const localPath = join(root, a.folder)
       try {
@@ -2025,6 +2059,32 @@ function registerIpc(): void {
       agents: cfg.driveAgents ?? {},
       // Reported per agent so the UI can show live sync state + usage.
       statuses: getSyncManager()?.statuses() ?? [],
+      // Whether the install-time "Geny Cloud" option was accepted, and what
+      // this machine can actually do (probed, never assumed).
+      cloudOptIn: cfg.cloudOptIn !== false,
+      capabilities: driveCapabilities(),
+    }
+  })
+
+  // Per-agent usage/quota in ONE round trip (the Drive list would otherwise
+  // issue a /storage/changes per agent just to read used_bytes).
+  ipcMain.handle('drive:usage', async () => {
+    const cfg = loadConfig()
+    const token = await getStoredToken()
+    if (!cfg.serverUrl || !token) return {}
+    try {
+      const res = await fetch(`${cfg.serverUrl.replace(/\/$/, '')}/api/agents/storage/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return {}
+      const data = (await res.json()) as {
+        agents?: Array<{ session_id: string; used_bytes: number | null; quota_bytes: number }>
+      }
+      return Object.fromEntries(
+        (data.agents ?? []).map((a) => [a.session_id, { used: a.used_bytes, quota: a.quota_bytes }]),
+      )
+    } catch {
+      return {}
     }
   })
 
@@ -2043,6 +2103,12 @@ function registerIpc(): void {
     saveConfig({ driveAgents: agents })
     applyDriveConfig()
     return { root: driveRoot(), agents }
+  })
+
+  ipcMain.handle('drive:set-cloud', async (_e, enabled: boolean) => {
+    saveConfig({ cloudOptIn: !!enabled })
+    applyDriveConfig()
+    return { cloudOptIn: !!enabled }
   })
 
   ipcMain.handle('drive:pick-root', async () => {
@@ -2321,6 +2387,7 @@ app.whenReady().then(() => {
     // Reconcile Geny Drive first (creates/moves managed pairs), which also
     // configures the manager; falls back to raw pairs if the drive is unset.
     try {
+      consumeInstallFlags()
       applyDriveConfig()
     } catch {
       manager.configure(loadConfig().syncPairs ?? [])

@@ -294,6 +294,9 @@ export function ControlApp() {
   const [driveRoot, setDriveRoot] = useState('')
   const [driveAgents, setDriveAgents] = useState<Record<string, { enabled: boolean; folder: string; label?: string }>>({})
   const [driveBusy, setDriveBusy] = useState('')
+  const [driveCloud, setDriveCloud] = useState(true)
+  const [driveCaps, setDriveCaps] = useState<{ streaming: boolean; missing: string } | null>(null)
+  const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
   const [driveMsg, setDriveMsg] = useState('')
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
@@ -352,6 +355,18 @@ export function ControlApp() {
     if (!d) return
     setDriveRoot(d.root)
     setDriveAgents(d.agents ?? {})
+    setDriveCloud(d.cloudOptIn !== false)
+    setDriveCaps(d.capabilities ?? null)
+    void window.connector?.drive?.usage().then(setDriveUsage).catch(() => undefined)
+  }
+
+  const fmtBytes = (n: number): string => {
+    if (n < 1024) return `${n} B`
+    const u = ['KB', 'MB', 'GB', 'TB']
+    let v = n / 1024
+    let i = 0
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+    return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`
   }
 
   const toggleDriveAgent = async (sessionId: string, label: string, enabled: boolean): Promise<void> => {
@@ -939,6 +954,23 @@ export function ControlApp() {
               <div className="gy-card-h">{I.folder} {t('drive.card')}</div>
               <p className="gy-hint" style={{ margin: '0 0 10px' }}>{t('drive.hint')}</p>
 
+              <ToggleLine
+                label={t('drive.cloudToggle')}
+                checked={driveCloud}
+                onChange={async (next) => {
+                  setDriveCloud(next)
+                  await window.connector?.drive?.setCloud(next)
+                  await refreshDrive()
+                  await refreshSync()
+                }}
+              />
+              {driveCaps && !driveCaps.streaming && driveCaps.missing && (
+                <p className="gy-hint" style={{ margin: '6px 0 12px', opacity: 0.85 }}>
+                  {driveCaps.missing}
+                </p>
+              )}
+              <div className="gy-spacer" />
+
               <label className="gy-field-label">{t('drive.rootLabel')}</label>
               <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                 <input className="gy-input" readOnly value={driveRoot} style={{ flex: 1, minWidth: 0 }} />
@@ -955,10 +987,13 @@ export function ControlApp() {
                 <p className="gy-hint" style={{ margin: '0 0 12px' }}>{driveMsg}</p>
               )}
 
-              {syncAgents.length === 0 && (
+              {!driveCloud && (
+                <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('drive.cloudOff')}</p>
+              )}
+              {driveCloud && syncAgents.length === 0 && (
                 <p className="gy-hint" style={{ margin: 0, opacity: 0.7 }}>{t('sync.noAgents')}</p>
               )}
-              {syncAgents.map((a) => {
+              {driveCloud && syncAgents.map((a) => {
                 const entry = driveAgents[a.id]
                 const on = !!entry?.enabled
                 const st = syncStatuses[`drive:${a.id}`]
@@ -984,6 +1019,10 @@ export function ControlApp() {
                       {on && (
                         <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {entry?.folder}
+                          {driveUsage[a.id]?.used != null &&
+                            ` · ${fmtBytes(driveUsage[a.id].used as number)}${
+                              driveUsage[a.id].quota ? ` / ${fmtBytes(driveUsage[a.id].quota)}` : ''
+                            }`}
                           {st && ` · ↓${st.counts.downloaded} ↑${st.counts.uploaded}`}
                           {st?.lastError && ` · ${st.lastError}`}
                         </div>
