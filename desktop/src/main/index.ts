@@ -1358,6 +1358,15 @@ function applyDriveConfig(): void {
   // opting back in restores exactly the previous set — and, because folders
   // and pair ids are stable, without re-downloading anything.
   const cloudOn = cfg.cloudOptIn !== false
+  // Mirror the current choice as a sentinel the WINDOWS INSTALLER can read
+  // (NSIS can't parse JSON): a manual reinstall pre-sets its checkbox from
+  // this, so rerunning the installer never silently re-enables the cloud a
+  // user turned off in the app. Harmless bookkeeping on Linux/macOS.
+  const optOutMarker = join(app.getPath('appData'), 'geny-connector', 'cloud-opt-out')
+  try {
+    if (!cloudOn && !existsSync(optOutMarker)) writeFileSync(optOutMarker, '')
+    else if (cloudOn && existsSync(optOutMarker)) unlinkSync(optOutMarker)
+  } catch { /* cosmetic — never block the drive on marker IO */ }
   const managed = Object.entries(agents)
     .filter(([, a]) => cloudOn && a.enabled)
     .map(([sessionId, a]) => {

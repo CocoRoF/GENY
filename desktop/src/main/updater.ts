@@ -103,7 +103,14 @@ export function initAutoUpdate(enabledGetter: () => boolean, langGetter?: () => 
         })
         autoUpdater.quitAndInstall(false, false)
       } else {
-        autoUpdater.quitAndInstall(false, true)
+        // Silent: the Windows installer is now ASSISTED (custom Geny Cloud
+        // page), and a non-silent update would replay the whole wizard on
+        // every release — worse, its default-checked page would override a
+        // user's in-app opt-out. Silent mode skips all pages, and
+        // customInstall writes no flag when the page never ran, so the
+        // app's current setting survives updates untouched. (macOS/AppImage
+        // ignore the flag.)
+        autoUpdater.quitAndInstall(true, true)
       }
     }
   })

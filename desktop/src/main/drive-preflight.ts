@@ -9,7 +9,7 @@
  *             nothing to install, but older builds can't do it
  *   macOS   → built-in WebDAV client (mount_webdav) — always present
  *
- * The installer provisions what it can (deb Depends: fuse3; the NSIS
+ * The installer provisions what it can (deb Recommends: fuse3; the NSIS
  * "Geny Cloud" option records consent), and THIS module is the runtime
  * truth: it never guesses from the platform alone, it probes. Findings are
  * surfaced in the Drive card so a missing prerequisite reads as one

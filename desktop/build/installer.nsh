@@ -30,9 +30,16 @@ Var GenyCloudCheckbox
 Var GenyCloudChecked
 
 Function GenyCloudPageCreate
-  ; Default ON: an empty var means the page has not been visited yet.
+  ; First visit: default ON, unless the app left its opt-out sentinel —
+  ; the app maintains cloud-opt-out next to its config whenever the user
+  ; turns Geny Cloud off, so a REINSTALL's default reflects the user's
+  ; actual current choice instead of re-asserting ours.
   ${If} $GenyCloudChecked == ""
-    StrCpy $GenyCloudChecked "1"
+    ${If} ${FileExists} "$APPDATA\geny-connector\cloud-opt-out"
+      StrCpy $GenyCloudChecked "0"
+    ${Else}
+      StrCpy $GenyCloudChecked "1"
+    ${EndIf}
   ${EndIf}
 
   ; Header text is a MUI2 macro; our include may be processed BEFORE MUI2.nsh
@@ -76,16 +83,22 @@ FunctionEnd
 !macroend
 
 !macro customInstall
-  ; Electron resolves userData to %APPDATA%\geny-connector (package.json
-  ; "name"); the app reads the flag from exactly that path.
-  CreateDirectory "$APPDATA\geny-connector"
-  ${If} $GenyCloudChecked == "0"
-    FileOpen $0 "$APPDATA\geny-connector\install-flags.json" w
-    FileWrite $0 '{"cloudOptIn": false}'
-    FileClose $0
+  ${If} $GenyCloudChecked == ""
+    ; Silent install or auto-update: the page never ran, so there is NO user
+    ; decision here. Write nothing — whatever the app currently has (its own
+    ; setting, or its built-in opt-in default on a fresh machine) stands.
+    ; An update overwriting the user's choice with our default would be the
+    ; installer asserting something it was never told.
   ${Else}
+    ; Electron resolves userData to %APPDATA%\geny-connector (package.json
+    ; "name"); the app reads the flag from exactly that path.
+    CreateDirectory "$APPDATA\geny-connector"
     FileOpen $0 "$APPDATA\geny-connector\install-flags.json" w
-    FileWrite $0 '{"cloudOptIn": true}'
+    ${If} $GenyCloudChecked == "0"
+      FileWrite $0 '{"cloudOptIn": false}'
+    ${Else}
+      FileWrite $0 '{"cloudOptIn": true}'
+    ${EndIf}
     FileClose $0
   ${EndIf}
 !macroend
