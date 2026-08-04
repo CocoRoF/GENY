@@ -17,6 +17,12 @@
 ; and MUI_PAGE_INSTFILES), so that macro may only declare a page — the dialog
 ; itself must live in ordinary Functions, defined here at top level.
 
+; The uninstaller is compiled as a SEPARATE pass that also includes this
+; file. Its script never references the page functions, and NSIS turns the
+; resulting "function not referenced" warning into a hard error — so every
+; installer-only declaration lives inside this guard.
+!ifndef BUILD_UNINSTALLER
+
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
@@ -62,6 +68,8 @@ Function GenyCloudPageLeave
     StrCpy $GenyCloudChecked "0"
   ${EndIf}
 FunctionEnd
+
+!endif ; !BUILD_UNINSTALLER
 
 !macro customPageAfterChangeDir
   Page custom GenyCloudPageCreate GenyCloudPageLeave
