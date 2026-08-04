@@ -475,13 +475,30 @@ class ThinkingTriggerService:
                 "warm_then_fire: %s memory %s — firing deferred trigger",
                 session_id, "ready" if ready else "warm-up capped",
             )
-            await self._fire_trigger(session_id)
+            await self._fire_trigger(session_id, reunion=True)
         except Exception:  # noqa: BLE001 — deferred fire is best-effort
             logger.debug("warm_then_fire failed for %s", session_id, exc_info=True)
         finally:
             self._warming.discard(session_id)
 
-    async def _fire_trigger(self, session_id: str) -> None:
+    #: Appended to EVERY self-initiated prompt: pinned facts are knowledge,
+    #: not questions. Field failure — the persona asked its owner's name and
+    #: raised a prohibited topic while both sat in pinned context.
+    IDENTITY_GUARD = (
+        "\n\n[지침] 핀 고정 사실(사용자 이름·호칭·금기 등)은 이미 아는 것으로 "
+        "전제하고, 절대 다시 묻지 마라. 기억이 조회되지 않으면 '기록이 없다'고 "
+        "단정하지 말고 memory_search로 확인한 뒤 말하라."
+    )
+
+    #: First self-initiated utterance after a rehydrate: continuity, not a
+    #: first meeting. Fired by _warm_then_fire instead of the preset roulette.
+    REUNION_PROMPT = (
+        "[THINKING_TRIGGER:reunion] 방금 세션이 다시 깨어났다. 핀 고정 사실과 "
+        "직전 대화 요약을 바탕으로, 처음 만난 사람처럼 굴지 말고 하던 관계 그대로 "
+        "자연스럽게 짧게 말을 걸어라. 이름이나 호칭을 다시 묻는 것은 금지다."
+    )
+
+    async def _fire_trigger(self, session_id: str, *, reunion: bool = False) -> None:
         try:
             from service.execution.agent_executor import (
                 AlreadyExecutingError,
@@ -525,10 +542,15 @@ class ThinkingTriggerService:
                         session_id, exc_info=True,
                     )
 
-            picked = self._pick_category_and_prompt(session_id, is_executing)
-            if picked is None:
-                return
-            prompt, chosen_category = picked
+            if reunion:
+                # Continuity fire from _warm_then_fire: fixed reunion prompt,
+                # no category roulette, no screen requirements.
+                prompt, chosen_category = self.REUNION_PROMPT, None
+            else:
+                picked = self._pick_category_and_prompt(session_id, is_executing)
+                if picked is None:
+                    return
+                prompt, chosen_category = picked
 
             # When the preset's screen-observation category fired (a category
             # with requires_screen_active), attach the live screen frame so the
@@ -595,7 +617,9 @@ class ThinkingTriggerService:
             if screen_attachment is not None:
                 exec_kwargs["attachments"] = [screen_attachment]
 
-            result = await execute_command(session_id, prompt, **exec_kwargs)
+            result = await execute_command(
+                session_id, prompt + self.IDENTITY_GUARD, **exec_kwargs
+            )
 
             self._consecutive_triggers[session_id] = (
                 self._consecutive_triggers.get(session_id, 0) + 1

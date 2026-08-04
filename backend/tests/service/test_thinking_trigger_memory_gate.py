@@ -60,7 +60,7 @@ async def test_cold_session_defers_and_warm_fires(monkeypatch):
 
     fired: list[str] = []
 
-    async def fake_fire(sid):
+    async def fake_fire(sid, **kw):
         # Simulate the re-entry: gate must be bypassed because sid ∈ _warming.
         assert sid in svc._warming
         fired.append(sid)
@@ -69,12 +69,12 @@ async def test_cold_session_defers_and_warm_fires(monkeypatch):
     real_fire = svc._fire_trigger
     calls = {"n": 0}
 
-    async def gated_then_fake(sid):
+    async def gated_then_fake(sid, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            await real_fire(sid)  # goes through the gate → defers
+            await real_fire(sid, **kw)  # goes through the gate → defers
         else:
-            await fake_fire(sid)
+            await fake_fire(sid, **kw)
 
     monkeypatch.setattr(svc, "_fire_trigger", gated_then_fake)
 

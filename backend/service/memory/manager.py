@@ -430,11 +430,25 @@ class SessionMemoryManager:
                     complete_structured=structured_kwargs["complete_structured"],
                 ).run()
                 if fact_report.ran and fact_report.changes:
+                    self._fact_zero_runs = 0
                     logger.info(
                         "compact_now: fact ledger updated (%d change(s), "
                         "%d active)",
                         fact_report.changes, fact_report.active_facts,
                     )
+                elif fact_report.ran:
+                    # Starvation watch: extraction that "succeeds" with zero
+                    # accrued facts forever is how the ledger silently sat
+                    # empty in the field while the persona re-pinned the same
+                    # identity by hand. Surface the pattern.
+                    self._fact_zero_runs = getattr(self, "_fact_zero_runs", 0) + 1
+                    if self._fact_zero_runs >= 5 and not fact_report.active_facts:
+                        logger.warning(
+                            "compact_now: fact extraction ran %d times with an "
+                            "EMPTY ledger — extraction may be ineffective for "
+                            "this dialogue source",
+                            self._fact_zero_runs,
+                        )
         except ImportError:
             pass  # older executor — narrative tiers only
         except Exception:  # noqa: BLE001 — facts are best-effort
@@ -1363,6 +1377,55 @@ class SessionMemoryManager:
         self._initialized = True
         logger.info("SessionMemoryManager initialized at %s", self._storage_path)
 
+    async def _seed_identity_ledger_if_empty(self) -> None:
+        """Promote hand-pinned identity notes into an EMPTY fact ledger.
+
+        Kind mapping: 호칭/identity/user tags → ``identity``; 금지주제/금기
+        tags → ``preference`` (the card's prohibition markers pick those up
+        via the statement text). Statements are whitespace-normalized note
+        bodies; fact ids derive from filenames so re-runs stay idempotent
+        even if the emptiness guard were ever bypassed.
+        """
+        if self._memory_provider is None:
+            return
+        from geny_executor.memory.facts import Fact, FactLedger
+
+        ledger = FactLedger(self._memory_provider)
+        state = await ledger.load()
+        if any(f.status == "active" for f in state.facts):
+            return
+        notes = self._memory_provider.notes()
+        metas = await notes.list(category="critical")
+        identity_tags = {"identity", "호칭", "user", "이름"}
+        prohibition_tags = {"금지주제", "금기"}
+        seeded = 0
+        for m in metas:
+            fname = m.ref.filename
+            if fname.startswith("__"):  # ledger/evergreen themselves
+                continue
+            tags = {str(t) for t in (m.tags or [])}
+            if not (tags & (identity_tags | prohibition_tags)):
+                continue
+            note = await notes.read(fname)
+            body = " ".join(((note.body if note else "") or "").split())
+            if not body:
+                continue
+            kind = "identity" if tags & identity_tags else "preference"
+            state.facts.append(
+                Fact(
+                    id=f"seed-{fname.rsplit('.', 1)[0]}"[:64],
+                    kind=kind,
+                    statement=body[:400],
+                    importance="critical",
+                )
+            )
+            seeded += 1
+        if seeded:
+            if await ledger.save(state):
+                logger.info(
+                    "identity ledger seeded from %d pinned note(s)", seeded
+                )
+
     async def initialize_vector_memory(self) -> bool:
         """Initialise the FAISS vector memory layer (async).
 
@@ -1373,6 +1436,16 @@ class SessionMemoryManager:
             ``True`` if vector memory was enabled and initialised.
         """
         try:
+            # One-time ledger seed BEFORE indexing: the fact ledger is the
+            # identity card's primary source, and in the field it sat empty
+            # (extraction accrues nothing) while the persona hand-pinned
+            # identity notes — promote those into the ledger so identity
+            # survives independent of extraction health. Idempotent: only
+            # runs while the ledger has zero active facts.
+            try:
+                await self._seed_identity_ledger_if_empty()
+            except Exception:  # noqa: BLE001 — seed is best-effort
+                logger.debug("identity ledger seed failed", exc_info=True)
             return await self._vector_initialize_and_index()
         except Exception:
             logger.warning(

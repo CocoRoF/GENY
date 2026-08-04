@@ -3182,6 +3182,18 @@ class AgentSession:
                 hooks_kwargs["graph_aware"] = bool(_tuning.get("graph_aware", True))
                 hooks_kwargs["graph_top_k"] = int(_tuning.get("graph_top_k", 5))
                 hooks_kwargs["graph_alpha"] = float(_tuning.get("graph_alpha", 0.5))
+            # Identity card + ambient-noise exclusion (executor >= 2.64.4).
+            # The card is the never-dropped 이름/호칭/금기 channel; screen
+            # observations stay out of the AUTOMATIC search layers (they were
+            # 59% of a real vault and drowned recall in noise).
+            if "identity_card_chars" in _hook_fields:
+                hooks_kwargs["identity_card_chars"] = int(
+                    _tuning.get("identity_card_chars", 600)
+                )
+            if "search_exclude_categories" in _hook_fields:
+                hooks_kwargs["search_exclude_categories"] = tuple(
+                    _tuning.get("search_exclude_categories", ("observations",))
+                )
             if "category_boosts" in _tuning and isinstance(
                 _tuning["category_boosts"], dict
             ):
