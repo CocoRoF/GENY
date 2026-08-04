@@ -116,6 +116,12 @@ interface ConnectorConfig {
    *  Undefined is treated as TRUE — the drive is the intended default and a
    *  config written before this field existed must not silently opt out. */
   cloudOptIn?: boolean
+  /** Folders linked INTO GenyDrive — bound to the DRIVE, not to any one
+   *  agent: [폴더-GenyDrive]에 바인드되고, 드라이브에 연결된 에이전트들이
+   *  [GenyDrive-에이전트] 바인딩을 통해 전부 공유한다. Each link appears
+   *  as workspace/<name>/ in EVERY connected agent's workspace (web:
+   *  subdirectory) and as a shortcut at the GenyDrive ROOT (local). */
+  driveLinks?: Array<{ name: string; localPath: string; paused?: boolean }>
   /** Per-agent Drive membership. `folder` is allocated once (safe name from
    *  the session label) and kept stable across session renames so local
    *  paths never churn. Disabling keeps the local folder on disk. */
@@ -1416,29 +1422,34 @@ function removeLinkShortcut(agentDir: string, linkName: string, targetDir: strin
 function migrateLegacyPairsToLinks(): void {
   const cfg = loadConfig()
   const pairs = cfg.syncPairs ?? []
-  if (!pairs.some((p) => !p.managed)) return
-  const next = pairs.map((p) => {
-    if (p.managed) return p
-    const siblings = pairs.filter((q) => q !== p && q.sessionId === p.sessionId)
-    const taken = new Set(siblings.map((q) => q.remotePrefix || '').filter(Boolean))
-    const name = allocateLinkName(basename(p.localPath), taken)
-    dlog('drive', `legacy pair migrated to link: ${p.id} → link:${p.sessionId}:${name}`)
-    return {
-      ...p,
-      id: `link:${p.sessionId}:${name}`,
-      managed: 'link' as const,
-      remotePrefix: name,
-    }
+  const legacy = pairs.filter((p) => !p.managed || p.managed === 'link')
+  if (legacy.length === 0) return
+  // Both generations fold into DRIVE-level links: classic free-form pairs
+  // (no managed) and the short-lived per-agent link pairs. A link belongs
+  // to the drive, so the agent a legacy pair pointed at is deliberately
+  // dropped — every connected agent shares the folder from now on. The
+  // pair ids change, abandoning old indexes on purpose (root-relative or
+  // per-agent baselines would misread as server-side deletions); a fresh
+  // bootstrap merges instead.
+  const links = [...(cfg.driveLinks ?? [])]
+  for (const p of legacy) {
+    if (links.some((l) => l.localPath === p.localPath)) continue
+    const taken = new Set(links.map((l) => l.name))
+    const name = p.remotePrefix || allocateLinkName(basename(p.localPath), taken)
+    links.push({ name: allocateLinkName(name, taken), localPath: p.localPath })
+    dlog('drive', `pair migrated to drive link: ${p.id} → ${name}`)
+  }
+  saveConfig({
+    driveLinks: links,
+    syncPairs: pairs.filter((p) => p.managed === 'drive'),
   })
-  saveConfig({ syncPairs: next })
 }
 
 function applyDriveConfig(): void {
   const cfg = loadConfig()
   const root = driveRoot()
   const agents = cfg.driveAgents ?? {}
-  const links = (cfg.syncPairs ?? []).filter((p) => p.managed === 'link')
-  const others = (cfg.syncPairs ?? []).filter((p) => !p.managed)
+  const links = cfg.driveLinks ?? []
   // Opting out of Geny Cloud (installer answer or the in-app switch) parks
   // the whole drive: no managed pairs run. Per-agent membership is kept so
   // opting back in restores exactly the previous set — and, because folders
@@ -1462,9 +1473,6 @@ function applyDriveConfig(): void {
       } catch {
         /* surfaced by the engine's own error state */
       }
-      // Every linked subtree of this agent is carved OUT of the drive
-      // mirror (one engine per path), and represented as a shortcut.
-      const agentLinks = links.filter((l) => l.sessionId === sessionId)
       return {
         // Stable id per agent so the sync index survives toggles/relocations.
         id: `drive:${sessionId}`,
@@ -1472,15 +1480,32 @@ function applyDriveConfig(): void {
         sessionLabel: a.label,
         localPath,
         managed: 'drive' as const,
-        excludePrefixes: agentLinks.map((l) => l.remotePrefix || '').filter(Boolean),
+        // Every drive link's subtree is carved OUT of every agent mirror —
+        // the link engines own those paths.
+        excludePrefixes: links.map((l) => l.name),
       }
     })
-  // Linked folders are part of the GenyDrive connection: the cloud switch
-  // parks them together with the drive mirrors (indexes preserved — both
-  // are `managed`, so configure() never deletes their baselines).
-  const activeLinks = cloudOn ? links : []
-  const next = [...others, ...activeLinks, ...managed]
-  saveConfig({ syncPairs: [...links, ...managed, ...others] })
+  // A drive link fans out to ONE ENGINE PER CONNECTED AGENT: the folder is
+  // bound to the drive, and every agent on the drive shares it as
+  // workspace/<name>/. Ids are (agent, name)-stable so baselines survive
+  // toggles; the cloud switch parks links together with the mirrors.
+  const enabledAgents = Object.entries(agents).filter(([, a]) => cloudOn && a.enabled)
+  const linkPairs = cloudOn
+    ? links.flatMap((l) =>
+        enabledAgents.map(([sessionId, a]) => ({
+          id: `link:${sessionId}:${l.name}`,
+          sessionId,
+          sessionLabel: a.label,
+          localPath: l.localPath,
+          managed: 'link' as const,
+          remotePrefix: l.name,
+          paused: l.paused,
+        })),
+      )
+    : []
+  const others = (cfg.syncPairs ?? []).filter((p) => !p.managed)
+  const next = [...others, ...linkPairs, ...managed]
+  saveConfig({ syncPairs: [...managed, ...others] })
   getSyncManager()?.configure(next)
   ensureAllLinkShortcuts()
   // A shortcut ensured at (re)configure time can lose a race with the
@@ -1492,20 +1517,21 @@ function applyDriveConfig(): void {
   setTimeout(() => ensureAllLinkShortcuts(), 20_000).unref?.()
 }
 
-/** Idempotent: every enabled agent folder carries a shortcut per linked
- *  folder — safe to call any time (skips occupied paths, repairs stale
- *  targets, no-ops when already correct). */
+/** Idempotent: the GenyDrive ROOT carries one shortcut per drive link —
+ *  the [폴더-GenyDrive] binding made visible, next to the agent folders.
+ *  Safe to call any time (skips occupied paths, repairs stale targets,
+ *  no-ops when already correct). Also sweeps 0.19.17-era per-agent
+ *  shortcuts, which the drive-level model superseded. */
 function ensureAllLinkShortcuts(): void {
   const cfg = loadConfig()
   if (cfg.cloudOptIn === false) return
   const root = driveRoot()
-  const agents = cfg.driveAgents ?? {}
-  for (const l of cfg.syncPairs ?? []) {
-    if (l.managed !== 'link' || !l.remotePrefix) continue
-    const agent = agents[l.sessionId]
-    if (!agent?.enabled) continue
-    const agentDir = join(root, agent.folder)
-    if (existsSync(agentDir)) ensureLinkShortcut(agentDir, l.remotePrefix, l.localPath)
+  if (!existsSync(root)) return
+  for (const l of cfg.driveLinks ?? []) {
+    ensureLinkShortcut(root, l.name, l.localPath)
+    for (const a of Object.values(cfg.driveAgents ?? {})) {
+      removeLinkShortcut(join(root, a.folder), l.name, l.localPath)
+    }
   }
 }
 
@@ -2320,10 +2346,17 @@ function registerIpc(): void {
     return { ok: true, root: target, moved }
     }),
   )
-  ipcMain.handle('sync:list', () => ({
-    pairs: loadConfig().syncPairs ?? [],
-    statuses: getSyncManager()?.statuses() ?? [],
-  }))
+  ipcMain.handle('sync:list', () => {
+    const cfg = loadConfig()
+    return {
+      pairs: cfg.syncPairs ?? [],
+      // Drive links are config-of-record (they fan out to one engine per
+      // connected agent at configure time) — the UI lists THESE, not the
+      // derived pairs, so a link shows even with zero agents connected.
+      links: cfg.driveLinks ?? [],
+      statuses: getSyncManager()?.statuses() ?? [],
+    }
+  })
   ipcMain.handle('sync:pick-folder', async () => {
     const res = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -2331,92 +2364,73 @@ function registerIpc(): void {
     })
     return res.canceled ? null : res.filePaths[0]
   })
-  ipcMain.handle('sync:add-pair', (_e, pair: { sessionId: string; sessionLabel?: string; localPath: string }) =>
+  ipcMain.handle('sync:add-pair', (_e, pair: { localPath: string }) =>
     driveExclusive(async () => {
-    const list = loadConfig().syncPairs ?? []
-    // Overlap guard: the same folder (or a nested one) feeding TWO hubs
-    // would ping-pong files between agents through the shared disk.
-    const norm = (p: string): string => p.replace(/[\\/]+$/, '')
-    const newPath = norm(pair.localPath)
-    for (const existing of list) {
-      if (existing.sessionId === pair.sessionId && norm(existing.localPath) === newPath) continue // replaced below
-      const ex = norm(existing.localPath)
-      if (ex === newPath || ex.startsWith(newPath + sep) || newPath.startsWith(ex + sep)) {
-        return { error: 'overlap', conflictWith: existing.sessionLabel || existing.sessionId }
+      const localPath = String(pair?.localPath || '').replace(/[\\/]+$/, '')
+      if (!localPath) return { error: 'empty path' }
+      const cfg = loadConfig()
+      const links = [...(cfg.driveLinks ?? [])]
+      // One binding per folder; nested folders would make two engines walk
+      // the same files through the shared disk.
+      for (const l of links) {
+        const ex = l.localPath.replace(/[\\/]+$/, '')
+        if (ex === localPath || ex.startsWith(localPath + sep) || localPath.startsWith(ex + sep)) {
+          return { error: 'overlap', conflictWith: l.name }
+        }
       }
-    }
-    // one pairing per (session, path) — replace duplicates
-    const filtered = list.filter(
-      (p) => !(p.sessionId === pair.sessionId && norm(p.localPath) === newPath),
-    )
-    // LINKED FOLDER: GenyDrive is the single connection point — a pair
-    // connects this folder into an agent's drive as workspace/<name>/
-    // (a plain subdirectory on the web, a shortcut in the local drive
-    // folder). Stable id keyed by (agent, subtree) so the sync baseline
-    // survives cloud toggles.
-    const taken = new Set(
-      filtered
-        .filter((p) => p.sessionId === pair.sessionId && p.remotePrefix)
-        .map((p) => p.remotePrefix as string),
-    )
-    const name = allocateLinkName(basename(newPath), taken)
-    const next = [
-      ...filtered,
-      {
-        id: `link:${pair.sessionId}:${name}`,
-        ...pair,
-        managed: 'link' as const,
-        remotePrefix: name,
-      },
-    ]
-    saveConfig({ syncPairs: next })
-    // QUIESCE FIRST. The reclaim below renames the drive mirror's copy of
-    // the subtree out of the way — done while an engine round is in
-    // flight, that round reads the vanished tree as "user deleted
-    // everything" and plans a server-side wipe (observed live: the whole
-    // workspace/<name>/ deleted). All engines stop and drain before any
-    // path changes hands; applyDriveConfig restarts them with the new
-    // exclusion set. Indexes are preserved across quiesce.
-    await getSyncManager()?.quiesce()
-    {
-      const cfg2 = loadConfig()
-      const agent = (cfg2.driveAgents ?? {})[pair.sessionId]
-      if (agent?.enabled) {
-        ensureLinkShortcut(join(driveRoot(), agent.folder), name, newPath, { reclaim: true })
-      }
-    }
-    applyDriveConfig()
-    return next
-    }),
-  )
-  ipcMain.handle('sync:remove-pair', (_e, id: string) =>
-    driveExclusive(async () => {
-      const all = loadConfig().syncPairs ?? []
-      const gone = all.find((p) => p.id === id)
-      const next = all.filter((p) => p.id !== id)
-      saveConfig({ syncPairs: next })
-      // Same discipline as creation: the shortcut swap happens only while
-      // engines are stopped, then the drive restarts without the exclusion
-      // and mirrors the (still intact) server subtree as normal data.
+      const root = driveRoot()
+      // The shortcut lives at the DRIVE ROOT next to agent folders — the
+      // name must not collide with links, agent folders, or anything the
+      // user already keeps there.
+      const taken = new Set<string>([
+        ...links.map((l) => l.name),
+        ...Object.values(cfg.driveAgents ?? {}).map((a) => a.folder),
+        ...(existsSync(root) ? readdirSync(root) : []),
+      ])
+      const name = allocateLinkName(basename(localPath), taken)
+      links.push({ name, localPath })
+      saveConfig({ driveLinks: links })
+      // QUIESCE FIRST: any agent mirror that previously materialized a
+      // real workspace/<name>/ copy is reclaimed (renamed aside, never
+      // deleted) only while no engine round is in flight — a mid-round
+      // rename reads as a user deletion and plans a server-side wipe
+      // (observed live before this ordering existed).
       await getSyncManager()?.quiesce()
-      if (gone?.managed === 'link' && gone.remotePrefix) {
-        const cfg = loadConfig()
-        const agent = (cfg.driveAgents ?? {})[gone.sessionId]
-        if (agent) removeLinkShortcut(join(driveRoot(), agent.folder), gone.remotePrefix, gone.localPath)
+      for (const a of Object.values(cfg.driveAgents ?? {})) {
+        const at = join(root, a.folder, name)
+        try {
+          const st = lstatSync(at, { throwIfNoEntry: false } as never) as ReturnType<typeof lstatSync> | undefined
+          if (st && !st.isSymbolicLink()) {
+            renameSync(at, `${at}.pre-link-${Date.now().toString(36)}`)
+            dlog('drive', `agent-mirror copy set aside for link '${name}' in ${a.folder}`)
+          }
+        } catch { /* per-agent best effort */ }
       }
       applyDriveConfig()
-      return next
+      return { ok: true, name }
     }),
   )
-  ipcMain.handle('sync:set-paused', (_e, id: string, paused: boolean) => {
-    const next = (loadConfig().syncPairs ?? []).map((p) =>
-      // Manual resume clears a stale auto-pause reason — the user is
-      // explicitly asking to try again, so the explanation resets with it.
-      p.id === id ? { ...p, paused: !!paused, ...(paused ? {} : { pausedReason: undefined }) } : p,
+  ipcMain.handle('sync:remove-pair', (_e, name: string) =>
+    driveExclusive(async () => {
+      const cfg = loadConfig()
+      const gone = (cfg.driveLinks ?? []).find((l) => l.name === name)
+      saveConfig({ driveLinks: (cfg.driveLinks ?? []).filter((l) => l.name !== name) })
+      await getSyncManager()?.quiesce()
+      if (gone) removeLinkShortcut(driveRoot(), gone.name, gone.localPath)
+      // Server-side workspace/<name>/ copies are user data and stay; each
+      // agent mirror will now sync them down as ordinary folders.
+      applyDriveConfig()
+      return { ok: true }
+    }),
+  )
+  ipcMain.handle('sync:set-paused', (_e, name: string, paused: boolean) => {
+    // Pausing a LINK pauses it on every agent — it is one binding.
+    const links = (loadConfig().driveLinks ?? []).map((l) =>
+      l.name === name ? { ...l, paused: !!paused } : l,
     )
-    saveConfig({ syncPairs: next })
+    saveConfig({ driveLinks: links })
     reconfigureSync()
-    return next
+    return { ok: true }
   })
   ipcMain.handle('sync:sync-now', (_e, id: string) => getSyncManager()?.syncNow(id))
   ipcMain.handle('sync:confirm-mass-delete', (_e, id: string, accept: boolean) => {

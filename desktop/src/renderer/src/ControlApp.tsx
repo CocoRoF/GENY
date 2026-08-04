@@ -299,9 +299,9 @@ export function ControlApp() {
   const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
   const [driveMsg, setDriveMsg] = useState('')
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
+  const [syncLinks, setSyncLinks] = useState<Array<{ name: string; localPath: string; paused?: boolean }>>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
   const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
-  const [syncSel, setSyncSel] = useState('')
   const [syncFolder, setSyncFolder] = useState('')
 
   useEffect(() => {
@@ -333,9 +333,8 @@ export function ControlApp() {
   const refreshSync = async (): Promise<void> => {
     const res = await window.connector?.sync?.list().catch(() => null)
     if (!res) return
-    // The card shows LINKED FOLDERS only — drive mirrors live in the
-    // Drive card above; GenyDrive is the single connection point.
     setSyncPairs((res.pairs as SyncPairView[]).filter((p) => (p as { managed?: string }).managed !== 'drive'))
+    setSyncLinks(res.links ?? [])
     setSyncStatuses(Object.fromEntries((res.statuses as SyncStatusView[]).map((s) => [s.id, s])))
   }
   useEffect(() => {
@@ -344,7 +343,6 @@ export function ControlApp() {
     void refreshDrive()
     void window.connector?.sync?.listAgents().then((a) => {
       setSyncAgents(a)
-      setSyncSel((cur) => cur || a[0]?.id || '')
     }).catch(() => undefined)
     const off = window.connector?.sync?.onStatus((statuses) => {
       setSyncStatuses(Object.fromEntries((statuses as SyncStatusView[]).map((s) => [s.id, s])))
@@ -404,11 +402,10 @@ export function ControlApp() {
   }
 
   const addSyncPair = async (): Promise<void> => {
-    if (!syncSel || !syncFolder) return
-    const label = syncAgents.find((a) => a.id === syncSel)?.name
-    const res = await window.connector?.sync?.addPair({ sessionId: syncSel, sessionLabel: label, localPath: syncFolder })
-    if (res && !Array.isArray(res) && (res as { error?: string }).error === 'overlap') {
-      alert(t('sync.overlapError', { agent: String((res as { conflictWith?: string }).conflictWith ?? '') }))
+    if (!syncFolder) return
+    const res = await window.connector?.sync?.addPair({ localPath: syncFolder })
+    if (res?.error === 'overlap') {
+      alert(t('sync.overlapError', { agent: String(res.conflictWith ?? '') }))
       return
     }
     setSyncFolder('')
@@ -1054,12 +1051,43 @@ export function ControlApp() {
               <div className="gy-card-h">{I.folder} {t('sync.pairsCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('sync.pairsHint')}</p>
 
-              {syncPairs.length === 0 && (
+              {syncLinks.length === 0 && (
                 <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('sync.empty')}</p>
               )}
-              {syncPairs.map((p) => {
-                const st = syncStatuses[p.id]
-                const state = p.paused ? 'paused' : (st?.state ?? 'idle')
+              {syncLinks.map((rawLink) => {
+                const link = {
+                  ...rawLink,
+                  // engines fanned out per connected agent share the link name
+                  ids: Object.keys(syncStatuses).filter(
+                    (id) => id.startsWith('link:') && id.endsWith(`:${rawLink.name}`),
+                  ),
+                }
+                // One row per LINK — a link is one binding, fanned out to an
+                // engine per connected agent. Aggregate: worst state wins,
+                // counts sum, the first error/mass-delete surfaces.
+                const sts = link.ids.map((id) => syncStatuses[id]).filter(Boolean)
+                const rank = { error: 5, session_gone: 5, awaiting_confirmation: 4, syncing: 3, paused: 2, idle: 1 } as Record<string, number>
+                const state = link.paused
+                  ? 'paused'
+                  : sts.map((x) => x.state).sort((a, b) => (rank[b] ?? 0) - (rank[a] ?? 0))[0] ?? 'idle'
+                const st = sts.length
+                  ? {
+                      ...sts[0],
+                      state,
+                      connected: sts.some((x) => x.connected),
+                      lastSyncAt: sts.map((x) => x.lastSyncAt).filter(Boolean).sort().pop() ?? null,
+                      lastError: sts.map((x) => x.lastError).find(Boolean) ?? null,
+                      pendingMassDelete: sts.map((x) => x.pendingMassDelete).find(Boolean) ?? null,
+                      counts: {
+                        downloaded: sts.reduce((n, x) => n + x.counts.downloaded, 0),
+                        uploaded: sts.reduce((n, x) => n + x.counts.uploaded, 0),
+                        conflicts: sts.reduce((n, x) => n + x.counts.conflicts, 0),
+                        skippedLarge: sts.reduce((n, x) => n + x.counts.skippedLarge, 0),
+                      },
+                    }
+                  : undefined
+                const p = { id: link.ids[0] ?? link.name, sessionLabel: link.name, sessionId: link.name, localPath: link.localPath, paused: link.paused, remotePrefix: link.name }
+                const massDeleteId = link.ids.find((id) => syncStatuses[id]?.pendingMassDelete)
                 const dotColor =
                   state === 'paused' ? 'var(--gy-muted, #888)'
                   : state === 'error' || state === 'session_gone' ? '#e5534b'
@@ -1080,8 +1108,7 @@ export function ControlApp() {
                         </div>
                         <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.localPath}>
                           {p.localPath}
-                          {(p as { remotePrefix?: string }).remotePrefix &&
-                            ` → GenyDrive/${p.sessionLabel || p.sessionId}/${(p as { remotePrefix?: string }).remotePrefix}`}
+                          {` → GenyDrive/${link.name}`}
                         </div>
                         {st && (
                           <div className="gy-hint">
@@ -1103,11 +1130,11 @@ export function ControlApp() {
                             </div>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="gy-btn gy-btn--danger gy-btn--sm"
-                                onClick={() => window.connector?.sync?.confirmMassDelete(p.id, true).then(refreshSync)}>
+                                onClick={() => massDeleteId && window.connector?.sync?.confirmMassDelete(massDeleteId, true).then(refreshSync)}>
                                 {t('sync.massDeleteApply')}
                               </button>
                               <button className="gy-btn gy-btn--ghost gy-btn--sm"
-                                onClick={() => window.connector?.sync?.confirmMassDelete(p.id, false).then(refreshSync)}>
+                                onClick={() => massDeleteId && window.connector?.sync?.confirmMassDelete(massDeleteId, false).then(refreshSync)}>
                                 {t('sync.massDeletePause')}
                               </button>
                             </div>
@@ -1120,15 +1147,15 @@ export function ControlApp() {
                           {t('sync.openFolder')}
                         </button>
                         <button className="gy-btn gy-btn--ghost gy-btn--sm" title={t('sync.syncNow')}
-                          onClick={() => window.connector?.sync?.syncNow(p.id)}>
+                          onClick={() => link.ids.forEach((id) => window.connector?.sync?.syncNow(id))}>
                           {t('sync.syncNow')}
                         </button>
                         <button className="gy-btn gy-btn--ghost gy-btn--sm"
-                          onClick={() => window.connector?.sync?.setPaused(p.id, !p.paused).then(refreshSync)}>
+                          onClick={() => window.connector?.sync?.setPaused(link.name, !link.paused).then(refreshSync)}>
                           {p.paused ? t('sync.resume') : t('sync.pause')}
                         </button>
                         <button className="gy-btn gy-btn--danger gy-btn--sm"
-                          onClick={() => window.connector?.sync?.removePair(p.id).then(refreshSync)}>
+                          onClick={() => window.connector?.sync?.removePair(link.name).then(refreshSync)}>
                           {t('sync.unlink')}
                         </button>
                       </div>
@@ -1140,16 +1167,6 @@ export function ControlApp() {
 
             <section className="gy-card">
               <div className="gy-card-h">{I.folder} {t('sync.addCard')}</div>
-              <label className="gy-field-label">{t('sync.agentLabel')}</label>
-              <select className="gy-input" value={syncSel} onChange={(e) => setSyncSel(e.target.value)}>
-                {syncAgents.length === 0 && <option value="">{t('sync.noAgents')}</option>}
-                {syncAgents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name !== a.id ? `${a.name} (${a.id.slice(0, 8)})` : a.id}
-                  </option>
-                ))}
-              </select>
-              <div style={{ height: 8 }} />
               <label className="gy-field-label">{t('sync.folderLabel')}</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input className="gy-input" readOnly value={syncFolder} placeholder={t('sync.folderPlaceholder')} style={{ flex: 1 }} />
@@ -1160,7 +1177,7 @@ export function ControlApp() {
                 </button>
               </div>
               <div style={{ height: 10 }} />
-              <button className="gy-btn" disabled={!syncSel || !syncFolder} onClick={() => void addSyncPair()}>
+              <button className="gy-btn" disabled={!syncFolder} onClick={() => void addSyncPair()}>
                 {t('sync.connect')}
               </button>
               <p className="gy-hint" style={{ marginTop: 10 }}>{t('sync.safetyHint')}</p>

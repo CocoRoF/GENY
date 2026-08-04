@@ -280,11 +280,20 @@ export interface ConnectorBridge {
   /** Workspace sync — Drive-style replication between a local folder and an
    *  agent's server workspace (settings → Workspace tab). */
   sync: {
-    list(): Promise<{ pairs: SyncPairConfig[]; statuses: SyncPairStatus[] }>
+    list(): Promise<{
+      pairs: SyncPairConfig[]
+      /** Drive links (config of record): one row per binding. */
+      links: Array<{ name: string; localPath: string; paused?: boolean }>
+      statuses: SyncPairStatus[]
+    }>
     pickFolder(): Promise<string | null>
-    addPair(pair: { sessionId: string; sessionLabel?: string; localPath: string }): Promise<SyncPairConfig[] | { error: string; conflictWith?: string }>
-    removePair(id: string): Promise<SyncPairConfig[]>
-    setPaused(id: string, paused: boolean): Promise<SyncPairConfig[]>
+    /** Link a folder to the DRIVE (no agent — every connected agent
+     *  shares it as workspace/<name>/). */
+    addPair(pair: { localPath: string }): Promise<{ ok?: boolean; name?: string; error?: string; conflictWith?: string }>
+    /** Unlink by link NAME (the whole binding, all agents). */
+    removePair(name: string): Promise<{ ok: boolean }>
+    /** Pause/resume the whole link across all agents. */
+    setPaused(name: string, paused: boolean): Promise<{ ok: boolean }>
     syncNow(id: string): Promise<void>
     /** Answer the mass-delete safety valve. Refusing pauses the pair. */
     confirmMassDelete(id: string, accept: boolean): Promise<void>
