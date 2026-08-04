@@ -27,6 +27,27 @@ function wsPath(p: string): string {
   return `workspace/${p}`
 }
 
+/** Server-side subtree scoping for LINKED FOLDERS.
+
+    A linked folder syncs an arbitrary local directory to ONE SUBTREE of
+    an agent workspace (workspace/<prefix>/…) instead of the root — on
+    the web that subtree is just a normal subdirectory; locally the
+    GenyDrive agent folder carries a symlink to the real directory. The
+    engine (sync-core) stays completely unaware: it keeps speaking
+    subtree-relative paths and this wrapper does ALL the mapping —
+    outgoing paths gain the prefix, the changes feed is filtered to the
+    subtree and stripped back. latest_seq/cursor semantics are untouched
+    (skipping foreign entries never skips seqs the engine needed).
+
+    excludePrefixes is the mirror image, for the DRIVE pair of the same
+    agent: subtrees owned by linked-folder pairs are made invisible to
+    it (changes entries dropped), so exactly one engine owns any path.
+*/
+export interface TransportScope {
+  remotePrefix?: string      // 'myproj' → all IO under workspace/myproj/
+  excludePrefixes?: string[] // subtrees this pair must never see
+}
+
 function encPath(p: string): string {
   return p.split('/').map(encodeURIComponent).join('/')
 }
@@ -41,13 +62,26 @@ const CHUNK_SIZE = 8 * 1024 * 1024
 
 export class HttpSyncTransport implements Transport {
   private chunkThreshold: number
+  private prefix: string          // '' or 'myproj/'
+  private excludes: string[]      // ['linked/', …]
 
   constructor(
     private auth: TransportAuth,
     private tmpDir: string,
-    opts: { chunkThresholdBytes?: number } = {},
+    opts: { chunkThresholdBytes?: number; scope?: TransportScope } = {},
   ) {
     this.chunkThreshold = opts.chunkThresholdBytes ?? CHUNK_THRESHOLD_DEFAULT
+    const raw = (opts.scope?.remotePrefix ?? '').replace(/^\/+|\/+$/g, '')
+    this.prefix = raw ? `${raw}/` : ''
+    this.excludes = (opts.scope?.excludePrefixes ?? [])
+      .map((p) => p.replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean)
+      .map((p) => `${p}/`)
+  }
+
+  /** engine-relative → server workspace-relative */
+  private toRemote(p: string): string {
+    return this.prefix ? (p ? `${this.prefix.slice(0, -1)}/${p}` : this.prefix.slice(0, -1)) : p
   }
 
   private url(path: string, qs: Record<string, string | number | undefined> = {}): string {
@@ -65,11 +99,27 @@ export class HttpSyncTransport implements Transport {
       headers: await authHeaders(this.auth),
     })
     if (!res.ok) throw Object.assign(new Error(`changes HTTP ${res.status}`), { status: res.status })
-    return (await res.json()) as ChangesResponse
+    const data = (await res.json()) as ChangesResponse
+    if (!this.prefix && this.excludes.length === 0) return data
+    const changes = (data.changes ?? []).flatMap((c) => {
+      const slash = `${c.path}/`
+      if (this.prefix) {
+        // linked pair: only its own subtree, re-based to subtree-relative.
+        // The prefix DIRECTORY entry itself maps to '' — dropped (the
+        // engine's root always exists).
+        if (c.path === this.prefix.slice(0, -1)) return []
+        if (!slash.startsWith(this.prefix)) return []
+        return [{ ...c, path: c.path.slice(this.prefix.length) }]
+      }
+      // drive pair: linked subtrees (and their root dirs) are invisible
+      if (this.excludes.some((ex) => slash.startsWith(ex))) return []
+      return [c]
+    })
+    return { ...data, changes }
   }
 
   async download(path: string, toAbs: string): Promise<void> {
-    const res = await fetch(this.url(`/storage-raw/${encPath(wsPath(path))}`), {
+    const res = await fetch(this.url(`/storage-raw/${encPath(wsPath(this.toRemote(path)))}`), {
       headers: await authHeaders(this.auth),
     })
     if (!res.ok || !res.body) {
@@ -94,7 +144,7 @@ export class HttpSyncTransport implements Transport {
     }
     const res = await fetch(
       this.url('/storage/file', {
-        path: wsPath(path),
+        path: wsPath(this.toRemote(path)),
         base_sha: baseSha,
         device: this.auth.deviceId,
       }),
@@ -131,7 +181,7 @@ export class HttpSyncTransport implements Transport {
   ): Promise<{ sha256: string }> {
     const sha = await hashFileSha256(fromAbs)
     const startRes = await fetch(
-      this.url('/storage/file/chunks/start', { path: wsPath(path), size, sha256: sha }),
+      this.url('/storage/file/chunks/start', { path: wsPath(this.toRemote(path)), size, sha256: sha }),
       { method: 'POST', headers: await authHeaders(this.auth) },
     )
     if (!startRes.ok) {
@@ -211,7 +261,7 @@ export class HttpSyncTransport implements Transport {
 
   async del(path: string, baseSha?: string): Promise<void> {
     const res = await fetch(
-      this.url('/storage/entry', { path: wsPath(path), base_sha: baseSha }),
+      this.url('/storage/entry', { path: wsPath(this.toRemote(path)), base_sha: baseSha }),
       { method: 'DELETE', headers: await authHeaders(this.auth) },
     )
     if (res.status === 409) {
@@ -223,7 +273,7 @@ export class HttpSyncTransport implements Transport {
   }
 
   async mkdir(path: string): Promise<void> {
-    const res = await fetch(this.url('/storage/mkdir', { path: wsPath(path) }), {
+    const res = await fetch(this.url('/storage/mkdir', { path: wsPath(this.toRemote(path)) }), {
       method: 'POST',
       headers: await authHeaders(this.auth),
     })

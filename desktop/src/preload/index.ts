@@ -297,13 +297,6 @@ export interface ConnectorBridge {
   /** Geny Drive — one local root, one folder per connected agent. The user
    *  chooses WHICH agents live on the drive (and where the root is); every
    *  folder placement is derived. */
-  dav: {
-    info(): Promise<{ url: string }>
-    listPasswords(): Promise<{ items?: Array<{ id: number; label: string; prefix: string; created_at?: string; last_used_at?: string | null }>; error?: string }>
-    /** Returns the secret EXACTLY ONCE — it is never retrievable again. */
-    createPassword(label: string): Promise<{ id?: number; label?: string; prefix?: string; secret?: string; error?: string }>
-    revokePassword(id: number): Promise<{ ok?: boolean; error?: string }>
-  }
   drive: {
     get(): Promise<{
       root: string
@@ -499,12 +492,6 @@ const api: ConnectorBridge = {
       ipcRenderer.on('sync:status-event', h)
       return () => ipcRenderer.removeListener('sync:status-event', h)
     },
-  },
-  dav: {
-    info: () => ipcRenderer.invoke('dav:info'),
-    listPasswords: () => ipcRenderer.invoke('dav:list-passwords'),
-    createPassword: (label) => ipcRenderer.invoke('dav:create-password', label),
-    revokePassword: (id) => ipcRenderer.invoke('dav:revoke-password', id),
   },
   drive: {
     get: () => ipcRenderer.invoke('drive:get'),

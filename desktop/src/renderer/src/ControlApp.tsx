@@ -297,41 +297,6 @@ export function ControlApp() {
   const [driveCloud, setDriveCloud] = useState(true)
   const [driveCaps, setDriveCaps] = useState<{ streaming: boolean; missing: string } | null>(null)
   const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
-  const [davUrl, setDavUrl] = useState('')
-  const [davList, setDavList] = useState<Array<{ id: number; label: string; prefix: string; last_used_at?: string | null }>>([])
-  const [davSecret, setDavSecret] = useState('')  // shown exactly once after issue
-  const [davBusy, setDavBusy] = useState(false)
-
-  const refreshDav = async (): Promise<void> => {
-    const info = await window.connector?.dav?.info()
-    setDavUrl(info?.url ?? '')
-    const r = await window.connector?.dav?.listPasswords()
-    if (r && !r.error) setDavList(r.items ?? [])
-  }
-
-  const issueDavPassword = async (): Promise<void> => {
-    setDavBusy(true)
-    try {
-      const label = `${navigator.platform || 'device'} ${new Date().toISOString().slice(0, 10)}`
-      const r = await window.connector?.dav?.createPassword(label)
-      if (r?.secret) {
-        setDavSecret(r.secret)
-        await refreshDav()
-      }
-    } finally {
-      setDavBusy(false)
-    }
-  }
-
-  const revokeDavPassword = async (id: number): Promise<void> => {
-    setDavBusy(true)
-    try {
-      await window.connector?.dav?.revokePassword(id)
-      await refreshDav()
-    } finally {
-      setDavBusy(false)
-    }
-  }
   const [driveMsg, setDriveMsg] = useState('')
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
@@ -368,7 +333,9 @@ export function ControlApp() {
   const refreshSync = async (): Promise<void> => {
     const res = await window.connector?.sync?.list().catch(() => null)
     if (!res) return
-    setSyncPairs(res.pairs as SyncPairView[])
+    // The card shows LINKED FOLDERS only — drive mirrors live in the
+    // Drive card above; GenyDrive is the single connection point.
+    setSyncPairs((res.pairs as SyncPairView[]).filter((p) => (p as { managed?: string }).managed !== 'drive'))
     setSyncStatuses(Object.fromEntries((res.statuses as SyncStatusView[]).map((s) => [s.id, s])))
   }
   useEffect(() => {
@@ -393,7 +360,6 @@ export function ControlApp() {
     setDriveCloud(d.cloudOptIn !== false)
     setDriveCaps(d.capabilities ?? null)
     void window.connector?.drive?.usage().then(setDriveUsage).catch(() => undefined)
-    void refreshDav().catch(() => undefined)
   }
 
   const fmtBytes = (n: number): string => {
@@ -1085,50 +1051,6 @@ export function ControlApp() {
             </section>
 
             <section className="gy-card">
-              <div className="gy-card-h">{I.link} {t('dav.card')}</div>
-              <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('dav.hint')}</p>
-              {davUrl && (
-                <div className="gy-field-row" style={{ marginBottom: 10 }}>
-                  <code style={{ userSelect: 'all', fontSize: 12 }}>{davUrl}</code>
-                  <button className="gy-btn gy-btn-sm" onClick={() => void navigator.clipboard.writeText(davUrl)}>
-                    {t('dav.copy')}
-                  </button>
-                </div>
-              )}
-              {davSecret && (
-                <div className="gy-callout" style={{ margin: '0 0 12px', padding: '10px 12px' }}>
-                  <div className="gy-hint" style={{ marginBottom: 6 }}>{t('dav.secretOnce')}</div>
-                  <div className="gy-field-row">
-                    <code style={{ userSelect: 'all', fontSize: 13, fontWeight: 600 }}>{davSecret}</code>
-                    <button className="gy-btn gy-btn-sm" onClick={() => void navigator.clipboard.writeText(davSecret)}>
-                      {t('dav.copy')}
-                    </button>
-                    <button className="gy-btn gy-btn-sm" onClick={() => setDavSecret('')}>
-                      {t('dav.dismiss')}
-                    </button>
-                  </div>
-                </div>
-              )}
-              <button className="gy-btn" disabled={davBusy} onClick={() => void issueDavPassword()}>
-                {t('dav.issue')}
-              </button>
-              {davList.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  {davList.map((it) => (
-                    <div key={it.id} className="gy-field-row" style={{ padding: '4px 0' }}>
-                      <span style={{ flex: 1, fontSize: 13 }}>
-                        {it.label} <span className="gy-hint">({it.prefix}…)</span>
-                      </span>
-                      <button className="gy-btn gy-btn-sm" disabled={davBusy} onClick={() => void revokeDavPassword(it.id)}>
-                        {t('dav.revoke')}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="gy-card">
               <div className="gy-card-h">{I.folder} {t('sync.pairsCard')}</div>
               <p className="gy-hint" style={{ margin: '0 0 12px' }}>{t('sync.pairsHint')}</p>
 
@@ -1158,6 +1080,8 @@ export function ControlApp() {
                         </div>
                         <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.localPath}>
                           {p.localPath}
+                          {(p as { remotePrefix?: string }).remotePrefix &&
+                            ` → GenyDrive/${p.sessionLabel || p.sessionId}/${(p as { remotePrefix?: string }).remotePrefix}`}
                         </div>
                         {st && (
                           <div className="gy-hint">

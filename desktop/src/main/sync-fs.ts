@@ -171,7 +171,17 @@ export class ReplicaFs implements LocalFs {
   }
 
   async removeFile(rel: string): Promise<void> {
-    await rm(this.absPath(rel), { force: true })
+    try {
+      await rm(this.absPath(rel), { force: true })
+    } catch (e) {
+      // Type flip: the index tracked a FILE here but a DIRECTORY occupies
+      // the path now (e.g. server-side MOVE turned x into x/). Deleting a
+      // dir under a file-plan would be acting on stale knowledge — skip;
+      // the next round re-plans with the real type (dirOverFile handling).
+      const code = (e as NodeJS.ErrnoException)?.code
+      if (code === 'EISDIR' || code === 'ERR_FS_EISDIR') return
+      throw e
+    }
   }
 
   async removeDirIfEmpty(rel: string): Promise<boolean> {

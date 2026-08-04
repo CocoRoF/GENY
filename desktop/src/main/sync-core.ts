@@ -199,6 +199,16 @@ export async function syncOnce(
     for (const p of [...remoteByPath.keys()]) {
       if (fs.isIgnored(p)) remoteByPath.delete(p)
     }
+    // Same asymmetry, INDEX edition: entries tracked before a path became
+    // ignored (e.g. a drive subtree handed over to a linked-folder pair).
+    // The scan hides them and the feed above hides them — but a stale
+    // index entry alone would read as "locally deleted" and plan a
+    // deleteRemote against a subtree that is now another engine's
+    // property. Ignored paths simply leave this engine's world: drop the
+    // bookkeeping, touch neither side.
+    for (const p of Object.keys(index.entries)) {
+      if (fs.isIgnored(p)) delete index.entries[p]
+    }
   }
 
   const local = await fs.scan()

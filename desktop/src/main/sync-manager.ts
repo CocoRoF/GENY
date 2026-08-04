@@ -31,8 +31,18 @@ export interface SyncPairConfig {
   pausedReason?: string
   /** 'drive' → this pair is OWNED by the Geny Drive orchestrator (single
    *  root, per-agent toggle): created/moved/removed by drive config, hidden
-   *  from the manual-pair editor. Undefined = classic user-managed pair. */
-  managed?: 'drive'
+   *  from the manual-pair editor.
+   *  'link' → a LINKED FOLDER: an arbitrary local directory connected into
+   *  GenyDrive — synced to workspace/<remotePrefix>/ (a plain subdirectory
+   *  on the web) and represented inside the local drive folder as a
+   *  symlink/junction. GenyDrive is the single connection point; linked
+   *  folders are the only non-drive pairs the UI creates. */
+  managed?: 'drive' | 'link'
+  /** link pairs: workspace subtree name this folder syncs into. */
+  remotePrefix?: string
+  /** drive pairs: subtree names owned by link pairs of the same agent —
+   *  invisible to this engine so exactly one engine owns any path. */
+  excludePrefixes?: string[]
 }
 
 export type SyncState =
@@ -119,7 +129,13 @@ class PairEngine {
       counts: { downloaded: 0, uploaded: 0, conflicts: 0, skippedLarge: 0 },
       pendingMassDelete: null,
     }
-    this.fs = new ReplicaFs(cfg.localPath)
+    // Linked subtrees are ignored at the FS layer too (scan + the
+    // isIgnored predicate the engine applies to REMOTE paths) — with the
+    // transport-side changes filter this makes the subtree fully
+    // invisible in BOTH directions, so the drive engine can never upload
+    // into or delete from a subtree a link engine owns.
+    const extraGlobs = (cfg.excludePrefixes ?? []).flatMap((p) => [p, `${p}/**`])
+    this.fs = new ReplicaFs(cfg.localPath, extraGlobs)
     this.index = this.loadIndex()
     this.transport = new HttpSyncTransport(
       {
@@ -129,6 +145,7 @@ class PairEngine {
         deviceId: this.deps.deviceId(),
       },
       join(cfg.localPath, '.geny-sync-tmp'),
+      { scope: { remotePrefix: cfg.remotePrefix, excludePrefixes: cfg.excludePrefixes } },
     )
   }
 
@@ -359,11 +376,13 @@ export class SyncManager {
         !next ||
         next.sessionId !== engine.cfg.sessionId ||
         next.localPath !== engine.cfg.localPath ||
-        Boolean(next.paused) !== Boolean(engine.cfg.paused)
+        Boolean(next.paused) !== Boolean(engine.cfg.paused) ||
+        (next.remotePrefix ?? '') !== (engine.cfg.remotePrefix ?? '') ||
+        JSON.stringify(next.excludePrefixes ?? []) !== JSON.stringify(engine.cfg.excludePrefixes ?? [])
       if (changed) {
         engine.stop()
         this.engines.delete(id)
-        if (!next && engine.cfg.managed !== 'drive') {
+        if (!next && !engine.cfg.managed) {
           // MANUAL pairing removed → its index file is dead weight (manual
           // ids are minted fresh on re-pair, so it can never be reused).
           // Drive pairs are the OPPOSITE: their id is the stable
