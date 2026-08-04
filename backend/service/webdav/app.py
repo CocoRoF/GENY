@@ -149,6 +149,21 @@ def _wsgi_env_fixups(app):
         # a copy/move destination is HOST + PATH — the scheme carries no
         # information here, so align it with what this stack believes and
         # let wsgidav's own host validation do the real check.
+        # Malformed Basic credentials (e.g. a client de-obscuring a
+        # plaintext secret into binary garbage — observed with rclone
+        # config create without --obscure) crash wsgidav's util.to_str
+        # with UnicodeDecodeError → 500. Bad credentials are a 401, never
+        # a 500: drop the undecodable header and let the authenticator
+        # issue its normal challenge.
+        auth = environ.get("HTTP_AUTHORIZATION", "")
+        if auth.lower().startswith("basic "):
+            import base64 as _b64
+
+            try:
+                _b64.b64decode(auth[6:].strip()).decode("utf-8")
+            except Exception:
+                environ.pop("HTTP_AUTHORIZATION", None)
+
         dest = environ.get("HTTP_DESTINATION")
         if dest:
             for prefix in ("https://", "http://"):
