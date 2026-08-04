@@ -64,15 +64,13 @@ class AppPasswordService:
             label=(label or "device")[:200],
             secret_hash=_hash(secret),
             prefix=secret[:5],
-            created_at=_now_iso(),
         )
-        inserted = self._db.insert(rec)
-        rec_id = (inserted or {}).get("id")
+        inserted = self._db.insert(rec) or {}
         return {
-            "id": rec_id,
+            "id": inserted.get("id"),
             "label": rec.label,
             "prefix": rec.prefix,
-            "created_at": rec.created_at,
+            "created_at": str(inserted.get("created_at") or ""),
             "secret": secret,
         }
 
@@ -140,7 +138,9 @@ class AppPasswordService:
 
     def _touch_last_used(self, d: Dict[str, Any]) -> None:
         try:
-            rec = AppPasswordModel(**{k: v for k, v in d.items() if k != "id"})
+            rec = AppPasswordModel(
+                **{k: v for k, v in d.items() if k not in ("id", "created_at", "updated_at")}
+            )
             rec.id = d.get("id")
             rec.last_used_at = _now_iso()
             self._db.update(rec)

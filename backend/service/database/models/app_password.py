@@ -27,7 +27,6 @@ class AppPasswordModel(BaseModel):
         label: str = "",
         secret_hash: str = "",
         prefix: str = "",
-        created_at: str = "",
         last_used_at: str = "",
         **kwargs,
     ):
@@ -38,7 +37,11 @@ class AppPasswordModel(BaseModel):
         # First characters of the secret, shown in the management list so a
         # user can tell entries apart without us keeping the secret.
         self.prefix = prefix
-        self.created_at = created_at
+        # created_at is OWNED BY BaseModel (real TIMESTAMP, auto-set,
+        # isoformat-parsed on read) — redefining it as VARCHAR here broke
+        # every find_* with "Invalid isoformat string". last_used_at stays
+        # a VARCHAR like AdminUserModel.last_login_at: only
+        # created_at/updated_at get datetime parsing in from_dict.
         self.last_used_at = last_used_at
 
     def get_table_name(self) -> str:
@@ -50,7 +53,6 @@ class AppPasswordModel(BaseModel):
             "label": "VARCHAR(200) DEFAULT ''",
             "secret_hash": "VARCHAR(64) NOT NULL",
             "prefix": "VARCHAR(12) DEFAULT ''",
-            "created_at": "VARCHAR(100) DEFAULT ''",
             "last_used_at": "VARCHAR(100) DEFAULT ''",
         }
 
