@@ -113,21 +113,36 @@ def build_dav_wsgi_app(
         "hotfixes": {"emulate_win32_lastmod": False},
     }
     app = WsgiDAVApp(config)
-    return _lock_content_type_hotfix(app)
+    return _wsgi_env_fixups(app)
 
 
-def _lock_content_type_hotfix(app):
-    """UPSTREAM BUG SHIM — WsgiDAV 4.3.5, request_server.py:1283.
+def _wsgi_env_fixups(app):
+    """Two seams between wsgidav and our deployment, fixed in one wrapper.
 
-    The lock-CREATE response hardcodes ``Content-Type: application;
-    charset=utf-8`` (the ``/xml`` is missing; the lock-REFRESH path a few
-    lines up is correct). litmus' neon — and any strict client — then
-    refuses to parse the activelock XML body, which breaks lock discovery
-    and, downstream, Finder/Office write flows. Repair the header on LOCK
-    responses only; delete this wrapper when upstream ships a fix.
+    1. PROXY SCHEME. Behind nginx the WSGI stack sees http:// while
+       clients send absolute ``Destination:`` headers with https:// —
+       wsgidav then rejects every COPY/MOVE as "different server"
+       (502 Bad Gateway; observed via litmus against prod). Restoring
+       wsgi.url_scheme from X-Forwarded-Proto makes destination
+       validation — and any absolute href generation — see the truth.
+       (uvicorn is not run with --proxy-headers, and enabling that
+       globally would affect the whole backend; this scopes the fix to
+       the DAV island.)
+
+    2. UPSTREAM BUG — WsgiDAV 4.3.5, request_server.py:1283: the
+       lock-CREATE response hardcodes ``Content-Type: application;
+       charset=utf-8`` (missing ``/xml``; the lock-REFRESH path is
+       correct). Strict clients then can't parse the activelock XML,
+       which breaks lock discovery and, downstream, Finder/Office write
+       flows. Repair the header on LOCK responses only; delete when
+       upstream ships a fix.
     """
 
     def fixed(environ, start_response):
+        fwd = environ.get("HTTP_X_FORWARDED_PROTO")
+        if fwd:
+            environ["wsgi.url_scheme"] = fwd.split(",")[0].strip() or environ["wsgi.url_scheme"]
+
         def sr(status, headers, exc_info=None):
             if environ.get("REQUEST_METHOD", "").upper() == "LOCK":
                 headers = [
