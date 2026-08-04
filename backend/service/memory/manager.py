@@ -1380,11 +1380,12 @@ class SessionMemoryManager:
     async def _seed_identity_ledger_if_empty(self) -> None:
         """Promote hand-pinned identity notes into an EMPTY fact ledger.
 
-        Kind mapping: 호칭/identity/user tags → ``identity``; 금지주제/금기
-        tags → ``preference`` (the card's prohibition markers pick those up
-        via the statement text). Statements are whitespace-normalized note
-        bodies; fact ids derive from filenames so re-runs stay idempotent
-        even if the emptiness guard were ever bypassed.
+        Selection is purely structural: critical CATEGORY + critical
+        IMPORTANCE (the author's own never-forget declaration). Seeded rows
+        carry ``importance=critical`` so the identity card includes them
+        regardless of kind. Statements are whitespace-normalized bodies;
+        ids derive from filenames so re-runs stay idempotent even if the
+        emptiness guard were ever bypassed.
         """
         if self._memory_provider is None:
             return
@@ -1396,25 +1397,25 @@ class SessionMemoryManager:
             return
         notes = self._memory_provider.notes()
         metas = await notes.list(category="critical")
-        identity_tags = {"identity", "호칭", "user", "이름"}
-        prohibition_tags = {"금지주제", "금기"}
         seeded = 0
         for m in metas:
             fname = m.ref.filename
             if fname.startswith("__"):  # ledger/evergreen themselves
                 continue
-            tags = {str(t) for t in (m.tags or [])}
-            if not (tags & (identity_tags | prohibition_tags)):
+            # Structural selection only: a hand-pinned note in the critical
+            # category with critical importance IS the author's declaration
+            # of a never-forget fact — no tag or text heuristics.
+            imp = getattr(m, "importance", None)
+            if (getattr(imp, "value", str(imp)) if imp is not None else "") != "critical":
                 continue
             note = await notes.read(fname)
             body = " ".join(((note.body if note else "") or "").split())
             if not body:
                 continue
-            kind = "identity" if tags & identity_tags else "preference"
             state.facts.append(
                 Fact(
                     id=f"seed-{fname.rsplit('.', 1)[0]}"[:64],
-                    kind=kind,
+                    kind="knowledge",
                     statement=body[:400],
                     importance="critical",
                 )
