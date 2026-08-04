@@ -29,7 +29,12 @@ Function GenyCloudPageCreate
     StrCpy $GenyCloudChecked "1"
   ${EndIf}
 
-  !insertmacro MUI_HEADER_TEXT "Geny 클라우드 (Geny Cloud)" "에이전트별 클라우드 저장소를 이 PC의 드라이브 폴더와 동기화합니다."
+  ; Header text is a MUI2 macro; our include may be processed BEFORE MUI2.nsh
+  ; (it was — makensis aborted here), so it is optional decoration, not a
+  ; requirement for the page to work.
+  !ifmacrodef MUI_HEADER_TEXT
+    !insertmacro MUI_HEADER_TEXT "Geny 클라우드 (Geny Cloud)" "에이전트별 클라우드 저장소를 이 PC의 드라이브 폴더와 동기화합니다."
+  !endif
 
   nsDialogs::Create 1018
   Pop $0
@@ -51,7 +56,7 @@ FunctionEnd
 
 Function GenyCloudPageLeave
   ${NSD_GetState} $GenyCloudCheckbox $0
-  ${If} $0 == ${BST_CHECKED}
+  ${If} $0 == 1  ; BST_CHECKED — literal, so include order can't break it
     StrCpy $GenyCloudChecked "1"
   ${Else}
     StrCpy $GenyCloudChecked "0"
