@@ -207,3 +207,47 @@ async def get_current_user(auth: dict = Depends(require_auth)):
         "username": auth.get("sub"),
         "display_name": auth.get("display_name"),
     }
+
+
+# ── App passwords (protocol clients: WebDAV mounts) ─────────────────────
+#
+# Mount clients speak HTTP Basic, not Bearer. Each device gets its own
+# generated secret (shown exactly once), individually revocable. The DAV
+# endpoint (/dav) authenticates against these — never against the account
+# password, so a leaked mount credential can be cut off without touching
+# the account.
+
+@router.post("/app-passwords")
+async def create_app_password(payload: dict, auth: dict = Depends(require_auth)):
+    from service.auth.app_password_service import get_app_password_service
+
+    svc = get_app_password_service()
+    if svc is None:
+        raise HTTPException(status_code=503, detail="App passwords unavailable (no database)")
+    username = auth.get("sub") or ""
+    if not username:
+        raise HTTPException(status_code=401, detail="No user in token")
+    label = str((payload or {}).get("label") or "").strip()
+    return svc.create(username, label)
+
+
+@router.get("/app-passwords")
+async def list_app_passwords(auth: dict = Depends(require_auth)):
+    from service.auth.app_password_service import get_app_password_service
+
+    svc = get_app_password_service()
+    if svc is None:
+        raise HTTPException(status_code=503, detail="App passwords unavailable (no database)")
+    return {"items": svc.list_for(auth.get("sub") or "")}
+
+
+@router.delete("/app-passwords/{rec_id}")
+async def revoke_app_password(rec_id: int, auth: dict = Depends(require_auth)):
+    from service.auth.app_password_service import get_app_password_service
+
+    svc = get_app_password_service()
+    if svc is None:
+        raise HTTPException(status_code=503, detail="App passwords unavailable (no database)")
+    if not svc.revoke(auth.get("sub") or "", rec_id):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}

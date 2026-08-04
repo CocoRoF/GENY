@@ -250,6 +250,9 @@ async def lifespan(app: FastAPI):
         app.state.auth_service = auth_svc
         has_admin = auth_svc.has_users()
         logger.info(f"   - Auth service: initialized (admin exists: {has_admin})")
+        from service.auth.app_password_service import init_app_password_service
+        init_app_password_service(app_db)
+        logger.info("   - App password service: initialized")
     else:
         app.state.auth_service = None
         logger.info("   - Auth service: disabled (no database)")
@@ -957,6 +960,20 @@ async def health_check():
 
 # Register routers
 app.include_router(auth_router)  # Auth (must be first — no auth guard on itself)
+
+# WebDAV — Geny Drive universal protocol surface. Mounted as a WSGI island
+# (WsgiDAV via a2wsgi): its own Basic/app-password auth, so the JWT
+# middleware stack above never sees /dav traffic. Guarded import — a build
+# without the wsgidav extra still boots, minus the mount.
+try:
+    from a2wsgi import WSGIMiddleware as _A2WSGIMiddleware
+
+    from service.webdav.app import get_or_build_dav_app
+
+    app.mount("/dav", _A2WSGIMiddleware(get_or_build_dav_app()))
+    logger.info("WebDAV mounted at /dav")
+except Exception as _dav_exc:  # noqa: BLE001
+    logger.warning(f"WebDAV unavailable: {_dav_exc}")
 app.include_router(command_router)
 app.include_router(agent_router)  # geny-executor agent sessions
 app.include_router(agent_tasks_router)  # background tasks REST (PR-A.5.4)

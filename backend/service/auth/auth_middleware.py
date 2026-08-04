@@ -384,6 +384,10 @@ PUBLIC_EXACT_PATHS: frozenset = frozenset(
 PUBLIC_PATH_PREFIXES: tuple = (
     "/static/",            # legacy dashboard assets — no data
     "/api/internal/mcp/",  # MCP bridge — guarded by its own per-session bearer token
+    "/dav",                # WebDAV island — enforces its OWN auth (HTTP Basic
+                           # against per-device app passwords; mount clients
+                           # cannot send JWTs). Nothing under /dav is served
+                           # without a valid app password.
 )
 
 

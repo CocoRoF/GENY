@@ -15,6 +15,7 @@ from service.database.models.chat_message import ChatMessageModel
 from service.database.models.session_log import SessionLogModel
 from service.database.models.session_memory_entry import SessionMemoryEntryModel
 from service.database.models.admin_user import AdminUserModel
+from service.database.models.app_password import AppPasswordModel
 from service.database.models.background_task import (
     BackgroundTaskModel,
     BackgroundTaskOutputModel,
@@ -36,6 +37,7 @@ __all__ = [
     'SessionLogModel',
     'SessionMemoryEntryModel',
     'AdminUserModel',
+    'AppPasswordModel',
     'BackgroundTaskModel',
     'BackgroundTaskOutputModel',
     'CronJobModel',
@@ -58,6 +60,7 @@ APPLICATION_MODELS = [
     SessionLogModel,
     SessionMemoryEntryModel,
     AdminUserModel,
+    AppPasswordModel,
     BackgroundTaskModel,
     BackgroundTaskOutputModel,
     CronJobModel,
