@@ -82,7 +82,7 @@ export interface ConnectorConfig {
 export interface ConnectorBridge {
   /** Which window this renderer is: 'overlay' (avatar), 'settings'/'control', or
    *  'quickchat' (the floating Spotlight-style input bar). */
-  windowKind: 'overlay' | 'control' | 'settings' | 'quickchat'
+  windowKind: 'overlay' | 'control' | 'settings' | 'quickchat' | 'chip'
 
   /** Connector app version (package.json), for the settings window. */
   appVersion(): Promise<string>

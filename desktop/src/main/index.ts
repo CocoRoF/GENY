@@ -1097,7 +1097,7 @@ async function refreshAll(): Promise<void> {
   }
 }
 
-function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings' | 'quickchat'): void {
+function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings' | 'quickchat' | 'chip'): void {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/index.html?window=${route}`)
   } else {
@@ -1291,7 +1291,8 @@ async function applyOverlayContent(): Promise<void> {
     overlayLocked = true
     applyOverlayInput()
     void createOverlayChip().then(() => {
-      void applyChipContent().then(applyChipVisibility)
+      void applyChipContent()
+      applyChipVisibility()
     })
     try {
       dlog('overlay', `loadURL ${base}/overlay ${redactTok(token)}`)
@@ -1404,17 +1405,12 @@ async function createOverlayChip(): Promise<void> {
 
 async function applyChipContent(): Promise<void> {
   if (!overlayChip || overlayChip.isDestroyed()) return
-  const token = await getStoredToken()
-  const { serverUrl } = loadConfig()
-  if (token && serverUrl) {
-    const base = serverUrl.replace(/\/+$/, '')
-    try {
-      await overlayChip.loadURL(`${base}/overlay?chip=1&token=${encodeURIComponent(token)}`)
-      overlayChip.webContents.insertCSS('html,body{background:transparent !important;}')
-    } catch {
-      /* retried by the next refresh */
-    }
-  }
+  // LOCAL page, deliberately. Loading the server's overlay page into this
+  // window crashed the app outright — measured: creating the window is
+  // harmless, loading that bundle into it is fatal (a second avatar
+  // runtime + WebGL context for three buttons). A local chip also works
+  // before login and costs no network.
+  loadRoute(overlayChip, 'chip')
 }
 
 /** Lock state is owned HERE: it decides window input, and two windows
