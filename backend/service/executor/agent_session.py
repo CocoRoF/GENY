@@ -2464,6 +2464,33 @@ class AgentSession:
     # geny-executor Pipeline Mode
     # ========================================================================
 
+    def rebind_tool_roots(self) -> bool:
+        """Re-apply filesystem roots to a LIVE pipeline.
+
+        Connecting an agent to GenyCloud changes what its file tools may
+        reach. The roots are baked into the tool context when the pipeline
+        is attached, so without this a connection would only take effect
+        after a restart — and a user who just clicked "connect" would see
+        the agent claim it cannot find the folder.
+        """
+        pipeline = self._pipeline
+        if pipeline is None:
+            return False
+        ctx = getattr(pipeline, "tool_context", None)
+        if ctx is None or not getattr(ctx, "working_dir", None):
+            return False
+        try:
+            from service.cloud import cloud_workspace, is_connected
+
+            roots = [ctx.working_dir]
+            owner = self._owner_username
+            if owner and is_connected(owner, self._session_id):
+                roots.append(cloud_workspace(owner))
+            ctx.allowed_paths = roots
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def _build_pipeline(self):
         """Adopt the manager-built Pipeline and attach session runtime.
 
@@ -2560,6 +2587,23 @@ class AgentSession:
                 working_dir = self.storage_path
         else:
             working_dir = ""
+
+        # GenyCloud — the folder ABOVE agents. A connected agent reaches it
+        # at `cloud/` inside its own workspace and operates on the SAME
+        # bytes the user's devices and every other connected agent see:
+        # a reference, never a copy. Copies per agent are exactly what the
+        # cloud exists to end.
+        cloud_dir = ""
+        try:
+            from service.cloud import ensure_agent_link, cloud_workspace, is_connected
+
+            owner = self._owner_username
+            if owner and self.storage_path and is_connected(owner, self._session_id):
+                if ensure_agent_link(self.storage_path, owner):
+                    cloud_dir = cloud_workspace(owner)
+        except Exception as exc:  # noqa: BLE001 — never block a session on the cloud
+            logger.debug("[%s] cloud link skipped: %s", self._session_id[:8], exc)
+
         is_vtuber = self._role == SessionRole.VTUBER
 
         # Persona text — preserve legacy GenyPresets.* behavior. The
@@ -3072,7 +3116,12 @@ class AgentSession:
                 # runs a real shell and cannot be path-guarded — its cwd
                 # moves into the workspace, and true containment for it is
                 # the sandbox.)
-                allowed_paths=[working_dir] if working_dir else None,
+                # The cloud is a SEPARATE root, not a subpath: the guard
+                # resolves symlinks before checking containment, so
+                # `cloud/x` only becomes legal by listing the cloud here.
+                allowed_paths=(
+                    [p for p in (working_dir, cloud_dir) if p] or None
+                ),
                 extras=_tool_extras,
             ),
             # Intentionally NOT passing ``llm_client`` here.

@@ -215,7 +215,7 @@ class SectionLibrary:
         )
 
     @staticmethod
-    def files_workspace(storage_path: str) -> PromptSection:
+    def files_workspace(storage_path: str, cloud_linked: bool = False) -> PromptSection:
         """Short manifest of the session's FILES WORKSPACE (host storage).
 
         Deliberately terse (workspace-canvas plan): the prompt states only the
@@ -237,6 +237,15 @@ class SectionLibrary:
             f"user watches the updated preview in the Canvas tab), "
             f"doc_convert for pdf/png/text, doc_generate to create new ones."
         )
+        if cloud_linked:
+            # Non-discoverable fact, not an instruction: the same bytes are
+            # visible to the user's devices and to every other connected
+            # agent, which changes what deleting or overwriting there means.
+            content += (
+                " cloud/ is GenyCloud — shared storage the user and other "
+                "connected agents see live; it is not this session's private "
+                "space."
+            )
         return PromptSection(
             name="files_workspace",
             content=content,
@@ -740,7 +749,10 @@ def build_agent_prompt(
     # space (uploads/drafts/outputs). Details via WorkspaceInfo (progressive
     # disclosure); the sandbox counterpart is covered by the GAPT section.
     if storage_path:
-        builder.add_section(SectionLibrary.files_workspace(storage_path))
+        import os as _os
+
+        _cloud_linked = _os.path.islink(_os.path.join(storage_path, "workspace", "cloud"))
+        builder.add_section(SectionLibrary.files_workspace(storage_path, _cloud_linked))
 
     # §4 DateTime (FULL only)
     if mode == PromptMode.FULL:

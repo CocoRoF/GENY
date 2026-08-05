@@ -1949,6 +1949,61 @@ async def put_storage_links(
     return {"ok": True, "links": links}
 
 
+@router.get("/cloud/members")
+async def cloud_members(auth: dict = Depends(require_auth)):
+    """Which of the caller's agents are connected to their GenyCloud."""
+    from service.cloud import connected_sessions
+
+    user = (auth or {}).get("sub") or "anonymous"
+    return {"sessions": connected_sessions(user)}
+
+
+@router.put("/{session_id}/cloud")
+async def set_cloud_connection(
+    payload: Dict[str, Any],
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Connect or disconnect ONE agent to the user's GenyCloud.
+
+    Connecting gives the agent a `cloud/` path inside its workspace that
+    resolves to the shared cloud — a reference, so the agent operates on
+    the same bytes as the user's devices and every other connected agent.
+    Disconnecting removes the reference; **nothing in the cloud is
+    deleted** (it was never this agent's copy) and the agent's own
+    workspace is untouched.
+
+    Takes effect immediately for new turns; a live pipeline picks the new
+    root up when its tools are next built.
+    """
+    _enforce_session_owner(session_id, auth)
+    from service.cloud import ensure_agent_link, remove_agent_link, set_connected
+
+    user = (auth or {}).get("sub") or "anonymous"
+    connected = bool(payload.get("connected"))
+    storage_path = _storage_root_live_or_dormant(session_id)
+
+    if connected:
+        if not await asyncio.to_thread(ensure_agent_link, storage_path, user):
+            raise HTTPException(
+                status_code=409,
+                detail="workspace/cloud is occupied by a real file or folder",
+            )
+    else:
+        await asyncio.to_thread(remove_agent_link, storage_path)
+
+    sessions = await asyncio.to_thread(set_connected, user, session_id, connected)
+    # The link changes what the agent can reach, so its tools must be
+    # rebuilt — otherwise the running pipeline keeps the old allowed_paths.
+    try:
+        agent = agent_manager.get_agent(session_id)
+        if agent is not None and hasattr(agent, "rebind_tool_roots"):
+            agent.rebind_tool_roots()
+    except Exception:  # noqa: BLE001 — worst case it applies next build
+        pass
+    return {"connected": connected, "sessions": sessions}
+
+
 @router.get("/{session_id}/storage/sync-devices")
 async def storage_sync_devices(
     session_id: str = Path(..., description="Session ID"),
