@@ -1322,6 +1322,21 @@ function consumeInstallFlags(): void {
   }
 }
 
+/** Storage scope addressing the user's cloud (server-side constant). */
+const CLOUD_SCOPE = '_cloud'
+
+/** The local mirror of the server cloud. A folder INSIDE the drive root
+ *  rather than the root itself: existing installs already keep per-agent
+ *  folders at the root, and moving those would risk user data for a
+ *  cosmetic gain. */
+function cloudFolder(): string {
+  return join(driveRoot(), 'Cloud')
+}
+
+/** The local cloud folder name is reserved — an agent folder that took it
+ *  would be mirrored on top of the cloud mirror. */
+const RESERVED_DRIVE_NAMES = new Set(['cloud'])
+
 /** Set once the IPC layer is wired; used by the boot-time restore. */
 let startNativeMount: () => Promise<{ mounted?: boolean; mountpoint?: string; error?: string }> =
   async () => ({ error: 'not ready' })
@@ -1338,11 +1353,12 @@ function allocateDriveFolder(
   agents: Record<string, { folder: string }>,
   sessionId: string,
 ): string {
-  const taken = new Set(
-    Object.entries(agents)
+  const taken = new Set([
+    ...RESERVED_DRIVE_NAMES,
+    ...Object.entries(agents)
       .filter(([sid]) => sid !== sessionId)
       .map(([, a]) => a.folder.toLowerCase()),
-  )
+  ])
   const base =
     (label || sessionId)
       .normalize('NFC')
@@ -1448,7 +1464,12 @@ function migrateLegacyPairsToLinks(): void {
   }
   saveConfig({
     driveLinks: links,
-    syncPairs: pairs.filter((p) => p.managed === 'drive'),
+    // Drop every derived pair: the cloud model rebuilds them with new ids
+    // (link:<name> instead of link:<sid>:<name>, plus the single `cloud`
+    // pair). Old per-agent link baselines are abandoned deliberately —
+    // they describe subtrees inside agent workspaces, and reusing them
+    // against the cloud would read as "the server lost everything".
+    syncPairs: pairs.filter((p) => p.managed === 'drive' && p.id.startsWith('drive:')),
   })
 }
 
@@ -1471,6 +1492,33 @@ function applyDriveConfig(): void {
     if (!cloudOn && !existsSync(optOutMarker)) writeFileSync(optOutMarker, '')
     else if (cloudOn && existsSync(optOutMarker)) unlinkSync(optOutMarker)
   } catch { /* cosmetic — never block the drive on marker IO */ }
+  // ── THE CLOUD ─────────────────────────────────────────────────────
+  // One pair, not one per agent. The server cloud is the hub every agent
+  // connects to, so a shared folder crosses the network ONCE no matter
+  // how many agents use it — the old model uploaded the same folder into
+  // every agent's workspace and ran an engine per copy.
+  const cloudLocal = cloudFolder()
+  if (cloudOn) {
+    try {
+      mkdirSync(cloudLocal, { recursive: true })
+    } catch { /* surfaced by the engine's own error state */ }
+  }
+  const cloudPair = cloudOn
+    ? [{
+        id: 'cloud',
+        sessionId: CLOUD_SCOPE,
+        sessionLabel: 'GenyCloud',
+        localPath: cloudLocal,
+        managed: 'drive' as const,
+        // Linked subtrees belong to their own engines; the cloud mirror
+        // must not also materialise them as real folders here.
+        excludePrefixes: links.map((l) => l.name),
+      }]
+    : []
+
+  // Agent workspace mirrors — an agent's PRIVATE space, unchanged. These
+  // are separate from the cloud: an agent keeps its own workspace and
+  // connects to the cloud on top of it.
   const managed = Object.entries(agents)
     .filter(([, a]) => cloudOn && a.enabled)
     .map(([sessionId, a]) => {
@@ -1487,31 +1535,24 @@ function applyDriveConfig(): void {
         sessionLabel: a.label,
         localPath,
         managed: 'drive' as const,
-        // Every drive link's subtree is carved OUT of every agent mirror —
-        // the link engines own those paths.
-        excludePrefixes: links.map((l) => l.name),
       }
     })
-  // A drive link fans out to ONE ENGINE PER CONNECTED AGENT: the folder is
-  // bound to the drive, and every agent on the drive shares it as
-  // workspace/<name>/. Ids are (agent, name)-stable so baselines survive
-  // toggles; the cloud switch parks links together with the mirrors.
-  const enabledAgents = Object.entries(agents).filter(([, a]) => cloudOn && a.enabled)
+
+  // A linked folder now binds to the CLOUD — one engine each, whatever
+  // the agent count. Ids drop the session dimension entirely.
   const linkPairs = cloudOn
-    ? links.flatMap((l) =>
-        enabledAgents.map(([sessionId, a]) => ({
-          id: `link:${sessionId}:${l.name}`,
-          sessionId,
-          sessionLabel: a.label,
-          localPath: l.localPath,
-          managed: 'link' as const,
-          remotePrefix: l.name,
-          paused: l.paused,
-        })),
-      )
+    ? links.map((l) => ({
+        id: `link:${l.name}`,
+        sessionId: CLOUD_SCOPE,
+        sessionLabel: l.name,
+        localPath: l.localPath,
+        managed: 'link' as const,
+        remotePrefix: l.name,
+        paused: l.paused,
+      }))
     : []
   const others = (cfg.syncPairs ?? []).filter((p) => !p.managed)
-  const next = [...others, ...linkPairs, ...managed]
+  const next = [...others, ...cloudPair, ...linkPairs, ...managed]
   saveConfig({ syncPairs: [...managed, ...others] })
   getSyncManager()?.configure(next)
   ensureAllLinkShortcuts()
@@ -1525,89 +1566,11 @@ function applyDriveConfig(): void {
   setTimeout(() => ensureAllLinkShortcuts(), 20_000).unref?.()
 }
 
-/** Delete a path in an agent's storage. Used to REVOKE a linked folder:
- *  the copy inside an agent workspace is a projection of the drive
- *  binding, not the agent's own data. */
-async function serverDeletePath(sessionId: string, path: string): Promise<boolean> {
-  const cfg = loadConfig()
-  const token = await getStoredToken()
-  if (!cfg.serverUrl || !token) return false
-  const url =
-    `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sessionId)}` +
-    `/storage/entry?path=${encodeURIComponent(path)}`
-  try {
-    const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
-    return res.ok || res.status === 404 // already gone counts as revoked
-  } catch {
-    return false
-  }
-}
-
-/** Revoke one agent's access to one linked folder.
+/** Publish this device's linked-folder set to the CLOUD.
  *
- * ACCESS FOLLOWS THE BINDING: [폴더 ↔ GenyDrive] × [GenyDrive ↔ 에이전트].
- * An agent that leaves the drive — or a folder that leaves the drive —
- * must stop being able to read that folder, and the only way to mean that
- * on the server is to remove the projected copy from its workspace.
- *
- * Order matters and is not negotiable:
- *   1. FINAL ROUND, awaited. Anything the agent wrote inside the folder
- *      must reach the user's real folder before the copy is destroyed.
- *   2. Refuse on an unhealthy pair (server unreachable): delayed
- *      revocation is recoverable, deleted-but-unsynced work is not. The
- *      exception is a dead session — its files are gone anyway.
- *   3. Delete the server subtree.
- *   4. DROP THE BASELINE. A surviving index would read the deletion as
- *      "the server lost these files" and delete the user's local copies
- *      on the next round.
- */
-async function revokeLinkAccess(
-  sessionId: string,
-  linkName: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const pairId = `link:${sessionId}:${linkName}`
-  const mgr = getSyncManager()
-  const statusOf = (): { state?: string } => mgr?.statuses().find((s) => s.id === pairId) ?? {}
-  if (statusOf().state === 'session_gone') {
-    mgr?.dropIndex(pairId)
-    return { ok: true }
-  }
-  await mgr?.drainPair(pairId)
-  if (mgr && mgr.statuses().some((s) => s.id === pairId) && !mgr.pairHealthy(pairId)) {
-    return { ok: false, error: 'sync incomplete — cannot safely revoke yet' }
-  }
-  await mgr?.quiesce()
-  if (!(await serverDeletePath(sessionId, `workspace/${linkName}`))) {
-    return { ok: false, error: 'server refused the removal' }
-  }
-  mgr?.dropIndex(pairId)
-  // The revoked agent drops out of the enabled set, so the ledger publish
-  // that follows would skip it — clear its ledger explicitly or the web
-  // would keep badging a folder that is no longer there.
-  void (async () => {
-    const cfg = loadConfig()
-    const token = await getStoredToken()
-    if (!cfg.serverUrl || !token) return
-    try {
-      await fetch(
-        `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sessionId)}/storage/links`,
-        {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ links: [] }),
-        },
-      )
-    } catch { /* badge-only */ }
-  })()
-  dlog('drive', `revoked link '${linkName}' from ${sessionId.slice(0, 8)}`)
-  return { ok: true }
-}
-
-/** Publish this device's linked-folder set to every connected agent.
- *
- * The binding graph lives here, in the connector — so without publishing
- * it the WEB explorer cannot tell a linked folder from a folder the agent
- * made itself, and neither can a second device. Names and this device's
+ * The binding graph lives here, in the connector — without publishing it
+ * the web explorer cannot tell a linked folder from a folder something
+ * else created, and neither can a second device. Names and this device's
  * label only: which folder on which machine is the user's business.
  * Best-effort by design — a failed publish costs a badge, never data. */
 function publishLinkLedger(): void {
@@ -1616,23 +1579,23 @@ function publishLinkLedger(): void {
   const links = cloudOn
     ? (cfg.driveLinks ?? []).map((l) => ({ name: l.name, device: hostname() }))
     : []
+  // ONE publish: linked folders live in the cloud now, so the ledger
+  // belongs to the cloud too. Agents see them through their connection,
+  // not as per-agent copies with per-agent ledgers.
   void (async () => {
     const token = await getStoredToken()
     if (!cfg.serverUrl || !token) return
-    for (const [sid, a] of Object.entries(cfg.driveAgents ?? {})) {
-      if (!a.enabled) continue
-      try {
-        await fetch(
-          `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sid)}/storage/links`,
-          {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ links }),
-          },
-        )
-      } catch {
-        /* badge-only metadata — never surface, never retry-storm */
-      }
+    try {
+      await fetch(
+        `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${CLOUD_SCOPE}/storage/links`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ links }),
+        },
+      )
+    } catch {
+      /* badge-only metadata — never surface, never retry-storm */
     }
   })()
 }
@@ -1647,8 +1610,15 @@ function ensureAllLinkShortcuts(): void {
   if (cfg.cloudOptIn === false) return
   const root = driveRoot()
   if (!existsSync(root)) return
+  const cloudLocal = cloudFolder()
+  try { mkdirSync(cloudLocal, { recursive: true }) } catch { /* engine reports */ }
   for (const l of cfg.driveLinks ?? []) {
-    ensureLinkShortcut(root, l.name, l.localPath)
+    // A linked folder belongs to the cloud, so its shortcut lives INSIDE
+    // the local cloud folder — browsing GenyCloud shows it in place.
+    ensureLinkShortcut(cloudLocal, l.name, l.localPath)
+    // Sweep the shortcuts earlier models left: at the drive root (0.19.18)
+    // and inside each agent folder (0.19.17).
+    removeLinkShortcut(root, l.name, l.localPath)
     for (const a of Object.values(cfg.driveAgents ?? {})) {
       removeLinkShortcut(join(root, a.folder), l.name, l.localPath)
     }
@@ -2392,19 +2362,10 @@ function registerIpc(): void {
       const cfg = loadConfig()
       const agents = { ...(cfg.driveAgents ?? {}) }
       const prev = agents[sessionId]
-      // Leaving the drive ends [GenyDrive ↔ 에이전트], and with it this
-      // agent's access to every linked folder — the projections go with
-      // the binding. Its OWN workspace files are untouched: those are the
-      // agent's data, not a projection.
-      if (prev?.enabled && !enabled) {
-        for (const l of cfg.driveLinks ?? []) {
-          const r = await revokeLinkAccess(sessionId, l.name)
-          if (!r.ok) {
-            applyDriveConfig() // nothing changed — restart engines
-            return { error: `${l.name}: ${r.error}`, root: driveRoot(), agents: cfg.driveAgents ?? {} }
-          }
-        }
-      }
+      // This toggle now means ONLY "mirror this agent's own workspace to
+      // my computer". Shared folders live in the cloud, and an agent's
+      // access to them is the cloud connection — revoked there, once,
+      // instead of by deleting a copy out of every agent.
       const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
       agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
       saveConfig({ driveAgents: agents })
@@ -2655,26 +2616,22 @@ function registerIpc(): void {
       const cfg = loadConfig()
       const gone = (cfg.driveLinks ?? []).find((l) => l.name === name)
       if (!gone) return { ok: true }
-      // Unlinking ends [폴더 ↔ GenyDrive], so every agent's access to it
-      // ends with it — drain, then remove the projected copy from each.
-      // A failure aborts the whole unlink: half-revoked would leave some
-      // agents reading a folder the user believes is disconnected.
-      const failures: string[] = []
-      for (const [sid, a] of Object.entries(cfg.driveAgents ?? {})) {
-        if (!a.enabled) continue
-        const r = await revokeLinkAccess(sid, name)
-        if (!r.ok) failures.push(`${a.label || sid.slice(0, 8)}: ${r.error}`)
-      }
-      if (failures.length) {
-        applyDriveConfig() // restart engines — nothing was changed
-        return { error: failures.join('; ') }
-      }
+      // Unlinking ends the binding between the user's folder and the
+      // cloud. It does NOT delete the cloud copy: the cloud is the hub,
+      // and what reached it is cloud content now — the same stance every
+      // consumer drive takes. The user's own folder is untouched too.
       saveConfig({ driveLinks: (cfg.driveLinks ?? []).filter((l) => l.name !== name) })
-      removeLinkShortcut(driveRoot(), gone.name, gone.localPath)
+      await getSyncManager()?.quiesce()
+      removeLinkShortcut(cloudFolder(), gone.name, gone.localPath)
+      removeLinkShortcut(driveRoot(), gone.name, gone.localPath) // legacy spot
+      // The cloud mirror stops excluding that subtree, so it now syncs
+      // down as ordinary cloud content.
+      getSyncManager()?.dropIndex(`link:${name}`)
       applyDriveConfig()
       return { ok: true }
     }),
   )
+
   ipcMain.handle('sync:set-paused', (_e, name: string, paused: boolean) => {
     // Pausing a LINK pauses it on every agent — it is one binding.
     const links = (loadConfig().driveLinks ?? []).map((l) =>
