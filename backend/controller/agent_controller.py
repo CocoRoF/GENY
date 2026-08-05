@@ -1364,14 +1364,17 @@ async def _sync_touch(notify_key: str, storage_path: str) -> int:
         return 0
 
 
-def _workspace_target(session_id: str, rel_path: str) -> "tuple":
+def _workspace_target(storage_path: str, rel_path: str) -> "tuple":
     """Resolve *rel_path* (storage-root-relative, e.g. 'workspace/uploads/x')
-    and enforce that it stays INSIDE the session's workspace/ — the only
+    and enforce that it stays INSIDE the scope's workspace/ — the only
     place UI-driven writes are allowed. Internal state (memory/, transcripts/,
-    synapse.db, checkpoints/) is never reachable from these endpoints."""
+    synapse.db, checkpoints/) is never reachable from these endpoints.
+
+    Takes a resolved STORAGE PATH, not a scope id: the caller has already
+    resolved (and thereby authorised) the scope, and a cloud path can only
+    be produced from the caller's own token."""
     from pathlib import Path as _P
 
-    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _P(storage_path).resolve()
     ws = (root / "workspace").resolve()
     target = (root / (rel_path or "")).resolve()
@@ -1400,8 +1403,9 @@ async def storage_mkdir(
     auth: dict = Depends(require_auth),
 ):
     """Create a folder inside the agent workspace (explorer 새 폴더)."""
-    _enforce_session_owner(session_id, auth)
-    root, _ws, target = _workspace_target(session_id, path)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
+    root, _ws, target = _workspace_target(storage_path, path)
     if target.exists():
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=False)
@@ -1416,11 +1420,12 @@ async def storage_rename(
     auth: dict = Depends(require_auth),
 ):
     """Rename/move a file or folder within the workspace."""
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     from service.utils import workspace_sync
 
-    root, ws, src = _workspace_target(session_id, request.src)
-    _root2, _ws2, dst = _workspace_target(session_id, request.dst)
+    root, ws, src = _workspace_target(storage_path, request.src)
+    _root2, _ws2, dst = _workspace_target(storage_path, request.dst)
     if src == ws or dst == ws:
         raise HTTPException(status_code=403, detail="Cannot rename the workspace root")
     # Locked no-clobber rename: os.rename silently replaces an existing
@@ -1447,10 +1452,11 @@ async def storage_delete(
     auth: dict = Depends(require_auth),
 ):
     """Delete a file or folder (recursive) inside the workspace."""
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     from service.utils import workspace_sync
 
-    _root, ws, target = _workspace_target(session_id, path)
+    _root, ws, target = _workspace_target(storage_path, path)
     if target == ws:
         raise HTTPException(status_code=403, detail="Cannot delete the workspace root")
     # Verify+delete under the storage lock (off-loop — rmtree of a big
@@ -1631,10 +1637,11 @@ async def put_workspace_file(
     import os as _os
     import uuid as _uuid
 
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     from service.utils import workspace_sync
 
-    root, ws, target = _workspace_target(session_id, path)
+    root, ws, target = _workspace_target(storage_path, path)
     if target == ws:
         raise HTTPException(status_code=403, detail="path must name a file")
 
@@ -1728,10 +1735,11 @@ async def chunk_upload_start(
     import json as _json
     import uuid as _uuid
 
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     from service.utils import workspace_sync
 
-    root, ws, target = _workspace_target(session_id, path)
+    root, ws, target = _workspace_target(storage_path, path)
     if target == ws:
         raise HTTPException(status_code=403, detail="path must name a file")
     if size > _workspace_max_file_bytes():
@@ -1821,7 +1829,8 @@ async def chunk_upload_commit(
     import json as _json
     import os as _os
 
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     from service.utils import workspace_sync
 
     root, part, meta = _chunk_paths(session_id, upload_id)
@@ -1838,7 +1847,7 @@ async def chunk_upload_commit(
         meta.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="content hash mismatch — restart upload")
 
-    _root2, ws, target = _workspace_target(session_id, info["path"])
+    _root2, ws, target = _workspace_target(storage_path, info["path"])
     # Quota re-check at commit: the start-time check can be stale after
     # other uploads landed in between.
     if not target.exists():
