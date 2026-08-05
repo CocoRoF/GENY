@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 // geny-drive-daemon — the native GenyDrive mount (Linux/FUSE leg of D4).
 //
 // A sidecar by necessity, not preference: FUSE cannot live inside the
@@ -20,11 +22,9 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -37,29 +37,6 @@ import (
 
 const readAhead = 1 << 20 // 1 MiB fetch granularity per handle
 
-var (
-	client *Client
-	snaps  *snapshotCache
-	spoolD string
-)
-
-func safeName(raw string) string {
-	bad := "<>:\"/\\|?*"
-	out := strings.Map(func(r rune) rune {
-		if strings.ContainsRune(bad, r) || r < 32 {
-			return '_'
-		}
-		return r
-	}, strings.TrimSpace(raw))
-	out = strings.TrimRight(out, ". ")
-	if out == "" {
-		return "agent"
-	}
-	if len(out) > 80 {
-		out = out[:80]
-	}
-	return out
-}
 
 // ── root: agents as folders ─────────────────────────────────────────────
 
@@ -480,27 +457,9 @@ var _ = (fs.NodeRmdirer)((*pathNode)(nil))
 var _ = (fs.NodeRenamer)((*pathNode)(nil))
 var _ = (fs.NodeSetattrer)((*pathNode)(nil))
 
-// ── main ────────────────────────────────────────────────────────────────
+// ── mount entry (unix) ──────────────────────────────────────────────────
 
-func main() {
-	server := flag.String("server", "", "Geny server base URL")
-	tokenFile := flag.String("token-file", "", "file containing the Bearer token (rewritten by the connector on refresh)")
-	mountpoint := flag.String("mountpoint", "", "empty directory to mount GenyDrive on")
-	parentPID := flag.Int("parent-pid", 0, "exit (unmounting) when this process disappears")
-	flag.Parse()
-	if *server == "" || *tokenFile == "" || *mountpoint == "" {
-		log.Fatal("usage: geny-drive-daemon --server URL --token-file PATH --mountpoint DIR")
-	}
-
-	client = NewClient(*server, *tokenFile)
-	snaps = newSnapshotCache(client, 2*time.Second)
-	var err error
-	spoolD, err = os.MkdirTemp("", "geny-drive-spool-")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(spoolD)
-
+func mountNative(ctx context.Context, mountpoint string) error {
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
 			FsName: "genydrive",
@@ -510,35 +469,23 @@ func main() {
 	to := 2 * time.Second
 	opts.AttrTimeout, opts.EntryTimeout = &to, &to
 
-	srv, err := fs.Mount(*mountpoint, &rootNode{}, opts)
+	srv, err := fs.Mount(mountpoint, &rootNode{}, opts)
 	if err != nil {
-		log.Fatalf("mount: %v", err)
+		return err
 	}
-	log.Printf("genydrive mounted at %s", *mountpoint)
+	log.Printf("genydrive mounted at %s", mountpoint)
 
-	sig := make(chan os.Signal, 2)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sig
+		<-ctx.Done()
 		srv.Unmount()
 	}()
-
-	// ORPHAN GUARD. A mount that outlives the connector is worse than no
-	// mount: the directory keeps answering with a dead daemon behind it
-	// (observed — SIGKILL'ing the app left the mount up, since a child is
-	// not signalled when its parent dies on Linux). Signal 0 probes
-	// liveness without touching the process; reparenting to init (ppid 1)
-	// is the same verdict for a process we were spawned by.
-	if *parentPID > 0 {
-		go func() {
-			for range time.Tick(2 * time.Second) {
-				if err := syscall.Kill(*parentPID, 0); err != nil || os.Getppid() == 1 {
-					log.Printf("parent %d gone — unmounting", *parentPID)
-					srv.Unmount()
-					return
-				}
-			}
-		}()
-	}
 	srv.Wait()
+	return nil
+}
+
+// unregisterNative has no meaning for FUSE — the mount IS the process, so
+// there is nothing left behind to clean up. Kept so the CLI is identical
+// on every platform (Windows sync roots DO outlive the process).
+func unregisterNative(mountpoint string) error {
+	return nil
 }

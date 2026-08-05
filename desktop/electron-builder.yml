@@ -71,15 +71,15 @@ mac:
 # run inside Electron — the V8 memory cage copies external buffers, so
 # native reads come back corrupted (proven by spike). It ships unpacked
 # next to the app resources; the connector spawns it on demand.
-# Linux only for now: Windows needs the Cloud Files API (separate
-# implementation) and macOS FUSE needs macFUSE installed, so those
-# platforms keep the mirror drive. A missing binary is handled at
-# runtime (the toggle simply doesn't appear).
+# One sidecar per platform: FUSE on Linux, Cloud Files API on Windows.
+# (macOS builds but is not offered — it needs macFUSE installed.) A
+# missing binary is handled at runtime: the toggle simply doesn't appear.
 extraResources:
   - from: ../drive-daemon/dist/${os}-${arch}/
     to: .
     filter:
       - geny-drive-daemon
+      - geny-drive-daemon.exe
 
 deb:
   # Geny Drive streaming mode (roadmap) mounts through FUSE 3. Recommends —

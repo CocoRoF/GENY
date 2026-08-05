@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Cross-build the drive daemon.
 #
-# go-fuse is pure Go, so this is a plain GOOS/GOARCH matrix with CGO off —
-# but only for UNIX: FUSE does not exist on Windows and the package does
-# not compile there (undefined syscall.Iovec, dirent, …). Windows gets its
-# native drive through the Cloud Files API instead, which is a separate
-# implementation, not this binary.
+# One binary, two mechanisms, selected by build tags:
+#   linux/darwin → FUSE (go-fuse, pure Go)
+#   windows      → Cloud Files API placeholders (cldapi.dll via LazyDLL)
+# Neither needs cgo, so every target cross-compiles from any host.
 #
-# macOS builds cleanly but needs macFUSE (a kexts install) at runtime, so
-# it is built for completeness and NOT offered in the UI — macOS users get
-# the mirror drive plus the WebDAV endpoint (see geny-webdav-review.md).
+# macOS builds but needs macFUSE (a kext install) at runtime, so it is not
+# offered in the UI — macOS keeps the mirror drive plus WebDAV (see
+# geny-webdav-review.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 build() {
@@ -22,7 +21,9 @@ build() {
 case "${1:-all}" in
   linux)  build linux amd64 linux-x64 ;;
   mac)    build darwin arm64 mac-arm64; build darwin amd64 mac-x64 ;;
+  win)    build windows amd64 win-x64 .exe ;;
   all)    build linux amd64 linux-x64
           build darwin arm64 mac-arm64
-          build darwin amd64 mac-x64 ;;
+          build darwin amd64 mac-x64
+          build windows amd64 win-x64 .exe ;;
 esac

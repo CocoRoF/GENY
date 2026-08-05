@@ -42,8 +42,27 @@ mount.
 
 ## Platforms
 
-`./build.sh all` builds linux-x64, mac-arm64, mac-x64. **Windows is
-excluded**: FUSE doesn't exist there and the native drive belongs to the
-Cloud Files API, a separate implementation. macOS builds but is not
-offered in the UI — it needs macFUSE installed; macOS keeps the mirror
-drive plus the WebDAV endpoint.
+One binary, two mechanisms, chosen by build tag:
+
+| Target | Mechanism | Files |
+|---|---|---|
+| linux, darwin | FUSE (go-fuse) | `mount_unix.go` |
+| windows | Cloud Files API placeholders | `mount_windows.go`, `cfapi_windows.go` |
+
+Neither needs cgo, so `./build.sh all` cross-compiles every target from
+any host.
+
+**Windows** registers a *sync root*: the folder is real, its entries are
+placeholders that occupy no disk, and the filter driver raises
+`FETCH_DATA` when something reads one — served from the same ranged GET
+the FUSE leg uses. Unlike WebDAV there is no 47 MB cap, no deprecated
+service and no registry surgery. A sync root is registered state that
+survives process exit (that is what makes Explorer remember the drive),
+so turning the drive off runs `--unregister`.
+
+Windows write-back is **not** wired yet: local edits inside the sync root
+are carried by the existing mirror engine, and the UI says so rather than
+implying otherwise.
+
+**macOS** builds but is not offered in the UI — it needs macFUSE (a kext)
+installed. macOS keeps the mirror drive plus the WebDAV endpoint.

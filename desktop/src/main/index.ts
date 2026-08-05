@@ -2377,9 +2377,10 @@ function registerIpc(): void {
   let daemonTokenTimer: NodeJS.Timeout | null = null
   const daemonTokenFile = (): string => join(app.getPath('userData'), 'drive-daemon.token')
   const daemonBinary = (): string => {
+    const exe = process.platform === 'win32' ? 'geny-drive-daemon.exe' : 'geny-drive-daemon'
     const cand = [
-      join(process.resourcesPath ?? '', 'geny-drive-daemon'),
-      join(app.getAppPath(), '..', 'geny-drive-daemon'),
+      join(process.resourcesPath ?? '', exe),
+      join(app.getAppPath(), '..', exe),
     ]
     return cand.find((p) => existsSync(p)) ?? ''
   }
@@ -2389,12 +2390,31 @@ function registerIpc(): void {
     writeFileSync(daemonTokenFile(), tok, { mode: 0o600 })
     return true
   }
-  const stopNativeMount = (): void => {
+  const nativeMountpoint = (): string =>
+    join(app.getPath('home'), process.platform === 'win32' ? 'GenyDrive-Cloud' : 'GenyDrive-Live')
+
+  const stopNativeMount = (opts: { unregister?: boolean } = {}): void => {
     if (daemonTokenTimer) { clearInterval(daemonTokenTimer); daemonTokenTimer = null }
-    if (daemonProc) { try { daemonProc.kill('SIGTERM') } catch { /* gone */ } daemonProc = null }
+    if (daemonProc) { try { daemonProc.kill() } catch { /* gone */ } daemonProc = null }
     try { unlinkSync(daemonTokenFile()) } catch { /* absent */ }
+    // A FUSE mount dies with its process; a Windows SYNC ROOT does not —
+    // it is registered state that survives reboots (that is what makes
+    // Explorer remember the drive). Turning the drive OFF must therefore
+    // unregister it explicitly, or the placeholders linger with nothing
+    // able to hydrate them.
+    if (opts.unregister && process.platform === 'win32') {
+      const bin = daemonBinary()
+      if (bin) {
+        try {
+          spawn(bin, ['--unregister', '--mountpoint', nativeMountpoint()], { stdio: 'ignore' })
+        } catch { /* best effort */ }
+      }
+    }
   }
-  app.on('will-quit', stopNativeMount)
+  // Quitting stops the daemon but must NOT unregister the Windows sync
+  // root: the drive should still be there next launch (that is the whole
+  // point of registered state). Only the user's own toggle unregisters.
+  app.on('will-quit', () => stopNativeMount())
 
   startNativeMount = async (): Promise<{ mounted?: boolean; mountpoint?: string; error?: string }> => {
     const bin = daemonBinary()
@@ -2402,15 +2422,18 @@ function registerIpc(): void {
     const cfg = loadConfig()
     if (!cfg.serverUrl) return { error: 'not signed in' }
     if (!(await writeDaemonToken())) return { error: 'no auth token' }
-    const mnt = join(app.getPath('home'), 'GenyDrive-Live')
+    const mnt = nativeMountpoint()
     try { mkdirSync(mnt, { recursive: true }) } catch { /* exists */ }
     stopNativeMount() // idempotent restart
     await writeDaemonToken()
-    // Force-clear a stale mount before taking the path (a previous run
-    // killed with SIGKILL can leave one; mounting over it would stack).
-    try {
-      spawn('fusermount3', ['-u', mnt], { stdio: 'ignore' })
-    } catch { /* not mounted / no fusermount — mount will tell us */ }
+    // Force-clear a stale FUSE mount before taking the path (a previous
+    // run killed with SIGKILL can leave one; mounting over it would
+    // stack). Windows re-registers with UPDATE instead — no clearing.
+    if (process.platform !== 'win32') {
+      try {
+        spawn('fusermount3', ['-u', mnt], { stdio: 'ignore' })
+      } catch { /* not mounted / no fusermount — mount will tell us */ }
+    }
     daemonProc = spawn(bin, [
       '--server', cfg.serverUrl.replace(/\/$/, ''),
       '--token-file', daemonTokenFile(),
@@ -2432,7 +2455,7 @@ function registerIpc(): void {
 
   ipcMain.handle('drive:native-mount', async (_e, enable: boolean) => {
     if (!enable) {
-      stopNativeMount()
+      stopNativeMount({ unregister: true })
       saveConfig({ nativeMount: false })
       return { mounted: false }
     }
@@ -2441,8 +2464,14 @@ function registerIpc(): void {
 
   ipcMain.handle('drive:native-status', () => ({
     running: !!daemonProc,
-    mountpoint: join(app.getPath('home'), 'GenyDrive-Live'),
-    supported: process.platform === 'linux' && driveCapabilities().streaming,
+    mountpoint: nativeMountpoint(),
+    // Linux needs a working FUSE stack; Windows needs Cloud Files API
+    // (build 16299+). Both are what the preflight probe reports. macOS is
+    // excluded on purpose — its FUSE needs a kext the user must install.
+    supported:
+      (process.platform === 'linux' || process.platform === 'win32') &&
+      driveCapabilities().streaming &&
+      !!daemonBinary(),
   }))
 
   ipcMain.handle('drive:pick-root', async () => {
