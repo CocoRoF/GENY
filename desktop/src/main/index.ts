@@ -330,7 +330,7 @@ const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
   'tray.hideAvatar': { ko: '아바타 숨기기', en: 'Hide avatar' },
   'tray.showAvatar': { ko: '아바타 보이기', en: 'Show avatar' },
   'tray.allowComputerUse': { ko: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)', en: 'Allow Local Computer Use (screen · input — details in settings)' },
-  'tray.clickThrough': { ko: '아바타 클릭 통과 (켜면 클릭이 뒤로 통과 — 끄면 아바타 조작 가능)', en: 'Avatar click-through (on: clicks pass behind — off: avatar is interactive)' },
+  'tray.restoreInput': { ko: '아바타 조작 복구 (클릭이 안 될 때)', en: 'Restore avatar input (if clicks stop working)' },
   'tray.autoUpdate': { ko: '자동 업데이트', en: 'Auto-update' },
   'tray.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
   'tray.version': { ko: '버전 v{version}', en: 'Version v{version}' },
@@ -1255,11 +1255,12 @@ async function applyOverlayContent(): Promise<void> {
     // Locked by default: the avatar is click-through (clicks reach the desktop),
     // and only the /overlay control bar re-enables input on hover via
     // windowControl.setClickThrough. The page owns -webkit-app-region (drag).
-    if (IS_LINUX && !linuxClickThroughOptIn) {
-      overlay.setIgnoreMouseEvents(false) // Linux: interactive unless opted in
-    } else {
-      overlay.setIgnoreMouseEvents(true, IS_LINUX ? undefined : { forward: true })
-    }
+    // Fresh page: it has reported no rectangles yet, so this resolves to
+    // "interactive" until it does — the user is never locked out while the
+    // avatar loads.
+    overlayInteractiveRects = []
+    overlayClickThroughWanted = true
+    applyOverlayInput()
     try {
       dlog('overlay', `loadURL ${base}/overlay ${redactTok(token)}`)
       await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
@@ -1272,20 +1273,87 @@ async function applyOverlayContent(): Promise<void> {
   } else {
     // Logged-out placeholder needs its dock handle clickable.
     dlog('overlay', `placeholder (token=${token ? 'yes' : 'no'} serverUrl=${serverUrl || '(empty)'})`)
-    overlay.setIgnoreMouseEvents(false)
+    overlayClickThroughWanted = false
+    overlayInteractiveRects = []
+    applyOverlayInput()
     loadRoute(overlay, 'overlay')
   }
 }
 
 
-// ── Linux platform notes ──────────────────────────────────────────────
-// setIgnoreMouseEvents' {forward:true} is darwin/win32-only: on Linux a
-// click-through window receives NO mouse events, so the overlay page's
-// hover-based unlock can never fire. Main therefore stays authoritative
-// on Linux: click-through is an explicit tray opt-in, and renderer
-// requests to enable it are ignored unless the user opted in.
-let linuxClickThroughOptIn = false
+// ── Linux overlay input ───────────────────────────────────────────────
+//
+// `setIgnoreMouseEvents(true, {forward:true})` is darwin/win32-only. On
+// Linux a click-through window receives NO events at all, so the overlay
+// page's hover-to-unlock can never fire — which made the LOCKED avatar
+// swallow its own control bar: the user could see the unlock button and
+// could not press it, and the only way out was a tray menu.
+//
+// Main does the hit-testing instead. The page reports the rectangles that
+// must stay clickable (its control bar); while click-through is wanted we
+// poll the cursor and drop the ignore flag whenever it is over one of
+// them. That reproduces `forward:true` behaviour without forwarded
+// events, and the lock does what it says on every platform.
+//
+// FAIL TOWARDS CONTROL: with no rectangles reported (an older server page)
+// click-through is simply not applied. A window the user cannot click is
+// worse than an avatar that catches a stray click.
 const IS_LINUX = process.platform === 'linux'
+
+type Rect = { x: number; y: number; w: number; h: number }
+let overlayInteractiveRects: Rect[] = []
+let overlayClickThroughWanted = false
+let overlayHitTimer: ReturnType<typeof setInterval> | null = null
+
+function stopOverlayHitTest(): void {
+  if (overlayHitTimer) clearInterval(overlayHitTimer)
+  overlayHitTimer = null
+}
+
+function overlayHitTick(): void {
+  if (!overlay || overlay.isDestroyed()) return stopOverlayHitTest()
+  try {
+    const b = overlay.getBounds()
+    const p = screen.getCursorScreenPoint()
+    const cx = p.x - b.x
+    const cy = p.y - b.y
+    const over = overlayInteractiveRects.some(
+      (r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h,
+    )
+    overlay.setIgnoreMouseEvents(!over)
+  } catch {
+    /* window mid-teardown */
+  }
+}
+
+/** Single place that decides the overlay's input state. */
+function applyOverlayInput(): void {
+  if (!overlay || overlay.isDestroyed()) return
+  if (!IS_LINUX) {
+    stopOverlayHitTest()
+    overlay.setIgnoreMouseEvents(overlayClickThroughWanted, { forward: true })
+    return
+  }
+  if (!overlayClickThroughWanted || overlayInteractiveRects.length === 0) {
+    stopOverlayHitTest()
+    overlay.setIgnoreMouseEvents(false)
+    return
+  }
+  if (!overlayHitTimer) overlayHitTimer = setInterval(overlayHitTick, 80)
+  overlayHitTick()
+}
+
+/** Panic button (tray): whatever state the overlay got into, give it back
+ *  to the user. Costs one stray click on the avatar; never costs control. */
+function forceOverlayInteractive(): void {
+  overlayClickThroughWanted = false
+  stopOverlayHitTest()
+  try {
+    overlay?.setIgnoreMouseEvents(false)
+    overlay?.showInactive()
+  } catch { /* ignore */ }
+  dlog('overlay', 'input force-restored (tray)')
+}
 
 let appQuitting = false
 app.on('before-quit', () => {
@@ -1686,15 +1754,15 @@ function rebuildTrayMenu(): void {
       },
     },
     { type: 'separator' },
+    // The old Linux checkbox turned the overlay OFF for the mouse with no
+    // way back from the overlay itself — main now hit-tests instead, so
+    // what is left is a panic button: if anything ever leaves the avatar
+    // unclickable, this hands control back.
     ...(IS_LINUX
       ? [{
-          label: nt('tray.clickThrough'),
-          type: 'checkbox' as const,
-          checked: linuxClickThroughOptIn,
-          click: (item: Electron.MenuItem) => {
-            linuxClickThroughOptIn = item.checked
-            saveConfig({ linuxClickThrough: item.checked })
-            overlay?.setIgnoreMouseEvents(linuxClickThroughOptIn)
+          label: nt('tray.restoreInput'),
+          click: () => {
+            forceOverlayInteractive()
             rebuildTrayMenu()
           },
         }]
@@ -1938,12 +2006,20 @@ function registerIpc(): void {
 
   // Click-through toggle from the renderer's hit-test loop.
   ipcMain.on('overlay:set-ignore-mouse', (_e, ignore: boolean) => {
-    if (IS_LINUX) {
-      // renderer hover-logic can't work here (no forward) — main decides
-      overlay?.setIgnoreMouseEvents(linuxClickThroughOptIn && ignore)
-    } else {
-      overlay?.setIgnoreMouseEvents(ignore, { forward: true })
-    }
+    overlayClickThroughWanted = !!ignore
+    applyOverlayInput()
+  })
+
+  // Rectangles (window-relative CSS px) the overlay page needs clickable
+  // while it is otherwise click-through. This is what makes the lock work
+  // on Linux at all — see the platform note above.
+  ipcMain.on('overlay:set-interactive-rects', (_e, rects: Rect[]) => {
+    overlayInteractiveRects = Array.isArray(rects)
+      ? rects
+          .filter((r) => r && Number.isFinite(r.x) && Number.isFinite(r.y) && r.w > 0 && r.h > 0)
+          .slice(0, 16)
+      : []
+    applyOverlayInput()
   })
 
   // Move the overlay by a pointer delta (dock-handle drag).
@@ -2835,7 +2911,7 @@ app.whenReady().then(() => {
   applyAutoLaunch(loadConfig().autoLaunch === true)
   // Restore the Linux click-through opt-in BEFORE the overlay first applies
   // its mouse policy (applyOverlayContent reads this flag).
-  linuxClickThroughOptIn = loadConfig().linuxClickThrough === true
+  // (legacy `linuxClickThrough` opt-in retired — main hit-tests now)
   buildAppMenu()
   createOverlay()
   createControl()

@@ -116,6 +116,7 @@ export interface ConnectorBridge {
   windowControl: {
     /** true = clicks pass through to the app behind; false = overlay captures. */
     setClickThrough(ignore: boolean): void
+    setInteractiveRects(rects: Array<{ x: number; y: number; w: number; h: number }>): void
     /** Move the overlay by a pixel delta (dock-handle drag). */
     moveBy(dx: number, dy: number): void
     /** Signal the end of a drag so main drops its authoritative drag rect
@@ -423,6 +424,10 @@ const api: ConnectorBridge = {
   },
   windowControl: {
     setClickThrough: (ignore) => ipcRenderer.send('overlay:set-ignore-mouse', ignore),
+    /** Window-relative rects that must stay clickable while click-through
+     *  is on. Linux has no event forwarding, so main hit-tests the cursor
+     *  against these — without them the lock would swallow its own bar. */
+    setInteractiveRects: (rects) => ipcRenderer.send('overlay:set-interactive-rects', rects),
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     moveEnd: () => ipcRenderer.send('overlay:move-end'),
     resizeOverlayBy: (edge, dx, dy) => ipcRenderer.send('overlay:resize-by', edge, dx, dy),

@@ -16,7 +16,7 @@
  *   room    — chat room_id for TTS (default: the session's chat_room_id).
  */
 
-import { useEffect, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { setToken } from '@/lib/authApi';
 import { agentApi, chatApi } from '@/lib/api';
@@ -168,6 +168,36 @@ export default function OverlayPage() {
     window.connector?.windowControl.setClickThrough(locked);
   }, [locked]);
 
+  // Tell the connector which rectangle must stay clickable while the avatar
+  // is click-through. Linux cannot forward events into a click-through
+  // window, so hover-to-unlock is impossible there and the lock used to
+  // swallow this very bar — the user could see the unlock button and not
+  // press it. Main hit-tests the cursor against this instead.
+  //
+  // Re-reported on every layout change AND on a slow interval: the bar
+  // grows and shrinks with its toggles, and a stale rectangle is a button
+  // that stops responding.
+  const barRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const report = () => {
+      const api = window.connector?.windowControl;
+      if (!api?.setInteractiveRects) return;
+      const r = barRef.current?.getBoundingClientRect();
+      api.setInteractiveRects(
+        r && r.width > 0
+          ? [{ x: Math.floor(r.x) - 4, y: Math.floor(r.y) - 4, w: Math.ceil(r.width) + 8, h: Math.ceil(r.height) + 8 }]
+          : [],
+      );
+    };
+    report();
+    const t = setInterval(report, 700);
+    window.addEventListener('resize', report);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('resize', report);
+    };
+  }, [locked, ttsEnabled, sttEnabled, realtimeOn, captionsOn, screenOn]);
+
   // Capability tuning lives in the SETTINGS window (계정·음성·앱). It's a
   // different origin, so it arrives via the native config bridge: read it on
   // load and re-apply on every config:changed broadcast → the hidden TTS/STT/
@@ -303,7 +333,7 @@ export default function OverlayPage() {
       {locked ? (
         /* Locked keeps the ESSENTIAL trio: open chat · settings · unlock —
            voice/screen toggles stay behind the unlock. */
-        <div style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
+        <div ref={barRef} style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
           <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
             <ChatIcon />
           </button>
@@ -315,7 +345,7 @@ export default function OverlayPage() {
           </button>
         </div>
       ) : (
-        <div style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
+        <div ref={barRef} style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
           {/* Drag handle (left of TTS) — a NON-button so bar-drag fires on it;
               widens the grab area and signals the window is movable. */}
           <span style={GRIP} title="드래그하여 아바타 이동">

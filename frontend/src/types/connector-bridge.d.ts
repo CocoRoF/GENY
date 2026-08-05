@@ -43,6 +43,10 @@ declare global {
         toggleControl(): void
         openControl(): void
         setClickThrough(ignore: boolean): void
+        /** Rects (window-relative CSS px) that must stay clickable while
+         *  click-through is on. Optional: older connectors lack it, and
+         *  the page must not break on them. */
+        setInteractiveRects?(rects: Array<{ x: number; y: number; w: number; h: number }>): void
         moveBy(dx: number, dy: number): void
         /** Optional (connector ≥0.17.1): end-of-drag signal. */
         moveEnd?(): void
