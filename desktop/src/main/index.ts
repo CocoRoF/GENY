@@ -68,6 +68,33 @@ function redactTok(t: string | null | undefined): string {
 // (Ubuntu 24.04 sandbox handling — userns restriction vs SUID helper — lives
 // in the launcher shim written by build/afterPack.cjs: the zygote's sandbox
 // check runs before any app JS, so it cannot be handled here.)
+// ONE CONNECTOR PER MACHINE.
+//
+// Without this lock a second launch — updating while the app is running,
+// clicking the launcher again because the avatar is "hidden", a desktop
+// autostart racing a manual start — brings up a COMPLETE second instance:
+// a second avatar window, a second set of sync engines, a second tray.
+// Reported as "the avatar exists twice, one of them broken", and it is
+// invisible in the logs because each process writes its own.
+//
+// The second launch instead surfaces the windows of the one already
+// running, which is what the user wanted by launching it.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    try {
+      if (overlay && !overlay.isDestroyed()) {
+        if (!overlay.isVisible()) overlay.show()
+        overlay.moveTop()
+      }
+      showControl()
+    } catch {
+      /* windows not built yet — the first instance is still starting */
+    }
+  })
+}
+
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
   // Let Chromium fall back to software compositing instead of taking the
@@ -625,7 +652,7 @@ function resetWindowPositions(): void {
 // ONE-SHOT timer (transitions finish after the event; the second pass lands
 // on the settled z-order). setAlwaysOnTop/moveTop are cheap SetWindowPos
 // calls — no-ops when already top, never steal focus, no flicker.
-function armAlwaysOnTop(win: BrowserWindow): void {
+function armAlwaysOnTop(win: BrowserWindow, after?: () => void): void {
   let settle: ReturnType<typeof setTimeout> | null = null
   const assertNow = (): void => {
     if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return
@@ -638,6 +665,9 @@ function armAlwaysOnTop(win: BrowserWindow): void {
     } catch {
       /* window mid-teardown */
     }
+    // Anything that must sit ABOVE this window has to be raised again
+    // right after — moveTop() just put this one on top of its whole band.
+    after?.()
   }
   const assert = (): void => {
     assertNow()
@@ -709,7 +739,11 @@ function createOverlay(): void {
   // decays on Windows as other processes churn the z-order (see
   // armAlwaysOnTop); this asserts now and keeps re-asserting for the
   // window's lifetime.
-  armAlwaysOnTop(overlay)
+  // The chip carries the ONLY controls a locked avatar has, so it must
+  // never end up behind it. The avatar re-asserts always-on-top for its
+  // lifetime (moveTop puts it above its whole band, chip included), so
+  // every assert re-raises the chip immediately afterwards.
+  armAlwaysOnTop(overlay, raiseChip)
 
   // The chip is a separate window, so it has to be told to follow. Move and
   // resize fire continuously during a drag; setBounds on an unchanged rect
@@ -1456,10 +1490,22 @@ function chipBoundsFor(b: Electron.Rectangle): Electron.Rectangle {
   }
 }
 
+/** Put the chip back on top of the avatar. Cheap and idempotent. */
+function raiseChip(): void {
+  if (!overlayChip || overlayChip.isDestroyed() || !overlayChip.isVisible()) return
+  try {
+    overlayChip.setAlwaysOnTop(true, 'screen-saver')
+    overlayChip.moveTop()
+  } catch {
+    /* mid-teardown */
+  }
+}
+
 function syncChipBounds(): void {
   if (!overlayChip || overlayChip.isDestroyed() || !overlay || overlay.isDestroyed()) return
   try {
     overlayChip.setBounds(chipBoundsFor(overlay.getBounds()))
+    raiseChip()
   } catch { /* mid-teardown */ }
 }
 
@@ -1471,6 +1517,7 @@ function applyChipVisibility(): void {
     // showInactive: taking focus would pull the user out of whatever they
     // are doing every time the avatar re-locks.
     if (!overlayChip.isVisible()) overlayChip.showInactive()
+    raiseChip()
   } else if (overlayChip.isVisible()) {
     overlayChip.hide()
   }
