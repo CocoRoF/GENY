@@ -85,6 +85,7 @@ const en = {
   // ─── Tab Navigation ───
   tabs: {
     main: 'Main',
+    cloud: 'Cloud',
     playground: 'Playground',
     workflows: 'Workflows',
     tools: 'Tools',
@@ -1046,6 +1047,24 @@ const en = {
   },
 
   // ─── Storage Tab ───
+  cloudTab: {
+    title: 'Cloud',
+    refresh: 'Refresh',
+    wholeCloud: 'Whole cloud',
+    agents: 'Agents',
+    noAgents: 'No agents yet.',
+    linkedFolders: 'Linked folders',
+    noLinks: 'No linked folders.',
+    connect: 'Connect',
+    connected: 'Connected',
+    connectHint: 'Let this agent read and write the cloud.',
+    disconnectHint: 'End the connection. Nothing in the cloud is deleted.',
+    hintCloud: 'Shared storage your computers and connected agents all use.',
+    hintAgentOn: "This agent's own workspace. It is connected to the cloud, so it can work there too.",
+    hintAgentOff: "This agent's own workspace. It is not connected to the cloud yet.",
+    hintLink: 'A folder on {device}, linked into the cloud.',
+    linkHint: 'Shared from {device}',
+  },
   storageTab: {
     selectSession: 'Select a Session',
     selectSessionDesc: 'Choose a session from the list to view its storage',

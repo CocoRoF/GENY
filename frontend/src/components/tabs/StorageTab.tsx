@@ -132,13 +132,27 @@ function AuthedAudio({ sessionId, path }: { sessionId: string; path: string }) {
   return <audio src={url} controls className="w-full" />;
 }
 
-export default function StorageTab() {
-  const { selectedSessionId } = useAppStore();
+interface StorageTabProps {
+  // All optional: the session tab renders it bare, the cloud view drives it.
+  /** Storage SCOPE to browse. Defaults to the selected session; the cloud
+   *  view passes `_cloud` or a connected agent's id, so one explorer
+   *  serves every surface instead of a second one drifting from it. */
+  scopeId?: string;
+  /** Start inside a subdirectory (the cloud view opens linked folders). */
+  initialPath?: string;
+  /** The cloud view supplies its own header and source picker. */
+  embedded?: boolean;
+}
+
+export default function StorageTab(props: StorageTabProps) {
+  const { scopeId, initialPath, embedded } = props;
+  const { selectedSessionId: storeSessionId } = useAppStore();
+  const selectedSessionId = scopeId ?? storeSessionId;
   const { t } = useI18n();
 
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [scope, setScope] = useState<Scope>('workspace');
-  const [cwd, setCwd] = useState('');
+  const [cwd, setCwd] = useState(initialPath ?? '');
   const [selected, setSelected] = useState<Entry | null>(null);
   const [listError, setListError] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -420,9 +434,13 @@ export default function StorageTab() {
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <TabShell
-      title={t('storageTab.title')}
-      icon={HardDrive}
+      title={embedded ? '' : t('storageTab.title')}
+      icon={embedded ? undefined : HardDrive}
       titleExtra={
+        // The operator-only "everything" scope is a session concept; the
+        // cloud has no internal state to reveal, so the picker is hidden
+        // when embedded.
+        embedded ? undefined : (
         <SegmentedControl
           ariaLabel={t('storageTab.title')}
           items={[
@@ -432,6 +450,7 @@ export default function StorageTab() {
           value={scope}
           onChange={(s) => setScope(s as Scope)}
         />
+        )
       }
       actions={
         <>

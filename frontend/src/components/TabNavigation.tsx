@@ -33,7 +33,9 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 // moved to /environments?tab=... top-level tabs (#553). The Header
 // component owns the entry point to /environments via its dedicated
 // link button, so nothing in this strip points to it anymore.
-const GLOBAL_TAB_IDS = ['main', 'settings'] as const;
+// 클라우드 sits between them by design: it is the storage layer the
+// whole product now hangs on, not a per-session detail.
+const GLOBAL_TAB_IDS = ['main', 'cloud', 'settings'] as const;
 // SESSION_TAB_DEFS:
 //   - ``id`` — pairs with ``activeTab`` so the strip highlights the
 //     right entry.

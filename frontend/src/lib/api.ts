@@ -692,6 +692,15 @@ export const agentApi = {
     ),
   /** Workspace subdirectories that are LINKED FOLDERS — folders living on
    *  a user's computer, shared into this agent through GenyDrive. */
+  /** Agents connected to the caller's GenyCloud. */
+  cloudMembers: () => apiCall<{ sessions: string[] }>(`/api/agents/cloud/members`),
+  /** Connect/disconnect ONE agent to the cloud. Disconnecting removes the
+   *  agent's reference; nothing in the cloud is deleted. */
+  setCloudConnection: (id: string, connected: boolean) =>
+    apiCall<{ connected: boolean; sessions: string[] }>(`/api/agents/${id}/cloud`, {
+      method: 'PUT',
+      body: JSON.stringify({ connected }),
+    }),
   storageLinks: (id: string) =>
     apiCall<{ links: Array<{ name: string; device: string }> }>(
       `/api/agents/${id}/storage/links`,

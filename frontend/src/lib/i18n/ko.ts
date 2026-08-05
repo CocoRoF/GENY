@@ -85,6 +85,7 @@ const ko: Translations = {
   // ─── Tab Navigation ───
   tabs: {
     main: '메인',
+    cloud: '클라우드',
     playground: '플레이그라운드',
     workflows: '워크플로우',
     tools: '도구',
@@ -1043,6 +1044,24 @@ const ko: Translations = {
   },
 
   // ─── Storage Tab ───
+  cloudTab: {
+    title: '클라우드',
+    refresh: '새로고침',
+    wholeCloud: '클라우드 전체',
+    agents: '에이전트',
+    noAgents: '에이전트가 없습니다.',
+    linkedFolders: '연결된 폴더',
+    noLinks: '연결된 폴더가 없습니다.',
+    connect: '연결',
+    connected: '연결됨',
+    connectHint: '이 에이전트가 클라우드를 읽고 쓸 수 있게 합니다.',
+    disconnectHint: '연결을 끊습니다. 클라우드의 파일은 삭제되지 않습니다.',
+    hintCloud: '내 컴퓨터와 연결된 에이전트들이 함께 쓰는 공용 저장소입니다.',
+    hintAgentOn: '이 에이전트의 개인 작업 공간입니다. 클라우드에 연결되어 있어 클라우드도 함께 다룰 수 있습니다.',
+    hintAgentOff: '이 에이전트의 개인 작업 공간입니다. 아직 클라우드에 연결되어 있지 않습니다.',
+    hintLink: '{device}의 폴더가 클라우드로 연결되어 있습니다.',
+    linkHint: '{device}에서 공유 중',
+  },
   storageTab: {
     selectSession: '세션을 선택하세요',
     selectSessionDesc: '스토리지를 볼 세션을 목록에서 선택하세요',
