@@ -254,7 +254,7 @@ export const messages: Record<string, Entry> = {
   'app.updateToggle': { ko: '자동 업데이트', en: 'Auto-update' },
   'app.updateHintOn': { ko: '새 버전을 자동으로 내려받아 재시작 시 설치합니다.', en: 'Automatically downloads new versions and installs them on restart.' },
   'app.updateHintOff': { ko: '자동 설치는 끄고, 새 버전이 있으면 알림만 띄웁니다.', en: 'Auto-install is off; only notifies when a new version is available.' },
-  'app.updateCheckNow': { ko: '지금 업데이트 확인', en: 'Check for updates now' },
+  'app.updateCheckNow': { ko: '최신버전 다운로드', en: 'Download latest version' },
 
   // ── app tab: launch on system startup ──
   'app.autostartCard': { ko: '시작 프로그램', en: 'Startup' },

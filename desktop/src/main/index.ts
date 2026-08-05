@@ -405,7 +405,7 @@ const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
   'tray.allowComputerUse': { ko: '로컬 컴퓨터 제어 허용 (화면·입력 — 세부는 설정에서)', en: 'Allow Local Computer Use (screen · input — details in settings)' },
   'tray.restoreInput': { ko: '아바타 조작 복구 (클릭이 안 될 때)', en: 'Restore avatar input (if clicks stop working)' },
   'tray.autoUpdate': { ko: '자동 업데이트', en: 'Auto-update' },
-  'tray.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
+  'tray.checkUpdate': { ko: '최신버전 다운로드 (자동 설치·재시작)', en: 'Download latest version (installs & restarts)' },
   'tray.version': { ko: '버전 v{version}', en: 'Version v{version}' },
   'tray.logout': { ko: '로그아웃', en: 'Sign out' },
   'tray.restart': { ko: '재시작', en: 'Restart' },
@@ -413,7 +413,7 @@ const NATIVE_MESSAGES: Record<string, { ko: string; en: string }> = {
   // app menu
   'menu.settings': { ko: '설정', en: 'Settings' },
   'menu.control': { ko: '제어판 / 채팅', en: 'Control panel / chat' },
-  'menu.checkUpdate': { ko: '업데이트 확인', en: 'Check for updates' },
+  'menu.checkUpdate': { ko: '최신버전 다운로드', en: 'Download latest version' },
   'menu.restart': { ko: '재시작', en: 'Restart' },
   'menu.logout': { ko: '로그아웃', en: 'Sign out' },
   'menu.quit': { ko: '종료', en: 'Quit' },
