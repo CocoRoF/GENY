@@ -134,7 +134,18 @@ def default_agent_resolver(username: str) -> List[AgentShare]:
     from service.sessions.store import get_session_store
     from service.auth.auth_middleware import _admin_users
 
-    out: List[AgentShare] = []
+    from service.cloud import CLOUD_SCOPE_ID, cloud_storage_path
+
+    # The CLOUD first: it is the storage above the agents, and a mount
+    # that only showed agent workspaces would hide the place everything
+    # actually gathers.
+    out: List[AgentShare] = [
+        AgentShare(
+            session_id=CLOUD_SCOPE_ID,
+            name="Cloud",
+            storage_path=cloud_storage_path(username),
+        )
+    ]
     records = get_session_store().list_all() or []
     is_admin = username in _admin_users()
     for rec in records:

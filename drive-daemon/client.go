@@ -414,8 +414,13 @@ type Agent struct {
 	SessionName string `json:"session_name"`
 }
 
-// Agents lists the caller's agents via the storage summary (owner-filtered
-// server-side; includes dormant sessions whose files are still on disk).
+//: Storage scope addressing the caller's own cloud. The server derives
+//: the path from the token, so this one id is per-user by construction.
+const CloudScope = "_cloud"
+
+// Agents lists what the drive should show as folders: the CLOUD first —
+// it is the hub above the agents, and the thing most users are looking
+// for — then each agent's own workspace.
 func (c *Client) Agents() ([]Agent, error) {
 	req, _ := http.NewRequest("GET", c.server+"/api/agents/storage/summary", nil)
 	resp, err := c.do(req)
@@ -432,7 +437,7 @@ func (c *Client) Agents() ([]Agent, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	return out.Agents, nil
+	return append([]Agent{{SessionID: CloudScope, SessionName: "Cloud"}}, out.Agents...), nil
 }
 
 // snapshotCache: per-agent live-entry map with a short TTL — getattr and
