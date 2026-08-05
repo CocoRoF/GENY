@@ -268,6 +268,16 @@ class PairEngine {
     void this.run()
   }
 
+  /** Run one reconcile round and WAIT for it — the caller needs to know
+   *  the replica and the server actually converged (used before revoking
+   *  an agent's access to a linked folder: anything the agent wrote must
+   *  reach the user's local folder BEFORE the server copy is removed). */
+  async syncNowAwait(): Promise<void> {
+    if (this.debounce) clearTimeout(this.debounce)
+    await this.run()
+    if (this.rerun) await this.run() // a round queued behind ours
+  }
+
   confirmMassDelete(accept: boolean): void {
     this.status.pendingMassDelete = null
     if (accept) {
@@ -419,6 +429,35 @@ export class SyncManager {
 
   syncNow(id: string): void {
     this.engines.get(id)?.syncNow()
+  }
+
+  /** Final round for one pair, awaited. Absent engine = nothing to drain. */
+  async drainPair(id: string): Promise<void> {
+    const e = this.engines.get(id)
+    if (!e) return
+    try {
+      await e.syncNowAwait()
+    } catch {
+      /* the caller decides what a failed drain means */
+    }
+  }
+
+  /** Forget a pair's baseline. Mandatory after revoking access: a stale
+   *  index would tell the next round "these files existed and the server
+   *  lost them" and delete the USER'S local copies. */
+  dropIndex(id: string): void {
+    this.engines.get(id)?.stop()
+    this.engines.delete(id)
+    void import('fs/promises').then(({ rm }) =>
+      rm(join(this.deps.indexDir, `${id}.json`), { force: true }).catch(() => {}),
+    )
+  }
+
+  /** True when the pair's last round left it in a healthy state — the
+   *  precondition for destroying the server-side copy. */
+  pairHealthy(id: string): boolean {
+    const st = this.statuses().find((s) => s.id === id)
+    return !!st && !st.lastError && st.state !== 'error' && st.state !== 'session_gone'
   }
 
   confirmMassDelete(id: string, accept: boolean): void {

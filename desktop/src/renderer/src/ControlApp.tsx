@@ -372,10 +372,18 @@ export function ControlApp() {
   }
 
   const toggleDriveAgent = async (sessionId: string, label: string, enabled: boolean): Promise<void> => {
+    // Leaving the drive also ends this agent's access to every linked
+    // folder — say so before doing it, since the agent's copy of those
+    // folders is removed (the user's own folder is never touched).
+    if (!enabled && syncLinks.length > 0) {
+      const names = syncLinks.map((l) => l.name).join(', ')
+      if (!confirm(t('drive.disconnectWarn', { agent: label, folders: names }))) return
+    }
     setDriveBusy(sessionId)
     setDriveMsg('')
     try {
       const r = await window.connector?.drive?.setAgent(sessionId, enabled, label)
+      if (r?.error) setDriveMsg(r.error)
       if (r) { setDriveRoot(r.root); setDriveAgents(r.agents ?? {}) }
       await refreshSync()
     } finally {
@@ -1176,7 +1184,14 @@ export function ControlApp() {
                           {p.paused ? t('sync.resume') : t('sync.pause')}
                         </button>
                         <button className="gy-btn gy-btn--danger gy-btn--sm"
-                          onClick={() => window.connector?.sync?.removePair(link.name).then(refreshSync)}>
+                          onClick={async () => {
+                            const shared = Object.values(driveAgents).filter((a) => a.enabled).length
+                            if (shared > 0 && !confirm(t('sync.unlinkWarn', { count: shared }))) return
+                            const r = await window.connector?.sync?.removePair(link.name)
+                            if ((r as { error?: string })?.error) setDriveMsg((r as { error?: string }).error ?? '')
+                            await refreshSync()
+                            await refreshDrive()
+                          }}>
                           {t('sync.unlink')}
                         </button>
                       </div>

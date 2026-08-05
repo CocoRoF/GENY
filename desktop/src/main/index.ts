@@ -1523,6 +1523,66 @@ function applyDriveConfig(): void {
   setTimeout(() => ensureAllLinkShortcuts(), 20_000).unref?.()
 }
 
+/** Delete a path in an agent's storage. Used to REVOKE a linked folder:
+ *  the copy inside an agent workspace is a projection of the drive
+ *  binding, not the agent's own data. */
+async function serverDeletePath(sessionId: string, path: string): Promise<boolean> {
+  const cfg = loadConfig()
+  const token = await getStoredToken()
+  if (!cfg.serverUrl || !token) return false
+  const url =
+    `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sessionId)}` +
+    `/storage/entry?path=${encodeURIComponent(path)}`
+  try {
+    const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    return res.ok || res.status === 404 // already gone counts as revoked
+  } catch {
+    return false
+  }
+}
+
+/** Revoke one agent's access to one linked folder.
+ *
+ * ACCESS FOLLOWS THE BINDING: [폴더 ↔ GenyDrive] × [GenyDrive ↔ 에이전트].
+ * An agent that leaves the drive — or a folder that leaves the drive —
+ * must stop being able to read that folder, and the only way to mean that
+ * on the server is to remove the projected copy from its workspace.
+ *
+ * Order matters and is not negotiable:
+ *   1. FINAL ROUND, awaited. Anything the agent wrote inside the folder
+ *      must reach the user's real folder before the copy is destroyed.
+ *   2. Refuse on an unhealthy pair (server unreachable): delayed
+ *      revocation is recoverable, deleted-but-unsynced work is not. The
+ *      exception is a dead session — its files are gone anyway.
+ *   3. Delete the server subtree.
+ *   4. DROP THE BASELINE. A surviving index would read the deletion as
+ *      "the server lost these files" and delete the user's local copies
+ *      on the next round.
+ */
+async function revokeLinkAccess(
+  sessionId: string,
+  linkName: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const pairId = `link:${sessionId}:${linkName}`
+  const mgr = getSyncManager()
+  const statusOf = (): { state?: string } => mgr?.statuses().find((s) => s.id === pairId) ?? {}
+  if (statusOf().state === 'session_gone') {
+    mgr?.dropIndex(pairId)
+    return { ok: true }
+  }
+  await mgr?.drainPair(pairId)
+  if (mgr && mgr.statuses().some((s) => s.id === pairId) && !mgr.pairHealthy(pairId)) {
+    return { ok: false, error: 'sync incomplete — cannot safely revoke yet' }
+  }
+  await mgr?.quiesce()
+  if (!(await serverDeletePath(sessionId, `workspace/${linkName}`))) {
+    return { ok: false, error: 'server refused the removal' }
+  }
+  mgr?.dropIndex(pairId)
+  dlog('drive', `revoked link '${linkName}' from ${sessionId.slice(0, 8)}`)
+  return { ok: true }
+}
+
 /** Idempotent: the GenyDrive ROOT carries one shortcut per drive link —
  *  the [폴더-GenyDrive] binding made visible, next to the agent folders.
  *  Safe to call any time (skips occupied paths, repairs stale targets,
@@ -2278,6 +2338,19 @@ function registerIpc(): void {
       const cfg = loadConfig()
       const agents = { ...(cfg.driveAgents ?? {}) }
       const prev = agents[sessionId]
+      // Leaving the drive ends [GenyDrive ↔ 에이전트], and with it this
+      // agent's access to every linked folder — the projections go with
+      // the binding. Its OWN workspace files are untouched: those are the
+      // agent's data, not a projection.
+      if (prev?.enabled && !enabled) {
+        for (const l of cfg.driveLinks ?? []) {
+          const r = await revokeLinkAccess(sessionId, l.name)
+          if (!r.ok) {
+            applyDriveConfig() // nothing changed — restart engines
+            return { error: `${l.name}: ${r.error}`, root: driveRoot(), agents: cfg.driveAgents ?? {} }
+          }
+        }
+      }
       const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
       agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
       saveConfig({ driveAgents: agents })
@@ -2498,11 +2571,23 @@ function registerIpc(): void {
     driveExclusive(async () => {
       const cfg = loadConfig()
       const gone = (cfg.driveLinks ?? []).find((l) => l.name === name)
+      if (!gone) return { ok: true }
+      // Unlinking ends [폴더 ↔ GenyDrive], so every agent's access to it
+      // ends with it — drain, then remove the projected copy from each.
+      // A failure aborts the whole unlink: half-revoked would leave some
+      // agents reading a folder the user believes is disconnected.
+      const failures: string[] = []
+      for (const [sid, a] of Object.entries(cfg.driveAgents ?? {})) {
+        if (!a.enabled) continue
+        const r = await revokeLinkAccess(sid, name)
+        if (!r.ok) failures.push(`${a.label || sid.slice(0, 8)}: ${r.error}`)
+      }
+      if (failures.length) {
+        applyDriveConfig() // restart engines — nothing was changed
+        return { error: failures.join('; ') }
+      }
       saveConfig({ driveLinks: (cfg.driveLinks ?? []).filter((l) => l.name !== name) })
-      await getSyncManager()?.quiesce()
-      if (gone) removeLinkShortcut(driveRoot(), gone.name, gone.localPath)
-      // Server-side workspace/<name>/ copies are user data and stay; each
-      // agent mirror will now sync them down as ordinary folders.
+      removeLinkShortcut(driveRoot(), gone.name, gone.localPath)
       applyDriveConfig()
       return { ok: true }
     }),
