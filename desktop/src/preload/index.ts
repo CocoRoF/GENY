@@ -402,10 +402,15 @@ export interface GatedCallResult {
 const _wk = new URLSearchParams(location.search).get('window')
 
 const api: ConnectorBridge = {
+  // Unknown values fall back to 'overlay', so a route added in main but
+  // NOT listed here silently renders the avatar placeholder instead —
+  // which is exactly what happened to the chip window (a full placeholder
+  // squeezed into 104x40). Keep this list in step with loadRoute().
   windowKind:
     _wk === 'settings' ? 'settings'
     : _wk === 'control' ? 'control'
     : _wk === 'quickchat' ? 'quickchat'
+    : _wk === 'chip' ? 'chip'
     : 'overlay',
   appVersion: () => ipcRenderer.invoke('app:version'),
   debug: {

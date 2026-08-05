@@ -70,6 +70,11 @@ function redactTok(t: string | null | undefined): string {
 // check runs before any app JS, so it cannot be handled here.)
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+  // Let Chromium fall back to software compositing instead of taking the
+  // renderer down with the GPU process. The avatar is a small canvas; a
+  // slower path is vastly better than a crash loop, and a crash loop here
+  // has been observed to take the whole desktop with it.
+  app.commandLine.appendSwitch('disable-gpu-watchdog')
   // FORCE X11 (XWayland when the session is Wayland).
   //
   // A Wayland client CANNOT position its own toplevel windows — the
@@ -704,7 +709,21 @@ function createOverlay(): void {
 
   // Content depends on login state: the remote transparent /overlay avatar page
   // once a token exists, otherwise a local "log in first" placeholder.
-  attachContentResilience(overlay, () => void applyOverlayContent())
+  attachContentResilience(
+    overlay,
+    () => void applyOverlayContent(),
+    () => {
+      // Repeated renderer death (a GPU/WebGL failure, typically): stop
+      // reloading the avatar page and show the local placeholder instead.
+      // A visible, working window beats an invisible loop that eats the
+      // machine.
+      overlayFellBack = true
+      overlayLocked = false
+      applyOverlayInput()
+      applyChipVisibility()
+      if (overlay && !overlay.isDestroyed()) loadRoute(overlay, 'overlay')
+    },
+  )
   // Per-monitor geometry: restore this display's remembered bounds, and on every
   // move/resize reconcile size-on-cross + persist per display.
   restoreOverlayGeometry()
@@ -1120,7 +1139,11 @@ function loadRoute(win: BrowserWindow, route: 'overlay' | 'control' | 'settings'
 //   • render-process-gone — the renderer crashed / was OOM-killed. Rebuild it.
 // `reload` rebuilds the RIGHT content (applyOverlayContent / applyControlContent
 // re-evaluate login state; loadRoute reloads a local route).
-function attachContentResilience(win: BrowserWindow, reload: () => void): void {
+function attachContentResilience(
+  win: BrowserWindow,
+  reload: () => void,
+  onCrashLoop?: () => void,
+): void {
   const wc = win.webContents
   let retries = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -1141,12 +1164,38 @@ function attachContentResilience(win: BrowserWindow, reload: () => void): void {
     dlog('load', `${win.getTitle() || 'win'} FAILED ${errorCode} ${errorDesc} url=${url.replace(/token=[^&]+/, 'token=…')} retry in ${Math.round(delay)}ms`)
     retryTimer = setTimeout(() => { if (!win.isDestroyed()) reload() }, delay)
   })
+  // CRASH-LOOP BREAKER.
+  //
+  // This used to reload IMMEDIATELY, with no delay and with the retry
+  // counter reset — so a page that dies on load (a GPU/WebGL failure is
+  // the usual cause for the avatar) came straight back, died again, and
+  // span forever. Every turn of that loop spawns a fresh renderer and a
+  // fresh batch of GPU work, which is how an app bug turns into a frozen
+  // MACHINE. Reported from the field exactly that way.
+  //
+  // So: back off like any other failure, and after a few crashes in a
+  // short window STOP retrying the remote page and fall back to the local
+  // placeholder — which needs no GPU and lets the user reach the tray,
+  // settings and logs instead of watching a dead loop.
+  let crashes = 0
+  let crashWindowStart = 0
   wc.on('render-process-gone', (_e, details) => {
     if (details.reason === 'clean-exit') return
-    dlog('load', `renderer gone (${details.reason}); reloading`)
     clearRetry()
-    retries = 0
-    if (!win.isDestroyed()) reload()
+    const now = Date.now()
+    if (now - crashWindowStart > 60_000) {
+      crashWindowStart = now
+      crashes = 0
+    }
+    crashes += 1
+    if (crashes > 3) {
+      dlog('load', `renderer gone (${details.reason}) x${crashes} — giving up on the remote page`)
+      onCrashLoop?.()
+      return
+    }
+    const delay = Math.min(1500 * Math.pow(2, crashes - 1), 15000)
+    dlog('load', `renderer gone (${details.reason}); reload in ${delay}ms (${crashes}/3)`)
+    retryTimer = setTimeout(() => { if (!win.isDestroyed()) reload() }, delay)
   })
   wc.on('destroyed', clearRetry)
 }
@@ -1275,8 +1324,34 @@ let authRefreshTimer: ReturnType<typeof setInterval> | null = null
 // Point the overlay at the server's transparent /overlay avatar page when logged
 // in (reusing the proven browser Live2D+TTS+WS stack), else a local placeholder.
 // Called on launch and again after login/logout (overlay:refresh).
-async function applyOverlayContent(): Promise<void> {
+//: Set when the avatar page has crashed too many times to keep retrying.
+//: The overlay then shows the LOCAL placeholder, which needs no GPU.
+let overlayFellBack = false
+//: Serializes content application. Concurrent callers (login, resume,
+//: session change, config change) each started a loadURL that aborted the
+//: previous one — an ERR_ABORTED storm that could leave the window with
+//: nothing loaded at all, which is what "the avatar never appears" looked
+//: like in the field.
+let overlayContentInFlight: Promise<void> | null = null
+
+function applyOverlayContent(): Promise<void> {
+  if (overlayContentInFlight) return overlayContentInFlight
+  const run = applyOverlayContentInner().finally(() => {
+    overlayContentInFlight = null
+  })
+  overlayContentInFlight = run
+  return run
+}
+
+async function applyOverlayContentInner(): Promise<void> {
   if (!overlay) return
+  if (overlayFellBack) {
+    // A crash loop was broken earlier; do not walk back into it. The user
+    // gets the placeholder until they explicitly retry (tray → 재시작 /
+    // 아바타 조작 복구) or the app restarts.
+    loadRoute(overlay, 'overlay')
+    return
+  }
   const token = await getStoredToken()
   const { serverUrl } = loadConfig()
   if (token && serverUrl) {
@@ -1396,7 +1471,10 @@ async function createOverlayChip(): Promise<void> {
       nodeIntegration: false,
     },
   })
-  armAlwaysOnTop(overlayChip)
+  // NOT armAlwaysOnTop: that arms blur/show hooks and a re-assert timer.
+  // Running it on a SECOND always-on-top window next to the avatar adds
+  // restack traffic for no gain — the chip is small, short-lived and
+  // recreated with the avatar. alwaysOnTop at creation is enough.
   overlayChip.on('closed', () => {
     overlayChip = null
   })
@@ -1439,6 +1517,12 @@ function applyOverlayInput(): void {
 /** Panic button (tray): whatever state the overlay got into, give it back
  *  to the user. Costs one stray click on the avatar; never costs control. */
 function forceOverlayInteractive(): void {
+  // Also the "try the avatar again" button: clearing the crash-loop latch
+  // is the only in-app way back to the remote page without a restart.
+  if (overlayFellBack) {
+    overlayFellBack = false
+    void applyOverlayContent()
+  }
   overlayLocked = false
   try {
     overlay?.setIgnoreMouseEvents(false)
