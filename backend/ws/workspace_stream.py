@@ -200,20 +200,23 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
     # Same ownership posture as every REST sync endpoint — this socket
     # exposes activity telemetry + the owner's device list.
     from controller.agent_controller import (
-        _enforce_session_owner,
-        _storage_root_live_or_dormant,
+        _enforce_scope_owner,
+        _resolve_storage_scope,
     )
 
     try:
-        _enforce_session_owner(session_id, auth.payload or {})
+        _enforce_scope_owner(session_id, auth.payload or {})
     except Exception:
         await websocket.close(code=4403)
         return
 
-    # Resolve the storage root (live or dormant) up front — 4404 if the
-    # session doesn't exist.
+    # Resolve the storage root up front — 4404 if the scope doesn't exist.
+    # `session_id` is a storage SCOPE: a session, or `_cloud` for the
+    # caller's own GenyCloud. The hub key must come back scoped too —
+    # every user's cloud shares the id, so keying the hub by the raw id
+    # would wake every other user's replicas on one user's write.
     try:
-        storage_path = _storage_root_live_or_dormant(session_id)
+        storage_path, hub_key = _resolve_storage_scope(session_id, auth.payload or {})
     except Exception:
         await websocket.close(code=4404)
         return
@@ -233,14 +236,14 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
         device_name=str(data.get("device_name") or "")[:64],
         user=str(user),
     )
-    _hub.add(session_id, dev, storage_path)
-    event = _hub.event_for(session_id)
+    _hub.add(hub_key, dev, storage_path)
+    event = _hub.event_for(hub_key)
     logger.info("[WorkspaceWS:%s] replica %s (%s) connected",
                 session_id[:8], dev.device_id[:8], dev.device_name)
 
     async def _refresh() -> int:
         stats = await asyncio.to_thread(
-            workspace_sync.refresh_index, storage_path, session_id
+            workspace_sync.refresh_index, storage_path, hub_key
         )
         return int(stats.get("latest_seq", 0))
 
@@ -248,7 +251,7 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
         latest = await _refresh()
         await _send(websocket, "state", {
             "latest_seq": latest,
-            "devices": _hub.devices(session_id),
+            "devices": _hub.devices(hub_key),
         })
 
         # Reader task: replicas only ever send heartbeats (and may close).
@@ -272,18 +275,18 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
                     break
                 # Primary agent-write signal is the inotify watcher; the
                 # poll is a slow belt-and-braces (fast only as fallback).
-                scan_interval = 30.0 if _hub.watch_active(session_id) else _AGENT_SCAN_S
+                scan_interval = 30.0 if _hub.watch_active(hub_key) else _AGENT_SCAN_S
                 try:
                     await asyncio.wait_for(event.wait(), timeout=min(scan_interval, _AGENT_SCAN_S))
                     event.clear()
-                    latest = _hub.latest(session_id) or await _refresh()
+                    latest = _hub.latest(hub_key) or await _refresh()
                     await _send(websocket, "changed", {"latest_seq": latest})
                     last_beat = time.monotonic()
                 except asyncio.TimeoutError:
                     # Shared-event race: a sibling replica may have cleared
                     # the event while we were mid-send — recheck the hub's
                     # latest so no replica silently lags a notify.
-                    hub_latest = _hub.latest(session_id) or 0
+                    hub_latest = _hub.latest(hub_key) or 0
                     if hub_latest > latest:
                         latest = hub_latest
                         await _send(websocket, "changed", {"latest_seq": latest})
@@ -295,7 +298,7 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
                         new_latest = await _refresh()
                         if new_latest > latest:
                             latest = new_latest
-                            _hub.notify(session_id, new_latest)
+                            _hub.notify(hub_key, new_latest)
                             # own event fires next iteration for ALL replicas
                             continue
                     if time.monotonic() - last_beat >= _HEARTBEAT_S:
@@ -308,6 +311,6 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.info("[WorkspaceWS:%s] closed: %s", session_id[:8], exc)
     finally:
-        _hub.remove(session_id, dev)
+        _hub.remove(hub_key, dev)
         logger.info("[WorkspaceWS:%s] replica %s disconnected",
                     session_id[:8], dev.device_id[:8])

@@ -52,6 +52,16 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 agent_manager = get_agent_session_manager()
 
 
+def _enforce_scope_owner(scope_id: str, auth: dict) -> None:
+    """Ownership for a storage scope. A cloud is the caller's by
+    construction; a session is checked the usual way."""
+    from service.cloud import is_cloud_scope
+
+    if is_cloud_scope(scope_id):
+        return
+    _enforce_session_owner(scope_id, auth)
+
+
 def _enforce_session_owner(session_id: str, auth: dict) -> None:
     """Ownership guard for /api/agents/{session_id}/* (audit S6).
 
@@ -1218,6 +1228,25 @@ async def stop_execution(
 # ============================================================================
 
 
+def _resolve_storage_scope(scope_id: str, auth: dict) -> tuple:
+    """Storage path + change-notification key for a storage SCOPE.
+
+    The storage API is scope-generic. A scope is normally a session (the
+    agent's own workspace), and ``_cloud`` addresses the CALLING USER'S
+    GenyCloud — the folder that sits above agents and gathers everything.
+
+    Security note: a cloud path is derived from the caller's own token,
+    never from the id, so ``_cloud`` cannot be pointed at another user's
+    cloud no matter what is sent.
+    """
+    from service.cloud import cloud_notify_key, cloud_storage_path, is_cloud_scope
+
+    if is_cloud_scope(scope_id):
+        user = (auth or {}).get("sub") or "anonymous"
+        return cloud_storage_path(user), cloud_notify_key(user)
+    return _storage_root_live_or_dormant(scope_id), scope_id
+
+
 def _storage_root_live_or_dormant(session_id: str) -> str:
     """Session storage root for live OR dormant sessions.
 
@@ -1274,12 +1303,12 @@ async def list_storage_files(
     """
     List session storage files. Works for dormant sessions too.
     """
-    _enforce_session_owner(session_id, auth)  # audit S6
+    _enforce_scope_owner(session_id, auth)  # audit S6
     import os as _os
 
     from service.utils import file_storage as storage_utils
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     if scope == "workspace":
         storage_path = _os.path.join(storage_path, "workspace")
         _os.makedirs(storage_path, exist_ok=True)
@@ -1315,7 +1344,7 @@ def _workspace_max_file_bytes() -> int:
 
 
 
-async def _sync_touch(session_id: str, storage_path: str) -> int:
+async def _sync_touch(notify_key: str, storage_path: str) -> int:
     """After any workspace write: refresh the sync index (off-loop —
     hashing/sqlite are blocking) and wake connected replicas. Returns the
     new latest_seq. Never raises — sync bookkeeping must not fail the
@@ -1325,13 +1354,13 @@ async def _sync_touch(session_id: str, storage_path: str) -> int:
         from ws.workspace_stream import notify_workspace_changed
 
         stats = await asyncio.to_thread(
-            workspace_sync.refresh_index, storage_path, session_id, force=True
+            workspace_sync.refresh_index, storage_path, notify_key, force=True
         )
         seq = int(stats.get("latest_seq", 0))
-        notify_workspace_changed(session_id, seq)
+        notify_workspace_changed(notify_key, seq)
         return seq
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[%s] sync index refresh failed: %s", session_id, exc)
+        logger.debug("[%s] sync index refresh failed: %s", notify_key, exc)
         return 0
 
 
@@ -1342,7 +1371,7 @@ def _workspace_target(session_id: str, rel_path: str) -> "tuple":
     synapse.db, checkpoints/) is never reachable from these endpoints."""
     from pathlib import Path as _P
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _P(storage_path).resolve()
     ws = (root / "workspace").resolve()
     target = (root / (rel_path or "")).resolve()
@@ -1376,7 +1405,7 @@ async def storage_mkdir(
     if target.exists():
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=False)
-    await _sync_touch(session_id, str(root))
+    await _sync_touch(_notify_key, str(root))
     return {"ok": True, "path": str(target.relative_to(root))}
 
 
@@ -1402,7 +1431,7 @@ async def storage_rename(
         raise HTTPException(status_code=404, detail="Source not found")
     if outcome == "dst_exists":
         raise HTTPException(status_code=409, detail="Destination already exists")
-    await _sync_touch(session_id, str(root))
+    await _sync_touch(_notify_key, str(root))
     return {"ok": True, "path": str(dst.relative_to(root))}
 
 
@@ -1438,7 +1467,7 @@ async def storage_delete(
             status_code=409,
             detail={"conflict": "delete", "current_sha": clash},
         )
-    await _sync_touch(session_id, str(_root))
+    await _sync_touch(_notify_key, str(_root))
     return {"ok": True}
 
 
@@ -1465,7 +1494,7 @@ async def upload_to_workspace(
     import re as _re
     from pathlib import Path as _P
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _P(storage_path).resolve()
     ws = (root / "workspace").resolve()
 
@@ -1523,7 +1552,7 @@ async def upload_to_workspace(
         raise HTTPException(status_code=500, detail="upload write failed")
 
     rel = str(dest.relative_to(root))
-    await _sync_touch(session_id, str(root))
+    await _sync_touch(_notify_key, str(root))
     return {
         "ok": True,
         "session_id": session_id,
@@ -1546,11 +1575,11 @@ async def storage_changes(
     A throttled incremental rescan runs first so agent-driven writes are
     included without any executor hook.
     """
-    _enforce_session_owner(session_id, auth)
+    _enforce_scope_owner(session_id, auth)
     from service.utils import workspace_sync
 
-    storage_path = _storage_root_live_or_dormant(session_id)
-    await asyncio.to_thread(workspace_sync.refresh_index, storage_path, session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
+    await asyncio.to_thread(workspace_sync.refresh_index, storage_path, _notify_key)
     result = await asyncio.to_thread(workspace_sync.changes_since, storage_path, since)
     result["max_file_bytes"] = _workspace_max_file_bytes()
     result["quota_bytes"] = workspace_sync.quota_bytes()
@@ -1673,7 +1702,7 @@ async def put_workspace_file(
         tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="write failed")
 
-    latest = await _sync_touch(session_id, str(root))
+    latest = await _sync_touch(_notify_key, str(root))
     return {
         "ok": True,
         "path": str(target.relative_to(root)),
@@ -1830,7 +1859,7 @@ async def chunk_upload_commit(
         )
     meta.unlink(missing_ok=True)
 
-    latest = await _sync_touch(session_id, str(root))
+    latest = await _sync_touch(_notify_key, str(root))
     return {
         "ok": True,
         "path": str(target.relative_to(root)),
@@ -1865,8 +1894,8 @@ async def get_storage_links(
     folder from an ordinary directory — it would show someone's laptop
     folder as if the agent had created it.
     """
-    _enforce_session_owner(session_id, auth)
-    storage_path = _storage_root_live_or_dormant(session_id)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     try:
         with open(_links_path(storage_path), "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -1888,8 +1917,8 @@ async def put_storage_links(
     {name, device} — never the local path: which folder on which machine
     is the user's business, and the workspace is shared with an agent.
     """
-    _enforce_session_owner(session_id, auth)
-    storage_path = _storage_root_live_or_dormant(session_id)
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     incoming = payload.get("links")
     if not isinstance(incoming, list):
         raise HTTPException(status_code=400, detail="links must be a list")
@@ -1944,7 +1973,7 @@ async def download_storage_file_raw(
 
     from starlette.responses import FileResponse
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _FilePath(storage_path).resolve()
     target = (root / file_path).resolve()
     try:
@@ -2010,7 +2039,7 @@ async def get_doc_preview(
     import shutil
     from pathlib import Path as _FilePath
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _FilePath(storage_path).resolve()
     src = (root / path).resolve()
     try:
@@ -2087,7 +2116,7 @@ async def read_storage_file(
     _enforce_session_owner(session_id, auth)  # audit S6
     from service.utils import file_storage as storage_utils
 
-    storage_path = _storage_root_live_or_dormant(session_id)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
 
     file_content = storage_utils.read_storage_file(
         storage_path, file_path, encoding=encoding, session_id=session_id
