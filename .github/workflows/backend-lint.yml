@@ -1,0 +1,59 @@
+name: Backend static checks
+
+# WHY THIS EXISTS
+#
+# A single undefined name — `_prune_tasks`, added in an edit whose
+# declaration never landed — raised NameError on EVERY screen-observation
+# upload in production (79 in 12 hours). Nothing caught it: the module
+# imported fine, the syntax was valid, and the line only runs on a request.
+# It reached users as "the backend suddenly dies".
+#
+# Undefined names are exactly the class of defect that is free to detect
+# and expensive to ship, so this gate blocks them. It deliberately checks
+# ONLY that class (plus syntax): a broad style linter on a large existing
+# codebase produces noise that gets ignored, and an ignored gate stops
+# being a gate.
+
+on:
+  push:
+    paths:
+      - 'backend/**/*.py'
+      - '.github/workflows/backend-lint.yml'
+  pull_request:
+    paths:
+      - 'backend/**/*.py'
+  workflow_dispatch:
+
+jobs:
+  undefined-names:
+    name: undefined names / syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install pyflakes==3.4.0
+
+      - name: Compile every module (syntax)
+        working-directory: backend
+        run: python -m compileall -q service controller ws tools main.py
+
+      - name: No undefined names
+        working-directory: backend
+        run: |
+          # pyflakes reports plenty of harmless things (unused imports in a
+          # codebase this size); only undefined names are fatal here.
+          out=$(python -m pyflakes service controller ws tools main.py 2>/dev/null | grep "undefined name" || true)
+          if [ -n "$out" ]; then
+            echo "::error::Undefined names found — these raise NameError at runtime:"
+            echo "$out"
+            echo ""
+            echo "If the name is only used inside a quoted annotation, import it"
+            echo "under 'if TYPE_CHECKING:' so it exists for readers and linters"
+            echo "without creating an import cycle."
+            exit 1
+          fi
+          echo "OK — no undefined names."

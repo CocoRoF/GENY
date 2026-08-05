@@ -624,6 +624,15 @@ async def _record_observation_note(
 _PRUNE_NOTES_PER_SWEEP = 200
 
 
+#: Live background prune sweeps. Two jobs, both load-bearing:
+#:   1) hold a REFERENCE — asyncio only keeps a weak one, so a task with no
+#:      strong reference can be garbage-collected mid-run;
+#:   2) key by session, so an upload burst cannot start a sweep per frame.
+#: Their absence was a NameError on EVERY observation upload (79 in 12h in
+#: production) that aborted save_observation after the work was done.
+_prune_tasks: Dict[str, "asyncio.Task"] = {}
+
+
 async def _prune_old_observations(session_id: str, storage_root: Path) -> None:
     """Best-effort retention sweep over the AMBIENT observation buffer.
 
@@ -953,7 +962,17 @@ async def save_observation(
     # mid-sweep on a 6k-note vault). The sidecar rebuild is coalesced +
     # off-loop since executor 2.64.3; the sweep still must not hold the
     # upload hostage. The hourly throttle inside the sweep is unchanged.
-    task = asyncio.create_task(_prune_old_observations(session_id, storage_root))
-    _prune_tasks.add(task)
-    task.add_done_callback(_prune_tasks.discard)
+    # Wrapped: this is BOOKKEEPING after the observation is already written
+    # and returned-worthy. Letting it raise threw away a completed save and
+    # reported failure to the client — which is exactly what happened.
+    try:
+        existing = _prune_tasks.get(session_id)
+        if existing is None or existing.done():
+            task = asyncio.create_task(_prune_old_observations(session_id, storage_root))
+            _prune_tasks[session_id] = task
+            task.add_done_callback(
+                lambda t, sid=session_id: _prune_tasks.pop(sid, None) and None
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("[%s] observation prune scheduling skipped", session_id, exc_info=True)
     return result

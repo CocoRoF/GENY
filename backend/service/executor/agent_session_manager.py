@@ -17,7 +17,10 @@ Usage example:
 
 from datetime import datetime
 from logging import getLogger
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:  # quoted-annotation only — no import cycle at runtime
+    from service.tick.engine import TickEngine
 import asyncio
 import json
 import os

@@ -36,6 +36,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
     Dict,
@@ -43,6 +44,9 @@ from typing import (
     Optional,
     Tuple,
 )
+
+if TYPE_CHECKING:  # quoted-annotation only — no import cycle at runtime
+    from service.memory.manager import SessionMemoryManager
 
 from service.sessions.models import (
     MCPConfig,
