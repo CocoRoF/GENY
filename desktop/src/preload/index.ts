@@ -323,6 +323,9 @@ export interface ConnectorBridge {
         code: string
       }
     }>
+    /** Native virtual drive (Linux FUSE sidecar): mount/unmount + status. */
+    nativeMount(enable: boolean): Promise<{ mounted?: boolean; mountpoint?: string; error?: string }>
+    nativeStatus(): Promise<{ running: boolean; mountpoint: string; supported: boolean }>
     /** Master switch: off parks the whole drive (membership is remembered). */
     setCloud(enabled: boolean): Promise<{ cloudOptIn: boolean }>
     /** Per-agent used/quota bytes in one round trip. */
@@ -506,6 +509,8 @@ const api: ConnectorBridge = {
     get: () => ipcRenderer.invoke('drive:get'),
     setAgent: (sessionId, enabled, label) =>
       ipcRenderer.invoke('drive:set-agent', sessionId, enabled, label),
+    nativeMount: (enable) => ipcRenderer.invoke('drive:native-mount', enable),
+    nativeStatus: () => ipcRenderer.invoke('drive:native-status'),
     setCloud: (enabled) => ipcRenderer.invoke('drive:set-cloud', enabled),
     usage: () => ipcRenderer.invoke('drive:usage'),
     pickRoot: () => ipcRenderer.invoke('drive:pick-root'),

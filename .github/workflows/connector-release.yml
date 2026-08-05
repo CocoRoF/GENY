@@ -57,6 +57,21 @@ jobs:
         with:
           node-version: 20
 
+      # The native virtual drive ships as a Go sidecar (FUSE cannot run
+      # inside Electron — the V8 memory cage corrupts native read buffers).
+      # Linux builds it; other platforms keep the mirror drive, and a
+      # missing binary is handled at runtime (the toggle stays hidden).
+      - uses: actions/setup-go@v5
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          go-version: '1.22'
+          cache-dependency-path: drive-daemon/go.sum
+
+      - name: Build drive daemon (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: ./build.sh linux
+        working-directory: drive-daemon
+
       - name: Install deps
         working-directory: desktop
         run: npm install --no-audit --no-fund

@@ -116,6 +116,8 @@ interface ConnectorConfig {
    *  Undefined is treated as TRUE — the drive is the intended default and a
    *  config written before this field existed must not silently opt out. */
   cloudOptIn?: boolean
+  /** Native virtual drive (FUSE sidecar) enabled by the user. */
+  nativeMount?: boolean
   /** Folders linked INTO GenyDrive — bound to the DRIVE, not to any one
    *  agent: [폴더-GenyDrive]에 바인드되고, 드라이브에 연결된 에이전트들이
    *  [GenyDrive-에이전트] 바인딩을 통해 전부 공유한다. Each link appears
@@ -1319,6 +1321,10 @@ function consumeInstallFlags(): void {
   }
 }
 
+/** Set once the IPC layer is wired; used by the boot-time restore. */
+let startNativeMount: () => Promise<{ mounted?: boolean; mountpoint?: string; error?: string }> =
+  async () => ({ error: 'not ready' })
+
 function driveRoot(): string {
   return loadConfig().driveRoot || join(app.getPath('home'), 'GenyDrive')
 }
@@ -2288,6 +2294,84 @@ function registerIpc(): void {
     }),
   )
 
+  // ── Native virtual drive (Linux/FUSE sidecar — D4) ──────────────
+  // FUSE cannot run inside Electron (V8 memory cage corrupts external
+  // buffers — proven by spike), so a Go sidecar mounts the drive and
+  // speaks the same storage REST as the mirror engine. The connector
+  // owns lifecycle + token freshness (the daemon re-reads the token
+  // file on 401).
+  let daemonProc: ReturnType<typeof spawn> | null = null
+  let daemonTokenTimer: NodeJS.Timeout | null = null
+  const daemonTokenFile = (): string => join(app.getPath('userData'), 'drive-daemon.token')
+  const daemonBinary = (): string => {
+    const cand = [
+      join(process.resourcesPath ?? '', 'geny-drive-daemon'),
+      join(app.getAppPath(), '..', 'geny-drive-daemon'),
+    ]
+    return cand.find((p) => existsSync(p)) ?? ''
+  }
+  const writeDaemonToken = async (): Promise<boolean> => {
+    const tok = await getStoredToken()
+    if (!tok) return false
+    writeFileSync(daemonTokenFile(), tok, { mode: 0o600 })
+    return true
+  }
+  const stopNativeMount = (): void => {
+    if (daemonTokenTimer) { clearInterval(daemonTokenTimer); daemonTokenTimer = null }
+    if (daemonProc) { try { daemonProc.kill('SIGTERM') } catch { /* gone */ } daemonProc = null }
+    try { unlinkSync(daemonTokenFile()) } catch { /* absent */ }
+  }
+  app.on('will-quit', stopNativeMount)
+
+  startNativeMount = async (): Promise<{ mounted?: boolean; mountpoint?: string; error?: string }> => {
+    const bin = daemonBinary()
+    if (!bin) return { error: 'daemon binary not bundled for this platform' }
+    const cfg = loadConfig()
+    if (!cfg.serverUrl) return { error: 'not signed in' }
+    if (!(await writeDaemonToken())) return { error: 'no auth token' }
+    const mnt = join(app.getPath('home'), 'GenyDrive-Live')
+    try { mkdirSync(mnt, { recursive: true }) } catch { /* exists */ }
+    stopNativeMount() // idempotent restart
+    await writeDaemonToken()
+    // Force-clear a stale mount before taking the path (a previous run
+    // killed with SIGKILL can leave one; mounting over it would stack).
+    try {
+      spawn('fusermount3', ['-u', mnt], { stdio: 'ignore' })
+    } catch { /* not mounted / no fusermount — mount will tell us */ }
+    daemonProc = spawn(bin, [
+      '--server', cfg.serverUrl.replace(/\/$/, ''),
+      '--token-file', daemonTokenFile(),
+      '--mountpoint', mnt,
+      // The daemon unmounts itself if we vanish — a mount outliving the
+      // app would keep answering with nothing behind it.
+      '--parent-pid', String(process.pid),
+    ], { stdio: 'ignore', detached: false })
+    daemonProc.on('exit', (code) => {
+      dlog('drive', `native mount daemon exited (${code})`)
+      daemonProc = null
+    })
+    // Keep the token file fresh so a long-lived mount survives rotation.
+    daemonTokenTimer = setInterval(() => { void writeDaemonToken() }, 10 * 60 * 1000)
+    daemonTokenTimer.unref?.()
+    saveConfig({ nativeMount: true })
+    return { mounted: true, mountpoint: mnt }
+  }
+
+  ipcMain.handle('drive:native-mount', async (_e, enable: boolean) => {
+    if (!enable) {
+      stopNativeMount()
+      saveConfig({ nativeMount: false })
+      return { mounted: false }
+    }
+    return startNativeMount()
+  })
+
+  ipcMain.handle('drive:native-status', () => ({
+    running: !!daemonProc,
+    mountpoint: join(app.getPath('home'), 'GenyDrive-Live'),
+    supported: process.platform === 'linux' && driveCapabilities().streaming,
+  }))
+
   ipcMain.handle('drive:pick-root', async () => {
     const res = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -2605,6 +2689,16 @@ app.whenReady().then(() => {
       consumeInstallFlags()
       migrateLegacyPairsToLinks()
       applyDriveConfig()
+      // Restore the native mount the user left enabled. Delayed so the
+      // token store is ready; a missing token simply skips it (the toggle
+      // still works once signed in).
+      if (loadConfig().nativeMount) {
+        setTimeout(() => {
+          void startNativeMount().catch((e) =>
+            dlog('drive', `native mount restore failed: ${(e as Error)?.message}`),
+          )
+        }, 4000).unref?.()
+      }
     } catch {
       manager.configure(loadConfig().syncPairs ?? [])
     }

@@ -298,6 +298,7 @@ export function ControlApp() {
   const [driveCaps, setDriveCaps] = useState<{ streaming: boolean; missing: string } | null>(null)
   const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
   const [driveMsg, setDriveMsg] = useState('')
+  const [nativeSt, setNativeSt] = useState<{ running: boolean; mountpoint: string; supported: boolean } | null>(null)
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncLinks, setSyncLinks] = useState<Array<{ name: string; localPath: string; paused?: boolean }>>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
@@ -358,6 +359,7 @@ export function ControlApp() {
     setDriveCloud(d.cloudOptIn !== false)
     setDriveCaps(d.capabilities ?? null)
     void window.connector?.drive?.usage().then(setDriveUsage).catch(() => undefined)
+    void window.connector?.drive?.nativeStatus().then(setNativeSt).catch(() => undefined)
   }
 
   const fmtBytes = (n: number): string => {
@@ -964,6 +966,25 @@ export function ControlApp() {
                   await refreshSync()
                 }}
               />
+              {nativeSt?.supported && (
+                <>
+                  <ToggleLine
+                    label={t('drive.nativeToggle')}
+                    checked={!!nativeSt?.running}
+                    disabled={!!driveBusy}
+                    onChange={async (next) => {
+                      const r = await window.connector?.drive?.nativeMount(next)
+                      if (r?.error) setDriveMsg(r.error)
+                      await window.connector?.drive?.nativeStatus().then(setNativeSt)
+                    }}
+                  />
+                  {nativeSt?.running && (
+                    <p className="gy-hint" style={{ margin: '4px 0 10px', opacity: 0.8 }}>
+                      {t('drive.nativeAt')} {nativeSt.mountpoint}
+                    </p>
+                  )}
+                </>
+              )}
               {driveCaps && !driveCaps.streaming && driveCaps.missing && (
                 <p className="gy-hint" style={{ margin: '6px 0 12px', opacity: 0.85 }}>
                   {driveCaps.missing}

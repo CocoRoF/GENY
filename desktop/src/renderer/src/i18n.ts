@@ -136,6 +136,8 @@ export const messages: Record<string, Entry> = {
   'drive.hint': { ko: '연결한 에이전트마다 드라이브 안에 폴더가 하나씩 생기고, 서버 작업공간과 실시간으로 동기화됩니다. 여러 에이전트를 동시에 연결할 수 있어요.', en: 'Each connected agent gets its own folder inside the drive, synced live with its server workspace. Connect as many agents as you like.' },
   'drive.cloudToggle': { ko: 'Geny 클라우드 사용', en: 'Use Geny Cloud' },
   'drive.cloudOff': { ko: '클라우드를 껐습니다. 연결해 둔 에이전트 목록은 그대로 기억되며, 다시 켜면 내려받기 없이 이어서 동기화됩니다.', en: 'Cloud is off. Your connected agents are remembered — turning it back on resumes without re-downloading.' },
+  'drive.nativeToggle': { ko: '가상 드라이브 (실시간 스트리밍, 베타)', en: 'Virtual drive (live streaming, beta)' },
+  'drive.nativeAt': { ko: '마운트 위치:', en: 'Mounted at:' },
   'drive.rootLabel': { ko: '드라이브 위치', en: 'Drive location' },
   'drive.rootHint': { ko: '위치를 바꾸면 연결된 폴더가 모두 새 위치로 이동합니다 (다시 내려받지 않습니다).', en: 'Changing the location MOVES every connected folder there — nothing is re-downloaded.' },
   'drive.changeRoot': { ko: '위치 변경…', en: 'Change…' },
