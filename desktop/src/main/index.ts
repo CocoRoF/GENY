@@ -70,6 +70,22 @@ function redactTok(t: string | null | undefined): string {
 // check runs before any app JS, so it cannot be handled here.)
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+  // FORCE X11 (XWayland when the session is Wayland).
+  //
+  // A Wayland client CANNOT position its own toplevel windows — the
+  // protocol has no such request. Running natively on Wayland therefore
+  // makes the avatar impossible to move: every setBounds/setPosition,
+  // including the drag handler, is silently ignored, and always-on-top
+  // is equally unavailable. The user sees an avatar that simply will not
+  // respond, which is exactly the reported symptom.
+  //
+  // Some environments switch Electron to Wayland behind our back via
+  // ELECTRON_OZONE_PLATFORM_HINT, so the switch is set explicitly AND the
+  // hint is cleared. Under XWayland everything (positioning, stacking,
+  // input regions) behaves like X11.
+  delete process.env.ELECTRON_OZONE_PLATFORM_HINT
+  app.commandLine.appendSwitch('ozone-platform', 'x11')
+  app.commandLine.appendSwitch('ozone-platform-hint', 'x11')
 }
 
 if (process.platform === 'win32') {
@@ -1303,51 +1319,35 @@ const IS_LINUX = process.platform === 'linux'
 type Rect = { x: number; y: number; w: number; h: number }
 let overlayInteractiveRects: Rect[] = []
 let overlayClickThroughWanted = false
-let overlayHitTimer: ReturnType<typeof setInterval> | null = null
-
-function stopOverlayHitTest(): void {
-  if (overlayHitTimer) clearInterval(overlayHitTimer)
-  overlayHitTimer = null
-}
-
-function overlayHitTick(): void {
-  if (!overlay || overlay.isDestroyed()) return stopOverlayHitTest()
-  try {
-    const b = overlay.getBounds()
-    const p = screen.getCursorScreenPoint()
-    const cx = p.x - b.x
-    const cy = p.y - b.y
-    const over = overlayInteractiveRects.some(
-      (r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h,
-    )
-    overlay.setIgnoreMouseEvents(!over)
-  } catch {
-    /* window mid-teardown */
-  }
-}
 
 /** Single place that decides the overlay's input state. */
 function applyOverlayInput(): void {
   if (!overlay || overlay.isDestroyed()) return
   if (!IS_LINUX) {
-    stopOverlayHitTest()
     overlay.setIgnoreMouseEvents(overlayClickThroughWanted, { forward: true })
     return
   }
-  if (!overlayClickThroughWanted || overlayInteractiveRects.length === 0) {
-    stopOverlayHitTest()
-    overlay.setIgnoreMouseEvents(false)
-    return
-  }
-  if (!overlayHitTimer) overlayHitTimer = setInterval(overlayHitTick, 80)
-  overlayHitTick()
+  // LINUX: the overlay stays interactive, always.
+  //
+  // Two mechanisms were tried and MEASURED not to work here:
+  //   · {forward:true} is darwin/win32-only, so a click-through window
+  //     receives nothing and the page's hover-to-unlock can never fire;
+  //   · hit-testing the cursor from main fails too — Electron's cursor
+  //     position stops updating while the pointer is over an
+  //     input-transparent window, so the bar is never detected as hovered
+  //     (verified with synthetic input: the position over the bar was
+  //     never once observed).
+  // Until the control bar becomes its own always-interactive window,
+  // catching a stray click on the avatar is the lesser harm: a user who
+  // cannot press their own unlock button has lost the app.
+  overlay.setIgnoreMouseEvents(false)
+  dlog('overlay', `input: interactive (linux; wanted=${overlayClickThroughWanted})`)
 }
 
 /** Panic button (tray): whatever state the overlay got into, give it back
  *  to the user. Costs one stray click on the avatar; never costs control. */
 function forceOverlayInteractive(): void {
   overlayClickThroughWanted = false
-  stopOverlayHitTest()
   try {
     overlay?.setIgnoreMouseEvents(false)
     overlay?.showInactive()
