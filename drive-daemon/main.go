@@ -448,6 +448,27 @@ func (n *pathNode) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAt
 	return n.Getattr(ctx, fh, out)
 }
 
+// Statfs makes the agent's quota visible where users actually look —
+// the file manager's free-space bar and `df`. Without it a mount reports
+// zeros and every "not enough space?" question becomes a support ticket.
+func (n *pathNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	used, quota, err := client.Usage(n.sid)
+	if err != nil || quota <= 0 {
+		return 0 // leave the kernel defaults rather than lie
+	}
+	const bs = 4096
+	out.Bsize, out.Frsize = bs, bs
+	out.Blocks = uint64(quota / bs)
+	free := quota - used
+	if free < 0 {
+		free = 0
+	}
+	out.Bfree, out.Bavail = uint64(free/bs), uint64(free/bs)
+	out.NameLen = 255
+	return 0
+}
+
+var _ = (fs.NodeStatfser)((*pathNode)(nil))
 var _ = (fs.NodeGetattrer)((*pathNode)(nil))
 var _ = (fs.NodeReaddirer)((*pathNode)(nil))
 var _ = (fs.NodeLookuper)((*pathNode)(nil))

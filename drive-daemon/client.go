@@ -10,6 +10,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,24 +171,47 @@ func (c *Client) Download(sid, relPath, spool string) error {
 	return err
 }
 
+// Files at or above this go through the resumable chunk protocol rather
+// than one long PUT: a dropped connection mid-upload then costs the
+// remaining chunks, not the whole transfer. Matches the connector's own
+// threshold so both clients behave alike.
+const chunkThreshold = 64 << 20
+const chunkSize = 8 << 20
+
 // Put uploads a spool file to a workspace path. Filesystem semantics are
 // last-writer-wins: base_sha is sent when known, and a 409 is resolved by
 // ONE retry against the server's current sha (the OS client already
 // serialized the user's intent — same stance as the WebDAV layer).
+//
+// The body is STREAMED from disk. Reading the spool into memory first
+// would make a 500 MB save cost 500 MB of RSS in a process that is
+// supposed to be invisible — and the retry closure would pin a second
+// copy.
 func (c *Client) Put(sid, relPath, spool, baseSha string) error {
-	body, err := os.ReadFile(spool)
+	st, err := os.Stat(spool)
 	if err != nil {
 		return err
+	}
+	if st.Size() >= chunkThreshold {
+		return c.putChunked(sid, relPath, spool, st.Size(), baseSha)
 	}
 	put := func(sha string) (*http.Response, error) {
 		q := url.Values{"path": {"workspace/" + relPath}, "device": {"drive-daemon"}}
 		if sha != "" {
 			q.Set("base_sha", sha)
 		}
-		req, _ := http.NewRequest("PUT", c.agentURL(sid, "/storage/file", q), bytes.NewReader(body))
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+		f, err := os.Open(spool)
+		if err != nil {
+			return nil, err
+		}
+		req, _ := http.NewRequest("PUT", c.agentURL(sid, "/storage/file", q), f)
+		req.ContentLength = st.Size()
+		// Re-open (not re-buffer) for the auth retry inside do().
+		req.GetBody = func() (io.ReadCloser, error) { return os.Open(spool) }
 		req.Header.Set("Content-Type", "application/octet-stream")
-		return c.do(req)
+		resp, err := c.do(req)
+		f.Close()
+		return resp, err
 	}
 	resp, err := put(baseSha)
 	if err != nil {
@@ -212,6 +237,129 @@ func (c *Client) Put(sid, relPath, spool, baseSha string) error {
 		return fmt.Errorf("put HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// putChunked: start → sequential 8 MiB parts → commit (server verifies the
+// whole-file sha and does the same atomic, journal-integrated commit as a
+// plain PUT).
+func (c *Client) putChunked(sid, relPath, spool string, size int64, baseSha string) error {
+	f, err := os.Open(spool)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	q := url.Values{
+		"path":   {"workspace/" + relPath},
+		"size":   {fmt.Sprint(size)},
+		"sha256": {sum},
+	}
+	req, _ := http.NewRequest("POST", c.agentURL(sid, "/storage/file/chunks/start", q), nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	var started struct {
+		UploadID string `json:"upload_id"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&started)
+	resp.Body.Close()
+	if err != nil || started.UploadID == "" {
+		return fmt.Errorf("chunk start failed (HTTP %d)", resp.StatusCode)
+	}
+
+	buf := make([]byte, chunkSize)
+	var off int64
+	for off < size {
+		n, rerr := io.ReadFull(f, buf)
+		if n == 0 && rerr != nil {
+			return rerr
+		}
+		part := buf[:n]
+		pq := url.Values{"offset": {fmt.Sprint(off)}}
+		preq, _ := http.NewRequest("PUT",
+			c.agentURL(sid, "/storage/file/chunks/"+url.PathEscape(started.UploadID), pq),
+			bytes.NewReader(part))
+		preq.ContentLength = int64(n)
+		preq.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(part)), nil }
+		presp, err := c.do(preq)
+		if err != nil {
+			return err
+		}
+		code := presp.StatusCode
+		presp.Body.Close()
+		if code != 200 {
+			return fmt.Errorf("chunk %d HTTP %d", off, code)
+		}
+		off += int64(n)
+	}
+
+	cq := url.Values{}
+	if baseSha != "" {
+		cq.Set("base_sha", baseSha)
+	}
+	creq, _ := http.NewRequest("POST",
+		c.agentURL(sid, "/storage/file/chunks/"+url.PathEscape(started.UploadID)+"/commit", cq), nil)
+	cresp, err := c.do(creq)
+	if err != nil {
+		return err
+	}
+	defer cresp.Body.Close()
+	if cresp.StatusCode == 409 {
+		// Same last-writer-wins stance as the small path: retry once
+		// against the server's current sha.
+		var conflict struct {
+			CurrentSha string `json:"current_sha"`
+		}
+		_ = json.NewDecoder(cresp.Body).Decode(&conflict)
+		cq2 := url.Values{"base_sha": {conflict.CurrentSha}}
+		creq2, _ := http.NewRequest("POST",
+			c.agentURL(sid, "/storage/file/chunks/"+url.PathEscape(started.UploadID)+"/commit", cq2), nil)
+		cresp2, err := c.do(creq2)
+		if err != nil {
+			return err
+		}
+		defer cresp2.Body.Close()
+		if cresp2.StatusCode != 200 {
+			return fmt.Errorf("chunk commit retry HTTP %d", cresp2.StatusCode)
+		}
+		return nil
+	}
+	if cresp.StatusCode != 200 {
+		return fmt.Errorf("chunk commit HTTP %d", cresp.StatusCode)
+	}
+	return nil
+}
+
+// Usage reports used/quota bytes for one agent (RFC-ish statfs source).
+func (c *Client) Usage(sid string) (used, quota int64, err error) {
+	q := url.Values{"since": {"0"}}
+	req, _ := http.NewRequest("GET", c.agentURL(sid, "/storage/changes", q), nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return 0, 0, fmt.Errorf("usage HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		UsedBytes  int64 `json:"used_bytes"`
+		QuotaBytes int64 `json:"quota_bytes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, 0, err
+	}
+	return out.UsedBytes, out.QuotaBytes, nil
 }
 
 func (c *Client) Mkdir(sid, relPath string) error {
@@ -296,6 +444,10 @@ type snapshotCache struct {
 
 	mu   sync.Mutex
 	data map[string]*snapEntry
+	// One refresh per agent at a time: a file manager opening a folder
+	// fires dozens of concurrent lookups, and without this every one of
+	// them would issue its own full changes request.
+	fetching map[string]*sync.Mutex
 }
 
 type snapEntry struct {
@@ -304,7 +456,12 @@ type snapEntry struct {
 }
 
 func newSnapshotCache(c *Client, ttl time.Duration) *snapshotCache {
-	return &snapshotCache{c: c, ttl: ttl, data: map[string]*snapEntry{}}
+	return &snapshotCache{
+		c:        c,
+		ttl:      ttl,
+		data:     map[string]*snapEntry{},
+		fetching: map[string]*sync.Mutex{},
+	}
 }
 
 func (s *snapshotCache) Get(sid string) (map[string]Entry, error) {
@@ -313,6 +470,21 @@ func (s *snapshotCache) Get(sid string) (map[string]Entry, error) {
 	if cur != nil && time.Since(cur.at) < s.ttl {
 		defer s.mu.Unlock()
 		return cur.entries, nil
+	}
+	gate, ok := s.fetching[sid]
+	if !ok {
+		gate = &sync.Mutex{}
+		s.fetching[sid] = gate
+	}
+	s.mu.Unlock()
+
+	gate.Lock()
+	defer gate.Unlock()
+	// Someone may have refreshed while we waited for the gate.
+	s.mu.Lock()
+	if e := s.data[sid]; e != nil && time.Since(e.at) < s.ttl {
+		s.mu.Unlock()
+		return e.entries, nil
 	}
 	s.mu.Unlock()
 
