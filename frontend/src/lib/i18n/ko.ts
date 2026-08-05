@@ -1072,6 +1072,8 @@ const ko: Translations = {
     previewUnavailable: '미리보기를 사용할 수 없습니다',
     resizeHint: '드래그해서 크기 조절 · 더블클릭으로 초기화',
     transcript: '전사문 (STT)',
+    linkedFolder: '연결된 폴더',
+    linkedFolderHint: '{device}의 폴더가 GenyDrive를 통해 이 에이전트와 공유되고 있습니다.',
     syncDevices: 'PC {count}대 동기화 중',
     scopeWorkspace: '워크스페이스',
     scopeAll: '전체',

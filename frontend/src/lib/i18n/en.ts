@@ -1075,6 +1075,8 @@ const en = {
     previewUnavailable: 'Preview unavailable',
     resizeHint: 'Drag to resize · double-click to reset',
     transcript: 'Transcript (STT)',
+    linkedFolder: 'linked',
+    linkedFolderHint: 'A folder on {device} shared with this agent through GenyDrive.',
     syncDevices: '{count} PCs syncing',
     scopeWorkspace: 'Workspace',
     scopeAll: 'All',

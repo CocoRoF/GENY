@@ -1840,6 +1840,77 @@ async def chunk_upload_commit(
     }
 
 
+#: Where a session records which of its workspace subdirectories are
+#: LINKED FOLDERS — folders that live on a user's computer and are shared
+#: into this agent through GenyDrive. Kept OUTSIDE workspace/ on purpose:
+#: anything inside it would sync straight back into the user's own folder.
+_LINKS_FILE = ".geny-links.json"
+
+
+def _links_path(storage_path: str) -> str:
+    import os as _os
+
+    return _os.path.join(storage_path, _LINKS_FILE)
+
+
+@router.get("/{session_id}/storage/links")
+async def get_storage_links(
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Linked folders projected into this workspace.
+
+    The binding graph ([폴더 ↔ GenyDrive] × [GenyDrive ↔ 에이전트]) lives in
+    the connector, so without this the web explorer cannot tell a linked
+    folder from an ordinary directory — it would show someone's laptop
+    folder as if the agent had created it.
+    """
+    _enforce_session_owner(session_id, auth)
+    storage_path = _storage_root_live_or_dormant(session_id)
+    try:
+        with open(_links_path(storage_path), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        links = data.get("links") or []
+    except (OSError, ValueError):
+        links = []
+    return {"links": links}
+
+
+@router.put("/{session_id}/storage/links")
+async def put_storage_links(
+    payload: Dict[str, Any],
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Publish this device's linked-folder set for the session.
+
+    Written by the connector whenever the drive is reconciled. Entries are
+    {name, device} — never the local path: which folder on which machine
+    is the user's business, and the workspace is shared with an agent.
+    """
+    _enforce_session_owner(session_id, auth)
+    storage_path = _storage_root_live_or_dormant(session_id)
+    incoming = payload.get("links")
+    if not isinstance(incoming, list):
+        raise HTTPException(status_code=400, detail="links must be a list")
+    links = []
+    for item in incoming[:200]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or "/" in name or "\\" in name or name.startswith("."):
+            continue
+        links.append({"name": name[:200], "device": str(item.get("device") or "")[:100]})
+    body = json.dumps({"links": links}, ensure_ascii=False)
+
+    def _write() -> None:
+        with open(_links_path(storage_path), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    await asyncio.to_thread(_write)
+    return {"ok": True, "links": links}
+
+
 @router.get("/{session_id}/storage/sync-devices")
 async def storage_sync_devices(
     session_id: str = Path(..., description="Session ID"),

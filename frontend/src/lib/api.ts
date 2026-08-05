@@ -690,6 +690,12 @@ export const agentApi = {
     apiCall<{ devices: Array<{ device_id: string; device_name: string; user: string }> }>(
       `/api/agents/${id}/storage/sync-devices`,
     ),
+  /** Workspace subdirectories that are LINKED FOLDERS — folders living on
+   *  a user's computer, shared into this agent through GenyDrive. */
+  storageLinks: (id: string) =>
+    apiCall<{ links: Array<{ name: string; device: string }> }>(
+      `/api/agents/${id}/storage/links`,
+    ),
 };
 
 // ==================== Background Tasks API (PR-A.5.5) ===========

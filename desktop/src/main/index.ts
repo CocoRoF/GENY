@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, powerMonitor, safeStorage, screen, session, shell, Tray } from 'electron'
 import { spawn } from 'child_process'
+import { hostname } from 'os'
 import { basename, join, sep } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, renameSync, cpSync, rmSync, readdirSync, lstatSync, readlinkSync, symlinkSync } from 'fs'
 import { initAutoUpdate, checkForUpdatesManually, triggerBackgroundCheck } from './updater'
@@ -1514,6 +1515,7 @@ function applyDriveConfig(): void {
   saveConfig({ syncPairs: [...managed, ...others] })
   getSyncManager()?.configure(next)
   ensureAllLinkShortcuts()
+  publishLinkLedger()
   // A shortcut ensured at (re)configure time can lose a race with the
   // drive engine's own first round — e.g. a link created over a subtree
   // the drive previously mirrored: the engine clears its stale real-dir
@@ -1579,8 +1581,60 @@ async function revokeLinkAccess(
     return { ok: false, error: 'server refused the removal' }
   }
   mgr?.dropIndex(pairId)
+  // The revoked agent drops out of the enabled set, so the ledger publish
+  // that follows would skip it — clear its ledger explicitly or the web
+  // would keep badging a folder that is no longer there.
+  void (async () => {
+    const cfg = loadConfig()
+    const token = await getStoredToken()
+    if (!cfg.serverUrl || !token) return
+    try {
+      await fetch(
+        `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sessionId)}/storage/links`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ links: [] }),
+        },
+      )
+    } catch { /* badge-only */ }
+  })()
   dlog('drive', `revoked link '${linkName}' from ${sessionId.slice(0, 8)}`)
   return { ok: true }
+}
+
+/** Publish this device's linked-folder set to every connected agent.
+ *
+ * The binding graph lives here, in the connector — so without publishing
+ * it the WEB explorer cannot tell a linked folder from a folder the agent
+ * made itself, and neither can a second device. Names and this device's
+ * label only: which folder on which machine is the user's business.
+ * Best-effort by design — a failed publish costs a badge, never data. */
+function publishLinkLedger(): void {
+  const cfg = loadConfig()
+  const cloudOn = cfg.cloudOptIn !== false
+  const links = cloudOn
+    ? (cfg.driveLinks ?? []).map((l) => ({ name: l.name, device: hostname() }))
+    : []
+  void (async () => {
+    const token = await getStoredToken()
+    if (!cfg.serverUrl || !token) return
+    for (const [sid, a] of Object.entries(cfg.driveAgents ?? {})) {
+      if (!a.enabled) continue
+      try {
+        await fetch(
+          `${cfg.serverUrl.replace(/\/$/, '')}/api/agents/${encodeURIComponent(sid)}/storage/links`,
+          {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ links }),
+          },
+        )
+      } catch {
+        /* badge-only metadata — never surface, never retry-storm */
+      }
+    }
+  })()
 }
 
 /** Idempotent: the GenyDrive ROOT carries one shortcut per drive link —

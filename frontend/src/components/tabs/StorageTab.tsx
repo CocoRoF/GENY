@@ -17,7 +17,7 @@ import {
   ChevronRight, Download, RefreshCw, FolderPlus, Upload, HardDrive,
   Folder, FileJson, FileText, FileCode, Globe, Palette, ScrollText,
   Settings, File as FileIcon, Image as ImageIcon, FileSpreadsheet,
-  Presentation, X, ArrowUp, Music,
+  Presentation, X, ArrowUp, Music, Link2,
 } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
@@ -152,12 +152,25 @@ export default function StorageTab() {
   const [previewWidth, setPreviewWidth] = useState(340);
   const [resizing, setResizing] = useState(false);
   const [syncDevices, setSyncDevices] = useState<Array<{ device_id: string; device_name: string }>>([]);
+  // Linked folders: workspace subdirectories that are really folders on a
+  // user's computer, shared in through GenyDrive. Without this the
+  // explorer would present someone's laptop folder as the agent's own.
+  const [links, setLinks] = useState<Array<{ name: string; device: string }>>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
 
   const canWrite = scope === 'workspace';
+  /** A linked folder is a TOP-LEVEL workspace directory whose name the
+   *  connector published — nested folders of the same name are ordinary. */
+  const linkOf = useCallback(
+    (entry: Entry) =>
+      entry.isDir && scope === 'workspace' && !cwd
+        ? links.find((l) => l.name === entry.name)
+        : undefined,
+    [links, scope, cwd],
+  );
   /** scope-relative → storage-root-relative (what the backend APIs expect). */
   const rootPath = useCallback(
     (p: string) => (scope === 'workspace' ? (p ? `workspace/${p}` : 'workspace') : p),
@@ -198,6 +211,9 @@ export default function StorageTab() {
       agentApi.syncDevices(selectedSessionId)
         .then((r) => { if (alive) setSyncDevices(r.devices || []); })
         .catch(() => { if (alive) setSyncDevices([]); });
+      agentApi.storageLinks(selectedSessionId)
+        .then((r) => { if (alive) setLinks(r.links || []); })
+        .catch(() => { if (alive) setLinks([]); });
     };
     load();
     const timer = setInterval(load, 30_000);
@@ -545,7 +561,13 @@ export default function StorageTab() {
                     setMenu({ x: e.clientX, y: e.clientY, target: entry });
                   }}
                 >
-                  <span className="shrink-0">{fileIcon(entry.name, entry.isDir)}</span>
+                  <span className="shrink-0">
+                    {linkOf(entry) ? (
+                      <Link2 size={15} className="text-[#8b5cf6]" />
+                    ) : (
+                      fileIcon(entry.name, entry.isDir)
+                    )}
+                  </span>
                   {renaming === entry.path ? (
                     <input
                       ref={renameInputRef}
@@ -561,7 +583,17 @@ export default function StorageTab() {
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <span className="flex-1 min-w-0 truncate">{entry.name}</span>
+                    <span className="flex-1 min-w-0 truncate">
+                      {entry.name}
+                      {linkOf(entry) && (
+                        <span
+                          className="ml-2 text-[10.5px] px-1.5 py-[1px] rounded-full bg-[#8b5cf6]/12 text-[#8b5cf6] align-middle"
+                          title={t('storageTab.linkedFolderHint', { device: linkOf(entry)?.device || '' })}
+                        >
+                          {t('storageTab.linkedFolder')}
+                        </span>
+                      )}
+                    </span>
                   )}
                   <span className="w-[84px] text-right text-[12px] text-[var(--text-muted)] tabular-nums shrink-0">
                     {entry.isDir ? '—' : formatSize(entry.size)}
