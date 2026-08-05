@@ -88,9 +88,34 @@ if (process.platform === 'linux') {
   // ELECTRON_OZONE_PLATFORM_HINT, so the switch is set explicitly AND the
   // hint is cleared. Under XWayland everything (positioning, stacking,
   // input regions) behaves like X11.
+  // WebGL MUST have a software path.
+  //
+  // The avatar is drawn with WebGL. Recent Chromium REFUSES to fall back
+  // to SwiftShader unless this switch is present — so on a machine where
+  // GPU acceleration is unavailable (which forcing X11 below can cause on
+  // a Wayland session), the canvas silently renders NOTHING and the
+  // renderer can die outright: an empty avatar window that reloads
+  // forever, exactly as reported. Slow beats absent.
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+
+  // FORCE X11 (XWayland when the session is Wayland) — unless the user
+  // opts out with GENY_OZONE_PLATFORM=wayland.
+  //
+  // A Wayland client CANNOT position its own toplevel windows — the
+  // protocol has no such request. Running natively on Wayland therefore
+  // makes the avatar impossible to move: every setBounds/setPosition,
+  // including the drag handler, is silently ignored, and always-on-top
+  // is equally unavailable.
+  //
+  // Some environments switch Electron to Wayland behind our back via
+  // ELECTRON_OZONE_PLATFORM_HINT, so the switch is set explicitly AND the
+  // hint is cleared. The escape hatch exists because this trade (movable
+  // window vs native-Wayland GPU path) can go the other way on some
+  // machines, and a user must not be stuck with our choice.
+  const ozone = process.env.GENY_OZONE_PLATFORM || 'x11'
   delete process.env.ELECTRON_OZONE_PLATFORM_HINT
-  app.commandLine.appendSwitch('ozone-platform', 'x11')
-  app.commandLine.appendSwitch('ozone-platform-hint', 'x11')
+  app.commandLine.appendSwitch('ozone-platform', ozone)
+  app.commandLine.appendSwitch('ozone-platform-hint', ozone)
 }
 
 if (process.platform === 'win32') {
@@ -3015,6 +3040,21 @@ function buildAppMenu(): void {
 }
 
 app.whenReady().then(() => {
+  // Environment fingerprint, logged once at boot. "The avatar is blank /
+  // keeps reloading" is almost always one of these lines, and without
+  // them every report costs a round trip to ask.
+  try {
+    const info = app.getGPUFeatureStatus?.() as unknown as Record<string, string> | undefined
+    dlog(
+      'env',
+      `platform=${process.platform} ozone=${process.env.GENY_OZONE_PLATFORM || (IS_LINUX ? 'x11' : 'default')} ` +
+        `session=${process.env.XDG_SESSION_TYPE || '?'} wayland=${process.env.WAYLAND_DISPLAY ? 'yes' : 'no'}`,
+    )
+    if (info) {
+      dlog('env', `gpu webgl=${info.webgl ?? '?'} compositing=${info.gpu_compositing ?? '?'}`)
+    }
+  } catch { /* diagnostics only */ }
+
   dlog(
     'boot',
     `v${app.getVersion()} ${process.platform}/${process.arch} exec=${process.execPath}` +
