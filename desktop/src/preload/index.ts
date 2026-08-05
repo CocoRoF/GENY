@@ -117,6 +117,11 @@ export interface ConnectorBridge {
     /** true = clicks pass through to the app behind; false = overlay captures. */
     setClickThrough(ignore: boolean): void
     setInteractiveRects(rects: Array<{ x: number; y: number; w: number; h: number }>): void
+    /** Chip window reports its rendered size (main sizes/places the window). */
+    chipSize(w: number, h: number): void
+    /** Lock/unlock from either window — main owns the state. */
+    setLocked(locked: boolean): void
+    onSetLocked(cb: (locked: boolean) => void): () => void
     /** Move the overlay by a pixel delta (dock-handle drag). */
     moveBy(dx: number, dy: number): void
     /** Signal the end of a drag so main drops its authoritative drag rect
@@ -428,6 +433,13 @@ const api: ConnectorBridge = {
      *  is on. Linux has no event forwarding, so main hit-tests the cursor
      *  against these — without them the lock would swallow its own bar. */
     setInteractiveRects: (rects) => ipcRenderer.send('overlay:set-interactive-rects', rects),
+    chipSize: (w, h) => ipcRenderer.send('overlay:chip-size', w, h),
+    setLocked: (locked) => ipcRenderer.send('overlay:set-locked', locked),
+    onSetLocked: (cb) => {
+      const h = (_e: unknown, v: boolean): void => cb(v)
+      ipcRenderer.on('overlay:locked', h)
+      return () => ipcRenderer.removeListener('overlay:locked', h)
+    },
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     moveEnd: () => ipcRenderer.send('overlay:move-end'),
     resizeOverlayBy: (edge, dx, dy) => ipcRenderer.send('overlay:resize-by', edge, dx, dy),

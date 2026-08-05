@@ -40,7 +40,75 @@ const ScreenObservationControls = dynamic(
 // Visual-novel-style dialogue box pinned to the bottom of the avatar area.
 const AvatarSubtitle = dynamic(() => import('@/components/live2d/AvatarSubtitle'), { ssr: false });
 
-export default function OverlayPage() {
+/** The locked-state chip, rendered in its OWN connector window.
+ *
+ * A locked avatar must let clicks reach the desktop — on EVERY platform.
+ * That means the avatar window has to be input-transparent, which would
+ * also swallow this control (Linux cannot forward events into such a
+ * window, and hit-testing the cursor from the main process was measured
+ * not to work there). Giving the chip its own always-interactive window
+ * removes the conflict entirely instead of trading one broken side for
+ * the other.
+ *
+ * It carries NO shared state on purpose: the capability toggles live in
+ * the avatar window's store and stay there, so this window only needs to
+ * send three intents.
+ */
+function LockedChip() {
+  useEffect(() => {
+    document.documentElement.style.background = 'transparent';
+    document.body.style.background = 'transparent';
+    const report = () => {
+      const el = document.getElementById('geny-chip');
+      const r = el?.getBoundingClientRect();
+      if (r && r.width > 0) {
+        window.connector?.windowControl.chipSize?.(Math.ceil(r.width), Math.ceil(r.height));
+      }
+    };
+    report();
+    const t = setInterval(report, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const onDrag = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => window.connector?.windowControl.moveBy(ev.movementX, ev.movementY);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.connector?.windowControl.moveEnd?.();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <div id="geny-chip" style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseDown={onDrag}>
+      <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
+        <ChatIcon />
+      </button>
+      <button type="button" onClick={() => window.connector?.windowControl.openSettings()} title="설정 창 열기" style={ICON_BTN}>
+        <GearIcon />
+      </button>
+      <button type="button" onClick={() => window.connector?.windowControl.setLocked?.(false)} title="잠금 해제" style={ICON_BTN}>
+        <LockIcon open={false} />
+      </button>
+    </div>
+  );
+}
+
+/** Route entry: the connector opens this same URL twice — once as the
+ *  avatar window, once (with ?chip=1) as the small always-clickable
+ *  control window that survives the avatar going input-transparent. */
+export default function OverlayRoute() {
+  const [chip] = useState(
+    () => typeof window !== 'undefined' && new URLSearchParams(location.search).get('chip') === '1',
+  );
+  return chip ? <LockedChip /> : <AvatarOverlay />;
+}
+
+function AvatarOverlay() {
   const [resolved, setResolved] = useState<{ sid: string; rid: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Locked (default): the avatar is click-through + fixed (no move/resize); only
@@ -167,6 +235,14 @@ export default function OverlayPage() {
   useEffect(() => {
     window.connector?.windowControl.setClickThrough(locked);
   }, [locked]);
+
+  // The chip window is a separate window, so unlocking happens THERE.
+  // Main relays it back here — without this the avatar would stay
+  // input-transparent while its own UI believed it was unlocked.
+  useEffect(() => {
+    const off = window.connector?.windowControl.onSetLocked?.((v: boolean) => setLocked(v));
+    return () => off?.();
+  }, []);
 
   // Tell the connector which rectangle must stay clickable while the avatar
   // is click-through. Linux cannot forward events into a click-through
@@ -331,19 +407,11 @@ export default function OverlayPage() {
       {/* The bar is the MOVE handle: drag its background → move the whole window.
           Locked → just a small lock chip. Unlocked → the full compact bar. */}
       {locked ? (
-        /* Locked keeps the ESSENTIAL trio: open chat · settings · unlock —
-           voice/screen toggles stay behind the unlock. */
-        <div ref={barRef} style={{ ...LOCK_ONLY, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
-          <button type="button" onClick={() => window.connector?.windowControl.openControl()} title="채팅 창 열기" style={ICON_BTN}>
-            <ChatIcon />
-          </button>
-          <button type="button" onClick={() => window.connector?.windowControl.openSettings()} title="설정 창 열기" style={ICON_BTN}>
-            <GearIcon />
-          </button>
-          <button type="button" onClick={() => setLocked(false)} title="잠금 해제" style={ICON_BTN}>
-            <LockIcon open={false} />
-          </button>
-        </div>
+        /* Nothing: while locked the avatar window is input-transparent on
+           EVERY platform, so drawing controls here would show buttons that
+           cannot be pressed. The connector's separate chip window carries
+           them instead. */
+        null
       ) : (
         <div ref={barRef} style={{ ...BAR, cursor: 'move' }} onMouseEnter={onBarEnter} onMouseLeave={onBarLeave} onMouseDown={onBarDrag}>
           {/* Drag handle (left of TTS) — a NON-button so bar-drag fires on it;

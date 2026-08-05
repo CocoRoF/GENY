@@ -47,6 +47,13 @@ declare global {
          *  click-through is on. Optional: older connectors lack it, and
          *  the page must not break on them. */
         setInteractiveRects?(rects: Array<{ x: number; y: number; w: number; h: number }>): void
+        /** Chip window: report its rendered size so the connector can size
+         *  and place the window around it. */
+        chipSize?(w: number, h: number): void
+        /** Set the lock from EITHER window; main owns the state and applies
+         *  it to the avatar window, then relays it to the avatar page. */
+        setLocked?(locked: boolean): void
+        onSetLocked?(cb: (locked: boolean) => void): () => void
         moveBy(dx: number, dy: number): void
         /** Optional (connector ≥0.17.1): end-of-drag signal. */
         moveEnd?(): void

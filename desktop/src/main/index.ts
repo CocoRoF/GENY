@@ -681,6 +681,21 @@ function createOverlay(): void {
   // window's lifetime.
   armAlwaysOnTop(overlay)
 
+  // The chip is a separate window, so it has to be told to follow. Move and
+  // resize fire continuously during a drag; setBounds on an unchanged rect
+  // is cheap, and syncing every frame is what keeps the chip from lagging
+  // behind the avatar it belongs to.
+  overlay.on('move', syncChipBounds)
+  overlay.on('resize', syncChipBounds)
+  overlay.on('show', applyChipVisibility)
+  overlay.on('hide', applyChipVisibility)
+  overlay.on('closed', () => {
+    try {
+      overlayChip?.destroy()
+    } catch { /* already gone */ }
+    overlayChip = null
+  })
+
   // External links open in the OS browser, never inside the overlay.
   overlay.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -1271,12 +1286,13 @@ async function applyOverlayContent(): Promise<void> {
     // Locked by default: the avatar is click-through (clicks reach the desktop),
     // and only the /overlay control bar re-enables input on hover via
     // windowControl.setClickThrough. The page owns -webkit-app-region (drag).
-    // Fresh page: it has reported no rectangles yet, so this resolves to
-    // "interactive" until it does — the user is never locked out while the
-    // avatar loads.
-    overlayInteractiveRects = []
-    overlayClickThroughWanted = true
+    // A freshly loaded avatar starts locked (clicks reach the desktop);
+    // its controls live in the chip window, so nothing is unreachable.
+    overlayLocked = true
     applyOverlayInput()
+    void createOverlayChip().then(() => {
+      void applyChipContent().then(applyChipVisibility)
+    })
     try {
       dlog('overlay', `loadURL ${base}/overlay ${redactTok(token)}`)
       await overlay.loadURL(`${base}/overlay?token=${encodeURIComponent(token)}${sessQ}`)
@@ -1289,9 +1305,11 @@ async function applyOverlayContent(): Promise<void> {
   } else {
     // Logged-out placeholder needs its dock handle clickable.
     dlog('overlay', `placeholder (token=${token ? 'yes' : 'no'} serverUrl=${serverUrl || '(empty)'})`)
-    overlayClickThroughWanted = false
-    overlayInteractiveRects = []
+    // Logged out: the placeholder needs its own dock handle clickable and
+    // there is no server page to host a chip.
+    overlayLocked = false
     applyOverlayInput()
+    applyChipVisibility()
     loadRoute(overlay, 'overlay')
   }
 }
@@ -1316,38 +1334,116 @@ async function applyOverlayContent(): Promise<void> {
 // worse than an avatar that catches a stray click.
 const IS_LINUX = process.platform === 'linux'
 
-type Rect = { x: number; y: number; w: number; h: number }
-let overlayInteractiveRects: Rect[] = []
-let overlayClickThroughWanted = false
+
+// ── the locked-state chip window ──────────────────────────────────────
+//
+// A locked avatar must pass clicks to the desktop on EVERY platform,
+// which means the avatar window is input-transparent — and an
+// input-transparent window cannot host its own unlock button. So the
+// chip lives in its own small, always-interactive window that follows
+// the avatar. Uniform behaviour, no platform-specific compromise.
+let overlayChip: BrowserWindow | null = null
+let overlayLocked = true
+let chipSize = { w: 104, h: 40 }
+
+function chipBoundsFor(b: Electron.Rectangle): Electron.Rectangle {
+  return {
+    x: Math.round(b.x + (b.width - chipSize.w) / 2),
+    y: Math.round(b.y + b.height - chipSize.h - 6),
+    width: chipSize.w,
+    height: chipSize.h,
+  }
+}
+
+function syncChipBounds(): void {
+  if (!overlayChip || overlayChip.isDestroyed() || !overlay || overlay.isDestroyed()) return
+  try {
+    overlayChip.setBounds(chipBoundsFor(overlay.getBounds()))
+  } catch { /* mid-teardown */ }
+}
+
+function applyChipVisibility(): void {
+  if (!overlayChip || overlayChip.isDestroyed()) return
+  const shouldShow = overlayLocked && !!overlay && !overlay.isDestroyed() && overlay.isVisible()
+  if (shouldShow) {
+    syncChipBounds()
+    // showInactive: taking focus would pull the user out of whatever they
+    // are doing every time the avatar re-locks.
+    if (!overlayChip.isVisible()) overlayChip.showInactive()
+  } else if (overlayChip.isVisible()) {
+    overlayChip.hide()
+  }
+}
+
+async function createOverlayChip(): Promise<void> {
+  if (overlayChip && !overlayChip.isDestroyed()) return
+  overlayChip = new BrowserWindow({
+    width: chipSize.w,
+    height: chipSize.h,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  armAlwaysOnTop(overlayChip)
+  overlayChip.on('closed', () => {
+    overlayChip = null
+  })
+  await applyChipContent()
+}
+
+async function applyChipContent(): Promise<void> {
+  if (!overlayChip || overlayChip.isDestroyed()) return
+  const token = await getStoredToken()
+  const { serverUrl } = loadConfig()
+  if (token && serverUrl) {
+    const base = serverUrl.replace(/\/+$/, '')
+    try {
+      await overlayChip.loadURL(`${base}/overlay?chip=1&token=${encodeURIComponent(token)}`)
+      overlayChip.webContents.insertCSS('html,body{background:transparent !important;}')
+    } catch {
+      /* retried by the next refresh */
+    }
+  }
+}
+
+/** Lock state is owned HERE: it decides window input, and two windows
+ *  (avatar + chip) must never disagree about it. */
+function setOverlayLocked(locked: boolean): void {
+  overlayLocked = locked
+  applyOverlayInput()
+  applyChipVisibility()
+  try {
+    overlay?.webContents.send('overlay:locked', locked)
+  } catch { /* window gone */ }
+}
 
 /** Single place that decides the overlay's input state. */
 function applyOverlayInput(): void {
   if (!overlay || overlay.isDestroyed()) return
-  if (!IS_LINUX) {
-    overlay.setIgnoreMouseEvents(overlayClickThroughWanted, { forward: true })
-    return
-  }
-  // LINUX: the overlay stays interactive, always.
-  //
-  // Two mechanisms were tried and MEASURED not to work here:
-  //   · {forward:true} is darwin/win32-only, so a click-through window
-  //     receives nothing and the page's hover-to-unlock can never fire;
-  //   · hit-testing the cursor from main fails too — Electron's cursor
-  //     position stops updating while the pointer is over an
-  //     input-transparent window, so the bar is never detected as hovered
-  //     (verified with synthetic input: the position over the bar was
-  //     never once observed).
-  // Until the control bar becomes its own always-interactive window,
-  // catching a stray click on the avatar is the lesser harm: a user who
-  // cannot press their own unlock button has lost the app.
-  overlay.setIgnoreMouseEvents(false)
-  dlog('overlay', `input: interactive (linux; wanted=${overlayClickThroughWanted})`)
+  // SAME RULE ON EVERY PLATFORM: locked → the avatar passes clicks to
+  // whatever is behind it; unlocked → it captures them for pan/zoom and
+  // the resize frame. The controls are never affected either way, because
+  // they live in their own window.
+  overlay.setIgnoreMouseEvents(overlayLocked, IS_LINUX ? undefined : { forward: true })
+  dlog('overlay', `input: ${overlayLocked ? 'click-through' : 'interactive'}`)
 }
+
 
 /** Panic button (tray): whatever state the overlay got into, give it back
  *  to the user. Costs one stray click on the avatar; never costs control. */
 function forceOverlayInteractive(): void {
-  overlayClickThroughWanted = false
+  overlayLocked = false
   try {
     overlay?.setIgnoreMouseEvents(false)
     overlay?.showInactive()
@@ -2005,22 +2101,34 @@ function registerIpc(): void {
   })
 
   // Click-through toggle from the renderer's hit-test loop.
+  // The avatar page still reports its lock; main owns the state so both
+  // windows can never disagree.
   ipcMain.on('overlay:set-ignore-mouse', (_e, ignore: boolean) => {
-    overlayClickThroughWanted = !!ignore
-    applyOverlayInput()
+    setOverlayLocked(!!ignore)
   })
 
-  // Rectangles (window-relative CSS px) the overlay page needs clickable
-  // while it is otherwise click-through. This is what makes the lock work
-  // on Linux at all — see the platform note above.
-  ipcMain.on('overlay:set-interactive-rects', (_e, rects: Rect[]) => {
-    overlayInteractiveRects = Array.isArray(rects)
-      ? rects
-          .filter((r) => r && Number.isFinite(r.x) && Number.isFinite(r.y) && r.w > 0 && r.h > 0)
-          .slice(0, 16)
-      : []
-    applyOverlayInput()
+  ipcMain.on('overlay:set-locked', (_e, locked: boolean) => {
+    setOverlayLocked(!!locked)
   })
+
+  ipcMain.on('overlay:chip-size', (_e, w: number, h: number) => {
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 20 || h < 12) return
+    if (Math.abs(w - chipSize.w) < 2 && Math.abs(h - chipSize.h) < 2) return
+    chipSize = { w: Math.min(600, Math.round(w)), h: Math.min(200, Math.round(h)) }
+    syncChipBounds()
+  })
+
+  ipcMain.on('overlay:chip-size', (_e, w: number, h: number) => {
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 20 || h < 12) return
+    if (Math.abs(w - chipSize.w) < 2 && Math.abs(h - chipSize.h) < 2) return
+    chipSize = { w: Math.min(600, Math.round(w)), h: Math.min(200, Math.round(h)) }
+    syncChipBounds()
+  })
+
+  // Accepted and ignored: older avatar pages report interactive rects for
+  // the cursor hit-test this build replaced with the chip window. Dropping
+  // the channel would throw in those pages.
+  ipcMain.on('overlay:set-interactive-rects', () => {})
 
   // Move the overlay by a pointer delta (dock-handle drag).
   //
