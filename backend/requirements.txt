@@ -40,7 +40,7 @@ ddgs==9.11.4
 # Must match the version pin in backend/pyproject.toml — out-of-sync
 # pins are what caused the prod Docker build to install 1.21.0 and
 # blow up on `from geny_executor import CredentialBundle`.
-geny-executor[qdrant,ssh]>=2.64.7,<3.0.0
+geny-executor[qdrant,ssh]>=2.64.8,<3.0.0
 geny-memory-adaptor>=1.6.0
 contextifier[pdf]>=0.5.0
 # Knowledge connectors — cron schedules + DB sources (postgres/mysql/sqlite)
@@ -58,7 +58,7 @@ edge-tts>=6.1
 # >=0.15.x pins arrange_doc + the mcp<2.0 cap transitively (mcp 2.0 dropped
 # mcp.server.fastmcp); with this floor the resolver keeps mcp on 1.x
 # for the whole backend env, not just edit2docs.
-edit2docs>=0.15.1
+edit2docs>=0.16.1
 # Web exploration — the an-web engine backs the executor's Browser* built-ins
 # and WebFetch render_js (embedded V8; no Chromium / playwright install).
 an-web>=0.9.1
