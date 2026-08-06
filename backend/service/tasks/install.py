@@ -105,7 +105,10 @@ def install_task_runtime(app_state) -> Dict[str, Any]:
     )
     # start() is sync-safe to call from a sync context; lifespan
     # will see the runner ready by the time it yields.
-    # Long-lived; needs a strong reference to survive suspension.
+    # start() is a one-shot crash-recovery re-attach pass (it sweeps tasks
+    # left RUNNING by a previous process). Detached so it cannot delay boot —
+    # but detached through spawn_background, so a failure in that sweep is
+    # logged instead of vanishing and leaving those tasks unresolved forever.
     spawn_background(runner.start(), name="tasks.runner", key="tasks.runner")
     return {"registry": registry, "runner": runner}
 

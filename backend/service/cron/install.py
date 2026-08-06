@@ -138,8 +138,11 @@ def install_cron_runtime(app_state) -> Dict[str, Any]:
     store = _build_store(app_state)
     cycle = int(os.getenv("GENY_CRON_CYCLE_SECONDS", "60"))
     runner = _RecordingCronRunner(store, task_runner, cycle_seconds=cycle)
-    # Long-lived: without a strong reference this loop is collectable while
-    # suspended, and cron would stop with no error anywhere.
+    # start() returns quickly — the cron daemon it spawns is anchored on the
+    # runner itself (``self._daemon``), so the loop is not at risk here. What
+    # was at risk is start() ITSELF: as a bare create_task, a failure during
+    # crash-recovery re-attach would have been swallowed, leaving cron
+    # silently not running with a healthy-looking boot log.
     spawn_background(runner.start(), name="cron.runner", key="cron.runner")
     return {"store": store, "runner": runner}
 
