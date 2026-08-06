@@ -2,17 +2,20 @@ name: Backend static checks
 
 # WHY THIS EXISTS
 #
-# A single undefined name — `_prune_tasks`, added in an edit whose
-# declaration never landed — raised NameError on EVERY screen-observation
-# upload in production (79 in 12 hours). Nothing caught it: the module
-# imported fine, the syntax was valid, and the line only runs on a request.
-# It reached users as "the backend suddenly dies".
+# A single undefined name — `_prune_tasks`, added in an edit whose declaration
+# never landed — raised NameError on EVERY screen-observation upload in
+# production (79 in 12 hours). Nothing caught it: the module imported fine, the
+# syntax was valid, and the line only ran on a request. It reached users as
+# "the backend suddenly dies".
 #
-# Undefined names are exactly the class of defect that is free to detect
-# and expensive to ship, so this gate blocks them. It deliberately checks
-# ONLY that class (plus syntax): a broad style linter on a large existing
-# codebase produces noise that gets ignored, and an ignored gate stops
-# being a gate.
+# The audit that followed found the same shape elsewhere: detached tasks with
+# no strong reference, and synchronous filesystem calls on the event loop that
+# stall the entire process. All are invisible to import and to any test that
+# does not walk the exact path, and all are trivially visible to a parser.
+#
+# So the gate checks that family and nothing else. A broad style linter over
+# 170k lines produces noise, gets ignored, and then catches nothing at all.
+# See backend/scripts/check_runtime_hazards.py for the per-class rationale.
 
 on:
   push:
@@ -25,8 +28,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  undefined-names:
-    name: undefined names / syntax
+  runtime-hazards:
+    name: runtime hazards / syntax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,21 +42,11 @@ jobs:
 
       - name: Compile every module (syntax)
         working-directory: backend
-        run: python -m compileall -q service controller ws tools main.py
+        # Every package, not a hand-listed subset — the first version of this
+        # gate listed `service controller ws tools main.py` and so left
+        # routers/, hooks/ and scripts/ (745 lines) unchecked.
+        run: python -m compileall -q .
 
-      - name: No undefined names
+      - name: Runtime hazard scan
         working-directory: backend
-        run: |
-          # pyflakes reports plenty of harmless things (unused imports in a
-          # codebase this size); only undefined names are fatal here.
-          out=$(python -m pyflakes service controller ws tools main.py 2>/dev/null | grep "undefined name" || true)
-          if [ -n "$out" ]; then
-            echo "::error::Undefined names found — these raise NameError at runtime:"
-            echo "$out"
-            echo ""
-            echo "If the name is only used inside a quoted annotation, import it"
-            echo "under 'if TYPE_CHECKING:' so it exists for readers and linters"
-            echo "without creating an import cycle."
-            exit 1
-          fi
-          echo "OK — no undefined names."
+        run: python scripts/check_runtime_hazards.py .

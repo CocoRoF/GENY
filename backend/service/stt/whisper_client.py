@@ -38,6 +38,7 @@ and a degraded result like
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import io
 from dataclasses import dataclass
 from logging import getLogger
@@ -349,5 +350,4 @@ def reset_whisper_client_for_tests() -> None:
         asyncio.run(_close_all_clients())
     except RuntimeError:
         # Already inside a loop — schedule and forget.
-        loop = asyncio.get_event_loop()
-        loop.create_task(_close_all_clients())
+        spawn_background(_close_all_clients(), name="stt.close_clients")

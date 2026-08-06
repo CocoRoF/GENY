@@ -32,6 +32,7 @@ removed. The runtime fires by:
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import math
 import os
 import random
@@ -517,7 +518,11 @@ class ThinkingTriggerService:
                             "thinking trigger deferred — warming memory for %s "
                             "(live=%s)", session_id, live is not None,
                         )
-                        asyncio.create_task(self._warm_then_fire(session_id))
+                        spawn_background(
+                            self._warm_then_fire(session_id),
+                            name=f"thinking.warm_then_fire:{session_id}",
+                            key=f"thinking.warm:{session_id}",
+                        )
                         return
                 except Exception:  # noqa: BLE001 — gate fails OPEN
                     logger.debug(

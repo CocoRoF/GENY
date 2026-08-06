@@ -20,6 +20,7 @@ REST API endpoints for Text-to-Speech:
 
 import json
 import os
+import asyncio
 import shutil
 from logging import getLogger
 from pathlib import Path
@@ -1117,7 +1118,9 @@ class UpdateProfileRequest(BaseModel):
 @router.get("/profiles")
 async def list_profiles():
     """List all voice profiles"""
-    _ensure_builtin_profiles()
+    # Off-loop: this copies whole preset directories of audio on first run,
+    # and it runs on every profile listing.
+    await asyncio.to_thread(_ensure_builtin_profiles)
     profiles = []
     if VOICES_DIR.exists():
         for profile_dir in sorted(VOICES_DIR.iterdir()):
@@ -1170,7 +1173,7 @@ async def get_profile(name: str):
     if not profile_dir.exists() or not profile_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
 
-    _ensure_builtin_profiles()
+    await asyncio.to_thread(_ensure_builtin_profiles)
 
     profile_json = profile_dir / "profile.json"
     if profile_json.exists():

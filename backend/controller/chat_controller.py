@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from service.auth.auth_middleware import require_auth
+from service.utils.background import spawn_background
 from service.chat.conversation_store import get_chat_store
 from service.executor import get_agent_session_manager
 from service.utils.text_sanitizer import sanitize_for_display
@@ -253,13 +254,24 @@ def _extract_thinking_preview(entry) -> Optional[str]:
 
 
 def _notify_room(room_id: str):
-    """Signal all SSE listeners that a new message appeared for this room."""
-    ev = _room_new_msg_events.get(room_id)
-    if ev:
-        ev.set()
-        logger.debug("[Broadcast:%s] room event notified (listeners present)", room_id[:8])
-    else:
-        logger.debug("[Broadcast:%s] room event notify skipped (no listeners)", room_id[:8])
+    """Signal all SSE listeners that a new message appeared for this room.
+
+    Guarded, because every one of its nine call sites runs AFTER the message
+    has already been persisted. Letting a notification failure propagate would
+    throw away committed work and report a 500 for a request that succeeded —
+    the exact shape of the screen-observation outage. A missed nudge costs a
+    listener one poll interval; a raised exception costs the user their
+    message.
+    """
+    try:
+        ev = _room_new_msg_events.get(room_id)
+        if ev:
+            ev.set()
+            logger.debug("[Broadcast:%s] room event notified (listeners present)", room_id[:8])
+        else:
+            logger.debug("[Broadcast:%s] room event notify skipped (no listeners)", room_id[:8])
+    except Exception:  # noqa: BLE001
+        logger.warning("[Broadcast:%s] room notify failed", room_id[:8], exc_info=True)
 
 
 def _build_agent_progress_data(astate: AgentExecutionState) -> dict:
@@ -677,8 +689,8 @@ async def broadcast_to_room(
         room_id, broadcast_id, len(room_session_ids), request.message[:80],
     )
 
-    # Fire-and-forget background task
-    asyncio.create_task(
+    # Detached: the HTTP response returns immediately, the fan-out runs on.
+    spawn_background(
         _run_broadcast(
             room_id, broadcast_id, broadcast_state,
             room_session_ids, agent_info, request.message, store,

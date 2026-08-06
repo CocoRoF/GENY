@@ -26,6 +26,8 @@ import json
 import os
 import uuid
 
+from service.utils.async_fs import rmtree_async
+from service.utils.background import spawn_background
 from service.sessions.models import (
     CreateSessionRequest,
     MCPConfig,
@@ -1113,9 +1115,7 @@ class AgentSessionManager:
         # covers genuine failures). Skips aliases and providers that can't be
         # enumerated (e.g. claude_code_cli).
         try:
-            import asyncio as _asyncio
-
-            _asyncio.get_running_loop().create_task(
+            spawn_background(
                 self._warn_if_model_unavailable(
                     primary_provider, resolved_model, credentials, env_id
                 )
@@ -2202,12 +2202,12 @@ class AgentSessionManager:
 
             # Clean up storage (only on permanent delete)
             if cleanup_storage and agent.storage_path:
-                import shutil
                 from pathlib import Path as FilePath
                 sp = FilePath(agent.storage_path)
                 if sp.is_dir():
                     try:
-                        shutil.rmtree(sp)
+                        # Off-loop — a session tree is thousands of files.
+                        await rmtree_async(sp)
                         logger.info(f"[{session_id}] Storage cleaned up: {agent.storage_path}")
                     except Exception as e:
                         logger.warning(f"[{session_id}] Failed to cleanup storage: {e}")
@@ -2230,6 +2230,15 @@ class AgentSessionManager:
                 cleanup_session_state(session_id)
             except Exception:
                 pass  # best-effort
+
+            # Same reasoning for the executor's own per-session registries
+            # (holder, drain/closing guards, admission lock): keyed by session
+            # id, and until now never cleared for a deleted session.
+            try:
+                from service.execution.agent_executor import forget_session
+                forget_session(session_id)
+            except Exception:
+                pass  # best-effort — must not block deletion
 
             # Remove session logger
             remove_session_logger(session_id)
@@ -2299,16 +2308,23 @@ class AgentSessionManager:
             if cleanup_storage:
                 storage_path = record.get("storage_path")
                 if storage_path:
-                    import shutil
                     from pathlib import Path as FilePath
 
                     sp = FilePath(storage_path)
                     if sp.is_dir():
                         try:
-                            shutil.rmtree(sp)
+                            await rmtree_async(sp)
                             logger.info(f"[{session_id}] Storage cleaned up: {storage_path}")
                         except Exception as e:
                             logger.warning(f"[{session_id}] Failed to cleanup storage: {e}")
+
+            # A dormant session can still own stale executor rows from when it
+            # was live earlier in this process lifetime.
+            try:
+                from service.execution.agent_executor import forget_session
+                forget_session(session_id)
+            except Exception:
+                pass  # best-effort
 
             self._store.soft_delete(session_id)
             await self._lifecycle_bus.emit(

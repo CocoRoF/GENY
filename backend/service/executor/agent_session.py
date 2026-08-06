@@ -28,6 +28,7 @@ Usage::
 """
 
 import asyncio
+from service.utils.background import spawn_background
 import json
 from logging import getLogger
 import os
@@ -1195,11 +1196,10 @@ class AgentSession:
         """
         if self._lifecycle_bus is None:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return  # no running loop — skip
-        loop.create_task(self._emit_revived(kind=kind))
+        spawn_background(
+            self._emit_revived(kind=kind),
+            name=f"session.emit_revived:{kind}",
+        )
 
     async def _ensure_alive(self) -> None:
         """Ensure the session is alive before execution.

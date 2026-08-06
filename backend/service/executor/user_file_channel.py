@@ -22,6 +22,8 @@ from __future__ import annotations
 import mimetypes
 import re
 import shutil
+
+from service.utils.async_fs import copy2_async
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -77,7 +79,7 @@ class SessionUserFileChannel(UserFileChannel):
             dest = out_dir / name
             if dest.exists() and dest.stat().st_size != src.stat().st_size:
                 dest = out_dir / f"{dest.stem}_{src.stat().st_size}{dest.suffix}"
-            shutil.copy2(src, dest)
+            await copy2_async(src, dest)
             rel = dest.relative_to(self._storage_root)
 
         mime = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"

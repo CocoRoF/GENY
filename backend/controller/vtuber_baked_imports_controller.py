@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from service.utils.async_fs import rmtree_async
+
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from logging import getLogger
@@ -201,12 +203,16 @@ class InstallRequest(BaseModel):
     keep_source: bool = True
 
 
-def _drop_model_with_dir(manager, info, models_root: Path) -> None:
+async def _drop_model_with_dir(manager, info, models_root: Path) -> None:
     """Remove a registry entry and its extracted directory.
 
     Mirrors the cleanup the install flow does inline for `(Editor)` name
     collisions; pulled out so the library-sync flow can call it when
     replacing by puppet_id.
+
+    Async because a puppet directory is textures — deleting it synchronously
+    from the async callers below would hold the event loop for the whole
+    delete, stalling every other request in the process.
     """
     url_parts = (info.url or "").lstrip("/").split("/")
     if len(url_parts) >= 3 and url_parts[0] == "static":
@@ -218,7 +224,7 @@ def _drop_model_with_dir(manager, info, models_root: Path) -> None:
         if base_root is not None:
             target = base_root / url_parts[2]
             if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
+                await rmtree_async(target, ignore_errors=True)
     manager.remove_model(info.name)
 
 
@@ -358,7 +364,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
         model_name = prior_by_id.name
         target_dir = models_root / model_name
         if target_dir.exists():
-            shutil.rmtree(target_dir, ignore_errors=True)
+            await rmtree_async(target_dir, ignore_errors=True)
     else:
         # Fresh install. Use microsecond precision so back-to-back
         # installs of distinct puppets with the same base name don't
@@ -379,10 +385,10 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
             extracted = _safe_extract(zf, target_dir)
     except HTTPException:
         # Clean up partial extract on a path-traversal reject.
-        shutil.rmtree(target_dir, ignore_errors=True)
+        await rmtree_async(target_dir, ignore_errors=True)
         raise
     except (zipfile.BadZipFile, OSError) as e:
-        shutil.rmtree(target_dir, ignore_errors=True)
+        await rmtree_async(target_dir, ignore_errors=True)
         raise HTTPException(400, f"zip read failed: {e}") from e
 
     # ── Locate the runtime entry file ──────────────────────────────
@@ -399,7 +405,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     if runtime == "live2d":
         entry = _resolve_inside(target_dir, runtime_files, (".model3.json",))
         if not entry:
-            shutil.rmtree(target_dir, ignore_errors=True)
+            await rmtree_async(target_dir, ignore_errors=True)
             raise HTTPException(400, "no .model3.json in zip — not a Live2D puppet")
         atlas_path: Optional[Path] = None
     else:
@@ -410,11 +416,11 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
         if not entry:
             entry = _resolve_inside(target_dir, runtime_files, (".json",))
         if not entry:
-            shutil.rmtree(target_dir, ignore_errors=True)
+            await rmtree_async(target_dir, ignore_errors=True)
             raise HTTPException(400, "no .skel/.json in zip — not a Spine puppet")
         atlas_path = _resolve_inside(target_dir, runtime_files, (".atlas",))
         if not atlas_path:
-            shutil.rmtree(target_dir, ignore_errors=True)
+            await rmtree_async(target_dir, ignore_errors=True)
             raise HTTPException(400, "no .atlas in zip — Spine puppet incomplete")
 
     # ── Build the registry entry ───────────────────────────────────
@@ -453,7 +459,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
             if m.display_name.startswith(pattern_base)
         ]
         for old in prior:
-            _drop_model_with_dir(manager, old, models_root)
+            await _drop_model_with_dir(manager, old, models_root)
             replaced.append({
                 "name": old.name,
                 "display_name": old.display_name,
@@ -504,7 +510,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     if schema_version > 2:
         # Geny doesn't know how to interpret newer schemas; refuse with a
         # clear message rather than silently ignoring the new fields.
-        shutil.rmtree(target_dir, ignore_errors=True)
+        await rmtree_async(target_dir, ignore_errors=True)
         raise HTTPException(
             400,
             (
@@ -723,7 +729,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     except Exception as e:
         # Persistence failed (disk full, permission denied) — roll back
         # the extracted directory so we don't leave dangling files.
-        shutil.rmtree(target_dir, ignore_errors=True)
+        await rmtree_async(target_dir, ignore_errors=True)
         raise HTTPException(500, f"register failed: {e}") from e
 
     # ── Move source zip to installed/ ───────────────────────────────
@@ -911,7 +917,7 @@ async def library_delete(puppet_id: str, request: Request) -> dict[str, Any]:
             )
             manager.remove_model(info.name)
         else:
-            _drop_model_with_dir(manager, info, models_root)
+            await _drop_model_with_dir(manager, info, models_root)
         removed_registry = {
             "name": info.name,
             "display_name": info.display_name,

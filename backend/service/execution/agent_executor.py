@@ -21,6 +21,7 @@ Both ``agent_controller`` (command tab) and ``chat_controller``
 """
 
 import asyncio
+from service.utils.background import spawn_background
 import re
 import time
 import uuid
@@ -753,6 +754,27 @@ def get_execution_holder(session_id: str) -> Optional[dict]:
     return _active_executions.get(session_id)
 
 
+def forget_session(session_id: str) -> None:
+    """Drop every per-session entry this module keeps, on permanent delete.
+
+    These registries are keyed by session id and nothing removed a deleted
+    session's row, so entries outlived the sessions they described — small in
+    bytes, but a registry that only ever grows is a leak regardless of rate.
+
+    The admission lock is dropped ONLY when it is currently unlocked. Removing
+    a held lock would be worse than leaking it: the next caller would create a
+    fresh lock, and two turns would enter a critical section designed for one.
+    A held lock at delete time means the drain above did not finish, so we
+    keep it and accept the entry.
+    """
+    _active_executions.pop(session_id, None)
+    _draining_sessions.discard(session_id)
+    _closing_sessions.discard(session_id)
+    lock = _exec_locks.get(session_id)
+    if lock is not None and not lock.locked():
+        _exec_locks.pop(session_id, None)
+
+
 def cleanup_execution(session_id: str, exec_id: Optional[str] = None) -> None:
     """Remove the holder entry if *exec_id* matches (or is None).
 
@@ -1316,7 +1338,11 @@ async def execute_command(
         #    drain's child execution can in turn drain again only after
         #    the guard releases at the outer drain's `finally`.
         if session_id not in _draining_sessions:
-            asyncio.create_task(_drain_inbox(session_id))
+            spawn_background(
+                _drain_inbox(session_id),
+                name=f"inbox.drain:{session_id}",
+                key=f"inbox.drain:{session_id}",
+            )
 
 
 # ============================================================================
@@ -1749,11 +1775,17 @@ async def start_command_background(
                 await asyncio.sleep(_chat_cfg.holder_grace_period_s)
                 cleanup_execution(session_id, exec_id=exec_id)
 
-            asyncio.create_task(_deferred_cleanup())
+            spawn_background(
+                _deferred_cleanup(), name=f"exec.cleanup:{exec_id}"
+            )
 
             # Post-execution inbox drain
             if session_id not in _draining_sessions:
-                asyncio.create_task(_drain_inbox(session_id))
+                spawn_background(
+                    _drain_inbox(session_id),
+                    name=f"inbox.drain:{session_id}",
+                    key=f"inbox.drain:{session_id}",
+                )
 
-    asyncio.create_task(_run())
+    spawn_background(_run(), name=f"exec.run:{session_id}:{exec_id}")
     return holder

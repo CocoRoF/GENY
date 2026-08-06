@@ -15,6 +15,7 @@ from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
+from service.utils.async_fs import rmtree_async
 
 from service.sessions.models import (
     CreateSessionRequest,
@@ -367,7 +368,9 @@ async def purge_deleted_sessions(auth: dict = Depends(require_auth)):
                 sp = FilePath(storage_path)
                 if sp.is_dir():
                     try:
-                        shutil.rmtree(sp)
+                        # Off-loop: a session tree is thousands of files, and
+                        # deleting it inline stalls the whole process.
+                        await rmtree_async(sp)
                     except Exception as e:  # noqa: BLE001 — best effort
                         logger.warning(f"Failed to cleanup storage {storage_path}: {e}")
             if store.permanent_delete(sid):
@@ -776,7 +779,7 @@ async def permanent_delete_session(
         sp = FilePath(storage_path)
         if sp.is_dir():
             try:
-                shutil.rmtree(sp)
+                await rmtree_async(sp)
                 logger.info(f"Storage cleaned up: {storage_path}")
             except Exception as e:
                 logger.warning(f"Failed to cleanup storage {storage_path}: {e}")
@@ -807,7 +810,7 @@ async def permanent_delete_session(
                 sp = FilePath(linked_storage)
                 if sp.is_dir():
                     try:
-                        shutil.rmtree(sp)
+                        await rmtree_async(sp)
                         logger.info(f"Linked session storage cleaned up: {linked_storage}")
                     except Exception as e:
                         logger.warning(f"Failed to cleanup linked storage {linked_storage}: {e}")
@@ -2140,7 +2143,7 @@ async def get_doc_preview(
             if parent.is_dir():
                 for old in parent.iterdir():
                     if old.is_dir() and old.name != str(mtime):
-                        shutil.rmtree(old, ignore_errors=True)
+                        await rmtree_async(old, ignore_errors=True)
         except Exception:  # noqa: BLE001
             pass
         cache_dir.mkdir(parents=True, exist_ok=True)

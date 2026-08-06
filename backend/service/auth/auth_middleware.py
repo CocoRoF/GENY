@@ -357,6 +357,7 @@ PUBLIC_EXACT_PATHS: frozenset = frozenset(
     {
         "/",                     # redirects to /dashboard (itself gated)
         "/health",               # liveness/readiness probe — no data
+        "/health/ready",         # readiness probe (503 when deps are down)
         "/favicon.ico",          # browser auto-request; avoids 401 log noise
         "/api/auth/status",      # "is first-run setup needed?" — asked before login
         "/api/auth/login",       # obtain a token

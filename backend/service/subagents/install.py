@@ -13,6 +13,7 @@ The manager is injected into each session's ``ToolContext.extras`` (see
 """
 
 from __future__ import annotations
+from service.utils.background import spawn_background
 
 import logging
 from typing import Any, Dict, Optional
@@ -184,7 +185,6 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
             else f"{tag} Sub-agent task failed: {str(text)[:500]}"
         )
 
-        import asyncio
 
         async def _wake() -> None:
             # Try to wake the VTuber immediately; if it's busy, queue to the
@@ -220,10 +220,7 @@ def _maybe_alarm_vtuber(payload: Dict[str, Any], *, ok: bool) -> None:
             except Exception:  # noqa: BLE001 — best effort
                 logger.debug("VTuber sub-agent alarm failed", exc_info=True)
 
-        try:
-            asyncio.get_running_loop().create_task(_wake())
-        except RuntimeError:
-            logger.debug("no running loop for VTuber sub-agent alarm")
+        spawn_background(_wake(), name="subagent.vtuber_alarm")
     except Exception:  # noqa: BLE001
         logger.debug("_maybe_alarm_vtuber failed", exc_info=True)
 

@@ -35,7 +35,7 @@ try:
 except ImportError:
     print("[WARN] python-dotenv not installed. Environment variables must be set manually.")
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, HTMLResponse
@@ -174,6 +174,18 @@ async def lifespan(app: FastAPI):
         install_loop_watchdog(_asyncio.get_running_loop())
     except Exception:  # noqa: BLE001 — never block startup on diagnostics
         logger.warning("loop watchdog install failed", exc_info=True)
+
+    # Make asyncio-level failures audible. Anything that escapes a task —
+    # ours or a library's — otherwise reaches only asyncio's own default
+    # handler, which writes to stderr with no logger name and no level, so
+    # it is invisible to log filters and easily lost in framework noise.
+    # A background job can be dead for weeks that way; one was.
+    try:
+        import asyncio as _asyncio
+
+        install_asyncio_exception_handler(_asyncio.get_running_loop())
+    except Exception:  # noqa: BLE001 — never block startup on diagnostics
+        logger.warning("asyncio exception handler install failed", exc_info=True)
 
     # (Step 0 removed — geny-executor 2.2.0 absorbed the llm_patches
     # compensation layer: CLI tool-call observability and structured
@@ -756,9 +768,12 @@ async def lifespan(app: FastAPI):
     # (manual + apply-pin-on-boot — a rollback or 'keep latest' choice
     # survives a container restart). Best-effort; never blocks startup.
     try:
-        import asyncio as _asyncio
         from service.claude_code.version_service import apply_pin_on_boot
-        _asyncio.create_task(apply_pin_on_boot())
+        spawn_background(
+            apply_pin_on_boot(),
+            name="claude_code.pin_on_boot",
+            key="claude_code.pin_on_boot",
+        )
     except Exception:  # noqa: BLE001
         logger.debug("claude_code: pin-on-boot scheduling skipped", exc_info=True)
 
@@ -906,6 +921,11 @@ app = FastAPI(
 # and the self-authenticating MCP bridge). WebSocket routes keep their own
 # auth (ws_auth_or_close); this gate ignores non-http scopes.
 from service.auth.auth_middleware import RequireLoginMiddleware  # noqa: E402
+from service.utils.background import (
+    background_task_count,
+    install_asyncio_exception_handler,
+    spawn_background,
+)
 
 app.add_middleware(RequireLoginMiddleware)
 
@@ -935,27 +955,75 @@ async def root():
     return RedirectResponse(url="/dashboard")
 
 
+async def _db_status() -> str:
+    """Probe the database without ever holding the event loop.
+
+    ``db_manager.health_check`` is synchronous. Awaiting it inline — which is
+    what this endpoint used to do — means a slow or hung database blocks the
+    loop for the whole probe. That inverts the purpose of a liveness check:
+    the probe designed to detect a wedge would itself cause one, the docker
+    healthcheck would then time out, and autoheal would restart a backend
+    whose only problem was a slow database. Hence: off-loop, and bounded.
+    """
+    db = getattr(app.state, "app_db", None)
+    if db is None:
+        return "not_configured"
+    try:
+        healthy = await asyncio.wait_for(
+            asyncio.to_thread(db.db_manager.health_check), timeout=3.0
+        )
+        return "healthy" if healthy else "unhealthy"
+    except asyncio.TimeoutError:
+        return "timeout"
+    except Exception:  # noqa: BLE001 — a probe must never raise
+        return "error"
+
+
 @app.get("/health")
 async def health_check():
-    """Detailed health check including database status"""
-    agents = agent_manager.list_agents()
+    """LIVENESS — is this process still able to serve?
 
-    # Database health check
-    db_status = "not_configured"
-    if hasattr(app.state, 'app_db') and app.state.app_db is not None:
-        try:
-            healthy = app.state.app_db.db_manager.health_check()
-            db_status = "healthy" if healthy else "unhealthy"
-        except Exception:
-            db_status = "error"
+    This is the endpoint the container healthcheck polls, and going unhealthy
+    here makes autoheal restart the process. So it must answer only the
+    question a restart can fix: *is the event loop still running?* Simply
+    reaching this handler and returning proves that.
+
+    It must NOT fail on a database outage. Restarting the backend does not
+    repair postgres; it would just add a restart loop on top of the outage.
+    Dependency health is reported in the body (and enforced by /health/ready)
+    rather than by failing this response.
+    """
+    agents = agent_manager.list_agents()
+    db_status = await _db_status()
+    degraded = db_status not in ("healthy", "not_configured")
 
     return {
-        "status": "healthy",
+        # Honest, unlike the hardcoded "healthy" this replaces: the old
+        # response reported healthy while its own database check said error.
+        "status": "degraded" if degraded else "healthy",
+        "live": True,
         "total_sessions": len(agents),
         "running_sessions": sum(1 for a in agents if a.status == "running"),
         "error_sessions": sum(1 for a in agents if a.status == "error"),
-        "database": db_status
+        "database": db_status,
+        "background_tasks": background_task_count(),
     }
+
+
+@app.get("/health/ready")
+async def readiness_check(response: Response):
+    """READINESS — are dependencies usable right now?
+
+    Separate from liveness on purpose: this one DOES fail (503) when the
+    database is unreachable, which is the right signal for a load balancer or
+    a human, and the wrong signal for a process supervisor. Nothing restarts
+    on it.
+    """
+    db_status = await _db_status()
+    ready = db_status in ("healthy", "not_configured")
+    if not ready:
+        response.status_code = 503
+    return {"ready": ready, "database": db_status}
 
 
 # Register routers

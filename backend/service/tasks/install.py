@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from service.utils.background import spawn_background
 from pathlib import Path
 from typing import Any, Dict
 
@@ -104,8 +105,8 @@ def install_task_runtime(app_state) -> Dict[str, Any]:
     )
     # start() is sync-safe to call from a sync context; lifespan
     # will see the runner ready by the time it yields.
-    import asyncio
-    asyncio.get_event_loop().create_task(runner.start())
+    # Long-lived; needs a strong reference to survive suspension.
+    spawn_background(runner.start(), name="tasks.runner", key="tasks.runner")
     return {"registry": registry, "runner": runner}
 
 

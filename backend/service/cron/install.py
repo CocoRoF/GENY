@@ -16,6 +16,7 @@ fires the cron controller already records. Without this the AdminPanel
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import logging
 import os
 from datetime import datetime, timezone
@@ -137,7 +138,9 @@ def install_cron_runtime(app_state) -> Dict[str, Any]:
     store = _build_store(app_state)
     cycle = int(os.getenv("GENY_CRON_CYCLE_SECONDS", "60"))
     runner = _RecordingCronRunner(store, task_runner, cycle_seconds=cycle)
-    asyncio.get_event_loop().create_task(runner.start())
+    # Long-lived: without a strong reference this loop is collectable while
+    # suspended, and cron would stop with no error anywhere.
+    spawn_background(runner.start(), name="cron.runner", key="cron.runner")
     return {"store": store, "runner": runner}
 
 

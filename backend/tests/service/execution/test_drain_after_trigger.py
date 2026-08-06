@@ -15,6 +15,13 @@ on the existing ``_draining_sessions`` re-entry guard. These tests pin
 the new contract by inspecting the source so a future refactor cannot
 silently re-introduce the regression.
 
+The scheduling call itself is matched loosely on purpose. It has already
+changed once — from a bare ``asyncio.create_task`` to ``spawn_background``,
+which additionally keeps a strong reference and logs failures — and the
+contract under test is *when* the drain is scheduled, not *how*. Pinning the
+mechanism would make this test fail on improvements to it, which is exactly
+what happened.
+
 We deliberately do *not* spin up a full ``execute_command`` here — that
 would require mocking the entire agent / session / logger surface.
 Instead the tests are structural and document *why* the line looks the
@@ -41,10 +48,10 @@ def test_post_execution_drain_runs_for_triggers_too() -> None:
     """
     source = inspect.getsource(agent_executor.execute_command)
 
-    # Find the line that schedules the drain.
+    # Find the line that schedules the drain (any scheduling mechanism).
     drain_lines = [
         line for line in source.splitlines()
-        if "_drain_inbox" in line and "create_task" in line
+        if "_drain_inbox(" in line
     ]
     assert drain_lines, (
         "expected execute_command to schedule _drain_inbox in its "
@@ -52,8 +59,8 @@ def test_post_execution_drain_runs_for_triggers_too() -> None:
     )
 
     # Locate the surrounding `if` for that scheduling.
-    drain_idx = source.index("create_task(_drain_inbox")
-    preceding = source[:drain_idx].splitlines()[-3:]
+    drain_idx = source.index("_drain_inbox(")
+    preceding = source[:drain_idx].splitlines()[-4:]
     guard = " ".join(line.strip() for line in preceding)
 
     assert "_draining_sessions" in guard, (
@@ -78,9 +85,7 @@ def test_async_path_also_drains_unconditionally() -> None:
     # Two scheduling sites are expected (sync + async). Both must be
     # guarded only by ``_draining_sessions``, never by ``is_trigger``.
     sites = [
-        m.start() for m in re.finditer(
-            r"asyncio\.create_task\(_drain_inbox\(", source
-        )
+        m.start() for m in re.finditer(r"_drain_inbox\(session_id\)", source)
     ]
     assert len(sites) >= 2, (
         "expected at least two _drain_inbox scheduling sites "
@@ -89,14 +94,15 @@ def test_async_path_also_drains_unconditionally() -> None:
 
     for site in sites:
         # Look at a small window before the scheduling line for the
-        # surrounding `if` clause.
-        window = source[max(0, site - 200):site]
-        guard_line = window.splitlines()[-2] if len(window.splitlines()) >= 2 else ""
-        assert "_draining_sessions" in guard_line, (
+        # surrounding `if` clause. The window spans a few lines because the
+        # call is now multi-line (name= and key= arguments).
+        window = source[max(0, site - 300):site]
+        guard = " ".join(line.strip() for line in window.splitlines()[-5:])
+        assert "_draining_sessions" in guard, (
             f"drain site at offset {site} missing _draining_sessions guard; "
-            f"saw: {guard_line!r}"
+            f"saw: {guard!r}"
         )
-        assert "is_trigger" not in guard_line, (
+        assert "is_trigger" not in guard, (
             f"drain site at offset {site} re-introduced is_trigger gating; "
-            f"saw: {guard_line!r}"
+            f"saw: {guard!r}"
         )

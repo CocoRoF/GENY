@@ -16,6 +16,7 @@ hard-excluded (never synced — rotation/topology hazards).
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import logging
 import os
 from typing import Any, Callable, Dict
@@ -51,12 +52,10 @@ def synced_env(env_key: str) -> Callable[[Any, Any], None]:
 
 
 def _schedule_push(env_key: str, value: Any) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.debug("provider_key_sync: no running loop; skip push for %s", env_key)
-        return
-    loop.create_task(push_provider_key(env_key, value))
+    spawn_background(
+        push_provider_key(env_key, value),
+        name=f"provider_key.push:{env_key}",
+    )
 
 
 async def push_provider_key(env_key: str, value: Any) -> Dict[str, str]:

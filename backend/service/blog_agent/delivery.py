@@ -19,6 +19,7 @@ InteractionEvent 분류:
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -139,8 +140,7 @@ async def _do_deliver(state: BlogTaskState, kind: str) -> None:
     # 2) paraphrase trigger — fire-and-forget. execute_command 는 내부적으로
     #    AlreadyExecuting 등을 raise 할 수 있으므로 별도 task 로 분리.
     try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(
+        spawn_background(
             _trigger_paraphrase(state, payload, kind),
             name=f"blog_paraphrase:{state.task_id[:8]}",
         )

@@ -24,6 +24,7 @@ Source configs contain credentials (headers, dsn) → they persist in a
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import json
 import os
 import re
@@ -389,7 +390,7 @@ class KnowledgeCollectionScheduler:
                             finally:
                                 self._running.pop(key, None)
 
-                        asyncio.create_task(
+                        spawn_background(
                             _run(), name=f"knowledge.collect:{sid}",
                         )
                         fired += 1

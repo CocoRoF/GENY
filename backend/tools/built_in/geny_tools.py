@@ -31,6 +31,7 @@ recipient to read and respond.
 from __future__ import annotations
 
 import asyncio
+from service.utils.background import spawn_background
 import json
 from logging import getLogger
 from typing import Optional
@@ -375,8 +376,9 @@ def _trigger_dm_response(
 
     # Schedule in the running event loop (fire-and-forget)
     try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_deliver_and_respond())
+        spawn_background(
+            _deliver_and_respond(), name=f"dm.deliver:{target_session_id}"
+        )
         logger.info(
             "DM trigger scheduled: %s → %s (msg=%s)",
             sender_name, target_session_id, message_id,
@@ -1037,9 +1039,9 @@ class SendDirectMessageInternalTool(BaseTool):
         from service.vtuber.sub_agent_bridge import delegate_to_subagent
 
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                delegate_to_subagent(_gas(), executor_sa_id, content.strip())
+            spawn_background(
+                delegate_to_subagent(_gas(), executor_sa_id, content.strip()),
+                name=f"subagent.delegate:{executor_sa_id}",
             )
         except RuntimeError:
             return json.dumps(
