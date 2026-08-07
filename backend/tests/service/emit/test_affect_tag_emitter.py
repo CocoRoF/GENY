@@ -293,7 +293,11 @@ async def test_multi_tag_summary_accumulates_all_mood_paths() -> None:
     by_tag = dict(zip(AFFECT_VECTOR_TAGS, summary.emotion_vec))
     assert by_tag["joy"] == pytest.approx(MOOD_ALPHA)
     assert by_tag["fear"] == pytest.approx(0.5 * MOOD_ALPHA)
-    assert by_tag["calm"] == pytest.approx(0.25 * MOOD_ALPHA)
+    # DEFAULT_MAX_TAG_MUTATIONS_PER_TURN caps a turn at TWO axes (§3.7), so
+    # the third tag is dropped rather than applied. The point of this test —
+    # that the summary reflects every APPLIED tag, not just the last one —
+    # still holds; it simply predates the cap.
+    assert by_tag["calm"] == 0.0
     assert by_tag["sadness"] == 0.0
     assert by_tag["anger"] == 0.0
     assert by_tag["excitement"] == 0.0

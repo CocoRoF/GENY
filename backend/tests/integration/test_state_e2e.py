@@ -269,8 +269,11 @@ async def test_s3_reconnect_after_24h_triggers_single_catchup_event() -> None:
 
     # Observable on the next turn's prompt: vitals are drifted.
     vitals_rendered = VitalsBlock().render(state)
-    # Hunger climbed from 30 by +2.5*24=60 → 90 → ``starving``.
-    assert "hunger: starving" in vitals_rendered
+    # The hunger axis models ATTENTION deprivation now, and its passive drift
+    # was dialed down from +2.5 to +1.0/h because recovery also fires on every
+    # user message. 30 + 1.0*24 = 54 → ``slightly_lonely``, rendered under the
+    # axis's current name.
+    assert "attention: slightly_lonely (54/100)" in vitals_rendered
     # Energy dropped from 60 by -1.5*24=-36 → 24 → ``tired``.
     assert "energy: tired" in vitals_rendered
 
@@ -382,8 +385,12 @@ async def test_s4_anger_mood_overrides_completed_default_on_avatar_path() -> Non
 
     observe = PipelineState()
     snap = await registry.hydrate(observe)
-    # 3 turns × 2.0 strength × 0.15 MOOD_ALPHA = 0.9
-    assert snap.mood.anger == pytest.approx(0.9, rel=1e-6)
+    # Two turns at full strength (0.3 each) reach 0.6; the third crosses the
+    # saturation knee at 0.5, so its 0.3 is scaled by
+    # 1 - (0.6-0.5)/0.3*0.5 = 0.8333 → +0.25. Diminishing returns near the cap
+    # are deliberate (Plan/Phase03 §3.3); the flat 3 × 0.3 = 0.9 this used to
+    # assert predates that rule.
+    assert snap.mood.anger == pytest.approx(0.85, rel=1e-6)
 
     extractor = EmotionExtractor(_EMOTION_MAP)
     emotion, _ = extractor.resolve_emotion(None, "completed", mood=snap.mood)

@@ -32,7 +32,9 @@ def test_default_instance_has_expected_defaults(monkeypatch: pytest.MonkeyPatch)
 
 def test_config_name_and_category() -> None:
     assert GameConfig.get_config_name() == "game"
-    assert GameConfig.get_category() == "general"
+    # Lives under sub_config/general/ on disk, but is filed under the
+    # "tools" group in the settings UI.
+    assert GameConfig.get_category() == "tools"
 
 
 def test_fields_metadata_has_three_fields() -> None:

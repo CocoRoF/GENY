@@ -26,8 +26,10 @@ def test_blog_agent_is_registered_in_global_registry() -> None:
     assert registry["blog_agent"] is BlogAgentConfig
 
 
-def test_category_is_general() -> None:
-    assert BlogAgentConfig.get_category() == "general"
+def test_category_is_tools() -> None:
+    # Lives under sub_config/general/ on disk, but is filed under the
+    # "tools" group in the settings UI.
+    assert BlogAgentConfig.get_category() == "tools"
 
 
 def test_display_name_visible_in_ui() -> None:
@@ -48,6 +50,9 @@ def test_model_options_mirror_blog_frontend_available_models() -> None:
         "claude-opus-4-7",
         "claude-sonnet-4-6",
         "claude-haiku-4-5-20251001",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
     ]
     for opt in BLOG_AGENT_MODEL_OPTIONS:
         assert "label" in opt and opt["label"]
@@ -63,13 +68,14 @@ def test_default_model_is_in_options() -> None:
 # ─── 필드 metadata ───────────────────────────────────────────────
 
 
-def test_all_eight_fields_present_in_metadata() -> None:
+def test_every_field_is_present_in_metadata() -> None:
     fields = BlogAgentConfig.get_fields_metadata()
     names = {f.name for f in fields}
     assert names == {
         "base_url",
         "api_key",
         "default_model",
+        "default_prompt_mode",
         "default_timeout_s",
         "pump_idle_grace_s",
         "enabled",

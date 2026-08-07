@@ -129,7 +129,11 @@ async def test_classic_mode_leaves_state_shared_untouched() -> None:
     assert result["output"] == "ok"
     assert CREATURE_STATE_KEY not in pipe.seen_shared
     assert MUTATION_BUFFER_KEY not in pipe.seen_shared
-    assert SESSION_META_KEY not in pipe.seen_shared
+    # Classic mode DOES stash a minimal session meta now: downstream stages
+    # read turn_kind unconditionally, and a missing dict made them NPE. What
+    # must stay absent is the creature state and the mutation buffer — the
+    # actual state-mode payloads.
+    assert pipe.seen_shared[SESSION_META_KEY] == {"turn_kind": "user"}
 
 
 @pytest.mark.asyncio
@@ -193,8 +197,11 @@ async def test_persist_applies_mutations_and_bumps_state() -> None:
     await session._invoke_pipeline("hi", start_time=0.0, session_logger=None)
 
     # Reload and check the mutation was persisted.
+    # 10 + 5 (the mutation) - 3 (_USER_MSG_HUNGER_RECOVERY, pushed onto the
+    # same buffer because this turn carries a user message) = 12. The flat
+    # 15 this used to expect predates the attention-recovery hook.
     after = await prov.load("c1", owner_user_id="u1")
-    assert after.vitals.hunger == pytest.approx(15.0)
+    assert after.vitals.hunger == pytest.approx(12.0)
 
 
 @pytest.mark.asyncio
@@ -222,7 +229,8 @@ async def test_astream_also_hydrates_and_persists() -> None:
 
     assert CREATURE_STATE_KEY in pipe.seen_shared
     after = await prov.load("c1", owner_user_id="u1")
-    assert after.vitals.hunger == pytest.approx(23.0)
+    # 20 + 3 (mutation) - 3 (attention recovery on a user message) = 20.
+    assert after.vitals.hunger == pytest.approx(20.0)
 
 
 # --- Catch-up behaviour through hydrate ------------------------------------
