@@ -695,7 +695,8 @@ async def broadcast_to_room(
             room_id, broadcast_id, broadcast_state,
             room_session_ids, agent_info, request.message, store,
             attachments=attachments_payload,
-        )
+        ),
+        name=f"chat.broadcast:{room_id}",
     )
 
     return {

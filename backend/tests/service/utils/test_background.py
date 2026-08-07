@@ -139,3 +139,47 @@ def test_no_running_loop_returns_none_instead_of_raising():
 
     coro = _work()
     assert bg.spawn_background(coro, name="test.noloop") is None
+
+
+# ── the call sites, not just the helper ─────────────────────────────
+
+def test_every_spawn_background_call_names_its_job():
+    """`name` is keyword-only and required, so omitting it does not merely
+    lose a log label — it raises TypeError at the call, and the coroutine is
+    collected unstarted.
+
+    That shipped: `create_agent_session` called it bare inside a
+    `try/except RuntimeError`, which does not catch TypeError, so the
+    exception propagated and everything after that line in session creation
+    stopped running. Nothing failed loudly; the only trace was a
+    "never awaited" warning buried in the logs.
+
+    A helper's contract is only as good as its call sites, and the type
+    checker is not run over this tree.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    offenders = []
+    for path in root.rglob("*.py"):
+        if any(p in {".venv", "tests", "__pycache__", "node_modules"} for p in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "spawn_background"
+                and not any(k.arg == "name" for k in node.keywords)
+                and not any(k.arg is None for k in node.keywords)  # **kwargs
+            ):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert not offenders, (
+        "spawn_background() called without name= — raises TypeError at runtime "
+        "and kills the rest of the caller: " + ", ".join(offenders)
+    )

@@ -33,7 +33,7 @@ import ast
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 SKIP_DIRS = {".venv", "__pycache__", "node_modules", ".git", "tests", "migrations"}
 
@@ -191,6 +191,93 @@ def undefined_names(root: Path) -> List[Finding]:
     return findings
 
 
+def call_arity(root: Path) -> List[Finding]:
+    """Calls that cannot possibly succeed — wrong arity, missing required
+    keyword-only argument.
+
+    This is the same failure shape as an undefined name: it imports, it
+    compiles, tests that never walk the line stay green, and it detonates on
+    the first live request. `spawn_background(coro)` — with `name` declared
+    keyword-only and required — shipped exactly this way and took the rest of
+    session creation down with it, because the TypeError propagated past an
+    `except RuntimeError`.
+
+    Scoped to be quiet rather than clever: only functions defined EXACTLY ONCE
+    across the tree, called by bare name, in a module that imports that name.
+    A duplicate name, a method, an alias or a decorated function is skipped —
+    a false positive here costs more than the miss.
+    """
+    defs: Dict[str, List[Any]] = defaultdict(list)
+    trees: List[tuple] = []
+    for path in sorted(root.rglob("*.py")):
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:
+            continue
+        trees.append((path, tree))
+        for node in ast.iter_child_nodes(tree):  # module level only, not methods
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs[node.name].append(node)
+
+    unique = {
+        name: nodes[0]
+        for name, nodes in defs.items()
+        if len(nodes) == 1 and not nodes[0].decorator_list
+    }
+
+    findings: List[Finding] = []
+    for path, tree in trees:
+        rel = str(path.relative_to(root))
+        imported = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            fn = unique.get(node.func.id)
+            if fn is None or node.func.id not in imported:
+                continue
+            if any(isinstance(a, ast.Starred) for a in node.args) or any(
+                k.arg is None for k in node.keywords
+            ):
+                continue  # *args / **kwargs — arity is not statically known
+            given = {k.arg for k in node.keywords}
+            required_kw = {
+                a.arg
+                for a, d in zip(fn.args.kwonlyargs, fn.args.kw_defaults)
+                if d is None
+            }
+            missing = sorted(required_kw - given)
+            if missing:
+                findings.append((
+                    rel, node.lineno, "call-missing-kwarg",
+                    f"{node.func.id}() missing required keyword-only "
+                    f"{', '.join(missing)}",
+                ))
+                continue
+            pos = fn.args.posonlyargs + fn.args.args
+            n_required = len(pos) - len(fn.args.defaults)
+            supplied = len(node.args) + len(
+                [k for k in node.keywords if k.arg in {a.arg for a in pos}]
+            )
+            if not fn.args.vararg and len(node.args) > len(pos):
+                findings.append((
+                    rel, node.lineno, "call-too-many-args",
+                    f"{node.func.id}() takes {len(pos)}, got {len(node.args)}",
+                ))
+            elif supplied < n_required:
+                findings.append((
+                    rel, node.lineno, "call-too-few-args",
+                    f"{node.func.id}() needs {n_required}, got {supplied}",
+                ))
+    return findings
+
+
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     findings: List[Finding] = []
@@ -210,6 +297,7 @@ def main() -> int:
         findings.extend(audit.findings)
 
     findings.extend(undefined_names(root))
+    findings.extend(call_arity(root))
 
     if not findings:
         print("OK — no runtime hazards found.")

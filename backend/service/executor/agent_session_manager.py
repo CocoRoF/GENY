@@ -1202,7 +1202,8 @@ class AgentSessionManager:
             spawn_background(
                 self._warn_if_model_unavailable(
                     primary_provider, resolved_model, credentials, env_id
-                )
+                ),
+                name=f"model.availability:{session_id}",
             )
         except RuntimeError:
             pass
