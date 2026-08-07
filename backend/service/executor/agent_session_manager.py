@@ -24,6 +24,7 @@ if TYPE_CHECKING:  # quoted-annotation only — no import cycle at runtime
 import asyncio
 import json
 import os
+import time
 import uuid
 
 from service.utils.async_fs import rmtree_async
@@ -1893,6 +1894,12 @@ class AgentSessionManager:
         if not params:
             return None
 
+        # A wake is the one moment a user is watching a spinner with nothing
+        # to read. Time it and say so: the phases land on the session logger,
+        # which is the channel the chat panel already renders.
+        _wake_started = time.monotonic()
+        logger.info("[%s] waking — restoring session", session_id)
+
         # Defensive: clear any stale teardown gate for this id (a prior evict
         # or delete may have left it set) so the rebuilt session accepts turns.
         try:
@@ -1996,6 +2003,18 @@ class AgentSessionManager:
             cascade="main",
             linked_id=linked_id,
         )
+        _wake_took = time.monotonic() - _wake_started
+        logger.info("[%s] awake in %.2fs", session_id, _wake_took)
+        try:
+            # The session is live from here; memory may still be warming, and
+            # that phase reports itself separately.
+            agent.record_memory_event(
+                "awake",
+                f"에이전트가 깨어났습니다 ({_wake_took:.1f}초)",
+                layer="session",
+            )
+        except Exception:  # noqa: BLE001 — a notice must not fail a wake
+            logger.debug("[%s] wake notice skipped", session_id, exc_info=True)
         return agent
 
     # ========================================================================

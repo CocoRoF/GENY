@@ -450,6 +450,13 @@ class _SessionScopedCronStore:
         return getattr(self._inner, name)
 
 
+#: Ceiling on the background memory warm-up. The session is already live and
+#: keyword search covers the gap, so this is not "how long a wake takes" — it
+#: is how long `memory_ready` may stay unset before every turn starts paying
+#: the readiness gate's full timeout instead.
+_MEMORY_WARMUP_TIMEOUT_S = 90.0
+
+
 class AgentSession:
     """geny-executor Pipeline-based agent session.
 
@@ -1828,17 +1835,60 @@ class AgentSession:
                 sid = self._session_id
                 ready_evt = self._memory_ready
 
+                self.record_memory_event(
+                    "waking",
+                    "에이전트를 깨우는 중 — 기억을 불러오고 있습니다…",
+                    layer="vector",
+                )
+                _woke_at = time.monotonic()
+
                 async def _vector_warmup() -> None:
                     try:
-                        ok = await mm.initialize_vector_memory()
-                        logger.info(f"[{sid}] vector memory warm-up done (ok={ok})")
+                        # BOUNDED. A large vault re-indexes in the background
+                        # and the session is already live, but an unbounded
+                        # wait leaves `memory_ready` unset forever if the
+                        # backend is wedged — and every turn then pays the
+                        # readiness gate's full timeout before proceeding.
+                        ok = await asyncio.wait_for(
+                            mm.initialize_vector_memory(),
+                            timeout=_MEMORY_WARMUP_TIMEOUT_S,
+                        )
+                        took = time.monotonic() - _woke_at
+                        logger.info(
+                            f"[{sid}] vector memory warm-up done "
+                            f"(ok={ok}, {took:.1f}s)"
+                        )
+                        self.record_memory_event(
+                            "awake",
+                            f"기억 준비 완료 ({took:.1f}초)"
+                            if ok else
+                            f"기억 준비 완료 — 벡터 검색은 사용할 수 없습니다 ({took:.1f}초)",
+                            layer="vector",
+                        )
                     except asyncio.CancelledError:
                         raise
+                    except asyncio.TimeoutError:
+                        took = time.monotonic() - _woke_at
+                        logger.warning(
+                            f"[{sid}] vector warm-up exceeded "
+                            f"{_MEMORY_WARMUP_TIMEOUT_S}s — continuing without it"
+                        )
+                        self.record_memory_event(
+                            "awake",
+                            f"기억 준비가 {took:.0f}초를 넘겨 키워드 검색으로 계속합니다",
+                            layer="vector",
+                        )
                     except Exception as ve:  # noqa: BLE001
                         logger.debug(f"[{sid}] Vector memory init skipped: {ve}")
+                        self.record_memory_event(
+                            "awake",
+                            "기억 준비 완료 — 벡터 검색은 사용할 수 없습니다",
+                            layer="vector",
+                        )
                     finally:
-                        # Ready even on failure/cancel: "as loaded as it will
-                        # get" — waiters must never hang on a dead warm-up.
+                        # Ready even on failure/cancel/timeout: "as loaded as
+                        # it will get" — waiters must never hang on a dead
+                        # warm-up, and a turn must never be blocked by one.
                         ready_evt.set()
 
                 self._vector_init_task = asyncio.create_task(
