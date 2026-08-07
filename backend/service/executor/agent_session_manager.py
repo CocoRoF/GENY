@@ -120,6 +120,31 @@ def _vtuber_sub_worker_notice() -> str:
 
 
 
+
+async def _remove_cloud_agent_space(owner_username: str, session_id: str) -> None:
+    """Delete an agent's space inside the cloud, on permanent delete only.
+
+    Best-effort: a session must always finish being deleted, even if its
+    cloud directory cannot be removed. Off-loop because it is a tree.
+    """
+    if not owner_username:
+        return
+    try:
+        from pathlib import Path as _P
+
+        from service.cloud import agent_space
+        from service.utils.async_fs import rmtree_async
+
+        space = _P(agent_space(owner_username, session_id))
+        if space.is_dir() and not space.is_symlink():
+            await rmtree_async(space, ignore_errors=True)
+            logger.info("[%s] cloud agent space removed", session_id)
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "[%s] cloud agent space cleanup skipped", session_id, exc_info=True,
+        )
+
+
 class AgentSessionManager:
     """
     AgentSession manager — geny-executor Pipeline sessions.
@@ -2228,6 +2253,14 @@ class AgentSessionManager:
 
             # Clean up storage (only on permanent delete)
             if cleanup_storage and agent.storage_path:
+                # The agent's files live in the cloud now, and rmtree of the
+                # session root only removes the SYMLINK — leaving
+                # `agents/<sid>/` behind forever, keyed by an opaque uuid the
+                # user cannot identify, and replicating to every PC. A
+                # permanent delete is the user asking for the files to go.
+                await _remove_cloud_agent_space(
+                    getattr(agent, "_owner_username", "") or "", session_id,
+                )
                 from pathlib import Path as FilePath
                 sp = FilePath(agent.storage_path)
                 if sp.is_dir():

@@ -222,3 +222,42 @@ def test_the_owner_is_derived_from_the_link_when_no_user_is_given(world):
 
     assert owner == store.cloud_storage_path(user)
     assert prefix == f"agents/{sid}"
+
+
+# ── cleanup and reserved names ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_permanent_delete_removes_the_cloud_space(world):
+    """rmtree of the session root only removes the SYMLINK. Without this the
+    agent's directory stays in the cloud forever under an opaque uuid — and
+    replicates to every PC."""
+    from service.executor.agent_session_manager import _remove_cloud_agent_space
+
+    user, storage, sid = world
+    (Path(storage) / "workspace" / "output.txt").write_text("work", encoding="utf-8")
+    target = Path(store.adopt_agent_space(user, storage, sid))
+    assert target.is_dir()
+
+    await _remove_cloud_agent_space(user, sid)
+
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_without_an_owner_is_a_no_op(world):
+    """A session whose adoption was skipped has no cloud space to remove, and
+    deletion must finish regardless."""
+    from service.executor.agent_session_manager import _remove_cloud_agent_space
+
+    await _remove_cloud_agent_space("", "sid-x")
+    await _remove_cloud_agent_space("hr", "never-adopted")
+
+
+def test_reserved_names_cover_the_structure(world):
+    """`agents` and `gapt` are the cloud's own layout — a linked folder taking
+    either would be mirrored on top of it."""
+    user, _storage, _sid = world
+    assert "agents" in store.RESERVED_CLOUD_NAMES
+    assert "gapt" in store.RESERVED_CLOUD_NAMES
+    assert Path(store.agents_root(user)).name == "agents"
+    assert Path(store.user_gapt_root(user)).name == "gapt"

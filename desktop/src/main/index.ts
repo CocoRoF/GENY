@@ -2883,6 +2883,11 @@ function registerIpc(): void {
       // name must not collide with links, agent folders, or anything the
       // user already keeps there.
       const taken = new Set<string>([
+        // The cloud owns `agents/` and `gapt/`: an agent's space and the
+        // user's GAPT workspaces live there. A linked folder taking one of
+        // those names would be mirrored straight on top of the structure.
+        'agents',
+        'gapt',
         ...links.map((l) => l.name),
         ...(existsSync(root) ? readdirSync(root) : []),
       ])

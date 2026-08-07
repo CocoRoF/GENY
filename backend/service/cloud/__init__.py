@@ -2,6 +2,7 @@
 
 from service.cloud.store import (
     CLOUD_SCOPE_ID,
+    RESERVED_CLOUD_NAMES,
     cloud_notify_key,
     cloud_storage_path,
     cloud_workspace,
@@ -25,6 +26,7 @@ from service.cloud.store import (
 
 __all__ = [
     "CLOUD_SCOPE_ID",
+    "RESERVED_CLOUD_NAMES",
     "cloud_notify_key",
     "cloud_storage_path",
     "cloud_workspace",

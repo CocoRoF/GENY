@@ -2118,6 +2118,13 @@ async def put_storage_links(
         name = str(item.get("name") or "").strip()
         if not name or "/" in name or "\\" in name or name.startswith("."):
             continue
+        # `agents/` and `gapt/` are the cloud's own structure. A linked folder
+        # taking one of those names would be mirrored on top of it.
+        from service.cloud import RESERVED_CLOUD_NAMES
+
+        if name.lower() in RESERVED_CLOUD_NAMES:
+            logger.warning("link name %r is reserved by the cloud — skipped", name)
+            continue
         links.append({
             "name": name[:200],
             "device": str(item.get("device") or "")[:100],
