@@ -128,3 +128,33 @@ def test_an_agent_can_be_told_where_it_stands(world):
     assert store.cloud_relative(user, store.agent_space(user, sid)) == f"agents/{sid}"
     assert store.cloud_relative(user, store.user_gapt_root(user)) == "gapt"
     assert store.cloud_relative(user, "/etc") is None
+
+
+def test_the_old_cloud_link_is_dropped_rather_than_carried_in(world):
+    """`workspace/cloud` pointed at the cloud root. Moving it into the agent's
+    own space — which now lives inside the cloud — would make the space
+    contain a link to its own ancestor, and a mount or an explorer walks that
+    cycle forever. The link has nothing left to express."""
+    user, storage, sid = world
+    ws = Path(storage) / "workspace"
+    os.symlink(store.cloud_workspace(user), str(ws / "cloud"), target_is_directory=True)
+    (ws / "real.txt").write_text("keep me", encoding="utf-8")
+
+    target = Path(store.adopt_agent_space(user, storage, sid))
+
+    assert not (target / "cloud").exists()
+    assert not (target / "cloud").is_symlink()
+    assert (target / "real.txt").read_text(encoding="utf-8") == "keep me"
+
+
+def test_an_unrelated_symlink_named_cloud_is_preserved(world):
+    """Only the link to the cloud ROOT is ours to remove. Anything else a
+    user or agent made under that name is their file."""
+    user, storage, sid = world
+    other = Path(storage) / "elsewhere"
+    other.mkdir()
+    os.symlink(str(other), str(Path(storage) / "workspace" / "cloud"), target_is_directory=True)
+
+    target = Path(store.adopt_agent_space(user, storage, sid))
+
+    assert (target / "cloud").is_symlink()

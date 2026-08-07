@@ -329,6 +329,20 @@ def adopt_agent_space(username: str, storage_path: str, session_id: str) -> str:
 
         if legacy.is_dir():
             for entry in sorted(legacy.iterdir()):
+                # The old `workspace/cloud` link pointed at the cloud root.
+                # Carrying it in would make the agent's own space contain a
+                # link to its own ancestor — a cycle that a mount or an
+                # explorer walks forever. The agent is inside the cloud now,
+                # so the link has nothing left to express.
+                if entry.is_symlink() and entry.name == "cloud":
+                    try:
+                        if Path(os.readlink(str(entry))).resolve() == Path(
+                            cloud_workspace(username)
+                        ).resolve():
+                            entry.unlink()
+                            continue
+                    except OSError:
+                        pass
                 dest = target / entry.name
                 if dest.exists() or dest.is_symlink():
                     n = 2
