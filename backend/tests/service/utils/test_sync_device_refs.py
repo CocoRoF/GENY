@@ -218,3 +218,17 @@ def test_dedup_matches_across_differing_action_names(storage):
     rows = [e for e in ws.list_events(storage)["events"] if e["path"] == "made-on-web"]
     assert len(rows) == 1, f"duplicate across action names: {rows}"
     assert rows[0]["actor_kind"] == "web"
+
+
+def test_attribution_replaces_a_scan_placeholder_filed_first(storage):
+    """The scan and the actor race. A write triggers a rescan, so the
+    anonymous "agent" row can land BEFORE the actor records itself —
+    observed in production as every web/replica change listed twice."""
+    (ws.Path(storage) / "workspace" / "raced.txt").write_text("x", encoding="utf-8")
+    ws.refresh_index(storage, "scope", force=True)          # scan wins the race
+    ws.record_event(storage, actor_kind="web", actor="hr",
+                    action="uploaded", path="raced.txt", size=1)
+
+    rows = [e for e in ws.list_events(storage)["events"] if e["path"] == "raced.txt"]
+    assert len(rows) == 1, f"placeholder not replaced: {rows}"
+    assert rows[0]["actor_kind"] == "web" and rows[0]["actor"] == "hr"

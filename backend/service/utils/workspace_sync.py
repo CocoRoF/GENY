@@ -576,10 +576,23 @@ def record_event(
         logger.debug("history: cannot open index for %s", storage_path, exc_info=True)
         return
     try:
+        now = int(time.time())
+        # The scan and the actor race, and either can win: a write triggers a
+        # rescan, which files an anonymous "agent" row for the same path
+        # moments before (or after) the actor records itself. Suppressing only
+        # the later scan row leaves the other order producing duplicates —
+        # observed in production as every web/replica change listed twice.
+        # The attributed row is the authoritative one, so it REPLACES the
+        # placeholder instead of joining it.
+        if actor_kind != "agent":
+            conn.execute(
+                "DELETE FROM events WHERE path=? AND actor_kind='agent' AND ts >= ?",
+                (path[:400], now - _ATTRIBUTION_WINDOW_S),
+            )
         conn.execute(
             "INSERT INTO events(ts, actor_kind, actor, action, path, size, detail) "
             "VALUES(?,?,?,?,?,?,?)",
-            (int(time.time()), actor_kind[:16], actor[:100], action[:24],
+            (now, actor_kind[:16], actor[:100], action[:24],
              path[:400], int(size or 0), detail[:300]),
         )
         conn.execute(
