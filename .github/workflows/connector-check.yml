@@ -1,0 +1,51 @@
+name: Connector Checks
+
+# The connector's sync engine decides what to DELETE on a user's machine, and
+# its test files were only ever run by hand — one `npx tsx` at a time, which
+# is the same as not running them. This gate runs them on every change so a
+# broken merge base or a widened link scope is caught here rather than on
+# someone's disk.
+#
+# The installer build lives in connector-release.yml and stays tag-triggered;
+# this job is deliberately cheap (typecheck + tests, no electron-builder).
+
+on:
+  push:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/connector-check.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/connector-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: typecheck + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # `npm ci` needs the native electron postinstall; skip the download —
+      # nothing here launches a browser or builds an installer.
+      - name: Install
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # sync-prod-e2e.ts is excluded by the runner: it talks to production.
+      - name: Tests
+        run: npm test
