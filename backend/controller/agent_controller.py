@@ -1396,6 +1396,37 @@ async def _sync_touch(notify_key: str, storage_path: str) -> int:
         return 0
 
 
+def _within_scope(root: "Path", target: "Path") -> bool:
+    """Is *target* inside this scope, counting its workspace wherever it lives?
+
+    An adopted agent's ``workspace`` is a symlink into the cloud, so a resolved
+    path under it is NOT under the session root — reads and downloads answered
+    403 for every file such an agent produced, including the images the chat
+    renderer points at. The workspace is part of the scope no matter which
+    directory physically holds it.
+    """
+    for base in (root, (root / "workspace").resolve()):
+        try:
+            target.relative_to(base)
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
+
+
+def _ws_path(ws: "Path", target: "Path") -> str:
+    """API path (``workspace/...``) for a target inside the workspace.
+
+    Reporting it as ``target.relative_to(storage_root)`` broke the moment an
+    agent's workspace became a symlink into the cloud: the resolved target is
+    under the cloud, not under the session root, so building the response
+    raised — after the operation had already succeeded. Anchoring on the
+    workspace instead is stable wherever the bytes physically live.
+    """
+    rel = str(target.relative_to(ws)).replace("\\", "/")
+    return "workspace" if rel == "." else f"workspace/{rel}"
+
+
 def _workspace_target(storage_path: str, rel_path: str) -> "tuple":
     """Resolve *rel_path* (storage-root-relative, e.g. 'workspace/uploads/x')
     and enforce that it stays INSIDE the scope's workspace/ — the only
@@ -1440,14 +1471,14 @@ async def storage_mkdir(
     """Create a folder inside the agent workspace (explorer 새 폴더)."""
     _enforce_scope_owner(session_id, auth)
     storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
-    root, _ws, target = _workspace_target(storage_path, path)
+    root, ws, target = _workspace_target(storage_path, path)
     if target.exists():
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=False)
     await _sync_touch(_notify_key, str(root))
     await _history(storage_path, http_request, auth, "mkdir",
-                   str(target.relative_to(root)))
-    return {"ok": True, "path": str(target.relative_to(root))}
+                   _ws_path(ws, target))
+    return {"ok": True, "path": _ws_path(ws, target)}
 
 
 @router.post("/{session_id}/storage/rename")
@@ -1475,9 +1506,9 @@ async def storage_rename(
         raise HTTPException(status_code=409, detail="Destination already exists")
     await _sync_touch(_notify_key, str(root))
     await _history(storage_path, None, auth, "renamed",
-                   str(dst.relative_to(root)),
-                   detail=f"from {src.relative_to(root)}")
-    return {"ok": True, "path": str(dst.relative_to(root))}
+                   _ws_path(ws, dst),
+                   detail=f"from {_ws_path(ws, src)}")
+    return {"ok": True, "path": _ws_path(ws, dst)}
 
 
 @router.delete("/{session_id}/storage/entry")
@@ -1518,7 +1549,7 @@ async def storage_delete(
         )
     await _sync_touch(_notify_key, str(_root))
     await _history(storage_path, http_request, auth, "deleted",
-                   str(target.relative_to(_root)))
+                   _ws_path(ws, target))
     return {"ok": True}
 
 
@@ -1605,7 +1636,7 @@ async def upload_to_workspace(
         tmp.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="upload write failed")
 
-    rel = str(dest.relative_to(root))
+    rel = _ws_path(ws, dest)
     await _sync_touch(_notify_key, str(root))
     await _history(storage_path, http_request, auth, "uploaded", rel, size)
     return {
@@ -1770,10 +1801,10 @@ async def put_workspace_file(
     # scan would otherwise see the same bytes land and file it as agent work.
     await _history(storage_path, request, auth,
                    "updated" if base_sha else "added",
-                   str(target.relative_to(root)), size)
+                   _ws_path(ws, target), size)
     return {
         "ok": True,
-        "path": str(target.relative_to(root)),
+        "path": _ws_path(ws, target),
         "sha256": h.hexdigest(),
         "size": size,
         "latest_seq": latest,
@@ -1932,7 +1963,7 @@ async def chunk_upload_commit(
     latest = await _sync_touch(_notify_key, str(root))
     return {
         "ok": True,
-        "path": str(target.relative_to(root)),
+        "path": _ws_path(ws, target),
         "sha256": actual_sha,
         "size": received,
         "latest_seq": latest,
@@ -2295,9 +2326,7 @@ async def download_storage_file_raw(
     storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _FilePath(storage_path).resolve()
     target = (root / file_path).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
+    if not _within_scope(root, target):
         raise HTTPException(status_code=403, detail="Path escapes session storage")
     if not target.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
@@ -2361,9 +2390,7 @@ async def get_doc_preview(
     storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
     root = _FilePath(storage_path).resolve()
     src = (root / path).resolve()
-    try:
-        src.relative_to(root)
-    except ValueError:
+    if not _within_scope(root, src):
         raise HTTPException(status_code=403, detail="Path escapes session storage")
     if not src.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
