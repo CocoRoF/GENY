@@ -292,16 +292,16 @@ export function ControlApp() {
   const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
   // Workspace sync (Drive-style local↔agent-workspace replication)
   const [driveRoot, setDriveRoot] = useState('')
+  const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
   const [driveBusy, setDriveBusy] = useState('')
   const [driveCloud, setDriveCloud] = useState(true)
   const [driveCaps, setDriveCaps] = useState<{ streaming: boolean; missing: string } | null>(null)
-  const [driveUsage, setDriveUsage] = useState<Record<string, { used: number | null; quota: number }>>({})
   const [driveMsg, setDriveMsg] = useState('')
+  const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
   const [nativeSt, setNativeSt] = useState<{ running: boolean; mountpoint: string; supported: boolean } | null>(null)
   const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncLinks, setSyncLinks] = useState<Array<{ name: string; localPath: string; paused?: boolean }>>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
-  const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
   const [syncFolder, setSyncFolder] = useState('')
 
   useEffect(() => {

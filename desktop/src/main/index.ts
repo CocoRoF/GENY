@@ -1661,35 +1661,6 @@ function driveRoot(): string {
   return loadConfig().driveRoot || join(app.getPath('home'), 'GenyDrive')
 }
 
-/** Filesystem-safe, human-recognizable folder name for an agent, unique
- *  within the drive. Allocated ONCE per agent and then frozen — renaming a
- *  session must not churn local paths (and break open files/shortcuts). */
-function allocateDriveFolder(
-  label: string,
-  agents: Record<string, { folder: string }>,
-  sessionId: string,
-): string {
-  const taken = new Set([
-    ...RESERVED_DRIVE_NAMES,
-    ...Object.entries(agents)
-      .filter(([sid]) => sid !== sessionId)
-      .map(([, a]) => a.folder.toLowerCase()),
-  ])
-  const base =
-    (label || sessionId)
-      .normalize('NFC')
-      // Reserved on Windows + path separators; keep letters/digits/spaces.
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/[. ]+$/, '') // Windows forbids trailing dot/space
-      .slice(0, 48) || sessionId.slice(0, 8)
-  let name = base
-  let n = 2
-  while (taken.has(name.toLowerCase())) name = `${base}-${n++}`
-  return name
-}
-
 /** Reconcile sync pairs with the drive config: one managed pair per enabled
  *  agent at `<root>/<folder>`, none for disabled ones. Idempotent — safe to
  *  call after any config change. */
