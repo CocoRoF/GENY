@@ -15,9 +15,40 @@ import pytest
 from service.trigger_preset.schemas import TriggerCategory
 
 
+
+class _WarmAgent:
+    """A live, warm session.
+
+    The memory-readiness gate defers a trigger whose session is still
+    warming, so a bare stub never reaches execute_command at all. These
+    tests predate the gate and were asserting on a call that no longer
+    happened."""
+
+    def memory_ready(self) -> bool:
+        return True
+
+    async def wait_memory_ready(self, timeout: float = 8.0) -> bool:
+        return True
+
+
+class _WarmManager:
+    def get_agent(self, _sid):
+        return _WarmAgent()
+
+    async def ensure_session_live(self, _sid):
+        return _WarmAgent()
+
+
+def _patch_warm_session(monkeypatch) -> None:
+    import service.executor.agent_session_manager as _mgr_mod
+
+    monkeypatch.setattr(_mgr_mod, "get_agent_session_manager", lambda: _WarmManager())
+
+
 def _patch_common(monkeypatch, svc, *, category: TriggerCategory, prompt: str) -> dict:
     """Stub everything _fire_trigger touches except the screen path; pin which
     category/prompt the roulette 'chose'. Returns the execute_command capture."""
+    _patch_warm_session(monkeypatch)
     monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
     monkeypatch.setattr(svc, "_pick_category_and_prompt", lambda _sid, _fn: (prompt, category))
     monkeypatch.setattr(svc, "_save_to_chat_room", lambda _sid, _r: None)
@@ -157,6 +188,7 @@ async def test_scan_fires_screen_active_session_not_in_activity(monkeypatch) -> 
 
     svc = ThinkingTriggerService()
     svc._fire_trigger = AsyncMock()  # type: ignore[assignment]
+    _patch_warm_session(monkeypatch)
     monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
     monkeypatch.setattr(so, "list_active_sessions", lambda: ["sid-screen"])
 
@@ -176,6 +208,7 @@ async def test_screen_active_bypasses_adaptive_backoff(monkeypatch) -> None:
 
     svc = ThinkingTriggerService()
     svc._fire_trigger = AsyncMock()  # type: ignore[assignment]
+    _patch_warm_session(monkeypatch)
     monkeypatch.setattr(svc, "_safe_inbox_unread_count", lambda _sid: 0)
     monkeypatch.setattr(so, "list_active_sessions", lambda: ["sid"])
 

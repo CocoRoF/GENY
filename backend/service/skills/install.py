@@ -41,26 +41,33 @@ SKILLS_OPT_IN_ENV = "GENY_ALLOW_USER_SKILLS"
 # so even if a Sub-Worker somehow saw this Skill the tools would be
 # absent and the Skill body would deadend. Role-gating the Skill itself
 # keeps the slash-command menu honest for each role.
+def _normalise_skill_id(skill_id: Any) -> str:
+    """One spelling for lookups. Ids appear as both ``blog-write`` (SKILL.md
+    ``name``) and ``blog_write`` (directory), and the two must not be
+    different keys to a security-relevant gate."""
+    return str(skill_id or "").strip().lower().replace("-", "_")
+
+
 _SKILL_ROLE_RESTRICTIONS: dict[str, frozenset[str]] = {
-    "blog-write": frozenset({"vtuber"}),
+    "blog_write": frozenset({"vtuber"}),
     # Whiteboard skills — VTuber-only. The underlying tools
     # (opsidian_*, knowledge_*, whiteboard_*) are filtered to the
     # VTuber roster in `_vtuber_tool_roster`, so a Worker stumbling
     # onto these skills would deadend on tool absence anyway. Gating
     # the Skill itself keeps the slash-command menu honest per role.
-    "whiteboard-search": frozenset({"vtuber"}),
-    "whiteboard-react-to-share": frozenset({"vtuber"}),
-    "whiteboard-curate-suggest": frozenset({"vtuber"}),
+    "whiteboard_search": frozenset({"vtuber"}),
+    "whiteboard_react_to_share": frozenset({"vtuber"}),
+    "whiteboard_curate_suggest": frozenset({"vtuber"}),
     # docs/voice-notes/02_PLAN.md W4 — audio capture skill backed by
     # whiteboard_transcribe + the WhisperClient pipeline (W1) + the
     # auto-transcribe PostCaptureHook (W2). VTuber-only so the
     # slash-command menu doesn't show it for Worker / developer roles.
-    "whiteboard-voice-notes": frozenset({"vtuber"}),
+    "whiteboard_voice_notes": frozenset({"vtuber"}),
     # V3 screen-observation. Backs the [USER_OBSERVATION] synthetic
     # trigger (service/vtuber/screen_observation.py). VTuber-only —
     # the silence-first guidance + sensitive-content abstractions
     # are specifically for the persona that gets the trigger.
-    "whiteboard-screen-observation": frozenset({"vtuber"}),
+    "whiteboard_screen_observation": frozenset({"vtuber"}),
 }
 
 # Bundled skills live in <repo>/backend/skills/bundled/. Resolved
@@ -133,7 +140,12 @@ def _skill_allowed_for_role(skill: Any, role: Optional[str]) -> bool:
     skill_id = getattr(skill, "id", None) or getattr(
         getattr(skill, "metadata", None), "id", None,
     )
-    allow = _SKILL_ROLE_RESTRICTIONS.get(str(skill_id))
+    # Look up on a NORMALISED id. The map was written with hyphens while
+    # installed ids use the on-disk directory name (underscores), so every
+    # key missed and the gate was inert: a Worker received every VTuber-only
+    # skill. Normalising means a future rename between the two spellings
+    # cannot silently switch the gate off again.
+    allow = _SKILL_ROLE_RESTRICTIONS.get(_normalise_skill_id(skill_id))
     if allow is None:
         return True
     if role is None:

@@ -18,8 +18,8 @@ from service.skills.install import (
 
 
 def test_role_restrictions_pin_blog_write_to_vtuber() -> None:
-    assert "blog-write" in _SKILL_ROLE_RESTRICTIONS
-    assert _SKILL_ROLE_RESTRICTIONS["blog-write"] == frozenset({"vtuber"})
+    assert "blog_write" in _SKILL_ROLE_RESTRICTIONS
+    assert _SKILL_ROLE_RESTRICTIONS["blog_write"] == frozenset({"vtuber"})
 
 
 def _make_fake_skill(skill_id: str):
@@ -38,7 +38,7 @@ def test_unknown_skill_id_is_unrestricted() -> None:
 
 
 def test_blog_write_only_resolves_for_vtuber() -> None:
-    s = _make_fake_skill("blog-write")
+    s = _make_fake_skill("blog_write")
     # 글로벌 catalog (role=None) 에서는 노출
     assert _skill_allowed_for_role(s, role=None) is True
     assert _skill_allowed_for_role(s, role="vtuber") is True
@@ -57,12 +57,12 @@ def test_install_role_filters_blog_write_for_worker() -> None:
     vtuber_ids = {getattr(s, "id", None) for s in vtuber_skills}
     worker_ids = {getattr(s, "id", None) for s in worker_skills}
 
-    assert "blog-write" in vtuber_ids
-    assert "blog-write" not in worker_ids
+    assert "blog_write" in vtuber_ids
+    assert "blog_write" not in worker_ids
 
 
 def test_install_role_none_keeps_blog_write() -> None:
     """글로벌 listing 엔드포인트 호환 — role 미지정 시 모든 skill 노출."""
     _, all_skills = install_skill_registry(role=None)
     ids = {getattr(s, "id", None) for s in all_skills}
-    assert "blog-write" in ids
+    assert "blog_write" in ids

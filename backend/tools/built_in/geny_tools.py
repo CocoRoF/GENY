@@ -974,17 +974,23 @@ class SendDirectMessageExternalTool(BaseTool):
 
 
 class SendDirectMessageInternalTool(BaseTool):
-    """Send a message to the bound counterpart agent (VTuber↔Sub-Worker).
+    """Delegate a task to this agent's own companion sub-agent.
 
-    Symmetric for both directions: a VTuber's counterpart is its
-    Sub-Worker; a Sub-Worker's counterpart is its paired VTuber. The
-    caller's ``session_id`` is injected by the adapter from
-    ``ToolContext.session_id``; the counterpart is resolved from
-    ``AgentSession._linked_session_id``. The LLM never sees — and
+    The caller's ``session_id`` is injected by the adapter from
+    ``ToolContext.session_id``; the companion comes from the environment
+    (``host_selections.extras.owned_subagent``). The LLM never sees — and
     cannot get wrong — a target_session_id.
 
-    Returns an error without side-effects when the caller has no
-    linked counterpart, or when the linked session has been deleted.
+    The companion runs autonomously and its completion arrives as an alarm
+    through the executor inbox, so this returns as soon as the work is
+    handed over. Returns an error without side-effects when the agent owns
+    no companion.
+
+    NOTE: this used to be a counterpart DM (VTuber↔Sub-Worker, resolved from
+    ``_linked_session_id``) that wrote to the recipient's inbox and recorded
+    the line on the sender's STM. It does neither now — that path lives in
+    ``SendDirectMessageExternalTool``, which is the only remaining caller of
+    ``_record_dm_on_sender_stm``.
     """
 
     name = "send_direct_message_internal"

@@ -243,26 +243,23 @@ def test_record_helper_caps_body_length(patched_world) -> None:
 # ─────────────────────────────────────────────────────────────────
 
 
-def test_internal_tool_records_outgoing_dm(patched_world) -> None:
+def test_internal_tool_refuses_without_an_owned_subagent(patched_world) -> None:
+    """The internal tool is a DELEGATION tool now: it hands work to the
+    agent's own companion sub-agent, declared in the environment. It used to
+    deliver a counterpart DM and record it on the sender's STM — this file
+    still asserted that, against a tool that no longer does either.
+
+    With no companion declared there is nothing to delegate to, and the tool
+    must say so WITHOUT side effects."""
     tool = SendDirectMessageInternalTool()
     out = tool.run(session_id="vtuber-1", content="find something fun")
 
-    # Inbox write happened + recipient trigger fired
-    assert len(patched_world["inbox"].delivered) == 1
-    assert len(patched_world["trigger_calls"]) == 1
+    import json as _json
 
-    # Sender STM now carries the outgoing DM as assistant_dm
-    msgs = patched_world["vtuber_mem"].messages
-    assert msgs == [
-        ("assistant_dm", "[DM to Sub-Worker (internal)]: find something fun"),
-    ]
-
-    # Recipient STM untouched by this tool (recipient records its own
-    # side via _trigger_dm_response → classifier on the other end)
-    assert patched_world["sub_mem"].messages == []
-
-    # Return JSON is unchanged
-    assert '"success": true' in out
+    assert "owns no sub-agent" in _json.loads(out)["error"]
+    assert patched_world["inbox"].delivered == []
+    assert patched_world["trigger_calls"] == []
+    assert patched_world["vtuber_mem"].messages == []
 
 
 def test_internal_tool_no_record_when_no_counterpart(patched_world) -> None:
@@ -341,6 +338,11 @@ def test_external_tool_unknown_target_no_record(patched_world) -> None:
 # ─────────────────────────────────────────────────────────────────
 
 
+#: Who each fixture session is paired with. The internal tool resolved this
+#: itself from `_linked_session_id`; the external tool takes it explicitly.
+_COUNTERPART_OF = {"vtuber-1": "sub-1", "sub-1": "vtuber-1"}
+
+
 def _meta_at(mem: _FakeMemoryManager, idx: int) -> Dict[str, Any]:
     """Convenience accessor — metadata recorded for the *idx*-th
     record_message call."""
@@ -361,8 +363,12 @@ def test_internal_tool_metadata_paired_vtuber_to_sub_is_task_request(
     """VTuber → bound Sub-Worker counterpart-DM with a plain task body
     must record ``kind=task_request`` + ``counterpart_role=paired_subworker``
     so retrieval / progressive memory tools can slice the stream."""
-    tool = SendDirectMessageInternalTool()
-    tool.run(session_id="vtuber-1", content="please write notes.md")
+    # The metadata derivation under test lives in
+    # `_record_dm_on_sender_stm`, which only the EXTERNAL tool still
+    # calls — the internal tool became a delegation tool and records
+    # nothing. Same code path, reached through its real caller.
+    tool = SendDirectMessageExternalTool()
+    tool.run(sender_session_id="vtuber-1", target_session_id=_COUNTERPART_OF["vtuber-1"], content="please write notes.md")
 
     meta = _meta_at(patched_world["vtuber_mem"], 0)
     assert meta["kind"] == "task_request"
@@ -377,9 +383,10 @@ def test_internal_tool_metadata_paired_sub_to_vtuber_subworker_result_is_task_re
 ) -> None:
     """Sub-Worker → bound VTuber with ``[SUB_WORKER_RESULT]`` body
     flips to ``kind=task_result`` + ``counterpart_role=paired_vtuber``."""
-    tool = SendDirectMessageInternalTool()
+    tool = SendDirectMessageExternalTool()
     tool.run(
-        session_id="sub-1",
+        sender_session_id="sub-1",
+        target_session_id=_COUNTERPART_OF["sub-1"],
         content="[SUB_WORKER_RESULT]\nstatus: ok\nsummary: wrote notes.md",
     )
 
@@ -396,8 +403,12 @@ def test_internal_tool_metadata_paired_sub_to_vtuber_plain_is_dm(
     """Sub-Worker → bound VTuber with a plain (non-SUB_WORKER_RESULT)
     body stays as ``kind=dm`` but keeps ``counterpart_role=paired_vtuber``
     so the relationship dimension is preserved."""
-    tool = SendDirectMessageInternalTool()
-    tool.run(session_id="sub-1", content="hello — quick question")
+    # The metadata derivation under test lives in
+    # `_record_dm_on_sender_stm`, which only the EXTERNAL tool still
+    # calls — the internal tool became a delegation tool and records
+    # nothing. Same code path, reached through its real caller.
+    tool = SendDirectMessageExternalTool()
+    tool.run(sender_session_id="sub-1", target_session_id=_COUNTERPART_OF["sub-1"], content="hello — quick question")
 
     meta = _meta_at(patched_world["sub_mem"], 0)
     assert meta["kind"] == "dm"

@@ -1,20 +1,29 @@
 """Regression tests for `SendDirectMessageInternalTool`.
 
-Cycle 20260420_7 / PR-1: the VTuber↔Sub-Worker DM path used to require
-the LLM to copy a UUID from its system prompt into
-``send_direct_message_external``'s ``target_session_id`` argument; when the
-LLM treated the "## Sub-Worker Agent" header as a literal session name
-instead, it created a new session and routed the DM there. The
-counterpart tool drops ``target_session_id`` from the LLM-visible
-schema entirely — the runtime resolves the linked agent from
-``AgentSession._linked_session_id``.
+WHAT THIS TOOL IS NOW
 
-See ``dev_docs/20260420_7/analysis/01_linked_counterpart_discovery.md``
-and ``plan/01_counterpart_message_tool.md``.
+It delegates a task to the agent's OWN companion sub-agent, declared in the
+environment (``host_selections.extras.owned_subagent``). The companion runs
+autonomously; completion arrives later as an inbox alarm.
+
+WHAT IT USED TO BE — and what this file used to assert — was a counterpart DM
+(VTuber↔Sub-Worker, resolved from ``AgentSession._linked_session_id``) that
+wrote to the recipient's inbox and fired a response trigger. Four tests here
+still described that, so they ran against a tool that now answers "this agent
+owns no sub-agent to delegate to" and did nothing else.
+
+The one property that survived both designs is the reason the tool exists:
+``target_session_id`` is NOT in the LLM-visible schema. The LLM used to be
+asked to copy a UUID out of its system prompt, mistook the "## Sub-Worker
+Agent" header for a session name, and created a new session to DM into. The
+runtime resolves the target; the model cannot get it wrong.
+
+See ``dev_docs/20260420_7/analysis/01_linked_counterpart_discovery.md``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -36,10 +45,18 @@ class _SimpleContext:
 
 
 class _FakeAgent:
-    def __init__(self, session_id: str, name: str, linked_id: Optional[str]):
+    def __init__(
+        self,
+        session_id: str,
+        name: str,
+        linked_id: Optional[str],
+        companion_id: Optional[str] = None,
+    ):
         self.session_id = session_id
         self.session_name = name
         self._linked_session_id = linked_id
+        # The environment-declared companion this agent may delegate to.
+        self._executor_sub_agent_id = companion_id
 
 
 class _FakeManager:
@@ -127,142 +144,71 @@ def test_probe_injects_session_id() -> None:
 # ─────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_vtuber_sends_to_linked_sub_worker(patched_world) -> None:
-    install, inbox, triggers = patched_world
-    install({
-        "vtuber-1": _FakeAgent("vtuber-1", "VTuber", linked_id="sub-1"),
-        "sub-1": _FakeAgent("sub-1", "SubWorker", linked_id="vtuber-1"),
-    })
-
-    tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "please create test.txt"},
-        _SimpleContext("vtuber-1"),
-    )
-
-    assert result.is_error is False, result.content
-    payload = json.loads(result.content)
-    assert payload["success"] is True
-    assert payload["delivered_to"] == "sub-1"
-    assert payload["delivered_to_name"] == "SubWorker"
-    assert len(inbox.delivered) == 1
-    assert len(triggers) == 1
-    assert triggers[0]["target_session_id"] == "sub-1"
-    assert triggers[0]["sender_session_id"] == "vtuber-1"
-
-
-@pytest.mark.asyncio
-async def test_sub_worker_replies_to_linked_vtuber(patched_world) -> None:
-    """Symmetry: same tool, opposite direction. Sub→VTuber must work
-    identically with zero logic change."""
-    install, inbox, triggers = patched_world
-    install({
-        "vtuber-1": _FakeAgent("vtuber-1", "VTuber", linked_id="sub-1"),
-        "sub-1": _FakeAgent("sub-1", "SubWorker", linked_id="vtuber-1"),
-    })
-
-    tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "done"},
-        _SimpleContext("sub-1"),
-    )
-
-    assert result.is_error is False, result.content
-    payload = json.loads(result.content)
-    assert payload["delivered_to"] == "vtuber-1"
-    assert triggers[0]["sender_session_id"] == "sub-1"
-
-
 # ─────────────────────────────────────────────────────────────────
-# Safe failures — no spurious session creation, no side-effects
+# Delegation — what the tool actually does now
 # ─────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_no_linked_counterpart_returns_error(patched_world) -> None:
+async def test_refuses_when_the_agent_owns_no_companion(patched_world) -> None:
+    """No companion declared → nothing to delegate to. The refusal must be
+    explicit AND side-effect free: a half-delivered task with no runner is
+    worse than a clear error."""
     install, inbox, triggers = patched_world
-    install({
-        "solo-1": _FakeAgent("solo-1", "Solo", linked_id=None),
-    })
+    install({"solo-1": _FakeAgent("solo-1", "Solo", linked_id=None)})
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "hi"},
-        _SimpleContext("solo-1"),
-    )
+    result = await tool.execute({"content": "do the thing"}, _SimpleContext("solo-1"))
 
     payload = json.loads(result.content)
-    assert "error" in payload
-    assert "no linked counterpart" in payload["error"]
+    assert "owns no sub-agent" in payload["error"]
     assert inbox.delivered == []
     assert triggers == []
 
 
 @pytest.mark.asyncio
-async def test_linked_counterpart_deleted_returns_error(patched_world) -> None:
-    """Linked id points at a session that no longer exists — fail loud,
-    don't silently reroute or create."""
+async def test_unknown_caller_session_is_reported_not_guessed(patched_world) -> None:
     install, inbox, triggers = patched_world
-    install({
-        "vtuber-1": _FakeAgent("vtuber-1", "VTuber", linked_id="ghost-sub"),
-    })
+    install({})
 
     tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "hi"},
-        _SimpleContext("vtuber-1"),
-    )
+    result = await tool.execute({"content": "hi"}, _SimpleContext("ghost-1"))
 
     payload = json.loads(result.content)
-    assert "error" in payload
-    assert "no longer exists" in payload["error"]
-    assert inbox.delivered == []
-    assert triggers == []
-
-
-@pytest.mark.asyncio
-async def test_empty_content_returns_error(patched_world) -> None:
-    install, inbox, triggers = patched_world
-    install({
-        "vtuber-1": _FakeAgent("vtuber-1", "VTuber", linked_id="sub-1"),
-        "sub-1": _FakeAgent("sub-1", "SubWorker", linked_id="vtuber-1"),
-    })
-
-    tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "   "},
-        _SimpleContext("vtuber-1"),
-    )
-
-    payload = json.loads(result.content)
-    assert "error" in payload
-    assert inbox.delivered == []
-
-
-@pytest.mark.asyncio
-async def test_unknown_caller_returns_error(patched_world) -> None:
-    install, inbox, triggers = patched_world
-    install({})  # nothing registered
-
-    tool = geny_tools.SendDirectMessageInternalTool()
-    adapter = tool
-
-    result = await adapter.execute(
-        {"content": "hi"},
-        _SimpleContext("ghost-caller"),
-    )
-
-    payload = json.loads(result.content)
-    assert "error" in payload
     assert "caller session not found" in payload["error"]
+    assert inbox.delivered == []
+
+
+@pytest.mark.asyncio
+async def test_hands_the_task_to_the_declared_companion(patched_world, monkeypatch) -> None:
+    """With a companion declared, the content goes to THAT sub-agent and the
+    tool returns immediately — the companion reports back through the inbox
+    alarm, not through this call."""
+    install, _inbox, _triggers = patched_world
+    install({
+        "vtuber-1": _FakeAgent(
+            "vtuber-1", "VTuber", linked_id="sub-1", companion_id="executor-sa-9",
+        ),
+    })
+
+    handed: list[tuple] = []
+
+    async def _fake_delegate(_app_state, sa_id, content):
+        handed.append((sa_id, content))
+
+    import service.vtuber.sub_agent_bridge as bridge
+
+    monkeypatch.setattr(bridge, "delegate_to_subagent", _fake_delegate)
+    monkeypatch.setattr(
+        geny_tools, "spawn_background",
+        lambda coro, **kw: asyncio.get_running_loop().create_task(coro),
+    )
+
+    tool = geny_tools.SendDirectMessageInternalTool()
+    result = await tool.execute(
+        {"content": "please write notes.md"}, _SimpleContext("vtuber-1"),
+    )
+
+    await asyncio.sleep(0)  # let the detached hand-off run
+    assert result.is_error is False, result.content
+    assert handed == [("executor-sa-9", "please write notes.md")]
