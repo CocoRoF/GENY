@@ -129,3 +129,81 @@ def test_the_bind_matches_what_the_host_side_tools_allow(cloud):
         root = store.sandbox_bind_root(user, sid)
         widest = store.cloud_workspace(user) if connected else store.agent_space(user, sid)
         assert root == widest
+
+
+# ── the bind actually follows a change ──────────────────────────────
+
+class _FakeClient:
+    """Records what the provider does to workspace rows."""
+
+    def __init__(self, existing):
+        self.existing = existing
+        self.deleted: list[str] = []
+        self.created: list[str] = []
+
+    async def list_projects(self, **_kw):
+        return [{"id": "p1", "slug": "geny"}]
+
+    async def list_workspaces(self, _pid):
+        return [self.existing] if self.existing else []
+
+    async def delete_workspace(self, wid):
+        self.deleted.append(wid)
+        self.existing = None
+
+    async def create_workspace(self, _pid, *, name, kind=None, worktree_path=None, **_kw):
+        self.created.append(worktree_path or "")
+        self.existing = {
+            "id": "w2", "name": name, "kind": kind, "worktree_path": worktree_path,
+            "status": "running",
+        }
+        return self.existing
+
+    async def start_workspace(self, _wid):
+        return self.existing
+
+    async def get_workspace(self, _wid):
+        return self.existing
+
+
+def _row(path):
+    return {
+        "id": "w1", "name": "sid-1", "kind": "bind",
+        "worktree_path": path, "status": "running",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "existing_path, want_rebuild",
+    [
+        (f"{HOST}/agents/sid-1", True),   # narrowed→widened: disconnect must bite
+        (HOST, False),                    # unchanged: reuse, no churn
+        ("", False),                      # field absent: never rebuild blindly
+    ],
+)
+async def test_a_changed_bind_rebuilds_the_workspace(
+    monkeypatch, existing_path, want_rebuild
+):
+    """A mount is fixed when the container is built. Reusing a row whose bind
+    no longer matches leaves the sandbox looking at the OLD tree — the whole
+    connection toggle silently stops applying to sandboxed tools."""
+    from service.gapt import provider as mod
+
+    client = _FakeClient(_row(existing_path) if existing_path else
+                         {"id": "w1", "name": "sid-1", "kind": "bind", "status": "running"})
+    prov = mod.GaptWorkspaceProvider(client)
+    monkeypatch.setattr(mod.GaptSandboxHandle, "ensure", lambda self: _noop())
+
+    await prov.ensure_workspace(
+        project_slug="geny", workspace_name="sid-1", wait_running=False,
+        bind_host_dir=HOST, backend_workspace_dir=CLOUD,
+    )
+
+    assert bool(client.deleted) is want_rebuild
+    if want_rebuild:
+        assert client.created == [HOST], "rebuilt against the wrong directory"
+
+
+async def _noop():
+    return None

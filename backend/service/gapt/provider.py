@@ -251,15 +251,39 @@ class GaptWorkspaceProvider:
             raise GaptApiError(500, "project.no_id", str(project)[:200])
 
         ws = await self._find_workspace_by_name(project_id, workspace_name)
+        # Only a path we can actually READ counts as a mismatch. A row that
+        # omits `worktree_path` would otherwise look stale on every build and
+        # archive the sandbox each time a session starts.
+        _existing_bind = str((ws or {}).get("worktree_path") or "").rstrip("/")
+        _stale_bind = bool(
+            ws is not None
+            and bind_host_dir
+            and (ws.get("kind") or "worktree") == "bind"
+            and _existing_bind
+            and _existing_bind != bind_host_dir.rstrip("/")
+        )
         if (
             ws is not None
             and bind_host_dir
-            and (ws.get("kind") or "worktree") != "bind"
+            and ((ws.get("kind") or "worktree") != "bind" or _stale_bind)
         ):
-            # Legacy worktree workspace from before the unification —
-            # archive it (bind dirs untouched by GAPT deletes) and fall
-            # through to a fresh bind creation under the same name.
+            # Two cases, one remedy — archive and re-create under the same
+            # name (bind dirs are untouched by GAPT deletes, so nothing is
+            # lost either way):
+            #
+            #  · a legacy worktree workspace from before the unification;
+            #  · a bind pointed at a DIFFERENT directory than the one we
+            #    were asked for. A mount is fixed when the container is
+            #    built, so reusing the row would silently keep the old
+            #    view: an agent that has since been disconnected would go
+            #    on reading the whole shared cloud through Bash, and a
+            #    newly connected one would never see it.
             wid_old = _workspace_id(ws)
+            if _stale_bind:
+                logger.info(
+                    "gapt_workspace.rebind name=%s %s → %s",
+                    workspace_name, ws.get("worktree_path"), bind_host_dir,
+                )
             try:
                 if wid_old:
                     await self._client.delete_workspace(wid_old)
