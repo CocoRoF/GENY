@@ -203,7 +203,8 @@ def list_storage_files(
     storage_path: str,
     subpath: str = "",
     session_id: str = "",
-    include_gitignore: bool = True
+    include_gitignore: bool = True,
+    extra_roots: Optional[List[str]] = None,
 ) -> List[Dict]:
     """
     List all files in the storage directory recursively.
@@ -220,9 +221,41 @@ def list_storage_files(
     Returns:
         List of file information dictionaries.
     """
+    # Containment. `subpath` arrives from a query string and the tree can
+    # hold symlinks, so the joined path is RESOLVED and then required to sit
+    # under an allowed root. Without this, a symlink planted anywhere in a
+    # workspace made this endpoint enumerate any directory in the backend
+    # container — verified against /etc, 498 entries. The raw-file reader and
+    # every write path already checked; the listing did not.
+    #
+    # `extra_roots` exists for one legitimate escape: the server-created
+    # `workspace/cloud` link into the caller's own cloud. It is passed by the
+    # caller that already authorised that scope — never inferred here.
+    roots = [Path(storage_path).resolve()]
+    for extra in extra_roots or []:
+        try:
+            roots.append(Path(extra).resolve())
+        except OSError:
+            continue
+
     target_path = Path(storage_path)
     if subpath:
         target_path = target_path / subpath
+    try:
+        resolved = target_path.resolve()
+    except OSError:
+        return []
+    if not any(resolved == r or r in resolved.parents for r in roots):
+        logger.warning(
+            "%slisting refused — %s escapes the allowed roots",
+            f"[{session_id}] " if session_id else "", subpath,
+        )
+        return []
+    # NOTE: `target_path` deliberately stays UNRESOLVED for the walk. Every
+    # row's `path` is computed as `item.relative_to(storage_path)`, so walking
+    # the resolved location would put entries outside the scope root and drop
+    # them all — the cloud link would list empty. The resolved form is only
+    # ever used for the containment decision above.
 
     if not target_path.exists():
         return []

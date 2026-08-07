@@ -1321,9 +1321,24 @@ async def list_storage_files(
     # vault — thousands of entries) and the UI polls it. Run synchronously
     # it seizes the event loop and starves every other endpoint (observed:
     # storage/changes timing out, all sync engines wedged in 'syncing').
+    # The one legitimate way out of this scope: a connected agent's
+    # `workspace/cloud` link into the caller's OWN cloud. Passed explicitly
+    # and only when the connection exists, so the listing follows that link
+    # and nothing else.
+    extra_roots: List[str] = []
+    try:
+        from service.cloud import cloud_workspace, is_cloud_scope, is_connected
+
+        _user = (auth or {}).get("sub") or ""
+        if _user and not is_cloud_scope(session_id) and is_connected(_user, session_id):
+            extra_roots.append(cloud_workspace(_user))
+    except Exception:  # noqa: BLE001
+        logger.debug("cloud root resolution skipped for listing", exc_info=True)
+
     files_data = await asyncio.to_thread(
         storage_utils.list_storage_files,
         storage_path, subpath=path, session_id=session_id,
+        extra_roots=extra_roots,
     )
     files = [StorageFile(**f) for f in files_data]
 
