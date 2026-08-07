@@ -2285,6 +2285,10 @@ async def set_cloud_connection(
         agent = agent_manager.get_agent(session_id)
         if agent is not None and hasattr(agent, "rebind_tool_roots"):
             agent.rebind_tool_roots()
+        # Host-side roots are re-read per turn; the SANDBOX bind is baked into
+        # its container mount, so it has to be rebuilt to follow the toggle.
+        if agent is not None and hasattr(agent, "invalidate_sandbox_binding"):
+            await agent.invalidate_sandbox_binding()
     except Exception:  # noqa: BLE001 — worst case it applies next build
         pass
     return {"connected": connected, "sessions": sessions}

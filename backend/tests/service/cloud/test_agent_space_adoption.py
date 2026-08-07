@@ -261,3 +261,19 @@ def test_reserved_names_cover_the_structure(world):
     assert "gapt" in store.RESERVED_CLOUD_NAMES
     assert Path(store.agents_root(user)).name == "agents"
     assert Path(store.user_gapt_root(user)).name == "gapt"
+
+
+def test_sandbox_scratch_does_not_replicate(world):
+    """`.gapt/` holds whatever a build leaves behind. The cloud carries work
+    product to every one of the user's PCs; it must not carry the machinery."""
+    from service.utils.workspace_sync import _build_ignore_spec
+
+    user, storage, sid = world
+    store.adopt_agent_space(user, storage, sid)
+    spec = _build_ignore_spec(store.cloud_storage_path(user), "cloud")
+
+    assert spec.match_file(f"agents/{sid}/.gapt/") or spec.match_file(
+        f"agents/{sid}/.gapt/build/out.o"
+    ), "sandbox scratch would sync to every PC"
+    # Real output beside it still syncs — that is the point of the space.
+    assert not spec.match_file(f"agents/{sid}/report.md")

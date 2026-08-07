@@ -2518,6 +2518,40 @@ class AgentSession:
     # geny-executor Pipeline Mode
     # ========================================================================
 
+    async def invalidate_sandbox_binding(self) -> bool:
+        """Tear the GAPT sandbox down so the next use rebuilds its bind.
+
+        The bind is chosen when the workspace is created — the agent's own
+        space, or the whole cloud when connected. A container mount cannot be
+        re-scoped per turn, so a connection toggle would otherwise leave the
+        sandbox looking at the OLD tree: a disconnected agent still reading
+        the shared space through Bash, or a freshly connected one unable to.
+
+        Best-effort. The sandbox ladder re-creates the workspace lazily on the
+        next sandboxed call, so failing here costs a stale bind until the
+        session restarts — never the toggle itself.
+        """
+        sandbox = getattr(self, "_gapt_sandbox", None)
+        if sandbox is None:
+            return False
+        try:
+            from service.gapt import get_gapt_client
+
+            wid = getattr(sandbox, "workspace_id", "")
+            if wid:
+                await get_gapt_client().delete_workspace(wid)
+            self._gapt_sandbox = None
+            logger.info(
+                "[%s] sandbox binding invalidated — rebuilds on next use",
+                self._session_id,
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] sandbox invalidation skipped", self._session_id, exc_info=True,
+            )
+            return False
+
     def rebind_tool_roots(self) -> bool:
         """Re-apply filesystem roots to a LIVE pipeline.
 

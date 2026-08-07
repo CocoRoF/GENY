@@ -993,13 +993,30 @@ class AgentSessionManager:
                     # shared tree with everything else.
                     _backend_ws = os.path.join(str(_ROOT), session_id, "workspace")
                     try:
-                        from service.cloud import adopt_agent_space
+                        from service.cloud import (
+                            adopt_agent_space,
+                            sandbox_bind_root,
+                        )
 
                         if owner_username:
-                            _backend_ws = adopt_agent_space(
+                            adopt_agent_space(
                                 owner_username,
                                 os.path.join(str(_ROOT), session_id),
                                 session_id,
+                            )
+                            # WHAT THE SANDBOX SEES follows the connection, the
+                            # same rule the host-side tool roots use: its own
+                            # space alone, or the whole shared tree. Connected,
+                            # /workspace IS the cloud — the user's linked
+                            # folders, the other agents' spaces and the user's
+                            # GAPT workspace are all visible and addressable,
+                            # which is what makes the cloud shared rather than
+                            # a place each agent reaches into blindly.
+                            # The executor's path mapping keys off this root,
+                            # so the agent's own working_dir lands at
+                            # /workspace/agents/<sid> either way.
+                            _backend_ws = sandbox_bind_root(
+                                owner_username, session_id
                             )
                     except Exception:  # noqa: BLE001 — fall back to the legacy path
                         logger.debug(
@@ -1011,7 +1028,22 @@ class AgentSessionManager:
                     if _host_root:
                         # Mirror the backend path under the host root: both
                         # sides see the same volume, only the prefix differs.
+                        # That mirroring only holds INSIDE the volume — the
+                        # cloud root is configurable, and one pointed outside
+                        # it would yield a `../..` relpath and a bind naming
+                        # some unrelated host directory. Refuse rather than
+                        # mount whatever that resolves to.
                         _rel_to_root = os.path.relpath(_backend_ws, str(_ROOT))
+                        if _rel_to_root.startswith(".."):
+                            logger.warning(
+                                "[%s] cloud root lies outside the bindable volume "
+                                "(%s) — sandbox falls back to its own space",
+                                session_id, _backend_ws,
+                            )
+                            _backend_ws = os.path.join(
+                                str(_ROOT), session_id, "workspace"
+                            )
+                            _rel_to_root = os.path.relpath(_backend_ws, str(_ROOT))
                         _bind_host = f"{_host_root}/{_rel_to_root}"
                     if _bind_host:
                         # The dir must exist before GAPT validates/mounts it.

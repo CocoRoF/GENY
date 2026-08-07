@@ -215,7 +215,9 @@ class SectionLibrary:
         )
 
     @staticmethod
-    def files_workspace(storage_path: str, cloud_linked: bool = False) -> PromptSection:
+    def files_workspace(
+        storage_path: str, cloud_linked: str = ""
+    ) -> PromptSection:
         """Short manifest of the session's FILES WORKSPACE (host storage).
 
         Deliberately terse (workspace-canvas plan): the prompt states only the
@@ -238,13 +240,23 @@ class SectionLibrary:
             f"doc_convert for pdf/png/text, doc_generate to create new ones."
         )
         if cloud_linked:
-            # Non-discoverable fact, not an instruction: the same bytes are
-            # visible to the user's devices and to every other connected
-            # agent, which changes what deleting or overwriting there means.
+            # Non-discoverable facts, not instructions. The agent's space is
+            # INSIDE GenyCloud now, so the layout above it — the user's
+            # folders, the other agents, the two kinds of GAPT workspace —
+            # is reachable and is not this session's private property. An
+            # agent that does not know this either never looks (and asks the
+            # user to re-upload what is already there) or overwrites shared
+            # work believing it was scratch.
             content += (
-                " cloud/ is GenyCloud — shared storage the user and other "
-                "connected agents see live; it is not this session's private "
-                "space."
+                f" This space is inside GenyCloud at `{cloud_linked}` — shared "
+                "storage that mirrors live to the user's PCs and to the other "
+                "connected agents, so anything written here appears on their "
+                "machines and anything deleted disappears from them. Sibling "
+                "paths in the cloud: the user's own folders at the top level "
+                "(their linked PC folders), `agents/<id>/` for each other "
+                "agent's space, `gapt/` for the user's own sandbox workspace, "
+                "and `.gapt/` inside a space for that agent's sandbox scratch "
+                "(the only part that does NOT mirror to the user's PCs)."
             )
         return PromptSection(
             name="files_workspace",
@@ -749,10 +761,22 @@ def build_agent_prompt(
     # space (uploads/drafts/outputs). Details via WorkspaceInfo (progressive
     # disclosure); the sandbox counterpart is covered by the GAPT section.
     if storage_path:
-        import os as _os
+        # Where this space SITS in the cloud, not whether a link exists. The
+        # old probe looked for a `workspace/cloud` symlink; agent spaces live
+        # inside the cloud directly now, so that link is gone and the probe
+        # would report "not shared" for every session that is.
+        _where = ""
+        try:
+            from service.cloud import owning_storage
 
-        _cloud_linked = _os.path.islink(_os.path.join(storage_path, "workspace", "cloud"))
-        builder.add_section(SectionLibrary.files_workspace(storage_path, _cloud_linked))
+            # `owning_storage` reads the adoption symlink, so it answers both
+            # "is this space in the cloud" and "where" without needing the
+            # username threaded through the prompt builder. A session that
+            # was never adopted returns an empty prefix and stays silent.
+            _where = owning_storage(storage_path)[1]
+        except Exception:  # noqa: BLE001 — prompt must build regardless
+            _where = ""
+        builder.add_section(SectionLibrary.files_workspace(storage_path, _where))
 
     # §4 DateTime (FULL only)
     if mode == PromptMode.FULL:

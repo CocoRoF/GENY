@@ -53,6 +53,11 @@ SYNC_EXTRA_IGNORES = [
     "*.tmp",
     "~$*",           # Office lock files
     ".~lock.*#",     # LibreOffice lock files
+    # Sandbox scratch. An agent's GAPT workspace lives under its own space
+    # now, and everything a build leaves there — caches, object files, venvs
+    # — would otherwise replicate to every one of the user's PCs. The cloud
+    # is for work product; this is the machinery that produces it.
+    ".gapt/",
 ]
 
 # Tombstones older than this are pruned — an offline replica that stayed

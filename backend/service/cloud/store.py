@@ -118,6 +118,25 @@ def is_connected(username: str, session_id: str) -> bool:
     return session_id in connected_sessions(username)
 
 
+def sandbox_bind_root(username: str, session_id: str) -> str:
+    """The directory a sandboxed agent gets mounted at ``/workspace``.
+
+    Connected, that is the WHOLE cloud: the agent stands inside the shared
+    tree beside the user's linked folders, the other agents' spaces and the
+    user's GAPT workspace, and can name any of them. Its own space is still
+    the working directory, so relative paths stay in its corner.
+
+    Disconnected, it is the agent's own space alone — the same boundary the
+    host-side tool roots enforce. The two have to agree: a bind mount cannot
+    be re-scoped per turn, so a container built while connected keeps seeing
+    the shared tree until it is rebuilt (see
+    ``AgentSession.invalidate_sandbox_binding``).
+    """
+    if is_connected(username, session_id):
+        return cloud_workspace(username)
+    return ensure_agent_space(username, session_id)
+
+
 def set_connected(username: str, session_id: str, connected: bool) -> list:
     import json
 
