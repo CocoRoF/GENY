@@ -14,11 +14,10 @@
 // scope), so there is one implementation of "what a folder looks like"
 // instead of two that drift.
 import { useCallback, useEffect, useState } from 'react';
-import { Cloud, Bot, Link2, RefreshCw } from 'lucide-react';
+import { Cloud, Bot, Link2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
-import { TabShell, IconButton } from '@/components/common/layout';
 import StorageTab from '@/components/tabs/StorageTab';
 
 const CLOUD_SCOPE = '_cloud';
@@ -80,12 +79,18 @@ export default function CloudTab() {
   // not exist in the new one.
   const explorerKey = `${source.kind}:${scopeId}:${initialPath}`;
 
+  const hint =
+    source.kind === 'cloud' ? t('cloudTab.hintCloud')
+    : source.kind === 'agent'
+      ? (members.includes(source.id) ? t('cloudTab.hintAgentOn') : t('cloudTab.hintAgentOff'))
+      : t('cloudTab.hintLink', { device: source.device });
+
+  // No header of its own: the tab strip above already names this view, so a
+  // title row carrying one refresh button was a whole row of chrome for
+  // nothing. The description moves into the explorer's toolbar (left slot)
+  // and the refresh moves into its refresh button — one bar, nothing lost.
   return (
-    <TabShell
-      title={t('cloudTab.title')}
-      icon={Cloud}
-      actions={<IconButton icon={RefreshCw} title={t('cloudTab.refresh')} onClick={() => void refresh()} />}
-    >
+    <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <div className="flex h-full min-h-0">
         <aside className="w-[210px] shrink-0 border-r border-[var(--border-color)] overflow-y-auto p-1.5">
           <button
@@ -155,17 +160,18 @@ export default function CloudTab() {
         </aside>
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="px-3 py-2 border-b border-[var(--border-color)] text-[12px] text-[var(--text-muted)]">
-            {source.kind === 'cloud' && t('cloudTab.hintCloud')}
-            {source.kind === 'agent' &&
-              (members.includes(source.id) ? t('cloudTab.hintAgentOn') : t('cloudTab.hintAgentOff'))}
-            {source.kind === 'link' && t('cloudTab.hintLink', { device: source.device })}
-          </div>
           <div className="flex-1 min-h-0">
-            <StorageTab key={explorerKey} scopeId={scopeId} initialPath={initialPath} embedded />
+            <StorageTab
+              key={explorerKey}
+              scopeId={scopeId}
+              initialPath={initialPath}
+              embedded
+              hint={hint}
+              onRefresh={() => void refresh()}
+            />
           </div>
         </div>
       </div>
-    </TabShell>
+    </div>
   );
 }

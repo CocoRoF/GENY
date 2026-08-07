@@ -9,7 +9,7 @@
 // workspace scope — the '전체' scope is a read-only operator view of the
 // whole session dir, and the backend enforces the same boundary.
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
@@ -17,7 +17,7 @@ import {
   ChevronRight, Download, RefreshCw, FolderPlus, Upload, HardDrive,
   Folder, FileJson, FileText, FileCode, Globe, Palette, ScrollText,
   Settings, File as FileIcon, Image as ImageIcon, FileSpreadsheet,
-  Presentation, X, ArrowUp, Music, Link2,
+  Presentation, X, ArrowUp, Music, Link2, Home,
 } from 'lucide-react';
 import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
@@ -142,10 +142,17 @@ interface StorageTabProps {
   initialPath?: string;
   /** The cloud view supplies its own header and source picker. */
   embedded?: boolean;
+  /** Description for the header's left slot, so an embedded host does not
+   *  need a separate row for it above the toolbar. */
+  hint?: ReactNode;
+  /** Extra work for the refresh button. The cloud view has state of its own
+   *  (connected agents, linked folders) that its removed header button used
+   *  to refresh; this keeps that reachable from the merged bar. */
+  onRefresh?: () => void;
 }
 
 export default function StorageTab(props: StorageTabProps) {
-  const { scopeId, initialPath, embedded } = props;
+  const { scopeId, initialPath, embedded, hint, onRefresh } = props;
   const { selectedSessionId: storeSessionId } = useAppStore();
   const selectedSessionId = scopeId ?? storeSessionId;
   const { t } = useI18n();
@@ -434,7 +441,13 @@ export default function StorageTab(props: StorageTabProps) {
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <TabShell
-      title={embedded ? '' : t('storageTab.title')}
+      title={
+        embedded
+          ? (hint ? (
+              <span className="text-[12px] font-normal text-[var(--text-muted)]">{hint}</span>
+            ) : '')
+          : t('storageTab.title')
+      }
       icon={embedded ? undefined : HardDrive}
       titleExtra={
         // The operator-only "everything" scope is a session concept; the
@@ -476,12 +489,20 @@ export default function StorageTab(props: StorageTabProps) {
             title={t('storageTab.downloadFolder')}
             onClick={() => void agentApi.downloadFolder(selectedSessionId, rootPath(cwd)).catch(() => alert(t('storageTab.downloadFolderError')))}
           />
-          <IconButton icon={RefreshCw} title={t('common.refresh')} onClick={fetchFiles} />
+          <IconButton
+            icon={RefreshCw}
+            title={t('common.refresh')}
+            onClick={() => { fetchFiles(); onRefresh?.(); }}
+          />
         </>
       }
     >
       <div className="h-full flex flex-col p-3 md:p-4 gap-2 min-h-0">
-        {/* Breadcrumb bar */}
+        {/* Breadcrumb bar. Embedded at the root it would hold nothing but the
+            root crumb itself, so it is dropped and the listing starts directly
+            under the toolbar. It comes back the moment it carries something:
+            a path, the read-only badge, or a sync indicator. */}
+        {(!embedded || cwd || !canWrite || syncDevices.length > 0) && (
         <div className="flex items-center gap-0.5 text-[13px] px-1 shrink-0 select-none">
           {cwd && (
             <button
@@ -495,8 +516,14 @@ export default function StorageTab(props: StorageTabProps) {
           <button
             className={`px-2 py-1 rounded-md hover:bg-[var(--bg-hover)] ${cwd ? 'text-[var(--text-secondary)]' : 'font-semibold text-[var(--text-primary)]'}`}
             onClick={() => { setCwd(''); setSelected(null); }}
+            title={embedded ? t('storageTab.goToRoot') : undefined}
           >
-            {scope === 'workspace' ? t('storageTab.scopeWorkspace') : t('storageTab.scopeAll')}
+            {/* Embedded, the scope name is noise: the host already says which
+                source is open, and "워크스페이스" is simply wrong for the
+                cloud. An icon keeps the click target for going back to root. */}
+            {embedded
+              ? <Home size={14} />
+              : (scope === 'workspace' ? t('storageTab.scopeWorkspace') : t('storageTab.scopeAll'))}
           </button>
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-0.5">
@@ -524,6 +551,7 @@ export default function StorageTab(props: StorageTabProps) {
             </span>
           )}
         </div>
+        )}
 
         <div ref={splitRef} className="flex-1 flex min-h-0">
           {/* File list */}

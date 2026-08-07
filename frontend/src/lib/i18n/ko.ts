@@ -1072,6 +1072,7 @@ const ko: Translations = {
     newFolder: '새 폴더',
     newFolderName: '새 폴더',
     goUp: '상위 폴더로',
+    goToRoot: '최상위로',
     readOnly: '읽기 전용',
     colName: '이름',
     colSize: '크기',

@@ -1075,6 +1075,7 @@ const en = {
     newFolder: 'New Folder',
     newFolderName: 'New Folder',
     goUp: 'Go up',
+    goToRoot: 'Go to root',
     readOnly: 'Read-only',
     colName: 'Name',
     colSize: 'Size',

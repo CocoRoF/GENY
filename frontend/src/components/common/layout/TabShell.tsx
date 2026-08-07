@@ -18,7 +18,10 @@ import { LucideIcon, AlertCircle, X } from 'lucide-react';
 import { cn } from './cn';
 
 export interface TabShellProps {
-  title: string;
+  /** Usually a string. Accepts a node so an embedded shell can put its own
+   *  content in the header's left slot — the cloud view puts its description
+   *  there, which is what merges the description row into the action row. */
+  title: ReactNode;
   subtitle?: ReactNode;
   icon?: LucideIcon;
   /** Rendered inline right after the title (e.g. a SegmentedControl view
