@@ -380,6 +380,30 @@ def adopt_agent_space(username: str, storage_path: str, session_id: str) -> str:
     return str(target)
 
 
+def owner_of_storage(storage_path: str) -> str:
+    """Recover the cloud owner from the adoption symlink, or "".
+
+    A restored session is re-registered from its stored record, and every
+    record written before the owner was persisted carries ``None``. Without
+    an owner the session gets no cloud identity at all: its space is not
+    adopted, its sandbox is bound to the legacy path instead of the shared
+    tree, and quota reads the wrong journal.
+
+    The link is the ground truth — ``<cloud>/<user>/workspace/agents/<sid>``
+    — so an already-adopted session can say who it belongs to without a
+    migration, and the answer heals the record on the way past.
+    """
+    ws = Path(storage_path) / "workspace"
+    try:
+        if not ws.is_symlink():
+            return ""
+        target = Path(os.readlink(str(ws)))
+        rel = target.relative_to(cloud_root())
+    except (OSError, ValueError):
+        return ""
+    return rel.parts[0] if rel.parts else ""
+
+
 def owning_storage(storage_path: str, username: str = "") -> tuple:
     """Which journal owns this scope's bytes, and under which prefix.
 

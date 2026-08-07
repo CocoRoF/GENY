@@ -88,6 +88,7 @@ class _FakeStore:
             "chat_room_id": rec.get("chat_room_id"),
             "trigger_preset_id": rec.get("trigger_preset_id"),
             "env_id": rec.get("env_id"),
+            "owner_username": rec.get("owner_username"),
         }
 
 
@@ -175,6 +176,8 @@ async def test_rehydrate_reuses_id_env_prompt_and_cascades():
             "env_id": "env-vtuber",
             "system_prompt": "be kind",
             "chat_room_id": "room-1",
+            "owner_username": "hr",
+            "storage_path": "/data/sessions/vt",
             "linked_session_id": "sub",
             "session_type": "vtuber",
         },
@@ -190,8 +193,14 @@ async def test_rehydrate_reuses_id_env_prompt_and_cascades():
     mgr = _skeleton(records)
     created = []
 
-    async def _fake_create(request, session_id=None, env_id=None, trigger_preset_id=None):
-        created.append({"id": session_id, "env_id": env_id, "role": request.role})
+    async def _fake_create(
+        request, session_id=None, env_id=None, trigger_preset_id=None,
+        owner_username=None,
+    ):
+        created.append({
+            "id": session_id, "env_id": env_id, "role": request.role,
+            "owner": owner_username, "working_dir": request.working_dir,
+        })
         agent = _FakeAgent(session_id)
         mgr._local_agents[session_id] = agent
         return agent
@@ -202,13 +211,25 @@ async def test_rehydrate_reuses_id_env_prompt_and_cascades():
 
     assert agent.session_id == "vt"
     # same id + persisted env forwarded
-    assert {"id": "vt", "env_id": "env-vtuber", "role": SessionRole.VTUBER} in created
+    _vt = next(c for c in created if c["id"] == "vt")
+    assert _vt["env_id"] == "env-vtuber"
+    assert _vt["role"] == SessionRole.VTUBER
     # cascade re-hydrated the linked sub-worker with its own id + env
-    assert {"id": "sub", "env_id": "env-worker", "role": SessionRole.WORKER} in created
+    _sub = next(c for c in created if c["id"] == "sub")
+    assert _sub["env_id"] == "env-worker"
+    assert _sub["role"] == SessionRole.WORKER
     # system prompt restored through the persona provider
     assert mgr._persona_provider.overrides["vt"] == "be kind"
     # chat room reattached
     assert agent._chat_room_id == "room-1"
+    # The owner survives the restart. Without it the rebuilt session has no
+    # cloud identity: its space is never adopted, the sandbox binds outside
+    # the shared tree, and quota reads an empty journal.
+    assert _vt["owner"] == "hr"
+    # `working_dir` in the record is storage_path echoed back, not a caller's
+    # choice — passing it on makes adoption stand aside and the agent works in
+    # the session root instead of its cloud space.
+    assert _vt["working_dir"] is None
     # SESSION_RESTORED emitted for both main and linked peer
     emitted = {sid for (_evt, sid, _kw) in mgr._lifecycle_bus.events}
     assert {"vt", "sub"} <= emitted

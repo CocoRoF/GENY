@@ -1944,9 +1944,18 @@ class AgentSessionManager:
         stored_system_prompt = record.get("system_prompt")
         linked_id = record.get("linked_session_id")
 
+        # `get_creation_params` echoes storage_path back as working_dir. That
+        # echo is not a caller's choice, but adoption treats any working_dir as
+        # one and steps aside — so a restored agent worked in the session root
+        # while the same agent, freshly created, worked in its cloud space.
+        # Same agent, different directory either side of a restart.
+        _wd = params.get("working_dir")
+        if _wd and _wd == record.get("storage_path"):
+            _wd = None
+
         request = CreateSessionRequest(
             session_name=params.get("session_name"),
-            working_dir=params.get("working_dir"),
+            working_dir=_wd,
             model=params.get("model"),
             max_turns=params.get("max_turns", 100),
             timeout=params.get("timeout", 21600),
@@ -1961,11 +1970,33 @@ class AgentSessionManager:
             session_type=params.get("session_type"),
         )
 
+        # The owner has to survive the restart. Without it the session is
+        # rebuilt with no cloud identity: its space is not adopted, the
+        # sandbox binds the legacy path instead of the shared tree, and the
+        # quota reads an empty journal. Records written before the owner was
+        # carried through hold None, so fall back to the adoption symlink —
+        # which already knows, and heals them in place.
+        _owner = params.get("owner_username") or ""
+        if not _owner:
+            try:
+                from service.cloud import owner_of_storage
+
+                _owner = owner_of_storage(params.get("working_dir") or "")
+                if _owner:
+                    self._store.update(session_id, {"owner_username": _owner})
+                    logger.info(
+                        "[%s] owner recovered from the cloud link: %s",
+                        session_id, _owner,
+                    )
+            except Exception:  # noqa: BLE001 — a restart must not hinge on this
+                logger.debug("[%s] owner recovery failed", session_id, exc_info=True)
+
         agent = await self.create_agent_session(
             request=request,
             session_id=session_id,
             env_id=params.get("env_id"),
             trigger_preset_id=params.get("trigger_preset_id"),
+            owner_username=_owner or None,
         )
 
         # Restore the user's customized system prompt through the persona

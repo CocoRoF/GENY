@@ -453,6 +453,11 @@ class SessionStore:
             # next wake. Restoring it here also lets the change-env feature
             # (PUT /api/agents/{id}/env) survive the manifest reload.
             "env_id": rec.get("env_id"),
+            # Same shape of bug as env_id above: the owner was registered but
+            # never handed back, so every restart re-created the session with
+            # no owner — losing its cloud identity (no adoption, a sandbox
+            # bound outside the shared tree, quota on the wrong journal).
+            "owner_username": rec.get("owner_username"),
             "graph_name": rec.get("graph_name"),
             "workflow_id": rec.get("workflow_id"),
             "tool_preset_id": rec.get("tool_preset_id"),
