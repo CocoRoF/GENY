@@ -47,6 +47,37 @@ function indexFiles(dir: string, id: string): string[] {
   return readdirSync(dir).filter((f) => f.startsWith(`${id}.json`)).sort()
 }
 
+/**
+ * The agreement pointer must be per ENGINE, not per machine.
+ *
+ * The cloud pair and every linked-folder pair address the same storage
+ * scope. Keyed by device alone they share one row, the server merges with
+ * max(), and an engine that was holding its cursor back would later recover
+ * from a cursor AHEAD of where it actually was — skipping exactly the
+ * tombstones the ref exists to deliver.
+ */
+async function refKeyIsolation(): Promise<void> {
+  const { HttpSyncTransport } = await import('../src/main/sync-transport')
+  const auth = {
+    baseUrl: 'http://x', token: async () => 't',
+    sessionId: '_cloud', deviceId: 'pc-1', deviceName: 'PC',
+  }
+  const cloud = new HttpSyncTransport(auth as never, '/tmp')
+  const link = new HttpSyncTransport(auth as never, '/tmp', {
+    scope: { remotePrefix: 'myproject', excludePrefixes: [] },
+  } as never)
+
+  const keyOf = (t: unknown): string =>
+    (t as unknown as { refKey: () => string }).refKey.call(t)
+
+  const a = keyOf(cloud)
+  const b = keyOf(link)
+  assert.notStrictEqual(a, b, `cloud and link engines share a ref row (${a})`)
+  assert.strictEqual(a, 'pc-1')
+  assert.strictEqual(b, 'pc-1:myproject')
+  ok('the cloud pair and a linked folder keep separate agreement pointers')
+}
+
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'geny-index-'))
   const manager = makeManager(dir)
@@ -107,6 +138,8 @@ async function main(): Promise<void> {
   assert.strictEqual(blank.cursor, 0)
   assert.ok(existsSync(base + '.seen'), 'the marker survives, so recovery still knows this pair has synced')
   ok('both generations unreadable → empty base, marker still says "recover me"')
+
+  await refKeyIsolation()
 
   console.log(`\nALL INDEX DURABILITY TESTS PASS (${results.length})`)
 }

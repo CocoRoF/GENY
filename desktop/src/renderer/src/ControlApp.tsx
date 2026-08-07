@@ -997,6 +997,15 @@ export function ControlApp() {
               {!driveCloud && (
                 <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('drive.cloudOff')}</p>
               )}
+              {driveCloud && (
+                // Says why there is no per-agent list any more: users who had
+                // agent folders shared will find them gone from this card
+                // (their files stay on disk), and the replacement is a cloud
+                // connection made on the web, not here.
+                <p className="gy-hint" style={{ margin: '0 0 4px', opacity: 0.85 }}>
+                  {t('drive.cloudEdgeHint')}
+                </p>
+              )}
               {driveCloud && (() => {
                 // ONE row: this computer's single edge, to the cloud. There
                 // used to be a toggle per agent here, mirroring each agent's

@@ -88,6 +88,20 @@ export class HttpSyncTransport implements Transport {
       .map((p) => `${p}/`)
   }
 
+  /** Key for this ENGINE's agreement pointer, not just this machine's.
+   *
+   *  The cloud pair and every linked-folder pair address the same storage
+   *  scope, so keying the ref by device alone would put them all in one row.
+   *  The server merges with max(), so the furthest-ahead engine would win —
+   *  and an engine that was holding its cursor back (a failing file, a
+   *  deferred write) would then recover from a cursor AHEAD of where it
+   *  actually was, skipping the tombstones in between. That is the exact
+   *  resurrection this ref exists to prevent. */
+  private refKey(): string {
+    const scope = this.prefix.replace(/\/$/, '')
+    return scope ? `${this.auth.deviceId}:${scope}` : this.auth.deviceId
+  }
+
   /** engine-relative → server workspace-relative */
   private toRemote(p: string): string {
     return this.prefix ? (p ? `${this.prefix.slice(0, -1)}/${p}` : this.prefix.slice(0, -1)) : p
@@ -106,7 +120,7 @@ export class HttpSyncTransport implements Transport {
   /** The server's remembered agreement point for this replica. */
   async deviceRef(): Promise<{ cursor: number; acked_ts: number } | null> {
     const res = await fetch(
-      this.url('/storage/device-state', { device_id: this.auth.deviceId }),
+      this.url('/storage/device-state', { device_id: this.refKey() }),
       { headers: await authHeaders(this.auth) },
     )
     if (!res.ok) return null
@@ -126,7 +140,7 @@ export class HttpSyncTransport implements Transport {
       method: 'PUT',
       headers: { ...(await authHeaders(this.auth)), 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        device_id: this.auth.deviceId,
+        device_id: this.refKey(),
         device_name: this.auth.deviceName ?? '',
         cursor,
       }),
