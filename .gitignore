@@ -230,6 +230,11 @@ CLAUDE.md
 GEMINI.md
 tests/
 !backend/tests/
+# The connector's sync engine decides what to delete on a user's machine.
+# Its suite was tracked only because the files had been force-added one by
+# one — a new test file was silently left out of every commit, and CI ran a
+# runner that did not exist in the repo.
+!desktop/tests/
 
 docker-compose.yaml
 
