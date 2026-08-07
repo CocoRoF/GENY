@@ -177,6 +177,7 @@ def test_history_is_capped(storage):
 def test_the_scan_does_not_duplicate_an_already_attributed_change(storage):
     """A web upload records itself (only it knows the actor); the scan then
     finds the same bytes on disk and must not file a second, wrong row."""
+    ws.refresh_index(storage, "scope", force=True)   # past the inventory build
     (ws.Path(storage) / "workspace" / "up.txt").write_text("hello", encoding="utf-8")
     ws.record_event(storage, actor_kind="web", actor="hr", action="added", path="up.txt")
 
@@ -188,6 +189,7 @@ def test_the_scan_does_not_duplicate_an_already_attributed_change(storage):
 
 
 def test_the_scan_attributes_unclaimed_changes_to_the_agent(storage):
+    ws.refresh_index(storage, "scope", force=True)   # past the inventory build
     (ws.Path(storage) / "workspace" / "agent-made.txt").write_text("x", encoding="utf-8")
     ws.refresh_index(storage, "scope", force=True)
     rows = [e for e in ws.list_events(storage)["events"] if e["path"] == "agent-made.txt"]
@@ -209,6 +211,7 @@ def test_dedup_matches_across_differing_action_names(storage):
     "mkdir", the scan sees "added". Keying de-duplication on the action let
     every such renaming through as a duplicate row — observed in production
     as the same change filed twice, once attributed and once as "agent"."""
+    ws.refresh_index(storage, "scope", force=True)   # past the inventory build
     (ws.Path(storage) / "workspace" / "made-on-web").mkdir()
     ws.record_event(storage, actor_kind="web", actor="hr",
                     action="mkdir", path="made-on-web")
@@ -224,6 +227,7 @@ def test_attribution_replaces_a_scan_placeholder_filed_first(storage):
     """The scan and the actor race. A write triggers a rescan, so the
     anonymous "agent" row can land BEFORE the actor records itself —
     observed in production as every web/replica change listed twice."""
+    ws.refresh_index(storage, "scope", force=True)   # past the inventory build
     (ws.Path(storage) / "workspace" / "raced.txt").write_text("x", encoding="utf-8")
     ws.refresh_index(storage, "scope", force=True)          # scan wins the race
     ws.record_event(storage, actor_kind="web", actor="hr",
@@ -232,3 +236,64 @@ def test_attribution_replaces_a_scan_placeholder_filed_first(storage):
     rows = [e for e in ws.list_events(storage)["events"] if e["path"] == "raced.txt"]
     assert len(rows) == 1, f"placeholder not replaced: {rows}"
     assert rows[0]["actor_kind"] == "web" and rows[0]["actor"] == "hr"
+
+
+def test_a_replica_at_cursor_zero_does_not_pin_the_journal(storage):
+    """A replica that has applied nothing bootstraps from since=0 on its next
+    round, so it needs no tombstone at all. Counting it would put the
+    retention floor at 0 and disable pruning entirely — one freshly paired
+    machine would pin the whole journal for the full TTL."""
+    _tombstone(storage, "old.txt", seq=10, age_days=60)
+    ws.set_device_state(storage, "fresh-pc", 0)
+
+    ws.refresh_index(storage, "scope", force=True)
+
+    assert "old.txt" not in _tombstones(storage), (
+        "a cursor-0 device blocked the age prune"
+    )
+
+
+def test_the_first_index_build_is_not_recorded_as_history(storage):
+    """Building an index over an existing tree makes every file look "added".
+    That is a listing of what is already there, not a log of anything that
+    happened — and it runs on every corruption self-heal, where it would bury
+    the real history under thousands of rows."""
+    for i in range(5):
+        (ws.Path(storage) / "workspace" / f"pre-existing-{i}.txt").write_text("x", encoding="utf-8")
+
+    ws.refresh_index(storage, "scope", force=True)
+    assert ws.list_events(storage)["events"] == [], "initial inventory was logged as history"
+
+    # A change AFTER the index exists is real history.
+    (ws.Path(storage) / "workspace" / "new.txt").write_text("y", encoding="utf-8")
+    ws.refresh_index(storage, "scope", force=True)
+    assert [e["path"] for e in ws.list_events(storage)["events"]] == ["new.txt"]
+
+
+def test_one_scan_cannot_overshoot_the_history_cap(storage):
+    """The per-write trim alone let a single scan append past the cap and
+    stay there."""
+    ws.refresh_index(storage, "scope", force=True)      # establish the index
+    for i in range(ws._EVENT_CAP + 200):
+        (ws.Path(storage) / "workspace" / f"f{i}.txt").write_text("x", encoding="utf-8")
+
+    ws.refresh_index(storage, "scope", force=True)
+
+    conn = ws._connect(storage)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    finally:
+        conn.close()
+    assert count <= ws._EVENT_CAP + 1, f"scan overshot the cap ({count})"
+
+
+def test_the_first_file_ever_added_to_an_empty_scope_is_recorded(storage):
+    """An empty workspace has no entries on every scan, so "are there entries
+    yet" would call each round an inventory — and the first file a user ever
+    adds would never appear in the history."""
+    ws.refresh_index(storage, "scope", force=True)   # first scan, empty scope
+    (ws.Path(storage) / "workspace" / "very-first.txt").write_text("x", encoding="utf-8")
+
+    ws.refresh_index(storage, "scope", force=True)
+
+    assert [e["path"] for e in ws.list_events(storage)["events"]] == ["very-first.txt"]

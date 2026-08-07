@@ -496,9 +496,7 @@ export class SyncManager {
           // "never seen", resurrecting deleted files. Drive indexes are only
           // removed when the AGENT SESSION itself is gone (session_gone) —
           // never on a toggle.
-          void import('fs/promises').then(({ rm }) =>
-            rm(join(this.deps.indexDir, `${id}.json`), { force: true }).catch(() => {}),
-          )
+          this.eraseIndexFiles(id)
         }
       }
     }
@@ -535,15 +533,30 @@ export class SyncManager {
     }
   }
 
+  /** Erase EVERY generation of a pair's baseline.
+   *
+   *  The engine now keeps a `.bak` (so a torn write falls back to the last
+   *  good copy) and a `.seen` marker (so a lost baseline can be told apart
+   *  from a first run). Deleting only the `.json` would leave the `.bak`
+   *  for the next load to pick up — which resurrects the very baseline the
+   *  caller asked to forget, with the consequence spelled out in dropIndex
+   *  below: the user's local copies get deleted. */
+  private eraseIndexFiles(id: string): void {
+    const base = join(this.deps.indexDir, `${id}.json`)
+    void import('fs/promises').then(({ rm }) => {
+      for (const suffix of ['', '.bak', '.tmp', '.seen']) {
+        rm(base + suffix, { force: true }).catch(() => {})
+      }
+    })
+  }
+
   /** Forget a pair's baseline. Mandatory after revoking access: a stale
    *  index would tell the next round "these files existed and the server
    *  lost them" and delete the USER'S local copies. */
   dropIndex(id: string): void {
     this.engines.get(id)?.stop()
     this.engines.delete(id)
-    void import('fs/promises').then(({ rm }) =>
-      rm(join(this.deps.indexDir, `${id}.json`), { force: true }).catch(() => {}),
-    )
+    this.eraseIndexFiles(id)
   }
 
   /** True when the pair's last round left it in a healthy state — the

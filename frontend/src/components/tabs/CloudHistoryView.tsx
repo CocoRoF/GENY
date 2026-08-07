@@ -24,6 +24,13 @@ export interface SyncEvent {
   detail: string;
 }
 
+// `t()` returns the KEY itself when a translation is missing, never a falsy
+// value, so `t(...) || fallback` silently never falls back — an unrecognised
+// action would render as the literal "cloudHistory.action.foo" on screen.
+// These sets say which values actually have translations.
+const KNOWN_ACTIONS = new Set(['added', 'uploaded', 'updated', 'deleted', 'renamed', 'mkdir']);
+const KNOWN_ACTORS = new Set(['device', 'web', 'agent']);
+
 const ACTION_TONE: Record<string, BadgeTone> = {
   added: 'success',
   uploaded: 'success',
@@ -91,7 +98,11 @@ export default function CloudHistoryView({ scopeId }: { scopeId: string }) {
       e.actor_kind === 'device' ? 'text-[#4f9cf7]'
       : e.actor_kind === 'agent' ? 'text-[#2fbf71]'
       : 'text-[var(--text-muted)]';
-    const label = e.actor || t(`cloudHistory.actor.${e.actor_kind}` as never) || e.actor_kind;
+    const label =
+      e.actor ||
+      (KNOWN_ACTORS.has(e.actor_kind)
+        ? t(`cloudHistory.actor.${e.actor_kind}` as never)
+        : e.actor_kind);
     return (
       <span className="flex items-center gap-1.5 min-w-0">
         <Icon size={13} className={`${color} shrink-0`} />
@@ -149,7 +160,9 @@ export default function CloudHistoryView({ scopeId }: { scopeId: string }) {
                   <StatusBadge tone={ACTION_TONE[e.action] ?? 'neutral'}>
                     <span className="flex items-center gap-1">
                       {Icon && <Icon size={11} />}
-                      {t(`cloudHistory.action.${e.action}` as never) || e.action}
+                      {KNOWN_ACTIONS.has(e.action)
+                        ? t(`cloudHistory.action.${e.action}` as never)
+                        : e.action}
                     </span>
                   </StatusBadge>
                 );

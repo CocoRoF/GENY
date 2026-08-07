@@ -317,8 +317,18 @@ _ATTRIBUTION_WINDOW_S = 120
 
 def _scan_event(
     conn: sqlite3.Connection, action: str, path: str, size: int, is_dir: bool,
+    *, inventory: bool = False,
 ) -> None:
-    """History row for a change found by the scan (i.e. nobody claimed it)."""
+    """History row for a change found by the scan (i.e. nobody claimed it).
+
+    ``inventory`` marks the first build of an index — every existing file
+    then looks "added", which is a listing of what is already there, not a
+    log of anything that happened. Recording it would bury the real history
+    under thousands of rows the moment an index is rebuilt (the corruption
+    self-heal does exactly that).
+    """
+    if inventory:
+        return
     try:
         now = int(time.time())
         # Match on PATH only. The actor names the operation from its own
@@ -371,6 +381,20 @@ def _refresh_index_inner(
             known: Dict[str, Tuple[int, int, int, str, int]] = {
                 r[0]: (r[1], r[2], r[3], r[4], r[5]) for r in rows
             }
+            # Is this the FIRST scan of this index? If so the round is an
+            # inventory of what is already on disk, not a record of anything
+            # that happened — it runs on a brand-new scope and after the
+            # corruption self-heal rebuilds the index, where filing an
+            # "added" per existing file would bury the real history under
+            # thousands of rows.
+            #
+            # The flag is a meta row, not "are there any entries yet": an
+            # empty workspace has no entries on every scan, so that test
+            # would call each round an inventory and never record the first
+            # file the user ever adds.
+            inventory = conn.execute(
+                "SELECT 1 FROM meta WHERE key='inventoried'"
+            ).fetchone() is None
 
             ts = _now_iso()
             for rel, (is_dir, size, mtime_ns) in current.items():
@@ -399,10 +423,10 @@ def _refresh_index_inner(
                 )
                 if old is None or old[4]:
                     stats["added"] += 1
-                    _scan_event(conn, "added", rel, size, is_dir)
+                    _scan_event(conn, "added", rel, size, is_dir, inventory=inventory)
                 else:
                     stats["updated"] += 1
-                    _scan_event(conn, "updated", rel, size, is_dir)
+                    _scan_event(conn, "updated", rel, size, is_dir, inventory=inventory)
 
             # vanished → tombstone
             for rel, (_d, _s, _m, _sha, deleted) in known.items():
@@ -415,7 +439,7 @@ def _refresh_index_inner(
                     (seq, ts, rel),
                 )
                 stats["deleted"] += 1
-                _scan_event(conn, "deleted", rel, 0, bool(_d))
+                _scan_event(conn, "deleted", rel, 0, bool(_d), inventory=inventory)
 
             # Prune ancient tombstones — and RECORD the highest pruned seq
             # as the stale-cursor watermark: a replica whose cursor is
@@ -464,6 +488,17 @@ def _refresh_index_inner(
                         (cutoff_iso, floor),
                     )
 
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES('inventoried', ?) "
+                "ON CONFLICT(key) DO NOTHING",
+                (_now_iso(),),
+            )
+            # A scan can append many rows at once; the per-write trim alone
+            # would let one round overshoot the cap and stay there.
+            conn.execute(
+                "DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - ?",
+                (_EVENT_CAP,),
+            )
             conn.commit()
             row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
             stats["latest_seq"] = int(row[0]) if row else 0
@@ -541,8 +576,13 @@ def _retention_floor(conn: sqlite3.Connection) -> Optional[int]:
     that a ref still reaches.
     """
     cutoff = int(time.time()) - _DEVICE_PIN_TTL_S
+    # cursor 0 means the replica has applied nothing yet, so its next round
+    # is a since=0 bootstrap and it needs no tombstone at all. Counting it
+    # would put the floor at 0 and disable pruning entirely — one freshly
+    # paired machine would pin the whole journal for the full TTL.
     row = conn.execute(
-        "SELECT MIN(cursor) FROM devices WHERE acked_ts >= ?", (cutoff,)
+        "SELECT MIN(cursor) FROM devices WHERE acked_ts >= ? AND cursor > 0",
+        (cutoff,),
     ).fetchone()
     return int(row[0]) if row and row[0] is not None else None
 

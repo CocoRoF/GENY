@@ -117,8 +117,10 @@ export default function CloudTab() {
       <div className="flex h-full min-h-0">
         <aside className="w-[210px] shrink-0 border-r border-[var(--border-color)] overflow-y-auto p-1.5">
           {/* History sits above the sources, and outside them: it is not a
-              place to browse but the record of what happened to all of
-              them — hence the separator rather than another source row. */}
+              place to browse but the record of what happened — hence the
+              separator rather than another source row. It reports the CLOUD,
+              which is where machines and agents actually meet; an agent's
+              private workspace keeps its own history under its own scope. */}
           <button
             className={`${rowBase} ${source.kind === 'history' ? rowOn : rowOff}`}
             onClick={() => setSource({ kind: 'history' })}
