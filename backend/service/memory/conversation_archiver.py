@@ -872,6 +872,20 @@ class ConversationArchiver:
         # per-category shards automatically on every NotesHandle.write
         # (1.20.0 EXEC-5).
         self._provider = memory_provider
+        # Bucket → cached relative path. PR 14 split conversations by
+        # ``(kind, counterpart)`` so each session can own up to one
+        # ``user``, one ``reflection``, one ``system``, and N ``dm``
+        # files. The cache key is the bucket's *base_slug* (i.e.
+        # ``user`` / ``reflection`` / ``system`` / ``dm__<cp>``);
+        # within ``user`` the title slug is appended once on first
+        # archive so subsequent calls hit the cache directly.
+        #
+        # Initialised HERE, not in set_memory_provider: an archiver used
+        # without a provider — or one whose wiring failed, which is
+        # swallowed at the call site — would otherwise raise
+        # AttributeError from archive() and set_session_id(), long after
+        # construction and with nothing pointing back at the cause.
+        self._cached_rel: Dict[str, str] = {}
 
     def set_memory_provider(self, provider) -> None:
         """Plug the executor `MemoryProvider` post-construction.
@@ -882,14 +896,8 @@ class ConversationArchiver:
         atomic-write path stays as a provider-less fallback.
         """
         self._provider = provider
-        # Bucket → cached relative path. PR 14 split conversations by
-        # ``(kind, counterpart)`` so each session can own up to one
-        # ``user``, one ``reflection``, one ``system``, and N ``dm``
-        # files. The cache key is the bucket's *base_slug* (i.e.
-        # ``user`` / ``reflection`` / ``system`` / ``dm__<cp>``);
-        # within ``user`` the title slug is appended once on first
-        # archive so subsequent calls hit the cache directly.
-        self._cached_rel: Dict[str, str] = {}
+        # A provider change invalidates where files live.
+        self._cached_rel.clear()
 
     def set_session_id(self, session_id: str) -> None:
         """Late-binding setter — used by ``SessionMemoryManager.

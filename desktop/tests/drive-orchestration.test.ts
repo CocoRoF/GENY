@@ -20,7 +20,7 @@
  * Run: npx tsx tests/drive-orchestration.test.ts
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import assert from 'assert'
@@ -94,6 +94,23 @@ function relocate(current: string, target: string): number {
     moved++
   }
   return moved
+}
+
+
+/** The pre-link sweep: which names it removes, and — more importantly —
+ *  which it must not touch. This deletes directories, so the blast radius is
+ *  the property worth asserting. */
+function sweepPreLink(dir: string): string[] {
+  const removed: string[] = []
+  const suffix = /\.pre-link-[0-9a-z]+$/
+  for (const name of readdirSync(dir)) {
+    const at = join(dir, name)
+    if (!suffix.test(name)) continue
+    if (!lstatSync(at).isDirectory()) continue
+    rmSync(at, { recursive: true, force: true })
+    removed.push(name)
+  }
+  return removed
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -187,11 +204,43 @@ function testRelocation(): void {
   ok('relocation never clobbers an occupied destination')
 }
 
+
+function testPreLinkSweep(): void {
+  const d = mkdtempSync(join(tmpdir(), 'geny-prelink-'))
+  mkdirSync(join(d, 'myproject.pre-link-msekdk22', 'docs'), { recursive: true })
+  writeFileSync(join(d, 'myproject.pre-link-msekdk22', 'docs', 'note.md'), 'dup')
+  mkdirSync(join(d, 'myproject'))
+  writeFileSync(join(d, 'myproject', 'real.txt'), 'live')
+  // Names that merely resemble the pattern belong to the user.
+  mkdirSync(join(d, 'notes.pre-link'))
+  mkdirSync(join(d, 'pre-link-stuff'))
+  mkdirSync(join(d, 'archive.pre-link-NOTBASE36!'))
+  writeFileSync(join(d, 'file.pre-link-abc123'), 'a file, not a directory')
+  const target = mkdtempSync(join(tmpdir(), 'geny-linktarget-'))
+  writeFileSync(join(target, 'precious.txt'), 'must survive')
+  symlinkSync(target, join(d, 'link.pre-link-abc123'), 'dir')
+
+  const removed = sweepPreLink(d)
+
+  assert.deepStrictEqual(removed, ['myproject.pre-link-msekdk22'])
+  ok('the stale copy is removed')
+
+  for (const kept of ['myproject', 'notes.pre-link', 'pre-link-stuff', 'archive.pre-link-NOTBASE36!', 'file.pre-link-abc123']) {
+    assert.ok(existsSync(join(d, kept)), `swept something it should not have: ${kept}`)
+  }
+  ok('names that only resemble the pattern are left alone')
+
+  assert.ok(existsSync(join(target, 'precious.txt')),
+    'followed a symlink and destroyed its target')
+  ok('a matching SYMLINK is not followed — its target survives')
+}
+
 function main(): void {
   const root = mkdtempSync(join(tmpdir(), 'geny-drive-'))
   testLinkNames()
   testDerivedPairs(root)
   testRelocation()
+  testPreLinkSweep()
   console.log(`\nALL DRIVE ORCHESTRATION TESTS PASS (${passed})`)
 }
 

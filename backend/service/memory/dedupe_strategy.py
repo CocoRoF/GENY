@@ -127,7 +127,11 @@ def _fresh_from_template(hint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         kind = Kind(kind_v) if kind_v else None
         direction = Direction(direction_v) if direction_v else None
         counterpart_role = CounterpartRole(cp_role) if cp_role else None
-        if kind is None or direction is None:
+        # make_event_metadata requires all three; a hint missing any of them
+        # cannot describe an event. Checking here rather than letting the
+        # required-argument violation surface as an AttributeError inside the
+        # blanket except below, where it reads as an unknown failure.
+        if kind is None or direction is None or counterpart_role is None:
             return None
 
         return make_event_metadata(

@@ -1,273 +1,122 @@
-"""Cycle 20260501_1 C — GenyDedupeStrategy.
+"""GenyDedupeStrategy — the one behaviour this subclass owns.
 
-Pins the contract that there's exactly *one* STM write site for
-every user / assistant turn (s18) and that
-state.metadata['_pending_message_metadata'] threads through to the
-record_message call so InteractionEvent metadata survives.
+WHAT IS OURS AND WHAT IS NOT
+
+``ProviderDrivenStrategy`` (the executor SDK) walks the new tail of
+``state.messages`` and records each entry. We subclass it for exactly one
+reason: to stamp ``msg["metadata"]`` with the InteractionEvent hint
+``AgentSession._invoke_pipeline`` leaves in state, so the SDK's
+``Turn.from_state_message`` can lift the typed fields.
+
+The previous version of this file asserted the RECORDING: one write per
+message, tool-role messages dropped, non-text blocks skipped, failures
+swallowed. That behaviour moved into the SDK, and the strategy stopped
+taking a memory manager at all — so every one of those tests constructed the
+class with a signature it no longer has and failed on the constructor,
+never reaching the assertion. They were testing someone else's code through
+our seam, and they had been dead for long enough that nobody noticed.
+
+What remains is the stamping contract, which is genuinely ours:
+  · the first same-role message in a batch gets the hint verbatim;
+  · subsequent same-role messages derive a FRESH event_id from the same
+    template, so one VTuber turn emitting several assistant messages does
+    not collapse them onto a single event.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
-import pytest
+from geny_executor.core.state import PipelineState
 
-from service.memory.dedupe_strategy import GenyDedupeStrategy
-
-
-# ─────────────────────────────────────────────────────────────────
-# Fakes
-# ─────────────────────────────────────────────────────────────────
+from service.memory.dedupe_strategy import _PENDING_KEY, GenyDedupeStrategy
 
 
-class _FakeMemoryManager:
-    def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
-
-    def record_message(self, role, content, metadata=None, **extra):
-        self.calls.append({"role": role, "content": content, "metadata": metadata})
-
-
-class _FakeState:
-    """Stand-in for PipelineState exposing the surface
-    `_record_transcript` consumes."""
-
-    def __init__(
-        self,
-        messages: List[Dict[str, Any]],
-        metadata: Dict[str, Any] | None = None,
-    ) -> None:
-        self.messages = list(messages)
-        self.metadata: Dict[str, Any] = dict(metadata or {})
+def _state(messages: List[Dict[str, Any]], pending: Dict[str, Any] | None = None) -> PipelineState:
+    state = PipelineState()
+    state.messages = messages
+    if pending is not None:
+        # The hint lives in state.metadata and is keyed BY ROLE — that is how
+        # AgentSession._invoke_pipeline leaves it.
+        state.metadata[_PENDING_KEY] = pending
+    return state
 
 
-def _make_strategy(mgr: _FakeMemoryManager) -> GenyDedupeStrategy:
-    # No reflection — irrelevant to this PR's contract
-    return GenyDedupeStrategy(
-        mgr,
-        enable_reflection=False,
-        llm_reflect=None,
-        curated_knowledge_manager=None,
-        resolver=None,
-    )
+def _stamp(messages: List[Dict[str, Any]], pending: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    strategy = GenyDedupeStrategy()
+    state = _state(messages, pending)
+    strategy._stamp_pending_metadata(state)
+    return state.messages
 
 
-# ─────────────────────────────────────────────────────────────────
-# Single-write contract
-# ─────────────────────────────────────────────────────────────────
+def test_the_hint_lands_on_the_message() -> None:
+    hint = {"user": {"event_id": "EVT-1", "kind": "user_chat", "direction": "inbound"}}
+    out = _stamp([{"role": "user", "content": "안녕"}], hint)
+
+    meta = out[0].get("metadata") or {}
+    assert meta.get("event_id") == "EVT-1"
+    assert meta.get("kind") == "user_chat"
+    assert meta.get("direction") == "inbound"
 
 
-def test_records_each_message_exactly_once_with_pending_metadata() -> None:
-    """user message and assistant message should each be recorded
-    once, with the matching pending metadata applied."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    user_meta = {"event_id": "evt-u", "kind": "user_chat",
-                 "direction": "in", "counterpart_id": "owner:alice",
-                 "counterpart_role": "user"}
-    assistant_meta = {"event_id": "evt-a", "kind": "user_chat",
-                      "direction": "out", "counterpart_id": "owner:alice",
-                      "counterpart_role": "user"}
-
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi back"},
-        ],
-        metadata={
-            "_pending_message_metadata": {
-                "user": user_meta,
-                "assistant": assistant_meta,
-            },
-        },
-    )
-
-    strategy._record_transcript(state)
-
-    assert [c["role"] for c in mgr.calls] == ["user", "assistant"]
-    assert mgr.calls[0]["content"] == "hello"
-    assert mgr.calls[1]["content"] == "hi back"
-    assert mgr.calls[0]["metadata"] == user_meta
-    assert mgr.calls[1]["metadata"] == assistant_meta
-    assert state.metadata["_stm_recorded_count"] == 2
-
-
-def test_records_without_metadata_when_pending_absent() -> None:
-    """No pending hint → record_message is called with
-    metadata=None. This is the fallback path for invoke_pipeline
-    paths where the metadata couldn't be resolved (legacy /
-    unrecognised prompt shape)."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "yo"},
-        ],
-        metadata={},
-    )
-    strategy._record_transcript(state)
-
-    assert all(c["metadata"] is None for c in mgr.calls)
-    assert len(mgr.calls) == 2
-
-
-def test_pending_metadata_threads_through_repeated_role() -> None:
-    """Cycle 20260501_2 F1 — when state.messages carries multiple
-    same-role messages in a single batch (e.g. a VTuber turn that
-    emits two assistant texts), every same-role line is recorded
-    with InteractionEvent metadata. The first reuses the pending
-    hint verbatim; subsequent ones get a *fresh* event_id with the
-    same kind / direction / counterpart_* / linked_event_id /
-    payload — so downstream filters see the line as a same-stream
-    sibling event, not as a metadata-less ghost."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    assistant_meta = {
-        "event_id": "evt-a-1",
-        "kind": "user_chat",
-        "direction": "out",
-        "counterpart_id": "owner:alice",
-        "counterpart_role": "user",
-        "linked_event_id": "evt-u-1",
-        "payload": {"trigger": "user"},
+def test_a_second_message_of_the_same_role_gets_its_own_event_id() -> None:
+    """One turn that emits two assistant messages must not file both under a
+    single event — that is the whole reason this subclass exists."""
+    # A derived event needs the full dimensions (kind AND direction) — the
+    # template cannot invent them, and returns nothing rather than guess.
+    # A derived event needs the FULL dimensions. Real hints always carry
+    # them — they are themselves built by make_event_metadata, where
+    # counterpart_role is a required argument.
+    hint = {
+        "assistant": {
+            "event_id": "EVT-1",
+            "kind": "reflection",
+            "direction": "internal",
+            "counterpart_id": "self",
+            "counterpart_role": "self",
+        }
     }
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "first reply"},
-            {"role": "assistant", "content": "second reply"},
+    out = _stamp(
+        [
+            {"role": "assistant", "content": "first"},
+            {"role": "assistant", "content": "second"},
         ],
-        metadata={"_pending_message_metadata": {"assistant": assistant_meta}},
+        hint,
     )
-    strategy._record_transcript(state)
 
-    assistant_records = [c for c in mgr.calls if c["role"] == "assistant"]
-    assert len(assistant_records) == 2
-
-    first = assistant_records[0]["metadata"]
-    second = assistant_records[1]["metadata"]
-    assert first == assistant_meta  # pending hint reused verbatim
-    assert second is not None
-    # Same canonical 5 dimensions threaded from the template
-    assert second["kind"] == "user_chat"
-    assert second["direction"] == "out"
-    assert second["counterpart_id"] == "owner:alice"
-    assert second["counterpart_role"] == "user"
-    assert second.get("linked_event_id") == "evt-u-1"
-    assert second.get("payload") == {"trigger": "user"}
-    # But event_id is fresh
-    assert second["event_id"] != assistant_meta["event_id"]
+    first = (out[0].get("metadata") or {}).get("event_id")
+    second = (out[1].get("metadata") or {}).get("event_id")
+    assert first == "EVT-1"
+    assert second and second != first, "two messages shared one event id"
+    assert (out[1].get("metadata") or {}).get("kind") == "reflection", (
+        "the derived event lost the rest of the hint"
+    )
 
 
-def test_repeated_role_with_no_hint_records_plainly() -> None:
-    """If no pending hint exists for a role, repeated messages of
-    that role still record (no metadata invented). This preserves
-    the legacy fallback for cycles where the metadata resolver
-    couldn't classify the input."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
+def test_no_hint_leaves_the_messages_alone() -> None:
+    out = _stamp([{"role": "user", "content": "안녕"}])
+    assert not (out[0].get("metadata") or {}).get("event_id")
 
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "a"},
-            {"role": "user", "content": "b"},
+
+def test_a_message_that_already_carries_metadata_is_left_alone() -> None:
+    """Stamping fills a gap; it does not overwrite. A caller that already
+    attached metadata knows more about that message than the pending hint."""
+    out = _stamp(
+        [{"role": "user", "content": "안녕", "metadata": {"mine": "keep"}}],
+        {"user": {"event_id": "EVT-1"}},
+    )
+    assert out[0]["metadata"] == {"mine": "keep"}
+
+
+def test_stamping_never_raises_on_odd_message_shapes() -> None:
+    """It runs on every turn, ahead of the recording it feeds. A malformed
+    entry must not take the pipeline down with it."""
+    out = _stamp(
+        [
+            {"role": "user", "content": [{"type": "image"}]},
+            {"role": "tool", "content": ""},
+            {"content": "no role at all"},
         ],
-        metadata={},
+        {"user": {"event_id": "EVT-1"}},
     )
-    strategy._record_transcript(state)
-
-    assert all(c["metadata"] is None for c in mgr.calls)
-    assert len(mgr.calls) == 2
-
-
-def test_skips_already_recorded_prefix() -> None:
-    """Repeated invocation in the same turn (state.metadata's
-    `_stm_recorded_count` advances) walks only new messages."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "old user"},
-            {"role": "assistant", "content": "old assistant"},
-            {"role": "user", "content": "new user"},
-        ],
-        metadata={"_stm_recorded_count": 2},
-    )
-    strategy._record_transcript(state)
-
-    assert [c["content"] for c in mgr.calls] == ["new user"]
-    assert state.metadata["_stm_recorded_count"] == 3
-
-
-def test_skips_non_text_message_blocks() -> None:
-    """Multimodal content (list of blocks) — text parts are
-    concatenated; tool_result blocks are dropped (parent class
-    behaviour preserved)."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": [
-                {"type": "text", "text": "hello "},
-                {"type": "image", "source": {}},
-                {"type": "text", "text": "world"},
-            ]},
-        ],
-        metadata={},
-    )
-    strategy._record_transcript(state)
-
-    assert mgr.calls[0]["content"] == "hello \nworld"
-
-
-def test_drops_tool_role_messages() -> None:
-    """Only user / assistant lines reach STM — tool_result and
-    other roles are filtered."""
-    mgr = _FakeMemoryManager()
-    strategy = _make_strategy(mgr)
-
-    state = _FakeState(
-        messages=[
-            {"role": "user", "content": "do thing"},
-            {"role": "tool", "content": "result"},
-            {"role": "assistant", "content": "done"},
-        ],
-        metadata={},
-    )
-    strategy._record_transcript(state)
-
-    roles = [c["role"] for c in mgr.calls]
-    assert roles == ["user", "assistant"]
-
-
-def test_handles_missing_memory_manager_gracefully() -> None:
-    """No memory manager → noop. Used at session boot when the
-    manager hasn't been wired yet."""
-    strategy = GenyDedupeStrategy(
-        memory_manager=None,
-        enable_reflection=False,
-    )
-    state = _FakeState(messages=[{"role": "user", "content": "x"}])
-    # Must not raise
-    strategy._record_transcript(state)
-
-
-def test_record_failure_swallowed() -> None:
-    """A buggy record_message implementation must not break the
-    pipeline (s18 runs at terminal state — failure here would lose
-    the rest of the turn's persistence)."""
-    class _ExplodingMgr:
-        def record_message(self, *a, **kw):
-            raise RuntimeError("upstream stm error")
-
-    strategy = GenyDedupeStrategy(_ExplodingMgr(), enable_reflection=False)
-    state = _FakeState(messages=[{"role": "user", "content": "hi"}])
-    # Must not raise
-    strategy._record_transcript(state)
-    assert state.metadata["_stm_recorded_count"] == 1
+    assert len(out) == 3

@@ -68,11 +68,31 @@ _FIXED_TS = datetime(2026, 5, 1, 1, 22, 12, 884629, tzinfo=TEST_TZ)
 
 
 def _make_archiver(tmp_path: Path, *, session_id: str = "") -> ConversationArchiver:
-    return ConversationArchiver(
-        str(tmp_path / "memory"),
+    """Archiver wired to a REAL provider over a temp directory.
+
+    The archiver no longer writes to disk itself — every rollup goes through
+    a MemoryProvider's NotesHandle, and without one it logs a warning and
+    writes nothing. These tests predate that seam and constructed it bare, so
+    every on-disk assertion compared against a directory nothing had written
+    to. Using geny_executor's own file-backed provider (rather than a mock of
+    it) keeps them testing the path production actually takes.
+    """
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    archiver = ConversationArchiver(
+        str(memory_dir),
         session_id=session_id,
         tz=TEST_TZ,
     )
+    from geny_executor.memory.providers.file import FileMemoryProvider
+
+    # The provider roots its own `memory/` under whatever it is given, so it
+    # takes the PARENT — that is how production lines up too, and it is what
+    # makes the archiver's reported absolute_path point at the real file.
+    archiver.set_memory_provider(
+        FileMemoryProvider(memory_dir.parent, session_id=session_id or "test-session")
+    )
+    return archiver
 
 
 def _meta(
@@ -261,16 +281,17 @@ class TestBuilders:
         assert "…" in t
         assert len(t) < 200
 
-    def test_build_links_to_user_chat_skips_dms(self):
-        # user_chat is not a DM-class kind → only the daily journal
-        # link is emitted (the legacy entities/<sanitized> link was
-        # retired with the entities/ category itself).
+    def test_build_links_to_user_chat_links_nowhere(self):
+        # A non-DM turn links out to NOTHING. Both former targets are gone:
+        # entities/<sanitized> went with the entities/ category, and the
+        # daily-journal date went with DailyJournalWriter (the rollup is
+        # self-contained; chronology comes from the index aggregates).
         links = build_links_to(
             kind=Kind.USER_CHAT.value,
             counterpart_id="owner:scenario",
             date="2026-05-01",
         )
-        assert links == ["2026-05-01"]
+        assert links == []
 
     def test_build_links_to_task_request_includes_dms(self):
         links = build_links_to(
@@ -278,8 +299,9 @@ class TestBuilders:
             counterpart_id="82b10c90-4c95-4e4f-863d-0bef73801fde",
             date="2026-05-01",
         )
-        assert "2026-05-01" in links
-        assert "dms/82b10c90-4c95-4e4f-863d-0bef73801fde/2026-05-01" in links
+        # Only the per-counterpart bundle — DM vault navigation is the one
+        # cross-link that survived.
+        assert links == ["dms/82b10c90-4c95-4e4f-863d-0bef73801fde/2026-05-01"]
         # entities/ link is no longer emitted post-Memory-v2.
         assert not any(l.startswith("entities/") for l in links)
 
@@ -289,8 +311,9 @@ class TestBuilders:
             counterpart_id="self",
             date="2026-05-01",
         )
-        # reflection on self → only the daily journal pointer
-        assert links == ["2026-05-01"]
+        # A reflection on self links nowhere: "self" is filtered as
+        # self-like before the DM check, and there is no journal target.
+        assert links == []
 
     def test_build_tags_lowercase(self):
         tags = build_tags(kind=Kind.TASK_REQUEST.value, counterpart_role="paired_subworker")
@@ -367,10 +390,9 @@ class TestArchiverSessionRollup:
         # Tags include base + kind + counterpart_role.
         assert "conversation" in meta["tags"]
         assert "user_chat" in meta["tags"]
-        # Links_to has the daily journal date (and *not* the dms/
-        # since user_chat is not a DM-class kind).
-        assert "2026-05-01" in meta["links_to"]
-        assert not any(l.startswith("dms/") for l in meta["links_to"])
+        # A user_chat turn links nowhere: not a DM, and the daily-journal
+        # target was retired with DailyJournalWriter.
+        assert meta["links_to"] == []
 
         # Body has one ## turn anchor and the user's content verbatim.
         assert "## turn-" in info["body"]
@@ -498,8 +520,8 @@ class TestArchiverSessionRollup:
         )
         assert result is not None
         info = _read_rollup(Path(result.absolute_path))
-        # Self-counterpart → only the daily journal link, no dms/.
-        assert info["meta"]["links_to"] == ["2026-05-01"]
+        # Self-counterpart → no dms/ link, and nothing else either.
+        assert info["meta"]["links_to"] == []
         # And no counterpart added (self-like is filtered).
         assert info["meta"]["counterparts"] == []
 

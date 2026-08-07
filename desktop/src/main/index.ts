@@ -1753,6 +1753,40 @@ function dropLegacyDriveState(): void {
   delete cfg.driveAgents
   writeConfigRaw(cfg)
   dlog('drive', 'legacy syncPairs/driveAgents config dropped')
+  sweepPreLinkCopies()
+}
+
+/** Remove the `<name>.pre-link-<ts>` copies the old link flow left behind.
+ *
+ *  Creating a link used to rename an agent mirror's copy of the subtree aside
+ *  under that suffix, so the shortcut could take the path. The copy was
+ *  redundant the moment the link started syncing — the same bytes live in the
+ *  linked folder and in the cloud — but it stayed on disk forever, showing up
+ *  as a stray directory beside the real one.
+ *
+ *  Only the exact `.pre-link-<base36>` shape this code produced is matched, so
+ *  a folder a user happened to name similarly is never touched. */
+function sweepPreLinkCopies(): void {
+  const root = driveRoot()
+  if (!existsSync(root)) return
+  const suffix = /\.pre-link-[0-9a-z]+$/
+  const sweep = (dir: string): void => {
+    let names: string[]
+    try { names = readdirSync(dir) } catch { return }
+    for (const name of names) {
+      const at = join(dir, name)
+      if (!suffix.test(name)) continue
+      try {
+        // lstat, not stat: a SYMLINK that happens to match the pattern must
+        // not be followed and its target destroyed.
+        if (!lstatSync(at).isDirectory()) continue
+        rmSync(at, { recursive: true, force: true })
+        dlog('drive', `removed stale pre-link copy: ${at}`)
+      } catch { /* locked or already gone — next launch retries */ }
+    }
+  }
+  sweep(root)
+  sweep(cloudFolder())
 }
 
 function applyDriveConfig(): void {

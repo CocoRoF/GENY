@@ -49,12 +49,23 @@ class _FakeShortTerm:
 
 
 class _FakeMemoryManager:
+    """Stands in for the real manager at the seam the controller USES.
+
+    That seam moved: ``ShortTermMemory`` was retired and the controller now
+    loads through ``aload_all_stm`` / ``load_all_stm``. This fake kept only
+    the old ``short_term`` property, so every endpoint under test saw an
+    empty stream and 18 assertions failed identically — a stale double, not
+    a broken product.
+    """
+
     def __init__(self, entries: Optional[List[Dict[str, Any]]] = None) -> None:
         self._stm = _FakeShortTerm(entries or [])
 
-    @property
-    def short_term(self):
-        return self._stm
+    async def aload_all_stm(self) -> List[Any]:
+        return self._stm.load_all()
+
+    def load_all_stm(self) -> List[Any]:
+        return self._stm.load_all()
 
 
 class _FakeAgent:
