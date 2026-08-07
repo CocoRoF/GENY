@@ -240,6 +240,13 @@ def _walk_workspace(ws: Path, spec) -> Dict[str, Tuple[bool, int, int]]:
     """Stat-walk → {rel_path: (is_dir, size, mtime_ns)}. Ignored dirs are
     pruned from descent (never entered), symlinks skipped entirely."""
     out: Dict[str, Tuple[bool, int, int]] = {}
+    # A workspace that IS a symlink belongs to another scope's journal — an
+    # agent space adopted into the cloud is the case. `followlinks=False`
+    # does NOT cover this: os.walk always enters the top path, so without
+    # this the session journal would index the cloud's bytes and two
+    # journals would own the same files.
+    if ws.is_symlink():
+        return out
     for root, dirs, files in os.walk(ws, followlinks=False):
         root_p = Path(root)
         rel_root = "" if root_p == ws else str(root_p.relative_to(ws)).replace("\\", "/")
@@ -731,6 +738,28 @@ def quota_bytes() -> int:
         return int(os.environ.get("GENY_WORKSPACE_QUOTA_MB", "10240")) * 1024 * 1024
     except ValueError:
         return 10240 * 1024 * 1024
+
+
+def used_bytes_under(storage_path: str, prefix: str) -> int:
+    """Bytes held under *prefix* within this storage's journal.
+
+    Per-agent usage is a slice of the cloud now that agent spaces live at
+    ``agents/<sid>/`` inside it — the agent's own storage root no longer
+    owns any bytes to count.
+    """
+    prefix = (prefix or "").strip("/")
+    if not prefix:
+        return used_bytes(storage_path)
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(size), 0) FROM entries "
+            "WHERE deleted=0 AND is_dir=0 AND (path = ? OR path LIKE ?)",
+            (prefix, f"{prefix}/%"),
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
 
 
 def used_bytes_if_indexed(storage_path: str) -> Optional[int]:

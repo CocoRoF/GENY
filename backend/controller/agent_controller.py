@@ -16,6 +16,7 @@ from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from service.auth.auth_middleware import require_auth
+from service.cloud import owning_storage as _cloud_owning_storage
 from service.utils.async_fs import rmtree_async
 
 from service.sessions.models import (
@@ -450,7 +451,19 @@ async def storage_summary(auth: dict = Depends(require_auth)):
             continue  # not the caller's session — omit silently
         try:
             storage_path = _storage_root_live_or_dormant(sid)
-            used = await asyncio.to_thread(workspace_sync.used_bytes_if_indexed, storage_path)
+            # Per-agent usage is a SLICE of the cloud now (agents/<sid>/),
+            # not a journal of its own.
+            _owner, _prefix = await asyncio.to_thread(
+                _cloud_owning_storage, storage_path,
+            )
+            if _prefix:
+                used = await asyncio.to_thread(
+                    workspace_sync.used_bytes_under, _owner, _prefix,
+                )
+            else:
+                used = await asyncio.to_thread(
+                    workspace_sync.used_bytes_if_indexed, _owner,
+                )
         except Exception:  # noqa: BLE001
             used = None
         out.append(
@@ -1636,7 +1649,14 @@ async def _enforce_workspace_quota(storage_path: str, incoming: int) -> None:
     quota = _wsync.quota_bytes()
     if quota <= 0:
         return
-    used = await asyncio.to_thread(_wsync.used_bytes, storage_path)
+    # Measure the journal that OWNS these bytes. An adopted agent holds none
+    # of its own — they are in the cloud — so reading its storage root would
+    # report 0 and switch the quota off for every agent write. The quota is
+    # the user's total, and the cloud is where the total lives.
+    from service.cloud import owning_storage
+
+    owner_path, _prefix = await asyncio.to_thread(owning_storage, storage_path)
+    used = await asyncio.to_thread(_wsync.used_bytes, owner_path)
     if used + max(0, incoming) > quota:
         raise HTTPException(
             status_code=507,

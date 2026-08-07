@@ -361,6 +361,40 @@ def adopt_agent_space(username: str, storage_path: str, session_id: str) -> str:
     return str(target)
 
 
+def owning_storage(storage_path: str, username: str = "") -> tuple:
+    """Which journal owns this scope's bytes, and under which prefix.
+
+    Returns ``(storage_path, prefix)``. An agent whose workspace has been
+    adopted holds no bytes of its own — they live in the cloud at
+    ``agents/<sid>/`` — so quota and usage must be read there. Answering from
+    the session's own (now empty) journal would report 0 B and, worse, switch
+    quota enforcement off for every agent write.
+    """
+    ws = Path(storage_path) / "workspace"
+    try:
+        if not ws.is_symlink():
+            return storage_path, ""
+        target = Path(os.readlink(str(ws)))
+    except OSError:
+        return storage_path, ""
+
+    user = username or ""
+    if not user:
+        # Derive the owner from the link itself: <cloud>/<user>/workspace/...
+        try:
+            rel = target.relative_to(cloud_root())
+            user = rel.parts[0] if rel.parts else ""
+        except (ValueError, OSError):
+            return storage_path, ""
+    if not user:
+        return storage_path, ""
+
+    prefix = cloud_relative(user, str(target))
+    if prefix is None:
+        return storage_path, ""
+    return cloud_storage_path(user, create=False), prefix
+
+
 def release_agent_space(storage_path: str) -> None:
     """Drop only the compatibility link. The agent's files stay in the cloud —
     they are shared work product, not session scratch."""

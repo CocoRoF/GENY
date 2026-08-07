@@ -158,3 +158,67 @@ def test_an_unrelated_symlink_named_cloud_is_preserved(world):
     target = Path(store.adopt_agent_space(user, storage, sid))
 
     assert (target / "cloud").is_symlink()
+
+
+# ── one path, one owner ─────────────────────────────────────────────
+
+def test_an_adopted_session_journals_nothing_of_its_own(world):
+    """The bytes live in the cloud and the cloud journal owns them. The
+    session's workspace is a symlink, and `os.walk(followlinks=False)` still
+    enters the TOP path — so without an explicit check the session journal
+    indexed the cloud too and two journals owned the same files."""
+    from service.utils.workspace_sync import refresh_index, used_bytes
+
+    user, storage, sid = world
+    (Path(storage) / "workspace" / "big.bin").write_bytes(b"x" * 5000)
+    store.adopt_agent_space(user, storage, sid)
+
+    refresh_index(storage, sid, force=True)
+    assert used_bytes(storage) == 0, "the session journal claimed cloud bytes"
+
+    cloud = store.cloud_storage_path(user)
+    refresh_index(cloud, "cloud", force=True)
+    assert used_bytes(cloud) >= 5000, "the cloud journal did not pick them up"
+
+
+def test_usage_is_read_from_the_owning_journal(world):
+    """Quota enforcement measures whatever `owning_storage` points at. If an
+    adopted agent resolved to its own empty journal the quota would read 0 and
+    be switched off for every agent write."""
+    from service.utils.workspace_sync import refresh_index, used_bytes, used_bytes_under
+
+    user, storage, sid = world
+    (Path(storage) / "workspace" / "payload.bin").write_bytes(b"y" * 4096)
+    store.adopt_agent_space(user, storage, sid)
+    cloud = store.cloud_storage_path(user)
+    refresh_index(cloud, "cloud", force=True)
+
+    owner, prefix = store.owning_storage(storage)
+
+    assert owner == cloud
+    assert prefix == f"agents/{sid}"
+    assert used_bytes(owner) >= 4096, "quota would not see the agent's bytes"
+    assert used_bytes_under(owner, prefix) >= 4096, "per-agent slice is wrong"
+
+
+def test_a_non_adopted_session_still_owns_its_own_bytes(world):
+    """Sessions whose adoption was skipped (no owner, or a failed move) must
+    keep being measured where their files actually are."""
+    user, storage, sid = world
+    (Path(storage) / "workspace" / "local.txt").write_text("still here", encoding="utf-8")
+
+    owner, prefix = store.owning_storage(storage)
+
+    assert owner == storage
+    assert prefix == ""
+
+
+def test_the_owner_is_derived_from_the_link_when_no_user_is_given(world):
+    """Quota enforcement has a storage path and no username in hand."""
+    user, storage, sid = world
+    store.adopt_agent_space(user, storage, sid)
+
+    owner, prefix = store.owning_storage(storage)
+
+    assert owner == store.cloud_storage_path(user)
+    assert prefix == f"agents/{sid}"
