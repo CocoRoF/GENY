@@ -136,13 +136,6 @@ const TOKEN_KEY = 'geny_auth_token'
 type StatusKind = 'idle' | 'working' | 'ok' | 'err'
 type Tab = 'account' | 'voice' | 'control' | 'workspace' | 'mcp' | 'app'
 
-interface SyncPairView {
-  id: string
-  sessionId: string
-  sessionLabel?: string
-  localPath: string
-  paused?: boolean
-}
 interface SyncStatusView {
   id: string
   state: 'idle' | 'syncing' | 'paused' | 'offline' | 'error' | 'session_gone' | 'awaiting_confirmation'
@@ -299,7 +292,6 @@ export function ControlApp() {
   const [driveMsg, setDriveMsg] = useState('')
   const [syncAgents, setSyncAgents] = useState<Array<{ id: string; name: string }>>([])
   const [nativeSt, setNativeSt] = useState<{ running: boolean; mountpoint: string; supported: boolean } | null>(null)
-  const [syncPairs, setSyncPairs] = useState<SyncPairView[]>([])
   const [syncLinks, setSyncLinks] = useState<Array<{ name: string; localPath: string; paused?: boolean }>>([])
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatusView>>({})
   const [syncFolder, setSyncFolder] = useState('')
@@ -333,7 +325,6 @@ export function ControlApp() {
   const refreshSync = async (): Promise<void> => {
     const res = await window.connector?.sync?.list().catch(() => null)
     if (!res) return
-    setSyncPairs((res.pairs as SyncPairView[]).filter((p) => (p as { managed?: string }).managed !== 'drive'))
     setSyncLinks(res.links ?? [])
     setSyncStatuses(Object.fromEntries((res.statuses as SyncStatusView[]).map((s) => [s.id, s])))
   }

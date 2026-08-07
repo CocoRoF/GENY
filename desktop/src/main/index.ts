@@ -201,7 +201,6 @@ interface ConnectorConfig {
   /** Per-agent Drive membership. `folder` is allocated once (safe name from
    *  the session label) and kept stable across session renames so local
    *  paths never churn. Disabling keeps the local folder on disk. */
-  driveAgents?: Record<string, { enabled: boolean; folder: string; label?: string }>
   /** Allow the agent to capture the screen (Phase 4). Default true.
    *  Legacy — superseded by computerUse.screen when computerUse is present. */
   captureArmed?: boolean
@@ -235,7 +234,6 @@ interface ConnectorConfig {
   mcpEnabled?: boolean
   /** Workspace sync pairings: agent session ↔ local folder (Drive-style
    *  bidirectional replication). Managed in settings → Workspace. */
-  syncPairs?: SyncPairConfig[]
   /** Stable replica identity for the sync protocol — generated once. */
   deviceId?: string
 }
@@ -316,6 +314,12 @@ function loadConfig(): ConnectorConfig {
     return { serverUrl: normalizeServerUrl(process.env.GENY_SERVER_URL) }
   }
 }
+/** Write the config verbatim — the only way to REMOVE a key, since
+ *  saveConfig merges a patch and can therefore only add or overwrite. */
+function writeConfigRaw(cfg: Record<string, unknown>): void {
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2))
+}
+
 function saveConfig(patch: Partial<ConnectorConfig>): ConnectorConfig {
   if ('serverUrl' in patch) patch = { ...patch, serverUrl: normalizeServerUrl(patch.serverUrl) }
   const prevLang = loadConfig().lang
@@ -1649,10 +1653,6 @@ function cloudFolder(): string {
   return join(driveRoot(), 'Cloud')
 }
 
-/** The local cloud folder name is reserved — an agent folder that took it
- *  would be mirrored on top of the cloud mirror. */
-const RESERVED_DRIVE_NAMES = new Set(['cloud'])
-
 /** Set once the IPC layer is wired; used by the boot-time restore. */
 let startNativeMount: () => Promise<{ mounted?: boolean; mountpoint?: string; error?: string }> =
   async () => ({ error: 'not ready' })
@@ -1682,30 +1682,23 @@ function allocateLinkName(desired: string, taken: Set<string>): string {
  *  ignores it (scan skips symlinks + the subtree is in excludePrefixes),
  *  so the link engine is the single owner of that subtree. */
 function ensureLinkShortcut(
-  agentDir: string,
+  parentDir: string,
   linkName: string,
   targetDir: string,
-  opts: { reclaim?: boolean } = {},
 ): void {
-  const at = join(agentDir, linkName)
+  const at = join(parentDir, linkName)
   try {
     const st = lstatSync(at, { throwIfNoEntry: false } as never) as ReturnType<typeof lstatSync> | undefined
     if (st?.isSymbolicLink()) {
       if (readlinkSync(at) === targetDir) return
       unlinkSync(at) // stale target → recreate below
     } else if (st) {
-      // A REAL directory/file sits at the shortcut path. On explicit link
-      // creation (reclaim) this is the drive mirror's own former copy of
-      // the subtree — the linked folder owns that data now, so the copy is
-      // MOVED ASIDE (never deleted: it may hold local-only edits) and the
-      // shortcut takes the path. Outside creation, never touch it.
-      if (!opts.reclaim) {
-        dlog('drive', `link shortcut skipped (occupied): ${at}`)
-        return
-      }
-      const backup = `${at}.pre-link-${Date.now().toString(36)}`
-      renameSync(at, backup)
-      dlog('drive', `link shortcut reclaimed path; previous copy kept at ${backup}`)
+      // A REAL directory or file already occupies the path. Never touch it:
+      // whatever it is, it is the user's. The "reclaim" branch that used to
+      // move it aside as `<name>.pre-link-<ts>` existed only to take the
+      // path back from a per-agent mirror, and there are no agent mirrors.
+      dlog('drive', `link shortcut skipped (occupied): ${at}`)
+      return
     }
     symlinkSync(targetDir, at, process.platform === 'win32' ? 'junction' : 'dir')
   } catch (e) {
@@ -1721,49 +1714,50 @@ function removeLinkShortcut(agentDir: string, linkName: string, targetDir: strin
   } catch { /* best effort */ }
 }
 
-/** One-time migration: classic free-form pairs (whole-workspace mirrors)
- *  become LINKED FOLDERS — GenyDrive is the single connection point now.
- *  The pair id changes (link:<sid>:<name>), which deliberately abandons
- *  the old index: its paths were workspace-ROOT-relative and rebasing
- *  them under the new subtree would make the 3-way merge read "server
- *  deleted everything" and wipe local files. A fresh bootstrap merges
- *  (uploads) instead — never deletes. Server-side root copies from the
- *  old layout are left untouched (user data). */
-function migrateLegacyPairsToLinks(): void {
-  const cfg = loadConfig()
-  const pairs = cfg.syncPairs ?? []
-  const legacy = pairs.filter((p) => !p.managed || p.managed === 'link')
-  if (legacy.length === 0) return
-  // Both generations fold into DRIVE-level links: classic free-form pairs
-  // (no managed) and the short-lived per-agent link pairs. A link belongs
-  // to the drive, so the agent a legacy pair pointed at is deliberately
-  // dropped — every connected agent shares the folder from now on. The
-  // pair ids change, abandoning old indexes on purpose (root-relative or
-  // per-agent baselines would misread as server-side deletions); a fresh
-  // bootstrap merges instead.
-  const links = [...(cfg.driveLinks ?? [])]
-  for (const p of legacy) {
-    if (links.some((l) => l.localPath === p.localPath)) continue
-    const taken = new Set(links.map((l) => l.name))
-    const name = p.remotePrefix || allocateLinkName(basename(p.localPath), taken)
-    links.push({ name: allocateLinkName(name, taken), localPath: p.localPath })
-    dlog('drive', `pair migrated to drive link: ${p.id} → ${name}`)
+/** Persist a pause for a DERIVED pair.
+ *
+ *  Engines are computed from `driveLinks` plus the cloud switch, so the
+ *  pause has to land on the thing that survives a restart. The legacy model
+ *  stored pairs in the config and edited them in place; doing that now wrote
+ *  to an empty list and then reconfigured the manager with it — which
+ *  stopped every engine on the machine, not just the paused one.
+ *
+ *  The cloud pair has nowhere to record a pause, so it is not pausable: the
+ *  switch that turns it off is "use Geny Cloud". */
+function pauseLink(pairId: string, reason: string): void {
+  const name = pairId.startsWith('link:') ? pairId.slice('link:'.length) : null
+  if (!name) {
+    dlog('drive', `pause requested for non-link pair ${pairId} — ignored (${reason})`)
+    return
   }
-  saveConfig({
-    driveLinks: links,
-    // Drop every derived pair: the cloud model rebuilds them with new ids
-    // (link:<name> instead of link:<sid>:<name>, plus the single `cloud`
-    // pair). Old per-agent link baselines are abandoned deliberately —
-    // they describe subtrees inside agent workspaces, and reusing them
-    // against the cloud would read as "the server lost everything".
-    syncPairs: pairs.filter((p) => p.managed === 'drive' && p.id.startsWith('drive:')),
-  })
+  const cfg = loadConfig()
+  const links = (cfg.driveLinks ?? []).map((l) =>
+    l.name === name ? { ...l, paused: true } : l,
+  )
+  saveConfig({ driveLinks: links })
+  dlog('drive', `link '${name}' paused: ${reason}`)
+  applyDriveConfig()
+}
+
+/** One-time removal of config from the per-agent / manual-pairing era.
+ *
+ *  `syncPairs` was the store for hand-made folder pairings and, later, the
+ *  derived drive pairs; `driveAgents` named a local mirror folder per agent.
+ *  Neither model exists — the drive is one cloud folder plus linked folders,
+ *  and its engines are derived. Leaving the keys behind would preserve state
+ *  that nothing reads and that describes a structure the app no longer has. */
+function dropLegacyDriveState(): void {
+  const cfg = loadConfig() as unknown as Record<string, unknown>
+  if (!('syncPairs' in cfg) && !('driveAgents' in cfg)) return
+  delete cfg.syncPairs
+  delete cfg.driveAgents
+  writeConfigRaw(cfg)
+  dlog('drive', 'legacy syncPairs/driveAgents config dropped')
 }
 
 function applyDriveConfig(): void {
   const cfg = loadConfig()
   const root = driveRoot()
-  const agents = cfg.driveAgents ?? {}
   const links = cfg.driveLinks ?? []
   // Opting out of Geny Cloud (installer answer or the in-app switch) parks
   // the whole drive: no managed pairs run. Per-agent membership is kept so
@@ -1816,13 +1810,6 @@ function applyDriveConfig(): void {
   // `<root>/<agent>` folder already on disk stays exactly where it is, as an
   // ordinary local folder. Those workspaces remain reachable on the web
   // (클라우드 → 에이전트) and through the virtual drive mount.
-  const staleAgentPairs = (cfg.syncPairs ?? []).filter(
-    (p) => p.managed === 'drive' && p.sessionId !== CLOUD_SCOPE,
-  )
-  if (staleAgentPairs.length) {
-    dlog('drive', `dropping ${staleAgentPairs.length} legacy agent sync pair(s); local files kept`)
-  }
-
   // A linked folder binds to the CLOUD — one engine each, whatever the agent
   // count. Ids drop the session dimension entirely.
   const linkPairs = cloudOn
@@ -1836,9 +1823,11 @@ function applyDriveConfig(): void {
         paused: l.paused,
       }))
     : []
-  const others = (cfg.syncPairs ?? []).filter((p) => !p.managed)
-  const next = [...others, ...cloudPair, ...linkPairs]
-  saveConfig({ syncPairs: [...others] })
+  // The pair set is DERIVED, never stored: it is the cloud mirror plus one
+  // engine per linked folder, both computed from `driveLinks` and the cloud
+  // switch. Persisting it was the legacy manual-pairing model, where a pair
+  // was a thing a user created by hand and the config was its home.
+  const next = [...cloudPair, ...linkPairs]
   getSyncManager()?.configure(next)
   ensureAllLinkShortcuts()
   publishLinkLedger()
@@ -1901,12 +1890,8 @@ function ensureAllLinkShortcuts(): void {
     // A linked folder belongs to the cloud, so its shortcut lives INSIDE
     // the local cloud folder — browsing GenyCloud shows it in place.
     ensureLinkShortcut(cloudLocal, l.name, l.localPath)
-    // Sweep the shortcuts earlier models left: at the drive root (0.19.18)
-    // and inside each agent folder (0.19.17).
+    // Sweep the shortcut the drive-root model left behind (0.19.18).
     removeLinkShortcut(root, l.name, l.localPath)
-    for (const a of Object.values(cfg.driveAgents ?? {})) {
-      removeLinkShortcut(join(root, a.folder), l.name, l.localPath)
-    }
   }
 }
 
@@ -2624,8 +2609,6 @@ function registerIpc(): void {
     const cfg = loadConfig()
     return {
       root: driveRoot(),
-      agents: cfg.driveAgents ?? {},
-      // Reported per agent so the UI can show live sync state + usage.
       statuses: getSyncManager()?.statuses() ?? [],
       // Whether the install-time "Geny Cloud" option was accepted, and what
       // this machine can actually do (probed, never assumed).
@@ -2655,9 +2638,6 @@ function registerIpc(): void {
       return {}
     }
   })
-
-  // `drive:set-agent` removed with the computer→agent edge it configured.
-  // A computer syncs the cloud; agents connect to the cloud from the web.
 
   ipcMain.handle('drive:set-cloud', (_e, enabled: boolean) =>
     driveExclusive(async () => {
@@ -2793,8 +2773,6 @@ function registerIpc(): void {
     if (!target) return { ok: false, error: 'empty path' }
     const current = driveRoot()
     if (target === current) return { ok: true, root: current, moved: 0 }
-    const cfg = loadConfig()
-    const agents = cfg.driveAgents ?? {}
     // Stop engines and WAIT for in-flight rounds — `configure([])` would also
     // delete the per-pair indexes (forcing a full re-bootstrap), and a live
     // watcher would recreate the very directory we are moving.
@@ -2802,9 +2780,13 @@ function registerIpc(): void {
     let moved = 0
     try {
       mkdirSync(target, { recursive: true })
-      for (const entry of Object.values(agents)) {
-        const from = join(current, entry.folder)
-        const to = join(target, entry.folder)
+      // The drive is ONE folder now. This used to iterate per-agent mirrors
+      // and, once those were removed, moved nothing at all — relocating the
+      // drive silently left the whole cloud mirror at the old path and made
+      // the engine re-download it into the new one.
+      for (const folder of ['Cloud']) {
+        const from = join(current, folder)
+        const to = join(target, folder)
         if (!existsSync(from) || existsSync(to)) continue
         try {
           renameSync(from, to) // same volume: instant
@@ -2835,10 +2817,8 @@ function registerIpc(): void {
   ipcMain.handle('sync:list', () => {
     const cfg = loadConfig()
     return {
-      pairs: cfg.syncPairs ?? [],
-      // Drive links are config-of-record (they fan out to one engine per
-      // connected agent at configure time) — the UI lists THESE, not the
-      // derived pairs, so a link shows even with zero agents connected.
+      // Links are the config of record; the engines are derived from them,
+      // so a link is listed even before its engine exists.
       links: cfg.driveLinks ?? [],
       statuses: getSyncManager()?.statuses() ?? [],
     }
@@ -2870,28 +2850,14 @@ function registerIpc(): void {
       // user already keeps there.
       const taken = new Set<string>([
         ...links.map((l) => l.name),
-        ...Object.values(cfg.driveAgents ?? {}).map((a) => a.folder),
         ...(existsSync(root) ? readdirSync(root) : []),
       ])
       const name = allocateLinkName(basename(localPath), taken)
       links.push({ name, localPath })
       saveConfig({ driveLinks: links })
-      // QUIESCE FIRST: any agent mirror that previously materialized a
-      // real workspace/<name>/ copy is reclaimed (renamed aside, never
-      // deleted) only while no engine round is in flight — a mid-round
-      // rename reads as a user deletion and plans a server-side wipe
-      // (observed live before this ordering existed).
+      // Quiesce before reconfiguring: starting an engine on a path while
+      // another round is mid-flight reads its churn as user edits.
       await getSyncManager()?.quiesce()
-      for (const a of Object.values(cfg.driveAgents ?? {})) {
-        const at = join(root, a.folder, name)
-        try {
-          const st = lstatSync(at, { throwIfNoEntry: false } as never) as ReturnType<typeof lstatSync> | undefined
-          if (st && !st.isSymbolicLink()) {
-            renameSync(at, `${at}.pre-link-${Date.now().toString(36)}`)
-            dlog('drive', `agent-mirror copy set aside for link '${name}' in ${a.folder}`)
-          }
-        } catch { /* per-agent best effort */ }
-      }
       applyDriveConfig()
       return { ok: true, name }
     }),
@@ -2931,15 +2897,14 @@ function registerIpc(): void {
     getSyncManager()?.confirmMassDelete(id, !!accept)
     if (!accept) {
       // refusal pauses the pair — persist that
-      const next = (loadConfig().syncPairs ?? []).map((p) =>
-        p.id === id ? { ...p, paused: true } : p,
-      )
-      saveConfig({ syncPairs: next })
+      pauseLink(id, 'user refused a mass delete')
     }
   })
   ipcMain.handle('sync:open-folder', (_e, id: string) => {
-    const pair = (loadConfig().syncPairs ?? []).find((p) => p.id === id)
-    if (pair) void shell.openPath(pair.localPath)
+    // Resolve against the LIVE engines. Pairs are derived, so looking them
+    // up in the config found nothing and the button quietly did nothing.
+    const st = getSyncManager()?.statuses().find((x) => x.id === id)
+    if (st?.localPath) void shell.openPath(st.localPath)
   })
   // Agent list for the pairing picker (main process owns the token).
   ipcMain.handle('sync:list-agents', async () => {
@@ -3101,18 +3066,14 @@ app.whenReady().then(() => {
         // persist the auto-pause (WITH its reason, so the explanation
         // survives the engine teardown) AND tear the engine down
         // (watcher/WS must not keep running on an inert pair)
-        const next = (loadConfig().syncPairs ?? []).map((p) =>
-          p.id === id ? { ...p, paused: true, pausedReason: reason } : p,
-        )
-        saveConfig({ syncPairs: next })
-        setTimeout(() => getSyncManager()?.configure(next), 0)
+        pauseLink(id, reason)
       },
     })
     // Reconcile Geny Drive first (creates/moves managed pairs), which also
     // configures the manager; falls back to raw pairs if the drive is unset.
     try {
       consumeInstallFlags()
-      migrateLegacyPairsToLinks()
+      dropLegacyDriveState()
       applyDriveConfig()
       // Restore the native mount the user left enabled. Delayed so the
       // token store is ready; a missing token simply skips it (the toggle
@@ -3124,8 +3085,12 @@ app.whenReady().then(() => {
           )
         }, 4000).unref?.()
       }
-    } catch {
-      manager.configure(loadConfig().syncPairs ?? [])
+    } catch (e) {
+      // applyDriveConfig is the ONLY way to build the pair set (cloud gate,
+      // link exclusions, shortcuts). The old fallback replayed stored pairs,
+      // which no longer exist — leaving the drive dead is worse than a
+      // logged failure, so surface it and let the next config change retry.
+      dlog('drive', `drive init failed: ${(e as Error)?.message ?? e}`)
     }
   } catch (e) {
     console.error('[sync] init failed', e)

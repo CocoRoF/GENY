@@ -29,19 +29,17 @@ export interface SyncPairConfig {
    *  human explanation instead of a bare "일시정지" after the engine that
    *  detected the condition has been torn down. */
   pausedReason?: string
-  /** 'drive' → this pair is OWNED by the Geny Drive orchestrator (single
-   *  root, per-agent toggle): created/moved/removed by drive config, hidden
-   *  from the manual-pair editor.
-   *  'link' → a LINKED FOLDER: an arbitrary local directory connected into
-   *  GenyDrive — synced to workspace/<remotePrefix>/ (a plain subdirectory
-   *  on the web) and represented inside the local drive folder as a
-   *  symlink/junction. GenyDrive is the single connection point; linked
-   *  folders are the only non-drive pairs the UI creates. */
+  /** What this engine is. Every pair is derived from the drive config —
+   *  there is no hand-made kind any more.
+   *  'drive' → the cloud mirror itself, <root>/Cloud ↔ the server cloud.
+   *  'link'  → a LINKED FOLDER: a directory anywhere on this machine,
+   *            synced into the cloud at <remotePrefix>/ and shown inside
+   *            the local cloud folder as a symlink/junction. */
   managed?: 'drive' | 'link'
-  /** link pairs: workspace subtree name this folder syncs into. */
+  /** link pairs: cloud subtree name this folder syncs into. */
   remotePrefix?: string
-  /** drive pairs: subtree names owned by link pairs of the same agent —
-   *  invisible to this engine so exactly one engine owns any path. */
+  /** the cloud mirror: subtree names owned by link engines — invisible to
+   *  this one, so exactly one engine owns any path. */
   excludePrefixes?: string[]
 }
 
@@ -485,19 +483,14 @@ export class SyncManager {
       if (changed) {
         engine.stop()
         this.engines.delete(id)
-        if (!next && !engine.cfg.managed) {
-          // MANUAL pairing removed → its index file is dead weight (manual
-          // ids are minted fresh on re-pair, so it can never be reused).
-          // Drive pairs are the OPPOSITE: their id is the stable
-          // drive:<sessionId>, and the index is the sync baseline — deleting
-          // it would turn every cloud-off/agent-off toggle into a full
-          // re-download on re-enable, and (worse) losing the baseline makes
-          // "deleted on the other side while parked" indistinguishable from
-          // "never seen", resurrecting deleted files. Drive indexes are only
-          // removed when the AGENT SESSION itself is gone (session_gone) —
-          // never on a toggle.
-          this.eraseIndexFiles(id)
-        }
+        // NOTE: the baseline is deliberately KEPT when a pair goes away.
+        // Turning the cloud off, or removing a link, parks an engine whose
+        // id is stable — and erasing its baseline would turn the next
+        // re-enable into a full re-download and, worse, make "deleted on the
+        // other side while parked" indistinguishable from "never seen",
+        // resurrecting deleted files. Baselines are erased only on an
+        // explicit dropIndex (revoked access), where a stale one would
+        // delete the user's local copies instead.
       }
     }
     // start new ones
