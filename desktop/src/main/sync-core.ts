@@ -143,6 +143,76 @@ const MASS_DELETE_MIN = 50
 const MASS_DELETE_RATIO = 0.3
 
 /** One full convergence round. Mutates and returns `index`. */
+/** State the server remembers for one replica — the remote-tracking ref. */
+export interface DeviceRef {
+  cursor: number
+  acked_ts: number
+}
+
+/**
+ * Rebuild the merge base after the local index was lost.
+ *
+ * WHY THIS IS NOT JUST A BOOTSTRAP
+ *
+ * A replica with no base treats every local file as newly created, because
+ * "I made this while away" and "the server deleted this" look identical from
+ * one side. The consequence is not cosmetic: every server-side deletion comes
+ * back AND is pushed into the cloud, and every server-side edit produces a
+ * junk conflict copy. Measured on a 50-file workspace with one lost index:
+ * 10/10 deletions resurrected, 20 junk copies, 30 spurious uploads.
+ *
+ * The server holds the missing half. `ref.cursor` is the last point this
+ * replica and the server agreed on. For most paths the base can then be
+ * established EXACTLY: if the server still holds the same bytes we have on
+ * disk, that content is provably what we agreed on. Only where the bytes
+ * already differ is a judgement needed, and there the failure is made safe —
+ * an unclaimed path is treated as a local change and preserved.
+ *
+ * With the base restored, the ordinary delta from `ref.cursor` carries the
+ * tombstones, and deletions are applied instead of resurrected.
+ */
+/** Clock skew between this PC and the server, plus "I just edited it",
+ *  both live inside this window. Timestamps are only consulted for paths
+ *  the exact check below cannot settle, and only outside this margin. */
+const RECOVERY_MTIME_MARGIN_MS = 10 * 60 * 1000
+
+export async function recoverBaseFromServerRef(
+  fs: LocalFs,
+  ref: DeviceRef,
+  serverSha: Map<string, string>,
+): Promise<SyncIndex> {
+  const index: SyncIndex = { cursor: Math.max(0, ref.cursor | 0), entries: {} }
+  if (!ref.cursor) return { cursor: 0, entries: {} }
+  const ackedMs = ref.acked_ts ? ref.acked_ts * 1000 : 0
+
+  const local = await fs.scan()
+  for (const [path, st] of local) {
+    if (fs.isIgnored?.(path)) continue
+    if (st.isDir) {
+      index.entries[path] = { isDir: true, size: 0, mtimeMs: st.mtimeMs, sha: '', lastSyncedSha: '' }
+      continue
+    }
+    const sha = await fs.hash(path)
+
+    // EXACT: the server still holds these very bytes, so this is provably
+    // the content we agreed on. No timestamp involved, so no clock to skew.
+    const claim = serverSha.get(path) === sha
+      // FALLBACK, only for paths whose content already differs: either the
+      // server moved after our last agreement and we hold the old copy, or
+      // we edited it locally. Age decides — and the margin makes the
+      // ambiguous cases fall through to "unclaimed", which the engine
+      // treats as a local change and preserves as a conflict copy. Losing a
+      // conflict copy's tidiness is acceptable; losing an edit is not.
+      || (ackedMs > 0 && st.mtimeMs < ackedMs - RECOVERY_MTIME_MARGIN_MS)
+
+    if (!claim) continue
+    index.entries[path] = {
+      isDir: false, size: st.size, mtimeMs: st.mtimeMs, sha, lastSyncedSha: sha,
+    }
+  }
+  return index
+}
+
 export async function syncOnce(
   transport: Transport,
   fs: LocalFs,

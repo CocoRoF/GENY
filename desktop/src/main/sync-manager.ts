@@ -12,10 +12,10 @@
  */
 
 import { watch, type FSWatcher } from 'chokidar'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { hostname } from 'os'
 import { join } from 'path'
-import { MassDeletePending, SyncIndex, syncOnce } from './sync-core'
+import { MassDeletePending, recoverBaseFromServerRef, SyncIndex, syncOnce } from './sync-core'
 import { ReplicaFs, DEFAULT_IGNORES } from './sync-fs'
 import { HttpSyncTransport, WorkspaceWsClient } from './sync-transport'
 
@@ -106,6 +106,10 @@ class PairEngine {
   private rerun = false
   private stopped = false
   private confirmedMassDelete = false
+  /** Set by loadIndex when the merge base could not be read but this pair
+   *  has synced before. Triggers one recovery round against the server's
+   *  device ref rather than a blind bootstrap. */
+  private indexLost = false
   // Sticky watcher-degradation notice (e.g. inotify ENOSPC). Kept OUTSIDE
   // status.lastError because every successful cycle rewrites lastError —
   // and the whole point of ENOSPC is that the 60s poll keeps succeeding.
@@ -143,6 +147,7 @@ class PairEngine {
         token: async () => (await this.deps.token()) ?? '',
         sessionId: cfg.sessionId,
         deviceId: this.deps.deviceId(),
+        deviceName: hostname(),
       },
       join(cfg.localPath, '.geny-sync-tmp'),
       { scope: { remotePrefix: cfg.remotePrefix, excludePrefixes: cfg.excludePrefixes } },
@@ -153,22 +158,63 @@ class PairEngine {
     return join(this.deps.indexDir, `${this.cfg.id}.json`)
   }
 
+  /** Load the merge base, falling back to the previous generation.
+   *
+   *  This file IS the 3-way merge base. Losing it does not degrade
+   *  gracefully: without it the engine cannot tell "the server deleted
+   *  this" from "I created this while away", so every server-side deletion
+   *  resurrects and is pushed back into the cloud (measured: 10/10, plus a
+   *  junk conflict copy per server-modified file). So a torn write must
+   *  land on the previous good generation, never on "no index at all".
+   *  `indexLost` records that both were unusable — the manager then
+   *  rebuilds the base from the server's device ref instead of guessing. */
   private loadIndex(): SyncIndex {
-    try {
-      const parsed = JSON.parse(readFileSync(this.indexPath(), 'utf-8'))
-      if (typeof parsed?.cursor === 'number' && parsed?.entries) return parsed
-    } catch {
-      /* fresh pair */
+    for (const path of [this.indexPath(), this.indexPath() + '.bak']) {
+      try {
+        const parsed = JSON.parse(readFileSync(path, 'utf-8'))
+        if (typeof parsed?.cursor === 'number' && parsed?.entries) return parsed
+      } catch {
+        /* try the previous generation */
+      }
     }
+    this.indexLost = existsSync(this.indexPath()) || existsSync(this.indexPath() + '.bak')
+      ? true          // present but unreadable — a torn write
+      : this.indexEverExisted()
     return { cursor: 0, entries: {} }
+  }
+
+  /** A pair that has synced before leaves a marker; its absence means this
+   *  really is a first run (nothing to recover, bootstrap is correct). */
+  private indexEverExisted(): boolean {
+    return existsSync(this.indexPath() + '.seen')
   }
 
   private saveIndex(): void {
     try {
       mkdirSync(this.deps.indexDir, { recursive: true })
-      const tmp = this.indexPath() + '.tmp'
+      const target = this.indexPath()
+      // Keep the last good generation before overwriting it.
+      if (existsSync(target)) {
+        try { copyFileSync(target, target + '.bak') } catch { /* best effort */ }
+      }
+      const tmp = target + '.tmp'
       writeFileSync(tmp, JSON.stringify(this.index))
-      renameSync(tmp, this.indexPath())
+      // fsync the DATA before the rename publishes it. rename is atomic for
+      // the directory entry, not for the bytes: without this a power cut can
+      // promote a zero-length file, which reads back as "no merge base".
+      try {
+        const fd = openSync(tmp, 'r+')
+        try { fsyncSync(fd) } finally { closeSync(fd) }
+      } catch { /* fsync unsupported — the rename still orders the entry */ }
+      renameSync(tmp, target)
+      // And fsync the DIRECTORY so the rename itself survives the cut.
+      try {
+        const dfd = openSync(this.deps.indexDir, 'r')
+        try { fsyncSync(dfd) } finally { closeSync(dfd) }
+      } catch { /* not supported on this platform (Windows dirs) */ }
+      if (!existsSync(target + '.seen')) {
+        try { writeFileSync(target + '.seen', '1') } catch { /* best effort */ }
+      }
     } catch (e) {
       this.deps.log(`sync[${this.cfg.id}] index save failed: ${e}`)
     }
@@ -292,6 +338,43 @@ class PairEngine {
     }
   }
 
+  /** One-time repair when the merge base was unreadable at load.
+   *
+   *  Without it the engine would bootstrap blind: every local file looks
+   *  newly created, so every server-side deletion resurrects and is pushed
+   *  back into the cloud. The server's device ref supplies the missing half.
+   *  If the server has no ref for us (first sync since this feature, or a
+   *  genuinely new pair) there is nothing to recover and a bootstrap is the
+   *  correct behaviour. */
+  private async recoverBaseIfLost(): Promise<void> {
+    if (!this.indexLost) return
+    this.indexLost = false
+    try {
+      const ref = await this.transport.deviceRef?.()
+      if (!ref || !ref.cursor) {
+        this.deps.log(`sync[${this.cfg.id}] index lost, no server ref — bootstrapping`)
+        return
+      }
+      // The server's CURRENT state lets most paths be settled exactly
+      // (same bytes here and there ⇒ provably the agreed content), leaving
+      // timestamps as a fallback only where the content already differs.
+      const snapshot = await this.transport.changes(0)
+      const serverSha = new Map<string, string>()
+      for (const c of snapshot.changes) {
+        if (!c.deleted && !c.is_dir) serverSha.set(c.path, c.sha256)
+      }
+      this.index = await recoverBaseFromServerRef(this.fs, ref, serverSha)
+      this.saveIndex()
+      this.deps.log(
+        `sync[${this.cfg.id}] merge base recovered from server ref ` +
+        `(cursor=${this.index.cursor}, ${Object.keys(this.index.entries).length} paths)`,
+      )
+    } catch (e) {
+      // Recovery is an optimisation over bootstrap, never a precondition.
+      this.deps.log(`sync[${this.cfg.id}] base recovery failed: ${e}`)
+    }
+  }
+
   private async run(): Promise<void> {
     if (this.stopped || this.cfg.paused) return
     if (this.running) {
@@ -302,6 +385,7 @@ class PairEngine {
     this.status.state = 'syncing'
     this.pushStatus()
     try {
+      await this.recoverBaseIfLost()
       const confirmed = this.confirmedMassDelete
       this.confirmedMassDelete = false
       const { stats } = await syncOnce(this.transport, this.fs, this.index, {
@@ -311,6 +395,15 @@ class PairEngine {
         confirmMassDelete: confirmed ? async () => true : undefined,
       })
       this.saveIndex()
+      // Publish the agreement point AFTER the base is safely on disk. Doing
+      // it first would let a crash between the two leave the server claiming
+      // we applied changes whose base we then lost — recovery would trust a
+      // cursor that is ahead of our actual state and skip real deletions.
+      if (!stats.errors.length) {
+        this.transport.ackCursor?.(this.index.cursor).catch(() => {
+          /* best effort — one round of recovery precision, never data */
+        })
+      }
       this.status.counts.downloaded += stats.downloaded
       this.status.counts.uploaded += stats.uploaded
       this.status.counts.conflicts += stats.conflicts

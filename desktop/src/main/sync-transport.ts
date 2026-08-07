@@ -21,6 +21,8 @@ export interface TransportAuth {
   token: () => string | Promise<string>
   sessionId: string
   deviceId: string
+  /** Human label for the history ("내-데스크톱"), not an identity. */
+  deviceName?: string
 }
 
 function wsPath(p: string): string {
@@ -53,7 +55,14 @@ function encPath(p: string): string {
 }
 
 async function authHeaders(auth: TransportAuth): Promise<Record<string, string>> {
-  return { Authorization: `Bearer ${await auth.token()}` }
+  // The device identity rides on every call so the server can attribute a
+  // write to THIS machine in the history. Without it a replica push is
+  // indistinguishable from an agent write once the bytes are on disk.
+  return {
+    Authorization: `Bearer ${await auth.token()}`,
+    'X-Geny-Device-Id': auth.deviceId,
+    'X-Geny-Device-Name': encodeURIComponent(auth.deviceName ?? ''),
+  }
 }
 
 /** Files above this go through the chunked/resumable path. */
@@ -92,6 +101,36 @@ export class HttpSyncTransport implements Transport {
       if (v !== undefined) u.searchParams.set(k, String(v))
     }
     return u.toString()
+  }
+
+  /** The server's remembered agreement point for this replica. */
+  async deviceRef(): Promise<{ cursor: number; acked_ts: number } | null> {
+    const res = await fetch(
+      this.url('/storage/device-state', { device_id: this.auth.deviceId }),
+      { headers: await authHeaders(this.auth) },
+    )
+    if (!res.ok) return null
+    const body = (await res.json()) as { state?: { cursor: number; acked_ts: number } | null }
+    return body.state ?? null
+  }
+
+  /** Publish "I have fully applied everything up to `cursor`".
+   *
+   *  This is what makes a lost merge base recoverable instead of fatal, and
+   *  it also pins journal retention: the server keeps tombstones above the
+   *  cursor of every live replica, so a machine that was off for months still
+   *  learns about deletions from a delta. Best-effort — a failed ack costs
+   *  one round of recovery precision, never data. */
+  async ackCursor(cursor: number): Promise<void> {
+    await fetch(this.url('/storage/device-state'), {
+      method: 'PUT',
+      headers: { ...(await authHeaders(this.auth)), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: this.auth.deviceId,
+        device_name: this.auth.deviceName ?? '',
+        cursor,
+      }),
+    })
   }
 
   async changes(since: number): Promise<ChangesResponse> {

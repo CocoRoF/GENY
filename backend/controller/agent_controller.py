@@ -1401,6 +1401,9 @@ class StorageRenameRequest(BaseModel):
 
 @router.post("/{session_id}/storage/mkdir")
 async def storage_mkdir(
+    # Defaulted so the handler stays directly callable in unit tests;
+    # FastAPI injects the live Request from the annotation regardless.
+    http_request: Request = None,  # type: ignore[assignment]
     session_id: str = Path(..., description="Session ID"),
     path: str = Query(..., description="New folder path (storage-root relative, under workspace/)"),
     auth: dict = Depends(require_auth),
@@ -1413,6 +1416,8 @@ async def storage_mkdir(
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=False)
     await _sync_touch(_notify_key, str(root))
+    await _history(storage_path, http_request, auth, "mkdir",
+                   str(target.relative_to(root)))
     return {"ok": True, "path": str(target.relative_to(root))}
 
 
@@ -1440,11 +1445,17 @@ async def storage_rename(
     if outcome == "dst_exists":
         raise HTTPException(status_code=409, detail="Destination already exists")
     await _sync_touch(_notify_key, str(root))
+    await _history(storage_path, None, auth, "renamed",
+                   str(dst.relative_to(root)),
+                   detail=f"from {src.relative_to(root)}")
     return {"ok": True, "path": str(dst.relative_to(root))}
 
 
 @router.delete("/{session_id}/storage/entry")
 async def storage_delete(
+    # Defaulted so the handler stays directly callable in unit tests;
+    # FastAPI injects the live Request from the annotation regardless.
+    http_request: Request = None,  # type: ignore[assignment]
     session_id: str = Path(..., description="Session ID"),
     path: str = Query(..., description="Path to delete (under workspace/)"),
     base_sha: Optional[str] = Query(
@@ -1477,11 +1488,16 @@ async def storage_delete(
             detail={"conflict": "delete", "current_sha": clash},
         )
     await _sync_touch(_notify_key, str(_root))
+    await _history(storage_path, http_request, auth, "deleted",
+                   str(target.relative_to(_root)))
     return {"ok": True}
 
 
 @router.post("/{session_id}/storage/upload")
 async def upload_to_workspace(
+    # Defaulted so the handler stays directly callable in unit tests;
+    # FastAPI injects the live Request from the annotation regardless.
+    http_request: Request = None,  # type: ignore[assignment]
     session_id: str = Path(..., description="Session ID"),
     subdir: str = Query(
         "uploads",
@@ -1562,6 +1578,7 @@ async def upload_to_workspace(
 
     rel = str(dest.relative_to(root))
     await _sync_touch(_notify_key, str(root))
+    await _history(storage_path, http_request, auth, "uploaded", rel, size)
     return {
         "ok": True,
         "session_id": session_id,
@@ -1713,6 +1730,11 @@ async def put_workspace_file(
         raise HTTPException(status_code=500, detail="write failed")
 
     latest = await _sync_touch(_notify_key, str(root))
+    # A replica push: attribute it to the machine, not to "the agent". The
+    # scan would otherwise see the same bytes land and file it as agent work.
+    await _history(storage_path, request, auth,
+                   "updated" if base_sha else "added",
+                   str(target.relative_to(root)), size)
     return {
         "ok": True,
         "path": str(target.relative_to(root)),
@@ -1892,6 +1914,117 @@ def _links_path(storage_path: str) -> str:
     import os as _os
 
     return _os.path.join(storage_path, _LINKS_FILE)
+
+
+def _actor_of(request: Optional[Request], auth: dict) -> tuple:
+    """Who is making this call: a replica, or a person on the web?
+
+    A replica identifies itself with `X-Geny-Device-Id`/`-Name` (the same
+    identity it uses on the sync socket). Anything else is a human in the
+    browser. The distinction is the whole point of the history: "a file you
+    did not touch changed" is only answerable if the actor is recorded at
+    the moment of the change.
+    """
+    user = str((auth or {}).get("display_name") or (auth or {}).get("sub") or "")
+    if request is not None:
+        device_id = request.headers.get("X-Geny-Device-Id") or ""
+        if device_id:
+            name = request.headers.get("X-Geny-Device-Name") or device_id[:8]
+            return "device", name
+    return "web", user
+
+
+async def _history(
+    storage_path: str, request: Optional[Request], auth: dict,
+    action: str, path: str = "", size: int = 0, detail: str = "",
+) -> None:
+    """Record one history row for a COMPLETED operation.
+
+    Off-loop (SQLite) and swallowing (this runs after the operation already
+    succeeded — the screen-observation outage was exactly a bookkeeping step
+    turning finished work into a 500).
+    """
+    from service.utils import workspace_sync
+
+    kind, actor = _actor_of(request, auth)
+    try:
+        await asyncio.to_thread(
+            workspace_sync.record_event, storage_path,
+            actor_kind=kind, actor=actor, action=action,
+            path=path, size=size, detail=detail,
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("history record skipped", exc_info=True)
+
+
+@router.get("/{session_id}/storage/history")
+async def storage_history(
+    session_id: str = Path(..., description="Storage scope"),
+    limit: int = Query(200, ge=1, le=500),
+    before_id: int = Query(0, ge=0),
+    auth: dict = Depends(require_auth),
+):
+    """Newest-first history of everything that happened to this storage."""
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
+    from service.utils import workspace_sync
+
+    return await asyncio.to_thread(
+        workspace_sync.list_events, storage_path, limit, before_id,
+    )
+
+
+@router.get("/{session_id}/storage/device-state")
+async def get_device_state(
+    session_id: str = Path(..., description="Storage scope"),
+    device_id: str = Query(..., min_length=1, max_length=64),
+    auth: dict = Depends(require_auth),
+):
+    """The last cursor this device and the server agreed on.
+
+    A replica reads this when its own merge base is gone (torn index after a
+    power cut, reinstall, new disk). Without it the replica cannot tell a
+    server-side deletion from a local creation and resurrects every deleted
+    file — measured: 10/10 deletions came back and were pushed into the
+    cloud. With it, the deletions are still in the delta from this cursor.
+    """
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
+    from service.utils import workspace_sync
+
+    state = await asyncio.to_thread(
+        workspace_sync.get_device_state, storage_path, device_id,
+    )
+    return {"state": state}
+
+
+@router.put("/{session_id}/storage/device-state")
+async def put_device_state(
+    payload: Dict[str, Any],
+    session_id: str = Path(..., description="Storage scope"),
+    auth: dict = Depends(require_auth),
+):
+    """Advance this device's agreement pointer after a clean round.
+
+    Also pins journal retention: tombstones above a live device's cursor are
+    the only record that a deletion happened, so they survive the age-based
+    prune while that device is still around.
+    """
+    _enforce_scope_owner(session_id, auth)
+    storage_path, _notify_key = _resolve_storage_scope(session_id, auth)
+    from service.utils import workspace_sync
+
+    device_id = str(payload.get("device_id") or "").strip()[:64]
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    try:
+        cursor = int(payload.get("cursor") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="cursor must be an integer") from None
+    return await asyncio.to_thread(
+        workspace_sync.set_device_state, storage_path, device_id, cursor,
+        str(payload.get("device_name") or "")[:64],
+    )
 
 
 @router.get("/{session_id}/storage/links")

@@ -129,6 +129,40 @@ def _connect(storage_path: str) -> sqlite3.Connection:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_seq ON entries(seq)")
     conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+    # Per-device agreement pointer — the remote-tracking ref of this design.
+    # A replica keeps the 3-way merge base locally; if that file is lost (a
+    # hard power-off writes it without an fsync, a reinstall wipes it), the
+    # base is unrecoverable and the replica can no longer tell "the server
+    # deleted this" from "I made this while away" — measured blast radius:
+    # every server-side deletion resurrects AND is pushed back into the
+    # cloud. Holding the last agreed cursor HERE, on the authority, makes
+    # that base reconstructible instead of lost.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS devices(
+               device_id TEXT PRIMARY KEY,
+               device_name TEXT NOT NULL DEFAULT '',
+               cursor INTEGER NOT NULL DEFAULT 0,
+               acked_at TEXT NOT NULL,
+               acked_ts INTEGER NOT NULL DEFAULT 0
+           )"""
+    )
+    # Human-readable history of what happened to this storage and who did
+    # it. The entries journal already records WHAT changed; it cannot say
+    # WHO, which is the only interesting question when a file you did not
+    # touch changes underneath you.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS events(
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               ts INTEGER NOT NULL,
+               actor_kind TEXT NOT NULL,
+               actor TEXT NOT NULL DEFAULT '',
+               action TEXT NOT NULL,
+               path TEXT NOT NULL DEFAULT '',
+               size INTEGER NOT NULL DEFAULT 0,
+               detail TEXT NOT NULL DEFAULT ''
+           )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_id ON events(id DESC)")
     if fresh:
         # Rebuilt (or first-ever) index: seed seq from the high-water mark
         # so it stays monotonic across rebuilds. Also mark every cursor
@@ -273,6 +307,37 @@ def refresh_index(
         return refresh_index(storage_path, session_id, force=True, _retried=True)
 
 
+#: A scan-detected change is attributed to the agent ONLY if nobody claimed
+#: it first. Web uploads and replica pushes record themselves at the moment
+#: they happen (they are the only ones who know who the actor was); the scan
+#: then sees the same change on disk and would file a duplicate. This window
+#: is how long an explicit attribution suppresses that duplicate.
+_ATTRIBUTION_WINDOW_S = 120
+
+
+def _scan_event(
+    conn: sqlite3.Connection, action: str, path: str, size: int, is_dir: bool,
+) -> None:
+    """History row for a change found by the scan (i.e. nobody claimed it)."""
+    try:
+        now = int(time.time())
+        claimed = conn.execute(
+            "SELECT 1 FROM events WHERE path=? AND action=? AND ts >= ? "
+            "AND actor_kind != 'agent' LIMIT 1",
+            (path, action, now - _ATTRIBUTION_WINDOW_S),
+        ).fetchone()
+        if claimed:
+            return
+        conn.execute(
+            "INSERT INTO events(ts, actor_kind, actor, action, path, size, detail) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (now, "agent", "", action, path[:400], int(size or 0),
+             "directory" if is_dir else ""),
+        )
+    except Exception:  # noqa: BLE001 — history must never break a scan
+        logger.debug("history: scan event skipped for %s", path, exc_info=True)
+
+
 def _refresh_index_inner(
     storage_path: str,
     session_id: str = "",
@@ -330,8 +395,10 @@ def _refresh_index_inner(
                 )
                 if old is None or old[4]:
                     stats["added"] += 1
+                    _scan_event(conn, "added", rel, size, is_dir)
                 else:
                     stats["updated"] += 1
+                    _scan_event(conn, "updated", rel, size, is_dir)
 
             # vanished → tombstone
             for rel, (_d, _s, _m, _sha, deleted) in known.items():
@@ -344,6 +411,7 @@ def _refresh_index_inner(
                     (seq, ts, rel),
                 )
                 stats["deleted"] += 1
+                _scan_event(conn, "deleted", rel, 0, bool(_d))
 
             # Prune ancient tombstones — and RECORD the highest pruned seq
             # as the stale-cursor watermark: a replica whose cursor is
@@ -353,10 +421,23 @@ def _refresh_index_inner(
                 datetime.now(timezone.utc).timestamp() - _TOMBSTONE_TTL_S,
                 timezone.utc,
             ).isoformat()
-            pruned = conn.execute(
-                "SELECT MAX(seq) FROM entries WHERE deleted=1 AND updated_at < ?",
-                (cutoff_iso,),
-            ).fetchone()
+            # Retention is pinned by device refs, not by age alone: a
+            # tombstone above a live device's cursor is the ONLY record that
+            # the deletion happened, and pruning it makes that device
+            # resurrect the file. Age still wins for devices gone longer
+            # than the pin TTL — they re-bootstrap instead.
+            floor = _retention_floor(conn)
+            if floor is None:
+                pruned = conn.execute(
+                    "SELECT MAX(seq) FROM entries WHERE deleted=1 AND updated_at < ?",
+                    (cutoff_iso,),
+                ).fetchone()
+            else:
+                pruned = conn.execute(
+                    "SELECT MAX(seq) FROM entries "
+                    "WHERE deleted=1 AND updated_at < ? AND seq <= ?",
+                    (cutoff_iso, floor),
+                ).fetchone()
             if pruned and pruned[0]:
                 wm_row = conn.execute(
                     "SELECT value FROM meta WHERE key='prune_watermark'"
@@ -367,10 +448,17 @@ def _refresh_index_inner(
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (str(wm),),
                 )
-                conn.execute(
-                    "DELETE FROM entries WHERE deleted=1 AND updated_at < ?",
-                    (cutoff_iso,),
-                )
+                if floor is None:
+                    conn.execute(
+                        "DELETE FROM entries WHERE deleted=1 AND updated_at < ?",
+                        (cutoff_iso,),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM entries "
+                        "WHERE deleted=1 AND updated_at < ? AND seq <= ?",
+                        (cutoff_iso, floor),
+                    )
 
             conn.commit()
             row = conn.execute("SELECT value FROM meta WHERE key='seq'").fetchone()
@@ -379,6 +467,157 @@ def _refresh_index_inner(
             return stats
         finally:
             conn.close()
+
+
+# ── Device refs (the remote-tracking half of the merge base) ─────────
+
+#: A device not seen for this long stops pinning journal retention. Without
+#: the cap, one machine that never comes back would keep every tombstone
+#: forever; past it, the device re-bootstraps instead (correct, just slower).
+_DEVICE_PIN_TTL_S = 90 * 24 * 3600
+
+
+def get_device_state(storage_path: str, device_id: str) -> Optional[Dict]:
+    """The last cursor this device and the server agreed on, if any."""
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute(
+            "SELECT device_id, device_name, cursor, acked_at, acked_ts "
+            "FROM devices WHERE device_id=?",
+            (device_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "device_id": row[0], "device_name": row[1], "cursor": int(row[2]),
+            "acked_at": row[3], "acked_ts": int(row[4]),
+        }
+    finally:
+        conn.close()
+
+
+def set_device_state(
+    storage_path: str, device_id: str, cursor: int, device_name: str = "",
+) -> Dict:
+    """Record that *device_id* has fully applied everything up to *cursor*.
+
+    Monotonic: a lower cursor never overwrites a higher one. A replica that
+    holds its cursor back after a failed action would otherwise widen the
+    recovery window every round, and a stale retry could rewind the ref.
+    """
+    now = int(time.time())
+    conn = _connect(storage_path)
+    try:
+        row = conn.execute(
+            "SELECT cursor FROM devices WHERE device_id=?", (device_id,)
+        ).fetchone()
+        merged = max(int(row[0]) if row else 0, int(cursor))
+        conn.execute(
+            "INSERT INTO devices(device_id, device_name, cursor, acked_at, acked_ts) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET "
+            "device_name=CASE WHEN excluded.device_name != '' "
+            "THEN excluded.device_name ELSE devices.device_name END, "
+            "cursor=excluded.cursor, acked_at=excluded.acked_at, "
+            "acked_ts=excluded.acked_ts",
+            (device_id, device_name, merged, _now_iso(), now),
+        )
+        conn.commit()
+        return {"device_id": device_id, "cursor": merged, "acked_ts": now}
+    finally:
+        conn.close()
+
+
+def _retention_floor(conn: sqlite3.Connection) -> Optional[int]:
+    """Lowest cursor still needed by a recently-seen device.
+
+    Tombstones at or below a live device's cursor have already been applied
+    by it; above it, they are the only record that a deletion happened, so
+    pruning them would make that device resurrect the file on its next
+    delta. This is the same discipline as not garbage-collecting objects
+    that a ref still reaches.
+    """
+    cutoff = int(time.time()) - _DEVICE_PIN_TTL_S
+    row = conn.execute(
+        "SELECT MIN(cursor) FROM devices WHERE acked_ts >= ?", (cutoff,)
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+# ── History ─────────────────────────────────────────────────────────
+
+#: Newest N events are kept; older ones are trimmed on write. A history that
+#: grows without bound turns into a second copy of the workspace.
+_EVENT_CAP = 5000
+
+
+def record_event(
+    storage_path: str,
+    *,
+    actor_kind: str,
+    actor: str,
+    action: str,
+    path: str = "",
+    size: int = 0,
+    detail: str = "",
+) -> None:
+    """Append one line of "who did what" history. Best-effort by contract.
+
+    Callers run this AFTER the operation it describes has already
+    succeeded, so it must never raise into them — losing a history row is
+    an accepted cost, failing a completed write is not.
+    """
+    try:
+        conn = _connect(storage_path)
+    except Exception:  # noqa: BLE001
+        logger.debug("history: cannot open index for %s", storage_path, exc_info=True)
+        return
+    try:
+        conn.execute(
+            "INSERT INTO events(ts, actor_kind, actor, action, path, size, detail) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (int(time.time()), actor_kind[:16], actor[:100], action[:24],
+             path[:400], int(size or 0), detail[:300]),
+        )
+        conn.execute(
+            "DELETE FROM events WHERE id <= "
+            "(SELECT MAX(id) FROM events) - ?", (_EVENT_CAP,),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001
+        logger.debug("history: event not recorded", exc_info=True)
+    finally:
+        conn.close()
+
+
+def list_events(storage_path: str, limit: int = 200, before_id: int = 0) -> Dict:
+    """Newest-first page of history."""
+    limit = max(1, min(int(limit or 200), 500))
+    conn = _connect(storage_path)
+    try:
+        if before_id and before_id > 0:
+            rows = conn.execute(
+                "SELECT id, ts, actor_kind, actor, action, path, size, detail "
+                "FROM events WHERE id < ? ORDER BY id DESC LIMIT ?",
+                (int(before_id), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, ts, actor_kind, actor, action, path, size, detail "
+                "FROM events ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return {
+            "events": [
+                {
+                    "id": r[0], "ts": r[1], "actor_kind": r[2], "actor": r[3],
+                    "action": r[4], "path": r[5], "size": r[6], "detail": r[7],
+                }
+                for r in rows
+            ],
+            "has_more": len(rows) == limit,
+        }
+    finally:
+        conn.close()
 
 
 def changes_since(storage_path: str, since: int) -> Dict:

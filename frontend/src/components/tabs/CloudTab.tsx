@@ -25,11 +25,12 @@
 // scope), so there is one implementation of "what a folder looks like"
 // instead of two that drift.
 import { useCallback, useEffect, useState } from 'react';
-import { Cloud, Bot, Folder, Monitor } from 'lucide-react';
+import { Cloud, Bot, Folder, History, Monitor } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import StorageTab from '@/components/tabs/StorageTab';
+import CloudHistoryView from '@/components/tabs/CloudHistoryView';
 
 const CLOUD_SCOPE = '_cloud';
 
@@ -42,6 +43,7 @@ interface Device {
 }
 
 type Source =
+  | { kind: 'history' }
   | { kind: 'cloud' }
   | { kind: 'agent'; id: string; name: string }
   | { kind: 'link'; name: string; device: string };
@@ -101,7 +103,7 @@ export default function CloudTab() {
   const explorerKey = `${source.kind}:${scopeId}:${initialPath}`;
 
   const hint =
-    source.kind === 'cloud' ? t('cloudTab.hintCloud')
+    source.kind === 'cloud' || source.kind === 'history' ? t('cloudTab.hintCloud')
     : source.kind === 'agent'
       ? (members.includes(source.id) ? t('cloudTab.hintAgentOn') : t('cloudTab.hintAgentOff'))
       : t('cloudTab.hintLink', { device: source.device });
@@ -114,6 +116,18 @@ export default function CloudTab() {
     <div className="flex flex-col h-full min-h-0 bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
       <div className="flex h-full min-h-0">
         <aside className="w-[210px] shrink-0 border-r border-[var(--border-color)] overflow-y-auto p-1.5">
+          {/* History sits above the sources, and outside them: it is not a
+              place to browse but the record of what happened to all of
+              them — hence the separator rather than another source row. */}
+          <button
+            className={`${rowBase} ${source.kind === 'history' ? rowOn : rowOff}`}
+            onClick={() => setSource({ kind: 'history' })}
+          >
+            <History size={15} className="text-[#e8a13c]" />
+            <span className="flex-1 truncate">{t('cloudHistory.title')}</span>
+          </button>
+          <div className="my-1.5 border-t border-[var(--border-color)]" />
+
           <button
             className={`${rowBase} ${source.kind === 'cloud' ? rowOn : rowOff}`}
             onClick={() => setSource({ kind: 'cloud' })}
@@ -236,14 +250,18 @@ export default function CloudTab() {
 
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 min-h-0">
-            <StorageTab
-              key={explorerKey}
-              scopeId={scopeId}
-              initialPath={initialPath}
-              embedded
-              hint={hint}
-              onRefresh={() => void refresh()}
-            />
+            {source.kind === 'history' ? (
+              <CloudHistoryView scopeId={CLOUD_SCOPE} />
+            ) : (
+              <StorageTab
+                key={explorerKey}
+                scopeId={scopeId}
+                initialPath={initialPath}
+                embedded
+                hint={hint}
+                onRefresh={() => void refresh()}
+              />
+            )}
           </div>
         </div>
       </div>

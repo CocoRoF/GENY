@@ -694,6 +694,15 @@ export const agentApi = {
    *  a user's computer, shared into this agent through GenyDrive. */
   /** Agents connected to the caller's GenyCloud. */
   cloudMembers: () => apiCall<{ sessions: string[] }>(`/api/agents/cloud/members`),
+  /** Newest-first "who changed what" history for a storage scope. */
+  storageHistory: (id: string, limit = 200, beforeId = 0) =>
+    apiCall<{
+      events: Array<{
+        id: number; ts: number; actor_kind: string; actor: string;
+        action: string; path: string; size: number; detail: string;
+      }>;
+      has_more: boolean;
+    }>(`/api/agents/${id}/storage/history?limit=${limit}&before_id=${beforeId}`),
   /** The caller's computers attached to the cloud, with the folders each
    *  shares. Offline machines stay listed — a sleeping laptop is paired,
    *  not gone, and its folders belong to it either way. */

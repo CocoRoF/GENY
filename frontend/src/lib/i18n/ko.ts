@@ -1044,6 +1044,24 @@ const ko: Translations = {
   },
 
   // ─── Storage Tab ───
+  cloudHistory: {
+    title: '히스토리',
+    hint: '이 저장소에서 일어난 모든 변경을 최신순으로 기록합니다.',
+    count: '{count}건',
+    colWhen: '시각',
+    colActor: '행위자',
+    colAction: '동작',
+    colPath: '경로',
+    colSize: '크기',
+    loadMore: '이전 기록 더 보기',
+    emptyTitle: '아직 기록이 없습니다',
+    emptyDesc: '파일이 추가·수정·삭제되면 누가 언제 했는지 여기에 남습니다.',
+    actor: { device: 'PC', web: '웹', agent: '에이전트' },
+    action: {
+      added: '추가', uploaded: '업로드', updated: '수정',
+      deleted: '삭제', renamed: '이름변경', mkdir: '폴더생성',
+    },
+  },
   cloudTab: {
     title: '클라우드',
     refresh: '새로고침',

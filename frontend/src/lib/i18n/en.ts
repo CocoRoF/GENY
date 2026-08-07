@@ -1047,6 +1047,24 @@ const en = {
   },
 
   // ─── Storage Tab ───
+  cloudHistory: {
+    title: 'History',
+    hint: 'Every change to this storage, newest first.',
+    count: '{count} entries',
+    colWhen: 'When',
+    colActor: 'Who',
+    colAction: 'Action',
+    colPath: 'Path',
+    colSize: 'Size',
+    loadMore: 'Load older',
+    emptyTitle: 'Nothing recorded yet',
+    emptyDesc: 'When files are added, changed or deleted, who did it shows up here.',
+    actor: { device: 'PC', web: 'Web', agent: 'Agent' },
+    action: {
+      added: 'added', uploaded: 'uploaded', updated: 'updated',
+      deleted: 'deleted', renamed: 'renamed', mkdir: 'new folder',
+    },
+  },
   cloudTab: {
     title: 'Cloud',
     refresh: 'Refresh',
