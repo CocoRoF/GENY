@@ -7,6 +7,7 @@ AgentSession API: /api/agents
 """
 import asyncio
 import json
+from urllib.parse import unquote
 import time
 from logging import getLogger
 from typing import Any, Dict, List, Optional
@@ -1929,8 +1930,11 @@ def _actor_of(request: Optional[Request], auth: dict) -> tuple:
     if request is not None:
         device_id = request.headers.get("X-Geny-Device-Id") or ""
         if device_id:
-            name = request.headers.get("X-Geny-Device-Name") or device_id[:8]
-            return "device", name
+            # The header is percent-encoded so a non-ASCII machine name
+            # ("내-데스크톱") survives HTTP header transport intact.
+            raw = request.headers.get("X-Geny-Device-Name") or ""
+            name = unquote(raw) if raw else device_id[:8]
+            return "device", name or device_id[:8]
     return "web", user
 
 
@@ -1947,11 +1951,16 @@ async def _history(
     from service.utils import workspace_sync
 
     kind, actor = _actor_of(request, auth)
+    # Normalise to WORKSPACE-relative, the same frame the scan uses. The
+    # handlers work in storage-root-relative paths ("workspace/a/b"), and
+    # without this the de-duplication never matches its own scan row — every
+    # attributed change got filed twice, once correctly and once as "agent".
+    rel = path[len("workspace/"):] if path.startswith("workspace/") else path
     try:
         await asyncio.to_thread(
             workspace_sync.record_event, storage_path,
             actor_kind=kind, actor=actor, action=action,
-            path=path, size=size, detail=detail,
+            path=rel, size=size, detail=detail,
         )
     except Exception:  # noqa: BLE001
         logger.debug("history record skipped", exc_info=True)

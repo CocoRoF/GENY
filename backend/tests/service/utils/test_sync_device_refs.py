@@ -202,3 +202,19 @@ def test_recording_never_raises_into_its_caller(storage, monkeypatch):
 
     monkeypatch.setattr(ws, "_connect", _boom)
     ws.record_event(storage, actor_kind="web", actor="x", action="added", path="p")
+
+
+def test_dedup_matches_across_differing_action_names(storage):
+    """Each actor names the operation in its own vocabulary: the web calls it
+    "mkdir", the scan sees "added". Keying de-duplication on the action let
+    every such renaming through as a duplicate row — observed in production
+    as the same change filed twice, once attributed and once as "agent"."""
+    (ws.Path(storage) / "workspace" / "made-on-web").mkdir()
+    ws.record_event(storage, actor_kind="web", actor="hr",
+                    action="mkdir", path="made-on-web")
+
+    ws.refresh_index(storage, "scope", force=True)
+
+    rows = [e for e in ws.list_events(storage)["events"] if e["path"] == "made-on-web"]
+    assert len(rows) == 1, f"duplicate across action names: {rows}"
+    assert rows[0]["actor_kind"] == "web"

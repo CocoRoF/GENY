@@ -321,10 +321,14 @@ def _scan_event(
     """History row for a change found by the scan (i.e. nobody claimed it)."""
     try:
         now = int(time.time())
+        # Match on PATH only. The actor names the operation from its own
+        # vocabulary — a web "mkdir" is an "added" to the scan, a replica
+        # "updated" may land as "added" — so keying on the action too would
+        # let every renaming of the same event through as a duplicate.
         claimed = conn.execute(
-            "SELECT 1 FROM events WHERE path=? AND action=? AND ts >= ? "
+            "SELECT 1 FROM events WHERE path=? AND ts >= ? "
             "AND actor_kind != 'agent' LIMIT 1",
-            (path, action, now - _ATTRIBUTION_WINDOW_S),
+            (path, now - _ATTRIBUTION_WINDOW_S),
         ).fetchone()
         if claimed:
             return
