@@ -85,7 +85,13 @@ async def test_create_session_returns_payload() -> None:
         assert captured[0].headers["authorization"] == "Bearer fakekey"
         assert "X-Request-ID" in captured[0].headers
         body = json.loads(captured[0].content)
-        assert body == {"title": "hello", "model": "claude-sonnet-4-6"}
+        # `prompt_mode` joined the payload alongside `default_prompt_mode`
+        # in BlogAgentConfig.
+        assert body == {
+            "title": "hello",
+            "model": "claude-sonnet-4-6",
+            "prompt_mode": "persona",
+        }
     finally:
         await c._client.aclose()
 

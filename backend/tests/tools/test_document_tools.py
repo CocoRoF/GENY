@@ -134,7 +134,10 @@ class TestDocEdit:
 class TestDocGenerate:
     def test_requires_api_key(self, storage, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        with pytest.raises(ToolError, match="ANTHROPIC_API_KEY"):
+        # The message points the user at the settings section now instead of
+        # naming the env var — matching on the var name asserted an
+        # implementation detail that the user-facing text stopped carrying.
+        with pytest.raises(ToolError, match="Anthropic API key"):
             DocGenerateTool().run(
                 session_id=SESSION, intent="a report", output="new.docx"
             )

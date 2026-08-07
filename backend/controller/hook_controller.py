@@ -355,6 +355,22 @@ async def list_entries(_auth: dict = Depends(require_auth)):
     return _build_response(data, path)
 
 
+def _migrate_entries_in_place(entries_map: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Rewrite every stored entry in the current shape.
+
+    Reading already normalises legacy rows on the way out; without doing the
+    same on the way in, a write persists whatever was there and leaves the
+    file unparseable by the executor.
+    """
+    for event, rows in list(entries_map.items()):
+        migrated: List[Dict[str, Any]] = []
+        for raw in rows or []:
+            normalized = _normalize_legacy_entry(raw)
+            if normalized is not None:
+                migrated.append(normalized)
+        entries_map[event] = migrated
+
+
 @router.post("/entries", response_model=HookEntriesResponse)
 async def append_entry(
     body: HookEntryPayload,
@@ -370,6 +386,12 @@ async def append_entry(
         upper = event.upper()
         if upper in entries_map and event not in entries_map:
             entries_map[event] = entries_map.pop(upper)
+        # ...and migrate the ENTRIES too, not just the key. Only the read path
+        # normalised them, so a file holding pre-H.1 rows (``command`` as an
+        # argv list) was rewritten with those rows untouched — and the
+        # executor rejects them outright, so hooks stopped loading after any
+        # edit through this endpoint.
+        _migrate_entries_in_place(entries_map)
         entries_map.setdefault(event, []).append(_entry_to_dict(body))
         _write_settings_atomic(path, data)
         _reload_loader()

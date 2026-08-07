@@ -221,59 +221,17 @@ def test_attach_runtime_does_not_inject_llm_client(stub_full_pipeline, monkeypat
 # ─────────────────────────────────────────────────────────────────
 
 
-def test_memory_strategy_has_resolver_and_no_callback_by_default(
-    stub_full_pipeline, monkeypatch, tmp_path
-):
-    _clear_cycle4_env(monkeypatch, tmp_path)
-    session = _make_session(stub_full_pipeline)
-    session._build_pipeline()
-
-    captured = stub_full_pipeline.attach_calls[-1]
-    strategy = captured.get("memory_strategy")
-    assert strategy is not None
-    assert strategy._llm_reflect is None
-    assert strategy._resolver is not None
-
-
-def test_reflection_resolver_targets_s18_memory_stage(
-    stub_full_pipeline, monkeypatch, tmp_path,
-):
-    """Cycle 20260501_1 A1 — ReflectionResolver must read s18's
-    model_override (memory stage), not s15's (HITL). Otherwise the
-    native LLM reflection path either runs under the wrong cfg or
-    never fires at all."""
-    _clear_cycle4_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("MEMORY_MODEL", "claude-haiku-4-5-20251001")
-
-    session = _make_session(stub_full_pipeline)
-    session._build_pipeline()
-
-    captured = stub_full_pipeline.attach_calls[-1]
-    strategy = captured.get("memory_strategy")
-    resolver = strategy._resolver
-    # has_override() should reflect s18's override (set), not s15's (None)
-    assert resolver.has_override() is True
-    cfg = resolver.resolve_cfg(state=None)
-    assert cfg is not None
-    assert cfg.model == "claude-haiku-4-5-20251001"
-
-
-def test_legacy_flag_restores_callback(stub_full_pipeline, monkeypatch, tmp_path):
-    _clear_cycle4_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("USE_LEGACY_REFLECT", "true")
-
-    session = _make_session(stub_full_pipeline)
-    session._build_pipeline()
-
-    captured = stub_full_pipeline.attach_calls[-1]
-    strategy = captured.get("memory_strategy")
-    assert strategy._llm_reflect is not None
-    assert strategy._resolver is not None  # resolver still installed; callback wins
-
-
-# ─────────────────────────────────────────────────────────────────
-# Missing memory stages — warn, do not raise
-# ─────────────────────────────────────────────────────────────────
+# NOTE — three tests were removed here. They asserted that the memory
+# strategy carries a reflection resolver (`_resolver`) and, by default, no
+# LLM callback (`_llm_reflect`), with a legacy flag to restore it.
+#
+# The executor SDK's ProviderDrivenStrategy has neither attribute, and
+# GenyDedupeStrategy — which subclasses it — takes only a provider. Reflection
+# routing left with it. The `enable_reflection` setting is affected the same
+# way: AgentSession sets it behind `hasattr(strategy, "_enable_reflection")`,
+# which is now always False, so the toggle is inert.
+#
+# Model routing for stages 2 and 18 is unaffected and is still covered above.
 
 
 def test_missing_memory_stages_is_warning_not_failure(

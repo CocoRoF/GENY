@@ -1026,6 +1026,11 @@ class MemoryDistillTool(BaseTool):
                 "events_seen": 0,
                 "kind_counts": {},
                 "recent": [],
+                # Present-but-null, like every other exit. A caller that asked
+                # for a narrative should read "there is none" from the value,
+                # not have to guess from a missing key.
+                "narrative": None,
+                "narrative_error": None,
                 "note_written": None,
             })
 

@@ -85,7 +85,10 @@ async def list_permissions(_auth: dict = Depends(require_auth)):
 
 class HookEntryInfo(BaseModel):
     event: str
-    command: List[str]
+    #: A shell command line. It was `List[str]` (argv) to match an older
+    #: executor schema; the current one takes a string, and the conversion
+    #: below was splitting it into one entry per character.
+    command: str
     timeout_ms: Optional[int] = None
     tool_filter: List[str] = Field(default_factory=list)
 
@@ -126,7 +129,10 @@ async def list_hooks(_auth: dict = Depends(require_auth)):
                 entries.append(
                     HookEntryInfo(
                         event=event_name,
-                        command=list(getattr(ent, "command", []) or []),
+                        # `command` is a STRING in the executor's hook schema.
+                        # list() on a string yields one entry PER CHARACTER,
+                        # which is what the admin UI was being shown.
+                        command=str(getattr(ent, "command", "") or ""),
                         timeout_ms=getattr(ent, "timeout_ms", None),
                         tool_filter=list(getattr(ent, "tool_filter", []) or []),
                     )

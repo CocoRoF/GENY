@@ -68,9 +68,9 @@ async def test_hooks_loaded_when_env_on(isolated_home: Path, monkeypatch) -> Non
     yaml_path.write_text(
         """
 enabled: true
-entries:
+hooks:
   pre_tool_use:
-    - command: ["bash", "/tmp/audit.sh"]
+    - command: "bash /tmp/audit.sh"
       timeout_ms: 200
 """,
         encoding="utf-8",
@@ -81,5 +81,7 @@ entries:
     assert len(resp.entries) == 1
     entry = resp.entries[0]
     assert entry.event == "pre_tool_use"
-    assert entry.command == ["bash", "/tmp/audit.sh"]
+    # The executor's hook schema takes `command` as a STRING now; an argv
+    # list is rejected outright, so the old fixture never even loaded.
+    assert entry.command == "bash /tmp/audit.sh"
     assert entry.timeout_ms == 200

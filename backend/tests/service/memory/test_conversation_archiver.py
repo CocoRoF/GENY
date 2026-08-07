@@ -20,6 +20,21 @@ no DB, no LLM. The archiver writes into ``tmp_path`` and the test
 inspects the bytes.
 """
 
+# NOTE — `test_record_message_archives.py` was deleted, not repaired.
+#
+# It tested `_augment_meta_with_conversation_ref`, the function that stamped
+# `payload.conversation_ref` onto the STM line so the Stream tab could follow
+# it back to the rollup note. Path-A GENY-5/6 moved archiving onto the
+# executor's `after_record_turn` hook, which runs AFTER the STM append, and
+# the function went with it. The file could not even be imported, so it could
+# not carry an xfail the way the other two witnesses to this regression do:
+#   · tests/integration/test_memory_v2_baseline.py
+#       ::test_stm_lines_carry_conversation_ref
+#   · tests/service/memory/test_record_message_concurrency.py
+#       ::test_session_rollup_holds_every_turn_as_distinct_anchor
+# Both are xfail(strict=True) and will fail loudly if the ref ever returns.
+# Verified in production: 0 of 342 lines in a live session.jsonl carry it.
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

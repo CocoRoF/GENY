@@ -27,6 +27,10 @@ def _db_available(monkeypatch):
     monkeypatch.setattr(H, "_get_db_manager", lambda db: db)
 
 
+# `asyncio.run` rather than `get_event_loop().run_until_complete`: the
+# latter picks up whatever loop a previous test left behind, so these
+# passed alone and failed inside the full suite depending on ordering.
+
 def test_delete_tasks_by_session_targets_outputs_then_tasks():
     mgr = _FakeMgr()
     n = H.db_delete_tasks_by_session(mgr, "SID")
@@ -77,11 +81,11 @@ def test_scoped_cron_store_stamps_owner():
     store = _SessionScopedCronStore(inner, "SESS-1")
 
     job = _Job({"message": "안녕"})
-    assert asyncio.get_event_loop().run_until_complete(store.put(job)) == "ok"
+    assert asyncio.run(store.put(job)) == "ok"
     # owner stamped into the created cron's payload
     assert job.payload["_session_id"] == "SESS-1"
     # non-put methods pass straight through
-    assert asyncio.get_event_loop().run_until_complete(store.get("j")) == "got:j"
+    assert asyncio.run(store.get("j")) == "got:j"
 
 
 def test_scoped_cron_store_does_not_clobber_existing_session():
@@ -95,7 +99,7 @@ def test_scoped_cron_store_does_not_clobber_existing_session():
             return "ok"
 
     job = _Job()
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         _SessionScopedCronStore(_Inner(), "SESS-2").put(job))
     # setdefault: an already-stamped owner is preserved.
     assert job.payload["_session_id"] == "ORIGINAL"

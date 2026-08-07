@@ -76,7 +76,12 @@ def test_empty_list_falls_back_to_default(stub_section) -> None:
         "tail_blocks_by_role": {"worker": []},
     }
     blocks = resolver.resolve_tail_blocks("worker")
-    assert len(blocks) == 2
+    # Assert the chain itself, not just its length — a count says nothing
+    # about which blocks a fallback actually restored, and this one grew by
+    # a block without the test noticing.
+    assert [b.name for b in blocks] == [
+        "datetime", "memory_context", "host_memory_tools",
+    ]
 
 
 def test_garbage_section_falls_back(stub_section) -> None:
@@ -95,14 +100,17 @@ def test_host_memory_tools_block_renders_catalogue(stub_section) -> None:
     last = blocks[-1]
     assert last.name == "host_memory_tools"
     rendered = last.render(state=None)
-    # Concrete tool names live HERE — in the host module — and not
-    # in the executor's preset.
-    assert "memory_categories" in rendered
-    assert "memory_list" in rendered
-    assert "memory_read" in rendered
-    assert "memory_search" in rendered
-    assert "memory_pin" in rendered
-    # Policy is also present (executor's role) so the agent
-    # gets policy + tools in one coherent block.
+    # The block no longer enumerates tool names. They reach the model as tool
+    # SCHEMAS, and the prompt points at those — naming them here as well
+    # duplicated a roster that drifts every time a tool is added or renamed.
+    # What the block must still carry is the usage contract around them.
+    assert "tools' schemas are provided to you" in rendered
     assert "Pinned Facts" in rendered
-    assert "before asking a clarification" in rendered
+    assert "Vault Map" in rendered
+    # Policy is present too, so the agent gets policy and tools in one
+    # coherent block. Asserted by MEANING rather than by an exact phrase —
+    # the wording has been rewritten once already and an exact-string match
+    # fails on a rewrite that changes nothing about the contract.
+    assert "consult memory" in rendered
+    assert "already answered" in rendered
+    assert "don't announce" in rendered

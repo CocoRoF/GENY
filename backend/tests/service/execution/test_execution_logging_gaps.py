@@ -79,6 +79,13 @@ class _FakeAgentManager:
     def get_agent(self, session_id: str) -> Optional[_FakeAgent]:
         return self._agents.get(session_id)
 
+    async def ensure_session_live(self, session_id: str) -> Optional[_FakeAgent]:
+        """Auto-revival seam: the executor asks the manager to bring a dormant
+        session back before running. The fake predates it, so the very path
+        under test (auto-revival emits a session log entry) hit an
+        AttributeError instead."""
+        return self._agents.get(session_id)
+
 
 # ─────────────────────────────────────────────────────────────────
 # Auto-revival

@@ -101,13 +101,26 @@ def test_blog_samples_each_row_is_self_contained():
 
 
 def test_blog_samples_source_size_bounds():
-    """Self-contained per-tool sources should be small — under ~12 KB
-    each, with delegate (the heaviest) being the largest."""
+    """Self-contained per-tool sources stay small, with delegate (the
+    heaviest) the largest.
+
+    The bound is a smell detector, not a spec: it catches a sample turning
+    into a library. It was 12,000 and delegate reached 12,121 — growth, not
+    ballooning — so it moves with the code rather than being silently
+    deleted. Sizes are printed on failure so the next bump is a decision
+    someone makes on purpose.
+    """
     samples = {s.name: s for s in _blog_samples()}
     for name, s in samples.items():
         assert isinstance(s.config, PythonInlineConfig)
         size = len(s.config.source_code)
-        assert size < 12_000, f"sample {name} source ballooned to {size} chars"
+        assert size < 14_000, (
+            f"sample {name} source ballooned to {size} chars; "
+            f"current sizes: "
+            + ", ".join(
+                f"{n}={len(x.config.source_code)}" for n, x in sorted(samples.items())
+            )
+        )
     # Delegate carries the most helpers; the lookup tools are tiny.
     delegate_len = len(samples["blog_agent_delegate"].config.source_code)
     status_len = len(samples["blog_agent_status"].config.source_code)

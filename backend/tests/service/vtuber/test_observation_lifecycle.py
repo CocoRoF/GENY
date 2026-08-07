@@ -211,11 +211,21 @@ async def test_sweep_removes_stale_images_notes_and_silents(
     promoted.write_bytes(b"keep")
     _age(promoted, 30)
 
+    # Timestamps RELATIVE to now. The retention window is measured against
+    # the wall clock, so the fixed 2026-07-06 that stood in for "recent" when
+    # this was written aged past the 7-day window and the fresh note started
+    # being swept — a test that only passed during the month it was authored.
+    from datetime import datetime, timedelta, timezone
+
+    _now = datetime.now(timezone.utc)
+    _stale_iso = (_now - timedelta(days=30)).isoformat()
+    _fresh_iso = (_now - timedelta(days=1)).isoformat()
+
     mm = _FakeManager()
     provider = _FakeProvider(
         [
-            _Summary("20260620-old-silent.md", "2026-06-20T00:00:00+00:00"),
-            _Summary("20260706-new-silent.md", "2026-07-06T00:00:00+00:00"),
+            _Summary("20260620-old-silent.md", _stale_iso),
+            _Summary("20260706-new-silent.md", _fresh_iso),
         ]
     )
 

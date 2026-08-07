@@ -92,14 +92,16 @@ def test_g9_9_worker_adaptive_uses_adaptive_thinking_budget() -> None:
     assert think["strategies"]["budget_planner"] == "adaptive"
 
 
-def test_g9_9_vtuber_keeps_static_thinking_budget() -> None:
-    """vtuber preset doesn't have a Stage 8 entry (think dropped on
-    VTuber) — the assertion is just that the absence is preserved."""
+def test_g9_9_vtuber_think_stage_uses_the_adaptive_budget_planner() -> None:
+    """VTuber declares Stage 8 with an ADAPTIVE budget planner.
+
+    This asserted the opposite — that vtuber omits Stage 8, or at most keeps
+    a static planner — from when think was dropped for the VTuber preset.
+    The stage is back, and adaptive.
+    """
     manifest = build_manifest("vtuber", provider="anthropic")
-    think_orders = {e["order"] for e in manifest.stages if e["order"] == 8}
-    # vtuber omits Stage 8 entirely — assert it's not declared.
-    assert 8 not in think_orders or all(
-        e.get("strategies", {}).get("budget_planner") in (None, "static")
-        for e in manifest.stages
-        if e["order"] == 8
-    )
+    stage8 = [e for e in manifest.stages if e["order"] == 8]
+
+    assert len(stage8) == 1, "vtuber no longer declares a think stage"
+    assert stage8[0]["name"] == "think"
+    assert stage8[0]["strategies"]["budget_planner"] == "adaptive"

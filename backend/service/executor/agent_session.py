@@ -3606,7 +3606,19 @@ class AgentSession:
         # to TURN_KIND_TRIGGER, everything else to TURN_KIND_USER.
         # ``assistant_dm`` (sub-worker / DM follow-ups) also collapse
         # to USER here — those carry user-equivalent affective intent.
-        stm_role = _classify_input_role(input_text)
+        # Guarded: this runs on every turn, and classification is a hint used
+        # to label the turn — not a precondition for running it. An unguarded
+        # call here meant a classifier failure took down the whole turn, which
+        # is precisely what the metadata-resolution path next to it has always
+        # protected against.
+        try:
+            stm_role = _classify_input_role(input_text)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "[%s] input-role classification failed; treating the turn as "
+                "user input", self._session_id, exc_info=True,
+            )
+            stm_role = ""
         turn_kind = TURN_KIND_TRIGGER if stm_role == "internal_trigger" else TURN_KIND_USER
         meta = state.shared.get(SESSION_META_KEY)
         if isinstance(meta, dict):

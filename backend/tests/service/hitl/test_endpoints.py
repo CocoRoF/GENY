@@ -121,8 +121,13 @@ async def test_list_pending_pipeline_without_resume_api_returns_empty(
     """Mixed-version deployments: a pipeline built before geny-executor
     1.0 has no ``list_pending_hitl`` — degrade to empty list instead
     of 500."""
+    # The method is defined on the CLASS, so delattr on the instance raises
+    # AttributeError instead of hiding it — the test blew up before reaching
+    # its own assertion. Shadowing with None makes the attribute present but
+    # not callable, which is exactly what the endpoint's getattr/callable
+    # guard checks.
     pipe = _StubPipeline()
-    delattr(pipe, "list_pending_hitl")
+    pipe.list_pending_hitl = None  # type: ignore[assignment]
     _bind_agent(_patch_agent_manager, _StubAgent(pipe))
     resp = await list_pending_hitl(session_id="s1", auth={})
     assert resp.pending == []

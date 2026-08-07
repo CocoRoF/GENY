@@ -211,15 +211,16 @@ def test_tool_stage_has_default_strategies(preset: str) -> None:
 
 
 @pytest.mark.parametrize("preset", _known_preset_ids())
-def test_agent_stage_has_single_agent_orchestrator(preset: str) -> None:
-    """Agent moved 11 → 12 in the 21-stage layout."""
+def test_agent_stage_orchestrator_is_subagent_type(preset: str) -> None:
+    """Agent moved 11 → 12 in the 21-stage layout, and its orchestrator moved
+    from ``single_agent`` to ``subagent_type`` when delegation landed."""
     from geny_executor import build_manifest
 
     manifest = build_manifest(preset, provider="anthropic")
     entry = next(e for e in manifest.stages if e["order"] == 12)
 
     assert entry["name"] == "agent"
-    assert entry["strategies"] == {"orchestrator": "single_agent"}
+    assert entry["strategies"] == {"orchestrator": "subagent_type"}
     assert entry["config"] == {"max_delegations": 4}
 
 

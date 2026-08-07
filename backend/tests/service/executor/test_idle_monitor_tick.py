@@ -130,8 +130,14 @@ async def test_stop_unregisters_spec_and_stops_owned_engine() -> None:
 async def test_start_is_idempotent() -> None:
     mgr = _make_manager_skeleton()
     await mgr.start_idle_monitor()
+    first = list(mgr._idle_tick_engine.specs())
     await mgr.start_idle_monitor()  # no duplicate spec, no raise
-    assert len(mgr._idle_tick_engine.specs()) == 1
+
+    # Assert IDEMPOTENCE, not a spec count. The monitor registers a second
+    # spec (media_retention) now, so a hardcoded 1 failed on a change that
+    # has nothing to do with what this test is about.
+    assert list(mgr._idle_tick_engine.specs()) == first
+    assert len(first) == len(set(first)), f"duplicate specs registered: {first}"
     await mgr.stop_idle_monitor()
 
 
