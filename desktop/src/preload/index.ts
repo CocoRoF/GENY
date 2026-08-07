@@ -336,15 +336,6 @@ export interface ConnectorBridge {
     setCloud(enabled: boolean): Promise<{ cloudOptIn: boolean }>
     /** Per-agent used/quota bytes in one round trip. */
     usage(): Promise<Record<string, { used: number | null; quota: number }>>
-    /** Connect/disconnect one agent. Disconnecting REVOKES its access to
-     *  every linked folder (their copies are removed from that agent's
-     *  storage — the user's own folders are untouched). `error` means
-     *  nothing changed, e.g. the final sync could not complete. */
-    setAgent(sessionId: string, enabled: boolean, label?: string): Promise<{
-      root: string
-      agents: Record<string, { enabled: boolean; folder: string; label?: string }>
-      error?: string
-    }>
     /** Native folder picker for the drive root (returns null on cancel). */
     pickRoot(): Promise<string | null>
     /** Relocate the drive: MOVES every managed folder, keeps sync indexes. */
@@ -533,8 +524,6 @@ const api: ConnectorBridge = {
   },
   drive: {
     get: () => ipcRenderer.invoke('drive:get'),
-    setAgent: (sessionId, enabled, label) =>
-      ipcRenderer.invoke('drive:set-agent', sessionId, enabled, label),
     nativeMount: (enable) => ipcRenderer.invoke('drive:native-mount', enable),
     nativeStatus: () => ipcRenderer.invoke('drive:native-status'),
     setCloud: (enabled) => ipcRenderer.invoke('drive:set-cloud', enabled),

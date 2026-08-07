@@ -8,8 +8,11 @@ from service.cloud.store import (
     cloud_workspace,
     connected_sessions,
     ensure_agent_link,
+    forget_device,
     is_cloud_scope,
     is_connected,
+    known_devices,
+    remember_device,
     remove_agent_link,
     set_connected,
 )
@@ -22,8 +25,11 @@ __all__ = [
     "cloud_workspace",
     "connected_sessions",
     "ensure_agent_link",
+    "forget_device",
     "is_cloud_scope",
     "is_connected",
+    "known_devices",
+    "remember_device",
     "remove_agent_link",
     "set_connected",
 ]

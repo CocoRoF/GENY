@@ -23,6 +23,9 @@ import type { StorageFile } from '@/types';
 import { FileViewer } from '@/components/file-viewer';
 import { TabShell, IconButton, EmptyState, SegmentedControl } from '@/components/common/layout';
 
+/** Storage scope addressing the caller's cloud (server-side constant). */
+const CLOUD_SCOPE = '_cloud';
+
 type Scope = 'workspace' | 'all';
 type SortKey = 'name' | 'size' | 'modified';
 
@@ -224,14 +227,25 @@ export default function StorageTab(props: StorageTabProps) {
     return () => clearTimeout(timer);
   }, [listError, fetchFiles]);
 
-  // Connector replicas syncing this workspace (chip in the breadcrumb bar).
+  // Computers syncing this scope (chip in the breadcrumb bar).
+  //
+  // ONLY the cloud can have any. A computer attaches to the cloud, an agent
+  // attaches to the cloud, and there is no computer→agent edge — asking an
+  // agent scope for its replicas is asking about a connection the model does
+  // not have. It used to answer, because the connector mirrored each agent
+  // workspace directly; that edge is gone, and an old connector still holding
+  // it open must not make the UI depict it.
   useEffect(() => {
     if (!selectedSessionId) return;
     let alive = true;
     const load = () => {
-      agentApi.syncDevices(selectedSessionId)
-        .then((r) => { if (alive) setSyncDevices(r.devices || []); })
-        .catch(() => { if (alive) setSyncDevices([]); });
+      if (selectedSessionId === CLOUD_SCOPE) {
+        agentApi.syncDevices(selectedSessionId)
+          .then((r) => { if (alive) setSyncDevices(r.devices || []); })
+          .catch(() => { if (alive) setSyncDevices([]); });
+      } else {
+        setSyncDevices([]);
+      }
       agentApi.storageLinks(selectedSessionId)
         .then((r) => { if (alive) setLinks(r.links || []); })
         .catch(() => { if (alive) setLinks([]); });

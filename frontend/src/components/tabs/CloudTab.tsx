@@ -1,26 +1,45 @@
 // 클라우드 — GenyCloud, the storage that sits ABOVE the agents.
 //
-// The model this view makes visible:
+// THE MODEL THIS VIEW MAKES VISIBLE
 //
-//   [user's folders] ↔ [local GenyCloud] ↔ [SERVER CLOUD] ↔ [agent workspace]
+//   [folder] ── [computer] ── [GENY CLOUD] ── [agent]
 //
-// The left rail is the source picker for those three places:
-//   · 클라우드 전체     — the cloud itself, the hub everything gathers in
-//   · 에이전트          — a connected agent's own workspace (private space)
-//   · 연결된 폴더       — a folder on one of the user's computers, shared
-//                        into the cloud by the connector
+// The cloud is the ONLY connection point. A computer attaches to the cloud;
+// an agent attaches to the cloud; a folder attaches through the computer
+// that holds it. There is deliberately no computer→agent edge: that was the
+// old model, where one shared folder became a copy inside every agent's
+// workspace with an engine per copy.
+//
+// The rail is that graph, read outward from the hub:
+//   · 클라우드 전체  — the hub itself
+//   · 연결된 PC      — the user's machines, each with the folders it shares
+//                      nested beneath it (a folder lives ON a machine, so it
+//                      is shown there rather than in a list of its own)
+//   · 에이전트       — the agents, each connectable to the hub
+//
+// A machine stays listed while it is asleep. Dropping it on disconnect would
+// read as "unpaired" rather than "offline", and its folders would lose the
+// machine they belong to.
 //
 // Browsing is the SAME explorer the session storage tab uses (it takes a
 // scope), so there is one implementation of "what a folder looks like"
 // instead of two that drift.
 import { useCallback, useEffect, useState } from 'react';
-import { Cloud, Bot, Link2 } from 'lucide-react';
+import { Cloud, Bot, Folder, Monitor } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { agentApi } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import StorageTab from '@/components/tabs/StorageTab';
 
 const CLOUD_SCOPE = '_cloud';
+
+interface Device {
+  device_id: string;
+  device_name: string;
+  online: boolean;
+  last_seen: number | null;
+  links: Array<{ name: string }>;
+}
 
 type Source =
   | { kind: 'cloud' }
@@ -32,16 +51,18 @@ export default function CloudTab() {
   const { sessions } = useAppStore();
   const [source, setSource] = useState<Source>({ kind: 'cloud' });
   const [members, setMembers] = useState<string[]>([]);
-  const [links, setLinks] = useState<Array<{ name: string; device: string }>>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [orphanLinks, setOrphanLinks] = useState<Array<{ name: string }>>([]);
   const [busy, setBusy] = useState('');
 
   const refresh = useCallback(async () => {
-    const [m, l] = await Promise.all([
+    const [m, d] = await Promise.all([
       agentApi.cloudMembers().catch(() => ({ sessions: [] as string[] })),
-      agentApi.storageLinks(CLOUD_SCOPE).catch(() => ({ links: [] })),
+      agentApi.cloudDevices().catch(() => ({ devices: [], unassigned_links: [] })),
     ]);
     setMembers(m.sessions || []);
-    setLinks(l.links || []);
+    setDevices(d.devices || []);
+    setOrphanLinks(d.unassigned_links || []);
   }, []);
 
   useEffect(() => {
@@ -101,6 +122,80 @@ export default function CloudTab() {
             <span className="flex-1 truncate">{t('cloudTab.wholeCloud')}</span>
           </button>
 
+          {/* ── 연결된 PC ── each machine, with the folders it shares.
+              A machine has no storage of its own to browse: it mirrors the
+              cloud. So the row states the attachment and its folders are
+              what you navigate into. */}
+          <div className="mt-3 mb-1 px-2.5 text-[11px] text-[var(--text-muted)]">
+            {t('cloudTab.computers')}
+          </div>
+          {devices.length === 0 && (
+            <p className="px-2.5 text-[12px] text-[var(--text-muted)] leading-snug">
+              {t('cloudTab.noComputers')}
+            </p>
+          )}
+          {devices.map((d) => {
+            const label = d.device_name || d.device_id.slice(0, 8);
+            return (
+              <div key={d.device_id}>
+                <div
+                  className="flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-[13px] text-[var(--text-secondary)]"
+                  title={t(d.online ? 'cloudTab.computerOnlineHint' : 'cloudTab.computerOfflineHint', { name: label })}
+                >
+                  <Monitor size={15} className={d.online ? 'text-[#2fbf71]' : 'text-[var(--text-muted)]'} />
+                  <span className="flex-1 truncate">{label}</span>
+                  <span
+                    className={`shrink-0 text-[10.5px] px-1.5 py-[2px] rounded-full ${
+                      d.online
+                        ? 'bg-[#2fbf71]/12 text-[#2fbf71]'
+                        : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
+                    }`}
+                  >
+                    {t(d.online ? 'cloudTab.online' : 'cloudTab.offline')}
+                  </span>
+                </div>
+                {d.links.map((l) => {
+                  const active = source.kind === 'link' && source.name === l.name;
+                  return (
+                    <button
+                      key={l.name}
+                      className={`${rowBase} ${active ? rowOn : rowOff} pl-7`}
+                      onClick={() => setSource({ kind: 'link', name: l.name, device: label })}
+                      title={t('cloudTab.linkHint', { device: label })}
+                    >
+                      <Folder size={14} className="text-[#8b5cf6]" />
+                      <span className="flex-1 truncate">{l.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* Folders whose machine could not be identified — shown rather
+              than dropped, so a link never silently disappears. */}
+          {orphanLinks.length > 0 && (
+            <>
+              <div className="mt-3 mb-1 px-2.5 text-[11px] text-[var(--text-muted)]">
+                {t('cloudTab.otherLinks')}
+              </div>
+              {orphanLinks.map((l) => {
+                const active = source.kind === 'link' && source.name === l.name;
+                return (
+                  <button
+                    key={l.name}
+                    className={`${rowBase} ${active ? rowOn : rowOff}`}
+                    onClick={() => setSource({ kind: 'link', name: l.name, device: '' })}
+                  >
+                    <Folder size={14} className="text-[#8b5cf6]" />
+                    <span className="flex-1 truncate">{l.name}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+          {/* ── 에이전트 ── each attaches to the cloud, never to a machine. */}
           <div className="mt-3 mb-1 px-2.5 text-[11px] text-[var(--text-muted)]">
             {t('cloudTab.agents')}
           </div>
@@ -137,26 +232,6 @@ export default function CloudTab() {
             );
           })}
 
-          <div className="mt-3 mb-1 px-2.5 text-[11px] text-[var(--text-muted)]">
-            {t('cloudTab.linkedFolders')}
-          </div>
-          {links.length === 0 && (
-            <p className="px-2.5 text-[12px] text-[var(--text-muted)]">{t('cloudTab.noLinks')}</p>
-          )}
-          {links.map((l) => {
-            const active = source.kind === 'link' && source.name === l.name;
-            return (
-              <button
-                key={l.name}
-                className={`${rowBase} ${active ? rowOn : rowOff}`}
-                onClick={() => setSource({ kind: 'link', name: l.name, device: l.device })}
-                title={t('cloudTab.linkHint', { device: l.device })}
-              >
-                <Link2 size={15} className="text-[#8b5cf6]" />
-                <span className="flex-1 truncate">{l.name}</span>
-              </button>
-            );
-          })}
         </aside>
 
         <div className="flex-1 min-w-0 flex flex-col">

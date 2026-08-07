@@ -132,6 +132,83 @@ def set_connected(username: str, session_id: str, connected: bool) -> list:
     return current
 
 
+# ── Paired computers ──────────────────────────────────────────────────
+#
+# The user's machines are one of the three things that attach to a cloud
+# (the others being agents and, through a machine, individual folders), so
+# they need to be nameable when they are switched off. A live socket list
+# alone would make a laptop vanish from the picture the moment it sleeps,
+# which reads as "unpaired" rather than "offline" — and the folders it
+# shares would lose the machine they belong to.
+#
+# So attachments are remembered here. Registration happens when a replica
+# connects; nothing is ever auto-removed, because a machine the user has
+# not explicitly unpaired is still theirs.
+
+_DEVICES_FILE = ".geny-cloud-devices.json"
+_MAX_DEVICES = 100
+
+
+def _devices_file(username: str) -> Path:
+    return Path(cloud_storage_path(username)) / _DEVICES_FILE
+
+
+def known_devices(username: str) -> list:
+    """Every computer that has ever attached to this cloud, newest first."""
+    try:
+        import json
+
+        with open(_devices_file(username), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        items = data.get("devices") or []
+        return [d for d in items if isinstance(d, dict) and d.get("device_id")]
+    except (OSError, ValueError):
+        return []
+
+
+def remember_device(username: str, device_id: str, device_name: str) -> None:
+    """Record an attachment (upsert by device_id, refreshing name/last_seen).
+
+    Best-effort bookkeeping: callers run it off the hot path and swallow
+    failures. Losing a row costs a rail entry until the next connect; it
+    must never cost the connection that triggered it.
+    """
+    import json
+    import time
+
+    device_id = str(device_id or "").strip()[:64]
+    if not device_id or device_id == "unknown":
+        return
+    device_name = str(device_name or "").strip()[:64]
+
+    rows = [d for d in known_devices(username) if d.get("device_id") != device_id]
+    rows.insert(0, {
+        "device_id": device_id,
+        "device_name": device_name,
+        "last_seen": int(time.time()),
+    })
+    del rows[_MAX_DEVICES:]
+
+    path = _devices_file(username)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"devices": rows}, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def forget_device(username: str, device_id: str) -> list:
+    """Unpair a computer. Its files are untouched — this only drops the row."""
+    import json
+
+    rows = [d for d in known_devices(username) if d.get("device_id") != device_id]
+    path = _devices_file(username)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"devices": rows}, f, ensure_ascii=False)
+    os.replace(tmp, path)
+    return rows
+
+
 def cloud_workspace(username: str) -> str:
     """The directory an agent actually reads and writes."""
     return str(Path(cloud_storage_path(username)) / "workspace")

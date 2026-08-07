@@ -1061,6 +1061,13 @@ const ko: Translations = {
     hintAgentOff: '이 에이전트의 개인 작업 공간입니다. 아직 클라우드에 연결되어 있지 않습니다.',
     hintLink: '{device}의 폴더가 클라우드로 연결되어 있습니다.',
     linkHint: '{device}에서 공유 중',
+    computers: '연결된 PC',
+    noComputers: '연결된 PC가 없습니다. 접속기를 설치하면 여기에 나타납니다.',
+    online: '온라인',
+    offline: '오프라인',
+    computerOnlineHint: '{name} — 지금 클라우드와 동기화 중입니다.',
+    computerOfflineHint: '{name} — 지금은 꺼져 있습니다. 켜지면 다시 동기화됩니다.',
+    otherLinks: '소속 PC 미확인',
   },
   storageTab: {
     selectSession: '세션을 선택하세요',

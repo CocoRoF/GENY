@@ -1941,7 +1941,13 @@ async def put_storage_links(
         name = str(item.get("name") or "").strip()
         if not name or "/" in name or "\\" in name or name.startswith("."):
             continue
-        links.append({"name": name[:200], "device": str(item.get("device") or "")[:100]})
+        links.append({
+            "name": name[:200],
+            "device": str(item.get("device") or "")[:100],
+            # Stable attribution. `device` is a hostname, which two machines
+            # can share and a user can change; the id survives both.
+            "device_id": str(item.get("device_id") or "")[:64],
+        })
     body = json.dumps({"links": links}, ensure_ascii=False)
 
     def _write() -> None:
@@ -1959,6 +1965,70 @@ async def cloud_members(auth: dict = Depends(require_auth)):
 
     user = (auth or {}).get("sub") or "anonymous"
     return {"sessions": connected_sessions(user)}
+
+
+@router.get("/cloud/devices")
+async def cloud_devices(auth: dict = Depends(require_auth)):
+    """The caller's computers attached to their cloud, and what each shares.
+
+    One of the three things that hang off a cloud — machines, agents, and
+    (through a machine) individual folders. The rail needs all three, and a
+    machine has to stay listed while it is asleep: a laptop that vanished on
+    sleep would read as unpaired, and the folders it shares would lose the
+    machine they belong to.
+
+    So the answer is the union of the persisted pairings and the live socket
+    list, with `online` marking which is which. Folders are attributed to
+    their machine by device_id, falling back to the machine NAME for ledgers
+    written by connectors that predate device_id in the link entries.
+    """
+    from service.cloud import cloud_notify_key, cloud_storage_path, known_devices
+    from ws.workspace_stream import get_workspace_hub
+
+    user = (auth or {}).get("sub") or "anonymous"
+    hub_key = cloud_notify_key(user)
+    live = {d["device_id"]: d for d in get_workspace_hub().devices(hub_key)}
+
+    def _read_links() -> list:
+        try:
+            with open(_links_path(cloud_storage_path(user)), "r", encoding="utf-8") as f:
+                return (json.load(f) or {}).get("links") or []
+        except (OSError, ValueError):
+            return []
+
+    known, links = await asyncio.gather(
+        asyncio.to_thread(known_devices, user),
+        asyncio.to_thread(_read_links),
+    )
+
+    rows = {d["device_id"]: dict(d) for d in known}
+    for device_id, d in live.items():          # a live machine not yet persisted
+        rows.setdefault(device_id, {"device_id": device_id, "device_name": d.get("device_name") or ""})
+
+    out = []
+    for device_id, row in rows.items():
+        name = row.get("device_name") or ""
+        out.append({
+            "device_id": device_id,
+            "device_name": name,
+            "online": device_id in live,
+            "last_seen": row.get("last_seen"),
+            "links": [
+                {"name": link.get("name")}
+                for link in links
+                if link.get("device_id") == device_id
+                or (not link.get("device_id") and link.get("device") == name)
+            ],
+        })
+    # Online first, then most recently seen — the machine the user is sitting
+    # at should not be below one they last used in March.
+    out.sort(key=lambda d: (not d["online"], -(d.get("last_seen") or 0)))
+
+    # Folders whose machine is unknown (ledger written before device_id, and
+    # no name match) would otherwise disappear from the UI entirely.
+    claimed = {link["name"] for d in out for link in d["links"]}
+    orphans = [{"name": link.get("name")} for link in links if link.get("name") not in claimed]
+    return {"devices": out, "unassigned_links": orphans}
 
 
 @router.put("/{session_id}/cloud")

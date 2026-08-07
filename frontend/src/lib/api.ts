@@ -694,6 +694,20 @@ export const agentApi = {
    *  a user's computer, shared into this agent through GenyDrive. */
   /** Agents connected to the caller's GenyCloud. */
   cloudMembers: () => apiCall<{ sessions: string[] }>(`/api/agents/cloud/members`),
+  /** The caller's computers attached to the cloud, with the folders each
+   *  shares. Offline machines stay listed — a sleeping laptop is paired,
+   *  not gone, and its folders belong to it either way. */
+  cloudDevices: () =>
+    apiCall<{
+      devices: Array<{
+        device_id: string;
+        device_name: string;
+        online: boolean;
+        last_seen: number | null;
+        links: Array<{ name: string }>;
+      }>;
+      unassigned_links: Array<{ name: string }>;
+    }>(`/api/agents/cloud/devices`),
   /** Connect/disconnect ONE agent to the cloud. Disconnecting removes the
    *  agent's reference; nothing in the cloud is deleted. */
   setCloudConnection: (id: string, connected: boolean) =>

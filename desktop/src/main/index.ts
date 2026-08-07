@@ -1832,30 +1832,28 @@ function applyDriveConfig(): void {
       }]
     : []
 
-  // Agent workspace mirrors — an agent's PRIVATE space, unchanged. These
-  // are separate from the cloud: an agent keeps its own workspace and
-  // connects to the cloud on top of it.
-  const managed = Object.entries(agents)
-    .filter(([, a]) => cloudOn && a.enabled)
-    .map(([sessionId, a]) => {
-      const localPath = join(root, a.folder)
-      try {
-        mkdirSync(localPath, { recursive: true })
-      } catch {
-        /* surfaced by the engine's own error state */
-      }
-      return {
-        // Stable id per agent so the sync index survives toggles/relocations.
-        id: `drive:${sessionId}`,
-        sessionId,
-        sessionLabel: a.label,
-        localPath,
-        managed: 'drive' as const,
-      }
-    })
+  // NO agent mirrors. The cloud is the only connection point, so this
+  // machine has exactly one edge: [computer] ── [cloud]. An agent reaches
+  // the same bytes through its own edge to the cloud.
+  //
+  // There used to be a mirror per agent here — a direct [computer] ── [agent]
+  // edge that made one shared folder into N copies with N engines, and put a
+  // "syncing with 1 PC" badge on an agent's private workspace describing a
+  // connection that is not part of the model.
+  //
+  // Removing the PAIR stops the syncing; it does not touch the bytes. Any
+  // `<root>/<agent>` folder already on disk stays exactly where it is, as an
+  // ordinary local folder. Those workspaces remain reachable on the web
+  // (클라우드 → 에이전트) and through the virtual drive mount.
+  const staleAgentPairs = (cfg.syncPairs ?? []).filter(
+    (p) => p.managed === 'drive' && p.sessionId !== CLOUD_SCOPE,
+  )
+  if (staleAgentPairs.length) {
+    dlog('drive', `dropping ${staleAgentPairs.length} legacy agent sync pair(s); local files kept`)
+  }
 
-  // A linked folder now binds to the CLOUD — one engine each, whatever
-  // the agent count. Ids drop the session dimension entirely.
+  // A linked folder binds to the CLOUD — one engine each, whatever the agent
+  // count. Ids drop the session dimension entirely.
   const linkPairs = cloudOn
     ? links.map((l) => ({
         id: `link:${l.name}`,
@@ -1868,8 +1866,8 @@ function applyDriveConfig(): void {
       }))
     : []
   const others = (cfg.syncPairs ?? []).filter((p) => !p.managed)
-  const next = [...others, ...cloudPair, ...linkPairs, ...managed]
-  saveConfig({ syncPairs: [...managed, ...others] })
+  const next = [...others, ...cloudPair, ...linkPairs]
+  saveConfig({ syncPairs: [...others] })
   getSyncManager()?.configure(next)
   ensureAllLinkShortcuts()
   publishLinkLedger()
@@ -2687,28 +2685,8 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('drive:set-agent', (_e, sessionId: string, enabled: boolean, label?: string) =>
-    driveExclusive(async () => {
-      // Guard the key: an empty/garbage id would mint a folder and a pair that
-      // can only ever resolve to session_gone (observed when a caller passed a
-      // failed create-session response through).
-      if (!sessionId || !/^[A-Za-z0-9_-]{4,128}$/.test(sessionId)) {
-        return { error: 'invalid session id', root: driveRoot(), agents: loadConfig().driveAgents ?? {} }
-      }
-      const cfg = loadConfig()
-      const agents = { ...(cfg.driveAgents ?? {}) }
-      const prev = agents[sessionId]
-      // This toggle now means ONLY "mirror this agent's own workspace to
-      // my computer". Shared folders live in the cloud, and an agent's
-      // access to them is the cloud connection — revoked there, once,
-      // instead of by deleting a copy out of every agent.
-      const folder = prev?.folder || allocateDriveFolder(label || sessionId, agents, sessionId)
-      agents[sessionId] = { enabled: !!enabled, folder, label: label ?? prev?.label }
-      saveConfig({ driveAgents: agents })
-      applyDriveConfig()
-      return { root: driveRoot(), agents }
-    }),
-  )
+  // `drive:set-agent` removed with the computer→agent edge it configured.
+  // A computer syncs the cloud; agents connect to the cloud from the web.
 
   ipcMain.handle('drive:set-cloud', (_e, enabled: boolean) =>
     driveExclusive(async () => {

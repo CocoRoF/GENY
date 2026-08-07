@@ -1064,6 +1064,13 @@ const en = {
     hintAgentOff: "This agent's own workspace. It is not connected to the cloud yet.",
     hintLink: 'A folder on {device}, linked into the cloud.',
     linkHint: 'Shared from {device}',
+    computers: 'Computers',
+    noComputers: 'No computers yet. Install the connector and it appears here.',
+    online: 'online',
+    offline: 'offline',
+    computerOnlineHint: '{name} — syncing with the cloud right now.',
+    computerOfflineHint: '{name} — currently switched off. It resumes when it comes back.',
+    otherLinks: 'Unknown computer',
   },
   storageTab: {
     selectSession: 'Select a Session',

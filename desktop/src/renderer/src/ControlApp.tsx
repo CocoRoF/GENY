@@ -292,7 +292,6 @@ export function ControlApp() {
   const [computerUse, setComputerUse] = useState<ComputerUseConfig>({})
   // Workspace sync (Drive-style local↔agent-workspace replication)
   const [driveRoot, setDriveRoot] = useState('')
-  const [driveAgents, setDriveAgents] = useState<Record<string, { enabled: boolean; folder: string; label?: string }>>({})
   const [driveBusy, setDriveBusy] = useState('')
   const [driveCloud, setDriveCloud] = useState(true)
   const [driveCaps, setDriveCaps] = useState<{ streaming: boolean; missing: string } | null>(null)
@@ -355,7 +354,6 @@ export function ControlApp() {
     const d = await window.connector?.drive?.get().catch(() => null)
     if (!d) return
     setDriveRoot(d.root)
-    setDriveAgents(d.agents ?? {})
     setDriveCloud(d.cloudOptIn !== false)
     setDriveCaps(d.capabilities ?? null)
     void window.connector?.drive?.usage().then(setDriveUsage).catch(() => undefined)
@@ -369,26 +367,6 @@ export function ControlApp() {
     let i = 0
     while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
     return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`
-  }
-
-  const toggleDriveAgent = async (sessionId: string, label: string, enabled: boolean): Promise<void> => {
-    // Leaving the drive also ends this agent's access to every linked
-    // folder — say so before doing it, since the agent's copy of those
-    // folders is removed (the user's own folder is never touched).
-    if (!enabled && syncLinks.length > 0) {
-      const names = syncLinks.map((l) => l.name).join(', ')
-      if (!confirm(t('drive.disconnectWarn', { agent: label, folders: names }))) return
-    }
-    setDriveBusy(sessionId)
-    setDriveMsg('')
-    try {
-      const r = await window.connector?.drive?.setAgent(sessionId, enabled, label)
-      if (r?.error) setDriveMsg(r.error)
-      if (r) { setDriveRoot(r.root); setDriveAgents(r.agents ?? {}) }
-      await refreshSync()
-    } finally {
-      setDriveBusy('')
-    }
   }
 
   const changeDriveRoot = async (): Promise<void> => {
@@ -1019,22 +997,20 @@ export function ControlApp() {
               {!driveCloud && (
                 <p className="gy-hint" style={{ margin: '0 0 12px', opacity: 0.7 }}>{t('drive.cloudOff')}</p>
               )}
-              {driveCloud && syncAgents.length === 0 && (
-                <p className="gy-hint" style={{ margin: 0, opacity: 0.7 }}>{t('sync.noAgents')}</p>
-              )}
-              {driveCloud && syncAgents.map((a) => {
-                const entry = driveAgents[a.id]
-                const on = !!entry?.enabled
-                const st = syncStatuses[`drive:${a.id}`]
-                const state = st?.state ?? (on ? 'idle' : undefined)
+              {driveCloud && (() => {
+                // ONE row: this computer's single edge, to the cloud. There
+                // used to be a toggle per agent here, mirroring each agent's
+                // workspace directly — a computer→agent edge the model does
+                // not have. Agents reach shared files through their own
+                // connection to the cloud, managed on the web.
+                const st = syncStatuses['cloud']
+                const state = st?.state ?? 'idle'
                 const dot =
-                  !on ? 'var(--gy-muted, #888)'
-                  : state === 'error' || state === 'session_gone' ? '#e5534b'
+                  state === 'error' || state === 'session_gone' ? '#e5534b'
                   : state === 'syncing' ? '#4f9cf7'
                   : st?.connected ? '#2fbf71' : '#e8a13c'
                 return (
                   <div
-                    key={a.id}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '8px 0', borderTop: '1px solid var(--gy-border, rgba(128,128,128,0.2))',
@@ -1043,37 +1019,23 @@ export function ControlApp() {
                     <span style={{ width: 8, height: 8, borderRadius: 4, background: dot, flexShrink: 0 }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {a.name}
+                        {t('drive.cloudFolder')}
                       </div>
-                      {on && (
-                        <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {entry?.folder}
-                          {driveUsage[a.id]?.used != null &&
-                            ` · ${fmtBytes(driveUsage[a.id].used as number)}${
-                              driveUsage[a.id].quota ? ` / ${fmtBytes(driveUsage[a.id].quota)}` : ''
-                            }`}
-                          {st && ` · ↓${st.counts.downloaded} ↑${st.counts.uploaded}`}
-                          {st?.lastError && ` · ${st.lastError}`}
-                        </div>
-                      )}
+                      <div className="gy-hint" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t(`sync.state.${state}`)}
+                        {st && ` · ↓${st.counts.downloaded} ↑${st.counts.uploaded}`}
+                        {st?.lastError && ` · ${st.lastError}`}
+                      </div>
                     </div>
-                    {on && (
-                      <button
-                        className="gy-btn gy-btn--ghost gy-btn--sm"
-                        onClick={() => window.connector?.sync?.openFolder(`drive:${a.id}`)}
-                      >
-                        {t('sync.openFolder')}
-                      </button>
-                    )}
-                    <ToggleLine
-                      label=""
-                      checked={on}
-                      disabled={!!driveBusy}
-                      onChange={(next) => void toggleDriveAgent(a.id, a.name, next)}
-                    />
+                    <button
+                      className="gy-btn gy-btn--ghost gy-btn--sm"
+                      onClick={() => window.connector?.sync?.openFolder('cloud')}
+                    >
+                      {t('sync.openFolder')}
+                    </button>
                   </div>
                 )
-              })}
+              })()}
             </section>
 
             <section className="gy-card">
@@ -1185,8 +1147,10 @@ export function ControlApp() {
                         </button>
                         <button className="gy-btn gy-btn--danger gy-btn--sm"
                           onClick={async () => {
-                            const shared = Object.values(driveAgents).filter((a) => a.enabled).length
-                            if (shared > 0 && !confirm(t('sync.unlinkWarn', { count: shared }))) return
+                            // The folder leaves the cloud — every agent
+                            // connected to it loses access at once, which is
+                            // the point of one hub instead of N copies.
+                            if (!confirm(t('sync.unlinkWarnCloud'))) return
                             const r = await window.connector?.sync?.removePair(link.name)
                             if ((r as { error?: string })?.error) setDriveMsg((r as { error?: string }).error ?? '')
                             await refreshSync()

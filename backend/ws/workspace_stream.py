@@ -241,6 +241,20 @@ async def workspace_ws(websocket: WebSocket, session_id: str) -> None:
     logger.info("[WorkspaceWS:%s] replica %s (%s) connected",
                 session_id[:8], dev.device_id[:8], dev.device_name)
 
+    # Remember the machine so the cloud can name it while it is asleep.
+    # Off-loop (this writes a file) and guarded (it is bookkeeping that runs
+    # after the socket is already live — a failure here must cost a rail
+    # entry, never the connection).
+    from service.cloud import is_cloud_scope, remember_device
+
+    if is_cloud_scope(session_id):
+        try:
+            await asyncio.to_thread(
+                remember_device, str(user), dev.device_id, dev.device_name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("cloud device registration skipped", exc_info=True)
+
     async def _refresh() -> int:
         stats = await asyncio.to_thread(
             workspace_sync.refresh_index, storage_path, hub_key
