@@ -209,10 +209,48 @@ class MemoryScenarioRunner:
     def initialize(self) -> None:
         self._vtuber_path.mkdir(parents=True, exist_ok=True)
         self._worker_path.mkdir(parents=True, exist_ok=True)
-        self._vtuber = SessionMemoryManager(str(self._vtuber_path))
-        self._vtuber.initialize()
-        self._worker = SessionMemoryManager(str(self._worker_path))
-        self._worker.initialize()
+        self._vtuber = self._make_manager(self._vtuber_path, VTUBER_SESSION_ID)
+        self._worker = self._make_manager(self._worker_path, WORKER_SESSION_ID)
+
+    @staticmethod
+    def _make_manager(path: Path, session_id: str) -> SessionMemoryManager:
+        """Manager wired to a REAL provider, as production wires it.
+
+        The manager stopped writing on its own — every record goes through a
+        MemoryProvider now, and without one it is inert. This scenario
+        constructed it bare, so every downstream assertion compared against
+        empty directories: 0 jsonl lines, no conversations/, no dms/. The
+        file-backed provider from geny_executor is the same one the executor
+        attaches, so the scenario exercises the real path instead of a mock
+        of it.
+        """
+        from geny_executor.memory.providers.file import FileMemoryProvider
+
+        manager = SessionMemoryManager(str(path), session_id=session_id)
+        manager.initialize()
+        # Both take the SESSION root: the manager keeps memory under it, and
+        # the provider roots its own `memory/` there too, so they line up.
+        manager.set_memory_provider(
+            FileMemoryProvider(path, session_id=session_id)
+        )
+
+        # Archiving is NOT driven by record_message any more — the executor's
+        # `after_record_turn` hook drives it, installed by AgentSession. A
+        # bare manager therefore appends to STM and archives nothing, which is
+        # why every conversations/ and dms/ assertion here saw empty
+        # directories. This scenario has no AgentSession, so it stands in for
+        # the hook with the same two calls the real one makes, in the same
+        # order (the conversation ref feeds the DM archiver).
+        inner = manager.record_message
+
+        def _record_and_archive(role, content, metadata=None, **extra):
+            inner(role, content, metadata, **extra)
+            archived = manager._maybe_archive_conversation(role, content, metadata)
+            conv_ref = archived.relative_path if archived is not None else None
+            manager._maybe_archive_dm(role, content, metadata, conv_ref)
+
+        manager.record_message = _record_and_archive  # type: ignore[method-assign]
+        return manager
 
     @property
     def inputs(self) -> ScenarioInputs:

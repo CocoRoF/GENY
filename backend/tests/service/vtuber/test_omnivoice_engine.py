@@ -41,6 +41,19 @@ class _Cfg:
     auto_asr: bool = False
 
 
+
+# The real class, captured BEFORE any patching. A stub that reaches for
+# `httpx.AsyncClient` by name calls whatever is currently patched in — itself —
+# and recurses until the stack gives out, which surfaces as an unhelpful
+# "health check error: RecursionError" rather than as a broken test.
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+def _pinned_client(transport: httpx.MockTransport):
+    """Patch target: build a real client, but always on `transport`."""
+    return lambda *a, **kw: _REAL_ASYNC_CLIENT(**{**kw, "transport": transport})
+
+
 def _patch_config(cfg: _Cfg):
     """Replace ConfigManager.load_config with a stub returning ``cfg``."""
     return patch(
@@ -111,7 +124,7 @@ async def test_health_check_ok():
     transport = httpx.MockTransport(handler)
     with _direct_patch(cfg):
         with patch.object(httpx, "AsyncClient",
-                          lambda *a, **kw: httpx.AsyncClient(transport=transport, **kw)):
+                          _pinned_client(transport)):
             engine = ove.OmniVoiceEngine()
             assert await engine.health_check() is True
 
@@ -127,7 +140,7 @@ async def test_health_check_loading_returns_false():
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         assert await engine.health_check() is False
@@ -155,7 +168,7 @@ async def test_synthesize_clone_mode_resolves_ref_audio(voices_dir):
     transport = httpx.MockTransport(handler)
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=transport, **kw)
+        _pinned_client(transport)
     ):
         engine = ove.OmniVoiceEngine()
         request = TTSRequest(text="안녕하세요", emotion="neutral", language="ko",
@@ -193,7 +206,7 @@ async def test_synthesize_design_mode_sends_instruct(voices_dir):
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         request = TTSRequest(text="hi", emotion="neutral", language="en")
@@ -227,7 +240,7 @@ async def test_get_voices_proxies_remote_response(voices_dir):
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         voices = await engine.get_voices(language="ko")
@@ -254,7 +267,7 @@ async def test_health_check_phase_ok_returns_true():
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         assert await engine.health_check() is True
@@ -274,7 +287,7 @@ async def test_health_check_phase_warming_returns_false():
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         assert await engine.health_check() is False
@@ -294,7 +307,7 @@ async def test_health_check_legacy_status_only_still_ready():
 
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw)
+        _pinned_client(httpx.MockTransport(handler))
     ):
         engine = ove.OmniVoiceEngine()
         assert await engine.health_check() is True
@@ -335,7 +348,7 @@ async def test_synthesize_concurrent_calls_do_not_serialise_in_adapter(voices_di
     transport = httpx.MockTransport(handler)
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=transport, **kw)
+        _pinned_client(transport)
     ):
         engine = ove.OmniVoiceEngine()
         req1 = TTSRequest(text="첫 번째", emotion="neutral", language="ko")
@@ -366,7 +379,7 @@ async def test_persistent_client_is_reused_across_calls(voices_dir):
     transport = httpx.MockTransport(handler)
     with _direct_patch(cfg), patch.object(
         httpx, "AsyncClient",
-        lambda *a, **kw: httpx.AsyncClient(transport=transport, **kw)
+        _pinned_client(transport)
     ):
         engine = ove.OmniVoiceEngine()
         req = TTSRequest(text="hi", emotion="neutral", language="ko")
