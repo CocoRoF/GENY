@@ -2207,20 +2207,18 @@ async def set_cloud_connection(
     root up when its tools are next built.
     """
     _enforce_session_owner(session_id, auth)
-    from service.cloud import ensure_agent_link, remove_agent_link, set_connected
+    from service.cloud import adopt_agent_space, set_connected
 
     user = (auth or {}).get("sub") or "anonymous"
     connected = bool(payload.get("connected"))
     storage_path = _storage_root_live_or_dormant(session_id)
 
     if connected:
-        if not await asyncio.to_thread(ensure_agent_link, storage_path, user):
-            raise HTTPException(
-                status_code=409,
-                detail="workspace/cloud is occupied by a real file or folder",
-            )
-    else:
-        await asyncio.to_thread(remove_agent_link, storage_path)
+        # The agent's space is inside the cloud either way; connecting only
+        # widens what it may reach from its own directory to the whole shared
+        # tree. Adoption is idempotent, so calling it here just makes sure the
+        # space exists before the roots are rebound.
+        await asyncio.to_thread(adopt_agent_space, user, storage_path, session_id)
 
     sessions = await asyncio.to_thread(set_connected, user, session_id, connected)
     # The link changes what the agent can reach, so its tools must be

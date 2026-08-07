@@ -957,10 +957,36 @@ class AgentSessionManager:
                     _host_root = os.getenv(
                         "GENY_AGENT_SESSIONS_HOST_DIR", ""
                     ).strip().rstrip("/")
+
+                    # Bind the agent's space INSIDE THE CLOUD, not the legacy
+                    # `<sid>/workspace`. That path is a symlink into the cloud
+                    # now, and a bind of a symlink resolves to a target that
+                    # does not exist on the host — which is exactly how the
+                    # old `workspace/cloud` link dangled inside the sandbox.
+                    # Binding the real cloud directory puts the sandbox in the
+                    # shared tree with everything else.
                     _backend_ws = os.path.join(str(_ROOT), session_id, "workspace")
-                    _bind_host = (
-                        f"{_host_root}/{session_id}/workspace" if _host_root else None
-                    )
+                    try:
+                        from service.cloud import adopt_agent_space
+
+                        if owner_username:
+                            _backend_ws = adopt_agent_space(
+                                owner_username,
+                                os.path.join(str(_ROOT), session_id),
+                                session_id,
+                            )
+                    except Exception:  # noqa: BLE001 — fall back to the legacy path
+                        logger.debug(
+                            "[%s] cloud-based bind path unavailable", session_id,
+                            exc_info=True,
+                        )
+
+                    _bind_host = None
+                    if _host_root:
+                        # Mirror the backend path under the host root: both
+                        # sides see the same volume, only the prefix differs.
+                        _rel_to_root = os.path.relpath(_backend_ws, str(_ROOT))
+                        _bind_host = f"{_host_root}/{_rel_to_root}"
                     if _bind_host:
                         # The dir must exist before GAPT validates/mounts it.
                         os.makedirs(_backend_ws, exist_ok=True)

@@ -2486,6 +2486,9 @@ class AgentSession:
         try:
             from service.cloud import cloud_workspace, is_connected
 
+            # Own space always; the whole cloud only while connected. Both
+            # roots are inside the cloud tree now, so "connect" is a WIDENING
+            # rather than a bridge to somewhere else.
             roots = [ctx.working_dir]
             owner = self._owner_username
             if owner and is_connected(owner, self._session_id):
@@ -2592,21 +2595,30 @@ class AgentSession:
         else:
             working_dir = ""
 
-        # GenyCloud — the folder ABOVE agents. A connected agent reaches it
-        # at `cloud/` inside its own workspace and operates on the SAME
-        # bytes the user's devices and every other connected agent see:
-        # a reference, never a copy. Copies per agent are exactly what the
-        # cloud exists to end.
+        # GenyCloud IS the filesystem. This agent's own space lives inside
+        # it at `agents/<sid>`, so `working_dir` moves there and the agent
+        # stands in the shared tree rather than reaching into it through a
+        # link. CONNECTING widens the reach from "my own space" to the whole
+        # cloud — the user's linked folders, the other agents' spaces, the
+        # GAPT workspaces — which is what makes it shared.
         cloud_dir = ""
         try:
-            from service.cloud import ensure_agent_link, cloud_workspace, is_connected
+            from service.cloud import adopt_agent_space, cloud_workspace, is_connected
 
             owner = self._owner_username
-            if owner and self.storage_path and is_connected(owner, self._session_id):
-                if ensure_agent_link(self.storage_path, owner):
+            if owner and self.storage_path:
+                adopted = adopt_agent_space(
+                    owner, self.storage_path, self._session_id,
+                )
+                # An explicit CreateSessionRequest.working_dir still wins:
+                # a caller who named a directory meant that directory, and
+                # adoption must not quietly relocate them.
+                if not self._working_dir:
+                    working_dir = adopted
+                if is_connected(owner, self._session_id):
                     cloud_dir = cloud_workspace(owner)
         except Exception as exc:  # noqa: BLE001 — never block a session on the cloud
-            logger.debug("[%s] cloud link skipped: %s", self._session_id[:8], exc)
+            logger.debug("[%s] cloud adoption skipped: %s", self._session_id[:8], exc)
 
         is_vtuber = self._role == SessionRole.VTUBER
 

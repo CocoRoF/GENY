@@ -33,6 +33,7 @@ import os
 import re
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 from service.utils.platform import DEFAULT_STORAGE_ROOT
 
@@ -215,43 +216,143 @@ def cloud_workspace(username: str) -> str:
 
 
 #: Name the cloud takes inside a connected agent's workspace.
-CLOUD_LINK_NAME = "cloud"
+# ── The cloud IS the filesystem ───────────────────────────────────────
+#
+#   <cloud>/workspace/
+#     ├── <linked folder>/       user bind directories (from their PCs)
+#     ├── agents/<session_id>/   an agent's own working space
+#     │     └── .gapt/           its GAPT sandbox, when the agent starts one
+#     └── gapt/<name>/           a GAPT workspace the USER set up independently
+#
+# Agent workspaces live INSIDE the cloud rather than beside it. The previous
+# layout put them in a sibling directory and reached the cloud through a
+# `workspace/cloud` symlink, which broke the moment the agent ran in a GAPT
+# sandbox: the link pointed at a path that exists only in the backend
+# container, so inside the sandbox it dangled (measured). With the agent
+# already standing in the cloud there is no link to dangle, and one mirror on
+# the user's PC carries the whole shared space — which is the point of it
+# being shared.
+#
+# What does NOT move: a session's internal state (memory/, transcripts/,
+# checkpoints/, synapse.db — 87 MB on one production session) stays at
+# ``<ROOT>/<session_id>/``. It is machinery, not work product, and replicating
+# it to every laptop would be both wasteful and confusing.
+
+#: Where agent spaces are grouped. Reserved: a linked folder may not take it.
+AGENTS_SUBDIR = "agents"
+
+#: Where a user-configured, agent-independent GAPT workspace lives. Kept at
+#: the top level and NOT under ``agents/`` precisely so the two are
+#: distinguishable at a glance — and so an agent can see (and be told about)
+#: a GAPT space that is not its own.
+GAPT_SUBDIR = "gapt"
+
+#: Names the cloud owns. A user folder linked under one of these would be
+#: mirrored on top of the structure.
+RESERVED_CLOUD_NAMES = frozenset({AGENTS_SUBDIR, GAPT_SUBDIR})
 
 
-def ensure_agent_link(storage_path: str, username: str) -> bool:
-    """Give a connected agent a natural path to the cloud.
+def agents_root(username: str) -> str:
+    """``<cloud>/workspace/agents`` — parent of every agent space."""
+    return str(Path(cloud_workspace(username)) / AGENTS_SUBDIR)
 
-    A symlink at ``workspace/cloud`` — which works because the executor's
-    path guard resolves the link FIRST and then checks containment against
-    ``allowed_paths``; adding the cloud there is what makes the traversal
-    legal. Without the link the agent would have to name an absolute
-    ``/data/..._cloud/<user>/workspace`` path, which is both ugly and
-    leaks the storage layout into prompts.
 
-    The sync indexer skips symlinks (``followlinks=False`` + explicit
-    ``is_symlink()`` checks), so this can never duplicate the cloud into
-    the agent's own mirror — the reference stays a reference.
+def agent_space(username: str, session_id: str) -> str:
+    """An agent's own working directory, inside the cloud."""
+    return str(Path(agents_root(username)) / _safe_user_dir(session_id))
+
+
+def agent_gapt_space(username: str, session_id: str) -> str:
+    """The GAPT workspace an agent starts for itself — under its own space,
+    so the sandbox it creates cannot be confused with the user's."""
+    return str(Path(agent_space(username, session_id)) / ".gapt")
+
+
+def user_gapt_root(username: str) -> str:
+    """``<cloud>/workspace/gapt`` — GAPT workspaces the user set up."""
+    return str(Path(cloud_workspace(username)) / GAPT_SUBDIR)
+
+
+def ensure_agent_space(username: str, session_id: str) -> str:
+    """Create (idempotently) the agent's directory inside the cloud."""
+    path = Path(agent_space(username, session_id))
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def cloud_relative(username: str, absolute: str) -> Optional[str]:
+    """Path as the user sees it in the cloud, or None if it is outside.
+
+    Used to tell an agent where it stands without leaking the storage root
+    into a prompt.
     """
-    link = Path(storage_path) / "workspace" / CLOUD_LINK_NAME
-    target = cloud_workspace(username)
     try:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink():
-            if os.readlink(str(link)) == target:
-                return True
-            link.unlink()
-        elif link.exists():
-            return False  # a real file/dir sits there — never clobber
-        os.symlink(target, str(link), target_is_directory=True)
-        return True
+        return str(Path(absolute).resolve().relative_to(
+            Path(cloud_workspace(username)).resolve()
+        ))
+    except (ValueError, OSError):
+        return None
+
+
+def adopt_agent_space(username: str, storage_path: str, session_id: str) -> str:
+    """Move a session's workspace INTO the cloud, once, and leave a link.
+
+    Returns the agent's cloud path. Idempotent and never destructive:
+
+    * if the legacy ``<storage>/workspace`` is a real directory, its contents
+      move into ``<cloud>/workspace/agents/<sid>/`` and the old path becomes a
+      symlink to it — so every place that joins ``storage_path / "workspace"``
+      keeps working unchanged;
+    * a name that already exists on the cloud side is NOT overwritten; the
+      incoming copy is kept beside it as ``<name>.local-<n>``, because both
+      sides are real work and choosing between them is not ours to do;
+    * once the link is in place the call only ensures the target exists.
+
+    The sync indexer skips symlinks, so the legacy path contributes nothing to
+    the session's own journal — the cloud journal is the single owner of these
+    bytes, which is what keeps one path to one engine.
+
+    This replaces the previous ``workspace/cloud`` symlink, which pointed the
+    other way and broke inside a GAPT sandbox: its target only exists in the
+    backend container, so the link dangled there (measured in production).
+    An agent standing inside the cloud has no link to dangle.
+    """
+    target = Path(ensure_agent_space(username, session_id))
+    legacy = Path(storage_path) / "workspace"
+
+    try:
+        if legacy.is_symlink():
+            if os.readlink(str(legacy)) != str(target):
+                legacy.unlink()
+                os.symlink(str(target), str(legacy), target_is_directory=True)
+            return str(target)
+
+        if legacy.is_dir():
+            for entry in sorted(legacy.iterdir()):
+                dest = target / entry.name
+                if dest.exists() or dest.is_symlink():
+                    n = 2
+                    while (target / f"{entry.name}.local-{n}").exists():
+                        n += 1
+                    dest = target / f"{entry.name}.local-{n}"
+                os.replace(str(entry), str(dest))
+            legacy.rmdir()
+
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(str(target), str(legacy), target_is_directory=True)
     except OSError:
-        return False
+        # Best-effort: a session whose workspace could not be moved keeps
+        # working on the legacy path rather than losing it.
+        return str(legacy)
+    return str(target)
 
 
-def remove_agent_link(storage_path: str) -> None:
-    link = Path(storage_path) / "workspace" / CLOUD_LINK_NAME
+def release_agent_space(storage_path: str) -> None:
+    """Drop only the compatibility link. The agent's files stay in the cloud —
+    they are shared work product, not session scratch."""
+    legacy = Path(storage_path) / "workspace"
     try:
-        if link.is_symlink():
-            link.unlink()
+        if legacy.is_symlink():
+            legacy.unlink()
     except OSError:
         pass
