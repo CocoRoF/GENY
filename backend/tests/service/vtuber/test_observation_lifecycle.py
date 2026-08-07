@@ -259,3 +259,27 @@ async def test_sweep_skips_notes_without_live_manager(tmp_path: Path, monkeypatc
     await so._prune_old_observations("s1", tmp_path)
     # Never raw-unlink a provider-indexed note — stays until a manager is live.
     assert old_note.exists()
+
+
+@pytest.mark.asyncio
+async def test_first_sweep_runs_on_a_freshly_booted_process(tmp_path: Path, monkeypatch):
+    """The throttle must not swallow the FIRST sweep.
+
+    `time.monotonic()` counts from an arbitrary origin — on Linux roughly
+    boot — so comparing it against a 0.0 "never pruned" default made
+    `now - 0.0 < 3600` true on any machine up for less than an hour. Every
+    container skipped pruning for its first hour after a restart, and the
+    only place it reproduced was a fresh CI runner.
+    """
+    obs = tmp_path / "memory" / "observations" / "2026-06-20"
+    obs.mkdir(parents=True)
+    stale = obs / "old.jpg"
+    stale.write_bytes(b"x")
+    _age(stale, 30)
+
+    monkeypatch.setattr(so.time, "monotonic", lambda: 12.0)  # 12s since boot
+    so.reset_cooldown_state_for_tests()
+
+    await so._prune_old_observations("s-fresh", tmp_path)
+
+    assert not stale.exists(), "the first sweep after boot was throttled away"

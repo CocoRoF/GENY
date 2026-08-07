@@ -653,7 +653,14 @@ async def _prune_old_observations(session_id: str, storage_root: Path) -> None:
     # whole observations tree; running it every 3-min upload is wasteful).
     key = str(storage_root)
     now = time.monotonic()
-    if now - _last_prune_at.get(key, 0.0) < 3600:
+    last = _last_prune_at.get(key)
+    # `is not None`, not a 0.0 default: monotonic() is measured from an
+    # arbitrary point — on Linux, roughly boot — so on a machine that has been
+    # up less than an hour `now - 0.0 < 3600` is TRUE and the sweep is
+    # throttled away before it has ever run. That is every container for its
+    # first hour after a restart, and it is why this only reproduced on a
+    # fresh CI runner.
+    if last is not None and now - last < 3600:
         return
     _last_prune_at[key] = now
     cutoff = time.time() - days * 86400
