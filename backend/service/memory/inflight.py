@@ -29,10 +29,17 @@ from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional, Tuple
 
 # How long one memory operation may run before it is worth someone's
-# attention. Generous: a first full re-index of a large vault legitimately
-# takes minutes, and crying wolf about that would teach everyone to ignore
-# this number. A genuine wedge blows past it by orders of magnitude.
-SLOW_OPERATION_S = 300.0
+# attention.
+#
+# Measured, not guessed: a cold-start backfill of the production vault (8,052
+# notes) takes ~630s. The first value here was 300s and it flagged that normal
+# start as stuck — which is the failure mode this number must not have. An
+# alarm that fires on every restart is one everybody learns to scroll past,
+# and then the real one goes unread too.
+#
+# 1800s leaves ~3x headroom over the worst backfill actually observed, while
+# the wedge this exists for ran for 27 HOURS. There is no overlap to split.
+SLOW_OPERATION_S = 1800.0
 
 _lock = threading.Lock()
 _inflight: Dict[int, Tuple[str, float]] = {}

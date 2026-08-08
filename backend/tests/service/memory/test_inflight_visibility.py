@@ -75,12 +75,16 @@ def test_a_long_running_call_crosses_the_line(monkeypatch):
 
 
 def test_a_normal_call_does_not_cry_wolf():
-    """A first re-index of a large vault legitimately runs for minutes. If
-    that reported stuck, everyone would learn to ignore the flag."""
+    """A cold-start backfill of the production vault (8,052 notes) was
+    measured at ~630s. The threshold shipped at 300s and flagged that normal
+    restart as stuck — an alarm that fires every time is one everyone learns
+    to scroll past, and then the real one goes unread too."""
     with inflight.track("index_batch"):
         assert inflight.status()["stuck"] is False
         assert inflight.stuck_for() is None
-    assert inflight.SLOW_OPERATION_S >= 60.0
+    assert inflight.SLOW_OPERATION_S >= 630.0 * 2, (
+        "no headroom over a backfill that is genuinely this slow"
+    )
 
 
 def test_a_failing_operation_still_clears():
