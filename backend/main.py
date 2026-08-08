@@ -1058,6 +1058,44 @@ async def health_check():
     }
 
 
+@app.get("/health/tasks")
+async def health_tasks(response: Response, limit: int = 40):
+    """Where every pending coroutine is parked, right now.
+
+    Thread dumps (py-spy, SIGUSR1) answer "what is the CPU doing" and say
+    *idle* for the failure that actually hurts here: a turn awaiting
+    something that will never arrive. The loop is healthy, every thread is
+    asleep, and the product is dead — twice in this codebase's history the
+    only way to find the line was to guess.
+
+    This is the missing view. It is a diagnostic, not an API: the shape is
+    free to change, and it is deliberately cheap enough to hit while a
+    request is hanging.
+    """
+    import asyncio as _aio
+    import traceback as _tb
+
+    out = []
+    for task in list(_aio.all_tasks())[:max(1, limit)]:
+        frames = []
+        try:
+            for frame in task.get_stack(limit=12):
+                info = _tb.extract_stack(frame, limit=1)
+                if info:
+                    f = info[0]
+                    frames.append(f"{f.filename}:{f.lineno} {f.name}")
+        except Exception:  # noqa: BLE001 — a diagnostic must never raise
+            frames.append("<stack unavailable>")
+        out.append({
+            "name": task.get_name(),
+            "done": task.done(),
+            "coro": str(task.get_coro())[:200],
+            "stack": frames,
+        })
+    response.headers["Cache-Control"] = "no-store"
+    return {"count": len(out), "tasks": out}
+
+
 @app.get("/health/ready")
 async def readiness_check(response: Response):
     """READINESS — are dependencies usable right now?

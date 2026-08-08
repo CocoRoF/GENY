@@ -194,3 +194,42 @@ async def test_a_healthy_memory_engine_does_not_degrade_health(monkeypatch):
 
     assert body["memory"]["stuck"] is False
     assert body["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_task_dump_shows_where_a_pending_coroutine_is_parked():
+    """The failure this exists for looks healthy from every other angle: the
+    loop is running, threads are asleep, and one turn awaits something that
+    never arrives. Only the task's own stack names the line."""
+    import asyncio
+
+    from fastapi import Response
+
+    gate = asyncio.Event()
+
+    async def _parked():
+        await gate.wait()
+
+    task = asyncio.create_task(_parked(), name="parked-turn")
+    await asyncio.sleep(0)  # let it reach the await
+
+    body = await main.health_tasks(Response())
+    gate.set()
+    await task
+
+    parked = [t for t in body["tasks"] if t["name"] == "parked-turn"]
+    assert parked, "a pending task was invisible in the dump"
+    assert parked[0]["done"] is False
+    assert any("_parked" in frame for frame in parked[0]["stack"]), (
+        "the dump named the task but not where it is waiting"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_dump_is_bounded():
+    """A diagnostic that returns thousands of stacks is one nobody can read,
+    and hitting it during an incident should not itself be the problem."""
+    from fastapi import Response
+
+    body = await main.health_tasks(Response(), limit=1)
+    assert body["count"] <= 1
