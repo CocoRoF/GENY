@@ -23,6 +23,8 @@ from typing import Any, List, Optional, Sequence, Tuple
 import numpy as np
 from geny_memory_adaptor import FEATURES
 
+from service.memory import inflight
+
 from geny_executor.memory.provider import (
     EmbeddingDescriptor,
     NoteRef,
@@ -91,17 +93,19 @@ class SynapseVectorHandle:
     # other sessions/health while one session's memory work runs on a worker.
 
     async def index(self, ref: NoteRef, text: str) -> int:
-        await asyncio.to_thread(
-            self._m.index, _node_id(ref), text,
-            kind=str(getattr(ref, "category", None) or "note"),
-        )
+        def _run() -> None:
+            with inflight.track("index"):
+                self._m.index(_node_id(ref), text,
+                              kind=str(getattr(ref, "category", None) or "note"))
+        await asyncio.to_thread(_run)
         return 1
 
     async def index_batch(self, items: Sequence[Tuple[NoteRef, str]]) -> int:
         def _run() -> int:
-            for ref, text in items:
-                self._m.index(_node_id(ref), text,
-                              kind=str(getattr(ref, "category", None) or "note"))
+            with inflight.track("index_batch"):
+                for ref, text in items:
+                    self._m.index(_node_id(ref), text,
+                                  kind=str(getattr(ref, "category", None) or "note"))
             return len(items)
         # One hop to the worker for the whole batch (not per item) — the initial
         # session re-index is exactly this path.
@@ -112,8 +116,10 @@ class SynapseVectorHandle:
         # Search + per-hit body fetch both hit SQLite → run the whole read on a
         # worker thread and hand back plain data.
         def _run() -> Tuple[list, list]:
-            hits = self._m.search(text, top_k=top_k)
-            bodies = [self._m.get_text(h.id) for h in hits if h.score >= threshold]
+            with inflight.track("search"):
+                hits = self._m.search(text, top_k=top_k)
+                bodies = [self._m.get_text(h.id) for h in hits
+                          if h.score >= threshold]
             return hits, bodies
         hits, bodies = await asyncio.to_thread(_run)
         # Record provenance for learning BEFORE thresholding — a note that just
@@ -179,14 +185,20 @@ class SynapseVectorHandle:
         return self._m.contradictions(note_key, top_k=top_k)
 
     async def remove(self, ref: NoteRef) -> bool:
-        await asyncio.to_thread(self._m.remove, _node_id(ref))
+        def _run() -> None:
+            with inflight.track("remove"):
+                self._m.remove(_node_id(ref))
+        await asyncio.to_thread(_run)
         return True
 
     async def reindex(self, *, plan: Optional[ReindexPlan] = None) -> ReindexPlan:
         # Synapse indexes are incremental + derived; distillation is the only
         # batch maintenance and needs no external tokens/cost. Write-heavy over
         # the whole graph → off the loop.
-        metrics = await asyncio.to_thread(self._m.distill)
+        def _distill():
+            with inflight.track("distill"):
+                return self._m.distill()
+        metrics = await asyncio.to_thread(_distill)
         return ReindexPlan(
             layer="vector",
             reason="synapse distill (local, zero-cost)",
@@ -201,7 +213,10 @@ class SynapseVectorHandle:
         # Synapse stores one vector per note (no sub-chunking), so a document is
         # its single chunk.
         nid = _node_id(ref)
-        body = await asyncio.to_thread(self._m.get_text, nid)
+        def _get_text():
+            with inflight.track("get_text"):
+                return self._m.get_text(nid)
+        body = await asyncio.to_thread(_get_text)
         if body is None:
             return []
         return [MemoryChunk(key=nid, content=body, source="vector",

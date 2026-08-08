@@ -1,4 +1,31 @@
 import os
+
+# BLAS threading — MUST be set before numpy is imported anywhere.
+#
+# OpenBLAS starts a worker pool sized to the host's cores. This process forks
+# constantly (the Claude Code CLI, docker exec, every subprocess tool), and a
+# fork does not carry the pool's threads into the child while the parent's
+# bookkeeping still says they exist. The next BLAS call then spin-waits on
+# workers that are never coming — one core pinned at 100%, inside a matmul,
+# forever, holding whatever lock the caller took.
+#
+# That is not hypothetical: it wedged the memory engine's global lock for 27
+# hours in production. A (4096 x 256) @ (256,) product — microseconds of real
+# work — never returned, 13 threads queued behind it, and every agent turn
+# timed out at 1800s while /health kept answering "healthy".
+#
+# Single-threaded BLAS removes the pool, and with it the whole failure class.
+# It costs nothing here: these matrices are far too small for threaded BLAS to
+# beat its own dispatch overhead.
+for _blas_var in (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(_blas_var, "1")
+
 import sys
 import asyncio
 from logging import basicConfig, getLogger, INFO
@@ -921,6 +948,7 @@ app = FastAPI(
 # and the self-authenticating MCP bridge). WebSocket routes keep their own
 # auth (ws_auth_or_close); this gate ignores non-http scopes.
 from service.auth.auth_middleware import RequireLoginMiddleware  # noqa: E402
+from service.memory import inflight as memory_inflight  # noqa: E402
 from service.utils.background import (
     background_task_count,
     install_asyncio_exception_handler,
@@ -995,7 +1023,26 @@ async def health_check():
     """
     agents = agent_manager.list_agents()
     db_status = await _db_status()
-    degraded = db_status not in ("healthy", "not_configured")
+
+    # Memory is not a dependency you can see from outside the process, and it
+    # is the one that takes conversations down when it stalls: every Synapse
+    # call serialises behind one lock, so one that never returns ends every
+    # turn at the 1800s timeout. That happened for 27 hours while this
+    # endpoint answered "healthy" — the loop was idle, the DB was up, and
+    # nothing here was looking at the part that was actually wedged.
+    #
+    # Reported, not enforced: a restart would clear a wedge, but a first
+    # re-index of a large vault legitimately runs for minutes and must not be
+    # killed halfway. Someone reading this should decide.
+    memory = memory_inflight.status()
+    if memory["stuck"]:
+        logger.warning(
+            "memory engine stalled — %s running for %.0fs (%d queued)",
+            memory["oldest_operation"], memory["oldest_age_s"],
+            memory["in_flight"],
+        )
+
+    degraded = db_status not in ("healthy", "not_configured") or memory["stuck"]
 
     return {
         # Honest, unlike the hardcoded "healthy" this replaces: the old
@@ -1007,6 +1054,7 @@ async def health_check():
         "error_sessions": sum(1 for a in agents if a.status == "error"),
         "database": db_status,
         "background_tasks": background_task_count(),
+        "memory": memory,
     }
 
 

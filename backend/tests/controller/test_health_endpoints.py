@@ -155,3 +155,42 @@ async def test_readiness_200s_when_the_database_is_fine(monkeypatch):
     body = await main.readiness_check(response)
     assert body["ready"] is True
     assert response.status_code == 200
+
+
+# ── the signal that was missing ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_health_reports_the_memory_engine(monkeypatch):
+    """`/health` is what a human and autoheal both read. For 27 hours it said
+    "healthy" while every agent turn timed out on a wedged memory lock,
+    because nothing in the response covered memory at all."""
+    _set_db(monkeypatch, healthy=True)
+    body = await main.health_check()
+
+    assert "memory" in body, "memory is invisible to the only signal anyone reads"
+    assert set(body["memory"]) >= {"in_flight", "oldest_age_s", "stuck"}
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_memory_engine_makes_health_say_degraded(monkeypatch):
+    from service.memory import inflight
+
+    _set_db(monkeypatch, healthy=True)
+    monkeypatch.setattr(inflight, "SLOW_OPERATION_S", 0.0)
+    with inflight.track("index"):
+        body = await main.health_check()
+
+    assert body["memory"]["stuck"] is True
+    assert body["status"] == "degraded"
+    # Still LIVE: the loop serves fine, and a first re-index of a large vault
+    # legitimately runs long. Failing liveness here would restart it halfway.
+    assert body["live"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_healthy_memory_engine_does_not_degrade_health(monkeypatch):
+    _set_db(monkeypatch, healthy=True)
+    body = await main.health_check()
+
+    assert body["memory"]["stuck"] is False
+    assert body["status"] == "healthy"

@@ -83,6 +83,18 @@ services:
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
       - GENY_AGENT_STORAGE_ROOT=/data/geny_agent_sessions
+      # ── BLAS threading ────────────────────────────────────────────────
+      # Belt to main.py's braces. OpenBLAS's worker pool does not survive a
+      # fork, and this process forks constantly (CLI, docker exec, tools);
+      # the next matmul then spins on workers that never come — one core at
+      # 100% inside a microsecond of real work, holding the memory engine's
+      # global lock. That wedged production for 27 hours while /health kept
+      # answering "healthy". No pool, no failure class; these matrices are
+      # far too small for threaded BLAS to pay for its own dispatch.
+      - OPENBLAS_NUM_THREADS=1
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
       # ── Geny Drive (agent cloud storage) ──────────────────────────────
       # Per-agent workspace quota and per-file cap. Declared explicitly so
       # the deployed limits are visible/tunable here instead of living as
