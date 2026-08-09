@@ -45,6 +45,18 @@ class _FakeMem:
     def index(self, node_id, text, kind="note"):
         self._mark("index")
 
+    def index_many(self, items, chunk_size=200):
+        self._mark("index_many")
+        return {"indexed": len(items), "touched": 0, "skipped": 0}
+
+    def manifest(self):
+        self._mark("manifest")
+        return {}
+
+    def remove_many(self, node_ids):
+        self._mark("remove_many")
+        return len(node_ids)
+
     def remove(self, node_id):
         self._mark("remove")
 
@@ -88,7 +100,49 @@ async def test_index_and_batch_offloaded():
     mem.threads.clear()
     n = await handle.index_batch([(_Ref("b.md"), "t1"), (_Ref("c.md"), "t2")])
     assert n == 2
-    assert mem.threads["index"] != loop_tid
+    # A batch goes through index_many — one transaction for the chunk rather
+    # than one fsync per note — and must still leave the loop free.
+    assert mem.threads["index_many"] != loop_tid
+    assert "index" not in mem.threads, "batch fell back to per-note indexing"
+
+
+@pytest.mark.asyncio
+async def test_the_incremental_calls_are_offloaded_too():
+    """``manifest`` reads every node row and ``remove_many`` writes; both are
+    SQLite on the same connection the turns use."""
+    mem = _FakeMem()
+    handle = SynapseVectorHandle(mem, dim=256)
+    loop_tid = _loop_thread_id()
+
+    await handle.manifest()
+    await handle.remove_many(["Scope.SESSION/observations/x.md"])
+
+    assert mem.threads["manifest"] != loop_tid
+    assert mem.threads["remove_many"] != loop_tid
+
+
+@pytest.mark.asyncio
+async def test_removing_nothing_never_reaches_the_engine():
+    mem = _FakeMem()
+    handle = SynapseVectorHandle(mem, dim=256)
+
+    assert await handle.remove_many([]) == 0
+    assert "remove_many" not in mem.threads
+
+
+@pytest.mark.asyncio
+async def test_a_batch_survives_an_older_adaptor():
+    """Version skew must cost speed, not the vault's whole write path."""
+    class _Old(_FakeMem):
+        index_many = None
+
+    mem = _Old()
+    handle = SynapseVectorHandle(mem, dim=256)
+
+    n = await handle.index_batch([(_Ref("b.md"), "t1"), (_Ref("c.md"), "t2")])
+
+    assert n == 2
+    assert mem.threads["index"], "nothing was indexed on the fallback path"
 
 
 @pytest.mark.asyncio

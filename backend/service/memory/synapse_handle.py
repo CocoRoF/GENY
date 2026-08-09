@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from geny_memory_adaptor import FEATURES
@@ -101,14 +101,69 @@ class SynapseVectorHandle:
         return 1
 
     async def index_batch(self, items: Sequence[Tuple[NoteRef, str]]) -> int:
+        payload = [
+            {
+                "node_id": _node_id(ref),
+                "text": text,
+                "kind": str(getattr(ref, "category", None) or "note"),
+            }
+            for ref, text in items
+        ]
+
         def _run() -> int:
             with inflight.track("index_batch"):
-                for ref, text in items:
-                    self._m.index(_node_id(ref), text,
-                                  kind=str(getattr(ref, "category", None) or "note"))
-            return len(items)
+                # ONE transaction per chunk, not per note. A per-note commit
+                # costs an fsync (43.7 ms on this deployment) against 2-3 ms
+                # of real indexing, so a catch-up used to be almost entirely
+                # disk sync: 500 changed notes measured 511 s one at a time
+                # and 42 s batched.
+                batch = getattr(self._m, "index_many", None)
+                if batch is None:
+                    # Older adaptor. Slow, but a version skew must not take
+                    # memory out entirely — this is the whole vault's write
+                    # path, not an optional feature.
+                    for item in payload:
+                        self._m.index(item["node_id"], item["text"],
+                                      kind=item["kind"])
+                    return len(payload)
+                out = batch(payload, chunk_size=200)
+            return int(out.get("indexed", 0))
+
         # One hop to the worker for the whole batch (not per item) — the initial
         # session re-index is exactly this path.
+        return await asyncio.to_thread(_run)
+
+    # ── incremental host support ─────────────────────────────────────
+    # The three calls below are what let a caller ask "what changed?" instead
+    # of re-offering the whole vault. Without them the only way to find one
+    # edited note is to re-read 5,500 of them and re-derive every digest.
+
+    def node_id_for(self, ref: NoteRef) -> str:
+        """The index's key for a note. Public so a caller can diff against
+        ``manifest()`` without duplicating the id convention — two places
+        building the same id differently is how an index silently doubles."""
+        return _node_id(ref)
+
+    async def manifest(self) -> Dict[str, Tuple[float, str]]:
+        """``{node_id: (indexed_at, content_sha)}`` — what is already indexed."""
+        def _run() -> Dict[str, Tuple[float, str]]:
+            with inflight.track("manifest"):
+                return self._m.manifest()
+        return await asyncio.to_thread(_run)
+
+    async def remove_many(self, node_ids: Sequence[str]) -> int:
+        """Drop nodes by index key, one transaction.
+
+        Takes ids rather than refs because the caller that needs this is
+        reaping notes whose files are GONE — there is no ref left to build.
+        """
+        ids = list(node_ids)
+        if not ids:
+            return 0
+
+        def _run() -> int:
+            with inflight.track("remove_many"):
+                return int(self._m.remove_many(ids))
         return await asyncio.to_thread(_run)
 
     async def search(self, text: str, *, top_k: int = 5,
