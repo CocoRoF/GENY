@@ -20,6 +20,7 @@ Both ``agent_controller`` (command tab) and ``chat_controller``
 (messenger broadcast) delegate here.
 """
 
+import os
 import asyncio
 from service.utils.background import spawn_background
 import re
@@ -868,6 +869,99 @@ def _get_agent_manager():
     return get_agent_session_manager()
 
 
+#: A turn that has recorded NOTHING for this long is wedged, not slow.
+#: Every real turn writes to the session log continuously — stage entries,
+#: tool calls, streamed deltas — so silence is the signal. Generous enough
+#: that a single long tool call (a big build, a slow HTTP fetch) does not
+#: trip it; short enough that a user is not left watching a spinner.
+_STALL_TIMEOUT_S = float(os.getenv("GENY_TURN_STALL_TIMEOUT_S", "300"))
+_STALL_POLL_S = 5.0
+
+
+async def _invoke_bounded(
+    agent,
+    *,
+    prompt: str,
+    invoke_kwargs: Dict[str, Any],
+    total_timeout: float,
+    session_logger,
+    session_id: str,
+):
+    """Run one turn under TWO limits: a hard ceiling and a no-progress stall.
+
+    The ceiling alone is not a safety net at a conversation's timescale. The
+    session default is 1800s, so a wedged turn sat there for 29 minutes with
+    the user watching a spinner before anything gave up — which is exactly
+    what a stuck subprocess, a wedged lock or a lost child process looks
+    like from here.
+
+    The stall guard makes the two cases distinguishable. A turn doing real
+    work writes to the session log the whole time (stage transitions, tool
+    calls, streamed deltas), and ``get_cache_length()`` is a monotonic count
+    of those writes. No writes for ``_STALL_TIMEOUT_S`` means no progress,
+    whatever the ceiling still allows.
+
+    Raises ``asyncio.TimeoutError`` for either limit, so the caller's
+    existing timeout handling covers both.
+    """
+    def _progress() -> int:
+        try:
+            return int(session_logger.get_cache_length()) if session_logger else -1
+        except Exception:  # noqa: BLE001 — a probe must never fail the turn
+            return -1
+
+    task = asyncio.ensure_future(agent.invoke(input_text=prompt, **invoke_kwargs))
+    started = time.monotonic()
+    last_progress = _progress()
+    last_moved = started
+
+    try:
+        while True:
+            remaining_total = total_timeout - (time.monotonic() - started)
+            if remaining_total <= 0:
+                logger.warning(
+                    "[Executor:%s] turn hit the %.0fs ceiling", session_id[:8],
+                    total_timeout,
+                )
+                raise asyncio.TimeoutError
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=min(_STALL_POLL_S, remaining_total),
+                )
+            except asyncio.TimeoutError:
+                pass  # still running — that is what we are here to check
+
+            now = time.monotonic()
+            current = _progress()
+            if current != last_progress:
+                last_progress, last_moved = current, now
+                continue
+            if current < 0:
+                # No usable progress signal (no logger). The ceiling is all
+                # we have; do not invent a stall.
+                continue
+            if now - last_moved >= _STALL_TIMEOUT_S:
+                logger.warning(
+                    "[Executor:%s] no progress for %.0fs (log cursor stuck at "
+                    "%d, %.0fs into a %.0fs budget) — abandoning the turn",
+                    session_id[:8], now - last_moved, current,
+                    now - started, total_timeout,
+                )
+                raise asyncio.TimeoutError
+    finally:
+        if not task.done():
+            task.cancel()
+            # Give it a moment to unwind (its `finally` releases the
+            # execution holder); never let cleanup outlive the turn.
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=10.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception:  # noqa: BLE001 — the turn's own error, already handled
+                pass
+
+
 def _get_session_logger(session_id: str, *, create_if_missing: bool = True):
     from service.logging.session_logger import get_session_logger
     return get_session_logger(session_id, create_if_missing=create_if_missing)
@@ -1008,9 +1102,13 @@ async def _execute_core(
             "[Executor:%s] invoking agent (effective_timeout=%s, agent_type=%s)",
             session_id[:8], effective_timeout, type(agent).__name__,
         )
-        invoke_result = await asyncio.wait_for(
-            agent.invoke(input_text=prompt, **invoke_kwargs),
-            timeout=effective_timeout,
+        invoke_result = await _invoke_bounded(
+            agent,
+            prompt=prompt,
+            invoke_kwargs=invoke_kwargs,
+            total_timeout=effective_timeout,
+            session_logger=session_logger,
+            session_id=session_id,
         )
 
         result_text = (

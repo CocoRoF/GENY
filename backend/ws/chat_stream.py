@@ -50,6 +50,40 @@ def _sanitize(obj: Any) -> Any:
         return str(obj)
 
 
+def initial_broadcast_events(bstate, build_agent_progress_data):
+    """What a client must be told about broadcasts the moment it connects.
+
+    Silence is ambiguous over a stream: "still running, nothing new since
+    your last event" and "that broadcast died with the process" look
+    identical. A client that had one in flight keeps its spinner, and the
+    user watches a chat entry count past 1,700 seconds with nothing behind
+    it.
+
+    ``_active_broadcasts`` is in-memory and the only source of truth, so no
+    entry means nothing is running. Saying that explicitly is the fix; a
+    client with nothing to clear ignores it.
+    """
+    if not bstate or bstate.finished:
+        return [("broadcast_done", {
+            "broadcast_id": getattr(bstate, "broadcast_id", None),
+            "reason": "no_active_broadcast",
+        })]
+    events = [("broadcast_status", {
+        "broadcast_id": bstate.broadcast_id,
+        "total": bstate.total,
+        "completed": bstate.completed,
+        "responded": bstate.responded,
+        "finished": False,
+    })]
+    if bstate.agent_states:
+        events.append(("agent_progress", {
+            "broadcast_id": bstate.broadcast_id,
+            "agents": [build_agent_progress_data(a)
+                       for a in bstate.agent_states.values()],
+        }))
+    return events
+
+
 async def _send_event(ws: WebSocket, event_type: str, data: Any, room_id: str = "") -> bool:
     """Send a JSON event over WebSocket. Returns False if connection lost."""
     try:
@@ -241,31 +275,24 @@ async def _stream_room_events(
                 room_id[:8], last_seen_id[:8], len(all_msgs),
             )
 
-    # ── Send current broadcast status if active ───────────────────────
+    # ── Send current broadcast status ─────────────────────────────────
+    # Silence is ambiguous to a reconnecting client: "still running, nothing
+    # new" and "that broadcast is long gone" look identical, so a client
+    # whose broadcast died with the process spins forever. It showed up as a
+    # chat entry counting past 1,700 seconds with nothing behind it.
+    #
+    # `active_broadcasts` is in-memory and the only source of truth, so no
+    # entry means nothing is running — say so explicitly and let the client
+    # clear. A client with nothing to clear ignores it.
     bstate = active_broadcasts.get(room_id)
     if bstate and not bstate.finished:
         logger.info(
             "[ChatWS:%s] active broadcast found: id=%s, total=%d, completed=%d",
             room_id[:8], bstate.broadcast_id[:8], bstate.total, bstate.completed,
         )
-        if not await _send_event(ws, "broadcast_status", {
-            "broadcast_id": bstate.broadcast_id,
-            "total": bstate.total,
-            "completed": bstate.completed,
-            "responded": bstate.responded,
-            "finished": False,
-        }, room_id):
+    for event_type, payload in initial_broadcast_events(bstate, build_agent_progress_data):
+        if not await _send_event(ws, event_type, payload, room_id):
             return
-        if bstate.agent_states:
-            agent_progress_list = [
-                build_agent_progress_data(astate)
-                for astate in bstate.agent_states.values()
-            ]
-            if not await _send_event(ws, "agent_progress", {
-                "broadcast_id": bstate.broadcast_id,
-                "agents": agent_progress_list,
-            }, room_id):
-                return
 
     # ── Dedicated receiver task ───────────────────────────────────────
     # Instead of using asyncio.wait with competing receive/event tasks
