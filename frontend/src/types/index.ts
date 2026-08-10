@@ -776,9 +776,91 @@ export interface MemoryGraphResponse {
   edges: MemoryGraphEdge[];
 }
 
+/** One row of `/memory/files` — index metadata plus a first-paragraph
+ *  preview. NOT a `MemoryFileDetail`: there is no body here, and the
+ *  listing has never returned one. */
+export interface MemoryFileSummary {
+  filename: string;
+  title: string;
+  category: string;
+  tags: string[];
+  importance: string;
+  char_count: number;
+  modified: string;
+  created?: string;
+  source?: string;
+  links_to?: string[];
+  linked_from?: string[];
+  first_paragraph?: string | null;
+}
+
 export interface MemoryFileListResponse {
-  files: MemoryFileDetail[];
+  files: MemoryFileSummary[];
+  /** Notes in the vault matching the filter — NOT the page size.
+   *  (It used to be the latter, which made a full page indistinguishable
+   *  from a full vault.) */
   total: number;
+  returned?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
+}
+
+// ==================== Vault catalogue (progressive disclosure) ====================
+//
+// Three steps, each paying only for what the user just asked to see:
+// counts → a day's notes → a note's body. The shapes below mirror
+// /memory/overview, /memory/day/{day} and /memory/graph/around; the
+// bodies never appear here on purpose.
+
+export interface MemoryOverview {
+  total: number;
+  kinds: { kind: string; count: number }[];
+  /** Newest day first; days with zero notes are absent. */
+  days: { day: string; count: number }[];
+}
+
+/** One note as the catalogue knows it — index metadata, no body. */
+export interface MemoryDayNote {
+  id: string;
+  filename: string;
+  category: string;
+  title: string;
+  updated_at: string | null;
+  char_count: number;
+  pinned: boolean;
+}
+
+export interface MemoryDayResponse {
+  day: string;
+  notes: MemoryDayNote[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export interface MemoryNeighbourhoodNode {
+  id: string;
+  kind: string;
+  title: string;
+  updated_at: string | null;
+  text_len: number;
+  pinned: boolean;
+  importance: string | null;
+}
+
+export interface MemoryNeighbourhoodEdge {
+  src: string;
+  dst: string;
+  type: string;
+  w: number;
+}
+
+export interface MemoryNeighbourhood {
+  nodes: MemoryNeighbourhoodNode[];
+  edges: MemoryNeighbourhoodEdge[];
+  /** The bound was hit — what is shown is a screen's worth, not all of it. */
+  truncated: boolean;
 }
 
 // ==================== InteractionEvent / Transcripts (cycle 20260430_3) ====================

@@ -7,6 +7,7 @@ import type {
   MemoryGraphNode,
   MemoryGraphEdge,
   MemorySearchResult,
+  MemoryOverview,
   SessionInfo,
 } from '@/types';
 
@@ -28,7 +29,19 @@ export interface OpsidianState {
   memoryStats: MemoryStats | null;
   loading: boolean;
 
-  // Files
+  // Vault catalogue — the counts the sidebar opens with, before any
+  // note has been fetched. `daysByCategory` is filled per category as
+  // folders are expanded, `loadedDays` records which day pages have
+  // already been pulled so re-expanding costs nothing.
+  overview: MemoryOverview | null;
+  daysByCategory: Record<string, { day: string; count: number }[]>;
+  loadedDays: Record<string, boolean>;
+  /** The whole-vault index (tag map, backlinks) — expensive, so it is
+   *  fetched only when a panel that genuinely needs it is opened. */
+  fullIndexLoaded: boolean;
+
+  // Files — a partial map by design: it holds the notes whose folder or
+  // day has actually been opened, not the vault.
   files: Record<string, MemoryFileInfo>;
   // Every category folder (canonical + host-defined) with its file_count
   // and description. Drives the sidebar so empty folders also appear —
@@ -67,6 +80,13 @@ export interface OpsidianState {
   setMemoryStats: (s: MemoryStats | null) => void;
   setLoading: (v: boolean) => void;
   setFiles: (f: Record<string, MemoryFileInfo>) => void;
+  /** Fold a page of notes in without dropping what is already there —
+   *  what every day / folder expansion uses. */
+  mergeFiles: (f: Record<string, MemoryFileInfo>) => void;
+  setOverview: (o: MemoryOverview | null) => void;
+  setCategoryDays: (category: string, days: { day: string; count: number }[]) => void;
+  markDayLoaded: (key: string) => void;
+  setFullIndexLoaded: (v: boolean) => void;
   setCategories: (
     c: Array<{
       name: string;
@@ -98,6 +118,10 @@ const initialState = {
   memoryIndex: null as MemoryIndex | null,
   memoryStats: null as MemoryStats | null,
   loading: false,
+  overview: null as MemoryOverview | null,
+  daysByCategory: {} as Record<string, { day: string; count: number }[]>,
+  loadedDays: {} as Record<string, boolean>,
+  fullIndexLoaded: false,
   files: {} as Record<string, MemoryFileInfo>,
   categories: [] as Array<{
     name: string;
@@ -130,6 +154,13 @@ export const useOpsidianStore = create<OpsidianState>((set) => ({
   setMemoryStats: (s) => set({ memoryStats: s }),
   setLoading: (v) => set({ loading: v }),
   setFiles: (f) => set({ files: f }),
+  mergeFiles: (f) => set((s) => ({ files: { ...s.files, ...f } })),
+  setOverview: (o) => set({ overview: o }),
+  setCategoryDays: (category, days) =>
+    set((s) => ({ daysByCategory: { ...s.daysByCategory, [category]: days } })),
+  markDayLoaded: (key) =>
+    set((s) => ({ loadedDays: { ...s.loadedDays, [key]: true } })),
+  setFullIndexLoaded: (v) => set({ fullIndexLoaded: v }),
   setCategories: (c) => set({ categories: c }),
   setSelectedFile: (fn) => set({ selectedFile: fn }),
   setFileDetail: (d) => set({ fileDetail: d }),

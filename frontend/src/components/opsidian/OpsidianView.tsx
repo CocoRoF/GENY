@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
 import { agentApi, memoryApi } from '@/lib/api';
+import { openVault, resetVault, loadGraphAround } from '@/lib/vaultCatalog';
 import './opsidian.css';
 import SessionSelector from './SessionSelector';
 import OpsidianSidebar from './OpsidianSidebar';
@@ -20,17 +21,13 @@ export default function OpsidianView() {
   const searchParams = useSearchParams();
   const {
     selectedSessionId,
+    selectedFile,
     viewMode,
     sidebarCollapsed,
     rightPanelOpen,
     graphNodes,
     graphEdges,
     setLoading,
-    setMemoryIndex,
-    setMemoryStats,
-    setFiles,
-    setCategories,
-    setGraphData,
     setSessions,
     setLoadingSessions,
     setSelectedSessionId,
@@ -63,26 +60,22 @@ export default function OpsidianView() {
     return () => { cancelled = true; };
   }, [setSessions, setLoadingSessions, searchParams, setSelectedSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load memory data when session changes
+  // Open the vault at its cheapest question: how much is in it, and on
+  // which days. The full index and the whole-vault graph used to load
+  // here — 3.2s and ~9 MB before anything had been asked for. Both are
+  // still available, on demand, to the surfaces that genuinely need
+  // them (`ensureFullIndex`, `loadGraphAround`).
   const loadSessionMemory = useCallback(async (sessionId: string) => {
     setLoading(true);
+    resetVault();
     try {
-      const [indexRes, graphRes, catsRes] = await Promise.all([
-        memoryApi.getIndex(sessionId),
-        memoryApi.getGraph(sessionId),
-        memoryApi.listCategories(sessionId),
-      ]);
-      setMemoryIndex(indexRes.index);
-      setMemoryStats(indexRes.stats);
-      setFiles(indexRes.index.files);
-      setCategories(catsRes.categories || []);
-      setGraphData(graphRes.nodes, graphRes.edges);
+      await openVault(sessionId);
     } catch (err) {
       console.error('Failed to load session memory:', err);
     } finally {
       setLoading(false);
     }
-  }, [setLoading, setMemoryIndex, setMemoryStats, setFiles, setCategories, setGraphData]);
+  }, [setLoading]);
 
   useEffect(() => {
     if (selectedSessionId) {
@@ -98,6 +91,21 @@ export default function OpsidianView() {
       };
     }
   }, [hub, selectedSessionId, loadSessionMemory]);
+
+  // The graph loads when its tab is opened, seeded by the current
+  // selection — never on session open, and never as the whole vault.
+  useEffect(() => {
+    if (viewMode !== 'graph' || !selectedSessionId) return;
+    let cancelled = false;
+    loadGraphAround(selectedSessionId)
+      .then((r) => {
+        if (!cancelled && r.truncated) {
+          console.info(`graph: showing ${r.count} nodes (bounded)`);
+        }
+      })
+      .catch((e) => console.error('Failed to load graph:', e));
+    return () => { cancelled = true; };
+  }, [viewMode, selectedSessionId, selectedFile]);
 
   // Handle graph node click → open file (same behaviour as old GraphView)
   const handleSelectFile = useCallback(

@@ -47,13 +47,15 @@ const IMPORTANCE_DOT: Record<string, string> = {
 
 // Time-series categories — render their files grouped under date headers
 // (newest day first) instead of one flat list, so daily / observations /
-// executions read by date.
-const DATE_GROUPED_CATEGORIES = new Set([
-  'daily',
-  'observations',
-  'executions',
-  'dms',
-]);
+// executions read by date. Shared with the loader, which uses the same
+// split to decide whether a category expands into days or into notes.
+import {
+  DATE_GROUPED_CATEGORIES,
+  loadCategory,
+  loadDay,
+  ensureFullIndex,
+  openVault,
+} from '@/lib/vaultCatalog';
 
 type _FileLike = { modified?: string; created?: string };
 
@@ -83,16 +85,14 @@ export default function OpsidianSidebar() {
     sidebarPanel,
     viewMode,
     memoryIndex,
+    overview,
+    daysByCategory,
+    loadedDays,
     setSidebarCollapsed,
     setSidebarPanel,
     setViewMode,
     openFile,
     setFileDetail,
-    setFiles,
-    setCategories,
-    setMemoryIndex,
-    setMemoryStats,
-    setGraphData,
     setLoading,
   } = useOpsidianStore();
   const { t } = useI18n();
@@ -109,23 +109,50 @@ export default function OpsidianSidebar() {
   // A live filter overrides collapse state — matches must be visible.
   const isFiltering = filterText.trim().length > 0;
 
+  // Expanding is what triggers a fetch — that is the whole point of the
+  // tree. Collapsing fetches nothing, and an already-loaded day is free
+  // the second time (the loader short-circuits on `loadedDays`).
   const toggleCategory = (cat: string) => {
+    const opening = !expandedCategories.has(cat);
     setExpandedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) next.delete(cat);
       else next.add(cat);
       return next;
     });
+    if (opening && selectedSessionId) {
+      loadCategory(selectedSessionId, cat).catch((e) =>
+        console.error(`Failed to open category ${cat}:`, e),
+      );
+    }
   };
 
-  const toggleDate = (key: string) => {
+  const toggleDate = (cat: string, day: string) => {
+    const key = `${cat}/${day}`;
+    const opening = !expandedDates.has(key);
     setExpandedDates((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+    if (opening && selectedSessionId) {
+      loadDay(selectedSessionId, cat, day).catch((e) =>
+        console.error(`Failed to open ${key}:`, e),
+      );
+    }
   };
+
+  // Tags and backlinks are whole-vault questions; their panels pay for
+  // the full index the first time one of them is opened, rather than
+  // every session open paying for panels nobody looked at.
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    if (sidebarPanel !== 'tags' && sidebarPanel !== 'backlinks') return;
+    ensureFullIndex(selectedSessionId).catch((e) =>
+      console.error('Failed to load the full index:', e),
+    );
+  }, [sidebarPanel, selectedSessionId]);
 
   // Reveal the selection: a note opened from anywhere else (graph node,
   // wikilink, search, digest) expands its category + date group so the
@@ -222,6 +249,42 @@ export default function OpsidianSidebar() {
     return out;
   }, [categories, grouped]);
 
+  // Counts straight from the catalogue — what a folder holds, whether or
+  // not any of it has been fetched. `categories[].file_count` is the
+  // fallback for stores with no catalogue.
+  const catalogCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of categories || []) {
+      if (c.name && typeof c.file_count === 'number') map[c.name] = c.file_count;
+    }
+    for (const k of overview?.kinds || []) map[k.kind] = k.count;
+    return map;
+  }, [categories, overview]);
+
+  /** Day rows for a date-grouped category.
+   *
+   * Prefers the catalogue (which knows every day, including ones whose
+   * notes have never been fetched) and falls back to grouping whatever
+   * is loaded — which is what a store with no catalogue, or a filter in
+   * progress, has to work with.
+   */
+  const dayRowsFor = (cat: string): { day: string; count: number }[] => {
+    const catalogued = daysByCategory[cat];
+    if (catalogued && !isFiltering) return catalogued;
+    return groupFilesByDate(grouped[cat] || []).map(([day, fs]) => ({
+      day,
+      count: fs.length,
+    }));
+  };
+
+  /** The notes of one day that are actually in hand. Empty until the day
+   *  is expanded — which is the design, not a gap. */
+  const filesForDay = (cat: string, day: string) =>
+    (grouped[cat] || []).filter((f) => {
+      const raw = f.modified || f.created || '';
+      return (raw.length >= 10 ? raw.slice(0, 10) : '—') === day;
+    });
+
   const categoryDescriptions = useMemo(() => {
     const map: Record<string, string> = {};
     for (const c of categories || []) {
@@ -269,20 +332,15 @@ export default function OpsidianSidebar() {
     </button>
   );
 
+  // Refresh re-asks the counts. It deliberately does NOT re-pull every
+  // note: what is open stays open and re-fetches on the next expand, and
+  // refreshing a vault must not cost more than opening one.
   const handleRefresh = async () => {
     if (!selectedSessionId) return;
     setLoading(true);
     try {
-      const [indexRes, graphRes, catsRes] = await Promise.all([
-        memoryApi.getIndex(selectedSessionId),
-        memoryApi.getGraph(selectedSessionId),
-        memoryApi.listCategories(selectedSessionId),
-      ]);
-      setMemoryIndex(indexRes.index);
-      setMemoryStats(indexRes.stats);
-      setFiles(indexRes.index.files);
-      setCategories(catsRes.categories || []);
-      setGraphData(graphRes.nodes, graphRes.edges);
+      await openVault(selectedSessionId);
+      useOpsidianStore.setState({ daysByCategory: {}, loadedDays: {} });
     } finally {
       setLoading(false);
     }
@@ -453,7 +511,12 @@ export default function OpsidianSidebar() {
                 if (filterText && catFiles.length === 0) return null;
                 const CatIcon = CATEGORY_ICONS[cat] || File;
                 const expanded = isFiltering || expandedCategories.has(cat);
-                const isEmpty = catFiles.length === 0;
+                // The count comes from the catalogue, not from what has
+                // been loaded — a collapsed folder must show how much is
+                // IN it, and nothing has been fetched yet at that point.
+                const catCount = catalogCounts[cat];
+                const isEmpty =
+                  catCount != null ? catCount === 0 : catFiles.length === 0;
                 const description = categoryDescriptions[cat];
                 return (
                   <div
@@ -469,20 +532,23 @@ export default function OpsidianSidebar() {
                       {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                       <CatIcon size={13} style={{ color: CATEGORY_COLORS[cat] }} />
                       <span className="obs-sb-cat-name">{cat}</span>
-                      <span className="obs-sb-cat-count">{catFiles.length}</span>
+                      <span className="obs-sb-cat-count">
+                        {catCount ?? catFiles.length}
+                      </span>
                     </button>
                     {expanded && !isEmpty && (
                       <div className="obs-sb-cat-files">
                         {DATE_GROUPED_CATEGORIES.has(cat)
-                          ? groupFilesByDate(catFiles).map(([day, dayFiles]) => {
+                          ? dayRowsFor(cat).map(({ day, count }) => {
                               const dayKey = `${cat}/${day}`;
                               const dayExpanded =
                                 isFiltering || expandedDates.has(dayKey);
+                              const dayFiles = filesForDay(cat, day);
                               return (
                                 <div key={day} className="obs-sb-date-group">
                                   <button
                                     className="obs-sb-date-header"
-                                    onClick={() => toggleDate(dayKey)}
+                                    onClick={() => toggleDate(cat, day)}
                                   >
                                     {dayExpanded ? (
                                       <ChevronDown size={11} />
@@ -490,11 +556,14 @@ export default function OpsidianSidebar() {
                                       <ChevronRight size={11} />
                                     )}
                                     <span className="obs-sb-date-text">{day}</span>
-                                    <span className="obs-sb-date-count">
-                                      {dayFiles.length}
-                                    </span>
+                                    <span className="obs-sb-date-count">{count}</span>
                                   </button>
-                                  {dayExpanded && dayFiles.map((f) => renderFileRow(f))}
+                                  {dayExpanded &&
+                                    (dayFiles.length > 0 ? (
+                                      dayFiles.map((f) => renderFileRow(f))
+                                    ) : loadedDays[dayKey] ? null : (
+                                      <div className="obs-sb-date-loading">…</div>
+                                    ))}
                                 </div>
                               );
                             })
