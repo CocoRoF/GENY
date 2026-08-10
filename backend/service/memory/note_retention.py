@@ -46,7 +46,14 @@ DEFAULT_RETENTION_DAYS = 30
 #: presents thousands at once, and a delete is a write — taking the engine
 #: for an unbounded stretch is the failure mode this whole effort exists to
 #: prevent.
-DEFAULT_MAX_PER_SWEEP = 500
+DEFAULT_MAX_PER_SWEEP = 200
+
+#: …and a wall-clock ceiling on top, because the count is a poor proxy: a
+#: delete touches the notes store, the sidecar index and the vector index,
+#: and how long that takes depends on the disk. The first version of this
+#: sweep ran inside the session warm-up with no clock at all and starved a
+#: live turn for 300 seconds. Whatever is left waits for the next sweep.
+DEFAULT_MAX_SECONDS = 30.0
 
 
 def retention_days() -> int:
@@ -63,6 +70,14 @@ def max_per_sweep() -> int:
                    DEFAULT_MAX_PER_SWEEP)
     except ValueError:
         return DEFAULT_MAX_PER_SWEEP
+
+
+def max_seconds() -> float:
+    try:
+        return float(os.environ.get("GENY_NOTE_RETENTION_MAX_SECONDS", "") or
+                     DEFAULT_MAX_SECONDS)
+    except ValueError:
+        return DEFAULT_MAX_SECONDS
 
 
 @dataclass(frozen=True)

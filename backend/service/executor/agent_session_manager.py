@@ -2564,6 +2564,32 @@ class AgentSessionManager:
                 jitter=300,
             )
         )
+
+        # Note retention — the OTHER half of the same problem. Media sweeps
+        # frames; this sweeps the notes themselves, which grow at ~757/day
+        # from the observation trigger and were never removed by anything.
+        #
+        # A tick, deliberately, not the session warm-up: the first version
+        # ran there and its deletes starved a live turn for 300 seconds.
+        # Housekeeping belongs off the path a user is waiting on.
+        async def _note_retention_tick() -> None:
+            for agent in list(self._local_agents.values()):
+                mm = getattr(agent, "_memory_manager", None)
+                if mm is None or not hasattr(mm, "prune_expired_notes"):
+                    continue
+                try:
+                    await mm.prune_expired_notes()
+                except Exception:  # noqa: BLE001 — one session, not the tick
+                    logger.debug("note retention tick failed", exc_info=True)
+
+        self._idle_tick_engine.register(
+            TickSpec(
+                name="note_retention",
+                interval=6 * 3600,
+                handler=_note_retention_tick,
+                jitter=600,
+            )
+        )
         if self._owns_idle_tick_engine:
             await self._idle_tick_engine.start()
         self._idle_monitor_running = True

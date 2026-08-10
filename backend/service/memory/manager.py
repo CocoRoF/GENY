@@ -16,6 +16,9 @@ It handles:
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from datetime import datetime, timezone, timedelta
 from logging import getLogger
 from pathlib import Path
@@ -784,10 +787,6 @@ class SessionMemoryManager:
         # is recoverable, a silently un-indexed vault is not.
         if not hasattr(vector_handle, "manifest"):
             return await self._vector_full_reindex(notes_handle, vector_handle)
-        # Prune BEFORE diffing: a note deleted here never becomes an orphan
-        # the diff has to notice, and the reconcile below sees the vault as
-        # it will actually be.
-        await self.prune_expired_notes()
         try:
             manifest = await vector_handle.manifest()
             metas = await notes_handle.list()
@@ -864,6 +863,7 @@ class SessionMemoryManager:
                 limit=note_retention.max_per_sweep(),
             )
             removed = 0
+            deadline = time.monotonic() + note_retention.max_seconds()
             for item in expired:
                 try:
                     if await notes_handle.delete(item.filename):
@@ -873,6 +873,17 @@ class SessionMemoryManager:
                         "note retention: %s could not be deleted",
                         item.filename, exc_info=True,
                     )
+                # Each delete is a write against the notes store AND the
+                # index. Yield between them so a turn asking for either is
+                # not queued behind the whole backlog, and stop on the clock
+                # rather than the count — the next sweep resumes.
+                await asyncio.sleep(0)
+                if time.monotonic() > deadline:
+                    logger.info(
+                        "note retention: stopping at %d/%d (time budget)",
+                        removed, len(expired),
+                    )
+                    break
             if removed:
                 logger.info(
                     "note retention: %d autonomous notes older than %dd "

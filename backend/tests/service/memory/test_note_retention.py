@@ -201,3 +201,44 @@ async def test_a_failing_sweep_never_breaks_the_session():
             raise RuntimeError("vault unreadable")
 
     assert await _mgr(_Broken()).prune_expired_notes() == 0
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_stops_on_its_time_budget(monkeypatch):
+    """Count is a poor proxy: a delete touches the notes store, the sidecar
+    index and the vector index, and how long that takes depends on the disk.
+    The first version had no clock, ran inside the session warm-up, and
+    starved a live turn for 300 seconds."""
+    import time as _t
+
+    monkeypatch.setattr(nr, "DEFAULT_MAX_SECONDS", 0.0)
+
+    class _Slow(_Notes):
+        async def delete(self, filename):
+            _t.sleep(0.01)
+            return await super().delete(filename)
+
+    notes = _Slow([_meta(f"n{i}.md", days_old=90) for i in range(40)])
+
+    removed = await _mgr(notes).prune_expired_notes()
+
+    assert removed < 40, "the sweep ignored its time budget"
+    assert removed >= 1, "the budget stopped it before any progress"
+
+
+def test_the_sweep_caps_are_modest():
+    """Both ceilings exist so one sweep is bounded and the next resumes."""
+    assert nr.DEFAULT_MAX_PER_SWEEP <= 500
+    assert 5.0 <= nr.DEFAULT_MAX_SECONDS <= 120.0
+
+
+@pytest.mark.asyncio
+async def test_retention_is_not_part_of_the_boot_reconcile():
+    """It must not sit on the path a waking session is gated on — that is
+    what turned a 90-second warm-up budget into an abandoned turn."""
+    import inspect
+
+    from service.memory.manager import SessionMemoryManager
+
+    src = inspect.getsource(SessionMemoryManager._vector_initialize_and_index)
+    assert "prune_expired_notes" not in src
