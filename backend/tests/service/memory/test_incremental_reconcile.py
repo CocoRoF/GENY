@@ -215,3 +215,66 @@ async def test_a_failing_manifest_does_not_break_the_session():
     notes = _Notes({"a.md": ("본문", NOW)})
 
     assert await _mgr(notes, _Broken({}))._vector_initialize_and_index() is False
+
+
+# ── a full-vault invalidation must not blow the warm-up budget ──────
+
+@pytest.mark.asyncio
+async def test_a_large_reindex_is_split_off_the_boot_path(monkeypatch):
+    """A tokenizer or embedding-geometry change invalidates EVERY note at
+    once. The warm-up that calls this is bounded at 90s, so applying
+    thousands inline means it is cancelled on every boot, memory never
+    reports ready, and the session answers blind."""
+    from service.memory.manager import SessionMemoryManager
+
+    spawned = []
+    monkeypatch.setattr(
+        "service.memory.manager.spawn_background",
+        lambda coro, **kw: (spawned.append(kw.get("name")), coro.close()),
+    )
+
+    n = SessionMemoryManager._RECONCILE_INLINE + 350
+    notes = _Notes({f"n{i}.md": ("본문", NOW) for i in range(n)})
+    vector = _Vector({})            # nothing indexed → every note is stale
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert len(vector.indexed) == SessionMemoryManager._RECONCILE_INLINE, (
+        "the boot path tried to re-index the whole vault"
+    )
+    assert spawned and "reconcile-tail" in spawned[0]
+
+
+@pytest.mark.asyncio
+async def test_ordinary_drift_still_finishes_inline(monkeypatch):
+    """The common case is a handful of notes; handing those to a background
+    task would leave memory reporting ready before it is."""
+    from service.memory.manager import SessionMemoryManager
+
+    spawned = []
+    monkeypatch.setattr(
+        "service.memory.manager.spawn_background",
+        lambda coro, **kw: (spawned.append(kw.get("name")), coro.close()),
+    )
+
+    notes = _Notes({f"n{i}.md": ("본문", NOW) for i in range(5)})
+    vector = _Vector({})
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert len(vector.indexed) == 5
+    assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_the_background_pass_covers_the_remainder():
+    from service.memory.manager import SessionMemoryManager
+
+    mgr = SessionMemoryManager.__new__(SessionMemoryManager)
+    notes = _Notes({f"n{i}.md": ("본문", NOW) for i in range(450)})
+    vector = _Vector({})
+    metas = await notes.list()
+
+    await mgr._reconcile_tail(notes, vector, metas)
+
+    assert len(vector.indexed) == 450

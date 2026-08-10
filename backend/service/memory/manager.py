@@ -24,6 +24,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from service.utils.background import spawn_background
 from service.memory.types import (
     CATEGORY_DESCRIPTIONS,
     MemoryEntry,
@@ -810,16 +811,30 @@ class SessionMemoryManager:
 
             orphans = [n for n in manifest if n not in on_disk]
 
-            items: List = []
-            for meta in stale:
-                note = await notes_handle.read(meta.ref.filename)
-                if note is None or not note.body:
-                    continue
-                items.append((note.ref, note.body))
+            # A tokenizer or embedding-geometry change invalidates EVERY
+            # note at once, so `stale` is occasionally the whole vault. The
+            # warm-up that calls this is bounded at 90s: applying thousands
+            # inline means it is cancelled every boot, memory never reports
+            # ready, and the session runs blind. Do a bounded slice here so
+            # the common case (a handful of notes) still finishes before the
+            # gate, and hand the rest to a background task that runs with
+            # the session already live.
+            head, tail = stale[:self._RECONCILE_INLINE], stale[self._RECONCILE_INLINE:]
+            items = await self._read_bodies(notes_handle, head)
             if items:
                 await vector_handle.index_batch(items)
             if orphans and hasattr(vector_handle, "remove_many"):
                 await vector_handle.remove_many(orphans)
+            if tail:
+                logger.info(
+                    "memory reconcile: %d more notes queued in the background",
+                    len(tail),
+                )
+                spawn_background(
+                    self._reconcile_tail(notes_handle, vector_handle, tail),
+                    name=f"memory.reconcile-tail:{len(tail)}",
+                    key=f"memory.reconcile:{id(self)}",
+                )
             if items or orphans:
                 logger.info(
                     "memory reconcile: %d indexed, %d orphans reaped "
@@ -833,6 +848,42 @@ class SessionMemoryManager:
             )
             return False
         return True
+
+    #: How many stale notes the BOOT path re-indexes before handing over. Big
+    #: enough that an ordinary drift (a few edits) finishes inline; small
+    #: enough that a full-vault invalidation cannot blow the warm-up budget.
+    _RECONCILE_INLINE = 200
+
+    async def _read_bodies(self, notes_handle, metas) -> List:
+        items: List = []
+        for meta in metas:
+            note = await notes_handle.read(meta.ref.filename)
+            if note is None or not note.body:
+                continue
+            items.append((note.ref, note.body))
+        return items
+
+    async def _reconcile_tail(self, notes_handle, vector_handle, metas) -> None:
+        """Finish a large re-index with the session already answering.
+
+        Chunked and yielding, for the same reason the retention sweep is: a
+        delete or an index is a write, and holding the memory engine for the
+        length of a backlog is the failure this whole area keeps producing.
+        """
+        done = 0
+        try:
+            for start in range(0, len(metas), 200):
+                chunk = metas[start:start + 200]
+                items = await self._read_bodies(notes_handle, chunk)
+                if items:
+                    done += await vector_handle.index_batch(items)
+                await asyncio.sleep(0)
+            logger.info("memory reconcile: background pass indexed %d", done)
+        except Exception:  # noqa: BLE001 — the session is already live
+            logger.warning(
+                "memory reconcile: background pass stopped after %d", done,
+                exc_info=True,
+            )
 
     async def prune_expired_notes(self) -> int:
         """Delete autonomous notes that have aged out. Returns how many.
