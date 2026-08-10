@@ -1088,6 +1088,11 @@ const en = {
     offline: 'offline',
     computerOnlineHint: '{name} — syncing with the cloud right now.',
     computerOfflineHint: '{name} — currently switched off. It resumes when it comes back.',
+    hintDeviceOn: '{name} — syncing with the cloud right now. Folders it shares: {folders}',
+    hintDeviceOff: '{name} — currently switched off. It resumes when it comes back. Folders it shares: {folders}',
+    deviceNoFolders: 'none',
+    expandFolders: "Show {name}'s folders",
+    collapseFolders: "Hide {name}'s folders",
     otherLinks: 'Unknown computer',
   },
   storageTab: {

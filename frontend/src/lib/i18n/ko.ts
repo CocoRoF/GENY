@@ -1085,6 +1085,11 @@ const ko: Translations = {
     offline: '오프라인',
     computerOnlineHint: '{name} — 지금 클라우드와 동기화 중입니다.',
     computerOfflineHint: '{name} — 지금은 꺼져 있습니다. 켜지면 다시 동기화됩니다.',
+    hintDeviceOn: '{name} — 지금 클라우드와 동기화 중입니다. 공유 중인 폴더: {folders}',
+    hintDeviceOff: '{name} — 지금은 꺼져 있습니다. 켜지면 다시 동기화됩니다. 공유 중인 폴더: {folders}',
+    deviceNoFolders: '없음',
+    expandFolders: '{name}의 폴더 펼치기',
+    collapseFolders: '{name}의 폴더 접기',
     otherLinks: '소속 PC 미확인',
   },
   storageTab: {
