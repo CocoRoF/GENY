@@ -704,6 +704,18 @@ async def _enforce_observation_cap(session_id: str, storage_root: Path) -> int:
     surplus = notes[limit:]
     if not surplus:
         return 0
+    # Bounded per pass. In the steady state the surplus is one note, but the
+    # FIRST pass on an existing vault meets thousands — and each delete is a
+    # write against the notes store and the index. Draining over successive
+    # uploads (every ~2 min) costs nothing; doing it in one pass is the
+    # unbounded-work-on-a-live-path failure this whole effort removed.
+    over_budget = len(surplus) - _PRUNE_NOTES_PER_SWEEP
+    if over_budget > 0:
+        logger.info(
+            "observation cap: %d over the limit, trimming %d this pass",
+            len(surplus), _PRUNE_NOTES_PER_SWEEP,
+        )
+        surplus = surplus[:_PRUNE_NOTES_PER_SWEEP]
     deleted = 0
     for md in surplus:
         try:

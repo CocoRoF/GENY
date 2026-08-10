@@ -133,6 +133,27 @@ async def test_a_failing_delete_does_not_abort_the_cap(vault, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_first_pass_on_a_big_vault_is_bounded(vault, monkeypatch):
+    """In the steady state the surplus is one note. The FIRST pass on an
+    existing vault meets thousands, and each delete is a write against the
+    notes store and the index — doing them all at once is the
+    unbounded-work-on-a-live-path failure this effort removed. Successive
+    uploads (every ~2 min) drain the rest."""
+    storage, root, mgr = vault
+    monkeypatch.setattr(so, "_PRUNE_NOTES_PER_SWEEP", 10)
+    monkeypatch.setenv("GENY_SCREEN_OBS_MAX_NOTES", "5")
+    _make(root, 100)
+
+    first = await so._enforce_observation_cap("sid", storage)
+    assert first == 10, "one pass tried to drain the whole backlog"
+    assert len(list(root.glob("*.md"))) == 90
+
+    second = await so._enforce_observation_cap("sid", storage)
+    assert second == 10
+    assert len(list(root.glob("*.md"))) == 80
+
+
+@pytest.mark.asyncio
 async def test_the_cap_is_not_throttled(vault, monkeypatch):
     """A count checked once an hour is not a cap, it is an average. In the
     steady state each new frame must evict exactly one."""
