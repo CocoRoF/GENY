@@ -856,6 +856,9 @@ class SessionMemoryManager:
             return False
         return True
 
+    #: Pause between background re-index chunks — see `_reconcile_tail`.
+    _CHUNK_PAUSE_S = 0.5
+
     #: How many stale notes the BOOT path re-indexes before handing over. Big
     #: enough that an ordinary drift (a few edits) finishes inline; small
     #: enough that a full-vault invalidation cannot blow the warm-up budget.
@@ -884,7 +887,11 @@ class SessionMemoryManager:
                 items = await self._read_bodies(notes_handle, chunk)
                 if items:
                     done += await vector_handle.index_batch(items)
-                await asyncio.sleep(0)
+                # Breathe between chunks. This runs while the session is
+                # answering, and a full-vault rebuild is thousands of writes
+                # — enough to make everything else feel wedged if it is
+                # allowed to run flat out.
+                await asyncio.sleep(self._CHUNK_PAUSE_S)
             logger.info("memory reconcile: background pass indexed %d", done)
         except Exception:  # noqa: BLE001 — the session is already live
             logger.warning(
