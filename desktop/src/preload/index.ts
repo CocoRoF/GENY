@@ -122,6 +122,13 @@ export interface ConnectorBridge {
     /** Lock/unlock from either window — main owns the state. */
     setLocked(locked: boolean): void
     onSetLocked(cb: (locked: boolean) => void): () => void
+    /** Avatar page only: how many pixels of the window's BOTTOM the chip
+     *  window is currently covering. The chip is a separate always-on-top
+     *  window, so the page cannot see it; anything anchored to the bottom
+     *  (subtitle, hands-free caption) must lift by this much or the two
+     *  draw on top of each other. 0 while the chip is hidden. */
+    requestChipInset(): void
+    onChipInset(cb: (px: number) => void): () => void
     /** Move the overlay by a pixel delta (dock-handle drag). */
     moveBy(dx: number, dy: number): void
     /** Signal the end of a drag so main drops its authoritative drag rect
@@ -435,6 +442,12 @@ const api: ConnectorBridge = {
       const h = (_e: unknown, v: boolean): void => cb(v)
       ipcRenderer.on('overlay:locked', h)
       return () => ipcRenderer.removeListener('overlay:locked', h)
+    },
+    requestChipInset: () => ipcRenderer.send('overlay:request-chip-inset'),
+    onChipInset: (cb) => {
+      const h = (_e: unknown, v: number): void => cb(v)
+      ipcRenderer.on('overlay:chip-inset', h)
+      return () => ipcRenderer.removeListener('overlay:chip-inset', h)
     },
     moveBy: (dx, dy) => ipcRenderer.send('overlay:move-by', dx, dy),
     moveEnd: () => ipcRenderer.send('overlay:move-end'),

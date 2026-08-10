@@ -23,7 +23,19 @@ import { useVTuberStore } from '@/store/useVTuberStore';
 const DISMISS_MS = 3000;
 const DEFAULT_CHAR_MS = 100; // one character every 100ms
 
-export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: { sessionId: string; charMs?: number }) {
+export default function AvatarSubtitle({
+  sessionId,
+  charMs = DEFAULT_CHAR_MS,
+  bottomInset = 0,
+}: {
+  sessionId: string;
+  charMs?: number;
+  /** Pixels at the bottom of the window that something else already owns
+   *  — in the connector, the chip window's buttons, which live in a
+   *  SEPARATE window and would otherwise be drawn straight over the last
+   *  line of this bubble. */
+  bottomInset?: number;
+}) {
   const sub = useVTuberStore((s) => s.subtitle[sessionId]);
   const speaking = useVTuberStore((s) => s.ttsSpeaking[sessionId] ?? false);
   const ttsEnabled = useVTuberStore((s) => s.ttsEnabled);
@@ -113,7 +125,7 @@ export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: 
   if (!full.trim()) return null;
 
   return (
-    <div style={WRAP}>
+    <div style={{ ...WRAP, bottom: WRAP_BOTTOM + Math.max(0, bottomInset) }}>
       <div style={{ ...BOX, opacity: visible ? 1 : 0, transform: visible ? 'translateY(0)' : 'translateY(8px)' }}>
         <div style={TEXT}>{revealed}</div>
       </div>
@@ -121,11 +133,14 @@ export default function AvatarSubtitle({ sessionId, charMs = DEFAULT_CHAR_MS }: 
   );
 }
 
+/** Resting gap from the bottom edge; `bottomInset` is added to it. */
+const WRAP_BOTTOM = 12;
+
 const WRAP: CSSProperties = {
   position: 'absolute',
   left: 0,
   right: 0,
-  bottom: 12,
+  bottom: WRAP_BOTTOM,
   display: 'flex',
   justifyContent: 'center',
   padding: '0 14px',

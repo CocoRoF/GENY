@@ -54,6 +54,14 @@ declare global {
          *  it to the avatar window, then relays it to the avatar page. */
         setLocked?(locked: boolean): void
         onSetLocked?(cb: (locked: boolean) => void): () => void
+        /** Avatar page (connector ≥0.19.8): how many pixels of this
+         *  window's BOTTOM the chip window currently covers. The chip is a
+         *  separate always-on-top window, so the page cannot see it —
+         *  without this the subtitle and the caption are drawn underneath
+         *  its buttons. 0 while the chip is hidden. Optional: older
+         *  connectors simply never send it, and the inset stays 0. */
+        requestChipInset?(): void
+        onChipInset?(cb: (px: number) => void): () => void
         moveBy(dx: number, dy: number): void
         /** Optional (connector ≥0.17.1): end-of-drag signal. */
         moveEnd?(): void

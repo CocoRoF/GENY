@@ -15,7 +15,7 @@
 
 import { useVTuberStore } from '@/store/useVTuberStore';
 
-export default function RealtimeCaption() {
+export default function RealtimeCaption({ bottomInset = 0 }: { bottomInset?: number }) {
   const on = useVTuberStore((s) => s.realtimeVoiceEnabled);
   const listening = useVTuberStore((s) => s.realtimeListening);
   const partial = useVTuberStore((s) => s.realtimePartial);
@@ -29,7 +29,13 @@ export default function RealtimeCaption() {
   const tailText = partial.slice(stableText.length);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4">
+    // `bottom` is driven, not classed: in the connector the chip window's
+    // buttons occupy the bottom of this window from a DIFFERENT window,
+    // and this caption would be drawn underneath them.
+    <div
+      className="pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4 pb-4"
+      style={{ bottom: Math.max(0, bottomInset) }}
+    >
       <div className="max-w-[92%] rounded-2xl bg-black/65 backdrop-blur-sm px-4 py-2.5 shadow-lg border border-white/10">
         {partial ? (
           <p className="text-[0.95rem] leading-snug text-center break-words">

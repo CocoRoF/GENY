@@ -98,6 +98,12 @@ function LockedChip() {
   );
 }
 
+/** Bottom pixels the chip window covers, used until main reports the real
+ *  figure (connectors older than the `overlay:chip-inset` channel never
+ *  will). Mirrors main's own default chip box: 40px tall, 6px margin at
+ *  each end. */
+const FALLBACK_CHIP_INSET = 52;
+
 /** Route entry: the connector opens this same URL twice — once as the
  *  avatar window, once (with ?chip=1) as the small always-clickable
  *  control window that survives the avatar going input-transparent. */
@@ -114,6 +120,9 @@ function AvatarOverlay() {
   // Locked (default): the avatar is click-through + fixed (no move/resize); only
   // the control bar is interactive. Unlocked: whole window draggable to reposition.
   const [locked, setLocked] = useState(true);
+  // Pixels of this window's bottom edge that the chip window occupies.
+  // -1 = main has not told us (old connector, or plain browser).
+  const [chipInset, setChipInset] = useState(-1);
   // Push-to-talk (global hotkey toggles this). Tap on → mic listens; tapping
   // again (or the same hotkey) toggles off. On the down-edge we also barge in.
   const [pttActive, setPttActive] = useState(false);
@@ -243,6 +252,34 @@ function AvatarOverlay() {
     const off = window.connector?.windowControl.onSetLocked?.((v: boolean) => setLocked(v));
     return () => off?.();
   }, []);
+
+  // How much of this window's bottom the chip window is covering.
+  //
+  // The chip is a separate always-on-top window parked over the bottom
+  // centre of the avatar — exactly where the subtitle bubble and the
+  // hands-free caption render. Nothing here can see another window, so
+  // the buttons sat on top of the last line of speech. Main knows both
+  // rectangles and publishes the reserved height; everything anchored to
+  // the bottom lifts by it. 0 while the chip is hidden, so the unlocked
+  // layout is unchanged.
+  useEffect(() => {
+    const off = window.connector?.windowControl.onChipInset?.((px: number) =>
+      setChipInset(Number.isFinite(px) ? Math.max(0, px) : 0),
+    );
+    // The page mounts long after the chip's last visibility change, and
+    // remounts on every reload — ask rather than wait for the next move.
+    window.connector?.windowControl.requestChipInset?.();
+    return () => off?.();
+  }, []);
+
+  // A connector that predates `onChipInset` still parks its chip over the
+  // bottom of this window, so falling back to 0 would leave the overlap
+  // exactly as it was. The chip is three fixed icons — its size is
+  // stable — so the size it is created at is a safe reservation until
+  // main reports the real number. Only while locked: unlocked, the chip
+  // is hidden and the bar sits in normal flow.
+  const bottomInset =
+    chipInset >= 0 ? chipInset : locked ? FALLBACK_CHIP_INSET : 0;
 
   // Tell the connector which rectangle must stay clickable while the avatar
   // is click-through. Linux cannot forward events into a click-through
@@ -394,9 +431,15 @@ function AvatarOverlay() {
           className="w-full h-full"
           viewStorageKey={`geny_overlay_view_${resolved.sid}`}
         />
-        {subtitlesEnabled && <AvatarSubtitle sessionId={resolved.sid} charMs={subtitleCharMs} />}
+        {subtitlesEnabled && (
+          <AvatarSubtitle
+            sessionId={resolved.sid}
+            charMs={subtitleCharMs}
+            bottomInset={bottomInset}
+          />
+        )}
         {/* Live hands-free caption (what the mic is hearing, in real time). */}
-        <RealtimeCaption />
+        <RealtimeCaption bottomInset={bottomInset} />
       </div>
 
       {/* Unlocked → show a resize frame (outline + edge/corner handles) so the

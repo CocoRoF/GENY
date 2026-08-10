@@ -1485,13 +1485,42 @@ let overlayChip: BrowserWindow | null = null
 let overlayLocked = true
 let chipSize = { w: 104, h: 40 }
 
+/** Gap between the chip's bottom edge and the avatar window's. */
+const CHIP_MARGIN = 6
+
 function chipBoundsFor(b: Electron.Rectangle): Electron.Rectangle {
   return {
     x: Math.round(b.x + (b.width - chipSize.w) / 2),
-    y: Math.round(b.y + b.height - chipSize.h - 6),
+    y: Math.round(b.y + b.height - chipSize.h - CHIP_MARGIN),
     width: chipSize.w,
     height: chipSize.h,
   }
+}
+
+/**
+ * How much of the avatar window's bottom the chip is sitting on.
+ *
+ * The chip is a SEPARATE always-on-top window parked over the bottom
+ * centre of the avatar — which is exactly where the subtitle bubble and
+ * the hands-free caption render. Nothing in the avatar page could know
+ * that, so the two drew straight through each other: the buttons landed
+ * on top of the last line of speech.
+ *
+ * Main is the only side that knows both rectangles, so it publishes the
+ * reserved height and the page lifts its bottom-anchored overlays clear
+ * of it. Zero while the chip is hidden (unlocked), so the unlocked
+ * layout is untouched.
+ */
+function chipInsetPx(): number {
+  const visible =
+    !!overlayChip && !overlayChip.isDestroyed() && overlayChip.isVisible()
+  return visible ? chipSize.h + CHIP_MARGIN * 2 : 0
+}
+
+function publishChipInset(): void {
+  try {
+    overlay?.webContents.send('overlay:chip-inset', chipInsetPx())
+  } catch { /* window gone */ }
 }
 
 /** Put the chip back on top of the avatar. Cheap and idempotent. */
@@ -1525,6 +1554,9 @@ function applyChipVisibility(): void {
   } else if (overlayChip.isVisible()) {
     overlayChip.hide()
   }
+  // After the show/hide above, so the page is told what is actually on
+  // screen rather than what was about to be.
+  publishChipInset()
 }
 
 async function createOverlayChip(): Promise<void> {
@@ -2251,19 +2283,23 @@ function registerIpc(): void {
     setOverlayLocked(!!locked)
   })
 
+  // Registered ONCE. It was registered twice, so every report ran the
+  // body twice; the second pass fell out on the "changed by <2px" guard,
+  // which is why it never showed — a duplicate that happened to be
+  // idempotent is still a duplicate.
   ipcMain.on('overlay:chip-size', (_e, w: number, h: number) => {
     if (!Number.isFinite(w) || !Number.isFinite(h) || w < 20 || h < 12) return
     if (Math.abs(w - chipSize.w) < 2 && Math.abs(h - chipSize.h) < 2) return
     chipSize = { w: Math.min(600, Math.round(w)), h: Math.min(200, Math.round(h)) }
     syncChipBounds()
+    // The chip just changed height — the page's reserved space is stale.
+    publishChipInset()
   })
 
-  ipcMain.on('overlay:chip-size', (_e, w: number, h: number) => {
-    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 20 || h < 12) return
-    if (Math.abs(w - chipSize.w) < 2 && Math.abs(h - chipSize.h) < 2) return
-    chipSize = { w: Math.min(600, Math.round(w)), h: Math.min(200, Math.round(h)) }
-    syncChipBounds()
-  })
+  // The avatar page mounts (and remounts, on every reload) long after the
+  // chip's last visibility change, so it would otherwise sit at inset 0
+  // until something happened to move the chip. It asks; main answers.
+  ipcMain.on('overlay:request-chip-inset', () => publishChipInset())
 
   // Accepted and ignored: older avatar pages report interactive rects for
   // the cursor hit-test this build replaced with the chip window. Dropping
