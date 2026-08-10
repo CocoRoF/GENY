@@ -23,6 +23,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from geny_memory_adaptor import FEATURES
 
+try:  # adaptor >= 1.8
+    from geny_memory_adaptor import MemoryBusy
+except ImportError:  # pragma: no cover — older adaptor never raises it
+    class MemoryBusy(RuntimeError):  # type: ignore[no-redef]
+        pass
+
 from service.memory import inflight
 
 from geny_executor.memory.provider import (
@@ -172,7 +178,15 @@ class SynapseVectorHandle:
         # worker thread and hand back plain data.
         def _run() -> Tuple[list, list]:
             with inflight.track("search"):
-                hits = self._m.search(text, top_k=top_k)
+                try:
+                    hits = self._m.search(text, top_k=top_k)
+                except MemoryBusy as exc:
+                    # A turn can answer without memory; it cannot answer while
+                    # blocked behind a write that never returns. Degrading here
+                    # is the difference between a shallow reply and the 27-hour
+                    # silence a single wedged write produced.
+                    logger.warning("memory search skipped — %s", exc)
+                    return [], []
                 bodies = [self._m.get_text(h.id) for h in hits
                           if h.score >= threshold]
             return hits, bodies

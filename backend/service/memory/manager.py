@@ -784,6 +784,10 @@ class SessionMemoryManager:
         # is recoverable, a silently un-indexed vault is not.
         if not hasattr(vector_handle, "manifest"):
             return await self._vector_full_reindex(notes_handle, vector_handle)
+        # Prune BEFORE diffing: a note deleted here never becomes an orphan
+        # the diff has to notice, and the reconcile below sees the vault as
+        # it will actually be.
+        await self.prune_expired_notes()
         try:
             manifest = await vector_handle.manifest()
             metas = await notes_handle.list()
@@ -830,6 +834,55 @@ class SessionMemoryManager:
             )
             return False
         return True
+
+    async def prune_expired_notes(self) -> int:
+        """Delete autonomous notes that have aged out. Returns how many.
+
+        Goes through the notes store rather than unlinking files, so the
+        vector index and the sidecars follow. Deliberately capped per call:
+        a vault that has never been pruned presents thousands at once, and a
+        delete is a write — holding the memory engine for an unbounded
+        stretch is the exact failure the rest of this work removes.
+
+        Never raises: retention is housekeeping, and a session must not fail
+        to start because a sweep hit a bad file.
+        """
+        if self._memory_provider is None:
+            return 0
+        from service.memory import note_retention
+
+        days = note_retention.retention_days()
+        if days <= 0:
+            return 0
+        notes_handle = self._memory_provider.notes()
+        try:
+            metas = await notes_handle.list()
+            expired = note_retention.select_expired(
+                metas,
+                now=datetime.now(timezone.utc),
+                days=days,
+                limit=note_retention.max_per_sweep(),
+            )
+            removed = 0
+            for item in expired:
+                try:
+                    if await notes_handle.delete(item.filename):
+                        removed += 1
+                except Exception:  # noqa: BLE001 — one bad file, not the sweep
+                    logger.debug(
+                        "note retention: %s could not be deleted",
+                        item.filename, exc_info=True,
+                    )
+            if removed:
+                logger.info(
+                    "note retention: %d autonomous notes older than %dd "
+                    "removed (%d candidates)",
+                    removed, days, len(expired),
+                )
+            return removed
+        except Exception:  # noqa: BLE001
+            logger.warning("note retention sweep failed", exc_info=True)
+            return 0
 
     async def _vector_full_reindex(self, notes_handle, vector_handle) -> bool:
         """The pre-incremental path, kept for stores without a manifest."""
