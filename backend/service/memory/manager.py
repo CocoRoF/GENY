@@ -813,7 +813,13 @@ class SessionMemoryManager:
                 # past that has been edited since. Equality is not drift.
                 updated_at = getattr(meta, "updated_at", None)
                 ts = getattr(updated_at, "timestamp", None)
-                if ts is not None and ts() > float(indexed_at):
+                # A DISAGREEMENT in either direction, not just "newer". The
+                # index used to record its own write time, so after a full
+                # re-index every row reads as more recent than its note and
+                # "newer" would never fire — the dates would stay wrong
+                # forever. Correcting one costs a batched touch, not a
+                # re-index, because the content digest still matches.
+                if ts is not None and abs(ts() - float(indexed_at)) > 1.0:
                     stale.append(meta)
 
             orphans = [n for n in manifest if n not in on_disk]
@@ -874,12 +880,21 @@ class SessionMemoryManager:
     _RECONCILE_INLINE = 200
 
     async def _read_bodies(self, notes_handle, metas) -> List:
+        """(ref, body, note_timestamp) for each readable note.
+
+        The timestamp is the NOTE's, not the moment we happen to index it —
+        otherwise a full re-index stamps the whole vault with one date and
+        anything that groups by day (the browser's day buckets) sees a
+        single bucket.
+        """
         items: List = []
         for meta in metas:
             note = await notes_handle.read(meta.ref.filename)
             if note is None or not note.body:
                 continue
-            items.append((note.ref, note.body))
+            stamp = getattr(meta, "updated_at", None)
+            ts = stamp.timestamp() if hasattr(stamp, "timestamp") else None
+            items.append((note.ref, note.body, ts))
         return items
 
     async def _reconcile_tail(self, notes_handle, vector_handle, metas) -> None:

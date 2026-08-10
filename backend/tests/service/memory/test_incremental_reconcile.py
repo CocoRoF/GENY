@@ -69,7 +69,11 @@ class _Vector:
         return dict(self._manifest)
 
     async def index_batch(self, items):
-        self.indexed.extend(ref.filename for ref, _ in items)
+        # (ref, body, note_timestamp) — the third carries the NOTE's own
+        # clock so day-grouping means something after a full re-index.
+        self.indexed.extend(item[0].filename for item in items)
+        self.stamps = getattr(self, "stamps", [])
+        self.stamps.extend(item[2] if len(item) > 2 else None for item in items)
         return len(items)
 
     async def remove_many(self, node_ids):
@@ -107,12 +111,13 @@ async def test_a_vault_in_sync_costs_nothing():
 
 @pytest.mark.asyncio
 async def test_a_note_edited_since_indexing_is_reindexed():
+    old_ts = NOW - timedelta(hours=1)
     notes = _Notes({
-        "old.md": ("본문", NOW - timedelta(hours=1)),
+        "old.md": ("본문", old_ts),                      # index agrees
         "edited.md": ("바뀐 본문", NOW + timedelta(minutes=5)),
     })
     vector = _Vector({
-        _node("old.md"): (INDEXED_AT, "sha"),
+        _node("old.md"): (old_ts.timestamp(), "sha"),
         _node("edited.md"): (INDEXED_AT, "sha"),
     })
 
@@ -196,7 +201,7 @@ async def test_a_store_without_a_manifest_still_gets_reconciled():
             return ref.filename
 
         async def index_batch(self, items):
-            self.indexed.extend(ref.filename for ref, _ in items)
+            self.indexed.extend(item[0].filename for item in items)
             return len(items)
 
     notes = _Notes({"a.md": ("본문", NOW), "b.md": ("본문", NOW)})
@@ -296,3 +301,39 @@ async def test_an_empty_digest_means_reindex():
     await _mgr(notes, vector)._vector_initialize_and_index()
 
     assert vector.indexed == ["stale.md"]
+
+
+@pytest.mark.asyncio
+async def test_the_note_s_own_timestamp_reaches_the_index():
+    """Without it every row records when the INDEX wrote, so after a full
+    re-index the whole vault claims one date and the browser's day buckets
+    collapse to a single bucket."""
+    notes = _Notes({"a.md": ("본문", NOW - timedelta(days=3))})
+    vector = _Vector({})
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert vector.stamps == [pytest.approx((NOW - timedelta(days=3)).timestamp())]
+
+
+@pytest.mark.asyncio
+async def test_an_index_stamp_ahead_of_the_note_is_also_drift():
+    """The index used to stamp its own write time, which is LATER than the
+    note. A "newer note wins" rule never fires on that and the dates stay
+    wrong forever; correcting it is a batched touch, not a re-index."""
+    notes = _Notes({"a.md": ("본문", NOW - timedelta(days=5))})
+    vector = _Vector({_node("a.md"): (NOW.timestamp(), "sha")})
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert vector.indexed == ["a.md"]
+
+
+@pytest.mark.asyncio
+async def test_a_matching_stamp_is_not_drift():
+    notes = _Notes({"a.md": ("본문", NOW)})
+    vector = _Vector({_node("a.md"): (NOW.timestamp(), "sha")})
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert vector.indexed == []

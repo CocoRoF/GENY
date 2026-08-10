@@ -107,14 +107,23 @@ class SynapseVectorHandle:
         return 1
 
     async def index_batch(self, items: Sequence[Tuple[NoteRef, str]]) -> int:
-        payload = [
-            {
+        # Items are (ref, text) or (ref, text, updated_at). The third form
+        # carries the NOTE's own timestamp: without it every row records
+        # when the INDEX wrote, so after a full re-index the whole vault
+        # claims to have changed on the same day and grouping by date says
+        # nothing. It also costs nothing — a same-content/new-clock item is
+        # a batched touch, not a re-index.
+        payload = []
+        for item in items:
+            ref, text = item[0], item[1]
+            row = {
                 "node_id": _node_id(ref),
                 "text": text,
                 "kind": str(getattr(ref, "category", None) or "note"),
             }
-            for ref, text in items
-        ]
+            if len(item) > 2 and item[2]:
+                row["updated_at"] = float(item[2])
+            payload.append(row)
 
         def _run() -> int:
             with inflight.track("index_batch"):
@@ -155,6 +164,37 @@ class SynapseVectorHandle:
         def _run() -> Dict[str, Tuple[float, str]]:
             with inflight.track("manifest"):
                 return self._m.manifest()
+        return await asyncio.to_thread(_run)
+
+    async def catalog_counts(self, *, by: str = "kind",
+                             kind: Optional[str] = None) -> List[Tuple[str, int]]:
+        """``[(key, count)]`` by kind or by day — metadata only, no bodies."""
+        def _run():
+            with inflight.track("catalog_counts"):
+                return self._m.catalog_counts(by=by, kind=kind)
+        return await asyncio.to_thread(_run)
+
+    async def catalog_page(self, *, day: Optional[str] = None,
+                           kind: Optional[str] = None, limit: int = 100,
+                           offset: int = 0) -> List[Dict[str, Any]]:
+        """One page of note metadata, filtered and paged in SQL."""
+        def _run():
+            with inflight.track("catalog_page"):
+                return self._m.catalog_page(day=day, kind=kind, limit=limit,
+                                            offset=offset)
+        return await asyncio.to_thread(_run)
+
+    async def neighbourhood(self, node_ids: Sequence[str], *, depth: int = 1,
+                            max_nodes: int = 400,
+                            max_edges: int = 4000) -> Dict[str, Any]:
+        """The bounded subgraph around a selection."""
+        ids = list(node_ids)
+
+        def _run():
+            with inflight.track("neighbourhood"):
+                return self._m.neighbourhood(ids, depth=depth,
+                                             max_nodes=max_nodes,
+                                             max_edges=max_edges)
         return await asyncio.to_thread(_run)
 
     async def remove_many(self, node_ids: Sequence[str]) -> int:

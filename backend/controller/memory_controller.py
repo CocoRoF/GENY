@@ -179,9 +179,47 @@ async def get_memory_tags(request: Request, session_id: str = Path(...)):
     return {"tags": counts}
 
 
+@router.get("/{session_id}/memory/graph/around")
+async def memory_graph_around(
+    request: Request,
+    session_id: str = Path(...),
+    node: List[str] = Query(default_factory=list, description="seed note ids"),
+    day: Optional[str] = Query(None, description="seed with a day's notes"),
+    kind: Optional[str] = Query(None),
+    depth: int = Query(1, ge=1, le=3),
+    max_nodes: int = Query(300, ge=1, le=2000),
+):
+    """The graph around a selection, bounded.
+
+    The whole-vault graph is not a view — it is a download: 5,384 nodes and
+    4.3 MB of JSON for one screen, every time the tab is opened. This asks
+    the same question at the scale a screen is read at, and says so when it
+    had to stop (``truncated``).
+
+    Seeds are note ids, or every note on a ``day`` — which is what the
+    sidebar has in hand when a day is expanded.
+    """
+    provider = _get_provider(session_id)
+    catalog = _vault_catalog(provider)
+    if catalog is None:
+        raise HTTPException(status_code=501, detail="No catalogue for this store")
+    seeds = list(node)
+    if day:
+        rows = await catalog.catalog_page(day=day, kind=kind, limit=max_nodes)
+        seeds += [r["id"] for r in rows]
+    if not seeds:
+        return {"nodes": [], "edges": [], "truncated": False}
+    out = await catalog.neighbourhood(seeds, depth=depth, max_nodes=max_nodes)
+    return out
+
+
 @router.get("/{session_id}/memory/graph")
 async def get_memory_graph(request: Request, session_id: str = Path(...)):
-    """Knowledge graph snapshot (rich nodes + typed edges).
+    """Knowledge graph snapshot — the WHOLE vault.
+
+    Kept for compatibility and for small vaults. On a real one it is a
+    download rather than a view (5,384 nodes / 4.3 MB measured), so callers
+    that render a screen should ask ``/memory/graph/around`` with a seed.
 
     Uses the shared ``build_graph_from_index`` projector — the SAME builder the
     user/curated Opsidian graphs use — so every surface renders identically and
@@ -240,6 +278,90 @@ async def get_memory_summary(request: Request, session_id: str = Path(...)):
 # Endpoints — CRUD
 # ============================================================================
 
+def _vault_catalog(provider):
+    """The index handle, when it can answer catalogue questions.
+
+    Returns None for stores without the API — the caller then falls back to
+    the note-walking path, which is correct but expensive.
+    """
+    vector = provider.vector() if hasattr(provider, "vector") else None
+    return vector if vector is not None and hasattr(vector, "catalog_counts") else None
+
+
+@router.get("/{session_id}/memory/overview")
+async def memory_overview(
+    request: Request,
+    session_id: str = Path(...),
+    kind: Optional[str] = Query(None, description="한 범주로 좁히기"),
+):
+    """How much is in the vault, and on which days — nothing more.
+
+    The first thing a sidebar needs is a number, and the note store answers
+    that by parsing every file (3.2s and 4.8MB of bodies held, measured on a
+    5,384-note vault). The index already carries the metadata, so this is two
+    GROUP BYs and no bodies at all.
+
+    The day buckets are what the sidebar expands into; the notes themselves
+    are not fetched until a day is opened.
+    """
+    provider = _get_provider(session_id)
+    catalog = _vault_catalog(provider)
+    if catalog is None:
+        raise HTTPException(
+            status_code=501,
+            detail="This session's memory store cannot answer catalogue queries",
+        )
+    kinds = await catalog.catalog_counts(by="kind")
+    days = await catalog.catalog_counts(by="day", kind=kind)
+    return {
+        "total": sum(n for _k, n in kinds) if kind is None
+        else sum(n for _d, n in days),
+        "kinds": [{"kind": k or "note", "count": n} for k, n in kinds],
+        "days": [{"day": d, "count": n} for d, n in days if d],
+    }
+
+
+@router.get("/{session_id}/memory/day/{day}")
+async def memory_day(
+    request: Request,
+    session_id: str = Path(...),
+    day: str = Path(..., description="YYYY-MM-DD"),
+    kind: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """One day's notes — metadata only.
+
+    Opening a day in the sidebar costs a read proportional to that day, not
+    to the vault. Bodies arrive when a note is opened, through
+    ``/memory/files/{filename}``.
+    """
+    provider = _get_provider(session_id)
+    catalog = _vault_catalog(provider)
+    if catalog is None:
+        raise HTTPException(status_code=501, detail="No catalogue for this store")
+    rows = await catalog.catalog_page(day=day, kind=kind, limit=limit,
+                                      offset=offset)
+    return {
+        "day": day,
+        "notes": [
+            {
+                "id": r["id"],
+                "filename": r["id"].rsplit("/", 1)[-1],
+                "category": r["kind"],
+                "title": r["title"],
+                "updated_at": r["updated_at"],
+                "char_count": r["text_len"],
+                "pinned": r["pinned"],
+            }
+            for r in rows
+        ],
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(rows) == limit,
+    }
+
+
 @router.get("/{session_id}/memory/files")
 async def list_memory_files(
     request: Request,
@@ -258,6 +380,14 @@ async def list_memory_files(
     summaries = await provider.index().list_notes(
         category=category, tag=tag, limit=limit, offset=offset,
     )
+    total = len(summaries)
+    catalog = _vault_catalog(provider)
+    if catalog is not None:
+        try:
+            counts = await catalog.catalog_counts(by="kind", kind=category)
+            total = sum(n for _k, n in counts)
+        except Exception:  # noqa: BLE001 — a count must not fail the listing
+            logger.debug("catalog count unavailable", exc_info=True)
     return {
         "files": [
             {
@@ -272,9 +402,14 @@ async def list_memory_files(
             }
             for s in summaries
         ],
-        "total": len(summaries),
+        # `total` used to be len(summaries) — the PAGE size, which made a
+        # full page indistinguishable from a full vault and left the sidebar
+        # unable to show a count without fetching everything.
+        "total": total,
+        "returned": len(summaries),
         "limit": limit,
         "offset": offset,
+        "has_more": len(summaries) == limit,
     }
 
 
