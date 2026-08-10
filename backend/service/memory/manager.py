@@ -826,7 +826,16 @@ class SessionMemoryManager:
             # the common case (a handful of notes) still finishes before the
             # gate, and hand the rest to a background task that runs with
             # the session already live.
-            head, tail = stale[:self._RECONCILE_INLINE], stale[self._RECONCILE_INLINE:]
+            # A stale set larger than the inline budget is not drift — it is
+            # a conversion (a tokenizer or geometry change invalidating the
+            # whole vault). Doing ANY of it inline just gets the warm-up
+            # cancelled at its 90s budget before the first chunk commits, so
+            # the conversion never starts. Hand the lot to the background,
+            # where it has no deadline, and let the warm-up finish now.
+            if len(stale) > self._RECONCILE_INLINE:
+                head, tail = [], stale
+            else:
+                head, tail = stale, []
             items = await self._read_bodies(notes_handle, head)
             if items:
                 await vector_handle.index_batch(items)

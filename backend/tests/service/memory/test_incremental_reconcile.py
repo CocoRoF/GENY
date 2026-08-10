@@ -239,8 +239,9 @@ async def test_a_large_reindex_is_split_off_the_boot_path(monkeypatch):
 
     await _mgr(notes, vector)._vector_initialize_and_index()
 
-    assert len(vector.indexed) == SessionMemoryManager._RECONCILE_INLINE, (
-        "the boot path tried to re-index the whole vault"
+    assert vector.indexed == [], (
+        "a conversion did work inline; the warm-up budget cancels it before "
+        "the first chunk commits and the conversion never starts"
     )
     assert spawned and "reconcile-tail" in spawned[0]
 
