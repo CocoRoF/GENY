@@ -851,7 +851,8 @@ class SessionMemoryManager:
         from service.memory import note_retention
 
         days = note_retention.retention_days()
-        if days <= 0:
+        keep = note_retention.max_per_category()
+        if days <= 0 and keep <= 0:
             return 0
         notes_handle = self._memory_provider.notes()
         try:
@@ -861,6 +862,7 @@ class SessionMemoryManager:
                 now=datetime.now(timezone.utc),
                 days=days,
                 limit=note_retention.max_per_sweep(),
+                keep_per_category=note_retention.max_per_category(),
             )
             removed = 0
             deadline = time.monotonic() + note_retention.max_seconds()

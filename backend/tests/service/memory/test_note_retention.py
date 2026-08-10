@@ -242,3 +242,70 @@ async def test_retention_is_not_part_of_the_boot_reconcile():
 
     src = inspect.getsource(SessionMemoryManager._vector_initialize_and_index)
     assert "prune_expired_notes" not in src
+
+
+# ── the count ceiling: what actually bounds the vault ───────────────
+
+def test_surplus_notes_go_even_when_they_are_young():
+    """An age window does not bound anything. At the measured 757
+    observations/day a 30-day window settles at ~22,700 notes — four times
+    the vault this was meant to stop growing. The count rule is the only
+    guarantee that survives a change in write rate."""
+    metas = [_meta(f"n{i}.md", days_old=i) for i in range(10)]
+
+    picked = _names(nr.select_expired(metas, now=NOW, days=0,
+                                      keep_per_category=4))
+
+    assert len(picked) == 6
+    assert "n9.md" in picked, "the oldest was not dropped first"
+    assert "n0.md" not in picked, "the newest was dropped"
+
+
+def test_the_ceiling_is_per_category():
+    """`observations` and `daily` fill at different rates; one budget shared
+    between them would let the faster one evict the slower one's history."""
+    metas = ([_meta(f"o{i}.md", days_old=i) for i in range(6)] +
+             [_meta(f"d{i}.md", category="daily", days_old=i) for i in range(2)])
+
+    picked = _names(nr.select_expired(metas, now=NOW, days=0,
+                                      keep_per_category=4))
+
+    assert sorted(picked) == ["o4.md", "o5.md"]
+
+
+def test_the_ceiling_still_spares_critical_and_digests():
+    """The count rule must not become a back door around the protections."""
+    metas = ([_meta("__digest__.md", days_old=99)] +
+             [_meta("keep.md", days_old=98, importance="critical")] +
+             [_meta(f"n{i}.md", days_old=i) for i in range(10)])
+
+    picked = _names(nr.select_expired(metas, now=NOW, days=0,
+                                      keep_per_category=2))
+
+    assert "__digest__.md" not in picked
+    assert "keep.md" not in picked
+
+
+def test_age_and_count_are_independent():
+    """Either reason alone is enough; neither disables the other."""
+    metas = [_meta("ancient.md", days_old=999)] + \
+            [_meta(f"n{i}.md", days_old=1) for i in range(5)]
+
+    by_age = _names(nr.select_expired(metas, now=NOW, days=30,
+                                      keep_per_category=0))
+    assert by_age == ["ancient.md"]
+
+    both = _names(nr.select_expired(metas, now=NOW, days=30,
+                                    keep_per_category=3))
+    assert "ancient.md" in both and len(both) == 3
+
+
+def test_both_rules_off_selects_nothing():
+    metas = [_meta(f"n{i}.md", days_old=999) for i in range(10)]
+    assert nr.select_expired(metas, now=NOW, days=0, keep_per_category=0) == []
+
+
+def test_the_default_ceiling_bounds_the_measured_write_rate():
+    """757 observations/day measured in production. The ceiling has to be a
+    number of notes, not a number of days."""
+    assert 1000 <= nr.DEFAULT_MAX_PER_CATEGORY <= 20000

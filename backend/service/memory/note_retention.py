@@ -42,6 +42,13 @@ AUTONOMOUS_CATEGORIES = ("observations", "daily")
 #: month. Generous by default because deletion is one-way.
 DEFAULT_RETENTION_DAYS = 30
 
+#: …and a CEILING on how many of each autonomous category to keep, because
+#: an age window alone does not bound anything: at the measured 757
+#: observations/day, 30 days settles at ~22,700 notes — four times the vault
+#: this was meant to stop growing. The write rate is not a constant anyone
+#: controls, so the guarantee has to be a count. Oldest go first.
+DEFAULT_MAX_PER_CATEGORY = 4000
+
 #: How many to remove in one sweep. A vault that has never been pruned
 #: presents thousands at once, and a delete is a write — taking the engine
 #: for an unbounded stretch is the failure mode this whole effort exists to
@@ -70,6 +77,14 @@ def max_per_sweep() -> int:
                    DEFAULT_MAX_PER_SWEEP)
     except ValueError:
         return DEFAULT_MAX_PER_SWEEP
+
+
+def max_per_category() -> int:
+    try:
+        return int(os.environ.get("GENY_NOTE_RETENTION_MAX_PER_CATEGORY", "") or
+                   DEFAULT_MAX_PER_CATEGORY)
+    except ValueError:
+        return DEFAULT_MAX_PER_CATEGORY
 
 
 def max_seconds() -> float:
@@ -112,15 +127,25 @@ def select_expired(
     days: int,
     categories: Sequence[str] = AUTONOMOUS_CATEGORIES,
     limit: int = DEFAULT_MAX_PER_SWEEP,
+    keep_per_category: int = 0,
 ) -> List[Expired]:
-    """Which notes have aged out. Pure — decides nothing about deleting.
+    """Which notes should go. Pure — decides nothing about deleting.
 
-    ``days <= 0`` selects nothing, so the feature is off by configuration
-    rather than by a caller remembering to check.
+    Two independent reasons, because either alone leaves a hole:
+
+    * AGE — older than *days*. Bounds staleness, but not size: the write
+      rate is nobody's constant, and at 757/day a 30-day window settles at
+      ~22,700 notes.
+    * COUNT — beyond the newest *keep_per_category* in its category. Bounds
+      size no matter the rate. Oldest first.
+
+    ``days <= 0`` disables the age rule; ``keep_per_category <= 0`` disables
+    the count rule. Both off selects nothing, so the feature is off by
+    configuration rather than by a caller remembering to check.
     """
-    if days <= 0:
+    if days <= 0 and keep_per_category <= 0:
         return []
-    cutoff = timedelta(days=days)
+    cutoff = timedelta(days=days) if days > 0 else None
     allowed = {c.lower() for c in categories}
     scored: List[tuple] = []
     for meta in metas:
@@ -136,12 +161,29 @@ def select_expired(
         if _importance_of(meta) == "critical":
             continue
         age = _age_of(meta, now)
-        if age <= cutoff:
-            continue
-        scored.append((age, Expired(filename=filename, category=category)))
+        scored.append((age, category, Expired(filename=filename, category=category)))
+
     # Oldest first BY AGE, not by name: observation filenames happen to sort
     # chronologically but `daily/execution-14-…` does not, and a capped sweep
     # must chew through the real backlog rather than whatever the listing
     # happened to yield first.
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [e for _age, e in scored[:max(0, limit)]]
+    scored.sort(key=lambda row: row[0], reverse=True)
+
+    doomed: List[Expired] = []
+    seen_per_category: dict = {}
+    total_per_category: dict = {}
+    for age, category, _e in scored:
+        total_per_category[category] = total_per_category.get(category, 0) + 1
+    for age, category, expired in scored:
+        rank = seen_per_category.get(category, 0)
+        seen_per_category[category] = rank + 1
+        too_old = cutoff is not None and age > cutoff
+        # `rank` counts from the OLDEST, so everything before the last
+        # `keep_per_category` entries of this category is surplus.
+        surplus = (
+            keep_per_category > 0
+            and rank < total_per_category[category] - keep_per_category
+        )
+        if too_old or surplus:
+            doomed.append(expired)
+    return doomed[:max(0, limit)]
