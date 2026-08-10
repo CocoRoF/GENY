@@ -1035,6 +1035,15 @@ async def health_check():
     # re-index of a large vault legitimately runs for minutes and must not be
     # killed halfway. Someone reading this should decide.
     memory = memory_inflight.status()
+    # Host-side side-effects (conversation archiving, compaction writes)
+    # run on their own single worker. A wedge there stalls every later
+    # turn in stage s18, and used to be invisible until turns started
+    # timing out — so it reports here too.
+    try:
+        from service.memory.sync_async_bridge import side_effect_status
+        memory["side_effects"] = side_effect_status()
+    except Exception:  # noqa: BLE001 — a probe must never fail /health
+        pass
     if memory["stuck"]:
         logger.warning(
             "memory engine stalled — %s running for %.0fs (%d queued)",
