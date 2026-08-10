@@ -797,9 +797,16 @@ class SessionMemoryManager:
             for meta in metas:
                 node_id = vector_handle.node_id_for(meta.ref)
                 on_disk.add(node_id)
-                indexed_at = manifest.get(node_id, (None, ""))[0]
+                indexed_at, digest = manifest.get(node_id, (None, ""))
                 if indexed_at is None:
                     stale.append(meta)          # never indexed
+                    continue
+                if not digest:
+                    # "indexed, derived state unknown" — the engine says its
+                    # tokenizer or embedding geometry moved, so these rows
+                    # were derived a way that no longer matches how queries
+                    # are analysed. Timestamps say nothing about that.
+                    stale.append(meta)
                     continue
                 # The index records when IT wrote, which is always at or after
                 # the note's own timestamp. So a note whose timestamp has moved

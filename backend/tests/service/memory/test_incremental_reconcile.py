@@ -278,3 +278,20 @@ async def test_the_background_pass_covers_the_remainder():
     await mgr._reconcile_tail(notes, vector, metas)
 
     assert len(vector.indexed) == 450
+
+
+@pytest.mark.asyncio
+async def test_an_empty_digest_means_reindex():
+    """The engine reports "indexed, derived state unknown" by emptying the
+    digest — that is how a tokenizer or embedding-geometry change reaches a
+    host that otherwise diffs on timestamps. Production upgraded its
+    tokenizer and re-indexed nothing until this was read."""
+    notes = _Notes({"stale.md": ("본문", NOW), "fine.md": ("본문", NOW)})
+    vector = _Vector({
+        _node("stale.md"): (INDEXED_AT, ""),        # geometry moved
+        _node("fine.md"): (INDEXED_AT, "sha"),
+    })
+
+    await _mgr(notes, vector)._vector_initialize_and_index()
+
+    assert vector.indexed == ["stale.md"]
