@@ -107,6 +107,26 @@ def _send_image_enabled() -> bool:
     ).strip().lower() not in ("0", "false", "no", "off")
 
 
+def _max_observation_notes() -> int:
+    """How many screen observations to keep at all.
+
+    An observation is a note about what was on screen a moment ago. It is
+    not a record of anything that happened between the user and the agent —
+    the frames the persona actually spoke about are promoted to
+    ``memory/attachments/`` and embedded in the execution record, which is
+    what survives. Keeping the rest forever grew the vault at ~757/day and
+    made every memory operation more expensive for no recall benefit.
+
+    A COUNT, not a window: the capture rate is not a constant anyone
+    controls, so only a count actually bounds the buffer. ``0`` disables the
+    cap (the day-based window still applies).
+    """
+    try:
+        return int(os.environ.get("GENY_SCREEN_OBS_MAX_NOTES", "") or 20)
+    except ValueError:
+        return 20
+
+
 def _retention_days() -> int:
     """How long observation IMAGE files are kept on disk before
     best-effort pruning. The markdown notes (caption text) are kept
@@ -633,6 +653,79 @@ _PRUNE_NOTES_PER_SWEEP = 200
 _prune_tasks: Dict[str, "asyncio.Task"] = {}
 
 
+async def _prune_observations(session_id: str, storage_root: Path) -> None:
+    """Both sweeps, in the order that does the least work.
+
+    The count cap runs first and unthrottled — in the steady state it is one
+    delete and the day-based sweep then finds nothing older than the window
+    still present. Keeping them separate would either throttle the cap into
+    an average or run the whole-tree walk on every upload.
+    """
+    try:
+        await _enforce_observation_cap(session_id, storage_root)
+    except Exception:  # noqa: BLE001 — bookkeeping, never the upload
+        logger.debug("observation cap skipped", exc_info=True)
+    await _prune_old_observations(session_id, storage_root)
+
+
+async def _enforce_observation_cap(session_id: str, storage_root: Path) -> int:
+    """Keep only the newest N observation notes. Runs on EVERY upload.
+
+    Unthrottled on purpose, unlike the day-based sweep next door: a count
+    cap that is only checked once an hour is not a cap, it is an average.
+    The work is a directory listing and, in the steady state, one delete —
+    the buffer is already at the limit, so each new frame evicts one.
+
+    Deletes route through the memory manager so the vector index and the
+    sidecars follow; the frame file goes with the note, since a frame whose
+    note is gone is unreachable. Frames the persona actually spoke about
+    were already promoted to ``memory/attachments/`` and are untouched.
+    """
+    limit = _max_observation_notes()
+    if limit <= 0:
+        return 0
+    root = storage_root / "memory" / "observations"
+    if not root.exists():
+        return 0
+    agent = _resolve_agent(session_id)
+    mm = getattr(agent, "memory_manager", None) if agent is not None else None
+    if mm is None:
+        # Never raw-unlink a provider-indexed note — that is exactly how the
+        # index filled with rows whose files were gone.
+        return 0
+    try:
+        notes = sorted(
+            (p for p in root.glob("*.md")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return 0
+    surplus = notes[limit:]
+    if not surplus:
+        return 0
+    deleted = 0
+    for md in surplus:
+        try:
+            if await mm.adelete_note(md.name):
+                deleted += 1
+        except Exception:  # noqa: BLE001 — one note, not the cap
+            logger.debug("observation cap: %s not deleted", md.name, exc_info=True)
+            continue
+        # The frame is only reachable through its note.
+        for ext in _MIME_TO_EXT.values():
+            frame = md.with_suffix(f".{ext}")
+            try:
+                frame.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if deleted:
+        logger.info(
+            "observation cap: %d dropped, keeping newest %d", deleted, limit,
+        )
+    return deleted
+
+
 async def _prune_old_observations(session_id: str, storage_root: Path) -> None:
     """Best-effort retention sweep over the AMBIENT observation buffer.
 
@@ -975,7 +1068,8 @@ async def save_observation(
     try:
         existing = _prune_tasks.get(session_id)
         if existing is None or existing.done():
-            task = asyncio.create_task(_prune_old_observations(session_id, storage_root))
+            task = asyncio.create_task(
+                _prune_observations(session_id, storage_root))
             _prune_tasks[session_id] = task
             task.add_done_callback(
                 lambda t, sid=session_id: _prune_tasks.pop(sid, None) and None

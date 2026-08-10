@@ -115,9 +115,20 @@ class LTMConfig(BaseConfig):
     user_opsidian_index_enabled: bool = True
     user_opsidian_raw_read_enabled: bool = True
 
+    # ── Retention ──
+    # What the agent writes to ITSELF, and how much of it survives. The
+    # screen-observation loop wrote ~757 notes/day and nothing removed any
+    # of them; 99.5% of a production vault was machine-authored.
+    observation_max_notes: int = 20
+    note_retention_days: int = 30
+    note_retention_max_per_category: int = 4000
+
     # ── Env mapping (for optional .env fallback) ──
     _ENV_MAP = {
         "embedding_api_key": "LTM_EMBEDDING_API_KEY",
+        "observation_max_notes": "GENY_SCREEN_OBS_MAX_NOTES",
+        "note_retention_days": "GENY_NOTE_RETENTION_DAYS",
+        "note_retention_max_per_category": "GENY_NOTE_RETENTION_MAX_PER_CATEGORY",
     }
 
     # ──────────────────────────────────────────────────────────────────
@@ -190,6 +201,7 @@ class LTMConfig(BaseConfig):
                     "auto_curation": "Auto-Curation Pipeline",
                     "auto_curation_schedule": "Curation Schedule",
                     "user_opsidian": "User Opsidian Access",
+                    "retention": "기록 보관 정책",
                 },
                 "fields": {
                     "enabled": {
@@ -304,6 +316,54 @@ class LTMConfig(BaseConfig):
     def get_fields_metadata(cls) -> List[ConfigField]:
         return [
             # ── Toggle ──
+            # ── Retention ──
+            ConfigField(
+                name="observation_max_notes",
+                field_type=FieldType.NUMBER,
+                label="화면 관찰 보관 개수",
+                description=(
+                    "화면 관찰은 방금 화면에 무엇이 있었는지에 대한 메모이지 "
+                    "사용자와 주고받은 기록이 아닙니다. 에이전트가 실제로 "
+                    "언급한 장면은 실행 기록에 첨부되어 따로 남으므로, "
+                    "여기서는 최근 N개만 보관합니다. 0이면 개수 제한 없음."
+                ),
+                default=20,
+                min_value=0,
+                max_value=2000,
+                group="retention",
+                apply_change=env_sync("GENY_SCREEN_OBS_MAX_NOTES"),
+            ),
+            ConfigField(
+                name="note_retention_days",
+                field_type=FieldType.NUMBER,
+                label="자동 생성 노트 보관 기간 (일)",
+                description=(
+                    "관찰·실행 기록처럼 에이전트가 스스로 만든 노트를 며칠까지 "
+                    "보관할지. 사용자가 쓴 노트와 대화 기록, critical 표시, "
+                    "요약·원장 파일은 대상이 아닙니다. 0이면 기간 제한 없음."
+                ),
+                default=30,
+                min_value=0,
+                max_value=3650,
+                group="retention",
+                apply_change=env_sync("GENY_NOTE_RETENTION_DAYS"),
+            ),
+            ConfigField(
+                name="note_retention_max_per_category",
+                field_type=FieldType.NUMBER,
+                label="자동 생성 노트 범주별 보관 개수",
+                description=(
+                    "기간만으로는 총량이 묶이지 않습니다 — 생성 속도가 바뀌면 "
+                    "보관량도 따라 바뀝니다. 범주마다 최신 N개까지만 남깁니다. "
+                    "0이면 개수 제한 없음."
+                ),
+                default=4000,
+                min_value=0,
+                max_value=100000,
+                group="retention",
+                apply_change=env_sync("GENY_NOTE_RETENTION_MAX_PER_CATEGORY"),
+            ),
+
             ConfigField(
                 name="enabled",
                 field_type=FieldType.BOOLEAN,
