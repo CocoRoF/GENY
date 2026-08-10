@@ -268,13 +268,31 @@ body {
 	-webkit-overflow-scrolling: touch;
 }
 
-input, textarea, select, button {
-	font-size: 16px; /* prevent iOS zoom on focus */
-}
-
-@media (min-width: 768px) {
+/* These are DEFAULTS, so they belong in the base layer — and the
+ * distinction is not cosmetic. An unlayered rule beats every rule
+ * inside `@layer`, whatever the specificity: `button { font-size }`
+ * written out here therefore overrode every Tailwind `text-*` utility
+ * on every button, input, select and textarea in the app. On desktop
+ * that meant `font-size: inherit` won, so a control simply took its
+ * parent's size and any size class on it was silently dead.
+ *
+ * Found via a status pill: the same `text-[10.5px]` rendered 10.5px on
+ * a <span> and 14px on the <button> beside it, which is what made the
+ * two badges different sizes. The pill was the symptom; this is the
+ * bug, and it was app-wide.
+ *
+ * In `@layer base` the intent survives (a control with no size class
+ * still gets the iOS-zoom guard) and utilities win again, which is
+ * what "utility" is supposed to mean. */
+@layer base {
 	input, textarea, select, button {
-		font-size: inherit;
+		font-size: 16px; /* prevent iOS zoom on focus */
+	}
+
+	@media (min-width: 768px) {
+		input, textarea, select, button {
+			font-size: inherit;
+		}
 	}
 }
 
