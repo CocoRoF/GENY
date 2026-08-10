@@ -1071,9 +1071,61 @@ async def health_tasks(response: Response, limit: int = 40):
     This is the missing view. It is a diagnostic, not an API: the shape is
     free to change, and it is deliberately cheap enough to hit while a
     request is hanging.
+
+    ``Task.get_stack()`` alone is not enough, and the gap is exactly the
+    case this endpoint exists for: for a *suspended* task CPython returns
+    only the outermost frame, so a turn parked twelve awaits deep reports
+    a single line ("_run_pipeline") and the actual blocking call stays
+    invisible. ``stack`` keeps that view; ``awaiting`` walks the
+    ``cr_await`` chain by hand to the innermost frame — the line the turn
+    is really stopped on.
     """
     import asyncio as _aio
     import traceback as _tb
+
+    def _await_chain(root, depth: int = 40) -> list[str]:
+        """Follow cr_await/ag_await/gi_yieldfrom down to the real block.
+
+        Ends on whatever has no frame left to descend into — a Future
+        (nothing scheduled it yet), a lock, a socket read — and names it,
+        because *what* is being awaited is half the diagnosis.
+        """
+        import gc as _gc
+
+        chain: list[str] = []
+        node = root
+        for _ in range(depth):
+            if node is None:
+                break
+            frame = (getattr(node, "cr_frame", None)
+                     or getattr(node, "ag_frame", None)
+                     or getattr(node, "gi_frame", None))
+            if frame is not None:
+                chain.append(
+                    f"{frame.f_code.co_filename}:{frame.f_lineno} "
+                    f"{frame.f_code.co_name}"
+                )
+            nxt = (getattr(node, "cr_await", None)
+                   or getattr(node, "ag_await", None)
+                   or getattr(node, "gi_yieldfrom", None))
+            if nxt is None:
+                # ``async_generator_asend`` — what ``async for`` awaits —
+                # exposes NO attribute pointing at its generator, so the
+                # chain would end here, one frame short of every stall
+                # that happens inside an async generator (which is most
+                # of them: streaming clients are async generators). The
+                # GC knows the edge even though the type won't name it.
+                for ref in _gc.get_referents(node):
+                    if hasattr(ref, "ag_frame") or hasattr(ref, "cr_frame"):
+                        nxt = ref
+                        break
+            if nxt is None:
+                if frame is None:
+                    # A bare awaitable — a Future, an Event, a transport.
+                    chain.append(f"<awaiting {type(node).__name__}>")
+                break
+            node = nxt
+        return chain
 
     out = []
     for task in list(_aio.all_tasks())[:max(1, limit)]:
@@ -1086,11 +1138,16 @@ async def health_tasks(response: Response, limit: int = 40):
                     frames.append(f"{f.filename}:{f.lineno} {f.name}")
         except Exception:  # noqa: BLE001 — a diagnostic must never raise
             frames.append("<stack unavailable>")
+        try:
+            awaiting = _await_chain(task.get_coro())
+        except Exception:  # noqa: BLE001 — a diagnostic must never raise
+            awaiting = ["<await chain unavailable>"]
         out.append({
             "name": task.get_name(),
             "done": task.done(),
             "coro": str(task.get_coro())[:200],
             "stack": frames,
+            "awaiting": awaiting,
         })
     response.headers["Cache-Control"] = "no-store"
     return {"count": len(out), "tasks": out}
