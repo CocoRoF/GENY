@@ -23,17 +23,36 @@ from service.execution import agent_executor as mod
 SHIPPED_STALL_S = mod._STALL_TIMEOUT_S
 
 
+class _Entry:
+    def __init__(self, level):
+        self.level = level
+
+
 class _Logger:
-    """Session log stand-in. `bump()` is what a working turn does."""
+    """Session log stand-in.
+
+    `bump()` is a TURN event; `background()` is the memory/trigger chatter
+    that shares this log and must not read as the turn making progress.
+    """
 
     def __init__(self, start: int = 0) -> None:
+        self.entries = []
         self.n = start
 
     def bump(self) -> None:
+        self.entries.append(_Entry(mod.LogLevel.STAGE))
+        self.n += 1
+
+    def background(self) -> None:
+        self.entries.append(_Entry(mod.LogLevel.INFO))
         self.n += 1
 
     def get_cache_length(self) -> int:
         return self.n
+
+    def get_cache_entries_since(self, cursor: int):
+        new = self.entries[cursor:]
+        return new, len(self.entries)
 
 
 class _Agent:
@@ -169,3 +188,52 @@ def test_the_stall_window_is_sane():
     """Too short cuts off legitimate long tool calls; too long is the 29
     minutes this exists to prevent."""
     assert 60.0 <= SHIPPED_STALL_S <= 600.0
+
+
+@pytest.mark.asyncio
+async def test_background_chatter_does_not_keep_a_dead_turn_alive():
+    """THE bug this signal was narrowed for. The session log is shared:
+    memory compaction and trigger bookkeeping keep writing to it. Watching
+    the raw write count meant a turn whose CLI had died sat "progressing"
+    for ten minutes while nothing about it moved."""
+    logger = _Logger()
+
+    async def _dead_turn():
+        while True:                    # the turn itself does nothing
+            await asyncio.sleep(0.01)
+
+    async def _noise():
+        for _ in range(200):           # …but the session log keeps growing
+            await asyncio.sleep(0.005)
+            logger.background()
+
+    noise = asyncio.create_task(_noise())
+    agent = _Agent(_dead_turn)
+    with pytest.raises(asyncio.TimeoutError):
+        await _run(agent, logger)
+    noise.cancel()
+
+    assert agent.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_turn_events_still_count_as_progress():
+    """The narrowing must not make every long turn look dead."""
+    logger = _Logger()
+
+    async def _working():
+        for _ in range(20):
+            await asyncio.sleep(0.02)
+            logger.bump()
+        return {"output": "완료"}
+
+    agent = _Agent(_working)
+    assert await _run(agent, logger) == {"output": "완료"}
+    assert agent.cancelled is False
+
+
+def test_an_interactive_turn_is_not_given_the_batch_budget():
+    """1800 s is a runaway-guard for a batch job, not a budget for a reply
+    someone is watching — healthy turns here measured 9-17 s."""
+    assert 60.0 <= mod._INTERACTIVE_TIMEOUT_S <= 1800.0
+    assert mod._INTERACTIVE_TIMEOUT_S < 1800.0

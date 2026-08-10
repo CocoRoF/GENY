@@ -877,6 +877,21 @@ def _get_agent_manager():
 _STALL_TIMEOUT_S = float(os.getenv("GENY_TURN_STALL_TIMEOUT_S", "300"))
 _STALL_POLL_S = 5.0
 
+#: Only these count as THIS TURN making progress. The first version watched
+#: the session's total write count, which background work — memory
+#: compaction, trigger bookkeeping — keeps nudging forever: a turn whose CLI
+#: had died sat "progressing" for ten minutes while nothing about it moved.
+_TURN_PROGRESS_LEVELS = frozenset({
+    LogLevel.STAGE, LogLevel.GRAPH, LogLevel.TOOL_USE,
+    LogLevel.RESPONSE, LogLevel.ERROR,
+})
+
+#: Ceiling for an INTERACTIVE turn when the caller named no timeout. The
+#: session default is 1800s, which is a runaway-guard for a batch job, not a
+#: budget for a reply someone is waiting on — measured healthy turns here run
+#: 9-17 s. Autonomous triggers already pass their own 180 s.
+_INTERACTIVE_TIMEOUT_S = float(os.getenv("GENY_TURN_MAX_SECONDS", "600"))
+
 
 async def _invoke_bounded(
     agent,
@@ -904,12 +919,33 @@ async def _invoke_bounded(
     Raises ``asyncio.TimeoutError`` for either limit, so the caller's
     existing timeout handling covers both.
     """
+    cursor = {"at": 0}
+    seen = {"n": 0}
+
     def _progress() -> int:
+        """How many entries THIS turn has produced.
+
+        Filtered by level on purpose: the session log is shared, and counting
+        every write meant background memory work kept a dead turn looking
+        alive.
+        """
+        if session_logger is None:
+            return -1
         try:
-            return int(session_logger.get_cache_length()) if session_logger else -1
+            entries, cursor["at"] = session_logger.get_cache_entries_since(
+                cursor["at"])
         except Exception:  # noqa: BLE001 — a probe must never fail the turn
             return -1
+        for entry in entries:
+            level = getattr(entry, "level", None)
+            if level in _TURN_PROGRESS_LEVELS:
+                seen["n"] += 1
+        return seen["n"]
 
+    try:
+        cursor["at"] = int(session_logger.get_cache_length()) if session_logger else 0
+    except Exception:  # noqa: BLE001
+        cursor["at"] = 0
     task = asyncio.ensure_future(agent.invoke(input_text=prompt, **invoke_kwargs))
     started = time.monotonic()
     last_progress = _progress()
@@ -1097,7 +1133,10 @@ async def _execute_core(
                 )
 
         # 2. Invoke
-        effective_timeout = timeout or getattr(agent, "timeout", 21600.0)
+        effective_timeout = timeout or min(
+            getattr(agent, "timeout", 21600.0) or 21600.0,
+            _INTERACTIVE_TIMEOUT_S,
+        )
         logger.info(
             "[Executor:%s] invoking agent (effective_timeout=%s, agent_type=%s)",
             session_id[:8], effective_timeout, type(agent).__name__,
