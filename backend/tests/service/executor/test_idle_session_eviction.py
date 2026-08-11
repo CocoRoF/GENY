@@ -91,6 +91,12 @@ def _skeleton(evict_seconds: float = 1800.0) -> AgentSessionManager:
     mgr._store = _FakeStore()
     mgr._lifecycle_bus = _FakeBus()
     mgr._idle_evict_seconds = evict_seconds
+    # Eviction is OFF by default now (Session Lifecycle → keep sessions
+    # awake). This suite is about what eviction does when it runs, so it
+    # opts in explicitly rather than depending on a host default that
+    # deliberately says otherwise. See test_keep_sessions_awake.py for
+    # the policy resolution itself.
+    mgr._evict_seconds = lambda: evict_seconds
     return mgr
 
 
@@ -99,31 +105,31 @@ def _skeleton(evict_seconds: float = 1800.0) -> AgentSessionManager:
 def test_long_idle_session_is_a_candidate():
     mgr = _skeleton()
     agent = _FakeAgent("s1", idle_seconds=2000)
-    assert mgr._is_evict_candidate(agent, datetime.now()) is True
+    assert mgr._is_evict_candidate(agent, datetime.now(), mgr._idle_evict_seconds) is True
 
 
 def test_fresh_idle_session_is_not_a_candidate():
     mgr = _skeleton()
     agent = _FakeAgent("s1", idle_seconds=60)  # only 1 min idle
-    assert mgr._is_evict_candidate(agent, datetime.now()) is False
+    assert mgr._is_evict_candidate(agent, datetime.now(), mgr._idle_evict_seconds) is False
 
 
 def test_always_on_session_is_never_a_candidate():
     mgr = _skeleton()
     agent = _FakeAgent("s1", idle_seconds=99_999, always_on=True)
-    assert mgr._is_evict_candidate(agent, datetime.now()) is False
+    assert mgr._is_evict_candidate(agent, datetime.now(), mgr._idle_evict_seconds) is False
 
 
 def test_busy_session_is_not_a_candidate():
     mgr = _skeleton()
     agent = _FakeAgent("s1", idle_seconds=99_999, executing=True)
-    assert mgr._is_evict_candidate(agent, datetime.now()) is False
+    assert mgr._is_evict_candidate(agent, datetime.now(), mgr._idle_evict_seconds) is False
 
 
 def test_running_session_is_not_a_candidate():
     mgr = _skeleton()
     agent = _FakeAgent("s1", idle_seconds=99_999, status=SessionStatus.RUNNING)
-    assert mgr._is_evict_candidate(agent, datetime.now()) is False
+    assert mgr._is_evict_candidate(agent, datetime.now(), mgr._idle_evict_seconds) is False
 
 
 # ── eviction teardown ────────────────────────────────────────────────

@@ -9,6 +9,11 @@ export interface SessionInfo {
   linked_session_id?: string | null;
   session_type?: string | null;
   chat_room_id?: string | null;
+  /** The user's own keep-awake choice for THIS session. `true` keeps it
+   *  resident whatever the host's idle policy says, `false` lets it be
+   *  reclaimed even while the host keeps everything else awake, and
+   *  `null`/absent follows the host policy (Settings → Session Lifecycle). */
+  always_on?: boolean | null;
   /** Id of the persistent companion sub-agent this agent owns, when its env
    *  declares one (host_selections.extras.owned_subagent). Env-driven, not
    *  role-driven. Absent/null → the agent owns no companion. */

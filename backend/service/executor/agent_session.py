@@ -145,6 +145,32 @@ _LONELINESS_FAMILIARITY_LOSS = -0.05
 # timeout is safe.
 _CLEANUP_FLUSH_TIMEOUT_S = 20.0
 
+
+def _host_keeps_sessions_awake() -> bool:
+    """The host-wide "leave sessions running" policy, read live.
+
+    Consulted on every idle scan rather than cached, so switching it in
+    settings takes effect on the next tick instead of the next restart —
+    which is the difference between a setting and a build flag.
+
+    Falls back to the environment (and finally to False) so a host whose
+    config store is unavailable behaves exactly as it did before the
+    setting existed.
+    """
+    try:
+        from service.config import get_config_manager
+        from service.config.sub_config.general.session_lifecycle_config import (
+            SessionLifecycleConfig,
+        )
+
+        cfg = get_config_manager().load_config(SessionLifecycleConfig)
+        if cfg is not None:
+            return bool(cfg.keep_sessions_awake)
+    except Exception:  # noqa: BLE001 — a policy read must never fail a turn
+        pass
+    raw = os.environ.get("GENY_KEEP_SESSIONS_AWAKE", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
 # Plan/Phase01 §3.2 — attention recovery constants. Hunger now models
 # attention deprivation (see Plan/01); every user-initiated turn
 # refunds a chunk of it, while autonomous (TRIGGER) turns do not. The
@@ -584,6 +610,11 @@ class AgentSession:
         # Role
         self._role = role
 
+        # Per-session keep-awake choice. None = follow role + host policy;
+        # see :attr:`_is_always_on`. Restored from the store record when a
+        # session is rehydrated, so a pin survives eviction and restart.
+        self._always_on_override: Optional[bool] = None
+
         # E.1 (cycle 20260426_1) — between-turn runtime refresh queue.
         # Set via :meth:`queue_runtime_refresh` (admin endpoint), drained
         # at the top of :meth:`invoke` / :meth:`astream`. ``None`` = no
@@ -927,13 +958,36 @@ class AgentSession:
 
     @property
     def _is_always_on(self) -> bool:
-        """Whether this session should never go idle.
+        """Whether this session should never be put to sleep or torn down.
 
-        True for VTuber sessions — a conversational persona that must stay
-        warm. (Owned companion sub-agents are not sessions; the
-        SubAgentManager manages their lifecycle.)
+        Three answers, in order of authority:
+
+        1. **The user's own choice for this session** (``always_on``).
+           Explicit beats implicit — a session someone pinned stays up
+           even if the host default says otherwise, and one they
+           un-pinned can still be reclaimed even while the host is
+           keeping everything else awake.
+        2. **The role rule.** A VTuber is a conversational persona bound
+           to its CLI process; an idle timeout would break that binding.
+        3. **The host policy** (Session Lifecycle → keep sessions awake).
+           Read live so flipping the setting takes effect on the next
+           idle tick, not the next restart.
         """
-        return self._role == SessionRole.VTUBER
+        if self._always_on_override is not None:
+            return self._always_on_override
+        if self._role == SessionRole.VTUBER:
+            return True
+        return _host_keeps_sessions_awake()
+
+    @property
+    def always_on_override(self) -> Optional[bool]:
+        """The user's explicit choice, or None to follow host policy."""
+        return self._always_on_override
+
+    def set_always_on(self, value: Optional[bool]) -> None:
+        """Pin this session awake (True), release it (False), or hand it
+        back to the host policy (None)."""
+        self._always_on_override = value
 
     def _get_logger(self) -> Optional[SessionLogger]:
         """Get session logger (lazy)."""
@@ -5465,6 +5519,7 @@ class AgentSession:
             pod_name=pod_name,
             pod_ip=pod_ip,
             role=self._role,
+            always_on=self._always_on_override,
             workflow_id=self._workflow_id,
             graph_name=self._preset_name,
             tool_preset_id=self._tool_preset_id,

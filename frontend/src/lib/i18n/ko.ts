@@ -875,6 +875,10 @@ const ko: Translations = {
   info: {
     wakeUp: '깨우기',
     wakingUp: '깨우는 중…',
+    keepAwakeOn: '상시 유지 중',
+    keepAwakeOff: '상시 유지',
+    keepAwakeOnHint: '이 세션은 조용해도 내려가지 않습니다. 눌러서 해제하면 서버 기본 정책을 따릅니다.',
+    keepAwakeOffHint: '이 세션을 항상 켜둡니다. 조용하다는 이유로 내려가지 않고, 다음 메시지에서 기억이 다시 올라오길 기다리지 않아도 됩니다.',
     selectSession: '세션을 선택하세요',
     selectSessionDesc: '상세 정보를 볼 세션을 선택하세요',
     loading: '로딩 중...',

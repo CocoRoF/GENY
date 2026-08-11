@@ -6,7 +6,7 @@ import { useCreatureStateStore } from '@/store/useCreatureStateStore';
 import { agentApi } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
-import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info, Power } from 'lucide-react';
+import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info, Power, Pin, PinOff } from 'lucide-react';
 import type { SessionInfo } from '@/types';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
@@ -114,6 +114,27 @@ export default function InfoTab() {
       setWaking(false);
     }
   }, [selectedSessionId, fetchDetail]);
+
+  // Keep awake — pin THIS session so the host never reclaims it for being
+  // quiet. Persisted server-side, so it survives the eviction (and the
+  // restart) it exists to prevent; `null` hands the session back to the
+  // host policy in Settings → Session Lifecycle.
+  const [pinning, setPinning] = useState(false);
+  const handleToggleAlwaysOn = useCallback(async () => {
+    if (!selectedSessionId || !data) return;
+    setPinning(true);
+    setError('');
+    try {
+      // Three states, two clicks: pinned ⇄ released. "Follow the host"
+      // is the state a session STARTS in, not one worth a third click.
+      await agentApi.setAlwaysOn(selectedSessionId, data.always_on ? null : true);
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setPinning(false);
+    }
+  }, [selectedSessionId, data, fetchDetail]);
 
   // Fetch thinking trigger status for VTuber sessions
   useEffect(() => {
@@ -241,6 +262,23 @@ export default function InfoTab() {
       icon={Info}
       actions={
         <div className="flex items-center gap-2">
+          {!isDeleted && (
+            <ActionButton
+              icon={data.always_on ? Pin : PinOff}
+              spinIcon={pinning}
+              onClick={handleToggleAlwaysOn}
+              disabled={pinning}
+              title={
+                data.always_on
+                  ? (t('info.keepAwakeOnHint') ?? '')
+                  : (t('info.keepAwakeOffHint') ?? '')
+              }
+            >
+              {data.always_on
+                ? (t('info.keepAwakeOn') ?? 'Always on')
+                : (t('info.keepAwakeOff') ?? 'Keep awake')}
+            </ActionButton>
+          )}
           {!isDeleted && (data.status === 'stopped' || data.status === 'idle' || !data.status) && (
             <ActionButton
               icon={Power}

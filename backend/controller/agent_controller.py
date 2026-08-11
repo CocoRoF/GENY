@@ -11,7 +11,7 @@ from urllib.parse import unquote
 import time
 from logging import getLogger
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Path, Query, Request, UploadFile
 from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -1238,6 +1238,48 @@ async def stop_execution(
         "success": True,
         "message": "Graph executes synchronously. Cancel the HTTP request to stop execution.",
     }
+
+
+@router.put("/{session_id}/always-on")
+async def set_always_on(
+    session_id: str = Path(..., description="Session ID"),
+    body: Dict[str, Any] = Body(default_factory=dict),
+    auth: dict = Depends(require_auth),
+):
+    """Pin this session awake, release it, or hand it back to host policy.
+
+    ``{"always_on": true}`` keeps the session resident no matter what the
+    host's idle policy says; ``false`` lets it be reclaimed even while the
+    host keeps everything else awake; ``null`` follows the policy.
+
+    Written to the store FIRST: the pin exists to survive eviction and
+    restart, so persisting it is the operation — updating the live object
+    is just making it take effect now. A session that is currently
+    dormant can be pinned too, which is why this does not require a live
+    agent.
+    """
+    raw = body.get("always_on", None)
+    if raw is not None and not isinstance(raw, bool):
+        raise HTTPException(
+            status_code=400,
+            detail="always_on must be true, false, or null",
+        )
+
+    _enforce_session_owner(session_id, auth)
+    store = get_session_store()
+    if store.get(session_id) is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    store.update(session_id, {"always_on": raw})
+    agent = agent_manager.get_agent(session_id)
+    if agent is not None:
+        agent.set_always_on(raw)
+
+    logger.info(
+        "[%s] always_on set to %s (%s)",
+        session_id, raw, "live" if agent is not None else "dormant record",
+    )
+    return {"session_id": session_id, "always_on": raw, "applied_live": agent is not None}
 
 
 # ============================================================================

@@ -319,6 +319,22 @@ class SessionInfo(BaseModel):
         description="Session role: 'worker', 'developer', 'researcher', or 'planner'"
     )
 
+    # Keep-awake override, per session.
+    #
+    # None = follow the host policy (the Session Lifecycle setting, plus
+    # the role rule that keeps a VTuber resident). True/False is the
+    # user's explicit answer for THIS session and outranks both, which is
+    # the point: "on until I say otherwise" has to survive a global
+    # default that says otherwise.
+    always_on: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True keeps this session resident regardless of the host's "
+            "idle policy; False lets it be evicted even when the host "
+            "keeps sessions awake; None follows the host policy."
+        ),
+    )
+
     # Workflow / Graph settings
     workflow_id: Optional[str] = Field(
         default=None,

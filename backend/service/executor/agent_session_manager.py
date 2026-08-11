@@ -60,6 +60,28 @@ from service.plugin import PluginRegistry, TamagotchiPlugin
 logger = getLogger(__name__)
 
 
+#: Eviction must stay clear of the IDLE transition (default 600s). A
+#: threshold just above it would tear a session down almost the moment it
+#: fell asleep, which is not "long-idle" by any reading.
+_EVICT_FLOOR_S = 900.0
+
+
+def _coerce_evict_seconds(raw: object, fallback: float) -> float:
+    """Read an evict threshold from anywhere, and keep it sane.
+
+    ``0`` means "never evict" and is preserved exactly; anything else is
+    lifted to the floor. A bad value falls back rather than disabling
+    eviction by accident.
+    """
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+    if value <= 0:
+        return 0.0
+    return max(value, _EVICT_FLOOR_S)
+
+
 _VTUBER_CHARACTERS_DIR = _Path(__file__).resolve().parent.parent.parent / "prompts" / "vtuber_characters"
 
 
@@ -201,14 +223,12 @@ class AgentSessionManager:
         # is added. Set ``GENY_IDLE_EVICT_SECONDS=0`` to disable (keep the
         # old always-warm behaviour). Default 30 min; a floor keeps it well
         # clear of the 10-min IDLE transition.
-        try:
-            self._idle_evict_seconds: float = float(
-                os.environ.get("GENY_IDLE_EVICT_SECONDS", "1800")
-            )
-        except (TypeError, ValueError):
-            self._idle_evict_seconds = 1800.0
-        if 0 < self._idle_evict_seconds < 900:
-            self._idle_evict_seconds = 900.0
+        # Seeded from the environment; the authoritative value is resolved
+        # per scan by ``_evict_seconds()`` so a settings change lands within
+        # one tick instead of at the next restart.
+        self._idle_evict_seconds: float = _coerce_evict_seconds(
+            os.environ.get("GENY_IDLE_EVICT_SECONDS", "1800"), 1800.0
+        )
 
         # Plugin registry — cycle 20260422 PR-X5-2/3. Manager-scoped
         # singleton. TamagotchiPlugin owns the four live blocks and the
@@ -2006,6 +2026,14 @@ class AgentSessionManager:
             self._persona_provider.set_static_override(session_id, stored_system_prompt)
             self._store.update(session_id, {"system_prompt": stored_system_prompt})
 
+        # A pin has to survive the thing it protects against. If "keep this
+        # session awake" only lived in memory, an eviction (or a restart)
+        # would silently drop it and the session would start going to sleep
+        # again with the UI still showing it pinned.
+        stored_always_on = params.get("always_on")
+        if stored_always_on is not None:
+            agent.set_always_on(bool(stored_always_on))
+
         # chat_room_id persists across restart so the messenger thread reattaches.
         stored_chat_room_id = params.get("chat_room_id")
         if stored_chat_room_id:
@@ -2593,9 +2621,8 @@ class AgentSessionManager:
         if self._owns_idle_tick_engine:
             await self._idle_tick_engine.start()
         self._idle_monitor_running = True
-        _evict = (
-            f"{self._idle_evict_seconds:.0f}s" if self._idle_evict_seconds > 0 else "disabled"
-        )
+        _now = self._evict_seconds()
+        _evict = f"{_now:.0f}s" if _now > 0 else "disabled (sessions stay awake)"
         logger.info(
             "✅ Idle monitor started (interval=%ss±%ss, evict=%s, owned=%s)",
             self._idle_monitor_interval,
@@ -2630,6 +2657,10 @@ class AgentSessionManager:
         transitioned = 0
         evicted = 0
         now = datetime.now()
+        # Resolved once per scan (not per session): every session in this
+        # pass is judged against the same threshold, and a settings change
+        # takes effect on the next tick.
+        evict_after = self._evict_seconds()
         # Snapshot items() so a concurrent create/delete does not mutate
         # the dict mid-scan.
         for session_id, agent in list(self._local_agents.items()):
@@ -2650,7 +2681,7 @@ class AgentSessionManager:
 
             # Eviction pass — only when enabled. Cheap pre-checks here; the
             # authoritative re-check + teardown happens under the lock inside.
-            if self._idle_evict_seconds > 0 and self._is_evict_candidate(agent, now):
+            if evict_after > 0 and self._is_evict_candidate(agent, now, evict_after):
                 if await self._evict_idle_session(session_id, agent):
                     evicted += 1
 
@@ -2662,7 +2693,35 @@ class AgentSessionManager:
                 "released; each rehydrates on next access", evicted,
             )
 
-    def _is_evict_candidate(self, agent: AgentSession, now: datetime) -> bool:
+    def _evict_seconds(self) -> float:
+        """The evict threshold in force RIGHT NOW — 0 meaning "never".
+
+        Read per scan, not cached at construction: the whole point of
+        putting this in settings is that an operator can turn eviction
+        off and have quiet sessions stop disappearing, without a
+        redeploy. Settings win; the environment is the fallback for
+        hosts that never opened the page.
+        """
+        try:
+            from service.config import get_config_manager
+            from service.config.sub_config.general.session_lifecycle_config import (
+                SessionLifecycleConfig,
+            )
+
+            cfg = get_config_manager().load_config(SessionLifecycleConfig)
+            if cfg is not None:
+                if cfg.keep_sessions_awake:
+                    return 0.0
+                return _coerce_evict_seconds(
+                    cfg.idle_evict_seconds, self._idle_evict_seconds
+                )
+        except Exception:  # noqa: BLE001 — settings must never break the tick
+            logger.debug("session lifecycle config unavailable", exc_info=True)
+        return self._idle_evict_seconds
+
+    def _is_evict_candidate(
+        self, agent: AgentSession, now: datetime, evict_after: float,
+    ) -> bool:
         """Cheap, lock-free filter for the eviction pass: a sleeping
         (IDLE), non-always-on session that has been inactive past the evict
         threshold and isn't mid-turn. Re-verified under the lock before any
@@ -2670,11 +2729,11 @@ class AgentSessionManager:
         if agent.status != SessionStatus.IDLE:
             return False
         if getattr(agent, "_is_always_on", False):
-            return False  # VTuber / linked CLI unit — always resident
+            return False  # VTuber, or one the user pinned — always resident
         last = getattr(agent, "_execution_start_time", None) or getattr(agent, "_created_at", None)
         if last is None:
             return False
-        if (now - last).total_seconds() < self._idle_evict_seconds:
+        if (now - last).total_seconds() < evict_after:
             return False
         return not self._session_busy(agent._session_id, agent)
 

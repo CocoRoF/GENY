@@ -317,6 +317,19 @@ export const agentApi = {
       method: 'POST',
     }),
 
+  /** PUT /api/agents/{id}/always-on — pin this session awake.
+   *
+   * `true` keeps it resident whatever the host's idle policy says,
+   * `false` lets it be reclaimed even while the host keeps everything
+   * else awake, `null` follows the host policy. Persisted, so the choice
+   * survives the eviction (and the restart) it exists to prevent — which
+   * is why a dormant session can be pinned too. */
+  setAlwaysOn: (id: string, alwaysOn: boolean | null) =>
+    apiCall<{ session_id: string; always_on: boolean | null; applied_live: boolean }>(
+      `/api/agents/${id}/always-on`,
+      { method: 'PUT', body: JSON.stringify({ always_on: alwaysOn }) },
+    ),
+
   /** GET /api/agents/{id}/execute/status — check if execution is active */
   getExecutionStatus: (id: string) =>
     apiCall<{ active: boolean; done?: boolean; has_error?: boolean; session_id: string; elapsed_ms?: number; last_activity_ms?: number; last_event_level?: string; last_tool_name?: string }>(

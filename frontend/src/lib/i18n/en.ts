@@ -880,6 +880,10 @@ const en = {
   info: {
     wakeUp: 'Wake Up',
     wakingUp: 'Waking…',
+    keepAwakeOn: 'Always on',
+    keepAwakeOff: 'Keep awake',
+    keepAwakeOnHint: 'This session is never taken down for being quiet. Click to release it back to the host policy.',
+    keepAwakeOffHint: 'Keep this session resident. It will not be taken down for being quiet, and the next message will not wait for its memory to load again.',
     selectSession: 'Select a Session',
     selectSessionDesc: 'Choose a session to view its details',
     loading: 'Loading...',
