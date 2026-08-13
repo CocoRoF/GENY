@@ -106,6 +106,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
@@ -1297,10 +1298,10 @@ class ConversationArchiver:
 
           1. If the bucket already has a cached rel, reuse it and
              read the existing rollup via ``NotesHandle.read``.
-          2. Otherwise enumerate ``provider.notes().list(category=
-             "conversations")`` for the current session — non-user
-             buckets match exactly, the user bucket matches the
-             prefix.
+          2. Otherwise list the ``conversations/`` directory directly —
+             non-user buckets match the stem exactly, the user bucket
+             matches the prefix. A directory answers this without the
+             notes store's lock or its cold-start full-vault scan.
           3. Otherwise create a new file using
              :func:`bucket_path_for` to compose the suffix.
         """
@@ -1348,25 +1349,41 @@ class ConversationArchiver:
         exact_stem = f"{sid_slug}__{base_slug}"
         prefix_stem = f"{exact_stem}__"
 
-        if notes is not None:
-            try:
-                metas = run_coro_sync(notes.list(category=CATEGORY))
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "conversation_archiver: provider list failed",
-                    exc_info=True,
-                )
-                metas = []
-            for meta_entry in metas:
-                bare = meta_entry.ref.filename
-                stem = bare[:-3] if bare.endswith(".md") else bare
+        # "Does this session's rollup file exist?" is a DIRECTORY question,
+        # and it used to be answered through the notes store:
+        # ``notes.list(category=...)`` takes the store's LoopAgnosticLock
+        # and, on a cold store, triggers the full-vault scan — every note
+        # read and frontmatter-parsed (~19s at 6.2k notes) — with this
+        # side-effect worker holding the lock the whole time while the
+        # main loop's own memory writes queue behind it. That contention
+        # is where the 2026-08-11 wedge parked. The notes store reads from
+        # this same directory, so listing it directly answers the same
+        # question with no lock and no parsing; the matched file's
+        # meta/body still comes from the provider (one bounded read), so
+        # frontmatter interpretation stays in one place.
+        candidates: list[str] = []
+        try:
+            for entry in sorted(os.listdir(self._memory_dir / CATEGORY)):
+                if not entry.endswith(".md"):
+                    continue
+                stem = entry[:-3]
                 if stem == exact_stem or (
                     bucket == Bucket.USER and stem.startswith(prefix_stem)
                 ):
-                    rel = f"{CATEGORY}/{bare}"
-                    self._cached_rel[base_slug] = rel
-                    em, eb = _read_meta_body(rel)
-                    return rel, str(self._memory_dir / rel), em, eb
+                    candidates.append(entry)
+        except FileNotFoundError:
+            pass  # no conversations dir yet — first archive creates it
+        except OSError:
+            logger.debug(
+                "conversation_archiver: directory listing failed",
+                exc_info=True,
+            )
+
+        for bare in candidates:
+            rel = f"{CATEGORY}/{bare}"
+            self._cached_rel[base_slug] = rel
+            em, eb = _read_meta_body(rel)
+            return rel, str(self._memory_dir / rel), em, eb
 
         title_slug = _slug_for_title(derived_title_seed) if bucket == Bucket.USER else ""
         bucket_path = bucket_path_for(

@@ -152,6 +152,56 @@ async def test_repeated_wedges_degrade_instead_of_leaking_threads():
 
 
 @pytest.mark.asyncio
+async def test_a_swept_side_effect_does_not_abort_the_turn():
+    """Retiring a pool cancels its QUEUED futures (`cancel_futures=True`).
+
+    A side-effect queued behind the wedged one gets swept — and that
+    CancelledError used to escape `offload_blocking` into the turn,
+    aborting a whole answer over a lost best-effort archive. Swept must
+    read as skipped (None), exactly like a timeout.
+    """
+    release = threading.Event()
+
+    def wedged():
+        release.wait(30)
+
+    def queued_victim():
+        return "ran"
+
+    # Occupy the single worker, queue a second job behind it, then let
+    # the first one time out — the retire sweeps the queued job.
+    first = asyncio.create_task(bridge.offload_blocking(wedged, timeout=0.5))
+    await asyncio.sleep(0.1)
+    second = asyncio.create_task(bridge.offload_blocking(queued_victim, timeout=10.0))
+    await asyncio.sleep(0.1)
+
+    assert await first is None
+    result = await asyncio.wait_for(second, timeout=10.0)
+    assert result is None, (
+        "the swept side-effect neither ran nor was skipped cleanly — "
+        f"got {result!r}"
+    )
+    release.set()
+
+
+@pytest.mark.asyncio
+async def test_the_callers_own_cancellation_still_propagates():
+    """Only the sweep is a skip. If the TURN is cancelled, the await
+    must raise — swallowing it would keep dead turns alive."""
+    release = threading.Event()
+
+    def slow():
+        release.wait(30)
+
+    task = asyncio.create_task(bridge.offload_blocking(slow, timeout=60.0))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    release.set()
+
+
+@pytest.mark.asyncio
 async def test_status_is_visible_before_anything_goes_wrong():
     """/health reads this; it must answer on a healthy process too."""
     status = bridge.side_effect_status()

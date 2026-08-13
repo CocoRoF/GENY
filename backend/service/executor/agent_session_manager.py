@@ -2626,7 +2626,20 @@ class AgentSessionManager:
             await self._idle_tick_engine.start()
         self._idle_monitor_running = True
         _now = self._evict_seconds()
-        _evict = f"{_now:.0f}s" if _now > 0 else "disabled (sessions stay awake)"
+        try:
+            from service.executor.agent_session import _host_keeps_sessions_awake
+            _awake = _host_keeps_sessions_awake()
+        except Exception:  # noqa: BLE001 — log line must never fail startup
+            _awake = False
+        if _now <= 0:
+            _evict = "disabled"
+        elif _awake:
+            # The threshold is live, but the host default pins every
+            # session — only ones the user released (always_on=False)
+            # are eligible.
+            _evict = f"{_now:.0f}s (host keeps sessions awake; applies only to sessions released by the user)"
+        else:
+            _evict = f"{_now:.0f}s"
         logger.info(
             "✅ Idle monitor started (interval=%ss±%ss, evict=%s, owned=%s)",
             self._idle_monitor_interval,
@@ -2705,6 +2718,16 @@ class AgentSessionManager:
         off and have quiet sessions stop disappearing, without a
         redeploy. Settings win; the environment is the fallback for
         hosts that never opened the page.
+
+        Deliberately NOT zeroed by ``keep_sessions_awake``. The host
+        policy is folded into each session's ``_is_always_on`` (user
+        override → role → host), and the candidate filter consults that
+        per session — which is what lets a session the user explicitly
+        released (``always_on=False``) still be reclaimed while the host
+        keeps everything else awake. Zeroing the threshold here would
+        switch the whole pass off and quietly break that override, which
+        is exactly what shipped first: the field promised it, the scan
+        never ran.
         """
         try:
             from service.config import get_config_manager
@@ -2714,8 +2737,6 @@ class AgentSessionManager:
 
             cfg = get_config_manager().load_config(SessionLifecycleConfig)
             if cfg is not None:
-                if cfg.keep_sessions_awake:
-                    return 0.0
                 return _coerce_evict_seconds(
                     cfg.idle_evict_seconds, self._idle_evict_seconds
                 )

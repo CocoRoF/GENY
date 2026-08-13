@@ -84,9 +84,18 @@ def _with_config(monkeypatch, *, keep_awake, evict=1800):
     return cfg
 
 
-def test_keep_awake_setting_disables_eviction(monkeypatch):
+def test_keep_awake_does_not_zero_the_threshold(monkeypatch):
+    """The host policy must NOT switch the eviction pass off wholesale.
+
+    ``keep_sessions_awake`` is enforced per session through
+    ``_is_always_on`` — that is what lets a session the user explicitly
+    released (``always_on=False``) still be reclaimed while the host
+    keeps everything else awake. The first shipped version zeroed the
+    threshold here instead, which silently broke that override: the
+    field promised it, the scan never ran.
+    """
     _with_config(monkeypatch, keep_awake=True, evict=1800)
-    assert _StubManager()._evict_seconds() == 0.0
+    assert _StubManager()._evict_seconds() == 1800.0
 
 
 def test_setting_change_takes_effect_without_restart(monkeypatch):
@@ -96,15 +105,14 @@ def test_setting_change_takes_effect_without_restart(monkeypatch):
     cfg = _with_config(monkeypatch, keep_awake=False, evict=1800)
     assert mgr._evict_seconds() == 1800.0
 
-    cfg.keep_sessions_awake = True
-    assert mgr._evict_seconds() == 0.0, (
-        "the manager cached the policy — a settings change would need a "
-        "redeploy to take effect"
+    cfg.idle_evict_seconds = 3600
+    assert mgr._evict_seconds() == 3600.0, (
+        "the manager cached the threshold — a settings change would need "
+        "a redeploy to take effect"
     )
 
-    cfg.keep_sessions_awake = False
-    cfg.idle_evict_seconds = 3600
-    assert mgr._evict_seconds() == 3600.0
+    cfg.idle_evict_seconds = 0
+    assert mgr._evict_seconds() == 0.0
 
 
 def test_unreadable_config_falls_back_to_the_previous_behaviour(monkeypatch):
@@ -183,6 +191,48 @@ def test_resolution_order_user_then_role_then_host(monkeypatch):
     assert _S(SessionRole.WORKER, override=False)._is_always_on is False, (
         "un-pinning a session must still mean something while the host "
         "keeps everything else awake"
+    )
+
+
+def test_released_session_is_evictable_while_host_keeps_awake(monkeypatch):
+    """The full contract, end to end at the scan's level.
+
+    Host keeps sessions awake; the user released ONE session
+    (``always_on=False``). That session — and only that session — must
+    be an eviction candidate.
+    """
+    import service.executor.agent_session as sess_mod
+    import service.config as config_mod
+    from service.sessions.models import SessionRole
+
+    cfg = SimpleNamespace(keep_sessions_awake=True, idle_evict_seconds=1800)
+    monkeypatch.setattr(
+        config_mod, "get_config_manager",
+        lambda: SimpleNamespace(load_config=lambda _cls: cfg),
+        raising=False,
+    )
+
+    class _S:
+        _is_always_on = sess_mod.AgentSession._is_always_on
+
+        def __init__(self, override):
+            self._role = SessionRole.WORKER
+            self._always_on_override = override
+            self.status = SessionStatus.IDLE
+            self._session_id = "s"
+            self._execution_start_time = datetime.now() - timedelta(seconds=99999)
+
+    mgr = _CandidateManager()
+    threshold = _StubManager()._evict_seconds()
+    assert threshold == 1800.0, "the pass itself must still run"
+
+    default_session = _S(override=None)     # follows host → pinned
+    released_session = _S(override=False)   # user said: let it sleep
+
+    assert mgr._is_evict_candidate(default_session, datetime.now(), threshold) is False
+    assert mgr._is_evict_candidate(released_session, datetime.now(), threshold) is True, (
+        "the user released this session and the host still cannot "
+        "reclaim it — the always_on=False override is decoration"
     )
 
 

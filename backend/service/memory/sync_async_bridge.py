@@ -220,6 +220,22 @@ async def offload_blocking(fn, *, timeout: float | None = None):
             timeout or _SIDE_EFFECT_TIMEOUT_S, _retirements,
         )
         return None
+    except asyncio.CancelledError:
+        # Two very different cancellations meet here. If OUR future was
+        # cancelled, that is `_retire` clearing another caller's wedged
+        # pool with ``cancel_futures=True`` — this side-effect was queued
+        # behind the wedge and got swept. It is best-effort work; being
+        # swept is a skip, not an error, and letting the CancelledError
+        # out of here would abort the TURN over a lost archive. If the
+        # future is still pending, the cancellation is the caller's own
+        # (the turn itself was cancelled) and must propagate untouched.
+        if fut.cancelled():
+            logger.warning(
+                "memory side-effect was swept while queued behind a retired "
+                "worker — skipped; the turn continues without it",
+            )
+            return None
+        raise
 
 
 __all__ = ["run_coro_sync", "offload_blocking", "side_effect_status"]

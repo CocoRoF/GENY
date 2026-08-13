@@ -653,6 +653,33 @@ class TestBucketSplit:
         assert sanitize_counterpart(worker_a) in r_a.relative_path
         assert sanitize_counterpart(worker_b) in r_b.relative_path
 
+    def test_fresh_archiver_rediscovers_existing_rollup_from_disk(self, tmp_path: Path):
+        """A NEW archiver (empty rel-cache) must append to the rollup an
+        earlier instance created — this is a process restart, and it is
+        the resolution path that now answers from a directory listing
+        instead of the notes store's full-vault enumeration. If discovery
+        breaks, every restart silently forks a second rollup file for the
+        same conversation."""
+        sid = "restart-sid-01"
+        first = _make_archiver(tmp_path, session_id=sid)
+        a = first.archive("user", "before the restart", _meta(
+            event_id_override="cccccccc" + "0" * 24,
+        ))
+        assert a is not None
+
+        # Same disk, brand-new archiver — nothing cached.
+        second = _make_archiver(tmp_path, session_id=sid)
+        b = second.archive("user", "after the restart", _meta(
+            event_id_override="dddddddd" + "0" * 24,
+        ))
+        assert b is not None
+        assert b.absolute_path == a.absolute_path, (
+            "the restarted archiver did not find the existing rollup — "
+            "it forked a second file for the same conversation"
+        )
+        body = Path(b.absolute_path).read_text(encoding="utf-8")
+        assert "before the restart" in body and "after the restart" in body
+
     def test_set_session_id_clears_cache(self, tmp_path: Path):
         """Late ``set_session_id`` (cycle 20260503_5) re-binds the
         archiver so subsequent writes carry the right slug.
