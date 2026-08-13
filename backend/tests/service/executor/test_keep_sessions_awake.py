@@ -36,7 +36,15 @@ def test_zero_means_never_and_survives_coercion():
     would turn "off" into "every 15 minutes"."""
     assert _coerce_evict_seconds(0, 1800.0) == 0.0
     assert _coerce_evict_seconds("0", 1800.0) == 0.0
-    assert _coerce_evict_seconds(-5, 1800.0) == 0.0
+
+
+def test_a_negative_value_is_invalid_input_not_a_quieter_zero():
+    """The settings API saves out-of-range values and reports the error
+    rather than rejecting them, so a typed ``-1`` reaches the runtime.
+    Reading it as "never evict" would silently switch reclamation off on
+    a host that asked for the opposite."""
+    assert _coerce_evict_seconds(-1, 1800.0) == 1800.0
+    assert _coerce_evict_seconds(-99999, 900.0) == 900.0
 
 
 def test_small_values_are_lifted_off_the_idle_transition():

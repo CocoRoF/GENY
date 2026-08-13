@@ -69,15 +69,19 @@ _EVICT_FLOOR_S = 900.0
 def _coerce_evict_seconds(raw: object, fallback: float) -> float:
     """Read an evict threshold from anywhere, and keep it sane.
 
-    ``0`` means "never evict" and is preserved exactly; anything else is
-    lifted to the floor. A bad value falls back rather than disabling
-    eviction by accident.
+    ``0`` means "never evict" and is preserved exactly. A NEGATIVE value
+    is not a quieter way of saying zero — it is invalid input (the field
+    declares a minimum of 0, and the settings API saves-then-reports
+    rather than rejecting), so it falls back instead of silently turning
+    eviction off. Everything else is lifted to the floor.
     """
     try:
         value = float(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return fallback
-    if value <= 0:
+    if value < 0:
+        return fallback
+    if value == 0:
         return 0.0
     return max(value, _EVICT_FLOOR_S)
 
