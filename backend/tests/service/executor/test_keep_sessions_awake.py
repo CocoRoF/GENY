@@ -287,13 +287,20 @@ async def test_pin_survives_two_rehydrations(monkeypatch):
                 "session_id": "s1", "always_on": True, "system_prompt": None,
                 "linked_session_id": None, "chat_room_id": None,
             }}
-            self.params = {"s1": {"session_name": "t", "always_on": True}}
 
         def get(self, sid):
             return dict(self.records.get(sid) or {})
 
         def get_creation_params(self, sid):
-            return dict(self.params.get(sid) or {})
+            # Faithful to the real store: a FIXED CreateSessionRequest
+            # mapping that does NOT carry always_on. The first version of
+            # this test invented a params dict that did — and green-lit a
+            # restore that read the wrong dict and never fired in
+            # production.
+            rec = self.records.get(sid)
+            if not rec:
+                return None
+            return {"session_name": "t", "working_dir": None, "model": None}
 
         def register(self, sid, data):
             # Wholesale replacement — what create_agent_session does.
@@ -345,8 +352,6 @@ async def test_pin_survives_two_rehydrations(monkeypatch):
             f"restart {restart}: the STORE record lost the pin — the next "
             "restart will silently unpin this session"
         )
-        # Params for the next cycle come from what the store now holds.
-        mgr._store.params["s1"]["always_on"] = mgr._store.records["s1"].get("always_on")
 
 
 # ── the setting itself ───────────────────────────────────────────────

@@ -2035,15 +2035,19 @@ class AgentSessionManager:
         # would silently drop it and the session would start going to sleep
         # again with the UI still showing it pinned.
         #
+        # Read from ``record`` — the store row snapshotted at the top of this
+        # method — NOT from ``params``: ``get_creation_params`` maps a fixed
+        # set of CreateSessionRequest fields and the pin is not a creation
+        # parameter, so reading it there returned None every time and the
+        # restore never fired at all. (system_prompt above reads from
+        # ``record`` for the same reason.)
+        #
         # Written back to the store as well — the create_agent_session call
         # above just REGISTERED the fresh agent's SessionInfo over the
         # stored record, and the fresh agent didn't know about the pin yet,
-        # so the record now says None. Restoring only the live object made
-        # the pin survive exactly ONE restart: the first rehydrate healed
-        # the agent but left the clobbered record, and the second restart
-        # read that record. (Same reason the system_prompt restore above
-        # re-updates the store.)
-        stored_always_on = params.get("always_on")
+        # so the record now says None. Healing only the live object would
+        # make the pin survive exactly one wake and vanish on the next.
+        stored_always_on = record.get("always_on")
         if stored_always_on is not None:
             agent.set_always_on(bool(stored_always_on))
             self._store.update(session_id, {"always_on": bool(stored_always_on)})
