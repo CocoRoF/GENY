@@ -2034,9 +2034,19 @@ class AgentSessionManager:
         # session awake" only lived in memory, an eviction (or a restart)
         # would silently drop it and the session would start going to sleep
         # again with the UI still showing it pinned.
+        #
+        # Written back to the store as well — the create_agent_session call
+        # above just REGISTERED the fresh agent's SessionInfo over the
+        # stored record, and the fresh agent didn't know about the pin yet,
+        # so the record now says None. Restoring only the live object made
+        # the pin survive exactly ONE restart: the first rehydrate healed
+        # the agent but left the clobbered record, and the second restart
+        # read that record. (Same reason the system_prompt restore above
+        # re-updates the store.)
         stored_always_on = params.get("always_on")
         if stored_always_on is not None:
             agent.set_always_on(bool(stored_always_on))
+            self._store.update(session_id, {"always_on": bool(stored_always_on)})
 
         # chat_room_id persists across restart so the messenger thread reattaches.
         stored_chat_room_id = params.get("chat_room_id")

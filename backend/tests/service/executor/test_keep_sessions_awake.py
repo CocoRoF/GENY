@@ -266,6 +266,89 @@ def test_host_policy_falls_back_to_env(monkeypatch):
     assert sess_mod._host_keeps_sessions_awake() is False
 
 
+# ── the pin survives MORE THAN ONE restart ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_pin_survives_two_rehydrations(monkeypatch):
+    """Found live: the pin survived exactly ONE restart.
+
+    ``_rehydrate`` calls ``create_agent_session``, which REGISTERS the
+    fresh agent's SessionInfo — ``always_on=None`` — over the stored
+    record. The restore block then healed the live object but not the
+    record, so the first restart looked fine and the second read the
+    clobbered record. A pin that survives one restart and not two is a
+    pin that fails precisely when trusted.
+    """
+    from service.executor.agent_session_manager import AgentSessionManager
+
+    class _Store:
+        def __init__(self):
+            self.records = {"s1": {
+                "session_id": "s1", "always_on": True, "system_prompt": None,
+                "linked_session_id": None, "chat_room_id": None,
+            }}
+            self.params = {"s1": {"session_name": "t", "always_on": True}}
+
+        def get(self, sid):
+            return dict(self.records.get(sid) or {})
+
+        def get_creation_params(self, sid):
+            return dict(self.params.get(sid) or {})
+
+        def register(self, sid, data):
+            # Wholesale replacement — what create_agent_session does.
+            self.records[sid] = dict(data)
+
+        def update(self, sid, patch):
+            self.records.setdefault(sid, {}).update(patch)
+
+    class _Agent:
+        def __init__(self):
+            self._always_on_override = None
+            self._chat_room_id = None
+
+        def set_always_on(self, v):
+            self._always_on_override = v
+
+        def record_memory_event(self, *a, **k):
+            pass
+
+    class _Bus:
+        async def emit(self, *a, **k):
+            pass
+
+    mgr = object.__new__(AgentSessionManager)
+    mgr._store = _Store()
+    mgr._lifecycle_bus = _Bus()
+    mgr._persona_provider = SimpleNamespace(set_static_override=lambda *a: None)
+
+    async def _fake_create(self, request, session_id=None, **kw):
+        agent = _Agent()
+        # The clobber, exactly as production does it: a fresh SessionInfo
+        # knows nothing of the pin.
+        self._store.register(session_id, {
+            "session_id": session_id, "always_on": None,
+            "system_prompt": None, "linked_session_id": None,
+            "chat_room_id": None,
+        })
+        return agent
+
+    monkeypatch.setattr(AgentSessionManager, "create_agent_session", _fake_create)
+
+    for restart in (1, 2):
+        agent = await mgr._rehydrate("s1", cascade=False)
+        assert agent is not None
+        assert agent._always_on_override is True, (
+            f"restart {restart}: the live agent lost the pin"
+        )
+        assert mgr._store.records["s1"].get("always_on") is True, (
+            f"restart {restart}: the STORE record lost the pin — the next "
+            "restart will silently unpin this session"
+        )
+        # Params for the next cycle come from what the store now holds.
+        mgr._store.params["s1"]["always_on"] = mgr._store.records["s1"].get("always_on")
+
+
 # ── the setting itself ───────────────────────────────────────────────
 
 def test_config_is_registered_and_shaped():
