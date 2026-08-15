@@ -958,10 +958,34 @@ export interface Live2dModelInfo {
   // entry with `runtime` so the frontend dispatcher can route to the
   // right canvas. Pre-v2 registries (no runtime field) fall back to
   // "live2d" on the backend, so undefined here means "treat as live2d".
-  runtime?: 'live2d' | 'spine';
+  // 'mmd' (3D PMX/PMD via babylon-mmd) joined with the MMD runtime.
+  runtime?: 'live2d' | 'spine' | 'mmd';
   // Spine-only: URL of the .atlas sibling of `url` (.skel/.json).
   // Live2D entries leave this null/undefined.
   atlas_url?: string | null;
+  // MMD-only: renderer config bag from the editor's avatar-editor.json
+  // sidecar (passed through the backend registry verbatim).
+  mmdConfig?: MmdModelConfig | null;
+}
+
+/** MMD renderer config — see backend Live2dModelInfo.mmdConfig. */
+export interface MmdModelConfig {
+  /** emotion key → morph NAME (MMD morphs are name-addressed) */
+  emotionMorphMap?: Record<string, string>;
+  /** mouth morph driven by TTS amplitude; null/absent = auto-detect */
+  lipSyncMorph?: string | null;
+  /** saved default camera pose from the editor */
+  camera?: {
+    alpha: number;
+    beta: number;
+    radius: number;
+    targetX: number;
+    targetY: number;
+    targetZ: number;
+  } | null;
+  hiddenMaterials?: string[];
+  hiddenMaterialIndices?: number[];
+  morphs?: { name: string; panel: 'brow' | 'eye' | 'mouth' | 'other' }[];
 }
 
 export interface AvatarState {

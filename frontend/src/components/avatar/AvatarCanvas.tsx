@@ -1,9 +1,15 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import Live2DCanvas from '@/components/live2d/Live2DCanvas';
 import SpineCanvas from '@/components/avatar/SpineCanvas';
 import type { Live2DEnhancedConfig } from '@/lib/live2d';
+
+// babylon-mmd + @babylonjs/core weigh ~4MB — load them only when a
+// session actually assigns an MMD model. ssr:false because the module
+// touches WebGL/canvas at import-evaluation depth.
+const MmdCanvas = dynamic(() => import('@/components/avatar/MmdCanvas'), { ssr: false });
 
 interface AvatarCanvasProps {
   sessionId: string;
@@ -36,6 +42,30 @@ interface AvatarCanvasProps {
 export default function AvatarCanvas(props: AvatarCanvasProps) {
   const model = useVTuberStore((s) => s.getModelForSession(props.sessionId));
   const runtime = model?.runtime ?? 'live2d';
+
+  if (runtime === 'mmd') {
+    if (!model) {
+      return (
+        <div
+          className={`flex h-full w-full items-center justify-center text-xs text-zinc-500 ${
+            props.className ?? ''
+          }`}
+        >
+          loading model…
+        </div>
+      );
+    }
+    return (
+      <MmdCanvas
+        sessionId={props.sessionId}
+        model={model}
+        className={props.className}
+        interactive={props.interactive}
+        background={props.background}
+        backgroundAlpha={props.backgroundAlpha}
+      />
+    );
+  }
 
   if (runtime === 'spine') {
     if (!model) {

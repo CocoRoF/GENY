@@ -29,6 +29,23 @@ export default function MiniAvatar({
   fallbackContent,
 }: MiniAvatarProps) {
   const assignedModelName = useVTuberStore((s) => s.assignments[sessionId]);
+  const model = useVTuberStore((s) => s.getModelForSession(sessionId));
+
+  // MMD models are full 3D scenes (babylon engine + WASM physics + a
+  // multi-MB PMX). Spinning that up per chat row is absurd for a 36px
+  // avatar — show the styled fallback circle instead. 2D runtimes keep
+  // their live mini rendering.
+  if (assignedModelName && model?.runtime === 'mmd') {
+    return (
+      <div
+        className={`rounded-full bg-gradient-to-br ${fallbackGradient} flex items-center justify-center shrink-0 ${className}`}
+        style={{ width: size, height: size }}
+        title={model.display_name}
+      >
+        {fallbackContent}
+      </div>
+    );
+  }
 
   if (!assignedModelName) {
     return (

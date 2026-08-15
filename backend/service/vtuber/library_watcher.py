@@ -171,6 +171,7 @@ async def _scan_once(app: FastAPI) -> None:
         # convention. Lazy import to avoid the cycle described above.
         from controller.vtuber_baked_imports_controller import (
             _live2d_models_root,
+            _mmd_models_root,
             _spine_models_root,
         )
 
@@ -180,6 +181,8 @@ async def _scan_once(app: FastAPI) -> None:
                 return _live2d_models_root()
             if parts[1] == "spine-models":
                 return _spine_models_root()
+            if parts[1] == "mmd-models":
+                return _mmd_models_root()
         return None
 
     for info in list(manager.list_models()):

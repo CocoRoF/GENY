@@ -219,6 +219,7 @@ async def _drop_model_with_dir(manager, info, models_root: Path) -> None:
         root_lookup = {
             "live2d-models": _live2d_models_root(),
             "spine-models": _spine_models_root(),
+            "mmd-models": _mmd_models_root(),
         }
         base_root = root_lookup.get(url_parts[1])
         if base_root is not None:
@@ -236,6 +237,10 @@ def _live2d_models_root() -> Path:
 
 def _spine_models_root() -> Path:
     return Path(__file__).resolve().parent.parent / "static" / "spine-models"
+
+
+def _mmd_models_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "static" / "mmd-models"
 
 
 # Names that show up in URLs — keep them ascii-only and filesystem-safe
@@ -326,7 +331,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     # ── Read metadata from the zip ─────────────────────────────────
     meta = _peek_zip_metadata(src)
     runtime: str = (meta.get("puppet", {}) or {}).get("runtime") or meta.get("runtime") or "live2d"
-    if runtime not in ("live2d", "spine"):
+    if runtime not in ("live2d", "spine", "mmd"):
         raise HTTPException(400, f"unsupported runtime in zip: {runtime!r}")
     suggested_name = (
         (meta.get("puppet", {}) or {}).get("name") or meta.get("name") or src.stem
@@ -342,6 +347,9 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     if runtime == "live2d":
         models_root = _live2d_models_root()
         url_prefix = "/static/live2d-models"
+    elif runtime == "mmd":
+        models_root = _mmd_models_root()
+        url_prefix = "/static/mmd-models"
     else:
         models_root = _spine_models_root()
         url_prefix = "/static/spine-models"
@@ -408,6 +416,32 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
             await rmtree_async(target_dir, ignore_errors=True)
             raise HTTPException(400, "no .model3.json in zip — not a Live2D puppet")
         atlas_path: Optional[Path] = None
+    elif runtime == "mmd":
+        # Prefer the sidecar's explicit pmxPath (parseBundle already
+        # picked the right model among costume variants); fall back to
+        # the largest .pmx/.pmd on disk for hand-built zips.
+        entry = None
+        sidecar_pmx = ((meta.get("mmd") or {}).get("pmxPath") or "").strip()
+        if sidecar_pmx:
+            cand = (target_dir / sidecar_pmx).resolve()
+            try:
+                cand.relative_to(target_dir.resolve())
+            except ValueError:
+                cand = None  # traversal-ish sidecar value — ignore it
+            if cand is not None and cand.exists() and cand.is_file():
+                entry = cand
+        if entry is None:
+            pm_files = [
+                target_dir / f
+                for f in runtime_files
+                if f.lower().endswith((".pmx", ".pmd")) and (target_dir / f).exists()
+            ]
+            pm_files.sort(key=lambda pth: pth.stat().st_size, reverse=True)
+            entry = pm_files[0] if pm_files else None
+        if entry is None:
+            await rmtree_async(target_dir, ignore_errors=True)
+            raise HTTPException(400, "no .pmx/.pmd in zip — not an MMD model")
+        atlas_path = None
     else:
         # Spine: prefer .skel (binary export); fall back to .json
         # (Spine v3 JSON export). Search in two passes so .skel always
@@ -701,6 +735,23 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
         except OSError:
             inbox_mtime_val = None
 
+    # ── MMD config bag (sidecar → registry passthrough) ────────────
+    # Everything the 3D renderer needs beyond the shared fields. The
+    # NAME-keyed emotion map stays name-keyed here — MMD morphs are
+    # addressed by name at runtime, unlike Live2D's index translation
+    # above.
+    mmd_config: Optional[dict[str, Any]] = None
+    if runtime == "mmd":
+        mmd_meta = meta.get("mmd") or {}
+        mmd_config = {
+            "emotionMorphMap": emotion_map_named,
+            "lipSyncMorph": anim_cfg.get("lipSyncMorph"),
+            "camera": anim_cfg.get("mmdCamera"),
+            "hiddenMaterials": mmd_meta.get("hiddenMaterials") or [],
+            "hiddenMaterialIndices": mmd_meta.get("hiddenMaterialIndices") or [],
+            "morphs": mmd_meta.get("morphs") or [],
+        }
+
     info = Live2dModelInfo(
         name=model_name,
         display_name=final_display,
@@ -718,6 +769,7 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
         atlas_url=f"{url_prefix}/{rel_atlas}" if rel_atlas else None,
         puppet_id=puppet_id,
         inbox_mtime=inbox_mtime_val,
+        mmdConfig=mmd_config,
     )
     try:
         if prior_by_id is not None:
@@ -910,6 +962,8 @@ async def library_delete(puppet_id: str, request: Request) -> dict[str, Any]:
                 models_root = _live2d_models_root()
             elif url_parts[1] == "spine-models":
                 models_root = _spine_models_root()
+            elif url_parts[1] == "mmd-models":
+                models_root = _mmd_models_root()
         if models_root is None:
             logger.warning(
                 f"[library-delete] {info.name} has unrecognized url={info.url!r}; "

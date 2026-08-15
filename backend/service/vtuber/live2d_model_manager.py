@@ -9,7 +9,7 @@ import asyncio
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -59,6 +59,19 @@ class Live2dModelInfo:
     # (i.e. the user renamed or re-baked the puppet) and re-install.
     # Entries from legacy hand-installed paths leave this None.
     inbox_mtime: Optional[float] = None
+    # MMD (PMX/PMD) runtime only — one opaque bag for everything the 3D
+    # renderer needs beyond the shared fields, sourced from the zip's
+    # avatar-editor.json sidecar:
+    #   emotionMorphMap: {emotion: morph NAME} (MMD drives morphs by
+    #     name, unlike Live2D's index-based emotionMap)
+    #   lipSyncMorph:    mouth morph the TTS amplitude drives (None =
+    #     auto-detect あ family client-side)
+    #   camera:          saved ArcRotate pose {alpha,beta,radius,target*}
+    #   hiddenMaterials / hiddenMaterialIndices: editor-hidden materials
+    #   morphs:          [{name, panel}] catalog for UI / fallbacks
+    # 2D entries leave this None. Kept as a dict (not a dataclass) so
+    # sidecar evolution doesn't require lockstep schema bumps here.
+    mmdConfig: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -79,6 +92,7 @@ class Live2dModelInfo:
             "atlas_url": self.atlas_url,
             "puppet_id": self.puppet_id,
             "inbox_mtime": self.inbox_mtime,
+            "mmdConfig": self.mmdConfig,
         }
 
 
@@ -147,6 +161,7 @@ class Live2dModelManager:
                     atlas_url=model_data.get("atlas_url"),
                     puppet_id=model_data.get("puppet_id"),
                     inbox_mtime=model_data.get("inbox_mtime"),
+                    mmdConfig=model_data.get("mmdConfig"),
                 )
                 self._models[info.name] = info
 
