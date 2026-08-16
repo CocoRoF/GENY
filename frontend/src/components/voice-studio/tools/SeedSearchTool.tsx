@@ -48,11 +48,19 @@ export default function SeedSearchTool() {
       setPlayingSeed(null);
       return;
     }
-    audioRef.src = url;
-    audioRef.play();
-    setPlayingSeed(seed);
-    audioRef.onended = () => setPlayingSeed(null);
-    audioRef.onerror = () => setPlayingSeed(null);
+    void (async () => {
+      try {
+        const objectUrl = await voiceStudioApi.fetchAuthedObjectUrl(url);
+        if (audioRef.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.src);
+        audioRef.src = objectUrl;
+        await audioRef.play();
+        setPlayingSeed(seed);
+        audioRef.onended = () => setPlayingSeed(null);
+        audioRef.onerror = () => setPlayingSeed(null);
+      } catch {
+        setPlayingSeed(null);
+      }
+    })();
   }, [audioRef, playingSeed]);
 
   const run = useCallback(async () => {

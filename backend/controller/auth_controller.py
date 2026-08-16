@@ -101,7 +101,12 @@ async def setup_admin(request: SetupRequest, response: Response):
     response.set_cookie(
         key="geny_auth_token",
         value=token_data["access_token"],
-        max_age=86400 * 7,  # 7 days
+        # Cookie MUST outlive the JWT. It used to be pinned at 7 days
+        # while the token lives TOKEN_EXPIRE_HOURS (default 30d) — after
+        # day 7 every cookie-authenticated surface (bare <audio> tags,
+        # EventSource, headerless GETs) silently 401'd while Bearer
+        # calls kept working: the 2026-08-16 Voice Studio outage.
+        max_age=60 * 60 * (get_auth_service().TOKEN_EXPIRE_HOURS if get_auth_service() else 720),
         samesite="lax",
         httponly=False,  # Frontend needs to read for API calls
     )
@@ -137,7 +142,12 @@ async def login(request: LoginRequest, response: Response):
     response.set_cookie(
         key="geny_auth_token",
         value=token_data["access_token"],
-        max_age=86400 * 7,  # 7 days
+        # Cookie MUST outlive the JWT. It used to be pinned at 7 days
+        # while the token lives TOKEN_EXPIRE_HOURS (default 30d) — after
+        # day 7 every cookie-authenticated surface (bare <audio> tags,
+        # EventSource, headerless GETs) silently 401'd while Bearer
+        # calls kept working: the 2026-08-16 Voice Studio outage.
+        max_age=60 * 60 * (get_auth_service().TOKEN_EXPIRE_HOURS if get_auth_service() else 720),
         samesite="lax",
         httponly=False,
     )
@@ -177,7 +187,12 @@ async def refresh(response: Response, auth: dict = Depends(require_auth)):
     response.set_cookie(
         key="geny_auth_token",
         value=token_data["access_token"],
-        max_age=86400 * 7,  # 7 days
+        # Cookie MUST outlive the JWT. It used to be pinned at 7 days
+        # while the token lives TOKEN_EXPIRE_HOURS (default 30d) — after
+        # day 7 every cookie-authenticated surface (bare <audio> tags,
+        # EventSource, headerless GETs) silently 401'd while Bearer
+        # calls kept working: the 2026-08-16 Voice Studio outage.
+        max_age=60 * 60 * (get_auth_service().TOKEN_EXPIRE_HOURS if get_auth_service() else 720),
         samesite="lax",
         httponly=False,
     )

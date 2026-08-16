@@ -69,8 +69,14 @@ export default function BatchJobRow({ job, onChanged }: BatchJobRowProps) {
           )}
           {hasZip && (
             <a
-              href={voiceStudioApi.getBatchDownloadUrl(job.id)}
-              download={`voicestudio-batch-${job.id}.zip`}
+              href="#download"
+              onClick={(e) => {
+                e.preventDefault();
+                void voiceStudioApi.downloadAuthed(
+                  voiceStudioApi.getBatchDownloadUrl(job.id),
+                  `voicestudio-batch-${job.id}.zip`,
+                );
+              }}
               className="flex items-center justify-center w-7 h-7 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] no-underline cursor-pointer transition-all"
               title={t('voiceStudio.batch.download')}
             >

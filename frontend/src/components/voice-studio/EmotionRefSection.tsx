@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2, Upload, Loader2, Play, Square, Mic, Scissors } from 'lucide-react';
-import { ttsApi, type VoiceProfile } from '@/lib/api';
+import { withAuthHeaders, ttsApi, type VoiceProfile } from '@/lib/api';
+import { voiceStudioApi } from '@/lib/voiceStudioApi';
 import { useI18n } from '@/lib/i18n';
 import RecorderModal from './RecorderModal';
 import TrimmerModal from './TrimmerModal';
@@ -85,7 +86,8 @@ export default function EmotionRefSection({ profile, onRefresh }: EmotionRefSect
       setActiveEmotion(emotion);
       try {
         const url = ttsApi.getRefAudioUrl(profile.name, emotion);
-        const res = await fetch(url);
+        const res = await fetch(url, { headers: withAuthHeaders() });
+        if (!res.ok) throw new Error(`ref audio ${res.status}`);
         const blob = await res.blob();
         setTrimSource(blob);
         setTrimmerOpen(true);
@@ -255,13 +257,28 @@ function EmotionRefCard({
       setPlaying(false);
       return;
     }
-    const url = ttsApi.getRefAudioUrl(profileName, emotion);
-    const audio = new Audio(url);
-    audioRef.current = audio;
-    audio.play();
-    setPlaying(true);
-    audio.onended = () => setPlaying(false);
-    audio.onerror = () => setPlaying(false);
+    // bare <audio src> can't carry the Bearer header and the auth
+    // cookie is unreliable (7d expiry) — fetch the bytes authed and
+    // play a blob object URL instead (same pattern audioManager uses)
+    void (async () => {
+      try {
+        const objectUrl = await voiceStudioApi.fetchAuthedObjectUrl(
+          ttsApi.getRefAudioUrl(profileName, emotion),
+        );
+        const audio = new Audio(objectUrl);
+        audioRef.current = audio;
+        await audio.play();
+        setPlaying(true);
+        const cleanup = () => {
+          URL.revokeObjectURL(objectUrl);
+          setPlaying(false);
+        };
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
+      } catch {
+        setPlaying(false);
+      }
+    })();
   }, [hasRef, playing, profileName, emotion]);
 
   useEffect(() => {

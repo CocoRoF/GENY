@@ -28,7 +28,12 @@ export function subscribeEvents(
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
     return () => {};
   }
-  const es = new EventSource(EVENTS_URL);
+  // EventSource cannot set an Authorization header; the backend's
+  // secure-by-default gate accepts ?token= for exactly this case.
+  const token = getToken();
+  const es = new EventSource(
+    token ? `${EVENTS_URL}?token=${encodeURIComponent(token)}` : EVENTS_URL,
+  );
   let closed = false;
   const close = () => {
     if (closed) return;
@@ -56,3 +61,4 @@ export function subscribeEvents(
   opts?.signal?.addEventListener('abort', close);
   return close;
 }
+import { getToken } from '@/lib/authApi';

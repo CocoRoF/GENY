@@ -249,10 +249,39 @@ export const voiceStudioApi = {
 
   /** GET /api/voice-studio/synth/history — recent rows (cap 20). */
   async getHistory(signal?: AbortSignal): Promise<HistoryItem[]> {
-    const res = await fetch(HISTORY_URL, { signal });
+    const res = await fetch(HISTORY_URL, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`history ${res.status}: ${res.statusText}`);
     const data = await res.json();
     return Array.isArray(data.items) ? (data.items as HistoryItem[]) : [];
+  },
+
+  /**
+   * Fetch a protected audio/binary URL WITH the Bearer header and hand
+   * back an object URL. Bare `<audio src>`/`<a href>` pointing at /api
+   * paths cannot attach Authorization and the auth cookie outlives
+   * nothing (7d vs 30d token — the 2026-08-16 Voice Studio outage), so
+   * every protected media/file URL must go through here. Callers own
+   * revoking via `URL.revokeObjectURL`.
+   */
+  async fetchAuthedObjectUrl(url: string): Promise<string> {
+    const res = await fetch(url, { headers: withAuthHeaders() });
+    if (!res.ok) throw new Error(`media ${res.status}: ${res.statusText}`);
+    return URL.createObjectURL(await res.blob());
+  },
+
+  /** Authed download: fetch → blob → synthetic <a download> click. */
+  async downloadAuthed(url: string, filename: string): Promise<void> {
+    const res = await fetch(url, { headers: withAuthHeaders() });
+    if (!res.ok) throw new Error(`download ${res.status}: ${res.statusText}`);
+    const objectUrl = URL.createObjectURL(await res.blob());
+    try {
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+    }
   },
 
   /** Direct audio URL for a stored history row. Streams ``audio/wav``. */
@@ -300,7 +329,7 @@ export const voiceStudioApi = {
   // ── Settings (Phase 3) ───────────────────────────────────────────
 
   async getEngines(signal?: AbortSignal): Promise<{ engines: EngineCard[]; default: string }> {
-    const res = await fetch(ENGINES_URL, { signal });
+    const res = await fetch(ENGINES_URL, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`engines ${res.status}: ${res.statusText}`);
     return res.json();
   },
@@ -319,7 +348,7 @@ export const voiceStudioApi = {
   },
 
   async getOmniVoiceDefaults(signal?: AbortSignal): Promise<OmniVoiceDefaults> {
-    const res = await fetch(OMNI_DEFAULTS_URL, { signal });
+    const res = await fetch(OMNI_DEFAULTS_URL, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`omnivoice-defaults ${res.status}: ${res.statusText}`);
     return res.json();
   },
@@ -338,13 +367,13 @@ export const voiceStudioApi = {
   },
 
   async getCacheStats(signal?: AbortSignal): Promise<CacheStats> {
-    const res = await fetch(LEGACY_CACHE_STATS_URL, { signal });
+    const res = await fetch(LEGACY_CACHE_STATS_URL, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`cache stats ${res.status}: ${res.statusText}`);
     return res.json();
   },
 
   async clearCache(): Promise<void> {
-    const res = await fetch(LEGACY_CACHE_DELETE_URL, { method: 'DELETE' });
+    const res = await fetch(LEGACY_CACHE_DELETE_URL, { method: 'DELETE', headers: withAuthHeaders() });
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
       throw new Error(`clear cache ${res.status}: ${text}`);
@@ -377,14 +406,14 @@ export const voiceStudioApi = {
   },
 
   async listBatches(signal?: AbortSignal): Promise<BatchJob[]> {
-    const res = await fetch(BATCH_URL, { signal });
+    const res = await fetch(BATCH_URL, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`list batches ${res.status}: ${res.statusText}`);
     const data = await res.json();
     return Array.isArray(data.jobs) ? (data.jobs as BatchJob[]) : [];
   },
 
   async getBatch(id: string, signal?: AbortSignal): Promise<BatchJob> {
-    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}`, { signal });
+    const res = await fetch(`${BATCH_URL}/${encodeURIComponent(id)}`, { signal, headers: withAuthHeaders() });
     if (!res.ok) throw new Error(`get batch ${res.status}: ${res.statusText}`);
     return res.json();
   },
@@ -485,7 +514,7 @@ export const voiceStudioApi = {
     if (_languagesCache) return _languagesCache;
     if (_languagesPromise) return _languagesPromise;
     _languagesPromise = (async () => {
-      const res = await fetch(LANGS_URL, { signal });
+      const res = await fetch(LANGS_URL, { signal, headers: withAuthHeaders() });
       if (!res.ok) throw new Error(`languages ${res.status}: ${res.statusText}`);
       const data = await res.json();
       _languagesCache = Array.isArray(data.languages) ? (data.languages as LanguageItem[]) : [];

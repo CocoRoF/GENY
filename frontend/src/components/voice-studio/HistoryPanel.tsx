@@ -90,11 +90,21 @@ export default function HistoryPanel({ refreshKey, onSaveAsRef }: HistoryPanelPr
         setPlayingId(null);
         return;
       }
-      audioRef.src = voiceStudioApi.getHistoryAudioUrl(id);
-      audioRef.play();
-      audioRef.onended = () => setPlayingId(null);
-      audioRef.onerror = () => setPlayingId(null);
-      setPlayingId(id);
+      void (async () => {
+        try {
+          const objectUrl = await voiceStudioApi.fetchAuthedObjectUrl(
+            voiceStudioApi.getHistoryAudioUrl(id),
+          );
+          if (audioRef.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.src);
+          audioRef.src = objectUrl;
+          await audioRef.play();
+          audioRef.onended = () => setPlayingId(null);
+          audioRef.onerror = () => setPlayingId(null);
+          setPlayingId(id);
+        } catch {
+          setPlayingId(null);
+        }
+      })();
     },
     [audioRef, playingId],
   );
@@ -215,8 +225,14 @@ export default function HistoryPanel({ refreshKey, onSaveAsRef }: HistoryPanelPr
                     {busyId === it.id ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
                   </button>
                   <a
-                    href={voiceStudioApi.getHistoryAudioUrl(it.id)}
-                    download={`voicestudio-${it.id}.wav`}
+                    href="#download"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void voiceStudioApi.downloadAuthed(
+                        voiceStudioApi.getHistoryAudioUrl(it.id),
+                        `voicestudio-${it.id}.wav`,
+                      );
+                    }}
                     className="flex items-center justify-center w-7 h-7 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] no-underline cursor-pointer transition-all"
                     title={t('voiceStudio.history.download')}
                   >

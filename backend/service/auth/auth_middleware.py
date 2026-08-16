@@ -163,6 +163,14 @@ def _extract_token(request: Request) -> str | None:
     if token:
         return token
 
+    # 3. ?token=<jwt> query param — for clients that cannot set headers
+    # at all: EventSource (voice-studio SSE) and bare media elements.
+    # Same trust level as the cookie; the overlay page already passes
+    # tokens via URL query, so this adds no new exposure class.
+    token = request.query_params.get("token")
+    if token:
+        return token
+
     return None
 
 
