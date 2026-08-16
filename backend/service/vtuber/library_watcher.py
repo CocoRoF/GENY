@@ -198,7 +198,13 @@ async def _scan_once(app: FastAPI) -> None:
             )
             manager.remove_model(info.name)
         else:
-            _drop_model_with_dir(manager, info, root)
+            # NB: must be awaited — this helper is async (rmtree_async
+            # inside). The original call dropped the coroutine on the
+            # floor, so the registry entry was never actually removed and
+            # this branch re-fired its "auto-unregistered" log every scan
+            # interval forever (observed live: one line every 5s per
+            # deleted zip, entry still present).
+            await _drop_model_with_dir(manager, info, root)
         logger.info(
             f"[library-watcher] auto-unregistered {info.name!r} "
             f"(puppet_id={info.puppet_id!r}) — source zip gone"
