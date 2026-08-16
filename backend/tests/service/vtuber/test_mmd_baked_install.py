@@ -200,3 +200,35 @@ def test_2d_runtimes_still_install_unchanged(tmp_path, monkeypatch):
     assert model["runtime"] == "live2d"
     assert model["url"].startswith("/static/live2d-models/")
     assert model["mmdConfig"] is None
+
+
+def test_reinstall_after_registry_wipe_keeps_model_name(tmp_path, monkeypatch):
+    """Backend restarts rebuild the registry from the inbox with a blank
+    slate. The install name must be reproducible (derived from the stable
+    puppet id), or durable session assignments — which store the model
+    NAME — dangle after every redeploy (observed live 2026-08-16)."""
+    import controller.vtuber_baked_imports_controller as ctl
+    from service.vtuber.live2d_model_manager import Live2dModelManager
+
+    app, manager, inbox = _make_app(tmp_path, monkeypatch)
+    (inbox / "chisa.zip").write_bytes(_mmd_zip())
+    client = TestClient(app)
+    first = client.post(
+        "/api/vtuber/baked-imports/install",
+        json={"filename": "chisa.zip", "keep_source": True},
+    )
+    assert first.status_code == 200, first.text
+    name1 = first.json()["model"]["name"]
+
+    # simulate a restart: brand-new manager over an EMPTY registry dir
+    fresh_dir = tmp_path / "registry2"
+    fresh_dir.mkdir()
+    app.state.live2d_model_manager = Live2dModelManager(str(fresh_dir))
+    second = client.post(
+        "/api/vtuber/baked-imports/install",
+        json={"filename": "chisa.zip", "keep_source": True},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["model"]["name"] == name1, (
+        "reinstall after a registry wipe must reproduce the same model name"
+    )

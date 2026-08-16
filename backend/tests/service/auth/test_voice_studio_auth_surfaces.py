@@ -41,14 +41,48 @@ def _fake_request(headers=None, cookies=None, query=""):
     return req
 
 
+SSE_PATH = "/api/voice-studio/events"
+
+
+def _fake_sse_request(**kw):
+    req = _fake_request(**kw)
+    req.scope["path"] = SSE_PATH
+    return req
+
+
 def test_extract_token_priority_and_query_fallback():
     from service.auth.auth_middleware import _extract_token
 
-    assert _extract_token(_fake_request(headers={"Authorization": "Bearer AAA"})) == "AAA"
-    assert _extract_token(_fake_request(cookies={"geny_auth_token": "BBB"})) == "BBB"
+    # priority pinned with MULTIPLE sources present at once
+    assert (
+        _extract_token(
+            _fake_sse_request(
+                headers={"Authorization": "Bearer AAA"},
+                cookies={"geny_auth_token": "BBB"},
+                query="token=CCC",
+            )
+        )
+        == "AAA"
+    ), "Bearer must beat cookie and query"
+    assert (
+        _extract_token(
+            _fake_sse_request(cookies={"geny_auth_token": "BBB"}, query="token=CCC")
+        )
+        == "BBB"
+    ), "cookie must beat query"
     # the EventSource path: no header, no cookie, token in the query
-    assert _extract_token(_fake_request(query="token=CCC")) == "CCC"
+    assert _extract_token(_fake_sse_request(query="token=CCC")) == "CCC"
     assert _extract_token(_fake_request()) is None
+
+
+def test_query_token_only_accepted_on_allowlisted_paths():
+    """Query strings land in access logs — ?token= must stay scoped to
+    header-incapable clients (SSE), never become a blanket auth path."""
+    from service.auth.auth_middleware import _extract_token
+
+    req = _fake_request(query="token=CCC")
+    req.scope["path"] = "/api/vtuber/models"
+    assert _extract_token(req) is None
 
 
 def test_middleware_accepts_query_token(monkeypatch):
@@ -86,7 +120,12 @@ def test_login_cookie_lifetime_matches_token_lifetime():
     import controller.auth_controller as ac
 
     src = inspect.getsource(ac)
-    assert "max_age=86400 * 7" not in src, "cookie lifetime hardcoded to 7d again"
-    assert src.count("TOKEN_EXPIRE_HOURS") >= 3, (
-        "each set_cookie site should derive max_age from the token lifetime"
-    )
+    # strip comments so doc text can't satisfy the assertions
+    code_lines = [
+        ln for ln in src.splitlines() if not ln.strip().startswith("#")
+    ]
+    code = "\n".join(code_lines)
+    assert "max_age=86400" not in code, "cookie lifetime hardcoded again"
+    assert (
+        code.count("max_age=60 * 60 * (get_auth_service().TOKEN_EXPIRE_HOURS") >= 3
+    ), "each set_cookie site must derive max_age (hours→seconds) from TOKEN_EXPIRE_HOURS"

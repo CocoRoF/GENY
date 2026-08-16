@@ -151,6 +151,12 @@ async def optional_auth(request: Request) -> dict | None:
     return auth_service.get_user_from_token(token)
 
 
+# Paths allowed to authenticate via ?token= (header-incapable clients).
+QUERY_TOKEN_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/voice-studio/events",  # EventSource SSE
+)
+
+
 def _extract_token(request: Request) -> str | None:
     """Extract JWT token from request headers or cookies."""
     # 1. Authorization: Bearer <token>
@@ -163,13 +169,15 @@ def _extract_token(request: Request) -> str | None:
     if token:
         return token
 
-    # 3. ?token=<jwt> query param — for clients that cannot set headers
-    # at all: EventSource (voice-studio SSE) and bare media elements.
-    # Same trust level as the cookie; the overlay page already passes
-    # tokens via URL query, so this adds no new exposure class.
-    token = request.query_params.get("token")
-    if token:
-        return token
+    # 3. ?token=<jwt> query param — ONLY for paths where setting a header
+    # is impossible (EventSource cannot carry Authorization). Deliberately
+    # narrow: query strings land in uvicorn/proxy access logs, so a
+    # blanket acceptance would write valid 30-day JWTs into logs on every
+    # request that chose the lazy path. Add prefixes here consciously.
+    if any(request.url.path.startswith(p) for p in QUERY_TOKEN_PATH_PREFIXES):
+        token = request.query_params.get("token")
+        if token:
+            return token
 
     return None
 

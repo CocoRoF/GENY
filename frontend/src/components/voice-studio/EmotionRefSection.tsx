@@ -237,6 +237,7 @@ function EmotionRefCard({
 }: EmotionRefCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playStartingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [localPromptText, setLocalPromptText] = useState(emotionRef?.prompt_text || '');
   const [localPromptLang, setLocalPromptLang] = useState(emotionRef?.prompt_lang || 'ko');
@@ -251,20 +252,29 @@ function EmotionRefCard({
 
   const togglePlay = useCallback(() => {
     if (!hasRef) return;
+    if (playStartingRef.current) return; // a play is already in flight
     if (playing && audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      if (audioRef.current.src?.startsWith('blob:')) {
+        URL.revokeObjectURL(audioRef.current.src);
+      }
       setPlaying(false);
       return;
     }
     // bare <audio src> can't carry the Bearer header and the auth
     // cookie is unreliable (7d expiry) — fetch the bytes authed and
     // play a blob object URL instead (same pattern audioManager uses)
+    playStartingRef.current = true;
     void (async () => {
       try {
         const objectUrl = await voiceStudioApi.fetchAuthedObjectUrl(
           ttsApi.getRefAudioUrl(profileName, emotion),
         );
+        // a previous play's blob may still be attached — release it
+        if (audioRef.current?.src?.startsWith('blob:')) {
+          URL.revokeObjectURL(audioRef.current.src);
+        }
         const audio = new Audio(objectUrl);
         audioRef.current = audio;
         await audio.play();
@@ -277,6 +287,8 @@ function EmotionRefCard({
         audio.onerror = cleanup;
       } catch {
         setPlaying(false);
+      } finally {
+        playStartingRef.current = false;
       }
     })();
   }, [hasRef, playing, profileName, emotion]);
@@ -285,6 +297,9 @@ function EmotionRefCard({
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
+        if (audioRef.current.src?.startsWith('blob:')) {
+          URL.revokeObjectURL(audioRef.current.src);
+        }
         audioRef.current = null;
       }
     };

@@ -38,6 +38,7 @@ export default function SeedSearchTool() {
   useEffect(() => {
     return () => {
       audioRef?.pause();
+      if (audioRef?.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.src);
     };
   }, [audioRef]);
 
@@ -160,8 +161,13 @@ export default function SeedSearchTool() {
                   </button>
                   {r.audio_url && (
                     <a
-                      href={r.audio_url}
-                      download={`seed-${r.seed}.wav`}
+                      href="#download"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (r.audio_url) {
+                          void voiceStudioApi.downloadAuthed(r.audio_url, `seed-${r.seed}.wav`);
+                        }
+                      }}
                       className="flex items-center justify-center w-7 h-7 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:border-[var(--primary-color)] no-underline cursor-pointer transition-all"
                       title="Download"
                     >

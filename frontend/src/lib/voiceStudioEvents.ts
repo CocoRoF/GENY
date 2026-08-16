@@ -7,6 +7,8 @@
  * keep-alive comments are ignored.
  */
 
+import { getToken } from '@/lib/authApi';
+
 export interface StudioEvent {
   kind: string;
   payload: Record<string, unknown>;
@@ -30,6 +32,8 @@ export function subscribeEvents(
   }
   // EventSource cannot set an Authorization header; the backend's
   // secure-by-default gate accepts ?token= for exactly this case.
+  // Known limitation: the token is snapshotted once — if it expires
+  // during a very long-lived page (30d), the stream dies until reload.
   const token = getToken();
   const es = new EventSource(
     token ? `${EVENTS_URL}?token=${encodeURIComponent(token)}` : EVENTS_URL,
@@ -61,4 +65,3 @@ export function subscribeEvents(
   opts?.signal?.addEventListener('abort', close);
   return close;
 }
-import { getToken } from '@/lib/authApi';

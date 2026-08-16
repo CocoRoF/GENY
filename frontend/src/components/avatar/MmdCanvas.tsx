@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVTuberStore } from '@/store/useVTuberStore';
 import { getAudioManager } from '@/lib/audioManager';
 import type { Live2dModelInfo, MmdModelConfig } from '@/types';
@@ -116,6 +116,15 @@ export default function MmdCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const avatarState = useVTuberStore((s) => s.avatarStates[sessionId]);
   const genRef = useRef(0);
+  // bumped when a (re)load finishes so the avatar-state effect re-applies
+  // the active emotion to the fresh model (it early-returns pre-load)
+  const [loadedTick, setLoadedTick] = useState(0);
+  // in-place re-bakes keep the same name/url but change the config —
+  // fingerprint it so hidden materials / camera / idle changes remount
+  const cfgFingerprint = useMemo(
+    () => JSON.stringify([model?.mmdConfig ?? null, model?.idleMotionGroupName ?? '']),
+    [model],
+  );
 
   // Live handles the mount effect exposes to the state/lip-sync effects.
   const mmdModelRef = useRef<MmdModel | null>(null);
@@ -243,6 +252,10 @@ export default function MmdCanvas({
             return;
           }
           const wasmInstance = await GetMmdWasmInstance(new MmdWasmInstanceTypeSPR());
+          if (cancelled || myGen !== genRef.current) {
+            teardown();
+            return;
+          }
           const physicsRuntime = new MultiPhysicsRuntime(wasmInstance);
           physicsRuntime.setGravity(new Vector3(0, -98, 0));
           physicsRuntime.register(scene);
@@ -291,7 +304,10 @@ export default function MmdCanvas({
           : undefined;
         if (idleVmd) {
           try {
-            const baseUrl = model.url.slice(0, model.url.lastIndexOf('/'));
+            // sidecar vmd paths are relative to the ZIP ROOT — which maps
+            // to /static/mmd-models/<name>/ (first four URL segments) —
+            // NOT to the .pmx's own directory (nested-bundle 404 bug)
+            const baseUrl = model.url.split('/').slice(0, 4).join('/');
             const vmdLoader = new VmdLoader(scene);
             vmdLoader.loggingEnabled = false;
             const animation = await vmdLoader.loadAsync(idleVmd.name, `${baseUrl}/${idleVmd.path}`);
@@ -370,7 +386,12 @@ export default function MmdCanvas({
           if (lipMorph) {
             const target = Math.min(1, lipAmpRef.current * 7);
             lipWeight += (target - lipWeight) * Math.min(1, dt / 60);
-            safeSetMorph(mmdModel, lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
+            // write only while speech is actually shaping the mouth —
+            // a constant 0 every frame would permanently override any
+            // VMD morph track that animates the same mouth morph
+            if (target > 0.004 || lipWeight > 0.004) {
+              safeSetMorph(mmdModel, lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
+            }
           }
 
           // A playing VMD owns every bone — procedural stance/sway would
@@ -456,6 +477,10 @@ export default function MmdCanvas({
         });
         disposers.push(() => {
           lipAmpRef.current = 0;
+          // the manager keeps a single mutable callback slot — release
+          // it so a dead component's closure isn't invoked per-frame
+          // forever after the last avatar surface unmounts
+          audioManager.setAmplitudeCallback(() => {});
         });
 
         container.appendChild(canvas);
@@ -490,6 +515,7 @@ export default function MmdCanvas({
           `[MmdCanvas] loaded ${model.name} · morphs=${morphNames.length} ` +
             `physics=${physicsOk} lipSync=${lipSyncMorphRef.current ?? '(none)'}`,
         );
+        setLoadedTick((t) => t + 1);
       } catch (e) {
         console.error('[MmdCanvas] model load failed:', model.url, e);
         teardown();
@@ -515,7 +541,7 @@ export default function MmdCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model?.name, model?.url]);
+  }, [model?.name, model?.url, cfgFingerprint]);
 
   // ── Apply avatar state (emotion → morph, eased) ───────────────────
   useEffect(() => {
@@ -541,7 +567,7 @@ export default function MmdCanvas({
       morphTargetsRef.current.set(morph, { target: intensity, ms });
     }
     activeEmotionMorphRef.current = morph;
-  }, [avatarState, model.mmdConfig]);
+  }, [avatarState, model.mmdConfig, loadedTick]);
 
   return <div ref={containerRef} className={`h-full w-full ${className}`} />;
 }

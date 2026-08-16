@@ -79,6 +79,7 @@ export default function HistoryPanel({ refreshKey, onSaveAsRef }: HistoryPanelPr
   useEffect(() => {
     return () => {
       audioRef?.pause();
+      if (audioRef?.src?.startsWith('blob:')) URL.revokeObjectURL(audioRef.src);
     };
   }, [audioRef]);
 

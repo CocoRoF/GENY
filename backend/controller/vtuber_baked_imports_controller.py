@@ -374,17 +374,29 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
         if target_dir.exists():
             await rmtree_async(target_dir, ignore_errors=True)
     else:
-        # Fresh install. Use microsecond precision so back-to-back
-        # installs of distinct puppets with the same base name don't
-        # collide on the timestamp.
         slug = _slugify(suggested_name)
-        model_name = f"{slug}__editor_{ts}"
-        target_dir = models_root / model_name
-        if target_dir.exists():
-            # Theoretically impossible (timestamp collision down to the
-            # microsecond + slug match) but reject loudly rather than
-            # overwrite a directory we didn't expect to find.
-            raise HTTPException(409, f"target already exists: {target_dir}")
+        if puppet_id:
+            # DETERMINISTIC name for editor puppets. The registry and the
+            # extracted dirs live on the ephemeral image layer and are
+            # rebuilt from the inbox on every backend restart — with the
+            # old timestamped names every restart minted a NEW name, so
+            # the durable session-assignment records (which store the
+            # model NAME) dangled and every session silently lost its
+            # avatar on redeploy (observed live 2026-08-16). Deriving the
+            # name from the stable IndexedDB puppet id makes reinstalls
+            # reproduce the same name forever.
+            model_name = f"{slug}__{_slugify(puppet_id)}"
+            target_dir = models_root / model_name
+            if target_dir.exists():
+                # our own namespace from a previous partial run — replace
+                await rmtree_async(target_dir, ignore_errors=True)
+        else:
+            # Hand-built zip without a sidecar id: keep the timestamped
+            # naming (no stable identity to derive from).
+            model_name = f"{slug}__editor_{ts}"
+            target_dir = models_root / model_name
+            if target_dir.exists():
+                raise HTTPException(409, f"target already exists: {target_dir}")
 
     # ── Extract ────────────────────────────────────────────────────
     target_dir.mkdir(parents=True, exist_ok=True)
