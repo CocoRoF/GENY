@@ -119,6 +119,13 @@ export default function MmdCanvas({
   // bumped when a (re)load finishes so the avatar-state effect re-applies
   // the active emotion to the fresh model (it early-returns pre-load)
   const [loadedTick, setLoadedTick] = useState(0);
+  // transient-failure retry: a re-bake install wipes + re-extracts the
+  // model dir on the server, so a remount racing that window 404s.
+  // Two spaced retries heal it; a hard failure (no WebGL, dead URL)
+  // surfaces as a visible message instead of a silent blank.
+  const [retryNonce, setRetryNonce] = useState(0);
+  const retryCountRef = useRef(0);
+  const [fatalError, setFatalError] = useState<string | null>(null);
   // in-place re-bakes keep the same name/url but change the config —
   // fingerprint it so hidden materials / camera / idle changes remount
   const cfgFingerprint = useMemo(
@@ -149,12 +156,21 @@ export default function MmdCanvas({
       canvas.style.height = '100%';
       canvas.style.display = 'block';
 
-      const engine = new Engine(canvas, true, {
-        alpha: true,
-        premultipliedAlpha: false,
-        stencil: true,
-        powerPreference: 'high-performance',
-      });
+      let engine: Engine;
+      try {
+        engine = new Engine(canvas, true, {
+          alpha: true,
+          premultipliedAlpha: false,
+          stencil: true,
+          powerPreference: 'high-performance',
+        });
+      } catch (e) {
+        // e.g. WebGL context refused (GPU denylist, exhausted contexts,
+        // transparent-window edge cases in embedded browsers)
+        console.error('[MmdCanvas] WebGL engine creation failed', e);
+        if (!cancelled) setFatalError('3D 렌더러 초기화 실패 (WebGL 사용 불가)');
+        return;
+      }
       SdefInjector.OverrideEngineCreateEffect(engine);
       const scene = new Scene(engine);
       scene.clearColor = new Color4(0, 0, 0, 0); // overlay-transparent
@@ -515,10 +531,23 @@ export default function MmdCanvas({
           `[MmdCanvas] loaded ${model.name} · morphs=${morphNames.length} ` +
             `physics=${physicsOk} lipSync=${lipSyncMorphRef.current ?? '(none)'}`,
         );
+        retryCountRef.current = 0;
+        if (!cancelled) setFatalError(null);
         setLoadedTick((t) => t + 1);
       } catch (e) {
         console.error('[MmdCanvas] model load failed:', model.url, e);
         teardown();
+        if (!cancelled) {
+          if (retryCountRef.current < 2) {
+            retryCountRef.current += 1;
+            const delay = 1600 * retryCountRef.current;
+            console.warn(`[MmdCanvas] retrying load in ${delay}ms (server may be re-installing)`);
+            const t = window.setTimeout(() => setRetryNonce((n) => n + 1), delay);
+            disposers.push(() => window.clearTimeout(t));
+          } else {
+            setFatalError('아바타 모델 로드 실패 — 네트워크/설치 상태를 확인하세요');
+          }
+        }
         return;
       }
 
@@ -541,7 +570,7 @@ export default function MmdCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model?.name, model?.url, cfgFingerprint]);
+  }, [model?.name, model?.url, cfgFingerprint, retryNonce]);
 
   // ── Apply avatar state (emotion → morph, eased) ───────────────────
   useEffect(() => {
@@ -569,7 +598,15 @@ export default function MmdCanvas({
     activeEmotionMorphRef.current = morph;
   }, [avatarState, model.mmdConfig, loadedTick]);
 
-  return <div ref={containerRef} className={`h-full w-full ${className}`} />;
+  return (
+    <div ref={containerRef} className={`relative h-full w-full ${className}`}>
+      {fatalError && (
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-red-400">
+          {fatalError}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Morph names come from user files — guard every runtime call so a
