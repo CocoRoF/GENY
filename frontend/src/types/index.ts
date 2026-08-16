@@ -986,6 +986,10 @@ export interface MmdModelConfig {
   hiddenMaterials?: string[];
   hiddenMaterialIndices?: number[];
   morphs?: { name: string; panel: 'brow' | 'eye' | 'mouth' | 'other' }[];
+  /** VMD motions in the installed bundle — paths relative to the zip
+   *  root (== the model URL's directory tree). The renderer loops the
+   *  one whose name matches Live2dModelInfo.idleMotionGroupName. */
+  vmds?: { name: string; path: string }[];
 }
 
 export interface AvatarState {

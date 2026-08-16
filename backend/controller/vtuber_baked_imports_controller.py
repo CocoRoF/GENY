@@ -557,7 +557,11 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
     k_scale = float(display_cfg.get("kScale") or 0.7)
     x_shift = float(display_cfg.get("initialXshift") or 0)
     y_shift = float(display_cfg.get("initialYshift") or 0)
-    idle_group = anim_cfg.get("idleMotionGroupName") or "Idle"
+    # Live2D's "Idle" is a real Cubism convention; MMD has no such
+    # default — an empty value there means "procedural idle" and must
+    # survive as-is (forcing "Idle" would make the renderer look for a
+    # VMD named Idle that doesn't exist).
+    idle_group = anim_cfg.get("idleMotionGroupName") or ("" if runtime == "mmd" else "Idle")
     emotion_map_named: dict[str, str] = anim_cfg.get("emotionMap") or {}
     tap_motions_flat: dict[str, dict[str, Any]] = anim_cfg.get("tapMotions") or {}
 
@@ -750,6 +754,9 @@ async def install_baked_import(req: InstallRequest, request: Request, auth: dict
             "hiddenMaterials": mmd_meta.get("hiddenMaterials") or [],
             "hiddenMaterialIndices": mmd_meta.get("hiddenMaterialIndices") or [],
             "morphs": mmd_meta.get("morphs") or [],
+            # [{name, path}] — paths relative to the zip root, same tree
+            # the extractor lays out under static/mmd-models/<name>/.
+            "vmds": mmd_meta.get("vmds") or [],
         }
 
     info = Live2dModelInfo(

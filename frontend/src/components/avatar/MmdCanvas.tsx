@@ -48,8 +48,11 @@ import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Scene } from '@babylonjs/core/scene';
 import { MmdStandardMaterialBuilder } from 'babylon-mmd/esm/Loader/mmdStandardMaterialBuilder';
 import { SdefInjector } from 'babylon-mmd/esm/Loader/sdefInjector';
+import { VmdLoader } from 'babylon-mmd/esm/Loader/vmdLoader';
 import { MmdRuntime } from 'babylon-mmd/esm/Runtime/mmdRuntime';
 import type { MmdModel } from 'babylon-mmd/esm/Runtime/mmdModel';
+// side effect: registers the runtime-animation binding on MmdModel
+import 'babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation';
 
 interface MmdCanvasProps {
   sessionId: string;
@@ -274,6 +277,40 @@ export default function MmdCanvas({
         }
         if (interactive) camera.attachControl(canvas, false);
 
+        // ── idle VMD motion (editor-designated) ──────────────────
+        // animationConfig.idleMotionGroupName carries a VMD stem name
+        // for MMD models (empty = procedural idle). The motion file
+        // lives in the extracted bundle next to the .pmx; loop it.
+        // Any failure falls back to the procedural idle silently —
+        // a broken motion must never take the avatar down.
+        let vmdPlaying = false;
+        let vmdHasMorphTracks = false;
+        const idleName = (model.idleMotionGroupName || '').trim();
+        const idleVmd = idleName
+          ? (cfg.vmds ?? []).find((v) => v.name === idleName)
+          : undefined;
+        if (idleVmd) {
+          try {
+            const baseUrl = model.url.slice(0, model.url.lastIndexOf('/'));
+            const vmdLoader = new VmdLoader(scene);
+            vmdLoader.loggingEnabled = false;
+            const animation = await vmdLoader.loadAsync(idleVmd.name, `${baseUrl}/${idleVmd.path}`);
+            if (cancelled || myGen !== genRef.current) {
+              teardown();
+              return;
+            }
+            vmdHasMorphTracks = (animation.morphTracks?.length ?? 0) > 0;
+            const handle = mmdModel.createRuntimeAnimation(animation);
+            mmdModel.setRuntimeAnimation(handle);
+            await mmdRuntime.seekAnimation(0, true);
+            await mmdRuntime.playAnimation();
+            vmdPlaying = true;
+            console.log(`[MmdCanvas] idle VMD looping: ${idleVmd.name}`);
+          } catch (e) {
+            console.warn('[MmdCanvas] idle VMD load failed — procedural idle fallback', e);
+          }
+        }
+
         // Lip-sync morph: editor-pinned → standard names → any mouth
         // morph from the sidecar catalog.
         const catalogMouth = (cfg.morphs ?? []).find((m) => m.panel === 'mouth')?.name;
@@ -334,6 +371,27 @@ export default function MmdCanvas({
             const target = Math.min(1, lipAmpRef.current * 7);
             lipWeight += (target - lipWeight) * Math.min(1, dt / 60);
             safeSetMorph(mmdModel, lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
+          }
+
+          // A playing VMD owns every bone — procedural stance/sway would
+          // fight its keyframes. Morph-wise: skip blink only when the
+          // motion has its own morph tracks; lip-sync + emotion easing
+          // stay active either way (TTS speech should own the mouth).
+          if (vmdPlaying) {
+            if (vmdHasMorphTracks || !blinkMorph) return;
+            if (blinkPhase < 0) {
+              if (now >= nextBlinkAt) blinkPhase = 0;
+              else return;
+            }
+            blinkPhase = Math.min(1, blinkPhase + dt / BLINK_MS);
+            const bw = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
+            safeSetMorph(mmdModel, blinkMorph, bw);
+            if (blinkPhase >= 1) {
+              blinkPhase = -1;
+              nextBlinkAt = now + 2500 + Math.random() * 3500;
+              safeSetMorph(mmdModel, blinkMorph, 0);
+            }
+            return;
           }
 
           // idle: layered natural stance + breath + sway + gaze
@@ -415,7 +473,19 @@ export default function MmdCanvas({
         disposers.push(() => resize.disconnect());
         updateScaling();
 
-        engine.runRenderLoop(() => scene.render());
+        engine.runRenderLoop(() => {
+          scene.render();
+          // loop the idle motion — MmdRuntime plays through once and
+          // parks on the last frame otherwise
+          if (
+            vmdPlaying &&
+            mmdRuntime.animationFrameTimeDuration > 0 &&
+            mmdRuntime.currentFrameTime >= mmdRuntime.animationFrameTimeDuration - 0.001
+          ) {
+            void mmdRuntime.seekAnimation(0, true);
+            void mmdRuntime.playAnimation();
+          }
+        });
         console.log(
           `[MmdCanvas] loaded ${model.name} · morphs=${morphNames.length} ` +
             `physics=${physicsOk} lipSync=${lipSyncMorphRef.current ?? '(none)'}`,

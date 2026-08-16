@@ -93,6 +93,7 @@ def _mmd_zip(sidecar_overrides: dict | None = None, with_model: bool = True) -> 
                 {"name": "あ", "panel": "mouth"},
                 {"name": "困る", "panel": "brow"},
             ],
+            "vmds": [{"name": "wave", "path": "motions/wave.vmd"}],
         },
     }
     if sidecar_overrides:
@@ -131,6 +132,10 @@ def test_mmd_zip_installs_with_mmd_config(tmp_path, monkeypatch):
     assert cfg["hiddenMaterials"] == ["Up_Hat"]
     assert cfg["hiddenMaterialIndices"] == [21]
     assert [m["name"] for m in cfg["morphs"]] == ["笑い", "あ", "困る"]
+    assert cfg["vmds"] == [{"name": "wave", "path": "motions/wave.vmd"}]
+    # MMD with an empty idleMotionGroupName must NOT inherit Live2D's
+    # "Idle" default — empty means "procedural idle" to the renderer
+    assert model["idleMotionGroupName"] == ""
 
     # registry round-trip: reload from disk sees the same bag
     reloaded = manager.get_model(model["name"])
